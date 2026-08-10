@@ -172,8 +172,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(title) = self.tab_by_id(tab_id, cx).and_then(|tab| {
-            matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
-                .then(|| tab.title.clone())
+            matches!(
+                tab.kind,
+                TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
+            )
+            .then(|| tab.title.clone())
         }) else {
             return false;
         };
@@ -1130,9 +1133,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let menu = self.main_window_tabs.context_menu?;
-        let renamable = self
-            .tab_by_id(menu.tab_id, cx)
-            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
+        let renamable = self.tab_by_id(menu.tab_id, cx).is_some_and(|tab| {
+            matches!(
+                tab.kind,
+                TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
+            )
+        });
         self.tab_by_id(menu.tab_id, cx)?;
         let viewport = window.viewport_size();
         let menu_height = if renamable {

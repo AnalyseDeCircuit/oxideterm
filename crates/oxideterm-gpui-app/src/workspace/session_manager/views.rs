@@ -6,6 +6,7 @@ pub(super) enum SessionManagerDisplayItem {
     SshConfig(SessionManagerSshConfigDisplayItem),
     Serial(SerialProfile),
     Telnet(TelnetProfile),
+    Mosh(MoshProfile),
     RemoteDesktop(RemoteDesktopProfile),
 }
 
@@ -37,6 +38,7 @@ pub(super) enum SessionManagerOpenTarget {
     SshConfig(String),
     Serial(String),
     Telnet(String),
+    Mosh(String),
     RemoteDesktop(String),
 }
 
@@ -95,6 +97,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => &host.alias,
             Self::Serial(profile) => &profile.id,
             Self::Telnet(profile) => &profile.id,
+            Self::Mosh(profile) => &profile.id,
             Self::RemoteDesktop(profile) => &profile.id,
         }
     }
@@ -107,7 +110,7 @@ impl SessionManagerDisplayItem {
             Self::RemoteDesktop(profile) => Some(SessionManagerSelectionTarget::RemoteDesktop(
                 profile.id.clone(),
             )),
-            Self::SshConfig(_) | Self::Serial(_) | Self::Telnet(_) => None,
+            Self::SshConfig(_) | Self::Serial(_) | Self::Telnet(_) | Self::Mosh(_) => None,
         }
     }
 
@@ -123,6 +126,7 @@ impl SessionManagerDisplayItem {
             Self::Telnet(profile) => {
                 Some(SessionManagerRowActionTarget::Telnet(profile.id.clone()))
             }
+            Self::Mosh(profile) => Some(SessionManagerRowActionTarget::Mosh(profile.id.clone())),
             Self::RemoteDesktop(profile) => Some(SessionManagerRowActionTarget::RemoteDesktop(
                 profile.id.clone(),
             )),
@@ -138,6 +142,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => SessionManagerOpenTarget::SshConfig(host.alias.clone()),
             Self::Serial(profile) => SessionManagerOpenTarget::Serial(profile.id.clone()),
             Self::Telnet(profile) => SessionManagerOpenTarget::Telnet(profile.id.clone()),
+            Self::Mosh(profile) => SessionManagerOpenTarget::Mosh(profile.id.clone()),
             Self::RemoteDesktop(profile) => {
                 SessionManagerOpenTarget::RemoteDesktop(profile.id.clone())
             }
@@ -150,6 +155,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => &host.alias,
             Self::Serial(profile) => &profile.name,
             Self::Telnet(profile) => &profile.name,
+            Self::Mosh(profile) => &profile.name,
             Self::RemoteDesktop(profile) => &profile.name,
         }
     }
@@ -160,6 +166,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(_) => None,
             Self::Serial(profile) => profile.group.as_deref(),
             Self::Telnet(profile) => profile.group.as_deref(),
+            Self::Mosh(profile) => profile.group.as_deref(),
             Self::RemoteDesktop(profile) => profile.group.as_deref(),
         }
     }
@@ -170,6 +177,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(_) => None,
             Self::Serial(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::Telnet(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
+            Self::Mosh(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::RemoteDesktop(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
         }
     }
@@ -180,6 +188,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => host.hostname.as_deref().unwrap_or(&host.alias),
             Self::Serial(profile) => &profile.port_path,
             Self::Telnet(profile) => &profile.host,
+            Self::Mosh(profile) => &profile.host,
             Self::RemoteDesktop(profile) => &profile.host,
         }
     }
@@ -190,6 +199,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => u32::from(host.port.unwrap_or(22)),
             Self::Serial(profile) => profile.baud_rate,
             Self::Telnet(profile) => u32::from(profile.port),
+            Self::Mosh(profile) => u32::from(profile.ssh_port),
             Self::RemoteDesktop(profile) => u32::from(profile.port),
         }
     }
@@ -199,6 +209,7 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => &connection.username,
             Self::SshConfig(host) => host.user.as_deref().unwrap_or_default(),
             Self::Serial(_) | Self::Telnet(_) => "",
+            Self::Mosh(profile) => &profile.username,
             Self::RemoteDesktop(profile) => profile.username.as_deref().unwrap_or_default(),
         }
     }
@@ -209,6 +220,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(_) => "ssh config".to_string(),
             Self::Serial(_) => "serial".to_string(),
             Self::Telnet(_) => "telnet".to_string(),
+            Self::Mosh(_) => "mosh".to_string(),
             Self::RemoteDesktop(profile) => profile.protocol.provider_id().to_string(),
         }
     }
@@ -238,6 +250,9 @@ impl SessionManagerDisplayItem {
             },
             Self::Serial(profile) => format!("{} · {}", profile.port_path, profile.baud_rate),
             Self::Telnet(profile) => format!("{}:{}", profile.host, profile.port),
+            Self::Mosh(profile) => {
+                format!("{}@{}:{}", profile.username, profile.host, profile.ssh_port)
+            }
             Self::RemoteDesktop(profile) => match profile.username.as_deref() {
                 Some(username) if !username.is_empty() => {
                     format!("{username}@{}:{}", profile.host, profile.port)
@@ -271,6 +286,13 @@ impl SessionManagerDisplayItem {
                 profile.port,
                 profile.group.as_deref().unwrap_or_default()
             ),
+            Self::Mosh(profile) => format!(
+                "{}\n{}\n{}\n{}\nmosh",
+                profile.name,
+                profile.host,
+                profile.username,
+                profile.group.as_deref().unwrap_or_default()
+            ),
             Self::RemoteDesktop(profile) => format!(
                 "{}\n{}\n{}\n{}\n{}",
                 profile.name,
@@ -293,6 +315,8 @@ impl SessionManagerDisplayItem {
                 .unwrap_or(LucideIcon::Radio),
             Self::Telnet(profile) => session_icons::session_icon_from_id(profile.icon.as_deref())
                 .unwrap_or(LucideIcon::Terminal),
+            Self::Mosh(profile) => session_icons::session_icon_from_id(profile.icon.as_deref())
+                .unwrap_or(LucideIcon::Wifi),
             Self::RemoteDesktop(profile) => {
                 session_icons::session_icon_from_id(profile.icon.as_deref())
                     .unwrap_or(LucideIcon::Monitor)
@@ -305,6 +329,7 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => connection.color.as_deref(),
             Self::Serial(profile) => profile.color.as_deref(),
             Self::Telnet(profile) => profile.color.as_deref(),
+            Self::Mosh(profile) => profile.color.as_deref(),
             Self::RemoteDesktop(profile) => profile.color.as_deref(),
             Self::SshConfig(_) => None,
         }
@@ -315,6 +340,7 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => connection.icon_background_color.as_deref(),
             Self::Serial(profile) => profile.icon_background_color.as_deref(),
             Self::Telnet(profile) => profile.icon_background_color.as_deref(),
+            Self::Mosh(profile) => profile.icon_background_color.as_deref(),
             Self::RemoteDesktop(profile) => profile.icon_background_color.as_deref(),
             Self::SshConfig(_) => None,
         }
@@ -359,6 +385,13 @@ impl WorkspaceApp {
                     .iter()
                     .cloned()
                     .map(SessionManagerDisplayItem::Telnet),
+            )
+            .chain(
+                self.connection_store
+                    .mosh_profiles()
+                    .iter()
+                    .cloned()
+                    .map(SessionManagerDisplayItem::Mosh),
             )
             .chain(
                 self.connection_store
@@ -1463,6 +1496,7 @@ impl WorkspaceApp {
             SessionManagerDisplayItem::SshConfig(_) => (0x8b5cf633, 0xc4b5fd),
             SessionManagerDisplayItem::Serial(_) => (0xf59e0b33, 0xfcd34d),
             SessionManagerDisplayItem::Telnet(_) => (0x22c55e33, 0x86efac),
+            SessionManagerDisplayItem::Mosh(_) => (0x3b82f633, 0x93c5fd),
         };
         let configured_foreground = item.icon_color().and_then(parse_hex_color);
         // Older assets used one accent for both layers; keep that appearance
@@ -1667,6 +1701,59 @@ impl WorkspaceApp {
                         cx,
                     ))
             }
+            SessionManagerDisplayItem::Mosh(profile) => {
+                let open_id = profile.id.clone();
+                let edit_id = profile.id.clone();
+                let menu_id = profile.id.clone();
+                div()
+                    .w(px(MANAGER_ROW_ACTIONS_WIDTH))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(MANAGER_ROW_ACTION_GAP))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Play,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.accent),
+                        has_background,
+                        move |this, _event, window, cx| {
+                            this.open_saved_mosh_profile(&open_id, window, cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Pencil,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.text),
+                        has_background,
+                        move |this, _event, window, cx| {
+                            this.open_saved_mosh_profile_editor(&edit_id, window, cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::MoreVertical,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.text),
+                        has_background,
+                        move |this, event, _window, cx| {
+                            this.open_session_manager_row_action_menu(
+                                SessionManagerRowActionTarget::Mosh(menu_id.clone()),
+                                f32::from(event.position.x),
+                                f32::from(event.position.y),
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+            }
             SessionManagerDisplayItem::RemoteDesktop(profile) => {
                 let open_id = profile.id.clone();
                 let edit_id = profile.id.clone();
@@ -1735,7 +1822,8 @@ impl WorkspaceApp {
             SessionManagerRowActionTarget::Connection(_) => {
                 MANAGER_ROW_ACTION_MENU_CONNECTION_HEIGHT
             }
-            SessionManagerRowActionTarget::RemoteDesktop(_) => {
+            SessionManagerRowActionTarget::Mosh(_)
+            | SessionManagerRowActionTarget::RemoteDesktop(_) => {
                 MANAGER_ROW_ACTION_MENU_EDITABLE_PROFILE_HEIGHT
             }
             SessionManagerRowActionTarget::Serial(_) | SessionManagerRowActionTarget::Telnet(_) => {
@@ -1890,6 +1978,29 @@ impl WorkspaceApp {
                 .child(dropdown_menu_separator(&self.tokens));
         }
 
+        if let SessionManagerRowActionTarget::Mosh(id) = &menu.target {
+            let edit_id = id.clone();
+            popup = popup
+                .child(self.render_session_manager_menu_action(
+                    dropdown_menu_item(
+                        &self.tokens,
+                        self.i18n.t("sessionManager.actions.edit"),
+                        DropdownMenuItemKind::Plain,
+                        false,
+                        false,
+                    ),
+                    false,
+                    false,
+                    has_background,
+                    move |this, _event, window, cx| {
+                        this.open_saved_mosh_profile_editor(&edit_id, window, cx);
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ))
+                .child(dropdown_menu_separator(&self.tokens));
+        }
+
         let delete_action = match &menu.target {
             SessionManagerRowActionTarget::Connection(id) => {
                 Some((id.clone(), self.i18n.t("sessionManager.actions.delete")))
@@ -1901,6 +2012,10 @@ impl WorkspaceApp {
             SessionManagerRowActionTarget::Telnet(id) => Some((
                 id.clone(),
                 self.i18n.t("sessionManager.telnet_profiles.delete"),
+            )),
+            SessionManagerRowActionTarget::Mosh(id) => Some((
+                id.clone(),
+                self.i18n.t("sessionManager.mosh_profiles.delete"),
             )),
             SessionManagerRowActionTarget::RemoteDesktop(id) => Some((
                 id.clone(),
@@ -1937,6 +2052,9 @@ impl WorkspaceApp {
                             }
                             SessionManagerRowActionTarget::Telnet(_) => {
                                 this.request_delete_telnet_profile(&delete_id, cx)
+                            }
+                            SessionManagerRowActionTarget::Mosh(_) => {
+                                this.request_delete_mosh_profile(&delete_id, cx)
                             }
                             SessionManagerRowActionTarget::RemoteDesktop(_) => {
                                 this.request_delete_remote_desktop_profile(&delete_id, cx)
@@ -2035,6 +2153,9 @@ impl WorkspaceApp {
             }
             SessionManagerOpenTarget::Telnet(profile_id) => {
                 self.open_saved_telnet_profile(&profile_id, window, cx)
+            }
+            SessionManagerOpenTarget::Mosh(profile_id) => {
+                self.open_saved_mosh_profile(&profile_id, window, cx)
             }
             SessionManagerOpenTarget::RemoteDesktop(profile_id) => {
                 self.open_saved_remote_desktop_profile(&profile_id, window, cx)

@@ -734,7 +734,9 @@ impl WorkspaceApp {
                     cx,
                 );
             }
-            SshConnectionIntent::Test | SshConnectionIntent::DrillDown { .. } => {}
+            SshConnectionIntent::Test
+            | SshConnectionIntent::DrillDown { .. }
+            | SshConnectionIntent::Mosh(_) => {}
         }
     }
 
@@ -1029,6 +1031,82 @@ impl WorkspaceApp {
                     session_manager.set_status(None, cx);
                 });
                 let _ = self.open_or_create_saved_ssh_terminal_tab(id, config, title, window, cx);
+            }
+            SshConnectionIntent::Mosh(options) => {
+                self.connection_flow.update(cx, |connection_flow, cx| {
+                    connection_flow.clear_host_key_challenge(cx);
+                });
+                if self.connection_form_state(cx).form.is_some() {
+                    self.update_connection_form_state(cx, ConnectionFormState::clear);
+                }
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(None, cx);
+                });
+
+                let mut bootstrap = MoshBootstrapConfig::new("pending", config);
+                bootstrap.server_executable = options.server_executable;
+                bootstrap.udp_host_override = options.udp_host_override;
+                bootstrap.udp_port = match options.udp_port {
+                    SavedMoshUdpPortSelection::Automatic => {
+                        oxideterm_mosh::MoshUdpPortSelection::Automatic
+                    }
+                    SavedMoshUdpPortSelection::Fixed { port } => {
+                        oxideterm_mosh::MoshUdpPortSelection::Fixed(port)
+                    }
+                    SavedMoshUdpPortSelection::Range { start, end } => {
+                        oxideterm_mosh::MoshUdpPortSelection::Range { start, end }
+                    }
+                };
+                bootstrap.ip_family = match options.ip_family {
+                    SavedMoshIpFamily::Auto => oxideterm_mosh::MoshIpFamily::Auto,
+                    SavedMoshIpFamily::Ipv4 => oxideterm_mosh::MoshIpFamily::Ipv4,
+                    SavedMoshIpFamily::Ipv6 => oxideterm_mosh::MoshIpFamily::Ipv6,
+                };
+                bootstrap.locale_assignments = options
+                    .locale
+                    .filter(|locale| !locale.trim().is_empty())
+                    .map(|locale| vec![("LANG".to_string(), locale)])
+                    .unwrap_or_default();
+                let bootstrap_context = MoshBootstrapContext {
+                    registry: self.ssh_registry.clone(),
+                    prompt_handler: Some(
+                        self.workspace_runtime.read(cx).native_ssh_prompt_handler(),
+                    ),
+                    managed_key_resolver: Some(managed_key_resolver_from_store(
+                        &self.connection_store,
+                    )),
+                };
+                let terminal_config = MoshTerminalConfig {
+                    title: title.clone(),
+                    bootstrap,
+                    bootstrap_context,
+                    prediction: match options.prediction {
+                        MoshPredictionMode::Adaptive => {
+                            oxideterm_terminal::MoshPredictionDisplay::Adaptive
+                        }
+                        MoshPredictionMode::Always => {
+                            oxideterm_terminal::MoshPredictionDisplay::Always
+                        }
+                        MoshPredictionMode::Never => {
+                            oxideterm_terminal::MoshPredictionDisplay::Never
+                        }
+                    },
+                    task_runtime: self.workspace_runtime.read(cx).task_runtime(),
+                };
+                match self.create_mosh_terminal_tab(terminal_config, title, window, cx) {
+                    Ok(_) => {
+                        if let Some(saved_profile_id) = options.saved_profile_id {
+                            let _ = self
+                                .connection_store
+                                .mark_mosh_profile_used(&saved_profile_id);
+                        }
+                    }
+                    Err(error) => {
+                        self.session_manager.update(cx, |session_manager, cx| {
+                            session_manager.set_status(Some(error.to_string()), cx);
+                        });
+                    }
+                }
             }
             SshConnectionIntent::DrillDown {
                 parent_id,

@@ -1,0 +1,36 @@
+{
+  "terminal": { "typeMosh": "Mosh" },
+  "modals": { "new_connection": { "transport_mosh": "Mosh" } },
+  "mosh": { "form": {
+    "title": "Kết nối Mosh mới",
+    "description": "Mở terminal UTF-8 có thể chuyển mạng. SSH chỉ dùng để khởi động mosh-server; các công cụ SSH không khả dụng.",
+    "advanced": "Cài đặt Mosh",
+    "capability_hint": "Mỗi kết nối mở một terminal. Không hỗ trợ SFTP, IDE, chuyển tiếp cổng, máy chủ trung gian và kết nối lại SSH.",
+    "server_executable": "Tệp thực thi mosh-server",
+    "server_executable_required": "Cần tệp thực thi mosh-server",
+    "udp_host": "Ghi đè máy chủ UDP",
+    "udp_host_placeholder": "Máy chủ công khai hoặc IP tùy chọn",
+    "udp_port": "Cổng UDP hoặc dải cổng",
+    "udp_port_placeholder": "Tự động, 60001 hoặc 60000:61000",
+    "udp_port_hint": "Để trống để mosh-server tự chọn cổng UDP.",
+    "invalid_udp_port": "Nhập cổng UDP hợp lệ hoặc dải tăng dần",
+    "locale": "Ngôn ngữ vùng từ xa",
+    "locale_placeholder": "Tùy chọn, ví dụ vi_VN.UTF-8",
+    "ip_family": "Họ IP",
+    "ip_auto": "Tự động",
+    "ipv4": "IPv4",
+    "ipv6": "IPv6",
+    "prediction": "Dự đoán cục bộ",
+    "prediction_adaptive": "Thích ứng",
+    "prediction_always": "Luôn bật",
+    "prediction_never": "Không bao giờ",
+    "save_failed": "Không thể lưu hồ sơ Mosh",
+    "missing_credentials": "Thiếu thông tin xác thực Mosh"
+  } },
+  "sessionManager": { "mosh_profiles": {
+    "delete": "Xóa",
+    "delete_failed": "Không thể xóa hồ sơ Mosh",
+    "confirm_delete": "Xóa hồ sơ Mosh \"{{name}}\"?",
+    "missing_credentials": "Hồ sơ Mosh này không có thông tin xác thực đã lưu"
+  } }
+}

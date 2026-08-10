@@ -2,8 +2,9 @@ use std::fmt;
 
 use oxideterm_connections::{
     AuthType, ConnectionInfo, ConnectionTerminalOptions, ConnectionX11ForwardingOptions,
-    RemoteDesktopProfile, SavedAuth, SavedConnection, SavedUpstreamProxyProtocol,
-    TransportUsernameTransition, transport_port_replacement, transport_username_transition,
+    MoshIpFamily, MoshPredictionMode, MoshProfile, MoshUdpPortSelection, RemoteDesktopProfile,
+    SavedAuth, SavedConnection, SavedUpstreamProxyProtocol, TransportUsernameTransition,
+    transport_port_replacement, transport_username_transition,
 };
 pub(in crate::workspace) use oxideterm_connections::{
     ConnectionTransport as NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
@@ -139,6 +140,7 @@ pub(in crate::workspace) fn connection_icon_field_visible(
         && matches!(
             transport,
             NewConnectionTransport::Ssh
+                | NewConnectionTransport::Mosh
                 | NewConnectionTransport::Serial
                 | NewConnectionTransport::Telnet
                 | NewConnectionTransport::Rdp
@@ -214,6 +216,10 @@ pub(in crate::workspace) enum NewConnectionField {
     SerialBaudRate,
     SerialProfileName,
     TelnetProfileName,
+    MoshServerExecutable,
+    MoshUdpHost,
+    MoshUdpPort,
+    MoshLocale,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -479,6 +485,8 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) remote_desktop_session_options: RemoteDesktopSessionOptions,
     /// Identifies an existing RDP/VNC asset without overloading SSH edit state.
     pub(in crate::workspace) remote_desktop_profile_id: Option<String>,
+    /// Identifies an existing Mosh asset without creating an SSH node edit owner.
+    pub(in crate::workspace) mosh_profile_id: Option<String>,
     pub(in crate::workspace) saved_password_keychain_id: Option<String>,
     pub(in crate::workspace) password_loaded: bool,
     pub(in crate::workspace) password_visible: bool,
@@ -536,6 +544,12 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) serial_flow_control: oxideterm_terminal::SerialFlowControl,
     pub(in crate::workspace) serial_profile_name: String,
     pub(in crate::workspace) telnet_profile_name: String,
+    pub(in crate::workspace) mosh_server_executable: String,
+    pub(in crate::workspace) mosh_udp_host: String,
+    pub(in crate::workspace) mosh_udp_port: String,
+    pub(in crate::workspace) mosh_locale: String,
+    pub(in crate::workspace) mosh_ip_family: MoshIpFamily,
+    pub(in crate::workspace) mosh_prediction: MoshPredictionMode,
 }
 
 impl fmt::Debug for NewConnectionForm {
@@ -554,6 +568,7 @@ impl fmt::Debug for NewConnectionForm {
                 &self.remote_desktop_session_options,
             )
             .field("remote_desktop_profile_id", &self.remote_desktop_profile_id)
+            .field("mosh_profile_id", &self.mosh_profile_id)
             .field(
                 "saved_password_keychain_id",
                 &self.saved_password_keychain_id,
@@ -624,6 +639,12 @@ impl fmt::Debug for NewConnectionForm {
             .field("serial_flow_control", &self.serial_flow_control)
             .field("serial_profile_name", &self.serial_profile_name)
             .field("telnet_profile_name", &self.telnet_profile_name)
+            .field("mosh_server_executable", &self.mosh_server_executable)
+            .field("mosh_udp_host", &self.mosh_udp_host)
+            .field("mosh_udp_port", &self.mosh_udp_port)
+            .field("mosh_locale", &self.mosh_locale)
+            .field("mosh_ip_family", &self.mosh_ip_family)
+            .field("mosh_prediction", &self.mosh_prediction)
             .finish()
     }
 }
@@ -640,6 +661,7 @@ impl Default for NewConnectionForm {
             password: String::new(),
             remote_desktop_session_options: RemoteDesktopSessionOptions::default(),
             remote_desktop_profile_id: None,
+            mosh_profile_id: None,
             saved_password_keychain_id: None,
             password_loaded: true,
             password_visible: false,
@@ -696,6 +718,12 @@ impl Default for NewConnectionForm {
             serial_flow_control: oxideterm_terminal::SerialFlowControl::None,
             serial_profile_name: String::new(),
             telnet_profile_name: String::new(),
+            mosh_server_executable: "mosh-server".to_string(),
+            mosh_udp_host: String::new(),
+            mosh_udp_port: String::new(),
+            mosh_locale: String::new(),
+            mosh_ip_family: MoshIpFamily::Auto,
+            mosh_prediction: MoshPredictionMode::Adaptive,
         }
     }
 }
@@ -743,6 +771,55 @@ pub(in crate::workspace) fn form_from_remote_desktop_profile(
     form.icon = profile.icon.clone().unwrap_or_default();
     form.color = profile.color.clone().unwrap_or_default();
     form.icon_background_color = profile.icon_background_color.clone().unwrap_or_default();
+    form.focused_field = NewConnectionField::Name;
+    form
+}
+
+pub(in crate::workspace) fn form_from_mosh_profile(
+    profile: &MoshProfile,
+    ungrouped_label: String,
+) -> NewConnectionForm {
+    // Editing retains only protected-store references and never loads the secret value.
+    let mut form = NewConnectionForm::default();
+    form.transport = NewConnectionTransport::Mosh;
+    form.mosh_profile_id = Some(profile.id.clone());
+    form.name = profile.name.clone();
+    form.host = profile.host.clone();
+    form.port = profile.ssh_port.to_string();
+    form.username = profile.username.clone();
+    form.auth_tab = ssh_auth_tab_from_saved_auth(&profile.auth);
+    form.saved_password_keychain_id = match &profile.auth {
+        SavedAuth::Password { keychain_id, .. } => keychain_id.clone(),
+        _ => None,
+    };
+    // Password-profile editors default to persisting a replacement credential.
+    form.save_password = matches!(profile.auth, SavedAuth::Password { .. });
+    form.password_loaded = true;
+    form.key_path = profile.auth.key_path().unwrap_or_default().to_string();
+    form.managed_key_id = profile
+        .auth
+        .managed_key_id()
+        .unwrap_or_default()
+        .to_string();
+    form.cert_path = profile.auth.cert_path().unwrap_or_default().to_string();
+    form.group = profile.group.clone().unwrap_or(ungrouped_label);
+    form.icon = profile.icon.clone().unwrap_or_default();
+    form.color = profile.color.clone().unwrap_or_default();
+    form.icon_background_color = profile.icon_background_color.clone().unwrap_or_default();
+    form.identity_agent = profile.identity_agent.clone().unwrap_or_default();
+    form.agent_available =
+        oxideterm_ssh::ssh_agent_available(identity_agent_selector(&form.identity_agent));
+    form.legacy_ssh_compatibility = profile.legacy_ssh_compatibility;
+    form.mosh_server_executable = profile.server_executable.clone();
+    form.mosh_udp_host = profile.udp_host_override.clone().unwrap_or_default();
+    form.mosh_udp_port = match profile.udp_port {
+        MoshUdpPortSelection::Automatic => String::new(),
+        MoshUdpPortSelection::Fixed { port } => port.to_string(),
+        MoshUdpPortSelection::Range { start, end } => format!("{start}:{end}"),
+    };
+    form.mosh_locale = profile.locale.clone().unwrap_or_default();
+    form.mosh_ip_family = profile.ip_family;
+    form.mosh_prediction = profile.prediction;
     form.focused_field = NewConnectionField::Name;
     form
 }
@@ -975,7 +1052,15 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::PostConnectCommand,
         ],
     };
-    if upstream_proxy_policy == NewConnectionUpstreamProxyPolicy::Custom {
+    if transport == NewConnectionTransport::Mosh {
+        fields.retain(|field| *field != NewConnectionField::PostConnectCommand);
+        fields.extend([
+            NewConnectionField::MoshServerExecutable,
+            NewConnectionField::MoshUdpHost,
+            NewConnectionField::MoshUdpPort,
+            NewConnectionField::MoshLocale,
+        ]);
+    } else if upstream_proxy_policy == NewConnectionUpstreamProxyPolicy::Custom {
         fields.extend([
             NewConnectionField::UpstreamProxyHost,
             NewConnectionField::UpstreamProxyPort,
@@ -1157,6 +1242,10 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::SerialBaudRate => &mut form.serial_baud_rate,
         NewConnectionField::SerialProfileName => &mut form.serial_profile_name,
         NewConnectionField::TelnetProfileName => &mut form.telnet_profile_name,
+        NewConnectionField::MoshServerExecutable => &mut form.mosh_server_executable,
+        NewConnectionField::MoshUdpHost => &mut form.mosh_udp_host,
+        NewConnectionField::MoshUdpPort => &mut form.mosh_udp_port,
+        NewConnectionField::MoshLocale => &mut form.mosh_locale,
     }
 }
 
@@ -1248,6 +1337,10 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::SerialBaudRate => &form.serial_baud_rate,
         NewConnectionField::SerialProfileName => &form.serial_profile_name,
         NewConnectionField::TelnetProfileName => &form.telnet_profile_name,
+        NewConnectionField::MoshServerExecutable => &form.mosh_server_executable,
+        NewConnectionField::MoshUdpHost => &form.mosh_udp_host,
+        NewConnectionField::MoshUdpPort => &form.mosh_udp_port,
+        NewConnectionField::MoshLocale => &form.mosh_locale,
     }
 }
 
@@ -1330,7 +1423,8 @@ mod tests {
     use chrono::Utc;
     use gpui::{Keystroke, Modifiers};
     use oxideterm_connections::{
-        AuthType, ConnectionInfo, RemoteDesktopProfile, SavedUpstreamProxyPolicy,
+        AuthType, ConnectionInfo, MoshIpFamily, MoshPredictionMode, MoshProfile,
+        MoshUdpPortSelection, RemoteDesktopProfile, SavedAuth, SavedUpstreamProxyPolicy,
     };
     use oxideterm_remote_desktop::{
         RemoteDesktopAudioOptions, RemoteDesktopClipboardOptions, RemoteDesktopDisplayOptions,
@@ -1348,7 +1442,7 @@ mod tests {
         apply_remote_desktop_vnc_preference, apply_transport_default_port,
         apply_transport_default_username, auth_family_from_tab, auth_tab_from_key_source,
         backspace_current_connection_field, connection_icon_field_visible,
-        connection_secret_field_visible, default_auth_tab_for_family,
+        connection_secret_field_visible, default_auth_tab_for_family, form_from_mosh_profile,
         form_from_remote_desktop_profile, identity_agent_from_form, identity_agent_selector,
         insert_text_into_current_connection_field, key_source_from_tab, new_connection_form_mode,
         next_connection_field, next_jump_connection_field, remote_desktop_feature_supported,
@@ -1503,9 +1597,62 @@ mod tests {
     }
 
     #[test]
-    fn custom_icon_field_is_available_for_all_five_session_assets() {
+    fn mosh_profile_form_preserves_edit_metadata_without_loading_credentials() {
+        let mut profile = MoshProfile::new(
+            "Roaming shell",
+            "mosh.example.com",
+            2222,
+            "operator",
+            SavedAuth::Password {
+                keychain_id: Some("mosh-password-owner".to_string()),
+                plaintext_password: None,
+            },
+        );
+        profile.id = "mosh-1".to_string();
+        profile.group = Some("Mobile".to_string());
+        profile.icon = Some("wifi".to_string());
+        profile.color = Some("#93c5fd".to_string());
+        profile.server_executable = "/opt/mosh/bin/mosh-server".to_string();
+        profile.udp_host_override = Some("udp.example.com".to_string());
+        profile.udp_port = MoshUdpPortSelection::Range {
+            start: 60_000,
+            end: 60_010,
+        };
+        profile.ip_family = MoshIpFamily::Ipv4;
+        profile.prediction = MoshPredictionMode::Always;
+        profile.locale = Some("en_US.UTF-8".to_string());
+
+        let form = form_from_mosh_profile(&profile, "Ungrouped".to_string());
+
+        assert_eq!(form.mosh_profile_id.as_deref(), Some("mosh-1"));
+        assert_eq!(form.transport, NewConnectionTransport::Mosh);
+        assert_eq!(form.name, "Roaming shell");
+        assert_eq!(form.host, "mosh.example.com");
+        assert_eq!(form.port, "2222");
+        assert_eq!(form.username, "operator");
+        assert_eq!(form.group, "Mobile");
+        assert_eq!(form.icon, "wifi");
+        assert_eq!(form.color, "#93c5fd");
+        assert_eq!(form.mosh_server_executable, "/opt/mosh/bin/mosh-server");
+        assert_eq!(form.mosh_udp_host, "udp.example.com");
+        assert_eq!(form.mosh_udp_port, "60000:60010");
+        assert_eq!(form.mosh_ip_family, MoshIpFamily::Ipv4);
+        assert_eq!(form.mosh_prediction, MoshPredictionMode::Always);
+        assert_eq!(form.mosh_locale, "en_US.UTF-8");
+        assert_eq!(form.auth_tab, SshAuthTab::Password);
+        assert_eq!(
+            form.saved_password_keychain_id.as_deref(),
+            Some("mosh-password-owner")
+        );
+        assert!(form.save_password);
+        assert!(form.password.is_empty());
+    }
+
+    #[test]
+    fn custom_icon_field_is_available_for_all_six_session_assets() {
         for transport in [
             NewConnectionTransport::Ssh,
+            NewConnectionTransport::Mosh,
             NewConnectionTransport::Serial,
             NewConnectionTransport::Telnet,
             NewConnectionTransport::Rdp,

@@ -146,9 +146,12 @@ impl WorkspaceApp {
         }
         self.apply_main_window_active_tab_change(previous_active_tab_id, next_active_tab_id, cx);
         self.sync_active_tab_surface(cx);
-        self.needs_active_pane_focus = self
-            .active_tab(cx)
-            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
+        self.needs_active_pane_focus = self.active_tab(cx).is_some_and(|tab| {
+            matches!(
+                tab.kind,
+                TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
+            )
+        });
         self.focus_active_pane(window, cx);
         self.reveal_active_tab(window, cx);
     }

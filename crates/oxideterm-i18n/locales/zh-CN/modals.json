@@ -164,11 +164,17 @@
       "restore_managed_key_passphrases": "恢复托管密钥口令",
       "restore_managed_key_passphrases_description": "关闭后，OxideTerm 会在需要时再询问托管密钥口令。",
       "contains_serial_profiles": "串口配置：",
+      "contains_mosh_profiles": "Mosh 配置：",
       "serial_profiles_count": "{{count}} 个配置",
+      "mosh_profiles_count": "{{count}} 个配置",
       "section_serial_profiles": "串口配置（{{count}} 个）",
+      "section_mosh_profiles": "Mosh 配置（{{count}} 个）",
       "toggle_serial_profiles": "导入串口连接配置",
+      "toggle_mosh_profiles": "导入 Mosh 连接配置",
       "imported_serial_profiles": "已导入 {{count}} 个串口配置。",
-      "skipped_serial_profiles": "已跳过串口配置"
+      "imported_mosh_profiles": "已导入 {{count}} 个 Mosh 配置。",
+      "skipped_serial_profiles": "已跳过串口配置",
+      "skipped_mosh_profiles": "已跳过 Mosh 配置"
     },
     "reconnect": {
       "title": "重新连接会话",
@@ -745,8 +751,11 @@
     "warning_passwords_included": "将包含 {{count}} 个已保存的服务器密码到加密文件中。",
     "security_passwords_included": "已保存的服务器密码会包含在这个加密的 .oxide 文件中",
     "include_serial_profiles": "包含串口配置",
+    "include_mosh_profiles": "包含 Mosh 配置",
     "include_serial_profiles_description": "导出已保存的串口连接配置（{{count}} 个）。",
+    "include_mosh_profiles_description": "导出不含当前设备凭据的 Mosh 配置（{{count}} 个）。",
     "content_summary_serial_profiles": "串口配置：{{count}} 个",
+    "content_summary_mosh_profiles": "Mosh 配置：{{count}} 个",
     "include_remote_desktop_profiles": "包含远程桌面连接",
     "include_remote_desktop_profiles_description": "导出已保存的 RDP 和 VNC 连接（{{count}} 个），不包含密码。",
     "content_summary_remote_desktop_profiles": "远程桌面连接：{{count}} 个"

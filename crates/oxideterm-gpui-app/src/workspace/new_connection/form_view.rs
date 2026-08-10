@@ -37,7 +37,8 @@ use crate::workspace::{
 use gpui::Div;
 use oxideterm_connections::{
     ConnectionTerminalBackspaceSequence, ConnectionTerminalDeleteSequence,
-    ConnectionTerminalEncoding, ConnectionX11ForwardingMode, SavedUpstreamProxyProtocol,
+    ConnectionTerminalEncoding, ConnectionX11ForwardingMode, MoshIpFamily, MoshPredictionMode,
+    SavedUpstreamProxyProtocol,
 };
 use oxideterm_gpui_settings_view::{
     terminal_backspace_sequence_label, terminal_delete_sequence_label, terminal_encoding_label,
@@ -208,6 +209,9 @@ impl WorkspaceApp {
                     | NewConnectionField::Color
                     | NewConnectionField::IdentityAgent
                     | NewConnectionField::TelnetProfileName
+                    | NewConnectionField::MoshServerExecutable
+                    | NewConnectionField::MoshUdpHost
+                    | NewConnectionField::MoshLocale
                     | NewConnectionField::JumpHost
                     | NewConnectionField::JumpUsername
                     | NewConnectionField::JumpIdentityAgent

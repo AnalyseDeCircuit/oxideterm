@@ -98,11 +98,12 @@ const VNC_COMPRESSION_PREFERENCES: &[(RemoteDesktopVncPreference, &str)] = &[
 fn new_connection_transport_index(transport: NewConnectionTransport) -> usize {
     match transport {
         NewConnectionTransport::Ssh => 0,
-        NewConnectionTransport::Telnet => 1,
-        NewConnectionTransport::Serial => 2,
-        NewConnectionTransport::Rdp => 3,
-        NewConnectionTransport::Vnc => 4,
-        NewConnectionTransport::WslGraphics => 5,
+        NewConnectionTransport::Mosh => 1,
+        NewConnectionTransport::Telnet => 2,
+        NewConnectionTransport::Serial => 3,
+        NewConnectionTransport::Rdp => 4,
+        NewConnectionTransport::Vnc => 5,
+        NewConnectionTransport::WslGraphics => 6,
     }
 }
 
@@ -1637,6 +1638,12 @@ impl WorkspaceApp {
                 LucideIcon::Server,
             ),
             (
+                NewConnectionTransport::Mosh,
+                self.i18n.t("modals.new_connection.transport_mosh"),
+                NewConnectionField::Name,
+                LucideIcon::Wifi,
+            ),
+            (
                 NewConnectionTransport::Telnet,
                 self.i18n.t("modals.new_connection.transport_telnet"),
                 NewConnectionField::Host,
@@ -1857,6 +1864,144 @@ impl WorkspaceApp {
                     ),
                 )
             })
+            .into_any_element()
+    }
+
+    pub(super) fn render_mosh_advanced_fields(
+        &self,
+        server_executable: &str,
+        udp_host: &str,
+        udp_port: &str,
+        locale: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (ip_family, prediction) = self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .map(|form| (form.mosh_ip_family, form.mosh_prediction))
+            .unwrap_or_default();
+        let ip_family_options = [
+            (MoshIpFamily::Auto, "mosh.form.ip_auto"),
+            (MoshIpFamily::Ipv4, "mosh.form.ipv4"),
+            (MoshIpFamily::Ipv6, "mosh.form.ipv6"),
+        ];
+        let prediction_options = [
+            (
+                MoshPredictionMode::Adaptive,
+                "mosh.form.prediction_adaptive",
+            ),
+            (MoshPredictionMode::Always, "mosh.form.prediction_always"),
+            (MoshPredictionMode::Never, "mosh.form.prediction_never"),
+        ];
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.three))
+            .pt(px(self.tokens.spacing.two))
+            .border_t_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(rgb(self.tokens.ui.text_heading))
+                    .child(self.i18n.t("mosh.form.advanced")),
+            )
+            .child(self.render_connection_hint(self.i18n.t("mosh.form.capability_hint")))
+            .child(self.render_connection_field(
+                self.i18n.t("mosh.form.server_executable"),
+                server_executable,
+                "mosh-server".to_string(),
+                NewConnectionField::MoshServerExecutable,
+                false,
+                cx,
+            ))
+            .child(self.render_connection_field(
+                self.i18n.t("mosh.form.udp_host"),
+                udp_host,
+                self.i18n.t("mosh.form.udp_host_placeholder"),
+                NewConnectionField::MoshUdpHost,
+                false,
+                cx,
+            ))
+            .child(self.render_connection_field(
+                self.i18n.t("mosh.form.udp_port"),
+                udp_port,
+                self.i18n.t("mosh.form.udp_port_placeholder"),
+                NewConnectionField::MoshUdpPort,
+                false,
+                cx,
+            ))
+            .child(self.render_connection_hint(self.i18n.t("mosh.form.udp_port_hint")))
+            .child(self.render_connection_field(
+                self.i18n.t("mosh.form.locale"),
+                locale,
+                self.i18n.t("mosh.form.locale_placeholder"),
+                NewConnectionField::MoshLocale,
+                false,
+                cx,
+            ))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(self.tokens.spacing.one))
+                    .child(self.i18n.t("mosh.form.ip_family"))
+                    .child(div().flex().gap(px(self.tokens.spacing.one)).children(
+                        ip_family_options.into_iter().enumerate().map(
+                            |(index, (value, label_key))| {
+                                segmented_tab(
+                                    &self.tokens,
+                                    self.i18n.t(label_key),
+                                    ip_family == value,
+                                )
+                                .id(SharedString::from(format!("mosh-ip-family-{index}")))
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.update_connection_form_state(cx, |state| {
+                                            if let Some(form) = state.form.as_mut() {
+                                                form.mosh_ip_family = value;
+                                            }
+                                        });
+                                        cx.notify();
+                                    }),
+                                )
+                            },
+                        ),
+                    )),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(self.tokens.spacing.one))
+                    .child(self.i18n.t("mosh.form.prediction"))
+                    .child(div().flex().gap(px(self.tokens.spacing.one)).children(
+                        prediction_options.into_iter().enumerate().map(
+                            |(index, (value, label_key))| {
+                                segmented_tab(
+                                    &self.tokens,
+                                    self.i18n.t(label_key),
+                                    prediction == value,
+                                )
+                                .id(SharedString::from(format!("mosh-prediction-{index}")))
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.update_connection_form_state(cx, |state| {
+                                            if let Some(form) = state.form.as_mut() {
+                                                form.mosh_prediction = value;
+                                            }
+                                        });
+                                        cx.notify();
+                                    }),
+                                )
+                            },
+                        ),
+                    )),
+            )
             .into_any_element()
     }
 
@@ -3406,7 +3551,7 @@ mod tests {
                 NewConnectionTransport::Ssh,
                 NewConnectionTransport::Vnc,
             ),
-            -160.0,
+            -200.0,
         );
         assert_eq!(
             new_connection_transport_vertical_offset(
@@ -3421,7 +3566,7 @@ mod tests {
     fn windows_only_transport_follows_shared_transport_order() {
         assert_eq!(
             new_connection_transport_index(NewConnectionTransport::WslGraphics),
-            5,
+            6,
         );
     }
 

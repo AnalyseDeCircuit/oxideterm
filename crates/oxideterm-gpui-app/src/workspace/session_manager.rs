@@ -16,8 +16,8 @@ use chrono::{DateTime, Datelike, Local, Utc};
 use gpui::{Div, EventEmitter, Task, prelude::*, rgba};
 use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
-    ConnectionStore, ProxyHopDraft, RemoteDesktopProfile, SaveConnectionRequest, SavedAuth,
-    SavedConnection, SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig,
+    ConnectionStore, MoshProfile, ProxyHopDraft, RemoteDesktopProfile, SaveConnectionRequest,
+    SavedAuth, SavedConnection, SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig,
     SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol, SecretString, SerialProfile,
     SshConfigHost, TelnetProfile,
     oxide_file::{
@@ -286,6 +286,10 @@ pub(super) enum SessionManagerDeleteConfirm {
         id: String,
         name: String,
     },
+    MoshProfile {
+        id: String,
+        name: String,
+    },
     RemoteDesktopProfile {
         id: String,
         name: String,
@@ -309,6 +313,7 @@ pub(super) enum SessionManagerRowActionTarget {
     Connection(String),
     Serial(String),
     Telnet(String),
+    Mosh(String),
     RemoteDesktop(String),
     GroupRoot,
     Group(String),
@@ -346,6 +351,8 @@ pub(super) struct OxideImportResultView {
     pub(super) skipped_quick_commands: bool,
     pub(super) imported_serial_profiles: usize,
     pub(super) skipped_serial_profiles: usize,
+    pub(super) imported_mosh_profiles: usize,
+    pub(super) skipped_mosh_profiles: usize,
     pub(super) quick_commands_errors: Vec<String>,
     pub(super) imported_plugin_settings: usize,
     pub(super) skipped_plugin_settings: bool,
@@ -750,6 +757,7 @@ pub(super) struct OxideImportDialogState {
     pub(super) expanded_app_settings_sections: HashSet<String>,
     pub(super) import_quick_commands: bool,
     pub(super) import_serial_profiles: bool,
+    pub(super) import_mosh_profiles: bool,
     pub(super) import_plugin_settings: bool,
     pub(super) selected_plugin_ids: HashSet<String>,
     pub(super) import_forwards: bool,
@@ -792,6 +800,7 @@ impl Default for OxideImportDialogState {
             expanded_app_settings_sections: HashSet::new(),
             import_quick_commands: true,
             import_serial_profiles: true,
+            import_mosh_profiles: true,
             import_plugin_settings: true,
             selected_plugin_ids: HashSet::new(),
             import_forwards: true,
@@ -832,6 +841,7 @@ impl std::fmt::Debug for OxideImportDialogState {
             )
             .field("import_quick_commands", &self.import_quick_commands)
             .field("import_serial_profiles", &self.import_serial_profiles)
+            .field("import_mosh_profiles", &self.import_mosh_profiles)
             .field("import_plugin_settings", &self.import_plugin_settings)
             .field("selected_plugin_ids", &self.selected_plugin_ids)
             .field("import_forwards", &self.import_forwards)
@@ -864,6 +874,7 @@ pub(super) struct OxideExportDialogState {
     pub(super) include_local_terminal_env_vars: bool,
     pub(super) include_quick_commands: bool,
     pub(super) include_serial_profiles: bool,
+    pub(super) include_mosh_profiles: bool,
     pub(super) include_remote_desktop_profiles: bool,
     pub(super) include_plugin_settings: bool,
     pub(super) plugin_groups: HashMap<String, usize>,
@@ -905,6 +916,7 @@ impl Default for OxideExportDialogState {
             include_local_terminal_env_vars: false,
             include_quick_commands: true,
             include_serial_profiles: true,
+            include_mosh_profiles: true,
             include_remote_desktop_profiles: true,
             include_plugin_settings: true,
             plugin_groups: HashMap::new(),

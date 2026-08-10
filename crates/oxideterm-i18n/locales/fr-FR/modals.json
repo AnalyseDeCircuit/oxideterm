@@ -164,11 +164,17 @@
       "restore_managed_key_passphrases": "Restaurer les phrases secrètes des clés gérées",
       "restore_managed_key_passphrases_description": "Si désactivé, OxideTerm demandera la phrase secrète de la clé gérée lorsque nécessaire.",
       "contains_serial_profiles": "Profils série :",
+      "contains_mosh_profiles": "Profils Mosh :",
       "serial_profiles_count": "{{count}} profil(s)",
+      "mosh_profiles_count": "{{count}} profil(s)",
       "section_serial_profiles": "Profils série ({{count}})",
+      "section_mosh_profiles": "Profils Mosh ({{count}})",
       "toggle_serial_profiles": "Importer les profils de connexion série",
+      "toggle_mosh_profiles": "Importer les profils de connexion Mosh",
       "imported_serial_profiles": "{{count}} profil(s) série importé(s).",
-      "skipped_serial_profiles": "Profils série ignorés"
+      "imported_mosh_profiles": "{{count}} profil(s) Mosh importé(s).",
+      "skipped_serial_profiles": "Profils série ignorés",
+      "skipped_mosh_profiles": "Profils Mosh ignorés"
     },
     "reconnect": {
       "title": "Reconnecter la session",
@@ -758,8 +764,11 @@
     "warning_passwords_included": "{{count}} mot(s) de passe serveur enregistrés seront inclus dans le fichier chiffré.",
     "security_passwords_included": "Les mots de passe serveur enregistrés sont inclus dans ce fichier .oxide chiffré",
     "include_serial_profiles": "Inclure les profils série",
+    "include_mosh_profiles": "Inclure les profils Mosh",
     "include_serial_profiles_description": "Exporte les profils de connexion série enregistrés ({{count}} profil(s)).",
+    "include_mosh_profiles_description": "Exporte les profils Mosh sans les identifiants locaux de l’appareil ({{count}} profil(s)).",
     "content_summary_serial_profiles": "Profils série : {{count}} profil(s)",
+    "content_summary_mosh_profiles": "Profils Mosh : {{count}} profil(s)",
     "include_remote_desktop_profiles": "Inclure les connexions Bureau à distance",
     "include_remote_desktop_profiles_description": "Exporte les connexions RDP et VNC enregistrées ({{count}}). Les mots de passe sont exclus.",
     "content_summary_remote_desktop_profiles": "Connexions Bureau à distance : {{count}}"

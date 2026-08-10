@@ -3,7 +3,16 @@ pub enum TerminalSessionKind {
     LocalPty,
     SshPty,
     Telnet,
+    Mosh,
     Serial,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MoshConnectionStatus {
+    #[default]
+    Connecting,
+    Connected,
+    Interrupted,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -160,6 +169,9 @@ pub trait TerminalSessionBackend: Send {
     }
     fn send_telnet_control(&mut self, _command: TelnetControlCommand) -> Result<()> {
         bail!("Telnet controls are only supported by Telnet sessions")
+    }
+    fn mosh_connection_status(&self) -> Option<MoshConnectionStatus> {
+        None
     }
     fn set_trzsz_policy(&mut self, _policy: Option<TrzszTransferPolicy>) {}
     fn take_trzsz_transfer(&mut self) -> Option<TrzszTransfer> {

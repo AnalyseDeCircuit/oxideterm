@@ -1,0 +1,36 @@
+{
+  "terminal": { "typeMosh": "Mosh" },
+  "modals": { "new_connection": { "transport_mosh": "Mosh" } },
+  "mosh": { "form": {
+    "title": "新建 Mosh 连接",
+    "description": "打开可漫游的 UTF-8 终端。SSH 仅用于启动 mosh-server，不提供 SSH 工具能力。",
+    "advanced": "Mosh 设置",
+    "capability_hint": "一个连接只打开一个终端，不支持 SFTP、IDE、端口转发、跳板主机和 SSH 重连。",
+    "server_executable": "mosh-server 可执行文件",
+    "server_executable_required": "必须填写 mosh-server 可执行文件",
+    "udp_host": "UDP 主机覆盖",
+    "udp_host_placeholder": "可选的公网主机或 IP",
+    "udp_port": "UDP 端口或范围",
+    "udp_port_placeholder": "自动、60001 或 60000:61000",
+    "udp_port_hint": "留空时由 mosh-server 自动选择 UDP 端口。",
+    "invalid_udp_port": "请输入有效的 UDP 端口或递增范围",
+    "locale": "远程区域设置",
+    "locale_placeholder": "可选，例如 zh_CN.UTF-8",
+    "ip_family": "IP 协议族",
+    "ip_auto": "自动",
+    "ipv4": "IPv4",
+    "ipv6": "IPv6",
+    "prediction": "本地预测",
+    "prediction_adaptive": "自适应",
+    "prediction_always": "始终开启",
+    "prediction_never": "关闭",
+    "save_failed": "保存 Mosh 配置失败",
+    "missing_credentials": "缺少 Mosh 凭据"
+  } },
+  "sessionManager": { "mosh_profiles": {
+    "delete": "删除",
+    "delete_failed": "删除 Mosh 配置失败",
+    "confirm_delete": "确定删除 Mosh 配置“{{name}}”吗？",
+    "missing_credentials": "此 Mosh 配置没有已保存的凭据"
+  } }
+}

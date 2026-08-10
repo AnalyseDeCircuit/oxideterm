@@ -1,0 +1,38 @@
+{
+  "terminal": { "typeMosh": "Mosh" },
+  "modals": { "new_connection": { "transport_mosh": "Mosh" } },
+  "mosh": {
+    "form": {
+      "title": "Neue Mosh-Verbindung",
+      "description": "Öffnet ein mobiles UTF-8-Terminal. SSH startet nur mosh-server; SSH-Werkzeuge sind nicht verfügbar.",
+      "advanced": "Mosh-Einstellungen",
+      "capability_hint": "Eine Verbindung öffnet ein Terminal. SFTP, IDE, Portweiterleitung, Sprunghosts und SSH-Wiederverbindung sind nicht verfügbar.",
+      "server_executable": "mosh-server-Programm",
+      "server_executable_required": "Das mosh-server-Programm ist erforderlich",
+      "udp_host": "UDP-Host überschreiben",
+      "udp_host_placeholder": "Optionaler öffentlicher Host oder IP",
+      "udp_port": "UDP-Port oder Bereich",
+      "udp_port_placeholder": "Automatisch, 60001 oder 60000:61000",
+      "udp_port_hint": "Leer lassen, damit mosh-server einen UDP-Port auswählt.",
+      "invalid_udp_port": "Gültigen UDP-Port oder aufsteigenden Bereich eingeben",
+      "locale": "Remote-Gebietsschema",
+      "locale_placeholder": "Optional, z. B. de_DE.UTF-8",
+      "ip_family": "IP-Familie",
+      "ip_auto": "Automatisch",
+      "ipv4": "IPv4",
+      "ipv6": "IPv6",
+      "prediction": "Lokale Vorhersage",
+      "prediction_adaptive": "Adaptiv",
+      "prediction_always": "Immer",
+      "prediction_never": "Nie",
+      "save_failed": "Mosh-Profil konnte nicht gespeichert werden",
+      "missing_credentials": "Mosh-Anmeldedaten fehlen"
+    }
+  },
+  "sessionManager": { "mosh_profiles": {
+    "delete": "Löschen",
+    "delete_failed": "Mosh-Profil konnte nicht gelöscht werden",
+    "confirm_delete": "Mosh-Profil \"{{name}}\" löschen?",
+    "missing_credentials": "Dieses Mosh-Profil enthält keine gespeicherten Anmeldedaten"
+  } }
+}

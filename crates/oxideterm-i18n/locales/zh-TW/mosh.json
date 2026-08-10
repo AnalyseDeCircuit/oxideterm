@@ -1,0 +1,36 @@
+{
+  "terminal": { "typeMosh": "Mosh" },
+  "modals": { "new_connection": { "transport_mosh": "Mosh" } },
+  "mosh": { "form": {
+    "title": "新增 Mosh 連線",
+    "description": "開啟可漫遊的 UTF-8 終端。SSH 僅用於啟動 mosh-server，不提供 SSH 工具功能。",
+    "advanced": "Mosh 設定",
+    "capability_hint": "一個連線只開啟一個終端，不支援 SFTP、IDE、連接埠轉送、跳板主機和 SSH 重新連線。",
+    "server_executable": "mosh-server 執行檔",
+    "server_executable_required": "必須填寫 mosh-server 執行檔",
+    "udp_host": "UDP 主機覆寫",
+    "udp_host_placeholder": "選填的公網主機或 IP",
+    "udp_port": "UDP 連接埠或範圍",
+    "udp_port_placeholder": "自動、60001 或 60000:61000",
+    "udp_port_hint": "留空時由 mosh-server 自動選擇 UDP 連接埠。",
+    "invalid_udp_port": "請輸入有效的 UDP 連接埠或遞增範圍",
+    "locale": "遠端區域設定",
+    "locale_placeholder": "選填，例如 zh_TW.UTF-8",
+    "ip_family": "IP 協定族",
+    "ip_auto": "自動",
+    "ipv4": "IPv4",
+    "ipv6": "IPv6",
+    "prediction": "本機預測",
+    "prediction_adaptive": "自適應",
+    "prediction_always": "永遠開啟",
+    "prediction_never": "關閉",
+    "save_failed": "儲存 Mosh 設定失敗",
+    "missing_credentials": "缺少 Mosh 憑證"
+  } },
+  "sessionManager": { "mosh_profiles": {
+    "delete": "刪除",
+    "delete_failed": "刪除 Mosh 設定失敗",
+    "confirm_delete": "確定刪除 Mosh 設定「{{name}}」嗎？",
+    "missing_credentials": "此 Mosh 設定沒有已儲存的憑證"
+  } }
+}

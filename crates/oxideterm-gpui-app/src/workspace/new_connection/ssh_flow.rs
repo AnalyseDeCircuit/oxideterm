@@ -6,10 +6,13 @@ use std::{
 use gpui::{App, Context, Window};
 use oxideterm_connections::{
     ConnectionTerminalOptions, ConnectionX11ForwardingMode, ConnectionX11ForwardingOptions,
-    SaveConnectionRequest, SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest,
-    SaveTelnetProfileRequest, SavedConnectionRuntimeSecrets, SavedUpstreamProxyProtocol,
-    SecretString, first_available_default_key_path,
+    MoshIpFamily as SavedMoshIpFamily, MoshPredictionMode,
+    MoshUdpPortSelection as SavedMoshUdpPortSelection, SaveConnectionRequest,
+    SaveMoshProfileRequest, SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest,
+    SaveTelnetProfileRequest, SavedConnectionRuntimeSecrets, SavedMoshProfileRuntimeSecrets,
+    SavedUpstreamProxyProtocol, SecretString, first_available_default_key_path,
 };
+use oxideterm_mosh::{MoshBootstrapConfig, MoshBootstrapContext};
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopProtocol,
     RemoteDesktopSecret,
@@ -27,9 +30,10 @@ use tokio::sync::oneshot;
 use super::{
     ConnectionFormState, NativeProxyConnectRun, ProxyConnectPreflightContext,
     form_state::{
-        NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop, NewConnectionSubmitAction,
-        NewConnectionTransport, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
-        SavedConnectionPromptAction, SshAuthTab, identity_agent_from_form, identity_agent_selector,
+        NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
+        NewConnectionSubmitAction, NewConnectionTransport, NewConnectionUpstreamProxyAuth,
+        NewConnectionUpstreamProxyPolicy, SavedConnectionPromptAction, SshAuthTab,
+        identity_agent_from_form, identity_agent_selector,
     },
     host_key_dialog::HostKeyChallenge,
 };
@@ -47,7 +51,7 @@ use oxideterm_session_adapter::{
     proxy_chain_config_from_saved_connection, ssh_config_from_saved_connection,
     ssh_config_from_saved_connection_with_runtime_secrets,
 };
-use oxideterm_terminal::{SerialSessionConfig, TelnetSessionConfig};
+use oxideterm_terminal::{MoshTerminalConfig, SerialSessionConfig, TelnetSessionConfig};
 
 mod connect;
 mod conversion;
@@ -137,6 +141,19 @@ pub(in crate::workspace) enum SshConnectionIntent {
         saved_connection_id: Option<String>,
         terminal_options: SshTerminalConnectionOptions,
     },
+    Mosh(MoshConnectionOptions),
+}
+
+/// Non-secret Mosh launch settings travel through SSH host-key preflight.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::workspace) struct MoshConnectionOptions {
+    pub(in crate::workspace) saved_profile_id: Option<String>,
+    pub(in crate::workspace) server_executable: String,
+    pub(in crate::workspace) udp_host_override: Option<String>,
+    pub(in crate::workspace) udp_port: SavedMoshUdpPortSelection,
+    pub(in crate::workspace) ip_family: SavedMoshIpFamily,
+    pub(in crate::workspace) prediction: MoshPredictionMode,
+    pub(in crate::workspace) locale: Option<String>,
 }
 
 pub(in crate::workspace) enum SshConnectionWorkerResult {

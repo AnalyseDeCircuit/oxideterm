@@ -1,5 +1,7 @@
 use super::*;
-use crate::workspace::new_connection::{NewConnectionTransport, form_from_remote_desktop_profile};
+use crate::workspace::new_connection::{
+    NewConnectionTransport, form_from_mosh_profile, form_from_remote_desktop_profile,
+};
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopSecret,
 };
@@ -36,6 +38,16 @@ impl WorkspaceApp {
                 })
             })
             .count();
+        let mosh_count = self
+            .connection_store
+            .mosh_profiles()
+            .iter()
+            .filter(|profile| {
+                profile.group.as_deref().is_some_and(|candidate| {
+                    candidate == group || candidate.starts_with(&format!("{group}/"))
+                })
+            })
+            .count();
         let remote_desktop_count = self
             .connection_store
             .remote_desktop_profiles()
@@ -46,7 +58,7 @@ impl WorkspaceApp {
                 })
             })
             .count();
-        connection_count + serial_count + telnet_count + remote_desktop_count
+        connection_count + serial_count + telnet_count + mosh_count + remote_desktop_count
     }
 
     pub(super) fn session_group_tree(&self) -> (Vec<String>, HashMap<String, Vec<String>>) {
@@ -65,6 +77,11 @@ impl WorkspaceApp {
             }
         }
         for profile in self.connection_store.telnet_profiles() {
+            if let Some(group) = profile.group.as_deref() {
+                add_group_path_segments(group, &mut paths);
+            }
+        }
+        for profile in self.connection_store.mosh_profiles() {
             if let Some(group) = profile.group.as_deref() {
                 add_group_path_segments(group, &mut paths);
             }
@@ -584,6 +601,21 @@ impl WorkspaceApp {
         });
     }
 
+    pub(super) fn request_delete_mosh_profile(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(profile) = self.connection_store.get_mosh_profile(id) else {
+            return;
+        };
+        let confirm = SessionManagerDeleteConfirm::MoshProfile {
+            id: profile.id.clone(),
+            name: profile.name.clone(),
+        };
+        self.session_manager.update(cx, |session_manager, cx| {
+            close_session_menu_state(session_manager);
+            session_manager.delete_confirm = Some(confirm);
+            cx.notify();
+        });
+    }
+
     pub(super) fn request_delete_remote_desktop_profile(
         &mut self,
         id: &str,
@@ -658,6 +690,9 @@ impl WorkspaceApp {
             SessionManagerDeleteConfirm::TelnetProfile { id, .. } => {
                 self.delete_telnet_profile(&id, cx)
             }
+            SessionManagerDeleteConfirm::MoshProfile { id, .. } => {
+                self.delete_mosh_profile(&id, cx)
+            }
             SessionManagerDeleteConfirm::RemoteDesktopProfile { id, .. } => {
                 self.delete_remote_desktop_profile(&id, cx)
             }
@@ -705,6 +740,29 @@ impl WorkspaceApp {
         self.session_manager.update(cx, |session_manager, cx| {
             session_manager.set_status(Some(status), cx)
         });
+    }
+
+    pub(super) fn delete_mosh_profile(&mut self, id: &str, cx: &mut Context<Self>) {
+        let (status, changed) = match self.connection_store.delete_mosh_profile(id) {
+            Ok(true) => (self.i18n.t("sessionManager.mosh_profiles.delete"), true),
+            Ok(false) => (
+                self.i18n.t("sessionManager.mosh_profiles.delete_failed"),
+                false,
+            ),
+            Err(error) => (
+                format!(
+                    "{}: {error}",
+                    self.i18n.t("sessionManager.mosh_profiles.delete_failed")
+                ),
+                false,
+            ),
+        };
+        self.session_manager.update(cx, |session_manager, cx| {
+            session_manager.set_status(Some(status), cx)
+        });
+        if changed {
+            self.queue_cloud_sync_dirty_refresh(cx);
+        }
     }
 
     pub(super) fn delete_remote_desktop_profile(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -899,6 +957,21 @@ impl WorkspaceApp {
         };
         self.open_new_connection_form(window, cx);
         let form = form_from_remote_desktop_profile(&saved, self.i18n.t("ssh.form.ungrouped"));
+        self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_saved_mosh_profile_editor(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(saved) = self.connection_store.get_mosh_profile(id).cloned() else {
+            return;
+        };
+        self.open_new_connection_form(window, cx);
+        let form = form_from_mosh_profile(&saved, self.i18n.t("ssh.form.ungrouped"));
         self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
         cx.notify();
     }

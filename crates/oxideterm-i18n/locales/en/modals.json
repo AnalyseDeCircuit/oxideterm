@@ -164,11 +164,17 @@
       "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
       "skipped_quick_commands": "Quick Commands skipped",
       "contains_serial_profiles": "Serial profiles:",
+      "contains_mosh_profiles": "Mosh profiles:",
       "serial_profiles_count": "{{count}} profile(s)",
+      "mosh_profiles_count": "{{count}} profile(s)",
       "section_serial_profiles": "Serial Profiles ({{count}})",
+      "section_mosh_profiles": "Mosh Profiles ({{count}})",
       "toggle_serial_profiles": "Import serial connection profiles",
+      "toggle_mosh_profiles": "Import Mosh connection profiles",
       "imported_serial_profiles": "Imported {{count}} serial profile(s).",
-      "skipped_serial_profiles": "Serial profiles skipped"
+      "imported_mosh_profiles": "Imported {{count}} Mosh profile(s).",
+      "skipped_serial_profiles": "Serial profiles skipped",
+      "skipped_mosh_profiles": "Mosh profiles skipped"
     },
     "reconnect": {
       "title": "Reconnect Session",
@@ -745,8 +751,11 @@
     "warning_passwords_included": "{{count}} saved server password(s) will be included in the encrypted file.",
     "security_passwords_included": "Saved server passwords are included inside this encrypted .oxide file",
     "include_serial_profiles": "Include Serial Profiles",
+    "include_mosh_profiles": "Include Mosh Profiles",
     "include_serial_profiles_description": "Export saved serial connection profiles ({{count}} profile(s)).",
+    "include_mosh_profiles_description": "Export saved Mosh profiles without device-local credentials ({{count}} profile(s)).",
     "content_summary_serial_profiles": "Serial profiles: {{count}} profile(s)",
+    "content_summary_mosh_profiles": "Mosh profiles: {{count}} profile(s)",
     "include_remote_desktop_profiles": "Include Remote Desktop Connections",
     "include_remote_desktop_profiles_description": "Export saved RDP and VNC connections ({{count}} connection(s)). Passwords are not included.",
     "content_summary_remote_desktop_profiles": "Remote desktop connections: {{count}}"

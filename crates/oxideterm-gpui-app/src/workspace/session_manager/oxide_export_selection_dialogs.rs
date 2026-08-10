@@ -578,6 +578,7 @@ impl WorkspaceApp {
             include_local_terminal_env_vars,
             include_quick_commands,
             include_serial_profiles,
+            include_mosh_profiles,
             include_remote_desktop_profiles,
             include_plugin_settings,
             plugin_groups,
@@ -595,6 +596,7 @@ impl WorkspaceApp {
                         dialog.include_local_terminal_env_vars,
                         dialog.include_quick_commands,
                         dialog.include_serial_profiles,
+                        dialog.include_mosh_profiles,
                         dialog.include_remote_desktop_profiles,
                         dialog.include_plugin_settings,
                         dialog.plugin_groups.clone(),
@@ -730,6 +732,29 @@ impl WorkspaceApp {
                         this.session_manager.update(cx, |manager, cx| {
                             if let Some(dialog) = manager.oxide_export_dialog.as_mut() {
                                 dialog.include_serial_profiles = !dialog.include_serial_profiles;
+                            }
+                            cx.notify();
+                        });
+                        this.refresh_oxide_export_preflight(cx);
+                        cx.stop_propagation();
+                    }),
+                    cx,
+                ),
+            )
+            .child(
+                self.render_oxide_option_row(
+                    self.i18n.t("export.include_mosh_profiles"),
+                    self.i18n
+                        .t("export.include_mosh_profiles_description")
+                        .replace(
+                            "{{count}}",
+                            &self.connection_store.mosh_profiles().len().to_string(),
+                        ),
+                    include_mosh_profiles,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.session_manager.update(cx, |manager, cx| {
+                            if let Some(dialog) = manager.oxide_export_dialog.as_mut() {
+                                dialog.include_mosh_profiles = !dialog.include_mosh_profiles;
                             }
                             cx.notify();
                         });

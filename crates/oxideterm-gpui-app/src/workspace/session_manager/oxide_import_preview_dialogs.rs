@@ -276,6 +276,9 @@ impl WorkspaceApp {
         if preview.serial_profiles_count > 0 {
             children.push(self.render_oxide_import_serial_profiles(&preview, cx));
         }
+        if preview.mosh_profiles_count > 0 {
+            children.push(self.render_oxide_import_mosh_profiles(&preview, cx));
+        }
         if preview.plugin_settings_count > 0 {
             children.push(self.render_oxide_import_plugins(&preview, cx));
         }
@@ -912,6 +915,38 @@ impl WorkspaceApp {
                     this.session_manager.update(cx, |manager, cx| {
                         if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
                             dialog.import_serial_profiles = !dialog.import_serial_profiles;
+                        }
+                        cx.notify();
+                    });
+                    cx.stop_propagation();
+                }),
+                cx,
+            ),
+        ])
+    }
+
+    pub(super) fn render_oxide_import_mosh_profiles(
+        &self,
+        preview: &ImportPreview,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let checked = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.import_mosh_profiles);
+        self.render_oxide_import_preview_subcard(vec![
+            self.render_oxide_option_row(
+                self.i18n
+                    .t("modals.import.section_mosh_profiles")
+                    .replace("{{count}}", &preview.mosh_profiles_count.to_string()),
+                self.i18n.t("modals.import.toggle_mosh_profiles"),
+                checked,
+                cx.listener(|this, _event, _window, cx| {
+                    this.session_manager.update(cx, |manager, cx| {
+                        if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                            dialog.import_mosh_profiles = !dialog.import_mosh_profiles;
                         }
                         cx.notify();
                     });

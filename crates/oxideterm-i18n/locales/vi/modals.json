@@ -164,11 +164,17 @@
       "restore_managed_key_passphrases": "Khôi phục passphrase khóa được quản lý",
       "restore_managed_key_passphrases_description": "Nếu tắt, OxideTerm sẽ hỏi passphrase khóa được quản lý khi cần.",
       "contains_serial_profiles": "Hồ sơ serial:",
+      "contains_mosh_profiles": "Hồ sơ Mosh:",
       "serial_profiles_count": "{{count}} hồ sơ",
+      "mosh_profiles_count": "{{count}} hồ sơ",
       "section_serial_profiles": "Hồ sơ serial ({{count}})",
+      "section_mosh_profiles": "Hồ sơ Mosh ({{count}})",
       "toggle_serial_profiles": "Nhập hồ sơ kết nối serial",
+      "toggle_mosh_profiles": "Nhập hồ sơ kết nối Mosh",
       "imported_serial_profiles": "Đã nhập {{count}} hồ sơ serial.",
-      "skipped_serial_profiles": "Đã bỏ qua hồ sơ serial"
+      "imported_mosh_profiles": "Đã nhập {{count}} hồ sơ Mosh.",
+      "skipped_serial_profiles": "Đã bỏ qua hồ sơ serial",
+      "skipped_mosh_profiles": "Đã bỏ qua hồ sơ Mosh"
     },
     "reconnect": {
       "title": "Kết nối lại phiên",
@@ -758,8 +764,11 @@
     "warning_passwords_included": "{{count}} mật khẩu máy chủ đã lưu sẽ được bao gồm trong tệp mã hóa.",
     "security_passwords_included": "Mật khẩu máy chủ đã lưu được bao gồm trong tệp .oxide đã mã hóa này",
     "include_serial_profiles": "Bao gồm hồ sơ serial",
+    "include_mosh_profiles": "Bao gồm hồ sơ Mosh",
     "include_serial_profiles_description": "Xuất các hồ sơ kết nối serial đã lưu ({{count}} hồ sơ).",
+    "include_mosh_profiles_description": "Xuất hồ sơ Mosh không kèm thông tin xác thực cục bộ của thiết bị ({{count}} hồ sơ).",
     "content_summary_serial_profiles": "Hồ sơ serial: {{count}} hồ sơ",
+    "content_summary_mosh_profiles": "Hồ sơ Mosh: {{count}} hồ sơ",
     "include_remote_desktop_profiles": "Bao gồm kết nối máy tính từ xa",
     "include_remote_desktop_profiles_description": "Xuất các kết nối RDP và VNC đã lưu ({{count}} kết nối). Không bao gồm mật khẩu.",
     "content_summary_remote_desktop_profiles": "Kết nối máy tính từ xa: {{count}}"

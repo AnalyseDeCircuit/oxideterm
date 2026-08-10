@@ -1,0 +1,36 @@
+{
+  "terminal": { "typeMosh": "Mosh" },
+  "modals": { "new_connection": { "transport_mosh": "Mosh" } },
+  "mosh": { "form": {
+    "title": "Nouvelle connexion Mosh",
+    "description": "Ouvre un terminal UTF-8 itinérant. SSH sert uniquement à lancer mosh-server ; les outils SSH sont indisponibles.",
+    "advanced": "Paramètres Mosh",
+    "capability_hint": "Une connexion ouvre un terminal. SFTP, IDE, transfert de ports, hôtes de saut et reconnexion SSH sont indisponibles.",
+    "server_executable": "Exécutable mosh-server",
+    "server_executable_required": "L’exécutable mosh-server est requis",
+    "udp_host": "Hôte UDP de remplacement",
+    "udp_host_placeholder": "Hôte public ou adresse IP facultative",
+    "udp_port": "Port UDP ou plage",
+    "udp_port_placeholder": "Automatique, 60001 ou 60000:61000",
+    "udp_port_hint": "Laissez vide pour que mosh-server choisisse un port UDP.",
+    "invalid_udp_port": "Saisissez un port UDP valide ou une plage croissante",
+    "locale": "Paramètres régionaux distants",
+    "locale_placeholder": "Facultatif, par exemple fr_FR.UTF-8",
+    "ip_family": "Famille IP",
+    "ip_auto": "Auto",
+    "ipv4": "IPv4",
+    "ipv6": "IPv6",
+    "prediction": "Prédiction locale",
+    "prediction_adaptive": "Adaptative",
+    "prediction_always": "Toujours",
+    "prediction_never": "Jamais",
+    "save_failed": "Impossible d’enregistrer le profil Mosh",
+    "missing_credentials": "Les identifiants Mosh sont manquants"
+  } },
+  "sessionManager": { "mosh_profiles": {
+    "delete": "Supprimer",
+    "delete_failed": "Impossible de supprimer le profil Mosh",
+    "confirm_delete": "Supprimer le profil Mosh « {{name}} » ?",
+    "missing_credentials": "Ce profil Mosh ne contient aucun identifiant enregistré"
+  } }
+}

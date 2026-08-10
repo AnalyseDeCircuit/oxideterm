@@ -270,6 +270,12 @@ impl WorkspaceApp {
                     .replace("{{name}}", name),
                 self.i18n.t("sessionManager.telnet_profiles.delete"),
             ),
+            SessionManagerDeleteConfirm::MoshProfile { name, .. } => (
+                self.i18n
+                    .t("sessionManager.mosh_profiles.confirm_delete")
+                    .replace("{{name}}", name),
+                self.i18n.t("sessionManager.mosh_profiles.delete"),
+            ),
             SessionManagerDeleteConfirm::RemoteDesktopProfile { name, .. } => (
                 self.i18n
                     .t("sessionManager.remote_desktop_profiles.confirm_delete")

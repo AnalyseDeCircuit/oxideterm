@@ -611,6 +611,24 @@ impl TerminalPane {
         Self::from_session(terminal, preferences, window, cx)
     }
 
+    pub fn new_mosh_with_preferences(
+        config: oxideterm_terminal::MoshTerminalConfig,
+        mut preferences: TerminalUiPreferences,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Self> {
+        // Mosh state is always UTF-8 regardless of the application default.
+        preferences.terminal_encoding = oxideterm_terminal::TerminalEncoding::Utf8;
+        let terminal = Arc::new(Mutex::new(TerminalSession::mosh_with_graphics(
+            config,
+            DEFAULT_COLS,
+            DEFAULT_ROWS,
+            graphics_options_from_preferences(&preferences),
+            preferences.scrollback_lines,
+        )));
+        Self::from_session(terminal, preferences, window, cx)
+    }
+
     pub fn new_serial_with_preferences(
         config: SerialSessionConfig,
         preferences: TerminalUiPreferences,

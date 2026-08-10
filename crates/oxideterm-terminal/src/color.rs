@@ -64,7 +64,7 @@ pub(crate) fn attrs_from_flags(flags: Flags) -> TerminalAttrs {
     }
 }
 
-fn color_to_rgb(color: Color) -> TerminalColor {
+pub(crate) fn color_to_rgb(color: Color) -> TerminalColor {
     match color {
         Color::Named(named) => named_color_to_rgb(named),
         Color::Spec(rgb) => TerminalColor::rgb(rgb.r, rgb.g, rgb.b),

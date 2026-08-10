@@ -1,0 +1,36 @@
+{
+  "terminal": { "typeMosh": "Mosh" },
+  "modals": { "new_connection": { "transport_mosh": "Mosh" } },
+  "mosh": { "form": {
+    "title": "新しい Mosh 接続",
+    "description": "移動に強い UTF-8 端末を開きます。SSH は mosh-server の起動にのみ使われ、SSH ツールは利用できません。",
+    "advanced": "Mosh 設定",
+    "capability_hint": "1 接続につき 1 端末です。SFTP、IDE、ポート転送、踏み台、SSH 再接続は利用できません。",
+    "server_executable": "mosh-server 実行ファイル",
+    "server_executable_required": "mosh-server 実行ファイルが必要です",
+    "udp_host": "UDP ホストの上書き",
+    "udp_host_placeholder": "任意の公開ホストまたは IP",
+    "udp_port": "UDP ポートまたは範囲",
+    "udp_port_placeholder": "自動、60001、または 60000:61000",
+    "udp_port_hint": "空欄の場合、mosh-server が UDP ポートを選択します。",
+    "invalid_udp_port": "有効な UDP ポートまたは昇順の範囲を入力してください",
+    "locale": "リモートロケール",
+    "locale_placeholder": "任意（例: ja_JP.UTF-8）",
+    "ip_family": "IP ファミリー",
+    "ip_auto": "自動",
+    "ipv4": "IPv4",
+    "ipv6": "IPv6",
+    "prediction": "ローカル予測",
+    "prediction_adaptive": "自動調整",
+    "prediction_always": "常に有効",
+    "prediction_never": "無効",
+    "save_failed": "Mosh プロファイルを保存できませんでした",
+    "missing_credentials": "Mosh の認証情報がありません"
+  } },
+  "sessionManager": { "mosh_profiles": {
+    "delete": "削除",
+    "delete_failed": "Mosh プロファイルを削除できませんでした",
+    "confirm_delete": "Mosh プロファイル「{{name}}」を削除しますか？",
+    "missing_credentials": "この Mosh プロファイルには保存済みの認証情報がありません"
+  } }
+}

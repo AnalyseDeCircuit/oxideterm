@@ -1,0 +1,36 @@
+{
+  "terminal": { "typeMosh": "Mosh" },
+  "modals": { "new_connection": { "transport_mosh": "Mosh" } },
+  "mosh": { "form": {
+    "title": "새 Mosh 연결",
+    "description": "이동 중에도 유지되는 UTF-8 터미널을 엽니다. SSH는 mosh-server 시작에만 사용되며 SSH 도구는 제공되지 않습니다.",
+    "advanced": "Mosh 설정",
+    "capability_hint": "연결 하나당 터미널 하나가 열립니다. SFTP, IDE, 포트 전달, 점프 호스트, SSH 재연결은 사용할 수 없습니다.",
+    "server_executable": "mosh-server 실행 파일",
+    "server_executable_required": "mosh-server 실행 파일이 필요합니다",
+    "udp_host": "UDP 호스트 재정의",
+    "udp_host_placeholder": "선택 사항인 공개 호스트 또는 IP",
+    "udp_port": "UDP 포트 또는 범위",
+    "udp_port_placeholder": "자동, 60001 또는 60000:61000",
+    "udp_port_hint": "비워 두면 mosh-server가 UDP 포트를 선택합니다.",
+    "invalid_udp_port": "유효한 UDP 포트 또는 오름차순 범위를 입력하세요",
+    "locale": "원격 로캘",
+    "locale_placeholder": "선택 사항, 예: ko_KR.UTF-8",
+    "ip_family": "IP 계열",
+    "ip_auto": "자동",
+    "ipv4": "IPv4",
+    "ipv6": "IPv6",
+    "prediction": "로컬 예측",
+    "prediction_adaptive": "적응형",
+    "prediction_always": "항상",
+    "prediction_never": "사용 안 함",
+    "save_failed": "Mosh 프로필을 저장하지 못했습니다",
+    "missing_credentials": "Mosh 인증 정보가 없습니다"
+  } },
+  "sessionManager": { "mosh_profiles": {
+    "delete": "삭제",
+    "delete_failed": "Mosh 프로필을 삭제하지 못했습니다",
+    "confirm_delete": "Mosh 프로필 \"{{name}}\"을(를) 삭제할까요?",
+    "missing_credentials": "이 Mosh 프로필에는 저장된 인증 정보가 없습니다"
+  } }
+}

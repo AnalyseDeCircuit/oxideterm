@@ -8,6 +8,23 @@ pub struct TelnetSessionConfig {
     pub port: u16,
 }
 
+pub struct MoshTerminalConfig {
+    pub title: String,
+    pub bootstrap: oxideterm_mosh::MoshBootstrapConfig,
+    pub bootstrap_context: oxideterm_mosh::MoshBootstrapContext,
+    pub prediction: MoshPredictionDisplay,
+    /// The workspace runtime outlives panes so shutdown can finish asynchronously.
+    pub task_runtime: Arc<tokio::runtime::Runtime>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MoshPredictionDisplay {
+    #[default]
+    Adaptive,
+    Always,
+    Never,
+}
+
 impl TelnetSessionConfig {
     pub fn endpoint_label(&self) -> String {
         format!("{}:{}", self.host, self.port)
@@ -147,6 +164,24 @@ impl TerminalSession {
         }
     }
 
+    pub fn mosh_with_graphics(
+        config: MoshTerminalConfig,
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+        scrollback_lines: usize,
+    ) -> Self {
+        Self {
+            backend: Box::new(MoshTerminalSession::new(
+                config,
+                cols,
+                rows,
+                graphics_options,
+                scrollback_lines,
+            )),
+        }
+    }
+
     pub fn serial_with_graphics_and_encoding(
         config: SerialSessionConfig,
         cols: usize,
@@ -213,6 +248,10 @@ impl TerminalSession {
 
     pub fn set_encoding(&mut self, encoding: TerminalEncoding) {
         self.backend.set_encoding(encoding);
+    }
+
+    pub fn mosh_connection_status(&self) -> Option<MoshConnectionStatus> {
+        self.backend.mosh_connection_status()
     }
 
     pub fn set_output_processor(&mut self, processor: Option<TerminalOutputProcessor>) {

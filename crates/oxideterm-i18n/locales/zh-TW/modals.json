@@ -164,11 +164,17 @@
       "restore_managed_key_passphrases": "恢復託管金鑰密語",
       "restore_managed_key_passphrases_description": "關閉後，OxideTerm 會在需要時再詢問託管金鑰密語。",
       "contains_serial_profiles": "序列埠設定：",
+      "contains_mosh_profiles": "Mosh 設定：",
       "serial_profiles_count": "{{count}} 個設定",
+      "mosh_profiles_count": "{{count}} 個設定",
       "section_serial_profiles": "序列埠設定（{{count}} 個）",
+      "section_mosh_profiles": "Mosh 設定（{{count}} 個）",
       "toggle_serial_profiles": "匯入序列埠連線設定",
+      "toggle_mosh_profiles": "匯入 Mosh 連線設定",
       "imported_serial_profiles": "已匯入 {{count}} 個序列埠設定。",
-      "skipped_serial_profiles": "已略過序列埠設定"
+      "imported_mosh_profiles": "已匯入 {{count}} 個 Mosh 設定。",
+      "skipped_serial_profiles": "已略過序列埠設定",
+      "skipped_mosh_profiles": "已略過 Mosh 設定"
     },
     "reconnect": {
       "title": "重新連線工作階段",
@@ -758,8 +764,11 @@
     "warning_passwords_included": "將包含 {{count}} 個已儲存的伺服器密碼到加密檔案中。",
     "security_passwords_included": "已儲存的伺服器密碼會包含在這個加密的 .oxide 檔案中",
     "include_serial_profiles": "包含序列埠設定",
+    "include_mosh_profiles": "包含 Mosh 設定",
     "include_serial_profiles_description": "匯出已儲存的序列埠連線設定（{{count}} 個）。",
+    "include_mosh_profiles_description": "匯出不含目前裝置憑證的 Mosh 設定（{{count}} 個）。",
     "content_summary_serial_profiles": "序列埠設定：{{count}} 個",
+    "content_summary_mosh_profiles": "Mosh 設定：{{count}} 個",
     "include_remote_desktop_profiles": "包含遠端桌面連線",
     "include_remote_desktop_profiles_description": "匯出已儲存的 RDP 與 VNC 連線（{{count}} 個），不包含密碼。",
     "content_summary_remote_desktop_profiles": "遠端桌面連線：{{count}} 個"

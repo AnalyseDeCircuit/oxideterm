@@ -1,0 +1,40 @@
+{
+  "terminal": { "typeMosh": "Mosh" },
+  "modals": { "new_connection": { "transport_mosh": "Mosh" } },
+  "mosh": {
+    "form": {
+      "title": "New Mosh Connection",
+      "description": "Open a roaming UTF-8 terminal. SSH is used only to start mosh-server; SSH tools are not available.",
+      "advanced": "Mosh Settings",
+      "capability_hint": "One connection opens one terminal. SFTP, IDE, port forwarding, jump hosts, and SSH reconnect are unavailable.",
+      "server_executable": "mosh-server executable",
+      "server_executable_required": "mosh-server executable is required",
+      "udp_host": "UDP host override",
+      "udp_host_placeholder": "Optional public host or IP",
+      "udp_port": "UDP port or range",
+      "udp_port_placeholder": "Automatic, 60001, or 60000:61000",
+      "udp_port_hint": "Leave blank to let mosh-server choose a UDP port.",
+      "invalid_udp_port": "Enter a valid UDP port or ascending range",
+      "locale": "Remote locale",
+      "locale_placeholder": "Optional, for example en_US.UTF-8",
+      "ip_family": "IP family",
+      "ip_auto": "Auto",
+      "ipv4": "IPv4",
+      "ipv6": "IPv6",
+      "prediction": "Local prediction",
+      "prediction_adaptive": "Adaptive",
+      "prediction_always": "Always",
+      "prediction_never": "Never",
+      "save_failed": "Failed to save Mosh profile",
+      "missing_credentials": "Mosh credentials are missing"
+    }
+  },
+  "sessionManager": {
+    "mosh_profiles": {
+      "delete": "Delete",
+      "delete_failed": "Failed to delete Mosh profile",
+      "confirm_delete": "Delete Mosh profile \"{{name}}\"?",
+      "missing_credentials": "This Mosh profile has no stored credentials"
+    }
+  }
+}

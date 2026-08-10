@@ -2848,7 +2848,9 @@ impl WorkspaceApp {
 fn is_terminal_tab(tab: &oxideterm_workspace::Tab) -> bool {
     matches!(
         tab.kind,
-        oxideterm_workspace::TabKind::LocalTerminal | oxideterm_workspace::TabKind::SshTerminal
+        oxideterm_workspace::TabKind::LocalTerminal
+            | oxideterm_workspace::TabKind::SshTerminal
+            | oxideterm_workspace::TabKind::MoshTerminal
     )
 }
 
@@ -2880,6 +2882,10 @@ fn new_connection_field_value(
         NewConnectionField::SerialBaudRate => &form.serial_baud_rate,
         NewConnectionField::SerialProfileName => &form.serial_profile_name,
         NewConnectionField::TelnetProfileName => &form.telnet_profile_name,
+        NewConnectionField::MoshServerExecutable => &form.mosh_server_executable,
+        NewConnectionField::MoshUdpHost => &form.mosh_udp_host,
+        NewConnectionField::MoshUdpPort => &form.mosh_udp_port,
+        NewConnectionField::MoshLocale => &form.mosh_locale,
         NewConnectionField::JumpHost => &form.jump_server_form.as_ref()?.host,
         NewConnectionField::JumpPort => &form.jump_server_form.as_ref()?.port,
         NewConnectionField::JumpUsername => &form.jump_server_form.as_ref()?.username,
@@ -2920,6 +2926,10 @@ fn connection_field_value_mut(
         NewConnectionField::SerialBaudRate => &mut form.serial_baud_rate,
         NewConnectionField::SerialProfileName => &mut form.serial_profile_name,
         NewConnectionField::TelnetProfileName => &mut form.telnet_profile_name,
+        NewConnectionField::MoshServerExecutable => &mut form.mosh_server_executable,
+        NewConnectionField::MoshUdpHost => &mut form.mosh_udp_host,
+        NewConnectionField::MoshUdpPort => &mut form.mosh_udp_port,
+        NewConnectionField::MoshLocale => &mut form.mosh_locale,
         NewConnectionField::JumpHost => {
             &mut form
                 .jump_server_form

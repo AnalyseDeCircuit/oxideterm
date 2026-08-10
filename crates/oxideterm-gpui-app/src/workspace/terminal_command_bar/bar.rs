@@ -666,6 +666,7 @@ impl WorkspaceApp {
                 let badge = match kind {
                     TabKind::LocalTerminal => self.i18n.t("terminal.typeLocal"),
                     TabKind::SshTerminal => self.i18n.t("terminal.typeSsh"),
+                    TabKind::MoshTerminal => self.i18n.t("terminal.typeMosh"),
                     _ => String::new(),
                 };
                 let row_color = if is_current {

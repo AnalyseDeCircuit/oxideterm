@@ -300,6 +300,10 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
 }
 
 impl WorkspaceRuntimeEntity {
+    pub(in crate::workspace) fn task_runtime(&self) -> Arc<tokio::runtime::Runtime> {
+        self.task_runtime.clone()
+    }
+
     pub(in crate::workspace) fn native_ssh_prompt_handler(&self) -> Arc<NativeSshPromptHandler> {
         // Additional terminal logins use the same UI-owned prompt delivery
         // channel as the source node's initial authentication.

@@ -216,7 +216,10 @@ impl WorkspaceTabHostEntity {
         let Some(tab) = self.tab_mut_by_id(tab_id) else {
             return false;
         };
-        if !matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal) {
+        if !matches!(
+            tab.kind,
+            TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
+        ) {
             return false;
         }
         tab.title.clear();

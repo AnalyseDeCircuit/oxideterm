@@ -164,11 +164,17 @@
       "restore_managed_key_passphrases": "Ripristina passphrase delle chiavi gestite",
       "restore_managed_key_passphrases_description": "Se disattivato, OxideTerm chiederà la passphrase della chiave gestita quando necessario.",
       "contains_serial_profiles": "Profili seriali:",
+      "contains_mosh_profiles": "Profili Mosh:",
       "serial_profiles_count": "{{count}} profilo/i",
+      "mosh_profiles_count": "{{count}} profilo/i",
       "section_serial_profiles": "Profili seriali ({{count}})",
+      "section_mosh_profiles": "Profili Mosh ({{count}})",
       "toggle_serial_profiles": "Importa profili di connessione seriale",
+      "toggle_mosh_profiles": "Importa profili di connessione Mosh",
       "imported_serial_profiles": "Importati {{count}} profilo/i seriale/i.",
-      "skipped_serial_profiles": "Profili seriali saltati"
+      "imported_mosh_profiles": "Importati {{count}} profilo/i Mosh.",
+      "skipped_serial_profiles": "Profili seriali saltati",
+      "skipped_mosh_profiles": "Profili Mosh saltati"
     },
     "reconnect": {
       "title": "Riconnetti Sessione",
@@ -758,8 +764,11 @@
     "warning_passwords_included": "{{count}} password server salvate saranno incluse nel file cifrato.",
     "security_passwords_included": "Le password server salvate sono incluse in questo file .oxide cifrato",
     "include_serial_profiles": "Includi profili seriali",
+    "include_mosh_profiles": "Includi profili Mosh",
     "include_serial_profiles_description": "Esporta i profili di connessione seriale salvati ({{count}} profilo/i).",
+    "include_mosh_profiles_description": "Esporta i profili Mosh senza credenziali locali del dispositivo ({{count}} profilo/i).",
     "content_summary_serial_profiles": "Profili seriali: {{count}} profilo/i",
+    "content_summary_mosh_profiles": "Profili Mosh: {{count}} profilo/i",
     "include_remote_desktop_profiles": "Includi connessioni desktop remoto",
     "include_remote_desktop_profiles_description": "Esporta le connessioni RDP e VNC salvate ({{count}}). Le password non sono incluse.",
     "content_summary_remote_desktop_profiles": "Connessioni desktop remoto: {{count}}"

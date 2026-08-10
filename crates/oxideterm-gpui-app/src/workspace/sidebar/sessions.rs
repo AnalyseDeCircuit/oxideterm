@@ -13,6 +13,7 @@ pub(in crate::workspace) struct ActiveSessionSidebarRow {
     depth: usize,
     is_last: bool,
     has_children: bool,
+    mosh_session_id: Option<TerminalSessionId>,
 }
 
 fn session_status_can_remove_from_sidebar(status: ActiveSessionStatus) -> bool {
@@ -69,7 +70,7 @@ impl WorkspaceApp {
             return self.render_active_sessions_focus_sidebar_content(cx);
         }
 
-        let rows = self.active_session_sidebar_rows();
+        let rows = self.active_session_sidebar_rows(cx);
         if rows.is_empty() {
             return self.render_empty_sessions_sidebar_content(cx);
         }
@@ -100,7 +101,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let rows = self.active_session_sidebar_rows();
+        let rows = self.active_session_sidebar_rows(cx);
         let focused_node_id = self.effective_active_session_focus_node_id(&rows);
         self.active_session_sidebar_focused_node_id = focused_node_id.clone();
         let visible_rows = self.active_session_focus_rows(&rows, focused_node_id.as_ref());
@@ -149,7 +150,10 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn active_session_sidebar_rows(&self) -> Vec<ActiveSessionSidebarRow> {
+    pub(in crate::workspace) fn active_session_sidebar_rows(
+        &self,
+        cx: &App,
+    ) -> Vec<ActiveSessionSidebarRow> {
         let mut tree_nodes = self.node_router.flatten_tree();
         let flat_node_child_counts = tree_nodes
             .iter()
@@ -159,7 +163,7 @@ impl WorkspaceApp {
                 counts
             });
 
-        let rows = tree_nodes
+        let mut rows = tree_nodes
             .drain(..)
             .filter_map(|flat_node| {
                 let flat_node_id = flat_node.id.clone();
@@ -186,9 +190,70 @@ impl WorkspaceApp {
                     has_children: flat_node_child_counts
                         .get(&flat_node_id)
                         .is_some_and(|count| *count > 0),
+                    mosh_session_id: None,
                 })
             })
             .collect::<Vec<_>>();
+
+        // A Mosh tab is a complete connection: it never expands into SSH capabilities.
+        for tab in self
+            .tabs(cx)
+            .iter()
+            .filter(|tab| tab.kind == TabKind::MoshTerminal)
+        {
+            let Some(session_id) = tab.active_pane_id.and_then(|pane_id| {
+                tab.root_pane
+                    .as_ref()
+                    .and_then(|root| root.session_id_for_pane(pane_id))
+            }) else {
+                continue;
+            };
+            let readiness = self
+                .tab_host
+                .read(cx)
+                .terminal_location(session_id)
+                .and_then(|location| {
+                    self.tab_host
+                        .read(cx)
+                        .panes()
+                        .get(&location.pane_id)
+                        .map(|pane| pane.read(cx).shared_session())
+                })
+                .and_then(|session| session.lock().mosh_connection_status())
+                .map(|status| match status {
+                    oxideterm_terminal::MoshConnectionStatus::Connecting => {
+                        ActiveSessionReadiness::Connecting
+                    }
+                    oxideterm_terminal::MoshConnectionStatus::Connected => {
+                        ActiveSessionReadiness::Ready
+                    }
+                    oxideterm_terminal::MoshConnectionStatus::Interrupted => {
+                        ActiveSessionReadiness::Error
+                    }
+                })
+                .unwrap_or(ActiveSessionReadiness::Connecting);
+            let node_id = NodeId::new(format!("mosh-session-{}", session_id.0));
+            rows.push(ActiveSessionSidebarRow {
+                node_id,
+                parent_id: None,
+                saved_connection_id: None,
+                title: tab.title.clone(),
+                host: String::new(),
+                username: String::new(),
+                port: 0,
+                node_view: ActiveSessionNode {
+                    id: format!("mosh-session-{}", session_id.0),
+                    title: tab.title.clone(),
+                    port: 0,
+                    terminal_ids: vec![session_id],
+                    readiness,
+                },
+                depth: 0,
+                is_last: true,
+                has_children: false,
+                mosh_session_id: Some(session_id),
+            });
+        }
         rows
     }
 
@@ -227,7 +292,7 @@ impl WorkspaceApp {
         index: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(row) = self.active_session_sidebar_rows().into_iter().nth(index) else {
+        let Some(row) = self.active_session_sidebar_rows(cx).into_iter().nth(index) else {
             return div().into_any_element();
         };
         div()
@@ -256,6 +321,7 @@ impl WorkspaceApp {
         row.depth.hash(&mut hasher);
         row.is_last.hash(&mut hasher);
         row.has_children.hash(&mut hasher);
+        row.mosh_session_id.hash(&mut hasher);
         self.expanded_ssh_nodes
             .contains(&row.node_id)
             .hash(&mut hasher);
@@ -323,7 +389,7 @@ impl WorkspaceApp {
         // selected node visible when entering focus mode, but fall back to root
         // if the selected node is stale or has disappeared.
         if self.active_session_sidebar_view_mode == ActiveSessionSidebarViewMode::Focus {
-            let rows = self.active_session_sidebar_rows();
+            let rows = self.active_session_sidebar_rows(cx);
             let selected = self
                 .active_ssh_node_id
                 .as_ref()
@@ -607,7 +673,7 @@ impl WorkspaceApp {
         index: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let rows = self.active_session_sidebar_rows();
+        let rows = self.active_session_sidebar_rows(cx);
         let focused_node_id = self.effective_active_session_focus_node_id(&rows);
         let Some(row) = self
             .active_session_focus_rows(&rows, focused_node_id.as_ref())
@@ -624,6 +690,9 @@ impl WorkspaceApp {
         row: ActiveSessionSidebarRow,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if row.mosh_session_id.is_some() {
+            return self.render_mosh_session_sidebar_row(row, cx);
+        }
         let theme = self.tokens.ui;
         let selected = self.active_ssh_node_id.as_ref() == Some(&row.node_id);
         let status = self.session_node_status(row.node_view.status());
@@ -1048,6 +1117,9 @@ impl WorkspaceApp {
         row: ActiveSessionSidebarRow,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if row.mosh_session_id.is_some() {
+            return self.render_mosh_session_sidebar_row(row, cx);
+        }
         let node_id = row.node_id;
         let node_view = row.node_view;
         let node_depth = row.depth;
@@ -1330,6 +1402,83 @@ impl WorkspaceApp {
             .flex_col()
             .child(header)
             .children(children)
+            .into_any_element()
+    }
+
+    fn render_mosh_session_sidebar_row(
+        &self,
+        row: ActiveSessionSidebarRow,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(session_id) = row.mosh_session_id else {
+            return div().into_any_element();
+        };
+        let theme = self.tokens.ui;
+        let active = self.active_terminal_session_id(cx) == Some(session_id);
+        let status = self.session_node_status(row.node_view.status());
+        let background = if active {
+            rgba((theme.accent << 8) | SESSION_FOCUS_TERMINAL_ACTIVE_BG_ALPHA)
+        } else {
+            rgba(theme.bg << 8)
+        };
+
+        div()
+            .h(px(SESSION_TREE_NODE_HEIGHT))
+            .w_full()
+            .px_2()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(7.0))
+            .rounded(px(self.tokens.radii.md))
+            .bg(background)
+            .hover(move |surface| surface.bg(rgb(theme.bg_hover)))
+            .child(self.render_session_status_dot(status))
+            .child(Self::render_lucide_icon(
+                LucideIcon::Wifi,
+                SESSION_TREE_ICON_SIZE,
+                rgb(status.text_color),
+            ))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .truncate()
+                    .text_size(px(SESSION_TREE_TEXT_SIZE))
+                    .text_color(rgb(status.text_color))
+                    .child(row.title),
+            )
+            .child(
+                div()
+                    .size(px(22.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(self.tokens.radii.md))
+                    .hover(move |button| {
+                        button.bg(rgba((theme.error << 8) | SESSION_FOCUS_ACTION_HOVER_ALPHA))
+                    })
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::WifiOff,
+                        13.0,
+                        rgb(theme.error),
+                    ))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, window, cx| {
+                            this.close_terminal_session(session_id, window, cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    this.focus_terminal_session(session_id, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
             .into_any_element()
     }
 

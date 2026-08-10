@@ -164,11 +164,17 @@
       "restore_managed_key_passphrases": "Restaurar frases secretas de chaves gerenciadas",
       "restore_managed_key_passphrases_description": "Se desativado, o OxideTerm pedirá a frase secreta da chave gerenciada quando necessário.",
       "contains_serial_profiles": "Perfis seriais:",
+      "contains_mosh_profiles": "Perfis Mosh:",
       "serial_profiles_count": "{{count}} perfil(is)",
+      "mosh_profiles_count": "{{count}} perfil(is)",
       "section_serial_profiles": "Perfis seriais ({{count}})",
+      "section_mosh_profiles": "Perfis Mosh ({{count}})",
       "toggle_serial_profiles": "Importar perfis de conexão serial",
+      "toggle_mosh_profiles": "Importar perfis de conexão Mosh",
       "imported_serial_profiles": "{{count}} perfil(is) serial(is) importado(s).",
-      "skipped_serial_profiles": "Perfis seriais ignorados"
+      "imported_mosh_profiles": "{{count}} perfil(is) Mosh importado(s).",
+      "skipped_serial_profiles": "Perfis seriais ignorados",
+      "skipped_mosh_profiles": "Perfis Mosh ignorados"
     },
     "reconnect": {
       "title": "Reconectar à sessão",
@@ -758,8 +764,11 @@
     "warning_passwords_included": "{{count}} senha(s) de servidor salvas serão incluídas no arquivo criptografado.",
     "security_passwords_included": "Senhas de servidor salvas estão incluídas neste arquivo .oxide criptografado",
     "include_serial_profiles": "Incluir perfis seriais",
+    "include_mosh_profiles": "Incluir perfis Mosh",
     "include_serial_profiles_description": "Exporta perfis de conexão serial salvos ({{count}} perfil(is)).",
+    "include_mosh_profiles_description": "Exporta perfis Mosh sem credenciais locais do dispositivo ({{count}} perfil(is)).",
     "content_summary_serial_profiles": "Perfis seriais: {{count}} perfil(is)",
+    "content_summary_mosh_profiles": "Perfis Mosh: {{count}} perfil(is)",
     "include_remote_desktop_profiles": "Incluir conexões de área de trabalho remota",
     "include_remote_desktop_profiles_description": "Exporta conexões RDP e VNC salvas ({{count}}). As senhas não são incluídas.",
     "content_summary_remote_desktop_profiles": "Conexões de área de trabalho remota: {{count}}"

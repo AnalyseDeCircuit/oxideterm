@@ -235,9 +235,9 @@ use oxideterm_ssh::{
 };
 use oxideterm_ssh_launch::TemporarySshLaunch;
 use oxideterm_terminal::{
-    LocalPtyConfig, RemoteShellIntegrationStatus, SerialSessionConfig, ShellInfo, SshSessionConfig,
-    TelnetSessionConfig, TerminalCommandMarkDetectionSource, TerminalCursorShape,
-    TerminalLifecycle, scan_shells,
+    LocalPtyConfig, MoshTerminalConfig, RemoteShellIntegrationStatus, SerialSessionConfig,
+    ShellInfo, SshSessionConfig, TelnetSessionConfig, TerminalCommandMarkDetectionSource,
+    TerminalCursorShape, TerminalLifecycle, scan_shells,
 };
 use oxideterm_theme::{
     AppUiColors, TerminalTheme, ThemeTokens, UiDensityProfile, UiMotionProfile, UiRadii,

@@ -9,6 +9,148 @@ use gpui::App;
 use oxideterm_connections::{ConnectionStore, SavedAuth, SavedConnection, SavedProxyHop};
 use oxideterm_gpui_terminal::TerminalNoticeVariant;
 
+struct PreparedMoshConnect {
+    config: SshConfig,
+    title: String,
+    options: MoshConnectionOptions,
+}
+
+fn parse_mosh_udp_port(value: &str) -> anyhow::Result<SavedMoshUdpPortSelection> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(SavedMoshUdpPortSelection::Automatic);
+    }
+    if let Some((start, end)) = value.split_once(':') {
+        let start = start.trim().parse::<u16>()?;
+        let end = end.trim().parse::<u16>()?;
+        if start == 0 || end == 0 || start > end {
+            anyhow::bail!("invalid Mosh UDP port range");
+        }
+        return Ok(SavedMoshUdpPortSelection::Range { start, end });
+    }
+    let port = value.parse::<u16>()?;
+    if port == 0 {
+        anyhow::bail!("invalid Mosh UDP port");
+    }
+    Ok(SavedMoshUdpPortSelection::Fixed { port })
+}
+
+fn mosh_password_draft_is_persistent(form: &NewConnectionForm) -> bool {
+    form.save_password || (form.mosh_profile_id.is_some() && !form.password.is_empty())
+}
+
+fn saved_mosh_auth_from_form(form: &mut NewConnectionForm) -> SavedAuth {
+    match form.auth_tab {
+        SshAuthTab::Password => {
+            // Editing follows SSH property semantics: a newly entered password is
+            // an explicit replacement and crosses directly into protected storage.
+            let persist_password = mosh_password_draft_is_persistent(form);
+            let plaintext_password = (persist_password && !form.password.is_empty())
+                .then(|| SecretString::from(std::mem::take(&mut form.password)));
+            SavedAuth::Password {
+                // An unchanged edit keeps the protected value by reference; a replacement
+                // reuses that same owner while new profiles honor the save-password choice.
+                keychain_id: persist_password
+                    .then(|| form.saved_password_keychain_id.clone())
+                    .flatten(),
+                plaintext_password,
+            }
+        }
+        SshAuthTab::Agent => SavedAuth::Agent,
+        SshAuthTab::DefaultKey => SavedAuth::Key {
+            key_path: String::new(),
+            has_passphrase: !form.passphrase.is_empty(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: (!form.passphrase.is_empty())
+                .then(|| SecretString::from(std::mem::take(&mut form.passphrase))),
+        },
+        SshAuthTab::SshKey => SavedAuth::Key {
+            key_path: form.key_path.trim().to_string(),
+            has_passphrase: !form.passphrase.is_empty(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: (!form.passphrase.is_empty())
+                .then(|| SecretString::from(std::mem::take(&mut form.passphrase))),
+        },
+        SshAuthTab::ManagedKey => SavedAuth::ManagedKey {
+            key_id: form.managed_key_id.trim().to_string(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: (!form.passphrase.is_empty())
+                .then(|| SecretString::from(std::mem::take(&mut form.passphrase))),
+        },
+        SshAuthTab::Certificate => SavedAuth::Certificate {
+            key_path: form.key_path.trim().to_string(),
+            cert_path: form.cert_path.trim().to_string(),
+            has_passphrase: !form.passphrase.is_empty(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: (!form.passphrase.is_empty())
+                .then(|| SecretString::from(std::mem::take(&mut form.passphrase))),
+        },
+        SshAuthTab::TwoFactor => SavedAuth::KeyboardInteractive,
+    }
+}
+
+fn runtime_mosh_auth_from_form(form: &mut NewConnectionForm) -> AuthMethod {
+    match form.auth_tab {
+        SshAuthTab::Password => {
+            AuthMethod::password_secret(take_zeroizing_secret(&mut form.password))
+        }
+        SshAuthTab::Agent => AuthMethod::Agent,
+        SshAuthTab::DefaultKey => AuthMethod::key_secret(
+            "",
+            (!form.passphrase.is_empty()).then(|| take_zeroizing_secret(&mut form.passphrase)),
+        ),
+        SshAuthTab::SshKey => AuthMethod::key_secret(
+            form.key_path.trim().to_string(),
+            (!form.passphrase.is_empty()).then(|| take_zeroizing_secret(&mut form.passphrase)),
+        ),
+        SshAuthTab::ManagedKey => AuthMethod::managed_key_secret(
+            form.managed_key_id.trim().to_string(),
+            (!form.passphrase.is_empty()).then(|| take_zeroizing_secret(&mut form.passphrase)),
+        ),
+        SshAuthTab::Certificate => AuthMethod::certificate_secret(
+            form.key_path.trim().to_string(),
+            form.cert_path.trim().to_string(),
+            (!form.passphrase.is_empty()).then(|| take_zeroizing_secret(&mut form.passphrase)),
+        ),
+        SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
+    }
+}
+
+fn runtime_mosh_auth_from_saved(
+    auth: &SavedAuth,
+    secrets: SavedMoshProfileRuntimeSecrets,
+) -> Option<AuthMethod> {
+    let secret = secrets.auth.map(SecretString::into_zeroizing);
+    Some(match auth {
+        SavedAuth::Password { .. } => AuthMethod::password_secret(secret?),
+        SavedAuth::Key { key_path, .. } => AuthMethod::key_secret(key_path.clone(), secret),
+        SavedAuth::ManagedKey { key_id, .. } => {
+            AuthMethod::managed_key_secret(key_id.clone(), secret)
+        }
+        SavedAuth::Certificate {
+            key_path,
+            cert_path,
+            ..
+        } => AuthMethod::certificate_secret(key_path.clone(), cert_path.clone(), secret),
+        SavedAuth::KeyboardInteractive => AuthMethod::KeyboardInteractive,
+        SavedAuth::Agent => AuthMethod::Agent,
+    })
+}
+
+fn mosh_options_from_profile(
+    profile: &oxideterm_connections::MoshProfile,
+) -> MoshConnectionOptions {
+    MoshConnectionOptions {
+        saved_profile_id: Some(profile.id.clone()),
+        server_executable: profile.server_executable.clone(),
+        udp_host_override: profile.udp_host_override.clone(),
+        udp_port: profile.udp_port,
+        ip_family: profile.ip_family,
+        prediction: profile.prediction,
+        locale: profile.locale.clone(),
+    }
+}
+
 fn saved_proxy_hop_auth_copies(
     connection_store: &ConnectionStore,
     proxy_hops: &[NewConnectionProxyHop],
@@ -316,6 +458,13 @@ impl WorkspaceApp {
             && mode == NewConnectionFormMode::NewConnection
         {
             self.submit_telnet_connection_form(action, window, cx);
+            return;
+        }
+        if transport == Some(NewConnectionTransport::Mosh)
+            && drill_down_parent_id.is_none()
+            && mode == NewConnectionFormMode::NewConnection
+        {
+            self.submit_mosh_connection_form(action, window, cx);
             return;
         }
         if transport
@@ -876,6 +1025,206 @@ impl WorkspaceApp {
                 });
             }
         }
+        cx.notify();
+    }
+
+    pub(super) fn submit_mosh_connection_form(
+        &mut self,
+        action: NewConnectionSubmitAction,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let prepared = self.with_connection_form_mut(cx, |this, form, cx| {
+            let form = form?;
+            let host = form.host.trim().to_string();
+            let username = form.username.trim().to_string();
+            let ssh_port = form
+                .port
+                .trim()
+                .parse::<u16>()
+                .ok()
+                .filter(|port| *port > 0);
+            if host.is_empty() || username.is_empty() || ssh_port.is_none() {
+                form.error = Some(this.i18n.t("ssh.form.validation_required"));
+                cx.notify();
+                return None;
+            }
+            match form.auth_tab {
+                SshAuthTab::SshKey if form.key_path.trim().is_empty() => {
+                    form.error = Some(this.i18n.t("ssh.form.key_path_required"));
+                    cx.notify();
+                    return None;
+                }
+                SshAuthTab::ManagedKey if form.managed_key_id.trim().is_empty() => {
+                    form.error = Some(this.i18n.t("ssh.form.managed_key_required"));
+                    cx.notify();
+                    return None;
+                }
+                SshAuthTab::Certificate
+                    if form.key_path.trim().is_empty() || form.cert_path.trim().is_empty() =>
+                {
+                    form.error = Some(this.i18n.t("ssh.form.certificate_paths_required"));
+                    cx.notify();
+                    return None;
+                }
+                _ => {}
+            }
+            let udp_port = match parse_mosh_udp_port(&form.mosh_udp_port) {
+                Ok(udp_port) => udp_port,
+                Err(_) => {
+                    form.error = Some(this.i18n.t("mosh.form.invalid_udp_port"));
+                    cx.notify();
+                    return None;
+                }
+            };
+            let server_executable = form.mosh_server_executable.trim().to_string();
+            if server_executable.is_empty() {
+                form.error = Some(this.i18n.t("mosh.form.server_executable_required"));
+                cx.notify();
+                return None;
+            }
+            let title = if form.name.trim().is_empty() {
+                format!("{username}@{host}")
+            } else {
+                form.name.trim().to_string()
+            };
+            let options = MoshConnectionOptions {
+                saved_profile_id: None,
+                server_executable: server_executable.clone(),
+                udp_host_override: (!form.mosh_udp_host.trim().is_empty())
+                    .then(|| form.mosh_udp_host.trim().to_string()),
+                udp_port,
+                ip_family: form.mosh_ip_family,
+                prediction: form.mosh_prediction,
+                locale: (!form.mosh_locale.trim().is_empty())
+                    .then(|| form.mosh_locale.trim().to_string()),
+            };
+            let ssh_port = ssh_port.expect("validated Mosh SSH port must exist");
+
+            if action == NewConnectionSubmitAction::Connect {
+                let auth = runtime_mosh_auth_from_form(form);
+                let config = SshConfig {
+                    host,
+                    port: ssh_port,
+                    username,
+                    auth,
+                    identity_agent: identity_agent_from_form(&form.identity_agent),
+                    legacy_ssh_compatibility: form.legacy_ssh_compatibility,
+                    strict_host_key_checking: true,
+                    ..SshConfig::default()
+                };
+                form.pending = true;
+                form.error = Some(this.i18n.t("ssh.form.checking_host_key"));
+                return Some((
+                    Some(PreparedMoshConnect {
+                        config,
+                        title,
+                        options,
+                    }),
+                    None,
+                    None,
+                ));
+            }
+
+            let auth_override = (action == NewConnectionSubmitAction::SaveAndConnect
+                && form.auth_tab == SshAuthTab::Password
+                && !mosh_password_draft_is_persistent(form))
+            .then(|| runtime_mosh_auth_from_form(form));
+            let auth = saved_mosh_auth_from_form(form);
+            let request = SaveMoshProfileRequest {
+                id: form.mosh_profile_id.clone(),
+                name: title,
+                group: serial_profile_group_from_form(&form.group, &this.i18n),
+                icon: asset_icon_from_form(&form.icon),
+                color: asset_color_from_form(&form.color),
+                icon_background_color: asset_color_from_form(&form.icon_background_color),
+                host,
+                ssh_port,
+                username,
+                auth,
+                server_executable,
+                udp_host_override: options.udp_host_override,
+                udp_port,
+                ip_family: options.ip_family,
+                prediction: options.prediction,
+                locale: options.locale,
+                identity_agent: identity_agent_from_form(&form.identity_agent),
+                legacy_ssh_compatibility: form.legacy_ssh_compatibility,
+            };
+            form.pending = true;
+            form.error = None;
+            Some((None, Some(request), auth_override))
+        });
+        let Some((direct_connect, save_request, auth_override)) = prepared else {
+            return;
+        };
+
+        if let Some(connect) = direct_connect {
+            self.start_ssh_preflight(
+                connect.config,
+                connect.title,
+                SshConnectionIntent::Mosh(connect.options),
+                cx,
+            );
+            cx.notify();
+            return;
+        }
+
+        let request = save_request.expect("Mosh save action must build a profile request");
+        let (profile, runtime_secrets) = match self
+            .connection_store
+            .upsert_mosh_profile_with_runtime_secrets(request)
+        {
+            Ok(saved) => saved,
+            Err(error) => {
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.pending = false;
+                        form.error =
+                            Some(format!("{}: {error}", self.i18n.t("mosh.form.save_failed")));
+                    }
+                });
+                cx.notify();
+                return;
+            }
+        };
+        self.queue_cloud_sync_dirty_refresh(cx);
+        if action == NewConnectionSubmitAction::Save {
+            self.update_connection_form_state(cx, ConnectionFormState::clear);
+            cx.notify();
+            return;
+        }
+
+        let Some(auth) =
+            auth_override.or_else(|| runtime_mosh_auth_from_saved(&profile.auth, runtime_secrets))
+        else {
+            self.update_connection_form_state(cx, |state| {
+                if let Some(form) = state.form.as_mut() {
+                    form.pending = false;
+                    form.error = Some(self.i18n.t("mosh.form.missing_credentials"));
+                }
+            });
+            cx.notify();
+            return;
+        };
+        let config = SshConfig {
+            host: profile.host.clone(),
+            port: profile.ssh_port,
+            username: profile.username.clone(),
+            auth,
+            identity_agent: profile.identity_agent.clone(),
+            legacy_ssh_compatibility: profile.legacy_ssh_compatibility,
+            strict_host_key_checking: true,
+            ..SshConfig::default()
+        };
+        let title = profile.name.clone();
+        let options = mosh_options_from_profile(&profile);
+        self.update_connection_form_state(cx, |state| {
+            if let Some(form) = state.form.as_mut() {
+                form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
+            }
+        });
+        self.start_ssh_preflight(config, title, SshConnectionIntent::Mosh(options), cx);
         cx.notify();
     }
 
@@ -1586,6 +1935,57 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(in crate::workspace) fn open_saved_mosh_profile(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(profile) = self.connection_store.get_mosh_profile(id).cloned() else {
+            return;
+        };
+        let Some(auth) = auth_method_from_saved_auth(&self.connection_store, &profile.auth) else {
+            // Portable profiles intentionally omit credentials. Open the editor at the
+            // matching secret field so the device-local value can be supplied safely.
+            self.open_saved_mosh_profile_editor(id, window, cx);
+            let missing_credentials = self
+                .i18n
+                .t("sessionManager.mosh_profiles.missing_credentials");
+            self.update_connection_form_state(cx, |state| {
+                if let Some(form) = state.form.as_mut() {
+                    form.error = Some(missing_credentials);
+                    form.focused_field = match form.auth_tab {
+                        SshAuthTab::Password => NewConnectionField::Password,
+                        SshAuthTab::DefaultKey
+                        | SshAuthTab::SshKey
+                        | SshAuthTab::ManagedKey
+                        | SshAuthTab::Certificate => NewConnectionField::Passphrase,
+                        SshAuthTab::Agent | SshAuthTab::TwoFactor => NewConnectionField::Name,
+                    };
+                    form.field_focused = false;
+                }
+            });
+            return;
+        };
+        let config = SshConfig {
+            host: profile.host.clone(),
+            port: profile.ssh_port,
+            username: profile.username.clone(),
+            auth,
+            identity_agent: profile.identity_agent.clone(),
+            legacy_ssh_compatibility: profile.legacy_ssh_compatibility,
+            strict_host_key_checking: true,
+            ..SshConfig::default()
+        };
+        let title = profile.name.clone();
+        let options = mosh_options_from_profile(&profile);
+        self.session_manager.update(cx, |session_manager, cx| {
+            session_manager.set_status(Some(self.i18n.t("ssh.form.checking_host_key")), cx);
+        });
+        self.start_ssh_preflight(config, title, SshConnectionIntent::Mosh(options), cx);
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn start_ssh_preflight(
         &self,
         mut config: SshConfig,
@@ -1641,6 +2041,66 @@ mod saved_connection_open_tests {
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
         }
+    }
+
+    #[test]
+    fn unchanged_mosh_password_edit_preserves_protected_store_reference() {
+        let mut form = NewConnectionForm::default();
+        form.auth_tab = SshAuthTab::Password;
+        form.save_password = true;
+        form.saved_password_keychain_id = Some("mosh-password-owner".to_string());
+
+        let auth = saved_mosh_auth_from_form(&mut form);
+
+        assert!(matches!(
+            auth,
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                plaintext_password: None,
+            } if keychain_id == "mosh-password-owner"
+        ));
+        assert!(form.password.is_empty());
+    }
+
+    #[test]
+    fn replacement_mosh_password_moves_secret_into_save_request() {
+        let mut form = NewConnectionForm::default();
+        form.auth_tab = SshAuthTab::Password;
+        form.password = "replacement-secret".to_string();
+        form.save_password = true;
+        form.saved_password_keychain_id = Some("mosh-password-owner".to_string());
+
+        let auth = saved_mosh_auth_from_form(&mut form);
+
+        assert!(matches!(
+            auth,
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                plaintext_password: Some(password),
+            } if keychain_id == "mosh-password-owner" && password == "replacement-secret"
+        ));
+        assert!(form.password.is_empty());
+    }
+
+    #[test]
+    fn mosh_edit_persists_an_entered_password_without_new_profile_checkbox_state() {
+        let mut form = NewConnectionForm::default();
+        form.mosh_profile_id = Some("mosh-profile".to_string());
+        form.auth_tab = SshAuthTab::Password;
+        form.password = "replacement-secret".to_string();
+        form.save_password = false;
+
+        assert!(mosh_password_draft_is_persistent(&form));
+        let auth = saved_mosh_auth_from_form(&mut form);
+
+        assert!(matches!(
+            auth,
+            SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some(password),
+            } if password == "replacement-secret"
+        ));
+        assert!(form.password.is_empty());
     }
 
     #[test]

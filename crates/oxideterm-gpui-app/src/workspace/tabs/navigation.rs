@@ -1,5 +1,13 @@
 use super::*;
 
+fn is_terminal_tab_kind(kind: &TabKind) -> bool {
+    // Terminal focus and display behavior is transport-neutral.
+    matches!(
+        kind,
+        TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
+    )
+}
+
 fn tab_exit_visual_index(live_visual_index: usize, occupied_indices: &[usize]) -> usize {
     let mut visual_index = live_visual_index;
     for occupied in occupied_indices {
@@ -121,7 +129,7 @@ impl WorkspaceApp {
         self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = self
             .active_tab(cx)
-            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
+            .is_some_and(|tab| is_terminal_tab_kind(&tab.kind));
         self.focus_active_tab_keyboard_owner(window, cx);
         self.reveal_active_tab(window, cx);
         cx.notify();
@@ -152,9 +160,9 @@ impl WorkspaceApp {
             self.set_main_window_active_tab(Some(tab_id), cx);
             self.resume_remote_desktop_frame_delivery(tab_id, cx);
             self.sync_active_tab_surface(cx);
-            self.needs_active_pane_focus = self.active_tab(cx).is_some_and(|tab| {
-                matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
-            });
+            self.needs_active_pane_focus = self
+                .active_tab(cx)
+                .is_some_and(|tab| is_terminal_tab_kind(&tab.kind));
             self.focus_active_tab_keyboard_owner(window, cx);
             self.reveal_active_tab(window, cx);
             cx.notify();
@@ -223,6 +231,11 @@ impl WorkspaceApp {
             }
             Some(TabKind::RemoteDesktop) => {
                 self.active_surface = ActiveSurface::Terminal;
+            }
+            Some(TabKind::MoshTerminal) => {
+                // Mosh tabs have no SSH node ownership and must not retain a stale host highlight.
+                self.active_surface = ActiveSurface::Terminal;
+                self.active_ssh_node_id = None;
             }
             _ => {
                 self.active_surface = ActiveSurface::Terminal;
@@ -613,7 +626,7 @@ impl WorkspaceApp {
         };
         if self
             .active_tab(cx)
-            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal))
+            .is_some_and(|tab| is_terminal_tab_kind(&tab.kind))
         {
             if self
                 .active_tab(cx)
@@ -977,7 +990,7 @@ impl WorkspaceApp {
         self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = self
             .active_tab(cx)
-            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
+            .is_some_and(|tab| is_terminal_tab_kind(&tab.kind));
         self.focus_active_pane(window, cx);
         self.reveal_active_tab(window, cx);
         if let Some(exiting_visual) = exiting_visual {
@@ -1121,7 +1134,7 @@ impl WorkspaceApp {
         self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = self
             .active_tab(cx)
-            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
+            .is_some_and(|tab| is_terminal_tab_kind(&tab.kind));
         self.focus_active_pane(window, cx);
         self.reveal_active_tab(window, cx);
         cx.notify();
@@ -1143,9 +1156,9 @@ impl WorkspaceApp {
         {
             self.set_main_window_active_tab(Some(tab_id), cx);
             self.sync_active_tab_surface(cx);
-            self.needs_active_pane_focus = self.active_tab(cx).is_some_and(|tab| {
-                matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
-            });
+            self.needs_active_pane_focus = self
+                .active_tab(cx)
+                .is_some_and(|tab| is_terminal_tab_kind(&tab.kind));
             self.focus_active_pane(window, cx);
             self.reveal_active_tab(window, cx);
             cx.notify();
@@ -1314,7 +1327,7 @@ impl WorkspaceApp {
             TabTitleSource::Static => tab.title.clone(),
             TabTitleSource::I18nKey(key) => self.i18n.t(key),
         };
-        if matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal) {
+        if is_terminal_tab_kind(&tab.kind) {
             let pane_count = tab.root_pane.as_ref().map_or(1, PaneNode::pane_count);
             if pane_count > 1 {
                 return format!("{title} ({pane_count})");

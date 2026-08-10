@@ -345,7 +345,7 @@ impl WorkspaceApp {
             return;
         }
 
-        if tab_kind == TabKind::SshTerminal {
+        if matches!(tab_kind, TabKind::SshTerminal | TabKind::MoshTerminal) {
             return;
         }
         if self.active_tab_has_serial_terminal(cx) {

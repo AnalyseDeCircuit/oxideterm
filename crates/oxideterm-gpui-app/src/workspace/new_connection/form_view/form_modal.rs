@@ -11,6 +11,7 @@ struct ConnectionFormModalSnapshot {
     auth_tab: SshAuthTab,
     password_present: bool,
     remote_desktop_profile_id: Option<String>,
+    mosh_profile_id: Option<String>,
     saved_password_keychain_id: Option<String>,
     password_visible: bool,
     password_loading: bool,
@@ -34,6 +35,10 @@ struct ConnectionFormModalSnapshot {
     pending: bool,
     serial_port_path: String,
     serial_baud_rate: String,
+    mosh_server_executable: String,
+    mosh_udp_host: String,
+    mosh_udp_port: String,
+    mosh_locale: String,
 }
 
 impl ConnectionFormModalSnapshot {
@@ -47,6 +52,7 @@ impl ConnectionFormModalSnapshot {
             auth_tab: form.auth_tab,
             password_present: !form.password.is_empty(),
             remote_desktop_profile_id: form.remote_desktop_profile_id.clone(),
+            mosh_profile_id: form.mosh_profile_id.clone(),
             saved_password_keychain_id: form.saved_password_keychain_id.clone(),
             password_visible: form.password_visible,
             password_loading: form.password_loading,
@@ -70,6 +76,10 @@ impl ConnectionFormModalSnapshot {
             pending: form.pending,
             serial_port_path: form.serial_port_path.clone(),
             serial_baud_rate: form.serial_baud_rate.clone(),
+            mosh_server_executable: form.mosh_server_executable.clone(),
+            mosh_udp_host: form.mosh_udp_host.clone(),
+            mosh_udp_port: form.mosh_udp_port.clone(),
+            mosh_locale: form.mosh_locale.clone(),
         }
     }
 }
@@ -103,6 +113,7 @@ impl WorkspaceApp {
         let duplicate_mode = mode == NewConnectionFormMode::DuplicateTemplate;
         let edit_properties_mode = mode.submits_saved_connection_properties();
         let remote_desktop_edit_mode = form.remote_desktop_profile_id.is_some();
+        let mosh_edit_mode = form.mosh_profile_id.is_some();
         let drill_down_mode = self
             .connection_form_state(cx)
             .drill_down_parent_node_id
@@ -119,6 +130,11 @@ impl WorkspaceApp {
             && !edit_properties_mode
             && !drill_down_mode
             && form.transport == NewConnectionTransport::Telnet;
+        let mosh_mode = !prompt_mode
+            && !duplicate_mode
+            && !edit_properties_mode
+            && !drill_down_mode
+            && form.transport == NewConnectionTransport::Mosh;
         let remote_desktop_protocol =
             if !prompt_mode && !duplicate_mode && !edit_properties_mode && !drill_down_mode {
                 match form.transport {
@@ -141,11 +157,12 @@ impl WorkspaceApp {
         let local_transport_mode = serial_mode || telnet_mode;
         let remote_desktop_mode = remote_desktop_protocol.is_some();
         let ssh_submission_mode =
-            !local_transport_mode && !remote_desktop_mode && !wsl_graphics_mode;
+            !local_transport_mode && !remote_desktop_mode && !wsl_graphics_mode && !mosh_mode;
         let shows_transport_selector = !prompt_mode
             && !duplicate_mode
             && !edit_properties_mode
             && !remote_desktop_edit_mode
+            && !mosh_edit_mode
             && !drill_down_mode;
         let shows_icon_field = connection_icon_field_visible(mode, drill_down_mode, form.transport);
         let title = if drill_down_mode {
@@ -157,8 +174,10 @@ impl WorkspaceApp {
         } else if duplicate_mode {
             self.i18n
                 .t("sessionManager.edit_properties.duplicate_title")
-        } else if edit_properties_mode || remote_desktop_edit_mode {
+        } else if edit_properties_mode || remote_desktop_edit_mode || mosh_edit_mode {
             self.i18n.t("sessionManager.edit_properties.title")
+        } else if mosh_mode {
+            self.i18n.t("mosh.form.title")
         } else {
             self.i18n.t("ssh.form.title")
         };
@@ -180,10 +199,12 @@ impl WorkspaceApp {
         } else if duplicate_mode {
             self.i18n
                 .t("sessionManager.edit_properties.duplicate_description")
-        } else if edit_properties_mode || remote_desktop_edit_mode {
+        } else if edit_properties_mode || remote_desktop_edit_mode || mosh_edit_mode {
             self.i18n.t("sessionManager.edit_properties.description")
         } else if telnet_mode {
             self.i18n.t("modals.new_connection.telnet_description")
+        } else if mosh_mode {
+            self.i18n.t("mosh.form.description")
         } else if serial_mode {
             self.i18n.t("modals.new_connection.serial_description")
         } else if remote_desktop_protocol
@@ -209,6 +230,11 @@ impl WorkspaceApp {
                     .is_ok_and(|baud| baud > 0)
         } else if telnet_mode {
             !form.host.trim().is_empty() && form.port.trim().parse::<u16>().is_ok()
+        } else if mosh_mode {
+            !form.host.trim().is_empty()
+                && !form.username.trim().is_empty()
+                && !form.mosh_server_executable.trim().is_empty()
+                && form.port.trim().parse::<u16>().is_ok_and(|port| port > 0)
         } else if remote_desktop_protocol
             == Some(oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp)
         {
@@ -252,7 +278,11 @@ impl WorkspaceApp {
                     modal_container(&self.tokens)
                 .w(px(if drill_down_mode {
                     TAURI_DRILL_DOWN_MODAL_WIDTH
-                } else if prompt_mode || edit_properties_mode || remote_desktop_edit_mode {
+                } else if prompt_mode
+                    || edit_properties_mode
+                    || remote_desktop_edit_mode
+                    || mosh_edit_mode
+                {
                     TAURI_EDIT_MODAL_WIDTH
                 } else if shows_transport_selector {
                     self.tokens.metrics.modal_width
@@ -438,7 +468,9 @@ impl WorkspaceApp {
                                         AuthSelectorContext::Prompt
                                     } else if drill_down_mode {
                                         AuthSelectorContext::DrillDown
-                                    } else if mode == NewConnectionFormMode::EditProperties {
+                                    } else if mode == NewConnectionFormMode::EditProperties
+                                        || mosh_edit_mode
+                                    {
                                         AuthSelectorContext::EditProperties
                                     } else {
                                         AuthSelectorContext::Standard
@@ -496,6 +528,24 @@ impl WorkspaceApp {
                                             NewConnectionField::Password,
                                             cx,
                                         ))
+                                    } else if mosh_edit_mode {
+                                        content
+                                            .child(self.render_connection_secret_field(
+                                                self.i18n.t("ssh.form.password"),
+                                                String::new(),
+                                                NewConnectionField::Password,
+                                                cx,
+                                            ))
+                                            .when(
+                                                form.saved_password_keychain_id.is_some(),
+                                                |content| {
+                                                    content.child(self.render_connection_hint(
+                                                        self.i18n.t(
+                                                            "sessionManager.edit_properties.password_hint",
+                                                        ),
+                                                    ))
+                                                },
+                                            )
                                     } else {
                                         content
                                             .child(self.render_connection_secret_field(
@@ -531,12 +581,14 @@ impl WorkspaceApp {
                                 )
                                 .when(
                                     form.auth_tab == SshAuthTab::SshKey
-                                        || ((prompt_mode || edit_properties_mode)
+                                        || ((prompt_mode
+                                            || edit_properties_mode
+                                            || mosh_edit_mode)
                                             && form.auth_tab == SshAuthTab::DefaultKey),
                                     |content| {
                                         let key_label = if drill_down_mode {
                                             self.i18n.t("ssh.drill_down.key_path")
-                                        } else if edit_properties_mode {
+                                        } else if edit_properties_mode || mosh_edit_mode {
                                             self.i18n.t("sessionManager.edit_properties.key_path")
                                         } else {
                                             self.i18n.t("ssh.form.key_file")
@@ -576,7 +628,7 @@ impl WorkspaceApp {
                                                 NewConnectionField::Passphrase,
                                                 cx,
                                             ))
-                                            .when(edit_properties_mode, |content| {
+                                            .when(edit_properties_mode || mosh_edit_mode, |content| {
                                                 content.child(self.render_connection_hint(
                                                     self.i18n.t(
                                                         "sessionManager.edit_properties.passphrase_hint",
@@ -654,7 +706,7 @@ impl WorkspaceApp {
                                             NewConnectionField::Passphrase,
                                             cx,
                                         ))
-                                        .when(edit_properties_mode, |content| {
+                                        .when(edit_properties_mode || mosh_edit_mode, |content| {
                                             content.child(self.render_connection_hint(
                                                 self.i18n.t(
                                                     "sessionManager.edit_properties.passphrase_hint",
@@ -721,7 +773,7 @@ impl WorkspaceApp {
                                 )
                                 .when(!drill_down_mode, |content| {
                                     content.child(self.render_connection_group_select(
-                                        if edit_properties_mode {
+                                        if edit_properties_mode || mosh_edit_mode {
                                             self.i18n.t("sessionManager.edit_properties.group")
                                         } else {
                                             self.i18n.t("ssh.form.group")
@@ -730,7 +782,7 @@ impl WorkspaceApp {
                                         cx,
                                     ))
                                 })
-                                .when(!prompt_mode && !drill_down_mode, |content| {
+                                .when(!prompt_mode && !drill_down_mode && !mosh_mode, |content| {
                                     content.child(self.render_connection_terminal_options(cx))
                                 })
                                 .when(edit_properties_mode, |content| {
@@ -824,7 +876,7 @@ impl WorkspaceApp {
                                             ),
                                     )
                                 })
-                                .when(!prompt_mode && !edit_properties_mode, |content| {
+                                .when(!prompt_mode && !edit_properties_mode && !mosh_mode, |content| {
                                     content
                                         .child(
                                             div()
@@ -911,6 +963,15 @@ impl WorkspaceApp {
                                                 .child(self.render_upstream_proxy_policy_section(cx))
                                                 .child(self.render_proxy_chain_section(cx))
                                         })
+                                })
+                                .when(mosh_mode, |content| {
+                                    content.child(self.render_mosh_advanced_fields(
+                                        &form.mosh_server_executable,
+                                        &form.mosh_udp_host,
+                                        &form.mosh_udp_port,
+                                        &form.mosh_locale,
+                                        cx,
+                                    ))
                                 })
                                     })
                                     .when(shows_icon_field, |content| {
@@ -1013,6 +1074,7 @@ impl WorkspaceApp {
                         )
                         .when(
                             !edit_properties_mode
+                                && !mosh_edit_mode
                                 && self.connection_form_state(cx).saved_connection_prompt_action.is_none()
                                 && !remote_desktop_mode
                                 && !wsl_graphics_mode,
@@ -1056,6 +1118,7 @@ impl WorkspaceApp {
                         .when(
                             edit_properties_mode
                                 || remote_desktop_edit_mode
+                                || mosh_edit_mode
                                 || self.connection_form_state(cx).saved_connection_prompt_action.is_some(),
                             |footer| {
                                 footer.child(self.render_connection_button(
@@ -1074,13 +1137,18 @@ impl WorkspaceApp {
                                     {
                                         self.i18n
                                             .t("sessionManager.edit_properties.save_and_reconnect")
-                                    } else if edit_properties_mode || remote_desktop_edit_mode {
+                                    } else if edit_properties_mode
+                                        || remote_desktop_edit_mode
+                                        || mosh_edit_mode
+                                    {
                                         self.i18n.t("sessionManager.edit_properties.save")
                                     } else {
                                         self.i18n.t("modals.new_connection.local_open")
                                     },
                                     true,
-                                    if (edit_properties_mode || remote_desktop_edit_mode)
+                                    if (edit_properties_mode
+                                        || remote_desktop_edit_mode
+                                        || mosh_edit_mode)
                                         && self.connection_form_state(cx).saved_connection_prompt_action.is_none()
                                     {
                                         ConnectionButtonAction::Save

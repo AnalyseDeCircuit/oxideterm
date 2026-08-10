@@ -222,6 +222,49 @@ impl WorkspaceApp {
         Ok(session_id)
     }
 
+    pub(in crate::workspace) fn create_mosh_terminal_tab(
+        &mut self,
+        mut config: MoshTerminalConfig,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<TerminalSessionId> {
+        let tab_id = self.alloc_tab_id(cx);
+        let pane_id = self.alloc_pane_id(cx);
+        let session_id = self.alloc_session_id(cx);
+        // The bootstrap consumer identifier is local runtime metadata, not a remote session name.
+        config.bootstrap.session_id = format!("mosh-{}", session_id.0);
+        let preferences =
+            self.prepare_terminal_preferences_for_tab_kind(&TabKind::MoshTerminal, cx);
+        let pane = cx.new(|cx| {
+            TerminalPane::new_mosh_with_preferences(config, preferences, window, cx)
+                .expect("failed to initialize Mosh terminal pane")
+        });
+
+        // Mosh owns one UDP terminal and deliberately has no SSH node capabilities.
+        self.register_terminal_pane(pane_id, session_id, pane.clone(), window, cx);
+        self.refresh_native_plugin_terminal_hooks(cx);
+        self.insert_tab(
+            Tab {
+                id: tab_id,
+                kind: TabKind::MoshTerminal,
+                title,
+                title_source: TabTitleSource::Static,
+                root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+                active_pane_id: Some(pane_id),
+            },
+            cx,
+        );
+        self.bind_terminal_location(tab_id, pane_id, session_id, cx);
+        self.set_main_window_active_tab(Some(tab_id), cx);
+        self.active_surface = ActiveSurface::Terminal;
+        self.needs_active_pane_focus = true;
+        pane.update(cx, |pane, cx| pane.focus(window, cx));
+        self.reveal_active_tab(window, cx);
+        cx.notify();
+        Ok(session_id)
+    }
+
     pub(in crate::workspace) fn open_or_create_saved_ssh_terminal_tab(
         &mut self,
         saved_connection_id: String,

@@ -209,9 +209,12 @@ impl WorkspaceApp {
     }
 
     pub(super) fn clear_active_terminal_screen(&mut self, cx: &mut Context<Self>) -> bool {
-        let terminal_active = self
-            .active_tab(cx)
-            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
+        let terminal_active = self.active_tab(cx).is_some_and(|tab| {
+            matches!(
+                tab.kind,
+                TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
+            )
+        });
         if !terminal_active {
             return false;
         }
@@ -311,9 +314,12 @@ impl WorkspaceApp {
             return false;
         };
 
-        let terminal_active = self
-            .active_tab(cx)
-            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
+        let terminal_active = self.active_tab(cx).is_some_and(|tab| {
+            matches!(
+                tab.kind,
+                TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
+            )
+        });
         if matches!(
             definition.scope,
             crate::keybindings::ActionScope::Terminal | crate::keybindings::ActionScope::Split
@@ -806,9 +812,12 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let terminal_active = self
-            .active_tab(cx)
-            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
+        let terminal_active = self.active_tab(cx).is_some_and(|tab| {
+            matches!(
+                tab.kind,
+                TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
+            )
+        });
         if !terminal_active {
             return false;
         }

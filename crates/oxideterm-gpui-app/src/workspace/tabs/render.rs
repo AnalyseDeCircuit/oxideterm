@@ -11,6 +11,7 @@ fn tab_kind_icon(
     match kind {
         TabKind::LocalTerminal => LucideIcon::Square,
         TabKind::SshTerminal => LucideIcon::Terminal,
+        TabKind::MoshTerminal => LucideIcon::Terminal,
         TabKind::FileManager => LucideIcon::FolderOpen,
         TabKind::Launcher | TabKind::Graphics | TabKind::RemoteDesktop => LucideIcon::Monitor,
         TabKind::Runtime | TabKind::ConnectionPool => LucideIcon::Gauge,

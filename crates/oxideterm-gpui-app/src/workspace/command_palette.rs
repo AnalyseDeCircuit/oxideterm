@@ -1004,6 +1004,7 @@ impl WorkspaceApp {
                 let detail = match tab.kind {
                     TabKind::LocalTerminal => self.i18n.t("layout.empty.new_local_terminal"),
                     TabKind::SshTerminal => self.i18n.t("command_palette.session_ssh_terminal"),
+                    TabKind::MoshTerminal => self.i18n.t("terminal.typeMosh"),
                     TabKind::Settings => self.i18n.t("settings_view.title"),
                     TabKind::SessionManager => self.i18n.t("sidebar.panels.saved_connections"),
                     TabKind::Runtime => self.i18n.t("sidebar.panels.runtime"),
@@ -2151,7 +2152,9 @@ fn command_palette_placeholder_key(mode: PaletteMode) -> &'static str {
 
 fn tab_kind_icon(kind: &TabKind) -> LucideIcon {
     match kind {
-        TabKind::LocalTerminal | TabKind::SshTerminal => LucideIcon::Terminal,
+        TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal => {
+            LucideIcon::Terminal
+        }
         TabKind::FileManager => LucideIcon::FolderOpen,
         TabKind::Launcher => LucideIcon::Terminal,
         TabKind::Graphics => LucideIcon::AppWindow,

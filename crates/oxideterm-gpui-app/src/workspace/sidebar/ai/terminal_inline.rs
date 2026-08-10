@@ -844,6 +844,9 @@ pub(in crate::workspace) fn terminal_ai_inline_os_context(
         Some(oxideterm_workspace::TabKind::SshTerminal) => {
             format!("SSH terminal (remote OS unknown, local: {local_os})")
         }
+        Some(oxideterm_workspace::TabKind::MoshTerminal) => {
+            format!("Mosh terminal (remote OS unknown, local: {local_os})")
+        }
         _ => format!("Local terminal on {local_os}"),
     }
 }

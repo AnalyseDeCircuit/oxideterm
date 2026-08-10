@@ -80,6 +80,11 @@ impl WorkspaceApp {
                     parts.push(format!("- Terminal: Local ({})", ai_local_os_label()));
                 }
             }
+            Some(TabKind::MoshTerminal) => {
+                if self.ai_active_terminal_session_id(cx).is_some() {
+                    parts.push("- Terminal: Mosh (remote OS unknown)".to_string());
+                }
+            }
             _ => parts.push("- Terminal: No active terminal".to_string()),
         }
         parts.push(String::new());
@@ -468,7 +473,10 @@ impl WorkspaceApp {
         let Some(tab) = self.active_tab(cx) else {
             return false;
         };
-        matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
+        matches!(
+            tab.kind,
+            TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
+        )
             && tab
                 .active_pane_id
                 .is_some_and(|pane_id| self.tab_host.read(cx).panes().contains_key(&pane_id))
@@ -476,7 +484,12 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn ai_active_tab_has_split_panes(&self, cx: &App) -> bool {
         self.active_tab(cx)
-            .filter(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal))
+            .filter(|tab| {
+                matches!(
+                    tab.kind,
+                    TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
+                )
+            })
             .and_then(|tab| tab.root_pane.as_ref())
             .is_some_and(|root| root.pane_count() > 1)
     }
@@ -574,6 +587,7 @@ pub(in crate::workspace) fn ai_tab_kind_label(kind: &TabKind) -> &'static str {
     match kind {
         TabKind::LocalTerminal => "local_terminal",
         TabKind::SshTerminal => "terminal",
+        TabKind::MoshTerminal => "mosh_terminal",
         TabKind::Sftp => "sftp",
         TabKind::Ide => "ide",
         TabKind::Forwards => "forwards",
