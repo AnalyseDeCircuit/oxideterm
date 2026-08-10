@@ -483,6 +483,7 @@ impl WorkspaceApp {
                 .ok(),
             quick_commands,
             serial_profiles: self.connection_store.export_serial_profiles_snapshot().ok(),
+            mosh_profiles: self.connection_store.export_mosh_profiles_snapshot().ok(),
             remote_desktop_profiles: self
                 .connection_store
                 .export_remote_desktop_profiles_snapshot()

@@ -40,6 +40,8 @@ impl CloudSyncOperationService {
             selection.quick_commands && preview.quick_commands_snapshot_json.is_some();
         let apply_serial_profiles =
             selection.serial_profiles && preview.serial_profiles_snapshot.is_some();
+        let apply_mosh_profiles =
+            selection.mosh_profiles && preview.mosh_profiles_snapshot.is_some();
         let apply_remote_desktop_profiles =
             selection.remote_desktop_profiles && preview.remote_desktop_profiles_snapshot.is_some();
         let apply_sensitive_credentials =
@@ -58,6 +60,7 @@ impl CloudSyncOperationService {
             + usize::from(selection.forwards && preview.forwards_snapshot.is_some())
             + usize::from(apply_quick_commands)
             + usize::from(apply_serial_profiles)
+            + usize::from(apply_mosh_profiles)
             + usize::from(apply_remote_desktop_profiles)
             + usize::from(apply_sensitive_credentials))
         .max(1);
@@ -86,6 +89,11 @@ impl CloudSyncOperationService {
                 .unwrap_or(0),
             serial_profiles: preview
                 .serial_profiles_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.records.len())
+                .unwrap_or(0),
+            mosh_profiles: preview
+                .mosh_profiles_snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.records.len())
                 .unwrap_or(0),
@@ -123,6 +131,7 @@ impl CloudSyncOperationService {
                             conflict_strategy: ImportConflictStrategy::Merge,
                             import_forwards: false,
                             import_serial_profiles: false,
+                            import_mosh_profiles: false,
                             import_remote_desktop_profiles: false,
                             import_portable_secrets: true,
                             restore_managed_keys: true,
@@ -255,6 +264,11 @@ impl CloudSyncOperationService {
         } else {
             None
         };
+        let mosh_profiles_snapshot = if selection.mosh_profiles {
+            preview.mosh_profiles_snapshot
+        } else {
+            None
+        };
         let mut remote_desktop_profiles_snapshot = if selection.remote_desktop_profiles {
             preview.remote_desktop_profiles_snapshot
         } else {
@@ -278,6 +292,7 @@ impl CloudSyncOperationService {
             forwards_snapshot,
             quick_commands_snapshot_json,
             serial_profiles_snapshot,
+            mosh_profiles_snapshot,
             remote_desktop_profiles_snapshot,
             app_settings_snapshots,
             plugin_settings_snapshot,
@@ -287,6 +302,7 @@ impl CloudSyncOperationService {
             + usize::from(applied.forwards.is_some())
             + usize::from(apply_quick_commands)
             + usize::from(apply_serial_profiles)
+            + usize::from(apply_mosh_profiles)
             + usize::from(apply_remote_desktop_profiles);
         report_progress(
             progress,
@@ -314,6 +330,7 @@ impl CloudSyncOperationService {
                 .is_some_and(|outcome| outcome.skipped == 0),
             quick_commands: apply_quick_commands,
             serial_profiles: apply_serial_profiles,
+            mosh_profiles: apply_mosh_profiles,
             remote_desktop_profiles: apply_remote_desktop_profiles,
             sensitive_credentials: apply_sensitive_credentials,
             app_settings_sections: app_settings_entry_ids,

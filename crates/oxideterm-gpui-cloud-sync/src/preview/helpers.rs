@@ -389,6 +389,7 @@ pub fn cloud_sync_preview_fact_rows(
     ]];
     if summary.quick_commands > 0
         || summary.serial_profiles > 0
+        || summary.mosh_profiles > 0
         || summary.sensitive_credentials > 0
     {
         rows.push(vec![
@@ -399,6 +400,10 @@ pub fn cloud_sync_preview_fact_rows(
             CloudSyncPreviewFactSpec {
                 label_key: "plugin.cloud_sync.preview.serial_profiles_label",
                 value: CloudSyncPreviewFactValue::Count(summary.serial_profiles),
+            },
+            CloudSyncPreviewFactSpec {
+                label_key: "plugin.cloud_sync.preview.mosh_profiles_label",
+                value: CloudSyncPreviewFactValue::Count(summary.mosh_profiles),
             },
             CloudSyncPreviewFactSpec {
                 label_key: "plugin.cloud_sync.preview.sensitive_credentials_label",
@@ -477,6 +482,11 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
                     .as_ref()
                     .map(|snapshot| snapshot.records.len())
                     .unwrap_or(0),
+                mosh_profiles: preview
+                    .mosh_profiles_snapshot
+                    .as_ref()
+                    .map(|snapshot| snapshot.records.len())
+                    .unwrap_or(0),
                 remote_desktop_profiles: preview
                     .remote_desktop_profiles_snapshot
                     .as_ref()
@@ -514,8 +524,9 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
             connections: preview.metadata.num_connections,
             forwards: preview.preview.total_forwards,
             quick_commands: preview.metadata.quick_commands_count.unwrap_or(0),
-            serial_profiles: 0,
-            remote_desktop_profiles: 0,
+            serial_profiles: preview.metadata.serial_profiles_count.unwrap_or(0),
+            mosh_profiles: preview.metadata.mosh_profiles_count.unwrap_or(0),
+            remote_desktop_profiles: preview.metadata.remote_desktop_profiles_count.unwrap_or(0),
             sensitive_credentials: preview.metadata.portable_secret_count.unwrap_or(0),
             has_app_settings: preview.preview.has_app_settings,
             app_settings_sections: preview

@@ -108,6 +108,7 @@ pub fn cloud_sync_section_signature(
             state.sync_scope.sync_forwards.hash(&mut hasher);
             state.sync_scope.sync_quick_commands.hash(&mut hasher);
             state.sync_scope.sync_serial_profiles.hash(&mut hasher);
+            state.sync_scope.sync_mosh_profiles.hash(&mut hasher);
             state
                 .sync_scope
                 .sync_remote_desktop_profiles
@@ -167,6 +168,7 @@ pub fn cloud_sync_rollback_backup_signature(backup: &CloudSyncRollbackBackup) ->
         metadata.forwards.hash(&mut hasher);
         metadata.quick_commands.hash(&mut hasher);
         metadata.serial_profiles.hash(&mut hasher);
+        metadata.mosh_profiles.hash(&mut hasher);
         metadata.sensitive_credentials.hash(&mut hasher);
     }
     hasher.finish()
@@ -183,6 +185,7 @@ pub fn cloud_sync_history_signature(entry: &CloudSyncHistoryEntry) -> u64 {
     entry.summary.forwards.hash(&mut hasher);
     entry.summary.quick_commands.hash(&mut hasher);
     entry.summary.serial_profiles.hash(&mut hasher);
+    entry.summary.mosh_profiles.hash(&mut hasher);
     entry.summary.sensitive_credentials.hash(&mut hasher);
     entry.summary.has_app_settings.hash(&mut hasher);
     entry.summary.plugin_settings_count.hash(&mut hasher);

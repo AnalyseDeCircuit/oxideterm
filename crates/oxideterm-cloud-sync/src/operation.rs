@@ -9,8 +9,8 @@ use std::{
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use oxideterm_connections::{
-    ConnectionStore, RemoteDesktopProfilesSyncSnapshot, SavedConnectionsConflictStrategy,
-    SavedConnectionsSyncSnapshot, SerialProfilesSyncSnapshot,
+    ConnectionStore, MoshProfilesSyncSnapshot, RemoteDesktopProfilesSyncSnapshot,
+    SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot, SerialProfilesSyncSnapshot,
     oxide_file::{
         AppSettingsSectionPreview, EncryptedPortableSecret, ImportConflictStrategy, ImportPreview,
         ImportResultEnvelope, OxideExportOptions, OxideFile, OxideImportOptions, OxideMetadata,
@@ -32,7 +32,7 @@ use crate::{
     StructuredLocalState, StructuredManifest, StructuredManifestSections, StructuredObjectEntry,
     StructuredSectionRevisions,
     backend::{CloudSyncBackend, RemoteMetadata, RemoteUploadObject},
-    connections_object_path, forwards_object_path,
+    connections_object_path, forwards_object_path, mosh_profiles_object_path,
     progress::{
         CloudSyncProgressSink, CloudSyncProgressStage, report_fractional_progress, report_progress,
     },
@@ -139,6 +139,7 @@ pub struct StructuredUploadItemFilter {
     pub forward_ids: Option<BTreeSet<String>>,
     pub quick_command_ids: Option<BTreeSet<String>>,
     pub serial_profile_ids: Option<BTreeSet<String>>,
+    pub mosh_profile_ids: Option<BTreeSet<String>>,
     pub remote_desktop_profile_ids: Option<BTreeSet<String>>,
 }
 
@@ -205,11 +206,13 @@ pub struct StructuredPreview {
     pub forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
     pub quick_commands_snapshot_json: Option<String>,
     pub serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
+    pub mosh_profiles_snapshot: Option<MoshProfilesSyncSnapshot>,
     pub remote_desktop_profiles_snapshot: Option<RemoteDesktopProfilesSyncSnapshot>,
     pub base_connections_snapshot: Option<SavedConnectionsSyncSnapshot>,
     pub base_forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
     pub base_quick_commands_snapshot_json: Option<String>,
     pub base_serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
+    pub base_mosh_profiles_snapshot: Option<MoshProfilesSyncSnapshot>,
     pub base_remote_desktop_profiles_snapshot: Option<RemoteDesktopProfilesSyncSnapshot>,
     pub sensitive_credentials_entry: Option<Vec<u8>>,
     pub sensitive_credentials_preview: Option<ImportPreview>,
@@ -251,6 +254,7 @@ impl StructuredPreview {
             forwards: self.forwards_snapshot.is_some(),
             quick_commands: self.quick_commands_snapshot_json.is_some(),
             serial_profiles: self.serial_profiles_snapshot.is_some(),
+            mosh_profiles: self.mosh_profiles_snapshot.is_some(),
             remote_desktop_profiles: self.remote_desktop_profiles_snapshot.is_some(),
             sensitive_credentials: self.sensitive_credentials_entry.is_some(),
             app_settings_sections: self.app_settings_entries.keys().cloned().collect(),

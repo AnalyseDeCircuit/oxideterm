@@ -577,6 +577,7 @@ mod tests {
                 forwards: 4,
                 quick_commands: 5,
                 serial_profiles: 6,
+                mosh_profiles: 0,
                 remote_desktop_profiles: 7,
                 sensitive_credentials: 8,
             }),

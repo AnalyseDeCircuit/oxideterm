@@ -433,6 +433,10 @@ impl CloudSyncPageRenderer {
                 CloudSyncUploadSelectionAction::ToggleSerialProfiles,
             ),
             (
+                "plugin.cloud_sync.settings.sync_mosh_profiles",
+                CloudSyncUploadSelectionAction::ToggleMoshProfiles,
+            ),
+            (
                 "plugin.cloud_sync.settings.sync_remote_desktop_profiles",
                 CloudSyncUploadSelectionAction::ToggleRemoteDesktopProfiles,
             ),
@@ -481,6 +485,9 @@ impl CloudSyncPageRenderer {
             CloudSyncUploadSelectionAction::ToggleSerialProfiles => {
                 selection.sync_serial_profiles || !selection.serial_profile_item_ids.is_empty()
             }
+            CloudSyncUploadSelectionAction::ToggleMoshProfiles => {
+                selection.sync_mosh_profiles || !selection.mosh_profile_item_ids.is_empty()
+            }
             CloudSyncUploadSelectionAction::ToggleRemoteDesktopProfiles => {
                 selection.sync_remote_desktop_profiles
                     || !selection.remote_desktop_profile_item_ids.is_empty()
@@ -509,6 +516,9 @@ impl CloudSyncPageRenderer {
             }
             CloudSyncUploadSelectionAction::ToggleSerialProfiles => {
                 selection.serial_profile_item_ids.len()
+            }
+            CloudSyncUploadSelectionAction::ToggleMoshProfiles => {
+                selection.mosh_profile_item_ids.len()
             }
             CloudSyncUploadSelectionAction::ToggleRemoteDesktopProfiles => {
                 selection.remote_desktop_profile_item_ids.len()

@@ -734,6 +734,11 @@ fn filter_structured_preview_for_selection(
             .records
             .retain(|profile| selection.selected_serial_profile_ids.contains(&profile.id));
     }
+    if let Some(snapshot) = preview.mosh_profiles_snapshot.as_mut() {
+        snapshot
+            .records
+            .retain(|profile| selection.selected_mosh_profile_ids.contains(&profile.id));
+    }
 }
 
 fn read_apply_sync_password(
@@ -1089,8 +1094,9 @@ fn create_cloud_sync_rollback_backup(
             plugin_settings_count: preview.plugin_settings_count,
             forwards: preview.total_forwards,
             quick_commands: metadata.quick_commands_count.unwrap_or(0),
-            serial_profiles: 0,
-            remote_desktop_profiles: 0,
+            serial_profiles: metadata.serial_profiles_count.unwrap_or(0),
+            mosh_profiles: metadata.mosh_profiles_count.unwrap_or(0),
+            remote_desktop_profiles: metadata.remote_desktop_profiles_count.unwrap_or(0),
             sensitive_credentials: metadata.portable_secret_count.unwrap_or(0),
         }),
     }))

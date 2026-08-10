@@ -95,6 +95,12 @@ impl CloudSyncPageRenderer {
                 cx,
             ),
             self.render_scope_bool_toggle(
+                "plugin.cloud_sync.settings.sync_mosh_profiles",
+                scope.sync_mosh_profiles,
+                |scope, next| scope.sync_mosh_profiles = Some(next),
+                cx,
+            ),
+            self.render_scope_bool_toggle(
                 "plugin.cloud_sync.settings.sync_remote_desktop_profiles",
                 scope.sync_remote_desktop_profiles,
                 |scope, next| scope.sync_remote_desktop_profiles = Some(next),

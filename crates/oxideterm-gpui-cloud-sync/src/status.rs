@@ -241,6 +241,7 @@ fn sync_scope_health_item(raw_scope: &RawSyncScope) -> CloudSyncHealthItem {
         || scope.sync_forwards
         || scope.sync_quick_commands
         || scope.sync_serial_profiles
+        || scope.sync_mosh_profiles
         || scope.sync_remote_desktop_profiles
         || scope.sync_sensitive_credentials
         || scope.sync_app_settings

@@ -164,6 +164,13 @@ pub fn cloud_sync_coverage_model(raw_scope: &RawSyncScope) -> Vec<CloudSyncCover
             ),
         },
         CloudSyncCoverageItem {
+            label_key: "plugin.cloud_sync.settings.sync_mosh_profiles",
+            status: coverage_status_from_bool(scope.sync_mosh_profiles),
+            detail: CloudSyncCoverageDetail::Static(
+                "plugin.cloud_sync.coverage.mosh_profiles_detail",
+            ),
+        },
+        CloudSyncCoverageItem {
             label_key: "plugin.cloud_sync.settings.sync_app_settings",
             status: app_settings_status,
             detail: CloudSyncCoverageDetail::AppSettingsSections(scope.app_settings_sections),

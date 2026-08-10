@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashSet};
 use anyhow::{Context, Result, bail};
 use chrono::DateTime;
 use oxideterm_connections::{
-    ApplySavedConnectionsSyncOutcome, ConnectionStore, ManagedSshKeyInfo,
+    ApplySavedConnectionsSyncOutcome, ConnectionStore, ManagedSshKeyInfo, MoshProfilesSyncSnapshot,
     RemoteDesktopProfilesSyncSnapshot, SavedConnectionsConflictStrategy,
     SavedConnectionsSyncSnapshot, SerialProfilesSyncSnapshot, oxide_file::EncryptedPluginSetting,
 };
@@ -35,6 +35,7 @@ pub struct CloudSyncLocalSnapshot {
     pub forwards_record_count: usize,
     pub quick_commands_record_count: usize,
     pub serial_profiles_record_count: usize,
+    pub mosh_profiles_record_count: usize,
     pub remote_desktop_profiles_record_count: usize,
     pub sensitive_credentials_record_count: usize,
 }
@@ -46,6 +47,7 @@ pub struct CloudSyncApplyOutcome {
     pub forwards: Option<ApplySavedForwardsSyncSnapshotResult>,
     pub quick_commands_applied: usize,
     pub serial_profiles_applied: usize,
+    pub mosh_profiles_applied: usize,
     pub remote_desktop_profiles_applied: usize,
     pub app_settings_applied: usize,
     pub plugin_settings_applied: usize,
@@ -73,6 +75,7 @@ pub fn build_local_snapshot(
         serde_json::from_str(&quick_commands_json)
             .context("failed to decode quick commands snapshot")?;
     let serial_profiles_snapshot = connection_store.export_serial_profiles_snapshot()?;
+    let mosh_profiles_snapshot = connection_store.export_mosh_profiles_snapshot()?;
     let remote_desktop_profiles_snapshot =
         connection_store.export_remote_desktop_profiles_snapshot()?;
     let app_settings_section_revisions =
@@ -93,6 +96,7 @@ pub fn build_local_snapshot(
         saved_forwards_revision: Some(forwards_snapshot.revision.clone()),
         quick_commands_revision: Some(tauri_simple_stable_hash(&quick_commands_json)?),
         serial_profiles_revision: Some(serial_profiles_snapshot.revision.clone()),
+        mosh_profiles_revision: Some(mosh_profiles_snapshot.revision.clone()),
         remote_desktop_profiles_revision: Some(remote_desktop_profiles_snapshot.revision.clone()),
         sensitive_credentials_revision: Some(sensitive_credentials_revision),
         settings_revision: Some(tauri_simple_stable_hash(&syncable_settings_payload)?),
@@ -111,6 +115,7 @@ pub fn build_local_snapshot(
         forwards_record_count: forwards_snapshot.records.len(),
         quick_commands_record_count: quick_commands_snapshot.commands.len(),
         serial_profiles_record_count: serial_profiles_snapshot.records.len(),
+        mosh_profiles_record_count: mosh_profiles_snapshot.records.len(),
         remote_desktop_profiles_record_count: remote_desktop_profiles_snapshot.records.len(),
         sensitive_credentials_record_count: connections_snapshot.records.len(),
     })
@@ -125,6 +130,7 @@ pub fn apply_structured_snapshots(
     forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
     quick_commands_snapshot_json: Option<String>,
     serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
+    mosh_profiles_snapshot: Option<MoshProfilesSyncSnapshot>,
     remote_desktop_profiles_snapshot: Option<RemoteDesktopProfilesSyncSnapshot>,
     app_settings_snapshots: BTreeMap<String, String>,
     plugin_settings_snapshot: Vec<EncryptedPluginSetting>,
@@ -137,6 +143,7 @@ pub fn apply_structured_snapshots(
         forwards_snapshot.as_ref(),
         quick_commands_snapshot_json.as_deref(),
         serial_profiles_snapshot.as_ref(),
+        mosh_profiles_snapshot.as_ref(),
         remote_desktop_profiles_snapshot.as_ref(),
         &app_settings_snapshots,
         &plugin_settings_snapshot,
@@ -228,6 +235,11 @@ pub fn apply_structured_snapshots(
         } else {
             0
         };
+        let mosh_profiles_applied = if let Some(snapshot) = mosh_profiles_snapshot {
+            connection_store.apply_mosh_profiles_snapshot(snapshot)?
+        } else {
+            0
+        };
         let remote_desktop_profiles_applied =
             if let Some(snapshot) = remote_desktop_profiles_snapshot {
                 connection_store.apply_remote_desktop_profiles_snapshot(snapshot)?
@@ -255,6 +267,7 @@ pub fn apply_structured_snapshots(
             forwards,
             quick_commands_applied,
             serial_profiles_applied,
+            mosh_profiles_applied,
             remote_desktop_profiles_applied,
             app_settings_applied,
             plugin_settings_applied,
@@ -427,6 +440,7 @@ fn preflight_structured_snapshots(
     forwards_snapshot: Option<&SavedForwardsSyncSnapshot>,
     quick_commands_snapshot_json: Option<&str>,
     serial_profiles_snapshot: Option<&SerialProfilesSyncSnapshot>,
+    mosh_profiles_snapshot: Option<&MoshProfilesSyncSnapshot>,
     remote_desktop_profiles_snapshot: Option<&RemoteDesktopProfilesSyncSnapshot>,
     app_settings_snapshots: &BTreeMap<String, String>,
     plugin_settings_snapshot: &[EncryptedPluginSetting],
@@ -448,6 +462,12 @@ fn preflight_structured_snapshots(
         }
     }
     for profile in serial_profiles_snapshot
+        .into_iter()
+        .flat_map(|snapshot| &snapshot.records)
+    {
+        profile.validate()?;
+    }
+    for profile in mosh_profiles_snapshot
         .into_iter()
         .flat_map(|snapshot| &snapshot.records)
     {
@@ -647,6 +667,7 @@ mod tests {
             quick_commands_snapshot_json,
             serial_profiles_snapshot,
             None,
+            None,
             app_settings_snapshots,
             plugin_settings_snapshot,
             SavedConnectionsConflictStrategy::Replace,
@@ -707,6 +728,7 @@ mod tests {
             Some(connections_snapshot),
             None,
             Some("{".to_string()),
+            None,
             None,
             None,
             BTreeMap::new(),

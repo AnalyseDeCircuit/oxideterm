@@ -522,6 +522,8 @@ fn history_summary(
         forwards,
         quick_commands: 0,
         serial_profiles: 0,
+        // Legacy cloud-sync payloads predate saved Mosh profiles.
+        mosh_profiles: 0,
         // Legacy cloud-sync payloads predate saved remote desktop profiles.
         remote_desktop_profiles: 0,
         sensitive_credentials: 0,
@@ -616,6 +618,7 @@ mod tests {
 
         assert_eq!(summary.connections, 2);
         assert_eq!(summary.forwards, 1);
+        assert_eq!(summary.mosh_profiles, 0);
         assert_eq!(summary.remote_desktop_profiles, 0);
     }
 }
