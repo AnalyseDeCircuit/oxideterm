@@ -285,14 +285,7 @@ impl CloudSyncBackend {
         }
         let mut parent = Vec::<String>::new();
         for segment in parts.iter().take(parts.len() - 1) {
-            let children_url = if parent.is_empty() {
-                format!("{MICROSOFT_GRAPH_BASE}/me/drive/special/approot/children")
-            } else {
-                format!(
-                    "{MICROSOFT_GRAPH_BASE}/me/drive/special/approot:/{}:/children",
-                    encode_path_segments(&parent.join("/"))
-                )
-            };
+            let children_url = onedrive_folder_children_url(&parent)?;
             let response = execute_cloud_request(
                 self.client
                     .post(children_url)
@@ -301,7 +294,6 @@ impl CloudSyncBackend {
                     .body(serde_json::to_vec(&json!({
                         "name": segment,
                         "folder": {},
-                        "@microsoft.graph.conflictBehavior": "fail",
                     }))?),
             )
             .await?;
@@ -408,6 +400,26 @@ fn onedrive_upload_url(
             ONEDRIVE_CREATE_CONFLICT_BEHAVIOR,
         );
     }
+    Ok(url)
+}
+
+fn onedrive_folder_children_url(parent: &[String]) -> Result<Url> {
+    let children_url = if parent.is_empty() {
+        format!("{MICROSOFT_GRAPH_BASE}/me/drive/special/approot/children")
+    } else {
+        format!(
+            "{MICROSOFT_GRAPH_BASE}/me/drive/special/approot:/{}:/children",
+            encode_path_segments(&parent.join("/"))
+        )
+    };
+    let mut url =
+        Url::parse(&children_url).context("failed to construct OneDrive folder creation URL")?;
+    // Graph defines conflictBehavior as a URL instance annotation. Keeping it
+    // out of the DriveItem JSON avoids invalidRequest responses on creation.
+    url.query_pairs_mut().append_pair(
+        MICROSOFT_GRAPH_CONFLICT_BEHAVIOR,
+        ONEDRIVE_CREATE_CONFLICT_BEHAVIOR,
+    );
     Ok(url)
 }
 
@@ -588,6 +600,28 @@ mod tests {
             Some(ONEDRIVE_CREATE_CONFLICT_BEHAVIOR.to_string())
         );
         assert!(replace_url.query().is_none());
+    }
+
+    #[test]
+    fn onedrive_folder_create_uses_url_conflict_behavior() {
+        let cases = [
+            (Vec::new(), "/v1.0/me/drive/special/approot/children"),
+            (
+                vec!["objects".to_string()],
+                "/v1.0/me/drive/special/approot:/objects:/children",
+            ),
+        ];
+
+        for (parent, expected_path) in cases {
+            let url = onedrive_folder_children_url(&parent).unwrap();
+            assert_eq!(url.path(), expected_path);
+            assert_eq!(
+                url.query_pairs()
+                    .find(|(key, _)| key == MICROSOFT_GRAPH_CONFLICT_BEHAVIOR)
+                    .map(|(_, value)| value.into_owned()),
+                Some(ONEDRIVE_CREATE_CONFLICT_BEHAVIOR.to_string())
+            );
+        }
     }
 
     #[test]
