@@ -71,6 +71,7 @@ fn preview_oxide_import_inner(
         app_settings_json,
         quick_commands_json,
         serial_profiles_json,
+        mosh_profiles_json,
         remote_desktop_profiles_json,
         plugin_settings,
         portable_secrets,
@@ -94,6 +95,7 @@ fn preview_oxide_import_inner(
         has_embedded_keys: connections.iter().any(connection_has_embedded_key),
         total_forwards: connections.iter().map(|conn| conn.forwards.len()).sum(),
         serial_profiles_count: count_serial_profiles(serial_profiles_json.as_deref()),
+        mosh_profiles_count: count_mosh_profiles(mosh_profiles_json.as_deref()),
         remote_desktop_profiles_count: count_remote_desktop_profiles(
             remote_desktop_profiles_json.as_deref(),
         ),

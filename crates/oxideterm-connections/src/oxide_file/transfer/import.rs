@@ -62,6 +62,7 @@ fn apply_oxide_import_with_options_inner(
         app_settings_json,
         quick_commands_json,
         serial_profiles_json,
+        mosh_profiles_json,
         remote_desktop_profiles_json,
         plugin_settings,
         portable_secrets,
@@ -90,6 +91,29 @@ fn apply_oxide_import_with_options_inner(
             profile.validate().map_err(|error| {
                 OxideFileError::InvalidFormat(format!(
                     "Failed to validate serial profiles from .oxide payload: {error}"
+                ))
+            })?;
+        }
+    }
+    let mosh_profiles_snapshot = mosh_profiles_json
+        .as_deref()
+        .map(|snapshot_json| {
+            serde_json::from_str::<MoshProfilesSyncSnapshot>(snapshot_json).map_err(|error| {
+                OxideFileError::InvalidFormat(format!(
+                    "Invalid Mosh profiles snapshot in .oxide payload: {error}"
+                ))
+            })
+        })
+        .transpose()?;
+    if options.import_mosh_profiles {
+        for profile in mosh_profiles_snapshot
+            .as_ref()
+            .into_iter()
+            .flat_map(|snapshot| &snapshot.records)
+        {
+            profile.validate().map_err(|error| {
+                OxideFileError::InvalidFormat(format!(
+                    "Failed to validate Mosh profiles from .oxide payload: {error}"
                 ))
             })?;
         }
@@ -140,6 +164,7 @@ fn apply_oxide_import_with_options_inner(
         app_settings_json,
         quick_commands_json,
         serial_profiles_json,
+        mosh_profiles_json,
         remote_desktop_profiles_json,
         plugin_settings,
         portable_secrets: if options.import_portable_secrets {
@@ -288,6 +313,22 @@ fn apply_oxide_import_with_options_inner(
                     serial_profiles_count.saturating_sub(result.imported_serial_profiles);
             } else {
                 result.skipped_serial_profiles = serial_profiles_count;
+            }
+        }
+        if let Some(mosh_profiles_snapshot) = mosh_profiles_snapshot {
+            let profile_count = mosh_profiles_snapshot.records.len();
+            if options.import_mosh_profiles {
+                result.imported_mosh_profiles = store
+                    .apply_mosh_profiles_snapshot(mosh_profiles_snapshot)
+                    .map_err(|error| {
+                        OxideFileError::InvalidFormat(format!(
+                            "Failed to import Mosh profiles from .oxide payload: {error}"
+                        ))
+                    })?;
+                result.skipped_mosh_profiles =
+                    profile_count.saturating_sub(result.imported_mosh_profiles);
+            } else {
+                result.skipped_mosh_profiles = profile_count;
             }
         }
         if let Some(remote_desktop_profiles_snapshot) = remote_desktop_profiles_snapshot {

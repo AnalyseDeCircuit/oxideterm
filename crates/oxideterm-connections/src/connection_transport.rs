@@ -4,6 +4,7 @@
 //! Connection transport identity and default-field transition rules.
 
 pub const SSH_DEFAULT_PORT_TEXT: &str = "22";
+pub const MOSH_DEFAULT_PORT_TEXT: &str = "22";
 pub const TELNET_DEFAULT_PORT_TEXT: &str = "23";
 pub const RDP_DEFAULT_PORT_TEXT: &str = "3389";
 pub const VNC_DEFAULT_PORT_TEXT: &str = "5900";
@@ -11,6 +12,7 @@ pub const VNC_DEFAULT_PORT_TEXT: &str = "5900";
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConnectionTransport {
     Ssh,
+    Mosh,
     Telnet,
     Serial,
     Rdp,
@@ -27,6 +29,7 @@ pub enum TransportUsernameTransition {
 pub fn transport_default_port(transport: ConnectionTransport) -> Option<&'static str> {
     match transport {
         ConnectionTransport::Ssh => Some(SSH_DEFAULT_PORT_TEXT),
+        ConnectionTransport::Mosh => Some(MOSH_DEFAULT_PORT_TEXT),
         ConnectionTransport::Telnet => Some(TELNET_DEFAULT_PORT_TEXT),
         ConnectionTransport::Rdp => Some(RDP_DEFAULT_PORT_TEXT),
         ConnectionTransport::Vnc => Some(VNC_DEFAULT_PORT_TEXT),
@@ -70,13 +73,13 @@ pub fn transport_username_transition(
         {
             Some(TransportUsernameTransition::Clear)
         }
-        ConnectionTransport::Ssh
+        ConnectionTransport::Ssh | ConnectionTransport::Mosh
             if previous_transport == ConnectionTransport::Rdp
                 && (username == "Administrator" || username.is_empty()) =>
         {
             Some(TransportUsernameTransition::Set("root"))
         }
-        ConnectionTransport::Ssh
+        ConnectionTransport::Ssh | ConnectionTransport::Mosh
             if previous_transport == ConnectionTransport::Vnc && username.is_empty() =>
         {
             Some(TransportUsernameTransition::Set("root"))
@@ -88,6 +91,7 @@ pub fn transport_username_transition(
 fn is_known_transport_default_port(port: &str) -> bool {
     [
         SSH_DEFAULT_PORT_TEXT,
+        MOSH_DEFAULT_PORT_TEXT,
         TELNET_DEFAULT_PORT_TEXT,
         RDP_DEFAULT_PORT_TEXT,
         VNC_DEFAULT_PORT_TEXT,

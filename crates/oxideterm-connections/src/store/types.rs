@@ -682,6 +682,112 @@ pub struct SaveTelnetProfileRequest {
     pub connect_on_open: Option<bool>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MoshIpFamily {
+    #[default]
+    Auto,
+    Ipv4,
+    Ipv6,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum MoshUdpPortSelection {
+    #[default]
+    Automatic,
+    Fixed { port: u16 },
+    Range { start: u16, end: u16 },
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MoshPredictionMode {
+    #[default]
+    Adaptive,
+    Always,
+    Never,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MoshProfile {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_background_color: Option<String>,
+    pub host: String,
+    #[serde(default = "default_port")]
+    pub ssh_port: u16,
+    pub username: String,
+    pub auth: SavedAuth,
+    #[serde(default = "default_mosh_server_executable")]
+    pub server_executable: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub udp_host_override: Option<String>,
+    #[serde(default)]
+    pub udp_port: MoshUdpPortSelection,
+    #[serde(default)]
+    pub ip_family: MoshIpFamily,
+    #[serde(default)]
+    pub prediction: MoshPredictionMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_agent: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub legacy_ssh_compatibility: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<DateTime<Utc>>,
+}
+
+fn default_mosh_server_executable() -> String {
+    "mosh-server".to_string()
+}
+
+#[derive(Clone, Debug)]
+pub struct SaveMoshProfileRequest {
+    pub id: Option<String>,
+    pub name: String,
+    pub group: Option<String>,
+    pub icon: Option<String>,
+    pub color: Option<String>,
+    pub icon_background_color: Option<String>,
+    pub host: String,
+    pub ssh_port: u16,
+    pub username: String,
+    pub auth: SavedAuth,
+    pub server_executable: String,
+    pub udp_host_override: Option<String>,
+    pub udp_port: MoshUdpPortSelection,
+    pub ip_family: MoshIpFamily,
+    pub prediction: MoshPredictionMode,
+    pub locale: Option<String>,
+    pub identity_agent: Option<String>,
+    pub legacy_ssh_compatibility: bool,
+}
+
+/// Carries a newly saved Mosh auth secret directly into one bootstrap attempt.
+pub struct SavedMoshProfileRuntimeSecrets {
+    pub auth: Option<SecretString>,
+}
+
+impl fmt::Debug for SavedMoshProfileRuntimeSecrets {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SavedMoshProfileRuntimeSecrets")
+            .field("auth", &self.auth.as_ref().map(|_| "[redacted secret]"))
+            .finish()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RemoteDesktopProfile {
     pub id: String,
@@ -812,6 +918,80 @@ impl TelnetProfile {
         }
         if self.host.trim().is_empty() {
             bail!("Telnet host is required");
+        }
+        Ok(())
+    }
+}
+
+impl MoshProfile {
+    pub fn new(
+        name: impl Into<String>,
+        host: impl Into<String>,
+        ssh_port: u16,
+        username: impl Into<String>,
+        auth: SavedAuth,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name: name.into(),
+            group: None,
+            icon: None,
+            color: None,
+            icon_background_color: None,
+            host: host.into(),
+            ssh_port,
+            username: username.into(),
+            auth,
+            server_executable: default_mosh_server_executable(),
+            udp_host_override: None,
+            udp_port: MoshUdpPortSelection::Automatic,
+            ip_family: MoshIpFamily::Auto,
+            prediction: MoshPredictionMode::Adaptive,
+            locale: None,
+            identity_agent: None,
+            legacy_ssh_compatibility: false,
+            created_at: now,
+            updated_at: now,
+            last_used_at: None,
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.id.trim().is_empty() {
+            bail!("Mosh profile id is required");
+        }
+        if self.name.trim().is_empty() {
+            bail!("Mosh profile name is required");
+        }
+        if self.host.trim().is_empty() {
+            bail!("Mosh host is required");
+        }
+        if self.ssh_port == 0 {
+            bail!("Mosh SSH port must be greater than zero");
+        }
+        if self.username.trim().is_empty() {
+            bail!("Mosh username is required");
+        }
+        if self.server_executable.trim().is_empty() {
+            bail!("Mosh server executable is required");
+        }
+        match self.udp_port {
+            MoshUdpPortSelection::Automatic => {}
+            MoshUdpPortSelection::Fixed { port: 0 }
+            | MoshUdpPortSelection::Range { start: 0, .. }
+            | MoshUdpPortSelection::Range { end: 0, .. } => {
+                bail!("Mosh UDP port must be greater than zero")
+            }
+            MoshUdpPortSelection::Range { start, end } if start > end => {
+                bail!("Mosh UDP port range is reversed")
+            }
+            MoshUdpPortSelection::Fixed { .. } | MoshUdpPortSelection::Range { .. } => {}
+        }
+        if self.locale.as_deref().is_some_and(|locale| {
+            locale.trim().is_empty() || locale.contains(['\0', '\r', '\n'])
+        }) {
+            bail!("Mosh locale is invalid");
         }
         Ok(())
     }
@@ -951,6 +1131,8 @@ pub struct ConnectionStoreData {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub telnet_profiles: Vec<TelnetProfile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mosh_profiles: Vec<MoshProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remote_desktop_profiles: Vec<RemoteDesktopProfile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub local_privilege_credentials: Vec<SavedPrivilegeCredential>,
@@ -971,6 +1153,7 @@ impl Default for ConnectionStoreData {
             managed_ssh_keys: Vec::new(),
             serial_profiles: Vec::new(),
             telnet_profiles: Vec::new(),
+            mosh_profiles: Vec::new(),
             remote_desktop_profiles: Vec::new(),
             local_privilege_credentials: Vec::new(),
             pending_keychain_cleanup: Vec::new(),
@@ -986,6 +1169,15 @@ pub struct SerialProfilesSyncSnapshot {
     pub exported_at: String,
     #[serde(default)]
     pub records: Vec<SerialProfile>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoshProfilesSyncSnapshot {
+    pub revision: String,
+    pub exported_at: String,
+    #[serde(default)]
+    pub records: Vec<MoshProfile>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

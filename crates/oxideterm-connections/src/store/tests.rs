@@ -40,6 +40,29 @@ mod tests {
         }
     }
 
+    fn mosh_request(id: &str, auth: SavedAuth) -> SaveMoshProfileRequest {
+        SaveMoshProfileRequest {
+            id: Some(id.to_string()),
+            name: "Mobile shell".to_string(),
+            group: None,
+            icon: None,
+            color: None,
+            icon_background_color: None,
+            host: "mosh.example.test".to_string(),
+            ssh_port: 22,
+            username: "me".to_string(),
+            auth,
+            server_executable: "mosh-server".to_string(),
+            udp_host_override: None,
+            udp_port: MoshUdpPortSelection::Automatic,
+            ip_family: MoshIpFamily::Auto,
+            prediction: MoshPredictionMode::Adaptive,
+            locale: None,
+            identity_agent: None,
+            legacy_ssh_compatibility: false,
+        }
+    }
+
     fn load_empty_store(name: &str) -> ConnectionStore {
         ConnectionStore::load(temp_store_path(name)).expect("store should load")
     }
@@ -398,6 +421,37 @@ mod tests {
             other => panic!("unexpected auth: {other:?}"),
         }
         assert_eq!(store.get_connection_password("conn-1").unwrap(), "secret");
+    }
+
+    #[test]
+    fn mosh_password_is_saved_to_keychain_reference() {
+        let mut store = load_empty_store("mosh-password-save");
+        let secret = "mosh-secret";
+
+        store
+            .upsert_mosh_profile(mosh_request(
+                "mosh-1",
+                SavedAuth::Password {
+                    keychain_id: None,
+                    plaintext_password: Some(SecretString::from(secret)),
+                },
+            ))
+            .unwrap();
+
+        let profile = store.get_mosh_profile("mosh-1").unwrap();
+        assert!(matches!(
+            profile.auth,
+            SavedAuth::Password {
+                keychain_id: Some(_),
+                plaintext_password: None,
+            }
+        ));
+        assert_eq!(
+            store.get_saved_auth_password(&profile.auth).unwrap(),
+            secret
+        );
+        let saved = fs::read_to_string(store.path()).unwrap();
+        assert!(!saved.contains(secret));
     }
 
     #[test]

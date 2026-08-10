@@ -5,6 +5,7 @@ mod tests {
 
     use crate::{
         ConnectionTerminalOptions, PrivilegeCredentialKind, SavePrivilegeCredentialRequest,
+        MoshIpFamily, MoshPredictionMode, MoshUdpPortSelection, SaveMoshProfileRequest,
         SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest, SavedUpstreamProxyProtocol,
         SerialFlowControl, SerialProfile, SerialProfilesSyncSnapshot,
     };
@@ -389,6 +390,69 @@ mod tests {
         assert_eq!(skipped.imported_serial_profiles, 0);
         assert_eq!(skipped.skipped_serial_profiles, 1);
         assert!(skipped_target.serial_profiles().is_empty());
+    }
+
+    #[test]
+    fn export_import_roundtrip_preserves_mosh_profiles_without_credentials() {
+        let mut source = temp_store("mosh-profile-source");
+        let profile = source
+            .upsert_mosh_profile(SaveMoshProfileRequest {
+                id: Some("mosh-1".to_string()),
+                name: "Roaming shell".to_string(),
+                group: Some("Mobile".to_string()),
+                icon: None,
+                color: None,
+                icon_background_color: None,
+                host: "example.test".to_string(),
+                ssh_port: 22,
+                username: "alice".to_string(),
+                auth: SavedAuth::Agent,
+                server_executable: "mosh-server".to_string(),
+                udp_host_override: None,
+                udp_port: MoshUdpPortSelection::Automatic,
+                ip_family: MoshIpFamily::Auto,
+                prediction: MoshPredictionMode::Adaptive,
+                locale: Some("en_US.UTF-8".to_string()),
+                identity_agent: None,
+                legacy_ssh_compatibility: false,
+            })
+            .unwrap();
+        let mosh_profiles_json =
+            serde_json::to_string_pretty(&source.export_mosh_profiles_snapshot().unwrap())
+                .unwrap();
+
+        let bytes = export_connections_to_oxide(
+            &source,
+            &[],
+            "secret!",
+            OxideExportOptions {
+                mosh_profiles_json: Some(mosh_profiles_json),
+                ..OxideExportOptions::default()
+            },
+        )
+        .unwrap();
+        let file = OxideFile::from_bytes(&bytes).unwrap();
+        assert_eq!(file.metadata.mosh_profiles_count, Some(1));
+        let preview = preview_oxide_import(
+            &temp_store("mosh-profile-preview"),
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+        assert_eq!(preview.mosh_profiles_count, 1);
+
+        let mut target = temp_store("mosh-profile-target");
+        let imported = apply_oxide_import(
+            &mut target,
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+        assert_eq!(imported.imported_mosh_profiles, 1);
+        assert_eq!(target.mosh_profiles()[0].id, profile.id);
+        assert!(matches!(target.mosh_profiles()[0].auth, SavedAuth::Agent));
     }
 
     #[test]

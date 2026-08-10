@@ -76,6 +76,14 @@ impl ConnectionStore {
         &self.data.telnet_profiles
     }
 
+    pub fn mosh_profiles(&self) -> &[MoshProfile] {
+        &self.data.mosh_profiles
+    }
+
+    pub fn get_mosh_profile(&self, id: &str) -> Option<&MoshProfile> {
+        self.data.mosh_profiles.iter().find(|profile| profile.id == id)
+    }
+
     pub fn remote_desktop_profiles(&self) -> &[RemoteDesktopProfile] {
         &self.data.remote_desktop_profiles
     }
@@ -383,6 +391,16 @@ impl ConnectionStore {
                 profile.updated_at = now;
             }
         }
+        for profile in &mut self.data.mosh_profiles {
+            if profile
+                .group
+                .as_deref()
+                .is_some_and(|group| group_path_is_within(group, &name))
+            {
+                profile.group = None;
+                profile.updated_at = now;
+            }
+        }
         for profile in &mut self.data.remote_desktop_profiles {
             if profile
                 .group
@@ -445,6 +463,17 @@ impl ConnectionStore {
             }
         }
         for profile in &mut self.data.telnet_profiles {
+            if let Some(renamed) = profile
+                .group
+                .as_deref()
+                .and_then(|group| rename_group_path(group, &old_name, &new_name))
+            {
+                profile.group = Some(renamed);
+                profile.updated_at = now;
+                updated += 1;
+            }
+        }
+        for profile in &mut self.data.mosh_profiles {
             if let Some(renamed) = profile
                 .group
                 .as_deref()
@@ -698,6 +727,123 @@ impl ConnectionStore {
         let Some(profile) = self
             .data
             .telnet_profiles
+            .iter_mut()
+            .find(|profile| profile.id == id)
+        else {
+            return Ok(false);
+        };
+        let now = Utc::now();
+        profile.last_used_at = Some(now);
+        profile.updated_at = now;
+        self.save()?;
+        Ok(true)
+    }
+
+    pub fn upsert_mosh_profile(
+        &mut self,
+        request: SaveMoshProfileRequest,
+    ) -> Result<MoshProfile> {
+        self.upsert_mosh_profile_with_runtime_secrets(request)
+            .map(|(profile, _secrets)| profile)
+    }
+
+    pub fn upsert_mosh_profile_with_runtime_secrets(
+        &mut self,
+        request: SaveMoshProfileRequest,
+    ) -> Result<(MoshProfile, SavedMoshProfileRuntimeSecrets)> {
+        let group = normalize_optional_group_name(request.group.as_deref())?;
+        let now = Utc::now();
+        let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let existing = self.get_mosh_profile(&id).cloned();
+        let old_keychain_ids = existing
+            .as_ref()
+            .map(|profile| collect_keychain_ids_for_auth(&profile.auth))
+            .unwrap_or_default();
+        let (auth, auth_secret) = self.materialize_auth_with_runtime_secret(
+            request.auth,
+            existing.as_ref().map(|profile| &profile.auth),
+        )?;
+        let next_keychain_ids = collect_keychain_ids_for_auth(&auth);
+        let mut profile = existing.unwrap_or_else(|| {
+            let mut profile = MoshProfile::new(
+                request.name.trim(),
+                request.host.trim(),
+                request.ssh_port,
+                request.username.trim(),
+                auth.clone(),
+            );
+            profile.id = id.clone();
+            profile
+        });
+        profile.name = request.name.trim().to_string();
+        profile.group = group.clone();
+        profile.icon = normalize_optional_text(request.icon);
+        profile.color = normalize_optional_text(request.color);
+        profile.icon_background_color = normalize_optional_text(request.icon_background_color);
+        profile.host = request.host.trim().to_string();
+        profile.ssh_port = request.ssh_port;
+        profile.username = request.username.trim().to_string();
+        profile.auth = auth;
+        profile.server_executable = request.server_executable.trim().to_string();
+        profile.udp_host_override = normalize_optional_text(request.udp_host_override);
+        profile.udp_port = request.udp_port;
+        profile.ip_family = request.ip_family;
+        profile.prediction = request.prediction;
+        profile.locale = normalize_optional_text(request.locale);
+        profile.identity_agent = normalize_optional_text(request.identity_agent);
+        profile.legacy_ssh_compatibility = request.legacy_ssh_compatibility;
+        profile.updated_at = now;
+        profile.validate()?;
+
+        if let Some(existing) = self
+            .data
+            .mosh_profiles
+            .iter_mut()
+            .find(|existing| existing.id == id)
+        {
+            *existing = profile.clone();
+        } else {
+            profile.created_at = now;
+            self.data.mosh_profiles.push(profile.clone());
+        }
+        if let Some(group) = group {
+            self.ensure_group(group)?;
+        }
+        self.normalize();
+        self.save()?;
+        for stale_keychain_id in old_keychain_ids
+            .iter()
+            .filter(|keychain_id| !next_keychain_ids.contains(*keychain_id))
+        {
+            let _ = self.keychain.delete(stale_keychain_id);
+        }
+        Ok((
+            profile,
+            SavedMoshProfileRuntimeSecrets { auth: auth_secret },
+        ))
+    }
+
+    pub fn delete_mosh_profile(&mut self, id: &str) -> Result<bool> {
+        let keychain_ids = self
+            .get_mosh_profile(id)
+            .map(|profile| collect_keychain_ids_for_auth(&profile.auth))
+            .unwrap_or_default();
+        let before = self.data.mosh_profiles.len();
+        self.data.mosh_profiles.retain(|profile| profile.id != id);
+        let deleted = self.data.mosh_profiles.len() != before;
+        if deleted {
+            self.save()?;
+            for keychain_id in keychain_ids {
+                let _ = self.keychain.delete(&keychain_id);
+            }
+        }
+        Ok(deleted)
+    }
+
+    pub fn mark_mosh_profile_used(&mut self, id: &str) -> Result<bool> {
+        let Some(profile) = self
+            .data
+            .mosh_profiles
             .iter_mut()
             .find(|profile| profile.id == id)
         else {
@@ -1974,6 +2120,11 @@ impl ConnectionStore {
         data.connections
             .iter()
             .flat_map(collect_connection_keychain_ids)
+            .chain(
+                data.mosh_profiles
+                    .iter()
+                    .flat_map(|profile| collect_keychain_ids_for_auth(&profile.auth)),
+            )
             .map(|keychain_id| {
                 let value = self.keychain.get_optional(&keychain_id)?;
                 Ok((keychain_id, value))
@@ -2167,6 +2318,9 @@ impl ConnectionStore {
                 migrated |= migrate_legacy_auth_credentials(&mut hop.auth, &self.keychain)?;
             }
         }
+        for profile in &mut self.data.mosh_profiles {
+            migrated |= migrate_legacy_auth_credentials(&mut profile.auth, &self.keychain)?;
+        }
         Ok(migrated)
     }
 
@@ -2209,6 +2363,12 @@ impl ConnectionStore {
                     .iter()
                     .filter_map(|profile| profile.group.clone()),
             )
+            .chain(
+                self.data
+                    .mosh_profiles
+                    .iter()
+                    .filter_map(|profile| profile.group.clone()),
+            )
             .collect::<Vec<_>>();
         for group in implicit_local_groups {
             if !self.data.groups.contains(&group) {
@@ -2233,6 +2393,9 @@ impl ConnectionStore {
             .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
         self.data
             .remote_desktop_profiles
+            .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+        self.data
+            .mosh_profiles
             .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
     }
 

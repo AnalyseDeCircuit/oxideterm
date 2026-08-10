@@ -16,9 +16,9 @@ pub use connection_import::{
     apply_connection_import, preview_connection_import,
 };
 pub use connection_transport::{
-    ConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT, TELNET_DEFAULT_PORT_TEXT,
-    TransportUsernameTransition, VNC_DEFAULT_PORT_TEXT, transport_default_port,
-    transport_port_replacement, transport_username_transition,
+    ConnectionTransport, MOSH_DEFAULT_PORT_TEXT, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
+    TELNET_DEFAULT_PORT_TEXT, TransportUsernameTransition, VNC_DEFAULT_PORT_TEXT,
+    transport_default_port, transport_port_replacement, transport_username_transition,
 };
 pub use draft::{
     ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, IMPORTED_GROUP, ProxyHopDraft,
@@ -44,13 +44,14 @@ pub use store::{
     ConnectionX11ForwardingOptions, DEFAULT_X11_UNTRUSTED_TIMEOUT_SECONDS,
     DeletedConnectionTombstone, GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID,
     LOCAL_SHELL_PRIVILEGE_CONNECTION_ID, LocalSyncMetadata, ManagedSshKeyInfo, ManagedSshKeyOrigin,
-    ManagedSshKeyUsage, PreparedSavedConnectionsSync, PrivilegeCredentialKind, ProxyHopInfo,
+    ManagedSshKeyUsage, MoshIpFamily, MoshPredictionMode, MoshProfile, MoshProfilesSyncSnapshot,
+    MoshUdpPortSelection, PreparedSavedConnectionsSync, PrivilegeCredentialKind, ProxyHopInfo,
     RemoteDesktopProfile, RemoteDesktopProfilesSyncSnapshot, SaveConnectionRequest,
-    SavePrivilegeCredentialRequest, SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest,
-    SaveTelnetProfileRequest, SavedAuth, SavedConnection, SavedConnectionRuntimeSecrets,
-    SavedConnectionSyncRecord, SavedConnectionsConflictStrategy, SavedConnectionsSyncCleanup,
-    SavedConnectionsSyncSnapshot, SavedPrivilegeCredential, SavedProxyHop, SavedUpstreamProxyAuth,
-    SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol,
-    SerialFlowControl, SerialParity, SerialProfile, SerialProfilesSyncSnapshot, TelnetProfile,
-    validate_group_name,
+    SaveMoshProfileRequest, SavePrivilegeCredentialRequest, SaveRemoteDesktopProfileRequest,
+    SaveSerialProfileRequest, SaveTelnetProfileRequest, SavedAuth, SavedConnection,
+    SavedConnectionRuntimeSecrets, SavedConnectionSyncRecord, SavedConnectionsConflictStrategy,
+    SavedConnectionsSyncCleanup, SavedConnectionsSyncSnapshot, SavedMoshProfileRuntimeSecrets,
+    SavedPrivilegeCredential, SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig,
+    SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol, SerialFlowControl, SerialParity,
+    SerialProfile, SerialProfilesSyncSnapshot, TelnetProfile, validate_group_name,
 };
