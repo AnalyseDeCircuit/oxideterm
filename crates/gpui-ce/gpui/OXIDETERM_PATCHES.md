@@ -226,6 +226,15 @@ ownership rules in `crates/gpui-ce/gpui/src/elements/div.rs` and
 Without this patch, one macOS trackpad event can move both a child and its scrollable ancestor,
 which makes the GPUI-CE build feel substantially more sensitive than the previous GPUI build.
 
+### Zero-area SVG paint semantics
+
+`crates/gpui-ce/gpui/src/window.rs` treats SVG bounds that become empty after device-pixel
+snapping as a successful no-op before consulting the sprite atlas or SVG rasterizer. Product
+layout transitions can intentionally collapse a clipping viewport to zero while its content
+remains mounted, so an empty paint has no visible work and is not a renderer failure. Keep the
+lower-level SVG rasterizer's strict positive-size invariant for direct callers; the no-op belongs
+at the window paint boundary, where logical layout bounds have been snapped to device pixels.
+
 ### Bounded text and input lock lifetimes
 
 Preserve the explicit temporary bindings that release internal locks before processing owned

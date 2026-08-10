@@ -1,6 +1,6 @@
 #[cfg(any(feature = "inspector", debug_assertions))]
 use crate::Inspector;
-// OxideTerm modification: exposes dynamic textures and hardens draw scheduling and arena lifetimes.
+// OxideTerm modification: exposes dynamic textures, hardens draw lifetimes, and skips empty SVG paints.
 
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
@@ -4276,6 +4276,10 @@ impl Window {
 
         let element_opacity = self.element_opacity();
         let bounds = self.snap_bounds(bounds);
+        // Clipped layout transitions may produce an empty frame with nothing to rasterize.
+        if bounds.is_zero() {
+            return Ok(());
+        }
 
         let params = RenderSvgParams {
             path,
@@ -6770,6 +6774,34 @@ mod oxideterm_draw_safety_tests {
 
         assert_eq!(fragments.len(), 1);
         assert_eq!(fragments[0].content_mask.bounds, bounds);
+    }
+
+    #[gpui::test]
+    fn zero_area_svg_paint_is_a_noop(cx: &mut TestAppContext) {
+        cx.add_empty_window().draw(
+            point(px(0.0), px(0.0)),
+            size(px(100.0), px(100.0)),
+            |_, _| {
+                canvas(
+                    |_, _, _| (),
+                    |bounds, _, window, cx| {
+                        let empty_bounds =
+                            Bounds::new(bounds.origin, size(Pixels::ZERO, bounds.size.height));
+                        window
+                            .paint_svg(
+                                empty_bounds,
+                                "missing-test-asset.svg".into(),
+                                None,
+                                TransformationMatrix::unit(),
+                                rgb(0xffffff).into(),
+                                cx,
+                            )
+                            .expect("zero-area SVG paint should be ignored");
+                    },
+                )
+                .into_any_element()
+            },
+        );
     }
 
     struct EmptyNestedWindow;

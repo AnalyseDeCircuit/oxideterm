@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt, AnyElement, Div, ElementId, IntoElement, Styled, Svg, Transformation,
-    radians, size,
+    Animation, AnimationExt, AnyElement, Div, ElementId, IntoElement, ParentElement, Styled, Svg,
+    Transformation, radians, size,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -267,15 +267,20 @@ pub fn horizontal_reveal(
     let id = (id.into(), if expanded { "expanded" } else { "collapsed" });
     let final_width = if expanded { expanded_width } else { 0.0 };
     let final_opacity = if expanded { 1.0 } else { 0.0 };
+    // Animate a clipping viewport while the mounted content keeps its natural width.
+    let viewport = gpui::div()
+        .h_full()
+        .flex_none()
+        .overflow_hidden()
+        .child(element.w(gpui::px(expanded_width)).flex_none());
     if !tokens.motion.enabled {
-        return element
+        return viewport
             .w(gpui::px(final_width))
             .opacity(final_opacity)
             .into_any_element();
     }
     let spatial = tokens.motion.spatial_enabled;
-    element
-        .overflow_hidden()
+    viewport
         .with_animation(
             id,
             Animation::new(duration(tokens, MotionDuration::Control))
@@ -416,6 +421,29 @@ pub fn animated_spinner(tokens: &ThemeTokens, id: impl Into<ElementId>, icon: Sv
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::{Context, InteractiveElement, Render, TestAppContext, div, px, size};
+
+    struct CollapsedHorizontalReveal {
+        tokens: ThemeTokens,
+    }
+
+    impl Render for CollapsedHorizontalReveal {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            _cx: &mut Context<Self>,
+        ) -> impl IntoElement {
+            div().child(horizontal_reveal(
+                &self.tokens,
+                "collapsed-horizontal-reveal-test",
+                div()
+                    .h(px(24.0))
+                    .debug_selector(|| "reveal-content".to_string()),
+                280.0,
+                false,
+            ))
+        }
+    }
 
     #[test]
     fn easing_and_interpolation_keep_exact_endpoints() {
@@ -460,6 +488,24 @@ mod tests {
     fn horizontal_reveal_targets_match_visibility() {
         assert_eq!(lerp(0.0, 280.0, 0.0), 0.0);
         assert_eq!(lerp(0.0, 280.0, 1.0), 280.0);
+    }
+
+    #[gpui::test]
+    fn collapsed_horizontal_reveal_keeps_content_at_expanded_width(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| {
+            let mut tokens = oxideterm_theme::default_tokens();
+            tokens.apply_motion(oxideterm_theme::UiMotionProfile::Off);
+            CollapsedHorizontalReveal { tokens }
+        });
+        cx.simulate_resize(size(px(640.0), px(480.0)));
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+
+        let content_bounds = cx
+            .debug_bounds("reveal-content")
+            .expect("reveal content bounds");
+        assert_eq!(content_bounds.size.width, px(280.0));
     }
 
     #[test]

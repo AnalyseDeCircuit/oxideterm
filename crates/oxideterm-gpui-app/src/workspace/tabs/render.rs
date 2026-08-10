@@ -350,8 +350,8 @@ impl WorkspaceApp {
             scroll_viewport = scroll_viewport.child(oxideterm_gpui_ui::motion::horizontal_reveal(
                 &self.tokens,
                 ("workspace-tab-open", tab_id.0),
-                // The animated wrapper is the scroll viewport's direct flex
-                // child, so it must retain the tab width for overflow measurement.
+                // Keep the content at full width while the clipping viewport
+                // animates as the scroll area's direct flex child.
                 div()
                     .w(px(tab_width))
                     .h_full()
