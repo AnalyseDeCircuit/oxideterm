@@ -1,0 +1,17 @@
+[package]
+name = "oxideterm-mosh"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+fernomade-crypto = { path = "../fernomade/crypto" }
+fernomade-runtime = { path = "../fernomade/runtime" }
+oxideterm-ssh = { path = "../oxideterm-ssh" }
+thiserror.workspace = true
+tokio.workspace = true
+zeroize.workspace = true
+
+[lints]
+workspace = true

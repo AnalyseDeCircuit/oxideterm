@@ -655,6 +655,21 @@ impl SshTransportClient {
             .await
     }
 
+    /// Establish an isolated registry-owned SSH transport for short-lived work.
+    ///
+    /// Callers must release the consumer after the command completes. Dedicated
+    /// entries retire immediately, so bootstrap traffic cannot join the saved
+    /// SSH node pool or inherit its long-lived capabilities.
+    pub async fn connect_dedicated_node_with_registry(
+        self,
+        registry: SshConnectionRegistry,
+        consumer: ConnectionConsumer,
+    ) -> Result<SshConnectionHandle, SshTransportError> {
+        let connection = registry.acquire_dedicated(self.config.clone(), consumer.clone());
+        self.connect_existing_node_with_registry(registry, consumer, connection)
+            .await
+    }
+
     pub async fn connect_existing_node_with_registry(
         self,
         registry: SshConnectionRegistry,

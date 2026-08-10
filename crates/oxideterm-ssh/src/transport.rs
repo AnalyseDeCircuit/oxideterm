@@ -300,6 +300,27 @@ pub struct SshCommandOutput {
     pub truncated: bool,
 }
 
+pub struct SshSecretCommandOutput {
+    /// Secret-bearing stdout is zeroized when the bootstrap consumer releases it.
+    pub stdout: Zeroizing<Vec<u8>>,
+    /// Stderr can repeat command output, so it follows the same secret lifetime.
+    pub stderr: Zeroizing<Vec<u8>>,
+    pub exit_code: Option<i32>,
+    pub truncated: bool,
+}
+
+impl std::fmt::Debug for SshSecretCommandOutput {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SshSecretCommandOutput")
+            .field("stdout_bytes", &self.stdout.len())
+            .field("stderr_bytes", &self.stderr.len())
+            .field("exit_code", &self.exit_code)
+            .field("truncated", &self.truncated)
+            .finish()
+    }
+}
+
 #[derive(Debug)]
 pub enum SshTransportCommand {
     Data(Vec<u8>),

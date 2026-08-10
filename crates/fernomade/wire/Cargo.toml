@@ -1,0 +1,11 @@
+[package]
+name = "fernomade-wire"
+version = "0.0.0"
+edition.workspace = true
+authors = ["AnalyseDeCircuit <yjmsoleilune@icloud.com>"]
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+flate2.workspace = true
+prost.workspace = true

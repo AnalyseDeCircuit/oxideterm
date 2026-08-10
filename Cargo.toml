@@ -1,5 +1,12 @@
 [workspace]
 members = [
+  "crates/fernomade/crypto",
+  "crates/fernomade/predict",
+  "crates/fernomade/runtime",
+  "crates/fernomade/session",
+  "crates/fernomade/state",
+  "crates/fernomade/wire",
+  "crates/oxideterm-mosh",
   "crates/oxideterm-atomic-file",
   "crates/oxideterm-app-lock",
   "crates/oxideterm-gpui-markdown",
@@ -113,6 +120,7 @@ anyhow = "1.0"
 ashpd = { version = "0.13", default-features = false, features = ["async-io", "notification", "open_uri", "file_chooser", "settings", "trash"] }
 async-channel = "2.5.0"
 async-trait = "0.1"
+aes = { version = "0.8.4", features = ["zeroize"] }
 async-process = "2.5"
 argon2 = { version = "0.5", default-features = false, features = ["std"] }
 base64 = "0.22"
@@ -141,6 +149,7 @@ futures-util = "0.3"
 futures = "0.3"
 futures-concurrency = "7.7.1"
 fs2 = "0.4"
+flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
 gpui = { path = "crates/gpui-ce/gpui", version = "=0.2.2" }
 gpui_linux = { path = "crates/gpui-ce/gpui_linux", version = "0.1.0" }
 gpui_macos = { path = "crates/gpui-ce/gpui_macos", version = "0.1.0" }
@@ -170,6 +179,7 @@ metal = "0.33"
 minisign-verify = "0.2"
 objc = "0.2"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSGraphics"] }
+ocb3 = { version = "0.1.0", default-features = false, features = ["alloc"] }
 parking_lot = "0.12"
 polling = "3.11"
 pollster = "0.4.0"
@@ -177,6 +187,7 @@ postage = { version = "0.5", features = ["futures-traits"] }
 proc-macro2 = "1.0.93"
 profiling = "1"
 proptest = { version = "1.10", features = ["attr-macro"] }
+prost = "0.14.4"
 quote = "1.0.9"
 quick-xml = "0.39"
 raw-window-handle = "0.6"
@@ -255,6 +266,8 @@ unicode-segmentation = "1.12"
 unicode-width = "0.2.2"
 url = "2.2"
 util = { path = "crates/gpui-ce/gpui_zed_util", version = "0.2.2", package = "gpui_zed_util" }
+vt100 = "0.16.2"
+vte = "0.15.0"
 uuid = { version = "1.23", features = ["v4", "v5", "v7", "serde"] }
 wasm-bindgen = "0.2.120"
 wasmtime = { version = "46.0.1", default-features = false, features = ["cranelift", "runtime", "std"] }

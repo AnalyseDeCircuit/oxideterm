@@ -9,9 +9,11 @@ alacritty_terminal.workspace = true
 anyhow.workspace = true
 async-channel.workspace = true
 crossbeam-channel.workspace = true
+fernomade-predict = { path = "../fernomade/predict" }
 libc.workspace = true
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-modem-transfer = { path = "../oxideterm-modem-transfer" }
+oxideterm-mosh = { path = "../oxideterm-mosh" }
 oxideterm-terminal-encoding = { path = "../oxideterm-terminal-encoding" }
 oxideterm-terminal-graphics = { path = "../oxideterm-terminal-graphics" }
 oxideterm-terminal-model = { path = "../oxideterm-terminal-model" }

@@ -1,0 +1,13 @@
+[package]
+name = "fernomade-crypto"
+version = "0.0.0"
+edition.workspace = true
+authors = ["AnalyseDeCircuit <yjmsoleilune@icloud.com>"]
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+aes.workspace = true
+base64.workspace = true
+ocb3.workspace = true
+zeroize.workspace = true

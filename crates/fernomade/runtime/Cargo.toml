@@ -1,0 +1,12 @@
+[package]
+name = "fernomade-runtime"
+version = "0.0.0"
+edition.workspace = true
+authors = ["AnalyseDeCircuit <yjmsoleilune@icloud.com>"]
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+fernomade-crypto = { version = "=0.0.0", path = "../crypto" }
+fernomade-session = { version = "=0.0.0", path = "../session" }
+fernomade-wire = { version = "=0.0.0", path = "../wire" }

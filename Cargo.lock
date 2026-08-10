@@ -195,7 +195,7 @@ dependencies = [
  "aead 0.6.0-rc.10",
  "aes 0.9.1",
  "cipher 0.5.2",
- "ctr",
+ "ctr 0.10.1",
  "ghash",
  "subtle",
  "zeroize",
@@ -2575,6 +2575,15 @@ dependencies = [
 
 [[package]]
 name = "ctr"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0369ee1ad671834580515889b80f2ea915f23b8be8d0daa4bbaf2ac5c7590835"
+dependencies = [
+ "cipher 0.4.4",
+]
+
+[[package]]
+name = "ctr"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baaca1c4b237092596f64d571e9db6ce4109c4ef9742e27590f1709594461f21"
@@ -3362,6 +3371,55 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
 dependencies = [
  "simd-adler32",
+]
+
+[[package]]
+name = "fernomade-crypto"
+version = "0.0.0"
+dependencies = [
+ "aes 0.8.4",
+ "base64 0.22.1",
+ "ocb3",
+ "zeroize",
+]
+
+[[package]]
+name = "fernomade-predict"
+version = "0.0.0"
+
+[[package]]
+name = "fernomade-runtime"
+version = "0.0.0"
+dependencies = [
+ "fernomade-crypto",
+ "fernomade-session",
+ "fernomade-wire",
+]
+
+[[package]]
+name = "fernomade-session"
+version = "0.0.0"
+dependencies = [
+ "fernomade-crypto",
+ "fernomade-state",
+ "fernomade-wire",
+]
+
+[[package]]
+name = "fernomade-state"
+version = "0.0.0"
+dependencies = [
+ "fernomade-wire",
+ "vt100",
+ "vte",
+]
+
+[[package]]
+name = "fernomade-wire"
+version = "0.0.0"
+dependencies = [
+ "flate2",
+ "prost",
 ]
 
 [[package]]
@@ -7151,6 +7209,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ocb3"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c196e0276c471c843dd5777e7543a36a298a4be942a2a688d8111cd43390dedb"
+dependencies = [
+ "aead 0.5.2",
+ "cipher 0.4.4",
+ "ctr 0.9.2",
+ "subtle",
+]
+
+[[package]]
 name = "oid"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7735,6 +7805,7 @@ dependencies = [
  "oxideterm-ide-fs",
  "oxideterm-launcher",
  "oxideterm-local-files",
+ "oxideterm-mosh",
  "oxideterm-network-proxy",
  "oxideterm-notification-center",
  "oxideterm-plugin-host-api",
@@ -7989,6 +8060,18 @@ name = "oxideterm-modem-transfer"
 version = "2.0.19"
 dependencies = [
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "oxideterm-mosh"
+version = "2.0.19"
+dependencies = [
+ "fernomade-crypto",
+ "fernomade-runtime",
+ "oxideterm-ssh",
+ "thiserror 2.0.18",
+ "tokio",
+ "zeroize",
 ]
 
 [[package]]
@@ -8337,8 +8420,10 @@ dependencies = [
  "async-channel",
  "criterion 0.5.1",
  "crossbeam-channel",
+ "fernomade-predict",
  "libc",
  "oxideterm-modem-transfer",
+ "oxideterm-mosh",
  "oxideterm-ssh",
  "oxideterm-terminal-encoding",
  "oxideterm-terminal-graphics",
@@ -8899,7 +8984,7 @@ dependencies = [
  "cbc 0.2.1",
  "crypto-bigint",
  "crypto-common 0.2.2",
- "ctr",
+ "ctr 0.10.1",
  "curve25519-dalek",
  "des",
  "digest 0.11.3",
@@ -9416,6 +9501,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "efaa288b896cb2b345da7b7f2110ab19e51565b83495b56fcec98a62f8b1f33e"
 dependencies = [
  "convert_case 0.11.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "prost"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1"
+dependencies = [
+ "bytes",
+ "prost-derive",
+]
+
+[[package]]
+name = "prost-derive"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
+dependencies = [
+ "anyhow",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -10337,7 +10445,7 @@ dependencies = [
  "clap",
  "criterion 0.7.0",
  "crypto-bigint",
- "ctr",
+ "ctr 0.10.1",
  "curve25519-dalek",
  "data-encoding",
  "delegate",
@@ -11497,7 +11605,7 @@ dependencies = [
  "cbc 0.2.1",
  "chacha20 0.10.0",
  "cipher 0.5.2",
- "ctr",
+ "ctr 0.10.1",
  "ctutils",
  "des",
  "poly1305 0.9.0",
@@ -13523,6 +13631,17 @@ checksum = "fb067e4cbd1ff067d1df46c9194b5de0e98efd2810bbc95c5d5e5f25a3231150"
 dependencies = [
  "cc",
  "libc",
+]
+
+[[package]]
+name = "vt100"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "054ff75fb8fa83e609e685106df4faeffdf3a735d3c74ebce97ec557d5d36fd9"
+dependencies = [
+ "itoa",
+ "unicode-width",
+ "vte",
 ]
 
 [[package]]
