@@ -75,7 +75,6 @@ struct NativeUpdateCheckRequest {
     current_version: String,
     install_flavor: Result<oxideterm_update::InstallFlavor, String>,
     update_proxy: oxideterm_settings::UpdateProxySettings,
-    preview_upgrade_error: Option<String>,
     runtime: Arc<tokio::runtime::Runtime>,
 }
 
@@ -242,15 +241,6 @@ impl SettingsWorkspaceEntity {
         self.native_update.package = None;
         cx.emit(SettingsWorkspaceEvent::ResetNativeUpdateOverlay);
 
-        if let Some(error) = request.preview_upgrade_error {
-            self.native_update.state = if request.kind == NativeUpdateCheckKind::Automatic {
-                NativeUpdateUiState::Idle
-            } else {
-                NativeUpdateUiState::Error(error)
-            };
-            cx.notify();
-            return true;
-        }
         let install_flavor = match request.install_flavor {
             Ok(install_flavor) => install_flavor,
             Err(error) => {
@@ -901,13 +891,6 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let channel = self.settings_store.settings().general.update_channel;
-        let preview_upgrade_error = (channel == UpdateChannel::Stable
-            && is_gpui_preview_version(env!("CARGO_PKG_VERSION")))
-        .then(|| {
-            // Keep the shared Tauri settings choice untouched for preview builds.
-            self.i18n
-                .t("settings_view.help.preview_stable_upgrade_hint")
-        });
         let install_flavor =
             oxideterm_update::NativeInstallContext::current(self.native_update_is_portable(cx))
                 .map(|context| context.install_flavor)
@@ -918,7 +901,6 @@ impl WorkspaceApp {
             current_version: env!("CARGO_PKG_VERSION").to_string(),
             install_flavor,
             update_proxy: self.settings_store.settings().general.update_proxy.clone(),
-            preview_upgrade_error,
             runtime: self.forwarding_runtime.clone(),
         };
         self.settings_workspace.update(cx, |settings, cx| {

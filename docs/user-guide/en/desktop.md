@@ -142,4 +142,4 @@ For context-sensitive helpers such as privilege prompts or modem transfers, make
 
 ## Updates
 
-Use Settings → Help & About to check the active version and update channel. Stable, beta, and GPUI preview builds use separate update channels, so choose the channel that matches the build you installed.
+Use Settings → Help & About to check the active version and update channel. Stable and beta builds use separate update channels, so choose the channel that matches the build you installed.

@@ -36,18 +36,7 @@ impl WorkspaceApp {
             }
             (SettingsTab::Help, SettingsSelect::UpdateChannel) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
-                let channels: &[UpdateChannel] =
-                    if is_gpui_preview_version(env!("CARGO_PKG_VERSION")) {
-                        // Preview cannot safely replace itself with a stable package.
-                        &[UpdateChannel::Beta, UpdateChannel::GpuiPreview]
-                    } else {
-                        &[
-                            UpdateChannel::Stable,
-                            UpdateChannel::Beta,
-                            UpdateChannel::GpuiPreview,
-                        ]
-                    };
-                for &channel in channels {
+                for channel in [UpdateChannel::Stable, UpdateChannel::Beta] {
                     let label = update_channel_label(channel, &self.i18n);
                     popup = popup.child(select_option_action(
                         select_option(

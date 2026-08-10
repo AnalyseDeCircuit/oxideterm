@@ -14,6 +14,7 @@ use std::{
 
 use anyhow::{Context, Result, anyhow};
 use fs2::FileExt;
+use oxideterm_settings::is_prerelease_version;
 use oxideterm_ssh_launch::TemporarySshLaunch;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
@@ -136,13 +137,7 @@ fn instance_scope_for_build(version: &str, development: bool) -> &'static str {
     if development {
         return "development";
     }
-    if version.contains("gpui-preview")
-        || version.contains("native-preview")
-        || version.contains("rustnative-preview")
-    {
-        return "gpui-preview";
-    }
-    if version.contains("beta") {
+    if is_prerelease_version(version) {
         return "beta";
     }
     "stable"
@@ -405,24 +400,21 @@ mod tests {
     fn installed_channels_and_development_use_distinct_instance_paths() {
         let data_dir = Path::new("/tmp/oxideterm-instance-scopes");
         let development = InstancePaths::for_data_dir(data_dir, "development");
-        let preview = InstancePaths::for_data_dir(data_dir, "gpui-preview");
+        let beta = InstancePaths::for_data_dir(data_dir, "beta");
         let stable = InstancePaths::for_data_dir(data_dir, "stable");
 
-        assert_ne!(development.lock_path, preview.lock_path);
-        assert_ne!(preview.lock_path, stable.lock_path);
+        assert_ne!(development.lock_path, beta.lock_path);
+        assert_ne!(beta.lock_path, stable.lock_path);
         assert_ne!(development.state_path, stable.state_path);
     }
 
     #[test]
     fn build_versions_map_to_stable_instance_scopes() {
         assert_eq!(instance_scope_for_build("2.0.0", false), "stable");
-        assert_eq!(
-            instance_scope_for_build("2.0.0-gpui-preview.16", false),
-            "gpui-preview"
-        );
         assert_eq!(instance_scope_for_build("2.0.0-beta.1", false), "beta");
+        assert_eq!(instance_scope_for_build("2.0.0-preview.1", false), "beta");
         assert_eq!(
-            instance_scope_for_build("2.0.0-gpui-preview.16", true),
+            instance_scope_for_build("2.0.0-beta.1", true),
             "development"
         );
     }

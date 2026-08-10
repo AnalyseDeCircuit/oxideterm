@@ -6,8 +6,6 @@ pub(in crate::workspace) const HELP_GITHUB_URL: &str =
     "https://github.com/AnalyseDeCircuit/oxideterm";
 pub(in crate::workspace) const HELP_ISSUES_URL: &str =
     "https://github.com/AnalyseDeCircuit/oxideterm/issues";
-pub(in crate::workspace) const HELP_DOWNLOAD_URL: &str =
-    "https://github.com/AnalyseDeCircuit/oxideterm/releases/latest";
 // Keep the in-app legal link aligned with the repository-level multilingual notice.
 pub(in crate::workspace) const HELP_LEGAL_URL: &str =
     "https://github.com/AnalyseDeCircuit/oxideterm/blob/main/LEGAL.md";
@@ -28,8 +26,6 @@ pub(in crate::workspace) const HELP_TECH_BADGES: [(&str, u32); 9] = [
 ];
 
 pub(in crate::workspace) const HELP_UPDATE_CHANNEL_SELECT_WIDTH: f32 = 140.0;
-pub(in crate::workspace) const HELP_PREVIEW_NOTICE_ALPHA: f32 = 0.10;
-pub(in crate::workspace) const HELP_PREVIEW_NOTICE_BORDER_ALPHA: f32 = 0.30;
 pub(in crate::workspace) const HELP_UPDATE_FOOTER_BORDER_ALPHA: f32 = 0.50;
 pub(in crate::workspace) const HELP_PORTABLE_NOTICE_BG_ALPHA: f32 = 0.70;
 pub(in crate::workspace) const HELP_PORTABLE_NOTICE_BORDER_ALPHA: f32 = 0.60;
@@ -59,8 +55,7 @@ impl WorkspaceApp {
             self.settings_store.settings().general.update_channel,
             &self.i18n,
         );
-        let update_channel = self.settings_store.settings().general.update_channel;
-        let mut version_rows = div()
+        let version_rows = div()
             .flex()
             .flex_col()
             .gap(px(12.0))
@@ -77,10 +72,6 @@ impl WorkspaceApp {
                 cx,
             ))
             .child(self.help_portable_or_channel_row(is_portable, channel_label, cx));
-
-        if !is_portable && update_channel == UpdateChannel::GpuiPreview {
-            version_rows = version_rows.child(self.help_gpui_preview_notice());
-        }
 
         // Tauri HelpAboutSection keeps the version rows and update controls inside one
         // card, with only the update block separated by `border-t pt-4`.
@@ -327,69 +318,9 @@ impl WorkspaceApp {
                     .child(self.help_portable_update_notice())
                     .child(self.help_update_status_area(cx))
                     .into_any_element()
-            } else if is_gpui_preview_version(env!("CARGO_PKG_VERSION"))
-                && self.settings_store.settings().general.update_channel == UpdateChannel::Stable
-            {
-                self.help_preview_stable_update_notice(cx)
             } else {
                 self.help_update_status_area(cx)
             })
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn help_preview_stable_update_notice(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba(
-                (self.tokens.ui.warning << 8) | alpha_byte(HELP_PREVIEW_NOTICE_BORDER_ALPHA),
-            ))
-            .bg(rgba(
-                (self.tokens.ui.warning << 8) | alpha_byte(HELP_PREVIEW_NOTICE_ALPHA),
-            ))
-            .p(px(12.0))
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .justify_between()
-            .gap(px(16.0))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(self.tokens.ui.warning))
-                            .child(
-                                self.i18n
-                                    .t("settings_view.help.preview_stable_upgrade_title"),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .mt(px(6.0))
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .line_height(px(22.0))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(
-                                self.i18n
-                                    .t("settings_view.help.preview_stable_upgrade_hint"),
-                            ),
-                    ),
-            )
-            .child(self.help_outline_button(
-                self.i18n.t("settings_view.help.download_stable"),
-                LucideIcon::ExternalLink,
-                |this, _event, _window, cx| {
-                    this.open_help_url(HELP_DOWNLOAD_URL, cx);
-                },
-                cx,
-            ))
             .into_any_element()
     }
 
@@ -630,45 +561,6 @@ impl WorkspaceApp {
             ),
             _ => None,
         }
-    }
-
-    pub(in crate::workspace) fn help_gpui_preview_notice(&self) -> AnyElement {
-        // Tauri renders `border-amber-500/30 bg-amber-500/10 p-3`; keep the
-        // channel warning visually coupled to that source state.
-        div()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba(
-                (self.tokens.ui.warning << 8) | alpha_byte(HELP_PREVIEW_NOTICE_BORDER_ALPHA),
-            ))
-            .bg(rgba(
-                (self.tokens.ui.warning << 8) | alpha_byte(HELP_PREVIEW_NOTICE_ALPHA),
-            ))
-            .p(px(12.0))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.warning))
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Shield,
-                        16.0,
-                        rgb(self.tokens.ui.warning),
-                    ))
-                    .child(self.i18n.t("settings_view.help.gpui_preview_title")),
-            )
-            .child(
-                div()
-                    .mt(px(8.0))
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .line_height(px(24.0))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.help.gpui_preview_hint")),
-            )
-            .into_any_element()
     }
 
     pub(in crate::workspace) fn resolved_help_portable_mode(&self, cx: &App) -> bool {

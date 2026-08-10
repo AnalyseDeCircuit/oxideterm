@@ -21,8 +21,7 @@ mod version;
 mod windows_update_helper;
 
 pub use channel::{
-    BETA_UPDATE_ENDPOINT, GPUI_PREVIEW_UPDATE_ENDPOINT, STABLE_UPDATE_ENDPOINT, UpdateEndpoint,
-    endpoint_for_channel,
+    BETA_UPDATE_ENDPOINT, STABLE_UPDATE_ENDPOINT, UpdateEndpoint, endpoint_for_channel,
 };
 pub use download::{
     DownloadProgress, NativeUpdateClient, NativeUpdateDownload, NativeUpdateError,

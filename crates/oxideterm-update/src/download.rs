@@ -11,7 +11,7 @@ use std::{
 };
 
 use futures_util::StreamExt as _;
-use oxideterm_settings::{UpdateChannel, UpdateProxySettings, is_gpui_preview_version};
+use oxideterm_settings::{UpdateChannel, UpdateProxySettings};
 use reqwest::{
     StatusCode,
     header::{
@@ -41,9 +41,6 @@ const MAX_RETAINED_RESUMABLE_UPDATE_DIRS: usize = 2;
 
 #[derive(Debug, thiserror::Error)]
 pub enum NativeUpdateError {
-    #[error("GPUI Preview cannot update directly to the stable release")]
-    PreviewStableChannelUnsupported,
-
     #[error("Update error: {0}")]
     General(String),
 
@@ -141,7 +138,6 @@ impl NativeUpdateClient {
         &self,
         request: NativeUpdateRequest,
     ) -> Result<NativeUpdateStatus, NativeUpdateError> {
-        validate_update_request(&request)?;
         let endpoint = endpoint_for_channel(request.channel);
         let response = self
             .http
@@ -550,17 +546,6 @@ impl NativeUpdateClient {
     }
 }
 
-fn validate_update_request(request: &NativeUpdateRequest) -> Result<(), NativeUpdateError> {
-    // Old and current preview builds share user settings with the stable app.
-    // Reject the cross-channel path before HTTP so a persisted Stable choice
-    // can never replace a preview installation in place.
-    if request.channel == UpdateChannel::Stable && is_gpui_preview_version(&request.current_version)
-    {
-        return Err(NativeUpdateError::PreviewStableChannelUnsupported);
-    }
-    Ok(())
-}
-
 fn build_update_http_client(
     proxy: &UpdateProxySettings,
 ) -> Result<reqwest::Client, NativeUpdateError> {
@@ -794,39 +779,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn preview_stable_check_is_rejected_before_network_access() {
-        let error = validate_update_request(&NativeUpdateRequest {
-            channel: UpdateChannel::Stable,
-            current_version: "2.0.0-gpui-preview.15".to_string(),
-            target: PlatformTarget::new("macos", "aarch64"),
-            install_flavor: InstallFlavor::MacApp,
-        })
-        .expect_err("preview must not query the stable updater");
-
-        assert!(matches!(
-            error,
-            NativeUpdateError::PreviewStableChannelUnsupported
-        ));
-    }
-
-    #[test]
-    fn stable_build_can_use_the_stable_channel() {
-        assert!(
-            validate_update_request(&NativeUpdateRequest {
-                channel: UpdateChannel::Stable,
-                current_version: "2.0.0".to_string(),
-                target: PlatformTarget::new("windows", "x86_64"),
-                install_flavor: InstallFlavor::WindowsNsis,
-            })
-            .is_ok()
-        );
-    }
-
-    #[test]
     fn package_file_name_keeps_version_and_removes_path_unsafe_chars() {
         let name = package_file_name(&NativeUpdatePackage {
-            version: "1.2.0-gpui-preview.1".into(),
-            current_version: "1.2.0-gpui-preview.0".into(),
+            version: "1.2.0-beta.1".into(),
+            current_version: "1.2.0-beta.0".into(),
             body: None,
             date: None,
             platform_key: "darwin-aarch64".into(),
@@ -834,7 +790,7 @@ mod tests {
             signature: None,
         });
 
-        assert!(name.starts_with("1.2.0-gpui-preview.1-"));
+        assert!(name.starts_with("1.2.0-beta.1-"));
         assert!(!name.contains('/'));
         assert!(!name.contains('?'));
     }

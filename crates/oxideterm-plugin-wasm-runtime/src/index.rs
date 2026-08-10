@@ -50,7 +50,6 @@ pub struct WasmRuntimeSupport {
 pub enum WasmRuntimeHostChannel {
     Stable,
     Beta,
-    GpuiPreview,
 }
 
 /// Downloadable runtime artifact for a concrete target triple.
@@ -217,11 +216,10 @@ mod tests {
             "version": "0.1.0",
             "runtimeChannel": "stable",
             "supports": {
-                "oxidetermChannels": ["stable", "beta", "gpui-preview"],
+                "oxidetermChannels": ["stable", "beta"],
                 "oxidetermVersions": [
                     ">=2.0.0 <3.0.0",
-                    ">=2.0.0-beta.0 <3.0.0",
-                    ">=2.0.0-gpui-preview.0 <3.0.0"
+                    ">=2.0.0-beta.0 <3.0.0"
                 ],
                 "pluginProtocol": [1],
                 "wasmGuestAbi": [1],
@@ -248,16 +246,10 @@ mod tests {
                 .oxideterm_channels
                 .contains(&WasmRuntimeHostChannel::Beta)
         );
-        assert!(
-            descriptor
-                .supports
-                .oxideterm_channels
-                .contains(&WasmRuntimeHostChannel::GpuiPreview)
-        );
     }
 
     #[test]
-    fn runtime_supports_stable_beta_and_gpui_preview_hosts() {
+    fn runtime_supports_stable_and_beta_hosts() {
         let descriptor = sample_descriptor();
 
         assert!(descriptor.supports_host(
@@ -274,13 +266,6 @@ mod tests {
             1,
             "preview1"
         ));
-        assert!(descriptor.supports_host(
-            WasmRuntimeHostChannel::GpuiPreview,
-            "2.0.0-gpui-preview.8",
-            1,
-            1,
-            "preview1"
-        ));
     }
 
     #[test]
@@ -289,8 +274,8 @@ mod tests {
         descriptor.supports.oxideterm_channels = vec![WasmRuntimeHostChannel::Stable];
 
         assert!(!descriptor.supports_host(
-            WasmRuntimeHostChannel::GpuiPreview,
-            "2.0.0-gpui-preview.8",
+            WasmRuntimeHostChannel::Beta,
+            "2.0.0-beta.8",
             1,
             1,
             "preview1"

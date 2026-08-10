@@ -562,8 +562,7 @@ pub fn language_options() -> [Language; 11] {
 pub fn cycle_update_channel(settings: &mut PersistedSettings) {
     settings.general.update_channel = match settings.general.update_channel {
         UpdateChannel::Stable => UpdateChannel::Beta,
-        UpdateChannel::Beta => UpdateChannel::GpuiPreview,
-        UpdateChannel::GpuiPreview => UpdateChannel::Stable,
+        UpdateChannel::Beta => UpdateChannel::Stable,
     };
 }
 
@@ -595,7 +594,6 @@ pub fn update_channel_label(channel: UpdateChannel, i18n: &I18n) -> String {
     match channel {
         UpdateChannel::Stable => i18n.t("settings_view.help.channel_stable"),
         UpdateChannel::Beta => i18n.t("settings_view.help.channel_beta"),
-        UpdateChannel::GpuiPreview => i18n.t("settings_view.help.channel_gpui_preview"),
     }
 }
 
@@ -665,6 +663,17 @@ pub fn background_fit_label(fit: BackgroundFit, i18n: &I18n) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_channel_cycle_contains_only_stable_and_beta() {
+        let mut settings = PersistedSettings::default();
+        settings.general.update_channel = UpdateChannel::Stable;
+
+        cycle_update_channel(&mut settings);
+        assert_eq!(settings.general.update_channel, UpdateChannel::Beta);
+        cycle_update_channel(&mut settings);
+        assert_eq!(settings.general.update_channel, UpdateChannel::Stable);
+    }
 
     #[test]
     fn modal_border_radius_sliders_have_dedicated_anchors() {

@@ -77,7 +77,6 @@ fn runtime_requirement_mentions_host_channel(
     host_version: &str,
 ) -> bool {
     match host_channel {
-        "gpui-preview" => requirement.contains("gpui-preview"),
         "beta" => requirement.contains("beta"),
         _ => !host_version.contains('-') && !requirement.contains('-'),
     }
@@ -85,9 +84,7 @@ fn runtime_requirement_mentions_host_channel(
 
 fn current_oxideterm_runtime_channel(host_version: &str) -> &'static str {
     let version = host_version.to_ascii_lowercase();
-    if version.contains("gpui-preview") {
-        "gpui-preview"
-    } else if version.contains('-') {
+    if version.contains('-') {
         "beta"
     } else {
         "stable"
@@ -101,8 +98,8 @@ mod tests {
     const COMPATIBLE_INDEX: &str = r#"{
         "runtimes": [{
             "supports": {
-                "oxidetermChannels": ["gpui-preview"],
-                "oxidetermVersions": [">=2.0.0-gpui-preview.0 <3.0.0"],
+                "oxidetermChannels": ["beta"],
+                "oxidetermVersions": [">=2.0.0-beta.0 <3.0.0"],
                 "pluginProtocol": [1],
                 "wasmGuestAbi": [1],
                 "wasi": ["preview1"]
@@ -112,11 +109,11 @@ mod tests {
 
     #[test]
     fn index_requires_the_current_channel_and_protocol_contract() {
-        validate_runtime_index(COMPATIBLE_INDEX, "2.0.0-gpui-preview.15").unwrap();
+        validate_runtime_index(COMPATIBLE_INDEX, "2.0.0-beta.15").unwrap();
 
         let incompatible =
             COMPATIBLE_INDEX.replace("\"pluginProtocol\": [1]", "\"pluginProtocol\": [2]");
-        let error = validate_runtime_index(&incompatible, "2.0.0-gpui-preview.15").unwrap_err();
+        let error = validate_runtime_index(&incompatible, "2.0.0-beta.15").unwrap_err();
         assert!(error.contains("does not declare support"));
     }
 

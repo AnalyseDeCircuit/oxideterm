@@ -681,11 +681,16 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
         "zh-CN",
         &mut validation_warnings,
     );
+    // Retired channels fall back to the channel appropriate for this build so
+    // shared settings from older installations remain loadable.
     sanitize_enum(
         &mut settings,
         &["general", "updateChannel"],
         &["stable", "beta"],
-        "beta",
+        match UpdateChannel::default() {
+            UpdateChannel::Stable => "stable",
+            UpdateChannel::Beta => "beta",
+        },
         &mut validation_warnings,
     );
     sanitize_enum(
@@ -852,6 +857,25 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retired_gpui_preview_channel_migrates_to_the_build_default() {
+        let sanitized = sanitize_settings_value(json!({
+            "general": { "updateChannel": "gpui-preview" }
+        }))
+        .expect("sanitize retired update channel");
+
+        assert_eq!(
+            sanitized.settings.general.update_channel,
+            UpdateChannel::default()
+        );
+        assert!(
+            sanitized
+                .validation_warnings
+                .iter()
+                .any(|warning| warning.contains("general.updateChannel"))
+        );
+    }
 
     #[test]
     fn legacy_ai_memory_migrates_once_to_an_itemized_entry() {

@@ -2,14 +2,14 @@
 
 This is a beta OxideTerm native desktop release.
 
-Use this channel when you want to test changes before they reach the stable channel, but do not need the faster-moving GPUI preview track. Beta builds may include packaging, updater, compatibility, and workflow changes that still need wider validation.
+Use this channel when you want to test changes before they reach the stable channel. Beta builds may include packaging, updater, compatibility, and workflow changes that still need wider validation.
 
 ## What This Beta Is
 
 - A pre-stable OxideTerm desktop build.
 - Intended for users who can tolerate small regressions and report issues with enough detail to reproduce them.
 - Published with updater metadata for the beta channel.
-- More conservative than GPUI preview, but not as stable as the stable channel.
+- Less stable than the stable channel and intended for pre-release validation.
 
 <!-- RELEASE_CHANGELOG -->
 

@@ -74,8 +74,8 @@ mod tests {
     fn parses_tauri_manifest_aliases_and_selects_target() {
         let manifest: NativeUpdateManifest = serde_json::from_str(
             r#"{
-              "version": "1.2.0-gpui-preview.1",
-              "notes": "Preview notes",
+              "version": "1.2.0-beta.1",
+              "notes": "Beta notes",
               "pub_date": "2026-05-27T00:00:00Z",
               "platforms": {
                 "darwin-aarch64": {
@@ -89,11 +89,11 @@ mod tests {
 
         let target = PlatformTarget::new("macos", "aarch64");
         let package = manifest
-            .select_package("1.2.0-gpui-preview.0", &target, InstallFlavor::MacApp)
+            .select_package("1.2.0-beta.0", &target, InstallFlavor::MacApp)
             .expect("newer target package should be selected");
 
         assert_eq!(package.platform_key, "darwin-aarch64");
-        assert_eq!(package.body.as_deref(), Some("Preview notes"));
+        assert_eq!(package.body.as_deref(), Some("Beta notes"));
         assert_eq!(package.signature.as_deref(), Some("sig"));
     }
 

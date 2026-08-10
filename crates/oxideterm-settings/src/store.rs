@@ -514,7 +514,7 @@ mod tests {
         DEFAULT_WINDOW_OPACITY, RenderProfile,
         model::{
             ConflictAction, FontFamily, IdeAgentMode, Language, RendererType, UpdateChannel,
-            default_update_channel_for_version, is_gpui_preview_version, is_prerelease_version,
+            default_update_channel_for_version, is_prerelease_version,
         },
     };
 
@@ -596,8 +596,6 @@ mod tests {
         assert!(!is_prerelease_version("1.4.2"));
         assert!(is_prerelease_version("1.4.2-beta.0"));
         assert!(is_prerelease_version("1.4.2-preview.1"));
-        assert!(is_gpui_preview_version("1.4.2-gpui-preview.0"));
-        assert!(is_gpui_preview_version("1.4.2-native-preview.0"));
         assert_eq!(
             default_update_channel_for_version("1.4.2"),
             UpdateChannel::Stable
@@ -607,8 +605,8 @@ mod tests {
             UpdateChannel::Beta
         );
         assert_eq!(
-            default_update_channel_for_version("1.4.2-gpui-preview.0"),
-            UpdateChannel::GpuiPreview
+            default_update_channel_for_version("1.4.2-preview.0"),
+            UpdateChannel::Beta
         );
     }
 

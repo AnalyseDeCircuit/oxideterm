@@ -548,46 +548,6 @@ mod tests {
     }
 
     #[test]
-    fn preview_stable_upgrade_strings_exist_in_every_locale() {
-        let locales = [
-            Locale::De,
-            Locale::En,
-            Locale::EsEs,
-            Locale::FrFr,
-            Locale::It,
-            Locale::Ja,
-            Locale::Ko,
-            Locale::PtBr,
-            Locale::Vi,
-            Locale::ZhCn,
-            Locale::ZhTw,
-        ];
-        let keys = [
-            "settings_view.help.preview_stable_upgrade_title",
-            "settings_view.help.preview_stable_upgrade_hint",
-            "settings_view.help.download_stable",
-        ];
-        let english = I18n::new(Locale::En);
-
-        // Cross-channel protection must remain understandable without falling
-        // back to raw keys or English in any shipped locale.
-        for locale in locales {
-            let i18n = I18n::new(locale);
-            for key in keys {
-                let translated = i18n.t(key);
-                assert_ne!(translated, key, "{locale:?} missing {key}");
-                if locale != Locale::En {
-                    assert_ne!(
-                        translated,
-                        english.t(key),
-                        "{locale:?} falls back for {key}"
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
     fn major_version_migration_strings_exist_in_every_locale() {
         let locales = [
             Locale::De,

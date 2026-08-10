@@ -1894,8 +1894,8 @@ fn wrap_file_manager_virtual_text_line(line: &str, max_columns: usize) -> Vec<St
     }
 
     // Tauri renders CodeHighlight with CSS `whitespace-pre` and browser
-    // scrolling. GPUI preview keeps a fixed row-height virtual list, so long
-    // physical lines become stable visual rows instead of oversized elements.
+    // scrolling. The native preview surface keeps a fixed row-height virtual
+    // list, so long physical lines become stable visual rows instead of oversized elements.
     let max_columns = max_columns.max(1);
     let mut chunks = Vec::new();
     let mut current = String::new();

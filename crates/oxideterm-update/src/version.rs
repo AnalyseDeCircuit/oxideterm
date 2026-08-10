@@ -95,12 +95,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compares_preview_versions_without_semver_dependency() {
-        assert!(is_update_newer(
-            "1.2.0-gpui-preview.2",
-            "1.2.0-gpui-preview.1"
-        ));
-        assert!(is_update_newer("1.2.0", "1.2.0-gpui-preview.9"));
+    fn compares_prerelease_versions_without_semver_dependency() {
+        assert!(is_update_newer("1.2.0-beta.2", "1.2.0-beta.1"));
+        assert!(is_update_newer("1.2.0", "1.2.0-beta.9"));
         assert!(!is_update_newer("1.2.0-beta.1", "1.2.0"));
     }
 }

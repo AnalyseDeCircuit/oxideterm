@@ -9,7 +9,7 @@ use oxideterm_settings::{
     PersistedSettings, RECOMMENDED_FOCUS_HANDOFF_COMMANDS, RemoteShellIntegrationMode,
     SettingsApplicationProxyMode, SettingsUpstreamProxyAuth, SettingsUpstreamProxyConfig,
     SettingsUpstreamProxyProtocol, UpdateChannel, UpdateProxyMode, UpdateProxyProtocol,
-    create_default_highlight_rule, is_gpui_preview_version, reindex_highlight_rules,
+    create_default_highlight_rule, reindex_highlight_rules,
 };
 use oxideterm_settings_model::{
     AcpAgentPreset, AiProviderModelChipItem, AiProviderModelPanel, AiSettingsPage,
