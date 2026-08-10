@@ -1429,6 +1429,7 @@
         "app.toggleSidebar": "サイドバー切替",
         "app.commandPalette": "コマンドパレット",
         "app.zenMode": "禅モード切替",
+        "app.toggleFullscreen": "フルスクリーンを切り替え",
         "app.nextTab": "次のタブ",
         "app.prevTab": "前のタブ",
         "app.navBack": "戻る",

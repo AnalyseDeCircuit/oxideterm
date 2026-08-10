@@ -2,6 +2,19 @@ use super::*;
 
 const TITLEBAR_CONTROL_ICON_SIZE: f32 = 12.0;
 
+fn uses_system_titlebar_double_click(is_macos: bool, click_count: usize) -> bool {
+    is_macos && click_count == 2
+}
+
+fn handle_window_drag_mouse_down(event: &MouseDownEvent, window: &Window) {
+    if uses_system_titlebar_double_click(cfg!(target_os = "macos"), event.click_count) {
+        // AppKit applies the user's configured titlebar double-click action.
+        window.titlebar_double_click();
+    } else {
+        window.start_window_move();
+    }
+}
+
 fn window_titlebar_visibility(
     is_linux: bool,
     is_fullscreen: bool,
@@ -96,8 +109,8 @@ impl WorkspaceApp {
             .when(!cfg!(target_os = "windows"), |region| {
                 region.on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(|_this, _event, window, cx| {
-                        window.start_window_move();
+                    cx.listener(|_this, event, window, cx| {
+                        handle_window_drag_mouse_down(event, window);
                         cx.stop_propagation();
                     }),
                 )
@@ -128,8 +141,8 @@ impl WorkspaceApp {
             .when(!cfg!(target_os = "windows"), |region| {
                 region.on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(|_this, _event, window, cx| {
-                        window.start_window_move();
+                    cx.listener(|_this, event, window, cx| {
+                        handle_window_drag_mouse_down(event, window);
                         cx.stop_propagation();
                     }),
                 )
@@ -292,7 +305,7 @@ impl WorkspaceApp {
 
 #[cfg(test)]
 mod tests {
-    use super::window_titlebar_visibility;
+    use super::{uses_system_titlebar_double_click, window_titlebar_visibility};
 
     #[test]
     fn linux_titlebar_visibility_respects_preference_and_fullscreen() {
@@ -305,5 +318,13 @@ mod tests {
     fn other_platforms_ignore_linux_titlebar_preference() {
         assert!(window_titlebar_visibility(false, false, false));
         assert!(!window_titlebar_visibility(false, true, true));
+    }
+
+    #[test]
+    fn only_macos_double_click_uses_the_system_titlebar_action() {
+        assert!(!uses_system_titlebar_double_click(true, 1));
+        assert!(uses_system_titlebar_double_click(true, 2));
+        assert!(!uses_system_titlebar_double_click(true, 3));
+        assert!(!uses_system_titlebar_double_click(false, 2));
     }
 }

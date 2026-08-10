@@ -1429,6 +1429,7 @@
         "app.toggleSidebar": "Basculer la barre latérale",
         "app.commandPalette": "Palette de commandes",
         "app.zenMode": "Basculer le mode zen",
+        "app.toggleFullscreen": "Activer ou désactiver le plein écran",
         "app.nextTab": "Onglet suivant",
         "app.prevTab": "Onglet précédent",
         "app.navBack": "Retour",

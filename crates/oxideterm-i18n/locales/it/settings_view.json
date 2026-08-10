@@ -1429,6 +1429,7 @@
         "app.toggleSidebar": "Mostra/nascondi barra laterale",
         "app.commandPalette": "Tavolozza comandi",
         "app.zenMode": "Modalità zen",
+        "app.toggleFullscreen": "Attiva/disattiva schermo intero",
         "app.nextTab": "Scheda successiva",
         "app.prevTab": "Scheda precedente",
         "app.navBack": "Indietro",

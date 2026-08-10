@@ -599,6 +599,12 @@ impl WorkspaceApp {
             .on_action(cx.listener(|this, _: &ZenMode, _window, cx| {
                 this.toggle_zen_mode(cx);
             }))
+            .on_action(cx.listener(|_this, _: &ToggleFullscreen, window, cx| {
+                // Full-screen transitions stay owned by the native window and
+                // must not fall through as terminal input.
+                window.toggle_fullscreen();
+                cx.stop_propagation();
+            }))
             .on_action(cx.listener(|this, _: &NextTab, window, cx| {
                 this.next_tab(true, window, cx);
                 // GPUI dispatches the action before the raw key event. Stop here so the

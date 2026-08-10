@@ -1429,6 +1429,7 @@
         "app.toggleSidebar": "Bật/tắt thanh bên",
         "app.commandPalette": "Bảng lệnh",
         "app.zenMode": "Chế độ zen",
+        "app.toggleFullscreen": "Bật/tắt toàn màn hình",
         "app.nextTab": "Tab tiếp theo",
         "app.prevTab": "Tab trước",
         "app.navBack": "Điều hướng lùi",

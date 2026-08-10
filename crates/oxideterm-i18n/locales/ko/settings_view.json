@@ -1429,6 +1429,7 @@
         "app.toggleSidebar": "사이드바 전환",
         "app.commandPalette": "명령 팔레트",
         "app.zenMode": "젠 모드 전환",
+        "app.toggleFullscreen": "전체 화면 전환",
         "app.nextTab": "다음 탭",
         "app.prevTab": "이전 탭",
         "app.navBack": "뒤로 이동",

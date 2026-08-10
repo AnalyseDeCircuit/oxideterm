@@ -9,7 +9,8 @@ use crate::{
     GoToTab9, NewConnection, NewTerminal, NextTab, OpenSettings, PaletteAiSidebar,
     PaletteBroadcast, PaletteEventLog, Paste, PrevTab, Quit, ShellLauncher, ShowShortcuts,
     SplitHorizontal, SplitNavLeft, SplitNavRight, SplitVertical, TerminalAiPanel,
-    TerminalClearScreen, TerminalFreeTypeMode, TerminalRecording, ToggleSidebar, ZenMode,
+    TerminalClearScreen, TerminalFreeTypeMode, TerminalRecording, ToggleFullscreen, ToggleSidebar,
+    ZenMode,
 };
 
 const CONTEXT: &str = "Workspace";
@@ -114,6 +115,16 @@ impl KeyCombo {
             ctrl: false,
             shift: false,
             alt: true,
+            meta: true,
+        }
+    }
+
+    fn cmd_ctrl(key: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
             meta: true,
         }
     }
@@ -233,6 +244,12 @@ pub(crate) static ACTION_DEFINITIONS: LazyLock<Vec<ActionDefinition>> = LazyLock
             ActionScope::Global,
             KeyCombo::cmd_shift("z"),
             KeyCombo::ctrl_shift("z"),
+        ),
+        def(
+            "app.toggleFullscreen",
+            ActionScope::Global,
+            KeyCombo::cmd_ctrl("f"),
+            KeyCombo::plain("f11"),
         ),
         def(
             "app.nextTab",
@@ -945,6 +962,7 @@ fn push_action_binding(bindings: &mut Vec<KeyBinding>, action_id: &str, combo: &
         "app.toggleSidebar" => push_binding!(ToggleSidebar),
         "app.commandPalette" => push_binding!(CommandPalette, workspace_and_global),
         "app.zenMode" => push_binding!(ZenMode),
+        "app.toggleFullscreen" => push_binding!(ToggleFullscreen),
         "app.nextTab" => push_binding!(NextTab),
         "app.prevTab" => push_binding!(PrevTab),
         "app.goToTab1" => push_binding!(GoToTab1),
@@ -989,7 +1007,7 @@ mod tests {
 
     #[test]
     fn tauri_default_registry_contains_all_orchestrated_actions() {
-        assert_eq!(ACTION_DEFINITIONS.len(), 44);
+        assert_eq!(ACTION_DEFINITIONS.len(), 45);
         assert!(action_definition("app.commandPalette").is_some());
         assert_eq!(
             action_definition("app.quit")
@@ -1006,6 +1024,11 @@ mod tests {
         );
         assert!(action_definition("terminal.toggleFreeTypeMode").is_some());
         assert!(action_definition("palette.broadcast").is_some());
+        assert_eq!(
+            action_definition("app.toggleFullscreen")
+                .map(|definition| definition.default_combo(KeybindingSide::Mac)),
+            Some(&KeyCombo::cmd_ctrl("f"))
+        );
         assert_eq!(
             action_definition("app.closeTab").map(|definition| definition.terminal_behavior),
             Some(TerminalBehavior::Never)
@@ -1038,6 +1061,41 @@ mod tests {
                 .is_empty()
             );
         }
+    }
+
+    #[test]
+    fn fullscreen_shortcut_defaults_are_registered_without_conflicts() {
+        let definition =
+            action_definition("app.toggleFullscreen").expect("full-screen shortcut definition");
+        let overrides = Map::new();
+
+        assert_eq!(
+            definition.default_combo(KeybindingSide::Mac),
+            &KeyCombo::cmd_ctrl("f")
+        );
+        assert_eq!(
+            definition.default_combo(KeybindingSide::Other),
+            &KeyCombo::plain("f11")
+        );
+        for side in [KeybindingSide::Mac, KeybindingSide::Other] {
+            assert!(
+                conflicts_for_combo(
+                    definition.id,
+                    definition.default_combo(side),
+                    &overrides,
+                    side,
+                )
+                .is_empty()
+            );
+        }
+
+        let current_default = definition.default_combo(KeybindingSide::current());
+        let keystroke = Keystroke::parse(&combo_to_gpui(current_default))
+            .expect("registered full-screen keystroke");
+        assert!(startup_key_bindings(&overrides).iter().any(|binding| {
+            binding.action().as_any().is::<ToggleFullscreen>()
+                && binding.match_keystrokes(&[keystroke.clone()]) == Some(false)
+        }));
     }
 
     #[test]

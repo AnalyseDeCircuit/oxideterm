@@ -1429,6 +1429,7 @@
         "app.toggleSidebar": "Seitenleiste umschalten",
         "app.commandPalette": "Befehlspalette",
         "app.zenMode": "Zen-Modus umschalten",
+        "app.toggleFullscreen": "Vollbild umschalten",
         "app.nextTab": "Nächster Tab",
         "app.prevTab": "Vorheriger Tab",
         "app.navBack": "Zurück navigieren",

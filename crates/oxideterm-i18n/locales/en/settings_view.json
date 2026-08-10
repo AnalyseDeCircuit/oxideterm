@@ -1429,6 +1429,7 @@
         "app.toggleSidebar": "Toggle Sidebar",
         "app.commandPalette": "Command Palette",
         "app.zenMode": "Toggle Zen Mode",
+        "app.toggleFullscreen": "Toggle Full Screen",
         "app.nextTab": "Next Tab",
         "app.prevTab": "Previous Tab",
         "app.navBack": "Navigate Back",

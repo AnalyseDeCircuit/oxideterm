@@ -1429,6 +1429,7 @@
         "app.toggleSidebar": "Alternar barra lateral",
         "app.commandPalette": "Paleta de comandos",
         "app.zenMode": "Alternar modo zen",
+        "app.toggleFullscreen": "Alternar tela cheia",
         "app.nextTab": "Próxima aba",
         "app.prevTab": "Aba anterior",
         "app.navBack": "Navegar para trás",

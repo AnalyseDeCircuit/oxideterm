@@ -40,6 +40,7 @@ actions!(
         ToggleSidebar,
         CommandPalette,
         ZenMode,
+        ToggleFullscreen,
         NextTab,
         PrevTab,
         GoToTab1,

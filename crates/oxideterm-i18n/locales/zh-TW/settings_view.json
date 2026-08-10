@@ -1429,6 +1429,7 @@
         "app.toggleSidebar": "切換側邊欄",
         "app.commandPalette": "指令面板",
         "app.zenMode": "切換禪模式",
+        "app.toggleFullscreen": "切換全螢幕",
         "app.nextTab": "下一個分頁",
         "app.prevTab": "上一個分頁",
         "app.navBack": "向後導覽",
