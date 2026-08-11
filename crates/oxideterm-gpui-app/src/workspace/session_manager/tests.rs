@@ -598,7 +598,6 @@ pub(super) fn oxide_dialog_inputs_are_active_outside_the_session_manager_tab() {
     assert!(session_manager_input_is_active(
         SessionManagerInput::OxideExportPassword,
         false,
-        false,
         None,
         Some(&export_dialog),
     ));
@@ -608,7 +607,6 @@ pub(super) fn oxide_dialog_inputs_are_active_outside_the_session_manager_tab() {
     assert!(session_manager_input_is_active(
         SessionManagerInput::OxideImportPassword,
         false,
-        false,
         Some(&import_dialog),
         None,
     ));
@@ -616,32 +614,12 @@ pub(super) fn oxide_dialog_inputs_are_active_outside_the_session_manager_tab() {
     assert!(!session_manager_input_is_active(
         SessionManagerInput::Search,
         false,
-        false,
         None,
         None,
     ));
     assert!(session_manager_input_is_active(
         SessionManagerInput::Search,
         true,
-        false,
-        None,
-        None,
-    ));
-}
-
-#[test]
-pub(super) fn saved_sidebar_search_is_active_only_while_its_sidebar_is_visible() {
-    assert!(session_manager_input_is_active(
-        SessionManagerInput::SavedSearch,
-        false,
-        true,
-        None,
-        None,
-    ));
-    assert!(!session_manager_input_is_active(
-        SessionManagerInput::SavedSearch,
-        true,
-        false,
         None,
         None,
     ));
@@ -656,7 +634,6 @@ pub(super) fn busy_oxide_export_does_not_keep_a_stale_text_input_active() {
 
     assert!(!session_manager_input_is_active(
         SessionManagerInput::OxideExportPassword,
-        false,
         false,
         None,
         Some(&export_dialog),

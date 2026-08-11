@@ -1,16 +1,15 @@
-use super::session_manager::{
-    SAVED_CONNECTION_VIRTUAL_OVERSCAN, SAVED_CONNECTION_VIRTUAL_ROW_HEIGHT, SessionManagerInput,
-};
 use super::*;
 use oxideterm_gpui_ui::button::ButtonRadius;
 use oxideterm_gpui_ui::{IconButtonOptions, TreeBranchMetrics, tree_child};
 
-const SESSION_TREE_NODE_HEIGHT: f32 = 32.0;
-const SESSION_TREE_ITEM_HEIGHT: f32 = 28.0;
-const SESSION_TREE_TEXT_SIZE: f32 = 13.0;
-const SESSION_TREE_META_TEXT_SIZE: f32 = 11.0;
-const SESSION_TREE_ICON_SIZE: f32 = 16.0;
-const SESSION_TREE_CHILD_ICON_SIZE: f32 = 14.0;
+// Active sessions are a high-frequency navigator, so keep its density closer
+// to a compact desktop connection list than to a settings or form surface.
+const SESSION_TREE_NODE_HEIGHT: f32 = 28.0;
+const SESSION_TREE_ITEM_HEIGHT: f32 = 24.0;
+const SESSION_TREE_TEXT_SIZE: f32 = 12.0;
+const SESSION_TREE_META_TEXT_SIZE: f32 = 10.0;
+const SESSION_TREE_ICON_SIZE: f32 = 14.0;
+const SESSION_TREE_CHILD_ICON_SIZE: f32 = 12.0;
 // Primary sidebar content needs a small inset below the header divider so the
 // first interactive surface does not visually merge with workspace chrome.
 const PRIMARY_SIDEBAR_CONTENT_TOP_INSET: f32 = 4.0;
@@ -108,7 +107,9 @@ pub(super) enum ActiveSessionSidebarViewMode {
 impl SidebarSection {
     pub(super) fn from_settings_key(key: &str) -> Self {
         match key {
-            "connections" | "saved" => Self::Connections,
+            // The retired saved-connections sidebar now restores the active
+            // session navigator while the full manager remains a workspace tab.
+            "connections" | "saved" => Self::Sessions,
             "sftp" => Self::Sftp,
             "forwards" => Self::Forwards,
             "runtime" => Self::Runtime,
@@ -133,7 +134,8 @@ impl SidebarSection {
     pub(super) fn as_settings_key(self) -> &'static str {
         match self {
             Self::Sessions => "sessions",
-            // Tauri persists the saved-connections sidebar as `saved`.
+            // Keep the activity identity stable; persistence stores the
+            // effective Sessions panel instead of this tab-only entry.
             Self::Connections => "saved",
             Self::Sftp => "sftp",
             Self::Forwards => "forwards",
@@ -158,14 +160,14 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn effective_sidebar_panel_section(&self) -> SidebarSection {
         match self.active_sidebar_section {
             SidebarSection::Sessions
-            | SidebarSection::Connections
             | SidebarSection::Sftp
             | SidebarSection::Forwards
             | SidebarSection::Extensions
             | SidebarSection::CloudSync => self.active_sidebar_section,
             // Tauri separates activity-bar tab buttons from sidebar sections.
             // Keep tab-only entries from replacing the Sessions sidebar body.
-            SidebarSection::Terminal
+            SidebarSection::Connections
+            | SidebarSection::Terminal
             | SidebarSection::Runtime
             | SidebarSection::Network
             | SidebarSection::Assistant
@@ -184,7 +186,6 @@ mod activity;
 mod ai;
 mod helpers;
 mod region;
-mod saved;
 mod sessions;
 mod state;
 mod titlebar;
@@ -209,7 +210,6 @@ mod sidebar_persistence_tests {
     fn sidebar_sections_roundtrip_persisted_settings_keys() {
         let sections = [
             SidebarSection::Sessions,
-            SidebarSection::Connections,
             SidebarSection::Sftp,
             SidebarSection::Forwards,
             SidebarSection::Runtime,
@@ -236,10 +236,14 @@ mod sidebar_persistence_tests {
     }
 
     #[test]
-    fn sidebar_section_parser_accepts_legacy_saved_connection_alias() {
+    fn retired_saved_connection_sidebar_restores_active_sessions() {
         assert_eq!(
             SidebarSection::from_settings_key("connections"),
-            SidebarSection::Connections
+            SidebarSection::Sessions
+        );
+        assert_eq!(
+            SidebarSection::from_settings_key("saved"),
+            SidebarSection::Sessions
         );
     }
 }

@@ -254,19 +254,6 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn focus_active_pane(&mut self, window: &mut Window, cx: &mut App) {
         self.clear_ai_sidebar_keyboard_focus(cx);
-        let released_saved_search = self.session_manager.update(cx, |session_manager, cx| {
-            if session_manager.focused_input()
-                != Some(crate::workspace::session_manager::SessionManagerInput::SavedSearch)
-            {
-                return false;
-            }
-            // An explicit pane focus handoff must prevent a previously clicked
-            // sidebar search field from continuing to own terminal keystrokes.
-            session_manager.clear_input_focus(cx)
-        });
-        if released_saved_search {
-            self.ime_marked_text = None;
-        }
         if let Some(pane) = self.active_pane(cx) {
             // A hidden terminal can retain paint operations that reference atlas slots later
             // reused by another surface. Force one fresh frame when the pane becomes active so

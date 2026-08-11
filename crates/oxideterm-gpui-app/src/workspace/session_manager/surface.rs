@@ -345,9 +345,6 @@ impl WorkspaceApp {
                 let changed = self.session_manager.update(cx, |session_manager, cx| {
                     let changed = match input {
                         SessionManagerInput::Search => session_manager.search_query.pop().is_some(),
-                        SessionManagerInput::SavedSearch => {
-                            session_manager.saved_search_query.pop().is_some()
-                        }
                         SessionManagerInput::GroupName => {
                             session_manager.group_name_draft.pop().is_some()
                         }

@@ -13,10 +13,10 @@ pub struct TreeBranchMetrics {
 impl TreeBranchMetrics {
     pub fn tauri_session_tree() -> Self {
         Self {
-            indent_size: 16.0,
-            branch_left: 10.0,
-            branch_top: 14.0,
-            branch_width: 8.0,
+            indent_size: 14.0,
+            branch_left: 8.0,
+            branch_top: 12.0,
+            branch_width: 7.0,
             line_alpha: 0x26,
         }
     }

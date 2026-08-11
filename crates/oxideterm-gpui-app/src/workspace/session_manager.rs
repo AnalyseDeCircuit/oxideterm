@@ -100,8 +100,6 @@ const MANAGER_SORT_MENU_WIDTH: f32 = 184.0; // Sort fields reuse the compact too
 const MANAGER_SORT_MENU_HEIGHT: f32 = 220.0; // Seven compact radio rows plus menu padding.
 const MANAGER_BATCH_MOVE_MENU_WIDTH: f32 = 220.0; // Tauri batch move DropdownMenuContent natural width.
 const MANAGER_BATCH_MOVE_MENU_HEIGHT: f32 = 260.0; // Keeps long group lists scrollable without covering the viewport.
-pub(super) const SAVED_CONNECTION_VIRTUAL_ROW_HEIGHT: f32 = 43.0; // Tauri Sidebar SAVED_CONNECTION_ROW_HEIGHT
-pub(super) const SAVED_CONNECTION_VIRTUAL_OVERSCAN: usize = 12; // Tauri savedListVirtualizer overscan
 const MANAGER_RESPONSIVE_SM: f32 = 640.0;
 const MANAGER_RESPONSIVE_MD: f32 = 768.0;
 const OXIDE_APP_SETTINGS_SECTIONS: &[&str] = ALL_OXIDE_SETTINGS_SECTIONS;
@@ -129,7 +127,6 @@ const OXIDE_NEW_BADGE_BG_ALPHA: u32 = 0x26; // Tauri bg-green-500/15
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum SessionManagerInput {
     Search,
-    SavedSearch,
     GroupName,
     OxideImportPassword,
     OxideExportPassword,
@@ -141,7 +138,6 @@ impl SessionManagerInput {
     pub(super) fn anchor_key(self) -> u64 {
         match self {
             Self::Search => 1,
-            Self::SavedSearch => 2,
             Self::GroupName => 3,
             Self::OxideImportPassword => 4,
             Self::OxideExportPassword => 5,
@@ -391,7 +387,6 @@ pub(super) struct SessionManagerState {
     pub(super) sort_field: SessionSortField,
     pub(super) sort_direction: SortDirection,
     pub(super) search_query: String,
-    pub(super) saved_search_query: String,
     pub(super) selected_items: HashSet<SessionManagerSelectionTarget>,
     pub(super) view_mode_menu_open: bool,
     pub(super) sort_menu_open: bool,
@@ -411,7 +406,6 @@ pub(super) struct SessionManagerState {
     pub(super) oxide_export_dialog: Option<OxideExportDialogState>,
     pub(super) status: Option<String>,
     pub(super) ssh_config_hosts: Vec<SshConfigHost>,
-    pub(super) saved_sidebar_scroll_handle: UniformListScrollHandle,
     pub(super) main_grid_list_state: ListState,
     pub(super) main_grid_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) main_list_state: ListState,
@@ -453,7 +447,6 @@ impl Default for SessionManagerState {
             sort_field: SessionSortField::LastUsed,
             sort_direction: SortDirection::Desc,
             search_query: String::new(),
-            saved_search_query: String::new(),
             selected_items: HashSet::new(),
             view_mode_menu_open: false,
             sort_menu_open: false,
@@ -473,7 +466,6 @@ impl Default for SessionManagerState {
             oxide_export_dialog: None,
             status: None,
             ssh_config_hosts: Vec::new(),
-            saved_sidebar_scroll_handle: UniformListScrollHandle::new(),
             main_grid_list_state: tauri_virtual_list_state(
                 0,
                 ListAlignment::Top,
@@ -614,7 +606,6 @@ impl SessionManagerState {
     pub(in crate::workspace) fn input_value(&self, input: SessionManagerInput) -> Option<&str> {
         match input {
             SessionManagerInput::Search => Some(&self.search_query),
-            SessionManagerInput::SavedSearch => Some(&self.saved_search_query),
             SessionManagerInput::GroupName => Some(&self.group_name_draft),
             SessionManagerInput::OxideImportPassword => self
                 .oxide_import_dialog
@@ -644,7 +635,6 @@ impl SessionManagerState {
     ) -> bool {
         let value = match input {
             SessionManagerInput::Search => &mut self.search_query,
-            SessionManagerInput::SavedSearch => &mut self.saved_search_query,
             SessionManagerInput::GroupName => {
                 self.group_editor_error = None;
                 &mut self.group_name_draft

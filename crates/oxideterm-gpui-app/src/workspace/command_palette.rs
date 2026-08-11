@@ -2413,13 +2413,6 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             action: PaletteAction::Sidebar(SidebarSection::Forwards),
         },
         CommandSpec {
-            id: "cmd:sidebar_connections",
-            label_key: "command_palette.cmd_sidebar_connections".into(),
-            icon: LucideIcon::Server,
-            shortcut_action: None,
-            action: PaletteAction::Sidebar(SidebarSection::Connections),
-        },
-        CommandSpec {
             id: "cmd:sidebar_ai",
             label_key: "command_palette.cmd_sidebar_ai".into(),
             icon: LucideIcon::Bot,
@@ -2758,19 +2751,6 @@ mod tests {
             .expect("version migration command");
 
         assert!(matches!(spec.action, PaletteAction::ShowVersionMigration));
-    }
-
-    #[test]
-    fn sidebar_connections_command_targets_saved_connections_panel() {
-        let spec = command_palette_specs()
-            .into_iter()
-            .find(|spec| spec.id == "cmd:sidebar_connections")
-            .expect("sidebar connections command");
-
-        assert!(matches!(
-            spec.action,
-            PaletteAction::Sidebar(SidebarSection::Connections)
-        ));
     }
 
     #[test]

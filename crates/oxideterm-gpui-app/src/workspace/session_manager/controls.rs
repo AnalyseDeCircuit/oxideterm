@@ -191,19 +191,13 @@ impl WorkspaceApp {
                 } else {
                     rgb(theme.text)
                 })
-                .when(
-                    matches!(
-                        target,
-                        SessionManagerInput::Search | SessionManagerInput::SavedSearch
-                    ),
-                    |input| {
-                        input.child(Self::render_lucide_icon(
-                            LucideIcon::Search,
-                            16.0,
-                            rgb(theme.text_muted),
-                        ))
-                    },
-                )
+                .when(target == SessionManagerInput::Search, |input| {
+                    input.child(Self::render_lucide_icon(
+                        LucideIcon::Search,
+                        16.0,
+                        rgb(theme.text_muted),
+                    ))
+                })
                 .child(
                     div()
                         .flex_1()
