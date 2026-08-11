@@ -409,6 +409,15 @@ pub(in crate::workspace) struct RemoteDesktopSessionEntity {
 }
 
 impl RemoteDesktopSessionEntity {
+    pub(in crate::workspace) fn active_session_protocol(&self) -> RemoteDesktopProtocol {
+        self.profile.protocol
+    }
+
+    pub(in crate::workspace) fn active_session_status(&self) -> RemoteDesktopSessionStatus {
+        // The protocol entity remains the authoritative source for sidebar liveness.
+        self.state.snapshot().status
+    }
+
     pub(in crate::workspace) fn ai_can_disconnect(&self) -> bool {
         matches!(
             self.state.snapshot().status,

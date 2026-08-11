@@ -1,4 +1,38 @@
 use super::*;
+use oxideterm_remote_desktop::{RemoteDesktopProtocol, RemoteDesktopSessionStatus};
+use oxideterm_terminal::TerminalSessionKind;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum StandaloneActiveSessionKind {
+    Mosh,
+    Telnet,
+    Serial,
+    Rdp,
+    Vnc,
+}
+
+impl StandaloneActiveSessionKind {
+    fn icon(self) -> LucideIcon {
+        match self {
+            Self::Mosh => LucideIcon::Wifi,
+            Self::Telnet => LucideIcon::Terminal,
+            Self::Serial => LucideIcon::Cable,
+            Self::Rdp | Self::Vnc => LucideIcon::Monitor,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum StandaloneActiveSessionTarget {
+    Terminal(TerminalSessionId),
+    RemoteDesktop(TabId),
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct StandaloneActiveSession {
+    kind: StandaloneActiveSessionKind,
+    target: StandaloneActiveSessionTarget,
+}
 
 #[derive(Clone)]
 pub(in crate::workspace) struct ActiveSessionSidebarRow {
@@ -13,7 +47,48 @@ pub(in crate::workspace) struct ActiveSessionSidebarRow {
     depth: usize,
     is_last: bool,
     has_children: bool,
-    mosh_session_id: Option<TerminalSessionId>,
+    standalone_session: Option<StandaloneActiveSession>,
+}
+
+fn standalone_terminal_kind(kind: TerminalSessionKind) -> Option<StandaloneActiveSessionKind> {
+    match kind {
+        TerminalSessionKind::Mosh => Some(StandaloneActiveSessionKind::Mosh),
+        TerminalSessionKind::Telnet => Some(StandaloneActiveSessionKind::Telnet),
+        TerminalSessionKind::Serial => Some(StandaloneActiveSessionKind::Serial),
+        TerminalSessionKind::LocalPty | TerminalSessionKind::SshPty => None,
+    }
+}
+
+fn standalone_remote_desktop_kind(protocol: RemoteDesktopProtocol) -> StandaloneActiveSessionKind {
+    match protocol {
+        RemoteDesktopProtocol::Rdp => StandaloneActiveSessionKind::Rdp,
+        RemoteDesktopProtocol::Vnc => StandaloneActiveSessionKind::Vnc,
+    }
+}
+
+fn terminal_lifecycle_readiness(lifecycle: &TerminalLifecycle) -> ActiveSessionReadiness {
+    match lifecycle {
+        TerminalLifecycle::Running => ActiveSessionReadiness::Ready,
+        TerminalLifecycle::Exited(_) => ActiveSessionReadiness::Error,
+        TerminalLifecycle::Closed => ActiveSessionReadiness::Disconnected,
+    }
+}
+
+fn remote_desktop_readiness(status: RemoteDesktopSessionStatus) -> ActiveSessionReadiness {
+    match status {
+        RemoteDesktopSessionStatus::Connected => ActiveSessionReadiness::Ready,
+        RemoteDesktopSessionStatus::Connecting | RemoteDesktopSessionStatus::Reconnecting => {
+            ActiveSessionReadiness::Connecting
+        }
+        RemoteDesktopSessionStatus::Failed => ActiveSessionReadiness::Error,
+        RemoteDesktopSessionStatus::Idle | RemoteDesktopSessionStatus::Disconnected => {
+            ActiveSessionReadiness::Disconnected
+        }
+    }
+}
+
+fn standalone_session_click_should_focus(click_count: usize) -> bool {
+    click_count >= 2
 }
 
 fn session_status_can_remove_from_sidebar(status: ActiveSessionStatus) -> bool {
@@ -190,71 +265,108 @@ impl WorkspaceApp {
                     has_children: flat_node_child_counts
                         .get(&flat_node_id)
                         .is_some_and(|count| *count > 0),
-                    mosh_session_id: None,
+                    standalone_session: None,
                 })
             })
             .collect::<Vec<_>>();
 
-        // A Mosh tab is a complete connection: it never expands into SSH capabilities.
-        for tab in self
-            .tabs(cx)
-            .iter()
-            .filter(|tab| tab.kind == TabKind::MoshTerminal)
-        {
-            let Some(session_id) = tab.active_pane_id.and_then(|pane_id| {
-                tab.root_pane
-                    .as_ref()
-                    .and_then(|root| root.session_id_for_pane(pane_id))
-            }) else {
-                continue;
-            };
-            let readiness = self
-                .tab_host
-                .read(cx)
-                .terminal_location(session_id)
-                .and_then(|location| {
-                    self.tab_host
-                        .read(cx)
-                        .panes()
-                        .get(&location.pane_id)
-                        .map(|pane| pane.read(cx).shared_session())
-                })
-                .and_then(|session| session.lock().mosh_connection_status())
-                .map(|status| match status {
-                    oxideterm_terminal::MoshConnectionStatus::Connecting => {
-                        ActiveSessionReadiness::Connecting
-                    }
-                    oxideterm_terminal::MoshConnectionStatus::Connected => {
-                        ActiveSessionReadiness::Ready
-                    }
-                    oxideterm_terminal::MoshConnectionStatus::Interrupted => {
-                        ActiveSessionReadiness::Error
-                    }
-                })
-                .unwrap_or(ActiveSessionReadiness::Connecting);
-            let node_id = NodeId::new(format!("mosh-session-{}", session_id.0));
-            rows.push(ActiveSessionSidebarRow {
-                node_id,
-                parent_id: None,
-                saved_connection_id: None,
-                title: tab.title.clone(),
-                host: String::new(),
-                username: String::new(),
-                port: 0,
-                node_view: ActiveSessionNode {
-                    id: format!("mosh-session-{}", session_id.0),
-                    title: tab.title.clone(),
-                    port: 0,
-                    terminal_ids: vec![session_id],
-                    readiness,
-                },
-                depth: 0,
-                is_last: true,
-                has_children: false,
-                mosh_session_id: Some(session_id),
-            });
-        }
+        // Standalone protocols own one connection row and never expose SSH capabilities.
+        rows.extend(
+            self.tabs(cx)
+                .iter()
+                .filter_map(|tab| self.standalone_active_session_sidebar_row(tab, cx)),
+        );
         rows
+    }
+
+    fn standalone_active_session_sidebar_row(
+        &self,
+        tab: &Tab,
+        cx: &App,
+    ) -> Option<ActiveSessionSidebarRow> {
+        let (standalone_session, readiness, terminal_ids, row_id) =
+            if tab.kind == TabKind::RemoteDesktop {
+                let session = self.remote_desktop.read(cx).session(tab.id)?;
+                let session = session.read(cx);
+                let protocol = session.active_session_protocol();
+                (
+                    StandaloneActiveSession {
+                        kind: standalone_remote_desktop_kind(protocol),
+                        target: StandaloneActiveSessionTarget::RemoteDesktop(tab.id),
+                    },
+                    remote_desktop_readiness(session.active_session_status()),
+                    Vec::new(),
+                    format!("remote-desktop-session-{}", tab.id.0),
+                )
+            } else {
+                let session_id = tab.active_pane_id.and_then(|pane_id| {
+                    tab.root_pane
+                        .as_ref()
+                        .and_then(|root| root.session_id_for_pane(pane_id))
+                })?;
+                let shared_session = self
+                    .tab_host
+                    .read(cx)
+                    .terminal_location(session_id)
+                    .and_then(|location| {
+                        self.tab_host
+                            .read(cx)
+                            .panes()
+                            .get(&location.pane_id)
+                            .map(|pane| pane.read(cx).shared_session())
+                    })?;
+                let terminal = shared_session.lock();
+                let kind = standalone_terminal_kind(terminal.kind())?;
+                let readiness = if kind == StandaloneActiveSessionKind::Mosh {
+                    terminal
+                        .mosh_connection_status()
+                        .map(|status| match status {
+                            oxideterm_terminal::MoshConnectionStatus::Connecting => {
+                                ActiveSessionReadiness::Connecting
+                            }
+                            oxideterm_terminal::MoshConnectionStatus::Connected => {
+                                ActiveSessionReadiness::Ready
+                            }
+                            oxideterm_terminal::MoshConnectionStatus::Interrupted => {
+                                ActiveSessionReadiness::Error
+                            }
+                        })
+                        .unwrap_or(ActiveSessionReadiness::Connecting)
+                } else {
+                    terminal_lifecycle_readiness(&terminal.lifecycle())
+                };
+                (
+                    StandaloneActiveSession {
+                        kind,
+                        target: StandaloneActiveSessionTarget::Terminal(session_id),
+                    },
+                    readiness,
+                    vec![session_id],
+                    format!("standalone-terminal-session-{}", session_id.0),
+                )
+            };
+
+        let node_id = NodeId::new(row_id.clone());
+        Some(ActiveSessionSidebarRow {
+            node_id,
+            parent_id: None,
+            saved_connection_id: None,
+            title: tab.title.clone(),
+            host: String::new(),
+            username: String::new(),
+            port: 0,
+            node_view: ActiveSessionNode {
+                id: row_id,
+                title: tab.title.clone(),
+                port: 0,
+                terminal_ids,
+                readiness,
+            },
+            depth: 0,
+            is_last: true,
+            has_children: false,
+            standalone_session: Some(standalone_session),
+        })
     }
 
     pub(in crate::workspace) fn sync_active_session_sidebar_list_state(
@@ -321,7 +433,7 @@ impl WorkspaceApp {
         row.depth.hash(&mut hasher);
         row.is_last.hash(&mut hasher);
         row.has_children.hash(&mut hasher);
-        row.mosh_session_id.hash(&mut hasher);
+        row.standalone_session.hash(&mut hasher);
         self.expanded_ssh_nodes
             .contains(&row.node_id)
             .hash(&mut hasher);
@@ -690,8 +802,8 @@ impl WorkspaceApp {
         row: ActiveSessionSidebarRow,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if row.mosh_session_id.is_some() {
-            return self.render_mosh_session_sidebar_row(row, cx);
+        if row.standalone_session.is_some() {
+            return self.render_standalone_session_sidebar_row(row, cx);
         }
         let theme = self.tokens.ui;
         let selected = self.active_ssh_node_id.as_ref() == Some(&row.node_id);
@@ -1117,8 +1229,8 @@ impl WorkspaceApp {
         row: ActiveSessionSidebarRow,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if row.mosh_session_id.is_some() {
-            return self.render_mosh_session_sidebar_row(row, cx);
+        if row.standalone_session.is_some() {
+            return self.render_standalone_session_sidebar_row(row, cx);
         }
         let node_id = row.node_id;
         let node_view = row.node_view;
@@ -1405,16 +1517,23 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_mosh_session_sidebar_row(
+    fn render_standalone_session_sidebar_row(
         &self,
         row: ActiveSessionSidebarRow,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(session_id) = row.mosh_session_id else {
+        let Some(session) = row.standalone_session else {
             return div().into_any_element();
         };
         let theme = self.tokens.ui;
-        let active = self.active_terminal_session_id(cx) == Some(session_id);
+        let active = match session.target {
+            StandaloneActiveSessionTarget::Terminal(session_id) => {
+                self.active_terminal_session_id(cx) == Some(session_id)
+            }
+            StandaloneActiveSessionTarget::RemoteDesktop(tab_id) => {
+                self.active_tab_id(cx) == Some(tab_id)
+            }
+        };
         let status = self.session_node_status(row.node_view.status());
         let background = if active {
             rgba((theme.accent << 8) | SESSION_FOCUS_TERMINAL_ACTIVE_BG_ALPHA)
@@ -1435,7 +1554,7 @@ impl WorkspaceApp {
             .hover(move |surface| surface.bg(rgb(theme.bg_hover)))
             .child(self.render_session_status_dot(status))
             .child(Self::render_lucide_icon(
-                LucideIcon::Wifi,
+                session.kind.icon(),
                 SESSION_TREE_ICON_SIZE,
                 rgb(status.text_color),
             ))
@@ -1456,26 +1575,43 @@ impl WorkspaceApp {
                     .items_center()
                     .justify_center()
                     .rounded(px(self.tokens.radii.md))
+                    .cursor_pointer()
                     .hover(move |button| {
                         button.bg(rgba((theme.error << 8) | SESSION_FOCUS_ACTION_HOVER_ALPHA))
                     })
                     .child(Self::render_lucide_icon(
-                        LucideIcon::WifiOff,
+                        LucideIcon::X,
                         13.0,
-                        rgb(theme.error),
+                        rgb(theme.text_muted),
                     ))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, window, cx| {
-                            this.close_terminal_session(session_id, window, cx);
+                            match session.target {
+                                StandaloneActiveSessionTarget::Terminal(session_id) => {
+                                    this.close_terminal_session(session_id, window, cx);
+                                }
+                                StandaloneActiveSessionTarget::RemoteDesktop(tab_id) => {
+                                    this.request_close_tab_by_id(tab_id, window, cx);
+                                }
+                            }
                             cx.stop_propagation();
                         }),
                     ),
             )
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
-                    this.focus_terminal_session(session_id, window, cx);
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    if standalone_session_click_should_focus(event.click_count) {
+                        match session.target {
+                            StandaloneActiveSessionTarget::Terminal(session_id) => {
+                                this.focus_terminal_session(session_id, window, cx);
+                            }
+                            StandaloneActiveSessionTarget::RemoteDesktop(tab_id) => {
+                                this.set_active_tab(tab_id, window, cx);
+                            }
+                        }
+                    }
                     cx.stop_propagation();
                 }),
             )
@@ -1932,5 +2068,53 @@ mod tests {
         assert!(!session_status_can_remove_from_sidebar(
             ActiveSessionStatus::Active
         ));
+    }
+
+    #[test]
+    fn standalone_connection_kinds_exclude_local_and_ssh_terminals() {
+        assert_eq!(
+            standalone_terminal_kind(TerminalSessionKind::Telnet),
+            Some(StandaloneActiveSessionKind::Telnet)
+        );
+        assert_eq!(
+            standalone_terminal_kind(TerminalSessionKind::Serial),
+            Some(StandaloneActiveSessionKind::Serial)
+        );
+        assert_eq!(
+            standalone_terminal_kind(TerminalSessionKind::Mosh),
+            Some(StandaloneActiveSessionKind::Mosh)
+        );
+        assert_eq!(
+            standalone_terminal_kind(TerminalSessionKind::LocalPty),
+            None
+        );
+        assert_eq!(standalone_terminal_kind(TerminalSessionKind::SshPty), None);
+    }
+
+    #[test]
+    fn standalone_connection_readiness_follows_its_backend_owner() {
+        assert_eq!(
+            terminal_lifecycle_readiness(&TerminalLifecycle::Running),
+            ActiveSessionReadiness::Ready
+        );
+        assert_eq!(
+            terminal_lifecycle_readiness(&TerminalLifecycle::Exited(Some(1))),
+            ActiveSessionReadiness::Error
+        );
+        assert_eq!(
+            remote_desktop_readiness(RemoteDesktopSessionStatus::Reconnecting),
+            ActiveSessionReadiness::Connecting
+        );
+        assert_eq!(
+            remote_desktop_readiness(RemoteDesktopSessionStatus::Disconnected),
+            ActiveSessionReadiness::Disconnected
+        );
+    }
+
+    #[test]
+    fn standalone_connection_row_focuses_only_on_double_click() {
+        assert!(!standalone_session_click_should_focus(1));
+        assert!(standalone_session_click_should_focus(2));
+        assert!(standalone_session_click_should_focus(3));
     }
 }
