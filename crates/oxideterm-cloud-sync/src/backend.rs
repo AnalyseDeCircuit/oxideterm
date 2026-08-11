@@ -25,7 +25,8 @@ use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 use crate::{
-    BackendType, CloudSyncSettings, OXIDE_CONTENT_TYPE, StructuredSectionRevisions,
+    BackendType, CloudSyncSettings, OXIDE_CONTENT_TYPE, StructuredManifestSections,
+    StructuredSectionRevisions,
     secrets::{CloudSyncSecrets, backend_uses_basic, backend_uses_token},
 };
 
@@ -733,11 +734,13 @@ fn require_endpoint(config: &CloudSyncSettings) -> Result<()> {
 }
 
 fn normalize_remote_metadata(value: Value, etag: Option<String>) -> Result<RemoteMetadata> {
-    let section_revisions = value
+    let explicit_section_revisions = value
         .get("sectionRevisions")
         .cloned()
         .map(serde_json::from_value)
         .transpose()?;
+    let section_revisions =
+        normalize_structured_section_revisions(explicit_section_revisions, value.get("sections"));
     Ok(RemoteMetadata {
         exists: value.get("exists").and_then(Value::as_bool).unwrap_or(true),
         format: value
@@ -787,6 +790,61 @@ fn normalize_remote_metadata(value: Value, etag: Option<String>) -> Result<Remot
             .and_then(Value::as_str)
             .map(str::to_string),
     })
+}
+
+fn normalize_structured_section_revisions(
+    explicit: Option<StructuredSectionRevisions>,
+    sections: Option<&Value>,
+) -> Option<StructuredSectionRevisions> {
+    let manifest_sections = sections
+        .cloned()
+        .and_then(|value| serde_json::from_value::<StructuredManifestSections>(value).ok());
+    if explicit.is_none() && manifest_sections.is_none() {
+        return None;
+    }
+
+    let mut revisions = explicit.unwrap_or_default();
+    let Some(sections) = manifest_sections else {
+        return Some(revisions);
+    };
+
+    // Older HTTP JSON servers retained only a subset of sectionRevisions, while the full
+    // structured manifest remained available in sections. Recover only missing values so an
+    // explicit provider revision always wins.
+    revisions.connections = revisions
+        .connections
+        .or_else(|| sections.connections.map(|entry| entry.revision));
+    revisions.forwards = revisions
+        .forwards
+        .or_else(|| sections.forwards.map(|entry| entry.revision));
+    revisions.quick_commands = revisions
+        .quick_commands
+        .or_else(|| sections.quick_commands.map(|entry| entry.revision));
+    revisions.serial_profiles = revisions
+        .serial_profiles
+        .or_else(|| sections.serial_profiles.map(|entry| entry.revision));
+    revisions.mosh_profiles = revisions
+        .mosh_profiles
+        .or_else(|| sections.mosh_profiles.map(|entry| entry.revision));
+    revisions.remote_desktop_profiles = revisions
+        .remote_desktop_profiles
+        .or_else(|| sections.remote_desktop_profiles.map(|entry| entry.revision));
+    revisions.sensitive_credentials = revisions
+        .sensitive_credentials
+        .or_else(|| sections.sensitive_credentials.map(|entry| entry.revision));
+    for (section_id, entry) in sections.app_settings {
+        revisions
+            .app_settings
+            .entry(section_id)
+            .or_insert(entry.revision);
+    }
+    for (plugin_id, entry) in sections.plugin_settings {
+        revisions
+            .plugin_settings
+            .entry(plugin_id)
+            .or_insert(entry.revision);
+    }
+    Some(revisions)
 }
 
 async fn response_to_object(response: HttpResponseSnapshot, source: &str) -> Result<RemoteObject> {
@@ -1189,5 +1247,88 @@ mod tests {
         assert_eq!(requests[0].url, requests[1].url);
         assert!(matches!(requests[0].body, HttpRequestBody::Empty));
         assert!(matches!(requests[1].body, HttpRequestBody::Empty));
+    }
+
+    #[test]
+    fn remote_metadata_recovers_revisions_from_structured_sections() {
+        let metadata = normalize_remote_metadata(
+            json!({
+                "format": crate::STRUCTURED_MANIFEST_FORMAT,
+                "revision": "manifest-revision",
+                "sectionRevisions": {
+                    "connections": "explicit-connections"
+                },
+                "sections": {
+                    "connections": {
+                        "revision": "derived-connections",
+                        "path": "structured/connections/derived-connections.json",
+                        "contentType": "application/json"
+                    },
+                    "quickCommands": {
+                        "revision": "quick-commands-revision",
+                        "path": "structured/quick-commands/quick-commands-revision.json",
+                        "contentType": "application/json"
+                    },
+                    "remoteDesktopProfiles": {
+                        "revision": "remote-desktop-revision",
+                        "path": "structured/remote-desktop-profiles/remote-desktop-revision.json",
+                        "contentType": "application/json"
+                    }
+                }
+            }),
+            None,
+        )
+        .unwrap();
+        let revisions = metadata.section_revisions.expect("section revisions");
+
+        assert_eq!(
+            revisions.connections.as_deref(),
+            Some("explicit-connections")
+        );
+        assert_eq!(
+            revisions.quick_commands.as_deref(),
+            Some("quick-commands-revision")
+        );
+        assert_eq!(
+            revisions.remote_desktop_profiles.as_deref(),
+            Some("remote-desktop-revision")
+        );
+    }
+
+    #[tokio::test]
+    async fn http_json_metadata_write_reads_json_etag() {
+        let executor = Arc::new(FakeHttpExecutor::new([response(
+            StatusCode::OK,
+            HeaderMap::new(),
+            json!({
+                "ok": true,
+                "revision": "manifest-revision",
+                "etag": "metadata-etag"
+            }),
+        )]));
+        let backend = CloudSyncBackend::with_http_executor(executor.clone());
+        let config = CloudSyncSettings {
+            backend_type: BackendType::HttpJson,
+            endpoint: "https://sync.example.test".to_string(),
+            namespace: "default".to_string(),
+            ..CloudSyncSettings::default()
+        };
+
+        let result = backend
+            .write_remote_metadata(
+                &config,
+                &CloudSyncSecrets::default(),
+                &json!({ "revision": "manifest-revision" }),
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.revision, "manifest-revision");
+        assert_eq!(result.etag.as_deref(), Some("metadata-etag"));
+        let requests = executor.requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].method, Method::PUT);
+        assert!(requests[0].url.path().ends_with("/metadata"));
     }
 }

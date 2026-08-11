@@ -531,9 +531,19 @@ fn build_app_settings_section_revision_map(
             scope.include_local_terminal_env_vars,
         )
         .with_context(|| format!("failed to export app settings section {section_id}"))?;
-        revisions.insert(section_id, tauri_simple_stable_hash(&snapshot)?);
+        revisions.insert(section_id, app_settings_snapshot_revision(&snapshot)?);
     }
     Ok(revisions)
+}
+
+fn app_settings_snapshot_revision(snapshot: &str) -> Result<String> {
+    let mut value: Value = serde_json::from_str(snapshot)
+        .context("failed to parse app settings snapshot for revision")?;
+    if let Some(envelope) = value.as_object_mut() {
+        // Export time describes the artifact, not the settings content, so it must not make a clean section dirty.
+        envelope.remove("exportedAt");
+    }
+    tauri_simple_stable_hash(&value)
 }
 
 fn build_syncable_settings_payload(settings_store: &SettingsStore) -> Value {
@@ -647,6 +657,22 @@ mod tests {
 
     fn set_failure_after(stage: StructuredApplyStage) {
         FAIL_STRUCTURED_APPLY_AFTER.with(|failure| failure.set(Some(stage)));
+    }
+
+    #[test]
+    fn app_settings_revision_ignores_export_timestamp() {
+        let first = r#"{"format":"oxideterm-settings","exportedAt":100,"sectionIds":["general"],"settings":{"general":{"language":"zh-CN"}}}"#;
+        let second = r#"{"format":"oxideterm-settings","exportedAt":200,"sectionIds":["general"],"settings":{"general":{"language":"zh-CN"}}}"#;
+        let changed = r#"{"format":"oxideterm-settings","exportedAt":200,"sectionIds":["general"],"settings":{"general":{"language":"en"}}}"#;
+
+        assert_eq!(
+            app_settings_snapshot_revision(first).unwrap(),
+            app_settings_snapshot_revision(second).unwrap()
+        );
+        assert_ne!(
+            app_settings_snapshot_revision(second).unwrap(),
+            app_settings_snapshot_revision(changed).unwrap()
+        );
     }
 
     fn empty_apply_arguments(

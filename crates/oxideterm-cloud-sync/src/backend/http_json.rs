@@ -181,10 +181,34 @@ impl CloudSyncBackend {
                 .body(serde_json::to_vec(metadata)?),
         )
         .await?;
-        if !response.status().is_success() {
-            return Err(http_json_error(response, "http_meta", "Failed to write metadata").await);
+        let status = response.status();
+        let response_etag = response
+            .headers()
+            .get(ETAG)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let value = response.json::<Value>().await.unwrap_or(Value::Null);
+        if !status.is_success() || value.get("ok").and_then(Value::as_bool) == Some(false) {
+            return Err(http_json_value_error(
+                status,
+                &value,
+                "http_meta",
+                "Failed to write metadata",
+            ));
         }
-        Ok(response_write_result(response).await)
+        Ok(RemoteWriteResult {
+            revision: value
+                .get("revision")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            // The official server returns the metadata ETag in JSON; proxies may expose it as a header instead.
+            etag: value
+                .get("etag")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or(response_etag),
+        })
     }
 
     pub(super) async fn download_http_json_snapshot_object(
