@@ -225,7 +225,9 @@ fn paint_remote_desktop_surface(
     let mut upload_pixels = 0u64;
     let mut largest_upload_pixels = 0u64;
     let renderer_resource_generation = window.renderer_resource_generation();
-    for update in surface.pending_texture_uploads(renderer_resource_generation) {
+    let updates = surface.pending_texture_uploads(renderer_resource_generation);
+    let mut uploaded_count = 0usize;
+    for update in &updates {
         let rect_pixels =
             u64::from(update.rect.width).saturating_mul(u64::from(update.rect.height));
         let rect_bytes = update.bytes.len();
@@ -243,12 +245,18 @@ fn paint_remote_desktop_surface(
             .update_dynamic_texture(&surface.texture, update_bounds, update.bytes.as_ref())
             .is_ok()
         {
+            uploaded_count = uploaded_count.saturating_add(1);
             upload_count = upload_count.saturating_add(1);
             upload_bytes = upload_bytes.saturating_add(rect_bytes);
             upload_pixels = upload_pixels.saturating_add(rect_pixels);
             largest_upload_pixels = largest_upload_pixels.max(rect_pixels);
-            surface.acknowledge_texture_upload(&update);
+        } else {
+            break;
         }
+    }
+    if uploaded_count > 0 {
+        // Confirm the successful prefix once so paint does not lock and compact queues per region.
+        surface.acknowledge_texture_uploads(&updates[..uploaded_count]);
     }
     if let Some(upload_started_at) = upload_started_at
         && upload_count > 0

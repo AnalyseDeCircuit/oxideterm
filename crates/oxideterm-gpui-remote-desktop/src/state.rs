@@ -16,7 +16,7 @@ use oxideterm_remote_desktop::{
     RemoteDesktopSessionStatus, RemoteDesktopSize,
 };
 
-const REMOTE_DESKTOP_MAX_TEXTURE_UPLOAD_RECTS: usize = 64;
+const REMOTE_DESKTOP_MAX_TEXTURE_UPLOAD_RECTS: usize = 16;
 const REMOTE_DESKTOP_TEXTURE_REGION_SIMPLIFY_TRIGGER: usize =
     REMOTE_DESKTOP_MAX_TEXTURE_UPLOAD_RECTS * 2;
 const REMOTE_DESKTOP_TEXTURE_MERGE_AREA_INFLATION_LIMIT: u64 = 2;
@@ -232,8 +232,16 @@ impl RemoteDesktopFrameSurface {
             .unwrap_or_default()
     }
 
+    #[cfg(test)]
     pub(crate) fn acknowledge_texture_upload(&self, upload: &RemoteDesktopTextureUpload) {
-        let uploaded_sequences = upload.sequence_ids.iter().copied().collect::<HashSet<_>>();
+        self.acknowledge_texture_uploads(std::slice::from_ref(upload));
+    }
+
+    pub(crate) fn acknowledge_texture_uploads(&self, uploads: &[RemoteDesktopTextureUpload]) {
+        let uploaded_sequences = uploads
+            .iter()
+            .flat_map(|upload| upload.sequence_ids.iter().copied())
+            .collect::<HashSet<_>>();
         let Ok(mut pending_updates) = self.pending_texture_updates.lock() else {
             return;
         };
@@ -254,8 +262,15 @@ impl RemoteDesktopFrameSurface {
             }
         }
         drop(pending_updates);
-        if let Some(renderer_resource_generation) = upload.renderer_resource_generation
+        let renderer_resource_generation = uploads
+            .iter()
+            .filter_map(|upload| upload.renderer_resource_generation)
+            .max();
+        if let Some(renderer_resource_generation) = renderer_resource_generation
             && let Ok(mut renderer_upload_state) = self.renderer_upload_state.lock()
+            && renderer_upload_state
+                .confirmed_resource_generation
+                .is_none_or(|confirmed| renderer_resource_generation >= confirmed)
         {
             // update_dynamic_texture returning success is the synchronization
             // boundary that makes this renderer generation safe to reuse.
@@ -360,7 +375,7 @@ impl CachedRemoteDesktopFrameImage {
 
         let sequence_id = self.next_texture_update_sequence;
         self.next_texture_update_sequence = self.next_texture_update_sequence.saturating_add(1);
-        push_pending_texture_update(&mut pending_updates, sequence_id, update.rect);
+        push_pending_texture_update(&mut pending_updates, sequence_id, update.size, update.rect);
         Some(pending_texture_stats(&pending_updates))
     }
 
@@ -375,7 +390,7 @@ impl CachedRemoteDesktopFrameImage {
         };
         let mut upload_updates = pending_updates.clone();
         drop(pending_updates);
-        simplify_pending_texture_regions(&mut upload_updates);
+        simplify_pending_texture_regions(&mut upload_updates, self.size);
         let uploads = upload_updates
             .iter()
             .filter_map(|update| {
@@ -854,6 +869,7 @@ fn pending_texture_stats(
 fn push_pending_texture_update(
     pending_updates: &mut Vec<RemoteDesktopTextureUpdate>,
     sequence_id: u64,
+    size: RemoteDesktopSize,
     rect: RemoteDesktopRect,
 ) {
     if rect.width == 0 || rect.height == 0 {
@@ -864,17 +880,39 @@ fn push_pending_texture_update(
         rect,
     });
     if pending_updates.len() > REMOTE_DESKTOP_TEXTURE_REGION_SIMPLIFY_TRIGGER {
-        simplify_pending_texture_regions(pending_updates);
+        simplify_pending_texture_regions(pending_updates, size);
     }
 }
 
-fn simplify_pending_texture_regions(pending_updates: &mut Vec<RemoteDesktopTextureUpdate>) {
+fn simplify_pending_texture_regions(
+    pending_updates: &mut Vec<RemoteDesktopTextureUpdate>,
+    size: RemoteDesktopSize,
+) {
     if pending_updates.len() <= 1 {
         return;
     }
     merge_touching_texture_rects(pending_updates);
     if pending_updates.len() > REMOTE_DESKTOP_MAX_TEXTURE_UPLOAD_RECTS {
         merge_texture_rects_to_limit(pending_updates, REMOTE_DESKTOP_MAX_TEXTURE_UPLOAD_RECTS);
+    }
+
+    let pending_pixels = pending_updates.iter().fold(0_u64, |pixels, update| {
+        pixels.saturating_add(frame_rect_pixels(update.rect))
+    });
+    let frame_pixels = frame_size_pixels(size);
+    if pending_pixels >= frame_pixels {
+        // One complete upload is cheaper than multiple regions carrying at least the same pixels.
+        let mut sequence_ids = pending_updates
+            .iter()
+            .flat_map(|update| update.sequence_ids.iter().copied())
+            .collect::<Vec<_>>();
+        sequence_ids.sort_unstable();
+        sequence_ids.dedup();
+        pending_updates.clear();
+        pending_updates.push(RemoteDesktopTextureUpdate {
+            sequence_ids,
+            rect: RemoteDesktopRect::new(0, 0, size.width, size.height),
+        });
     }
 }
 
@@ -1937,7 +1975,7 @@ mod tests {
     }
 
     #[test]
-    fn dirty_update_backlog_keeps_dirty_regions_without_full_texture_promotion() {
+    fn dirty_update_backlog_bounds_texture_upload_calls_without_full_promotion() {
         let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
         let size = RemoteDesktopSize {
             width: 128,
@@ -1968,13 +2006,16 @@ mod tests {
         assert_eq!(stats.full_update_recoveries, 0);
         assert_eq!(stats.pending_texture_updates, update_count);
         assert_eq!(stats.pending_texture_upload_bytes, update_count * 4);
-        assert_eq!(updates.len(), update_count);
-        assert_eq!(updates[0].rect, RemoteDesktopRect::new(0, 0, 1, 1));
+        assert_eq!(updates.len(), REMOTE_DESKTOP_MAX_TEXTURE_UPLOAD_RECTS);
+        assert_eq!(updates[0].rect, RemoteDesktopRect::new(0, 0, 3, 1));
         assert_eq!(
-            updates[update_count - 1].rect,
-            RemoteDesktopRect::new(((update_count - 1) * 2) as u32, 0, 1, 1)
+            updates.last().unwrap().rect,
+            RemoteDesktopRect::new(60, 0, 3, 1)
         );
-        assert_eq!(updates[update_count - 1].bytes.as_ref(), [31, 31, 31, 0xff]);
+        assert_eq!(
+            updates.last().unwrap().bytes.as_ref(),
+            [30, 30, 30, 0xff, 0, 0, 0, 0x00, 31, 31, 31, 0xff]
+        );
     }
 
     #[test]
@@ -2007,13 +2048,40 @@ mod tests {
         let updates = drain_pending_texture_updates(&state);
         assert_eq!(stats.dirty_updates_applied, update_count);
         assert_eq!(stats.full_update_recoveries, 0);
-        assert_eq!(stats.pending_texture_updates, update_count);
+        assert!(stats.pending_texture_updates <= REMOTE_DESKTOP_TEXTURE_REGION_SIMPLIFY_TRIGGER);
         assert!(updates.len() <= REMOTE_DESKTOP_MAX_TEXTURE_UPLOAD_RECTS);
         assert!(
             !updates
                 .iter()
                 .any(|update| is_full_frame_rect(size, update.rect))
         );
+    }
+
+    #[test]
+    fn texture_regions_promote_to_one_full_upload_when_total_work_reaches_a_frame() {
+        let size = RemoteDesktopSize {
+            width: 8,
+            height: 8,
+        };
+        let mut updates = Vec::new();
+        for (sequence_id, x) in [0, 2, 4, 6].into_iter().enumerate() {
+            updates.push(RemoteDesktopTextureUpdate {
+                sequence_ids: vec![sequence_id as u64],
+                rect: RemoteDesktopRect::new(x, 0, 1, size.height),
+            });
+        }
+        for (offset, y) in [0, 2, 4, 6].into_iter().enumerate() {
+            updates.push(RemoteDesktopTextureUpdate {
+                sequence_ids: vec![(offset + 4) as u64],
+                rect: RemoteDesktopRect::new(0, y, size.width, 1),
+            });
+        }
+
+        simplify_pending_texture_regions(&mut updates, size);
+
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].rect, RemoteDesktopRect::new(0, 0, 8, 8));
+        assert_eq!(updates[0].sequence_ids, (0..8).collect::<Vec<_>>());
     }
 
     #[test]
