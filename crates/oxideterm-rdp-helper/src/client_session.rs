@@ -537,9 +537,8 @@ fn encode_display_control_layout(
     layout: &RemoteDesktopMonitorLayout,
 ) -> Option<SessionResult<Vec<u8>>> {
     let display_control_channel = active_stage.get_dvc::<DisplayControlClient>()?;
-    let channel_id = display_control_channel.channel_id()?;
-    let display_control =
-        display_control_channel.channel_processor_downcast_ref::<DisplayControlClient>()?;
+    let channel_id = display_control_channel.channel_id();
+    let display_control = display_control_channel.processor();
     if !display_control.ready() {
         return None;
     }
@@ -559,15 +558,9 @@ fn encode_display_control_layout(
 }
 
 fn display_control_resize_available(active_stage: &mut ActiveStage) -> bool {
-    let Some(display_control_channel) = active_stage.get_dvc::<DisplayControlClient>() else {
-        return false;
-    };
-    if display_control_channel.channel_id().is_none() {
-        return false;
-    }
-    display_control_channel
-        .channel_processor_downcast_ref::<DisplayControlClient>()
-        .is_some_and(DisplayControlClient::ready)
+    active_stage
+        .get_dvc::<DisplayControlClient>()
+        .is_some_and(|channel| channel.processor().ready())
 }
 
 fn publish_rdp_resize_capability(
@@ -621,8 +614,8 @@ fn encode_pending_microphone_packets(
     active_stage: &mut ActiveStage,
 ) -> Option<SessionResult<Vec<u8>>> {
     let audio_input_channel = active_stage.get_dvc::<AudioInputClient>()?;
-    let channel_id = audio_input_channel.channel_id()?;
-    let audio_input = audio_input_channel.channel_processor_downcast_ref::<AudioInputClient>()?;
+    let channel_id = audio_input_channel.channel_id();
+    let audio_input = audio_input_channel.processor();
     let messages = audio_input.drain_messages();
     if messages.is_empty() {
         return None;
@@ -651,7 +644,19 @@ pub(super) async fn run_native_rdp_active_session(
         connection_result.desktop_size.width,
         connection_result.desktop_size.height,
     );
-    let mut active_stage = ActiveStage::new(connection_result);
+    // Keep the factory for every server-driven Deactivation-Reactivation Sequence.
+    let activation_factory = connection_result.activation_factory;
+    let mut active_stage = ActiveStageBuilder {
+        static_channels: connection_result.static_channels,
+        user_channel_id: connection_result.user_channel_id,
+        io_channel_id: connection_result.io_channel_id,
+        message_channel_id: connection_result.message_channel_id,
+        share_id: connection_result.share_id,
+        compression_type: connection_result.compression_type,
+        enable_server_pointer: connection_result.enable_server_pointer,
+        pointer_software_rendering: connection_result.pointer_software_rendering,
+    }
+    .build();
     let mut clipboard_cleanup = tokio::time::interval(RDP_CLIPBOARD_TIMEOUT_POLL_INTERVAL);
     let mut frame_state = ClientRdpFrameState {
         graphics_epoch,
@@ -838,7 +843,7 @@ pub(super) async fn run_native_rdp_active_session(
                         },
                     )?;
                 }
-                ActiveStageOutput::DeactivateAll(connection_activation) => {
+                ActiveStageOutput::DeactivateAll => {
                     let graphics_epoch =
                         begin_rdp_frame_transition(output_tx, &mut frame_state, egfx_bridge)?;
                     handle_deactivate_all(
@@ -846,7 +851,7 @@ pub(super) async fn run_native_rdp_active_session(
                         &mut writer,
                         &mut active_stage,
                         &mut image,
-                        connection_activation,
+                        activation_factory.create(),
                     )
                     .await?;
                     frame_state.finish_reactivation();
@@ -857,7 +862,14 @@ pub(super) async fn run_native_rdp_active_session(
                         })?;
                 }
                 ActiveStageOutput::Terminate(reason) => break 'session reason,
-                ActiveStageOutput::MultitransportRequest(_) | ActiveStageOutput::AutoDetect(_) => {}
+                ActiveStageOutput::MultitransportRequest(_)
+                | ActiveStageOutput::AutoDetect(_)
+                | ActiveStageOutput::SaveSessionInfo { .. } => {}
+                ActiveStageOutput::AutoReconnectCookie(mut cookie) => {
+                    // OxideTerm currently performs credential-backed retries. Erase the unused
+                    // reconnect credential immediately instead of retaining it without an owner.
+                    cookie.random_bits.zeroize();
+                }
             }
         }
         if frame_state.published_first_desktop_frame {

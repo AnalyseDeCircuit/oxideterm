@@ -886,6 +886,11 @@ pub(super) fn process_clipboard_message(
                     .submit_file_contents(response)
                     .map_err(|error| session::custom_err!("CLIPRDR file response", error))?,
             ),
+            ClipboardMessage::SendInitiateFileCopy(files) => Some(
+                cliprdr
+                    .initiate_file_copy(files)
+                    .map_err(|error| session::custom_err!("CLIPRDR initiate file copy", error))?,
+            ),
             ClipboardMessage::Error(_) => None,
         }
     }) else {

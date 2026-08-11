@@ -245,9 +245,7 @@ pub(super) async fn handle_deactivate_all<ReadStream, WriteStream>(
     writer: &mut ironrdp_tokio::TokioFramed<WriteStream>,
     active_stage: &mut ActiveStage,
     image: &mut DecodedImage,
-    mut connection_activation: Box<
-        ironrdp::connector::connection_activation::ConnectionActivationSequence,
-    >,
+    mut connection_activation: ironrdp::connector::connection_activation::ConnectionActivationSequence,
 ) -> SessionResult<()>
 where
     ReadStream: AsyncRead + Send + Sync + Unpin,
@@ -255,7 +253,7 @@ where
 {
     let mut buffer = WriteBuf::new();
     loop {
-        let written = single_sequence_step_read(reader, &mut *connection_activation, &mut buffer)
+        let written = single_sequence_step_read(reader, &mut connection_activation, &mut buffer)
             .await
             .map_err(|error| {
                 session::custom_err!("read deactivation-reactivation sequence step", error)
@@ -267,34 +265,27 @@ where
         }
 
         if let ConnectionActivationState::Finalized {
-            io_channel_id,
-            user_channel_id,
             desktop_size,
             share_id,
             enable_server_pointer,
             pointer_software_rendering,
+            ..
         } = connection_activation.connection_activation_state()
         {
-            // The server can assign new channel IDs after reactivation; reset
-            // both the decoded image and active stage before accepting pixels.
+            // Rebuild the decoded image and processors before accepting pixels while preserving
+            // the negotiated bulk decompression history owned by ActiveStage.
             *image = DecodedImage::new(
                 RDP_DECODED_FRAME_PIXEL_FORMAT,
                 desktop_size.width,
                 desktop_size.height,
             );
-            active_stage.set_fastpath_processor(
-                fast_path::ProcessorBuilder {
-                    io_channel_id,
-                    user_channel_id,
-                    share_id,
-                    enable_server_pointer,
-                    pointer_software_rendering,
-                    bulk_decompressor: None,
-                }
-                .build(),
+            active_stage.reactivate(
+                connection_activation.io_channel_id(),
+                connection_activation.user_channel_id(),
+                share_id,
+                enable_server_pointer,
+                pointer_software_rendering,
             );
-            active_stage.set_share_id(share_id);
-            active_stage.set_enable_server_pointer(enable_server_pointer);
             return Ok(());
         }
     }

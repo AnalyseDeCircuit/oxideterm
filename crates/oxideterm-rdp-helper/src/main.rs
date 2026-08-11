@@ -41,7 +41,7 @@ use ironrdp::{
         synchronize_event as rdp_synchronize_event,
     },
     pdu::{
-        gcc::KeyboardType,
+        gcc::{ConnectionType, KeyboardType},
         geometry::InclusiveRectangle,
         input::fast_path::FastPathInputEvent,
         rdp::{
@@ -53,8 +53,8 @@ use ironrdp::{
         },
     },
     session::{
-        self, ActiveStage, ActiveStageOutput, GracefulDisconnectReason, SessionErrorExt as _,
-        SessionResult, fast_path, image::DecodedImage,
+        self, ActiveStage, ActiveStageBuilder, ActiveStageOutput, GracefulDisconnectReason,
+        SessionErrorExt as _, SessionResult, image::DecodedImage,
     },
     svc::{ChannelFlags, SvcProcessorMessages},
 };
