@@ -1194,6 +1194,45 @@ fn graphics_accumulator_merges_dirty_updates_before_copying_pixels() {
 }
 
 #[test]
+fn graphics_accumulator_preserves_separated_dirty_regions_as_one_batch() {
+    let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+    let image = DecodedImage::new(PixelFormat::RgbA32, 16, 4);
+    let mut frame_state = ClientRdpFrameState {
+        graphics_sync: RdpGraphicsSyncState::Synced,
+        published_first_desktop_frame: true,
+        ..ClientRdpFrameState::default()
+    };
+
+    for x in [1, 14] {
+        send_client_rdp_graphics_update(
+            &output_tx,
+            &image,
+            InclusiveRectangle {
+                left: x,
+                top: 1,
+                right: x,
+                bottom: 1,
+            },
+            &mut frame_state,
+        )
+        .expect("separated dirty update should queue");
+    }
+
+    flush_queued_rdp_graphics_updates(&output_tx, &image, &mut frame_state)
+        .expect("queued dirty regions should flush atomically");
+
+    match output_rx.graphics_rx.try_recv() {
+        Ok(ClientRdpOutput::Event(RemoteDesktopHelperEvent::FrameUpdateBatch { batch })) => {
+            assert_eq!(batch.updates.len(), 2);
+            assert_eq!(batch.byte_len(), 8);
+            assert_eq!(batch.updates[0].rect, RemoteDesktopRect::new(1, 1, 1, 1));
+            assert_eq!(batch.updates[1].rect, RemoteDesktopRect::new(14, 1, 1, 1));
+        }
+        other => panic!("expected sparse dirty frame batch, got {other:?}"),
+    }
+}
+
+#[test]
 fn graphics_accumulator_promotes_large_dirty_area_to_base_frame() {
     let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
     let image = DecodedImage::new(PixelFormat::RgbA32, 4, 3);

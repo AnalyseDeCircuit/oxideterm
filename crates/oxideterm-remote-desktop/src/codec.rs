@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 use crate::{
-    RemoteDesktopClipboardData, RemoteDesktopClipboardFormat, RemoteDesktopFrame,
-    RemoteDesktopFrameCompression, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate,
+    REMOTE_DESKTOP_MAX_FRAME_UPDATE_BATCH_REGIONS, RemoteDesktopClipboardData,
+    RemoteDesktopClipboardFormat, RemoteDesktopFrame, RemoteDesktopFrameCompression,
+    RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate, RemoteDesktopFrameUpdateBatch,
     RemoteDesktopHelperEvent, RemoteDesktopHelperRequest, RemoteDesktopRect, RemoteDesktopSize,
 };
 
@@ -24,6 +25,23 @@ pub enum RemoteDesktopJsonLineError {
     JsonFailed(#[from] serde_json::Error),
     #[error("remote desktop helper binary payload is too large: {0} bytes")]
     BinaryPayloadTooLarge(usize),
+    #[error("remote desktop helper frame update batch is invalid")]
+    InvalidFrameUpdateBatch,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteDesktopBinaryFrameUpdateHeader {
+    size: RemoteDesktopSize,
+    rect: RemoteDesktopRect,
+    format: RemoteDesktopFrameFormat,
+    #[serde(default)]
+    graphics_epoch: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    trace_id: Option<u64>,
+    #[serde(default)]
+    compression: RemoteDesktopFrameCompression,
+    payload_len: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -38,6 +56,8 @@ enum RemoteDesktopBinaryEventHeader {
         format: RemoteDesktopFrameFormat,
         #[serde(default)]
         graphics_epoch: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<u64>,
         #[serde(default)]
         compression: RemoteDesktopFrameCompression,
         payload_len: usize,
@@ -48,8 +68,14 @@ enum RemoteDesktopBinaryEventHeader {
         format: RemoteDesktopFrameFormat,
         #[serde(default)]
         graphics_epoch: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<u64>,
         #[serde(default)]
         compression: RemoteDesktopFrameCompression,
+        payload_len: usize,
+    },
+    FrameUpdateBatchBinary {
+        updates: Vec<RemoteDesktopBinaryFrameUpdateHeader>,
         payload_len: usize,
     },
     ClipboardDataBinary {
@@ -138,6 +164,7 @@ pub fn write_event_line(
                 size: frame.size,
                 format: frame.format,
                 graphics_epoch: frame.graphics_epoch,
+                trace_id: frame.trace_id,
                 compression: RemoteDesktopFrameCompression::None,
                 payload_len: frame.bytes.len(),
             },
@@ -150,11 +177,15 @@ pub fn write_event_line(
                 rect: update.rect,
                 format: update.format,
                 graphics_epoch: update.graphics_epoch,
+                trace_id: update.trace_id,
                 compression: update.compression,
                 payload_len: update.bytes.len(),
             },
             &update.bytes,
         ),
+        RemoteDesktopHelperEvent::FrameUpdateBatch { batch } => {
+            write_binary_frame_update_batch(writer, batch)
+        }
         RemoteDesktopHelperEvent::ClipboardData { data } => write_binary_event(
             writer,
             RemoteDesktopBinaryEventHeader::ClipboardDataBinary {
@@ -238,14 +269,60 @@ fn write_binary_request(
     Ok(())
 }
 
+fn write_binary_frame_update_batch(
+    writer: &mut impl Write,
+    batch: &RemoteDesktopFrameUpdateBatch,
+) -> Result<(), RemoteDesktopJsonLineError> {
+    if !batch.is_complete() || batch.updates.len() > REMOTE_DESKTOP_MAX_FRAME_UPDATE_BATCH_REGIONS {
+        return Err(RemoteDesktopJsonLineError::InvalidFrameUpdateBatch);
+    }
+    let payload_len = batch.byte_len();
+    if payload_len > MAX_BINARY_PAYLOAD_LEN {
+        return Err(RemoteDesktopJsonLineError::BinaryPayloadTooLarge(
+            payload_len,
+        ));
+    }
+    let updates = batch
+        .updates
+        .iter()
+        .map(|update| RemoteDesktopBinaryFrameUpdateHeader {
+            size: update.size,
+            rect: update.rect,
+            format: update.format,
+            graphics_epoch: update.graphics_epoch,
+            trace_id: update.trace_id,
+            compression: update.compression,
+            payload_len: update.bytes.len(),
+        })
+        .collect();
+    let header = RemoteDesktopBinaryEventHeader::FrameUpdateBatchBinary {
+        updates,
+        payload_len,
+    };
+    writer.write_all(encode_line(&header)?.as_bytes())?;
+    for update in &batch.updates {
+        writer.write_all(&update.bytes)?;
+    }
+    writer.flush()?;
+    Ok(())
+}
+
 fn read_binary_event(
     reader: &mut impl Read,
     header: RemoteDesktopBinaryEventHeader,
 ) -> Result<RemoteDesktopHelperEvent, RemoteDesktopJsonLineError> {
+    let header = match header {
+        RemoteDesktopBinaryEventHeader::FrameUpdateBatchBinary {
+            updates,
+            payload_len,
+        } => return read_binary_frame_update_batch(reader, updates, payload_len),
+        header => header,
+    };
     let payload_len = match &header {
         RemoteDesktopBinaryEventHeader::FrameBinary { payload_len, .. }
         | RemoteDesktopBinaryEventHeader::FrameUpdateBinary { payload_len, .. }
         | RemoteDesktopBinaryEventHeader::ClipboardDataBinary { payload_len, .. } => *payload_len,
+        RemoteDesktopBinaryEventHeader::FrameUpdateBatchBinary { .. } => unreachable!(),
     };
     if payload_len > MAX_BINARY_PAYLOAD_LEN {
         return Err(RemoteDesktopJsonLineError::BinaryPayloadTooLarge(
@@ -259,29 +336,87 @@ fn read_binary_event(
             size,
             format,
             graphics_epoch,
+            trace_id,
             compression: RemoteDesktopFrameCompression::None,
             ..
-        } => RemoteDesktopHelperEvent::Frame {
-            frame: RemoteDesktopFrame::new(size, format, payload)
-                .with_graphics_epoch(graphics_epoch),
-        },
+        } => {
+            let frame =
+                RemoteDesktopFrame::new(size, format, payload).with_graphics_epoch(graphics_epoch);
+            RemoteDesktopHelperEvent::Frame {
+                frame: match trace_id {
+                    Some(trace_id) => frame.with_trace_id(trace_id),
+                    None => frame,
+                },
+            }
+        }
         RemoteDesktopBinaryEventHeader::FrameUpdateBinary {
             size,
             rect,
             format,
             graphics_epoch,
+            trace_id,
             compression: RemoteDesktopFrameCompression::None,
             ..
-        } => RemoteDesktopHelperEvent::FrameUpdate {
-            update: RemoteDesktopFrameUpdate::new(size, rect, format, payload)
-                .with_graphics_epoch(graphics_epoch),
-        },
+        } => {
+            let update = RemoteDesktopFrameUpdate::new(size, rect, format, payload)
+                .with_graphics_epoch(graphics_epoch);
+            RemoteDesktopHelperEvent::FrameUpdate {
+                update: match trace_id {
+                    Some(trace_id) => update.with_trace_id(trace_id),
+                    None => update,
+                },
+            }
+        }
+        RemoteDesktopBinaryEventHeader::FrameUpdateBatchBinary { .. } => unreachable!(),
         RemoteDesktopBinaryEventHeader::ClipboardDataBinary { format, .. } => {
             RemoteDesktopHelperEvent::ClipboardData {
                 data: RemoteDesktopClipboardData::new(format, payload),
             }
         }
     })
+}
+
+fn read_binary_frame_update_batch(
+    reader: &mut impl Read,
+    updates: Vec<RemoteDesktopBinaryFrameUpdateHeader>,
+    payload_len: usize,
+) -> Result<RemoteDesktopHelperEvent, RemoteDesktopJsonLineError> {
+    if updates.is_empty() || updates.len() > REMOTE_DESKTOP_MAX_FRAME_UPDATE_BATCH_REGIONS {
+        return Err(RemoteDesktopJsonLineError::InvalidFrameUpdateBatch);
+    }
+    let expected_payload_len = updates
+        .iter()
+        .map(|update| update.payload_len)
+        .try_fold(0_usize, usize::checked_add)
+        .ok_or(RemoteDesktopJsonLineError::InvalidFrameUpdateBatch)?;
+    if payload_len != expected_payload_len {
+        return Err(RemoteDesktopJsonLineError::InvalidFrameUpdateBatch);
+    }
+    if payload_len > MAX_BINARY_PAYLOAD_LEN {
+        return Err(RemoteDesktopJsonLineError::BinaryPayloadTooLarge(
+            payload_len,
+        ));
+    }
+
+    // Read each region into its final allocation to avoid holding a second
+    // batch-sized payload buffer while the UI is under graphics pressure.
+    let mut decoded_updates = Vec::with_capacity(updates.len());
+    for update in updates {
+        let mut bytes = vec![0; update.payload_len];
+        reader.read_exact(&mut bytes)?;
+        let decoded_update =
+            RemoteDesktopFrameUpdate::new(update.size, update.rect, update.format, bytes)
+                .with_graphics_epoch(update.graphics_epoch);
+        decoded_updates.push(match update.trace_id {
+            Some(trace_id) => decoded_update.with_trace_id(trace_id),
+            None => decoded_update,
+        });
+    }
+    let batch = RemoteDesktopFrameUpdateBatch::new(decoded_updates);
+    if !batch.is_complete() {
+        return Err(RemoteDesktopJsonLineError::InvalidFrameUpdateBatch);
+    }
+    Ok(RemoteDesktopHelperEvent::FrameUpdateBatch { batch })
 }
 
 fn read_binary_request(
@@ -370,6 +505,46 @@ mod tests {
         assert!(header.contains("\"type\":\"frameBinary\""));
         assert!(header.contains("\"payloadLen\":4"));
         assert_eq!(&bytes[(header_end + 1)..], &[1, 2, 3, 4]);
+
+        let decoded = read_event_line(&mut Cursor::new(bytes)).unwrap().unwrap();
+        assert_eq!(decoded, event);
+    }
+
+    #[test]
+    fn frame_update_batch_uses_one_header_and_contiguous_region_payloads() {
+        let size = RemoteDesktopSize {
+            width: 4,
+            height: 1,
+        };
+        let event = RemoteDesktopHelperEvent::FrameUpdateBatch {
+            batch: RemoteDesktopFrameUpdateBatch::new(vec![
+                RemoteDesktopFrameUpdate::new(
+                    size,
+                    RemoteDesktopRect::new(0, 0, 1, 1),
+                    RemoteDesktopFrameFormat::Bgra8,
+                    vec![1, 2, 3, 0xff],
+                )
+                .with_graphics_epoch(7)
+                .with_trace_id(42),
+                RemoteDesktopFrameUpdate::new(
+                    size,
+                    RemoteDesktopRect::new(3, 0, 1, 1),
+                    RemoteDesktopFrameFormat::Bgra8,
+                    vec![4, 5, 6, 0xff],
+                )
+                .with_graphics_epoch(7)
+                .with_trace_id(42),
+            ]),
+        };
+        let mut bytes = Vec::new();
+
+        write_event_line(&mut bytes, &event).unwrap();
+
+        let header_end = bytes.iter().position(|byte| *byte == b'\n').unwrap();
+        let header = std::str::from_utf8(&bytes[..header_end]).unwrap();
+        assert!(header.contains("\"type\":\"frameUpdateBatchBinary\""));
+        assert!(header.contains("\"payloadLen\":8"));
+        assert_eq!(&bytes[(header_end + 1)..], &[1, 2, 3, 0xff, 4, 5, 6, 0xff]);
 
         let decoded = read_event_line(&mut Cursor::new(bytes)).unwrap().unwrap();
         assert_eq!(decoded, event);

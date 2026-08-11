@@ -26,7 +26,7 @@ use ironrdp_graphics::{
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopFrame, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate,
-    RemoteDesktopHelperEvent, RemoteDesktopRect, RemoteDesktopSize,
+    RemoteDesktopFrameUpdateBatch, RemoteDesktopHelperEvent, RemoteDesktopRect, RemoteDesktopSize,
 };
 
 use super::*;
@@ -71,7 +71,7 @@ impl EgfxSessionBridge {
             .map_err(|_| io::Error::other("EGFX renderer lock is poisoned"))?;
         renderer.graphics_epoch = graphics_epoch;
         renderer.awaiting_reactivation = true;
-        renderer.pending_desktop_dirty = None;
+        renderer.pending_desktop_dirty.clear();
         renderer.needs_base_frame = true;
         Ok(())
     }
@@ -262,7 +262,7 @@ struct EgfxRenderer {
     allocated_cache_bytes: usize,
     progressive_decoder: ProgressiveDecoder,
     clearcodec_decoder: ClearCodecDecoder,
-    pending_desktop_dirty: Option<RemoteDesktopRect>,
+    pending_desktop_dirty: Vec<RemoteDesktopRect>,
     needs_base_frame: bool,
     graphics_epoch: u64,
     awaiting_reactivation: bool,
@@ -283,7 +283,7 @@ impl EgfxRenderer {
             allocated_cache_bytes: 0,
             progressive_decoder: ProgressiveDecoder::new(),
             clearcodec_decoder: ClearCodecDecoder::new(),
-            pending_desktop_dirty: None,
+            pending_desktop_dirty: Vec::new(),
             needs_base_frame: true,
             graphics_epoch: 0,
             awaiting_reactivation: false,
@@ -324,12 +324,12 @@ impl EgfxRenderer {
         });
         self.desktop_pixels = opaque_black_pixels(byte_len);
         self.discard_surface_state();
-        self.pending_desktop_dirty = Some(RemoteDesktopRect::new(
+        self.pending_desktop_dirty = vec![RemoteDesktopRect::new(
             0,
             0,
             u32::from(width),
             u32::from(height),
-        ));
+        )];
         self.needs_base_frame = true;
         Ok(())
     }
@@ -338,7 +338,7 @@ impl EgfxRenderer {
         self.desktop_size = None;
         self.desktop_pixels.clear();
         self.discard_surface_state();
-        self.pending_desktop_dirty = None;
+        self.pending_desktop_dirty.clear();
         self.needs_base_frame = true;
     }
 
@@ -689,28 +689,38 @@ impl EgfxRenderer {
     }
 
     fn queue_desktop_dirty(&mut self, rect: RemoteDesktopRect) {
-        self.pending_desktop_dirty = Some(match self.pending_desktop_dirty {
-            Some(existing) => existing.union(rect).unwrap_or(rect),
-            None => rect,
-        });
+        crate::frame::queue_bounded_dirty_rect(
+            &mut self.pending_desktop_dirty,
+            rect,
+            crate::frame::RDP_GRAPHICS_MAX_DIRTY_RECTS,
+        );
     }
 
     fn publish_completed_frame(&mut self) -> Result<(), String> {
         if self.awaiting_reactivation {
-            self.pending_desktop_dirty = None;
+            self.pending_desktop_dirty.clear();
             return Ok(());
         }
-        let Some(dirty) = self.pending_desktop_dirty.take() else {
+        if self.pending_desktop_dirty.is_empty() {
             return Ok(());
-        };
+        }
+        let dirty_rects = std::mem::take(&mut self.pending_desktop_dirty);
         let Some(size) = self.desktop_size else {
             return Ok(());
         };
+        let dirty_pixels = dirty_rects
+            .iter()
+            .map(|dirty| u64::from(dirty.width).saturating_mul(u64::from(dirty.height)))
+            .fold(0_u64, u64::saturating_add);
+        let frame_pixels = u64::from(size.width).saturating_mul(u64::from(size.height));
         if self.needs_base_frame
-            || dirty.x == 0
-                && dirty.y == 0
-                && dirty.width == size.width
-                && dirty.height == size.height
+            || dirty_pixels >= frame_pixels
+            || dirty_rects.iter().any(|dirty| {
+                dirty.x == 0
+                    && dirty.y == 0
+                    && dirty.width == size.width
+                    && dirty.height == size.height
+            })
         {
             return self.publish_base_frame(true);
         }
@@ -718,15 +728,27 @@ impl EgfxRenderer {
         self.next_trace_id = self.next_trace_id.saturating_add(1).max(1);
         let desktop_width = u16::try_from(size.width)
             .map_err(|_| "RDP Graphics Pipeline desktop width overflowed.")?;
-        let event = RemoteDesktopHelperEvent::FrameUpdate {
-            update: RemoteDesktopFrameUpdate::new(
-                size,
-                dirty,
-                RemoteDesktopFrameFormat::Rgba8,
-                copy_rgba_region_u32(&self.desktop_pixels, desktop_width, dirty)?,
-            )
-            .with_graphics_epoch(self.graphics_epoch)
-            .with_trace_id(self.next_trace_id),
+        let updates = dirty_rects
+            .into_iter()
+            .map(|dirty| {
+                Ok(RemoteDesktopFrameUpdate::new(
+                    size,
+                    dirty,
+                    RemoteDesktopFrameFormat::Rgba8,
+                    copy_rgba_region_u32(&self.desktop_pixels, desktop_width, dirty)?,
+                )
+                .with_graphics_epoch(self.graphics_epoch)
+                .with_trace_id(self.next_trace_id))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let event = if updates.len() == 1 {
+            RemoteDesktopHelperEvent::FrameUpdate {
+                update: updates.into_iter().next().expect("one update was checked"),
+            }
+        } else {
+            RemoteDesktopHelperEvent::FrameUpdateBatch {
+                batch: RemoteDesktopFrameUpdateBatch::new(updates),
+            }
         };
         match self
             .output_tx
@@ -768,7 +790,7 @@ impl EgfxRenderer {
         {
             Ok(()) => {
                 self.needs_base_frame = false;
-                self.pending_desktop_dirty = None;
+                self.pending_desktop_dirty.clear();
                 if publish_ready && !self.published_first_frame {
                     for event in native_rdp_desktop_ready_events(size) {
                         self.output_tx
@@ -1082,6 +1104,29 @@ mod tests {
         };
         assert_eq!(frame.format, RemoteDesktopFrameFormat::Rgba8);
         assert_eq!(frame.bytes, red);
+    }
+
+    #[test]
+    fn completed_egfx_frame_preserves_separated_dirty_regions() {
+        let (output_tx, output_rx) = client_rdp_output_channel(4);
+        let mut renderer = EgfxRenderer::new(output_tx);
+        renderer.reset_graphics(8, 1).unwrap();
+        renderer.publish_completed_frame().unwrap();
+        let _base = output_rx.graphics_rx.try_recv().unwrap();
+        renderer.queue_desktop_dirty(RemoteDesktopRect::new(0, 0, 1, 1));
+        renderer.queue_desktop_dirty(RemoteDesktopRect::new(7, 0, 1, 1));
+
+        renderer.publish_completed_frame().unwrap();
+
+        let ClientRdpOutput::Event(RemoteDesktopHelperEvent::FrameUpdateBatch { batch }) =
+            output_rx.graphics_rx.try_recv().unwrap()
+        else {
+            panic!("expected an EGFX sparse frame batch");
+        };
+        assert_eq!(batch.updates.len(), 2);
+        assert_eq!(batch.byte_len(), 8);
+        assert_eq!(batch.updates[0].rect, RemoteDesktopRect::new(0, 0, 1, 1));
+        assert_eq!(batch.updates[1].rect, RemoteDesktopRect::new(7, 0, 1, 1));
     }
 
     #[test]

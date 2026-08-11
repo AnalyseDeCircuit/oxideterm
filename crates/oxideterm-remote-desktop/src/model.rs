@@ -591,6 +591,8 @@ pub enum RemoteDesktopFrameCompression {
     None,
 }
 
+pub const REMOTE_DESKTOP_MAX_FRAME_UPDATE_BATCH_REGIONS: usize = 256;
+
 impl Default for RemoteDesktopFrameCompression {
     fn default() -> Self {
         Self::None
@@ -643,14 +645,7 @@ impl RemoteDesktopFrame {
     }
 
     pub fn apply_update(&mut self, update: &RemoteDesktopFrameUpdate) -> bool {
-        if self.graphics_epoch != update.graphics_epoch
-            || self.size != update.size
-            || self.format != update.format
-            || update.compression != RemoteDesktopFrameCompression::None
-            || !self.is_complete()
-            || !update.is_complete()
-            || !update.rect.fits_in(update.size)
-        {
+        if !self.can_apply_update(update) {
             return false;
         }
 
@@ -662,6 +657,30 @@ impl RemoteDesktopFrame {
             update.rect.width,
             self.format.bytes_per_pixel(),
         )
+    }
+
+    fn can_apply_update(&self, update: &RemoteDesktopFrameUpdate) -> bool {
+        self.graphics_epoch == update.graphics_epoch
+            && self.size == update.size
+            && self.format == update.format
+            && update.compression == RemoteDesktopFrameCompression::None
+            && self.is_complete()
+            && update.is_complete()
+            && update.rect.fits_in(update.size)
+    }
+
+    pub fn apply_update_batch(&mut self, batch: &RemoteDesktopFrameUpdateBatch) -> bool {
+        // Validate every region before mutating the backing frame so a malformed
+        // batch can never leave the receiver with a partially applied frame.
+        if !batch.is_complete()
+            || batch
+                .updates
+                .iter()
+                .any(|update| !self.can_apply_update(update))
+        {
+            return false;
+        }
+        batch.updates.iter().all(|update| self.apply_update(update))
     }
 }
 
@@ -775,6 +794,71 @@ impl RemoteDesktopFrameUpdate {
         self.trace_id = incoming.trace_id.or(self.trace_id);
         self.bytes = bytes;
         true
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopFrameUpdateBatch {
+    pub updates: Vec<RemoteDesktopFrameUpdate>,
+}
+
+impl RemoteDesktopFrameUpdateBatch {
+    pub fn new(updates: Vec<RemoteDesktopFrameUpdate>) -> Self {
+        Self { updates }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        let Some(first) = self.updates.first() else {
+            return false;
+        };
+        first.is_complete()
+            && self.updates.iter().skip(1).all(|update| {
+                update.is_complete()
+                    && update.size == first.size
+                    && update.format == first.format
+                    && update.graphics_epoch == first.graphics_epoch
+                    && update.compression == first.compression
+            })
+    }
+
+    pub fn graphics_epoch(&self) -> Option<u64> {
+        self.is_complete().then(|| self.updates[0].graphics_epoch)
+    }
+
+    pub fn byte_len(&self) -> usize {
+        self.updates
+            .iter()
+            .map(|update| update.bytes.len())
+            .fold(0_usize, usize::saturating_add)
+    }
+
+    pub fn merge(&mut self, incoming: Self, max_regions: usize) -> Result<(), Self> {
+        let raw_region_count = self.updates.len().saturating_add(incoming.updates.len());
+        if !self.is_complete()
+            || !incoming.is_complete()
+            || raw_region_count > max_regions
+            || self.updates[0].size != incoming.updates[0].size
+            || self.updates[0].format != incoming.updates[0].format
+            || self.updates[0].graphics_epoch != incoming.updates[0].graphics_epoch
+            || self.updates[0].compression != incoming.updates[0].compression
+        {
+            return Err(incoming);
+        }
+
+        for incoming_update in incoming.updates {
+            let mut incoming_update = Some(incoming_update);
+            for existing_update in self.updates.iter_mut().rev() {
+                if existing_update.merge(incoming_update.as_ref().expect("update is available")) {
+                    incoming_update = None;
+                    break;
+                }
+            }
+            if let Some(incoming_update) = incoming_update {
+                self.updates.push(incoming_update);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1023,6 +1107,95 @@ mod tests {
                 0, 0, 0, 0, 3, 3, 3, 3, 4, 4, 4, 4,
             ]
         );
+    }
+
+    #[test]
+    fn invalid_frame_update_batch_does_not_partially_mutate_backing_frame() {
+        let size = RemoteDesktopSize {
+            width: 2,
+            height: 1,
+        };
+        let original = vec![0; 8];
+        let mut frame =
+            RemoteDesktopFrame::new(size, RemoteDesktopFrameFormat::Rgba8, original.clone());
+        let batch = RemoteDesktopFrameUpdateBatch::new(vec![
+            RemoteDesktopFrameUpdate::new(
+                size,
+                RemoteDesktopRect::new(0, 0, 1, 1),
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![1, 2, 3, 4],
+            ),
+            RemoteDesktopFrameUpdate::new(
+                size,
+                RemoteDesktopRect::new(1, 0, 1, 1),
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![5, 6, 7],
+            ),
+        ]);
+
+        assert!(!frame.apply_update_batch(&batch));
+        assert_eq!(frame.bytes, original);
+    }
+
+    #[test]
+    fn frame_update_batch_applies_sparse_regions_without_union_pixels() {
+        let size = RemoteDesktopSize {
+            width: 3,
+            height: 1,
+        };
+        let mut frame = RemoteDesktopFrame::new(size, RemoteDesktopFrameFormat::Rgba8, vec![0; 12]);
+        let batch = RemoteDesktopFrameUpdateBatch::new(vec![
+            RemoteDesktopFrameUpdate::new(
+                size,
+                RemoteDesktopRect::new(0, 0, 1, 1),
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![1, 1, 1, 0xff],
+            ),
+            RemoteDesktopFrameUpdate::new(
+                size,
+                RemoteDesktopRect::new(2, 0, 1, 1),
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![2, 2, 2, 0xff],
+            ),
+        ]);
+
+        assert!(frame.apply_update_batch(&batch));
+        assert_eq!(frame.bytes, vec![1, 1, 1, 0xff, 0, 0, 0, 0, 2, 2, 2, 0xff]);
+    }
+
+    #[test]
+    fn frame_update_batches_merge_without_losing_newer_overlapping_pixels() {
+        let size = RemoteDesktopSize {
+            width: 3,
+            height: 1,
+        };
+        let mut queued = RemoteDesktopFrameUpdateBatch::new(vec![RemoteDesktopFrameUpdate::new(
+            size,
+            RemoteDesktopRect::new(0, 0, 1, 1),
+            RemoteDesktopFrameFormat::Rgba8,
+            vec![1, 1, 1, 0xff],
+        )]);
+        let incoming = RemoteDesktopFrameUpdateBatch::new(vec![
+            RemoteDesktopFrameUpdate::new(
+                size,
+                RemoteDesktopRect::new(0, 0, 1, 1),
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![2, 2, 2, 0xff],
+            ),
+            RemoteDesktopFrameUpdate::new(
+                size,
+                RemoteDesktopRect::new(2, 0, 1, 1),
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![3, 3, 3, 0xff],
+            ),
+        ]);
+
+        queued.merge(incoming, 16).unwrap();
+
+        assert_eq!(queued.updates.len(), 2);
+        assert_eq!(queued.updates[0].rect, RemoteDesktopRect::new(0, 0, 1, 1));
+        assert_eq!(queued.updates[0].bytes, vec![2, 2, 2, 0xff]);
+        assert_eq!(queued.updates[1].rect, RemoteDesktopRect::new(2, 0, 1, 1));
     }
 
     #[test]

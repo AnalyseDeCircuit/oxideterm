@@ -7,12 +7,14 @@ use std::time::{Duration, Instant};
 
 use oxideterm_remote_desktop::{
     RemoteDesktopFrame, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate,
-    RemoteDesktopHelperEvent, RemoteDesktopRect, RemoteDesktopSize,
+    RemoteDesktopFrameUpdateBatch, RemoteDesktopHelperEvent, RemoteDesktopRect, RemoteDesktopSize,
 };
 
 const RDP_GRAPHICS_ACCUMULATOR_QUIET_WINDOW: Duration = Duration::from_millis(2);
 const RDP_GRAPHICS_ACCUMULATOR_MAX_WINDOW: Duration = Duration::from_millis(8);
 const RDP_GRAPHICS_ACCUMULATOR_BASE_AREA_DIVISOR: u64 = 3;
+pub(crate) const RDP_GRAPHICS_MAX_DIRTY_RECTS: usize = 16;
+const RDP_GRAPHICS_ACCUMULATOR_MERGE_INFLATION_LIMIT: u64 = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RdpGraphicsSyncState {
@@ -42,7 +44,7 @@ impl RdpGraphicsSyncState {
 
 #[derive(Debug, Default)]
 pub(crate) struct RdpGraphicsFrameAccumulator {
-    pending_rect: Option<RemoteDesktopRect>,
+    pending_rects: Vec<RemoteDesktopRect>,
     first_update_at: Option<Instant>,
     quiet_until: Option<Instant>,
     regions: usize,
@@ -55,34 +57,36 @@ impl RdpGraphicsFrameAccumulator {
 
     pub(crate) fn queue_rect(&mut self, rect: RemoteDesktopRect) {
         let now = Instant::now();
-        if self.pending_rect.is_none() {
+        if self.pending_rects.is_empty() {
             self.first_update_at = Some(now);
         }
         self.quiet_until = Some(now + RDP_GRAPHICS_ACCUMULATOR_QUIET_WINDOW);
         self.regions = self.regions.saturating_add(1);
-        self.pending_rect = Some(match self.pending_rect {
-            Some(existing) => existing.union(rect).unwrap_or(rect),
-            None => rect,
-        });
+        queue_bounded_dirty_rect(&mut self.pending_rects, rect, RDP_GRAPHICS_MAX_DIRTY_RECTS);
     }
 
-    pub(crate) fn take_ready_rect(&mut self) -> Option<RemoteDesktopRect> {
+    pub(crate) fn take_ready_rects(&mut self) -> Option<Vec<RemoteDesktopRect>> {
         if !self.ready_to_flush() {
             return None;
         }
-        self.take_rect()
+        self.take_rects()
     }
 
-    pub(crate) fn take_rect(&mut self) -> Option<RemoteDesktopRect> {
-        let rect = self.pending_rect.take();
+    pub(crate) fn take_rects(&mut self) -> Option<Vec<RemoteDesktopRect>> {
+        if self.pending_rects.is_empty() {
+            return None;
+        }
+        let rects = std::mem::take(&mut self.pending_rects);
         self.first_update_at = None;
         self.quiet_until = None;
         self.regions = 0;
-        rect
+        Some(rects)
     }
 
     pub(crate) fn next_flush_delay(&self) -> Option<Duration> {
-        self.pending_rect?;
+        if self.pending_rects.is_empty() {
+            return None;
+        }
         let now = Instant::now();
         let mut deadline = self.quiet_until?;
         if let Some(first_update_at) = self.first_update_at {
@@ -96,17 +100,91 @@ impl RdpGraphicsFrameAccumulator {
     }
 
     pub(crate) fn should_promote_to_base(&self, image: &DecodedImage) -> bool {
-        let Some(rect) = self.pending_rect else {
+        if self.pending_rects.is_empty() {
             return false;
-        };
-        rect_covers_image(rect, image)
-            || rect_pixels(rect).saturating_mul(RDP_GRAPHICS_ACCUMULATOR_BASE_AREA_DIVISOR)
+        }
+        let dirty_pixels = self
+            .pending_rects
+            .iter()
+            .copied()
+            .map(rect_pixels)
+            .fold(0_u64, u64::saturating_add);
+        self.pending_rects
+            .iter()
+            .copied()
+            .any(|rect| rect_covers_image(rect, image))
+            || dirty_pixels.saturating_mul(RDP_GRAPHICS_ACCUMULATOR_BASE_AREA_DIVISOR)
                 >= image_pixels(image)
     }
 
     fn ready_to_flush(&self) -> bool {
         self.next_flush_delay().is_some_and(|delay| delay.is_zero())
     }
+}
+
+pub(crate) fn queue_bounded_dirty_rect(
+    rects: &mut Vec<RemoteDesktopRect>,
+    rect: RemoteDesktopRect,
+    limit: usize,
+) {
+    rects.push(rect);
+    merge_touching_accumulator_rects(rects);
+    merge_accumulator_rects_to_limit(rects, limit);
+}
+
+fn merge_touching_accumulator_rects(rects: &mut Vec<RemoteDesktopRect>) {
+    let mut index = 0;
+    while index < rects.len() {
+        let mut candidate = index + 1;
+        while candidate < rects.len() {
+            if let Some(union) = rects[index].union(rects[candidate])
+                && accumulator_rects_touch(rects[index], rects[candidate])
+                && rect_pixels(union)
+                    <= rect_pixels(rects[index])
+                        .saturating_add(rect_pixels(rects[candidate]))
+                        .saturating_mul(RDP_GRAPHICS_ACCUMULATOR_MERGE_INFLATION_LIMIT)
+            {
+                rects[index] = union;
+                rects.swap_remove(candidate);
+                index = 0;
+                candidate = 1;
+                continue;
+            }
+            candidate += 1;
+        }
+        index += 1;
+    }
+}
+
+fn merge_accumulator_rects_to_limit(rects: &mut Vec<RemoteDesktopRect>, limit: usize) {
+    while rects.len() > limit {
+        let mut best_pair = (0, 1);
+        let mut best_inflation = u64::MAX;
+        for first in 0..rects.len() {
+            for second in (first + 1)..rects.len() {
+                let Some(union) = rects[first].union(rects[second]) else {
+                    continue;
+                };
+                let inflation = rect_pixels(union).saturating_sub(
+                    rect_pixels(rects[first]).saturating_add(rect_pixels(rects[second])),
+                );
+                if inflation < best_inflation {
+                    best_pair = (first, second);
+                    best_inflation = inflation;
+                }
+            }
+        }
+        let (first, second) = best_pair;
+        rects[first] = rects[first].union(rects[second]).unwrap_or(rects[first]);
+        rects.swap_remove(second);
+    }
+}
+
+fn accumulator_rects_touch(first: RemoteDesktopRect, second: RemoteDesktopRect) -> bool {
+    first.x <= second.x.saturating_add(second.width)
+        && second.x <= first.x.saturating_add(first.width)
+        && first.y <= second.y.saturating_add(second.height)
+        && second.y <= first.y.saturating_add(first.height)
 }
 
 #[cfg(test)]
@@ -165,12 +243,32 @@ pub(crate) fn graphics_update_rect_for_accumulator(
 
 pub(crate) fn accumulated_graphics_event(
     image: &DecodedImage,
-    rect: RemoteDesktopRect,
+    rects: Vec<RemoteDesktopRect>,
 ) -> RemoteDesktopHelperEvent {
-    if rect_covers_image(rect, image) {
+    if rects
+        .iter()
+        .copied()
+        .any(|rect| rect_covers_image(rect, image))
+    {
         base_frame_event(image)
+    } else if rects.len() == 1 {
+        graphics_update_rect_event(image, rects[0])
     } else {
-        graphics_update_rect_event(image, rect)
+        let updates = rects
+            .into_iter()
+            .map(|rect| {
+                let frame_format = frame_format_for_image(image);
+                RemoteDesktopFrameUpdate::new(
+                    remote_size_for_image(image),
+                    rect,
+                    frame_format,
+                    copy_image_rect(image.data(), image.width(), rect, frame_format),
+                )
+            })
+            .collect();
+        RemoteDesktopHelperEvent::FrameUpdateBatch {
+            batch: RemoteDesktopFrameUpdateBatch::new(updates),
+        }
     }
 }
 

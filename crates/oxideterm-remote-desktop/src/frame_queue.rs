@@ -10,7 +10,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{RemoteDesktopFrameFormat, RemoteDesktopHelperEvent, RemoteDesktopSize};
+use crate::{
+    REMOTE_DESKTOP_MAX_FRAME_UPDATE_BATCH_REGIONS, RemoteDesktopFrameFormat,
+    RemoteDesktopHelperEvent, RemoteDesktopSize,
+};
 
 const DEFAULT_MAX_EVENTS: usize = 256;
 const DEFAULT_MAX_DIRTY_BYTES: usize = 32 * 1024 * 1024;
@@ -116,6 +119,26 @@ impl RemoteDesktopFrameQueue {
                 _ => {}
             }
         }
+        if let RemoteDesktopHelperEvent::FrameUpdateBatch { batch } = &event {
+            let Some(graphics_epoch) = batch.graphics_epoch() else {
+                self.awaiting_base_frame = true;
+                return RemoteDesktopFrameQueuePush::RecoveryRequired;
+            };
+            match self.active_graphics_epoch {
+                Some(active_epoch) if graphics_epoch < active_epoch => {
+                    return RemoteDesktopFrameQueuePush::Discarded;
+                }
+                Some(active_epoch) if graphics_epoch > active_epoch => {
+                    self.frames.clear();
+                    self.queued_dirty_bytes = 0;
+                    self.active_graphics_epoch = Some(graphics_epoch);
+                    self.awaiting_base_frame = true;
+                    return RemoteDesktopFrameQueuePush::RecoveryRequired;
+                }
+                None => self.active_graphics_epoch = Some(graphics_epoch),
+                _ => {}
+            }
+        }
 
         if self.awaiting_base_frame {
             // Deltas after a dropped predecessor cannot be applied safely.
@@ -132,7 +155,13 @@ impl RemoteDesktopFrameQueue {
         self.queued_dirty_bytes = self
             .frames
             .iter()
-            .filter(|event| matches!(event, RemoteDesktopHelperEvent::FrameUpdate { .. }))
+            .filter(|event| {
+                matches!(
+                    event,
+                    RemoteDesktopHelperEvent::FrameUpdate { .. }
+                        | RemoteDesktopHelperEvent::FrameUpdateBatch { .. }
+                )
+            })
             .map(frame_event_bytes)
             .fold(0_usize, usize::saturating_add);
         if self.frames.len() <= self.max_events && self.queued_dirty_bytes <= self.max_dirty_bytes {
@@ -175,7 +204,11 @@ impl RemoteDesktopFrameQueue {
 
     pub fn pop_front(&mut self) -> Option<RemoteDesktopHelperEvent> {
         let event = self.frames.pop_front()?;
-        if matches!(event, RemoteDesktopHelperEvent::FrameUpdate { .. }) {
+        if matches!(
+            event,
+            RemoteDesktopHelperEvent::FrameUpdate { .. }
+                | RemoteDesktopHelperEvent::FrameUpdateBatch { .. }
+        ) {
             self.queued_dirty_bytes = self
                 .queued_dirty_bytes
                 .saturating_sub(frame_event_bytes(&event));
@@ -317,6 +350,7 @@ pub fn is_remote_desktop_frame_event(event: &RemoteDesktopHelperEvent) -> bool {
         event,
         RemoteDesktopHelperEvent::Frame { .. }
             | RemoteDesktopHelperEvent::FrameUpdate { .. }
+            | RemoteDesktopHelperEvent::FrameUpdateBatch { .. }
             | RemoteDesktopHelperEvent::FrameStreamReset { .. }
     )
 }
@@ -325,6 +359,7 @@ fn frame_event_bytes(event: &RemoteDesktopHelperEvent) -> usize {
     match event {
         RemoteDesktopHelperEvent::Frame { frame } => frame.bytes.len(),
         RemoteDesktopHelperEvent::FrameUpdate { update } => update.bytes.len(),
+        RemoteDesktopHelperEvent::FrameUpdateBatch { batch } => batch.byte_len(),
         RemoteDesktopHelperEvent::FrameStreamReset { .. } => 0,
         _ => 0,
     }
@@ -341,6 +376,11 @@ fn try_merge_frame_event(
                     return Err(RemoteDesktopHelperEvent::FrameUpdate { update });
                 }
             }
+            RemoteDesktopHelperEvent::FrameUpdateBatch { batch } => {
+                if !frame.apply_update_batch(&batch) {
+                    return Err(RemoteDesktopHelperEvent::FrameUpdateBatch { batch });
+                }
+            }
             incoming => *existing = incoming,
         },
         RemoteDesktopHelperEvent::FrameUpdate { update } => match incoming {
@@ -353,7 +393,25 @@ fn try_merge_frame_event(
                     });
                 }
             }
+            incoming @ RemoteDesktopHelperEvent::FrameUpdateBatch { .. } => {
+                return Err(incoming);
+            }
             incoming => *existing = incoming,
+        },
+        RemoteDesktopHelperEvent::FrameUpdateBatch { batch } => match incoming {
+            RemoteDesktopHelperEvent::FrameUpdateBatch {
+                batch: incoming_batch,
+            } => {
+                if let Err(incoming_batch) = batch.merge(
+                    incoming_batch,
+                    REMOTE_DESKTOP_MAX_FRAME_UPDATE_BATCH_REGIONS,
+                ) {
+                    return Err(RemoteDesktopHelperEvent::FrameUpdateBatch {
+                        batch: incoming_batch,
+                    });
+                }
+            }
+            incoming => return Err(incoming),
         },
         slot => *slot = incoming,
     }
@@ -363,7 +421,10 @@ fn try_merge_frame_event(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RemoteDesktopFrame, RemoteDesktopFrameUpdate, RemoteDesktopRect};
+    use crate::{
+        RemoteDesktopFrame, RemoteDesktopFrameUpdate, RemoteDesktopFrameUpdateBatch,
+        RemoteDesktopRect,
+    };
 
     fn update_at(x: u32) -> RemoteDesktopHelperEvent {
         RemoteDesktopHelperEvent::FrameUpdate {
@@ -377,6 +438,35 @@ mod tests {
                 vec![x as u8, 0, 0, 0xff],
             ),
         }
+    }
+
+    fn update_batch_at(x: u32) -> RemoteDesktopHelperEvent {
+        let RemoteDesktopHelperEvent::FrameUpdate { update } = update_at(x) else {
+            unreachable!();
+        };
+        RemoteDesktopHelperEvent::FrameUpdateBatch {
+            batch: RemoteDesktopFrameUpdateBatch::new(vec![update]),
+        }
+    }
+
+    #[test]
+    fn consecutive_frame_batches_share_one_bounded_queue_entry() {
+        let mut queue = RemoteDesktopFrameQueue::with_limits(1, usize::MAX);
+
+        assert_eq!(
+            queue.push(update_batch_at(0)),
+            RemoteDesktopFrameQueuePush::Queued
+        );
+        assert_eq!(
+            queue.push(update_batch_at(2)),
+            RemoteDesktopFrameQueuePush::Queued
+        );
+
+        let Some(RemoteDesktopHelperEvent::FrameUpdateBatch { batch }) = queue.pop_front() else {
+            panic!("merged frame batch should remain queued");
+        };
+        assert_eq!(batch.updates.len(), 2);
+        assert!(queue.is_empty());
     }
 
     #[test]

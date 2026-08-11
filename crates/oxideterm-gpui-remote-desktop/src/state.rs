@@ -541,6 +541,14 @@ impl RemoteDesktopViewState {
                     self.apply_event(RemoteDesktopHelperEvent::Frame { frame });
                 }
             }
+            RemoteDesktopHelperEvent::FrameUpdateBatch { batch } => {
+                // Direct callers still receive correct atomic ordering. The
+                // batched drain path below defers texture preparation until all
+                // regions from this presentation batch have been copied.
+                for update in batch.updates {
+                    self.apply_event(RemoteDesktopHelperEvent::FrameUpdate { update });
+                }
+            }
             RemoteDesktopHelperEvent::ConnectionFailure { message, category } => {
                 self.status = RemoteDesktopSessionStatus::Failed;
                 self.message = Some(message);
@@ -641,48 +649,19 @@ impl RemoteDesktopViewState {
                     }
                 }
                 RemoteDesktopHelperEvent::FrameUpdate { update } => {
-                    stats.frame_updates += 1;
-                    record_frame_trace(&mut stats, update.trace_id);
-                    if self.can_apply_frame_update(update.graphics_epoch)
-                        && let Some(frame_image) = self.frame_image.as_mut()
-                        && let Some(texture_stats) = frame_image.apply_update_with_stats(&update)
-                    {
-                        stats.dirty_updates_applied += 1;
-                        stats.dirty_rect_pixels += frame_rect_pixels(update.rect);
-                        stats.dirty_frame_pixels += frame_size_pixels(update.size);
-                        stats.dirty_tiles_refreshed += 1;
-                        stats.pending_texture_updates = texture_stats.pending_texture_updates;
-                        stats.pending_texture_upload_bytes =
-                            texture_stats.pending_texture_upload_bytes;
-                        texture_uploads_changed = true;
-                        self.status = RemoteDesktopSessionStatus::Connected;
-                        self.size = Some(update.size);
-                        self.message = None;
-                        self.error_category = None;
-                        self.corrupted_frame = None;
-                        self.pending_resize = None;
-                    } else if self.can_accept_full_update(update.graphics_epoch)
-                        && let Some(frame) = frame_from_full_update(&update)
-                    {
-                        stats.full_update_recoveries += 1;
-                        record_frame_trace(&mut stats, frame.trace_id);
-                        self.apply_event(RemoteDesktopHelperEvent::Frame { frame });
-                        stats.full_frames += 1;
-                        if self.frame_image.is_some() {
-                            stats.frame_tiles_created += 1;
-                            if let Some(frame_image) = self.frame_image.as_ref()
-                                && let Ok(updates) = frame_image.pending_texture_updates.lock()
-                            {
-                                let pending = pending_texture_stats(&updates);
-                                stats.pending_texture_updates = pending.pending_texture_updates;
-                                stats.pending_texture_upload_bytes =
-                                    pending.pending_texture_upload_bytes;
-                            }
-                        } else {
-                            stats.corrupted_frames += 1;
-                        }
-                    } else {
-                        stats.dirty_updates_rejected += 1;
+                    self.apply_frame_update_with_stats(
+                        update,
+                        &mut stats,
+                        &mut texture_uploads_changed,
+                    );
+                }
+                RemoteDesktopHelperEvent::FrameUpdateBatch { batch } => {
+                    for update in batch.updates {
+                        self.apply_frame_update_with_stats(
+                            update,
+                            &mut stats,
+                            &mut texture_uploads_changed,
+                        );
                     }
                 }
                 event => {
@@ -694,6 +673,55 @@ impl RemoteDesktopViewState {
             frame_image.prepare_texture_uploads();
         }
         stats
+    }
+
+    fn apply_frame_update_with_stats(
+        &mut self,
+        update: RemoteDesktopFrameUpdate,
+        stats: &mut RemoteDesktopFrameApplyStats,
+        texture_uploads_changed: &mut bool,
+    ) {
+        stats.frame_updates += 1;
+        record_frame_trace(stats, update.trace_id);
+        if self.can_apply_frame_update(update.graphics_epoch)
+            && let Some(frame_image) = self.frame_image.as_mut()
+            && let Some(texture_stats) = frame_image.apply_update_with_stats(&update)
+        {
+            stats.dirty_updates_applied += 1;
+            stats.dirty_rect_pixels += frame_rect_pixels(update.rect);
+            stats.dirty_frame_pixels += frame_size_pixels(update.size);
+            stats.dirty_tiles_refreshed += 1;
+            stats.pending_texture_updates = texture_stats.pending_texture_updates;
+            stats.pending_texture_upload_bytes = texture_stats.pending_texture_upload_bytes;
+            *texture_uploads_changed = true;
+            self.status = RemoteDesktopSessionStatus::Connected;
+            self.size = Some(update.size);
+            self.message = None;
+            self.error_category = None;
+            self.corrupted_frame = None;
+            self.pending_resize = None;
+        } else if self.can_accept_full_update(update.graphics_epoch)
+            && let Some(frame) = frame_from_full_update(&update)
+        {
+            stats.full_update_recoveries += 1;
+            record_frame_trace(stats, frame.trace_id);
+            self.apply_event(RemoteDesktopHelperEvent::Frame { frame });
+            stats.full_frames += 1;
+            if self.frame_image.is_some() {
+                stats.frame_tiles_created += 1;
+                if let Some(frame_image) = self.frame_image.as_ref()
+                    && let Ok(updates) = frame_image.pending_texture_updates.lock()
+                {
+                    let pending = pending_texture_stats(&updates);
+                    stats.pending_texture_updates = pending.pending_texture_updates;
+                    stats.pending_texture_upload_bytes = pending.pending_texture_upload_bytes;
+                }
+            } else {
+                stats.corrupted_frames += 1;
+            }
+        } else {
+            stats.dirty_updates_rejected += 1;
+        }
     }
 
     pub fn mark_resize_requested(&mut self, size: RemoteDesktopSize) {
@@ -1181,7 +1209,8 @@ fn is_full_frame_rect(size: RemoteDesktopSize, rect: RemoteDesktopRect) -> bool 
 mod tests {
     use oxideterm_remote_desktop::{
         NegotiatedCapabilityStatus, RemoteDesktopCursorShape, RemoteDesktopFrame,
-        RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate, RemoteDesktopRect,
+        RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate, RemoteDesktopFrameUpdateBatch,
+        RemoteDesktopRect,
     };
 
     use super::*;
@@ -1659,28 +1688,26 @@ mod tests {
         let before = frame_texture(&state);
         drain_pending_texture_updates(&state);
 
-        let stats = state.apply_frame_events([
-            RemoteDesktopHelperEvent::FrameUpdate {
-                update: RemoteDesktopFrameUpdate::new(
+        let stats = state.apply_frame_events([RemoteDesktopHelperEvent::FrameUpdateBatch {
+            batch: RemoteDesktopFrameUpdateBatch::new(vec![
+                RemoteDesktopFrameUpdate::new(
                     size,
                     RemoteDesktopRect::new(10, 10, 1, 1),
                     RemoteDesktopFrameFormat::Rgba8,
                     vec![0xaa, 0xbb, 0xcc, 0xdd],
                 ),
-            },
-            RemoteDesktopHelperEvent::FrameUpdate {
-                update: RemoteDesktopFrameUpdate::new(
+                RemoteDesktopFrameUpdate::new(
                     size,
                     RemoteDesktopRect::new(20, 20, 1, 1),
                     RemoteDesktopFrameFormat::Rgba8,
                     vec![0x11, 0x22, 0x33, 0x44],
                 ),
-            },
-        ]);
+            ]),
+        }]);
 
         let retired = state.take_retired_images();
         let after = frame_texture(&state);
-        assert_eq!(stats.events, 2);
+        assert_eq!(stats.events, 1);
         assert_eq!(stats.frame_updates, 2);
         assert_eq!(stats.dirty_updates_applied, 2);
         assert_eq!(stats.dirty_rect_pixels, 2);

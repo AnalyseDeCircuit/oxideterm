@@ -939,24 +939,27 @@ pub(super) fn flush_rdp_graphics_updates(
     if frame_state.awaiting_reactivation {
         return Ok(());
     }
-    let rect = if force {
-        frame_state.graphics_accumulator.take_rect()
+    let rects = if force {
+        frame_state.graphics_accumulator.take_rects()
     } else {
-        frame_state.graphics_accumulator.take_ready_rect()
+        frame_state.graphics_accumulator.take_ready_rects()
     };
-    let Some(rect) = rect else {
+    let Some(rects) = rects else {
         return Ok(());
     };
     if frame_state.pending_base_frame
         || frame_state.graphics_sync.needs_base()
-        || rect_covers_image(rect, image)
+        || rects
+            .iter()
+            .copied()
+            .any(|rect| rect_covers_image(rect, image))
     {
         return send_client_rdp_base_frame(output_tx, image, frame_state, true);
     }
 
     let trace_id = frame_state.next_graphics_trace_id();
     let event = attach_graphics_metadata(
-        accumulated_graphics_event(image, rect),
+        accumulated_graphics_event(image, rects),
         frame_state.graphics_epoch,
         trace_id,
     );
@@ -967,6 +970,15 @@ pub(super) fn flush_rdp_graphics_updates(
             update.rect,
             update.bytes.len(),
         );
+    } else if let RemoteDesktopHelperEvent::FrameUpdateBatch { batch } = &event {
+        for update in &batch.updates {
+            frame_state.graphics_diagnostics.record_dirty_update(
+                trace_id,
+                update.size,
+                update.rect,
+                update.bytes.len(),
+            );
+        }
     }
     send_client_rdp_graphics_event(output_tx, event, frame_state)
 }
@@ -1128,6 +1140,21 @@ pub(super) fn attach_graphics_metadata(
                 .with_graphics_epoch(graphics_epoch)
                 .with_trace_id(trace_id),
         },
+        RemoteDesktopHelperEvent::FrameUpdateBatch { batch } => {
+            RemoteDesktopHelperEvent::FrameUpdateBatch {
+                batch: oxideterm_remote_desktop::RemoteDesktopFrameUpdateBatch::new(
+                    batch
+                        .updates
+                        .into_iter()
+                        .map(|update| {
+                            update
+                                .with_graphics_epoch(graphics_epoch)
+                                .with_trace_id(trace_id)
+                        })
+                        .collect(),
+                ),
+            }
+        }
         event => event,
     }
 }

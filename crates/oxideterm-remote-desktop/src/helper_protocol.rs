@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     NegotiatedCapabilities, RemoteDesktopCursorShape, RemoteDesktopEndpoint, RemoteDesktopFrame,
-    RemoteDesktopFrameUpdate, RemoteDesktopMonitorLayout, RemoteDesktopProtocol,
-    RemoteDesktopSecret, RemoteDesktopSessionOptions, RemoteDesktopSessionStatus,
-    RemoteDesktopSize,
+    RemoteDesktopFrameUpdate, RemoteDesktopFrameUpdateBatch, RemoteDesktopMonitorLayout,
+    RemoteDesktopProtocol, RemoteDesktopSecret, RemoteDesktopSessionOptions,
+    RemoteDesktopSessionStatus, RemoteDesktopSize,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -375,6 +375,9 @@ pub enum RemoteDesktopHelperEvent {
     FrameUpdate {
         update: RemoteDesktopFrameUpdate,
     },
+    FrameUpdateBatch {
+        batch: RemoteDesktopFrameUpdateBatch,
+    },
     FrameStreamReset {
         graphics_epoch: u64,
     },
@@ -462,6 +465,11 @@ impl fmt::Debug for RemoteDesktopHelperEvent {
                 .field("trace_id", &update.trace_id)
                 .field("compression", &update.compression)
                 .field("bytes", &format_args!("<{} bytes>", update.bytes.len()))
+                .finish(),
+            Self::FrameUpdateBatch { batch } => formatter
+                .debug_struct("FrameUpdateBatch")
+                .field("updates", &batch.updates.len())
+                .field("bytes", &format_args!("<{} bytes>", batch.byte_len()))
                 .finish(),
             Self::FrameStreamReset { graphics_epoch } => formatter
                 .debug_struct("FrameStreamReset")

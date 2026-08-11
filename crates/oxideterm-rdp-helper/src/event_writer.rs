@@ -5,6 +5,7 @@ use std::{
     thread,
 };
 
+use oxideterm_remote_desktop::REMOTE_DESKTOP_MAX_FRAME_UPDATE_BATCH_REGIONS;
 use oxideterm_remote_desktop::{RemoteDesktopHelperEvent, write_event_line};
 
 #[derive(Clone)]
@@ -103,7 +104,9 @@ fn next_frame_for_stdout(
 fn is_frame_event(event: &RemoteDesktopHelperEvent) -> bool {
     matches!(
         event,
-        RemoteDesktopHelperEvent::Frame { .. } | RemoteDesktopHelperEvent::FrameUpdate { .. }
+        RemoteDesktopHelperEvent::Frame { .. }
+            | RemoteDesktopHelperEvent::FrameUpdate { .. }
+            | RemoteDesktopHelperEvent::FrameUpdateBatch { .. }
     )
 }
 
@@ -134,6 +137,11 @@ fn try_merge_frame_event(
                     return Err(RemoteDesktopHelperEvent::FrameUpdate { update });
                 }
             }
+            RemoteDesktopHelperEvent::FrameUpdateBatch { batch } => {
+                if !frame.apply_update_batch(&batch) {
+                    return Err(RemoteDesktopHelperEvent::FrameUpdateBatch { batch });
+                }
+            }
             incoming => {
                 *existing = incoming;
             }
@@ -148,9 +156,27 @@ fn try_merge_frame_event(
                     });
                 }
             }
+            incoming @ RemoteDesktopHelperEvent::FrameUpdateBatch { .. } => {
+                return Err(incoming);
+            }
             incoming => {
                 *existing = incoming;
             }
+        },
+        RemoteDesktopHelperEvent::FrameUpdateBatch { batch } => match incoming {
+            RemoteDesktopHelperEvent::FrameUpdateBatch {
+                batch: incoming_batch,
+            } => {
+                if let Err(incoming_batch) = batch.merge(
+                    incoming_batch,
+                    REMOTE_DESKTOP_MAX_FRAME_UPDATE_BATCH_REGIONS,
+                ) {
+                    return Err(RemoteDesktopHelperEvent::FrameUpdateBatch {
+                        batch: incoming_batch,
+                    });
+                }
+            }
+            incoming => return Err(incoming),
         },
         slot => {
             *slot = incoming;
