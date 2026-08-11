@@ -25,7 +25,6 @@ const TERMINAL_PROJECT_REMOTE_MAX_OUTPUT: usize = 512 * 1024;
 #[derive(Clone)]
 pub(in crate::workspace) enum WorkspaceTerminalEvent {
     GitMetadataChanged,
-    GitCommitDraftReady(terminal_git::TerminalGitCommitDraftRequest),
     ProjectMetadataChanged,
 }
 
@@ -1051,7 +1050,6 @@ mod tests {
                     WorkspaceTerminalEvent::GitMetadataChanged => {
                         recorder.git_metadata_changes += 1;
                     }
-                    WorkspaceTerminalEvent::GitCommitDraftReady(_) => {}
                     WorkspaceTerminalEvent::ProjectMetadataChanged => {
                         recorder.project_metadata_changes += 1;
                     }
@@ -1152,7 +1150,6 @@ mod tests {
                     WorkspaceTerminalEvent::GitMetadataChanged => {
                         recorder.git_metadata_changes += 1;
                     }
-                    WorkspaceTerminalEvent::GitCommitDraftReady(_) => {}
                     WorkspaceTerminalEvent::ProjectMetadataChanged => {
                         recorder.project_metadata_changes += 1;
                     }

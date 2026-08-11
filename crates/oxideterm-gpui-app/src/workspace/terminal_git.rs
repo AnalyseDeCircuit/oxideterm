@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use oxideterm_ai::{
@@ -20,7 +19,7 @@ use oxideterm_environment::{
     git_worktree_list_args, infer_terminal_cwd_from_text, interpret_git_branch_list_outputs,
     interpret_git_command_outputs_with_status_and_operation, interpret_git_staged_diff_outputs,
     parse_shell_branch_list_output, parse_shell_staged_diff_output, preferred_git_cwd,
-    remote_shell_branch_list_command, remote_shell_staged_diff_command, shell_quote,
+    remote_shell_branch_list_command, remote_shell_staged_diff_command,
 };
 use oxideterm_ssh::NodeId;
 use tokio::process::Command;
@@ -61,23 +60,6 @@ pub(in crate::workspace) enum TerminalGitAiCommitMessageOutcome {
     Error(String),
 }
 
-#[derive(Clone)]
-pub(in crate::workspace) struct TerminalGitCommitDraftRequest {
-    command: Arc<Mutex<Option<String>>>,
-}
-
-impl TerminalGitCommitDraftRequest {
-    fn new(command: String) -> Self {
-        Self {
-            command: Arc::new(Mutex::new(Some(command))),
-        }
-    }
-
-    pub(in crate::workspace) fn take(&self) -> Option<String> {
-        self.command.lock().ok()?.take()
-    }
-}
-
 #[derive(Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum TerminalGitBranchError {
     NotRepository,
@@ -114,6 +96,7 @@ pub(in crate::workspace) struct TerminalGitBranchPickerState {
     active_section: TerminalGitPanelSection,
     key: Option<GitProbeKey>,
     query: String,
+    commit_message: String,
     branches: Vec<GitBranchReference>,
     highlighted_branch: Option<String>,
     loading: bool,
@@ -132,11 +115,11 @@ impl TerminalGitBranchPickerState {
 
     fn close(&mut self) {
         let generation = self.generation;
-        let ai_commit_generation = self.ai_commit_generation;
+        let ai_commit_generation =
+            terminal_git_now_ms().max(self.ai_commit_generation.saturating_add(1));
         *self = Self::default();
         // Generations belong to the Entity lifetime, not one panel mount. Keep
-        // them monotonic so a completion from a closed panel cannot match a
-        // later reopen of the same repository.
+        // them monotonic and invalidate any AI completion from the closed panel.
         self.generation = generation;
         self.ai_commit_generation = ai_commit_generation;
     }
@@ -155,15 +138,12 @@ impl TerminalGitBranchPickerState {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(in crate::workspace) enum TerminalGitPanelSection {
-    #[default]
     Branches,
+    #[default]
     Changes,
-    Sync,
-    Stash,
     Resolve,
-    Commit,
     History,
-    Refs,
+    More,
 }
 
 impl TerminalGitPanelSection {
@@ -171,12 +151,9 @@ impl TerminalGitPanelSection {
         match self {
             Self::Branches => "terminal.git.section_branches",
             Self::Changes => "terminal.git.section_changes",
-            Self::Sync => "terminal.git.section_sync",
-            Self::Stash => "terminal.git.section_stash",
             Self::Resolve => "terminal.git.section_resolve",
-            Self::Commit => "terminal.git.section_commit",
             Self::History => "terminal.git.section_history",
-            Self::Refs => "terminal.git.section_refs",
+            Self::More => "terminal.git.section_more",
         }
     }
 }
@@ -263,6 +240,14 @@ impl WorkspaceTerminalEntity {
         &self.git_panel.query
     }
 
+    pub(in crate::workspace) fn git_commit_message(&self) -> &str {
+        &self.git_panel.commit_message
+    }
+
+    pub(in crate::workspace) fn git_commit_message_ready(&self) -> bool {
+        TerminalGitActionPlan::commit_message(&self.git_panel.commit_message).is_some()
+    }
+
     pub(in crate::workspace) fn git_panel_loading(&self) -> bool {
         self.git_panel.loading
     }
@@ -307,6 +292,7 @@ impl WorkspaceTerminalEntity {
         self.git_panel.active_section = active_section;
         self.git_panel.key = Some(key.clone());
         self.git_panel.query.clear();
+        self.git_panel.commit_message.clear();
         self.git_panel.branches.clear();
         self.git_panel.highlighted_branch = None;
         self.git_panel.loading = true;
@@ -335,6 +321,19 @@ impl WorkspaceTerminalEntity {
         replace_utf16(&mut self.git_panel.query, replacement_range, text);
         self.git_panel.highlighted_branch = None;
         self.ensure_git_branch_highlight();
+        true
+    }
+
+    pub(in crate::workspace) fn replace_git_commit_message(
+        &mut self,
+        replacement_range: Option<std::ops::Range<usize>>,
+        text: &str,
+    ) -> bool {
+        if !self.git_panel.open {
+            return false;
+        }
+        replace_utf16(&mut self.git_panel.commit_message, replacement_range, text);
+        self.git_panel.ai_commit_error = None;
         true
     }
 
@@ -571,7 +570,7 @@ impl WorkspaceTerminalEntity {
                     generation,
                     outcome,
                 } => {
-                    changed |= self.apply_git_ai_commit_message_result(generation, outcome, cx);
+                    changed |= self.apply_git_ai_commit_message_result(generation, outcome);
                 }
             }
         }
@@ -699,23 +698,22 @@ impl WorkspaceTerminalEntity {
         &mut self,
         generation: u64,
         outcome: TerminalGitAiCommitMessageOutcome,
-        cx: &mut Context<Self>,
     ) -> bool {
-        if self.git_panel.ai_commit_generation != generation {
+        if !self.git_panel.open || self.git_panel.ai_commit_generation != generation {
             return false;
         }
 
         self.git_panel.ai_commit_loading = false;
         match outcome {
             TerminalGitAiCommitMessageOutcome::Ready(message) => {
-                let Some(command) = terminal_git_commit_command_from_ai_message(&message) else {
+                let Some(subject) = terminal_git_clean_ai_commit_subject(&message) else {
                     self.git_panel.ai_commit_error = Some(TerminalGitAiCommitError::InvalidMessage);
                     return true;
                 };
-                self.git_panel.close();
-                cx.emit(WorkspaceTerminalEvent::GitCommitDraftReady(
-                    TerminalGitCommitDraftRequest::new(command),
-                ));
+                // AI output remains an editable, transient draft. It is never
+                // persisted or sent back to a model after this boundary.
+                self.git_panel.commit_message = subject;
+                self.git_panel.ai_commit_error = None;
             }
             TerminalGitAiCommitMessageOutcome::EmptyStagedDiff => {
                 self.git_panel.ai_commit_error = Some(TerminalGitAiCommitError::NoStagedChanges);
@@ -768,7 +766,7 @@ impl WorkspaceApp {
         {
             TerminalGitPanelSection::Resolve
         } else {
-            TerminalGitPanelSection::Branches
+            TerminalGitPanelSection::Changes
         };
 
         self.close_terminal_quick_commands_popover(cx);
@@ -947,6 +945,17 @@ impl WorkspaceApp {
         self.send_terminal_git_command(plan, failure_message, cx);
     }
 
+    pub(in crate::workspace) fn commit_terminal_git_message(&mut self, cx: &mut Context<Self>) {
+        let message = self.terminal.read(cx).git_commit_message().to_string();
+        let Some(plan) = TerminalGitActionPlan::commit_message(&message) else {
+            return;
+        };
+        let action_label = self.i18n.t("terminal.git.action_commit");
+        let failure_message =
+            self.i18n_replace("terminal.git.command_failed", &[("action", action_label)]);
+        self.send_terminal_git_command(plan, failure_message, cx);
+    }
+
     pub(in crate::workspace) fn run_terminal_git_path_action(
         &mut self,
         action: TerminalGitPathAction,
@@ -1102,15 +1111,27 @@ impl WorkspaceApp {
                 true
             }
             "enter" => {
-                if self.terminal.read(cx).git_panel_active_section()
-                    != TerminalGitPanelSection::Branches
-                {
-                    return false;
+                let active_section = self.terminal.read(cx).git_panel_active_section();
+                match active_section {
+                    TerminalGitPanelSection::Branches => {
+                        let branch = self.terminal.read(cx).selected_git_branch();
+                        if let Some(branch) = branch {
+                            self.select_terminal_git_branch(branch, cx);
+                        }
+                    }
+                    TerminalGitPanelSection::Changes => {
+                        let can_commit = self.terminal.read(cx).git_commit_message_ready()
+                            && self
+                                .active_terminal_git_snapshot(cx)
+                                .is_some_and(|snapshot| snapshot.status.staged() > 0);
+                        if can_commit {
+                            self.commit_terminal_git_message(cx);
+                        }
+                    }
+                    _ => {}
                 }
-                let branch = self.terminal.read(cx).selected_git_branch();
-                if let Some(branch) = branch {
-                    self.select_terminal_git_branch(branch, cx);
-                }
+                // Enter belongs to the open Git panel and must never reach the
+                // terminal pane behind it, even when the commit is disabled.
                 true
             }
             _ => false,
@@ -1528,11 +1549,6 @@ fn terminal_git_truncate_ai_context(mut context: String, max_chars: usize) -> St
     context
 }
 
-fn terminal_git_commit_command_from_ai_message(text: &str) -> Option<String> {
-    let subject = terminal_git_clean_ai_commit_subject(text)?;
-    Some(format!("git commit -m {}", shell_quote(&subject)))
-}
-
 fn terminal_git_clean_ai_commit_subject(text: &str) -> Option<String> {
     let mut subject = text
         .lines()
@@ -1572,6 +1588,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn git_panel_defaults_to_the_worktree_flow() {
+        assert_eq!(
+            TerminalGitPanelSection::default(),
+            TerminalGitPanelSection::Changes
+        );
+    }
+
+    #[test]
+    fn git_panel_more_label_exists_in_every_locale() {
+        let locales = [
+            Locale::De,
+            Locale::En,
+            Locale::EsEs,
+            Locale::FrFr,
+            Locale::It,
+            Locale::Ja,
+            Locale::Ko,
+            Locale::PtBr,
+            Locale::Vi,
+            Locale::ZhCn,
+            Locale::ZhTw,
+        ];
+        let keys = [
+            TerminalGitPanelSection::More.label_key(),
+            "terminal.git.group_repository",
+            "terminal.git.group_advanced",
+            "terminal.git.commit_message_placeholder",
+        ];
+
+        // The compact navigation must never expose a raw key in shipped locales.
+        for locale in locales {
+            let i18n = I18n::new(locale);
+            for key in keys {
+                assert_ne!(i18n.t(key), key, "{locale:?} missing {key}");
+            }
+        }
+    }
+
+    #[test]
     fn local_git_command_platform_options_are_applied() {
         let mut command = Command::new("git");
 
@@ -1579,26 +1634,23 @@ mod tests {
     }
 
     #[test]
-    fn ai_commit_message_becomes_editable_commit_command() {
+    fn ai_commit_message_becomes_an_editable_subject() {
         assert_eq!(
-            terminal_git_commit_command_from_ai_message("feat: add terminal git actions")
-                .as_deref(),
-            Some("git commit -m 'feat: add terminal git actions'")
+            terminal_git_clean_ai_commit_subject("feat: add terminal git actions").as_deref(),
+            Some("feat: add terminal git actions")
         );
         assert_eq!(
-            terminal_git_commit_command_from_ai_message(
-                "git commit -m \"fix: quote branch names\""
-            )
-            .as_deref(),
-            Some("git commit -m 'fix: quote branch names'")
+            terminal_git_clean_ai_commit_subject("git commit -m \"fix: quote branch names\"")
+                .as_deref(),
+            Some("fix: quote branch names")
         );
     }
 
     #[test]
     fn ai_commit_message_rejects_empty_or_control_output() {
-        assert!(terminal_git_commit_command_from_ai_message("```").is_none());
-        assert!(terminal_git_commit_command_from_ai_message("feat: bad\nname\u{7}").is_some());
-        assert!(terminal_git_commit_command_from_ai_message("feat: bad\u{7}name").is_none());
+        assert!(terminal_git_clean_ai_commit_subject("```").is_none());
+        assert!(terminal_git_clean_ai_commit_subject("feat: bad\nname\u{7}").is_some());
+        assert!(terminal_git_clean_ai_commit_subject("feat: bad\u{7}name").is_none());
     }
 
     #[test]
@@ -1611,14 +1663,5 @@ mod tests {
         let prompt = terminal_git_ai_diff_context(&context, 200);
         assert!(!prompt.contains("sk-test-secret"));
         assert!(prompt.contains("[REDACTED]"));
-    }
-
-    #[test]
-    fn commit_draft_request_is_consumed_once_across_clones() {
-        let request = TerminalGitCommitDraftRequest::new("git commit -m test".to_string());
-        let clone = request.clone();
-
-        assert_eq!(clone.take().as_deref(), Some("git commit -m test"));
-        assert!(request.take().is_none());
     }
 }

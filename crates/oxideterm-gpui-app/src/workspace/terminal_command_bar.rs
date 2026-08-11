@@ -22,8 +22,8 @@ use oxideterm_gpui_ui::text_input::{TextInputView, text_input, text_input_anchor
 use oxideterm_gpui_ui::{
     ActionChipOptions, ActionChipTextTone, CommandPanelOptions, ContextChipOptions,
     EntityListRowOptions, MonospaceDatumOptions, MonospaceDatumTone, StatusPillOptions, StatusTone,
-    action_chip, action_chip_foreground, command_panel, context_chip, entity_list_row,
-    monospace_datum, status_pill,
+    action_chip, action_chip_foreground, command_panel, command_panel_body, context_chip,
+    entity_list_row, monospace_datum, status_pill,
 };
 use oxideterm_terminal_recording::format_recording_elapsed;
 
@@ -39,7 +39,8 @@ const TERMINAL_BROADCAST_MENU_WIDTH: f32 = 260.0;
 const TERMINAL_CWD_MENU_WIDTH: f32 = 520.0;
 const TERMINAL_CWD_MENU_MAX_HEIGHT: f32 = 420.0;
 const TERMINAL_CWD_MENU_MARGIN: f32 = 12.0;
-const TERMINAL_GIT_BRANCH_MENU_WIDTH: f32 = 720.0;
+const TERMINAL_GIT_BRANCH_MENU_WIDTH: f32 = 460.0;
+const TERMINAL_GIT_BRANCH_MENU_BODY_HEIGHT: f32 = 360.0;
 const TERMINAL_GIT_BRANCH_MENU_BODY_MAX_HEIGHT: f32 = 520.0;
 const TERMINAL_GIT_BRANCH_MENU_MARGIN: f32 = 12.0;
 const TERMINAL_PROJECT_MENU_WIDTH: f32 = 640.0;
@@ -81,12 +82,9 @@ fn terminal_git_section_icon(section: TerminalGitPanelSection) -> LucideIcon {
     match section {
         TerminalGitPanelSection::Branches => LucideIcon::GitFork,
         TerminalGitPanelSection::Changes => LucideIcon::Pencil,
-        TerminalGitPanelSection::Sync => LucideIcon::RefreshCw,
-        TerminalGitPanelSection::Stash => LucideIcon::Archive,
         TerminalGitPanelSection::Resolve => LucideIcon::AlertTriangle,
-        TerminalGitPanelSection::Commit => LucideIcon::CheckCircle,
         TerminalGitPanelSection::History => LucideIcon::History,
-        TerminalGitPanelSection::Refs => LucideIcon::ListTree,
+        TerminalGitPanelSection::More => LucideIcon::MoreVertical,
     }
 }
 

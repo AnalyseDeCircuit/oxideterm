@@ -24,6 +24,7 @@ use super::new_connection::{NewConnectionField, refresh_identity_agent_availabil
 use super::quick_commands::QuickCommandInput;
 use super::session_manager::{SessionManagerInput, SessionManagerState};
 use super::sftp::SftpInput;
+use super::terminal_git::TerminalGitPanelSection;
 use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::{
     tauri_ui_font_family,
@@ -112,6 +113,7 @@ pub(super) enum WorkspaceImeTarget {
     Search,
     TerminalCwdSearch,
     TerminalGitBranchSearch,
+    TerminalGitCommitMessage,
     TerminalProjectSearch,
     TerminalCastSearch,
     HostProcessSearch,
@@ -471,6 +473,7 @@ impl WorkspaceImeTarget {
             Self::Search => 1,
             Self::TerminalCwdSearch => 18,
             Self::TerminalGitBranchSearch => 17,
+            Self::TerminalGitCommitMessage => 20,
             Self::TerminalProjectSearch => 19,
             Self::TerminalCastSearch => 3,
             Self::HostProcessSearch => 6,
@@ -980,7 +983,15 @@ impl WorkspaceApp {
             }
 
             if self.terminal.read(cx).git_panel_open() {
-                return Some(WorkspaceImeTarget::TerminalGitBranchSearch);
+                return match self.terminal.read(cx).git_panel_active_section() {
+                    TerminalGitPanelSection::Branches => {
+                        Some(WorkspaceImeTarget::TerminalGitBranchSearch)
+                    }
+                    TerminalGitPanelSection::Changes => {
+                        Some(WorkspaceImeTarget::TerminalGitCommitMessage)
+                    }
+                    _ => None,
+                };
             }
 
             if self.terminal.read(cx).project_panel_open() {
@@ -1734,6 +1745,12 @@ impl WorkspaceApp {
                 terminal
                     .git_panel_open()
                     .then(|| terminal.git_panel_query().to_string())
+            }
+            WorkspaceImeTarget::TerminalGitCommitMessage => {
+                let terminal = self.terminal.read(cx);
+                terminal
+                    .git_panel_open()
+                    .then(|| terminal.git_commit_message().to_string())
             }
             WorkspaceImeTarget::TerminalProjectSearch => {
                 let terminal = self.terminal.read(cx);
@@ -2522,6 +2539,14 @@ impl WorkspaceApp {
             WorkspaceImeTarget::TerminalGitBranchSearch => {
                 if self.terminal.update(cx, |terminal, _cx| {
                     terminal.replace_git_panel_query(replacement_range, text)
+                }) {
+                    self.show_active_input_caret(cx);
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::TerminalGitCommitMessage => {
+                if self.terminal.update(cx, |terminal, _cx| {
+                    terminal.replace_git_commit_message(replacement_range, text)
                 }) {
                     self.show_active_input_caret(cx);
                     cx.notify();

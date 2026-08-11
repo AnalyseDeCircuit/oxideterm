@@ -67,6 +67,15 @@ pub struct GitActionPlan {
 }
 
 impl GitActionPlan {
+    /// Builds a commit plan from one user-visible subject line.
+    pub fn commit_message(message: &str) -> Option<Self> {
+        let message = message.trim();
+        git_action_arg_is_valid(message).then(|| Self {
+            command: format!("git commit -m {}", shell_quote(message)),
+            cwd_after_command: None,
+        })
+    }
+
     /// Selects a branch, or changes into its linked worktree when present.
     pub fn select_branch(branch: &GitBranchReference) -> Option<Self> {
         let branch_name = branch.name().trim();
@@ -291,6 +300,18 @@ mod tests {
         );
         assert!(GitActionPlan::checkout_name("feature\nbad").is_none());
         assert!(GitActionPlan::create_branch_name("feature\nbad").is_none());
+    }
+
+    #[test]
+    fn commit_message_plan_requires_one_safe_subject() {
+        assert_eq!(
+            GitActionPlan::commit_message("fix: preserve user's draft")
+                .unwrap()
+                .command(),
+            "git commit -m 'fix: preserve user'\\''s draft'"
+        );
+        assert!(GitActionPlan::commit_message("   ").is_none());
+        assert!(GitActionPlan::commit_message("fix: first\nsecond").is_none());
     }
 
     #[test]
