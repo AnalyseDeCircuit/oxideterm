@@ -23,6 +23,7 @@ pub(super) fn is_vnc_canceled_io(error: &io::Error) -> bool {
 pub(super) trait VncTransport: Read + Write + Send {
     fn shutdown_transport(&self);
     fn set_phase_timeout(&mut self, timeout: Option<Duration>);
+    fn set_read_poll_interval(&mut self, interval: Duration) -> io::Result<()>;
     fn peer_certificate_der(&self) -> VncResult<Option<Vec<u8>>>;
 }
 
@@ -116,6 +117,10 @@ impl VncTransport for CancellableTcpStream {
         }
     }
 
+    fn set_read_poll_interval(&mut self, interval: Duration) -> io::Result<()> {
+        self.stream.set_read_timeout(Some(interval))
+    }
+
     fn peer_certificate_der(&self) -> VncResult<Option<Vec<u8>>> {
         Ok(None)
     }
@@ -133,6 +138,12 @@ impl VncTransport for native_tls::TlsStream<CancellableTcpStream> {
         }
     }
 
+    fn set_read_poll_interval(&mut self, interval: Duration) -> io::Result<()> {
+        // TLS retains the same TCP owner, so only the underlying socket poll
+        // interval changes after the handshake has completed.
+        self.get_mut().set_read_poll_interval(interval)
+    }
+
     fn peer_certificate_der(&self) -> VncResult<Option<Vec<u8>>> {
         self.peer_certificate()
             .map_err(|error| {
@@ -146,5 +157,32 @@ impl VncTransport for native_tls::TlsStream<CancellableTcpStream> {
                 })
             })
             .transpose()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{TcpListener, TcpStream};
+
+    use super::*;
+
+    #[test]
+    fn read_poll_interval_can_change_after_handshake() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (_server, _) = listener.accept().unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .unwrap();
+        let mut transport = CancellableTcpStream::new(client, Arc::new(AtomicBool::new(false)));
+
+        transport
+            .set_read_poll_interval(Duration::from_millis(20))
+            .unwrap();
+
+        assert_eq!(
+            transport.stream.read_timeout().unwrap(),
+            Some(Duration::from_millis(20))
+        );
     }
 }

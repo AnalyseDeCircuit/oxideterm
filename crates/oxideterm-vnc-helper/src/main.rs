@@ -23,10 +23,10 @@ use oxideterm_remote_desktop::{
     NegotiatedCapabilities, NegotiatedCapabilityStatus, RemoteDesktopClipboardData,
     RemoteDesktopCursorShape, RemoteDesktopEndpoint, RemoteDesktopErrorCategory,
     RemoteDesktopFakeBackend, RemoteDesktopFrame, RemoteDesktopFrameFormat,
-    RemoteDesktopFrameUpdate, RemoteDesktopHelperEvent, RemoteDesktopHelperRequest,
-    RemoteDesktopKey, RemoteDesktopKeyState, RemoteDesktopLockKeys, RemoteDesktopMonitorLayout,
-    RemoteDesktopMouseButton, RemoteDesktopMouseButtonState, RemoteDesktopProtocol,
-    RemoteDesktopRect, RemoteDesktopSecret, RemoteDesktopServerCertificate,
+    RemoteDesktopFrameUpdate, RemoteDesktopFrameUpdateBatch, RemoteDesktopHelperEvent,
+    RemoteDesktopHelperRequest, RemoteDesktopKey, RemoteDesktopKeyState, RemoteDesktopLockKeys,
+    RemoteDesktopMonitorLayout, RemoteDesktopMouseButton, RemoteDesktopMouseButtonState,
+    RemoteDesktopProtocol, RemoteDesktopRect, RemoteDesktopSecret, RemoteDesktopServerCertificate,
     RemoteDesktopServerIdentityKind, RemoteDesktopSessionOptions, RemoteDesktopSessionStatus,
     RemoteDesktopSize, RemoteDesktopWheelDelta, read_request_line, run_fake_backend_stdio,
     write_event_line,
@@ -62,6 +62,7 @@ const VNC_WHEEL_RIGHT: u8 = 64;
 const VNC_SCROLL_STEP: f32 = 120.0;
 const REMOTE_DESKTOP_DIAGNOSTICS_ENV: &str = "OXIDETERM_REMOTE_DESKTOP_DIAGNOSTICS";
 const MAX_VNC_FRAME_BYTES: usize = 128 * 1024 * 1024;
+const VNC_MAX_FRAME_UPDATE_REGIONS: usize = 16;
 
 type SharedEventWriter = Arc<Mutex<io::Stdout>>;
 type SharedVncWriter = SyncSender<VncIoCommand>;
@@ -879,10 +880,10 @@ enum VncServerEvent {
     Noop,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 enum VncFramebufferChange {
     Full,
-    Rect(RfbRect),
+    Updates(Vec<RemoteDesktopFrameUpdate>),
 }
 
 struct VncFramebuffer {
@@ -932,12 +933,13 @@ impl VncFramebuffer {
                 self.bgra = next;
                 Ok(Some(VncFramebufferChange::Full))
             }
-            VncServerEvent::RawImage(rect, data) => Ok(self.draw_rect(rect, &data)),
+            VncServerEvent::RawImage(rect, data) => Ok(self.draw_rect(rect, data)),
             VncServerEvent::CopyRect { dst, src_x, src_y } => Ok(self.copy_rect(dst, src_x, src_y)),
             VncServerEvent::Batch(events) => {
                 let mut change = None;
                 for event in events {
-                    change = merge_vnc_framebuffer_change(change, self.try_apply(event)?);
+                    let incoming = self.try_apply(event)?;
+                    change = self.merge_framebuffer_change(change, incoming)?;
                 }
                 Ok(change)
             }
@@ -972,7 +974,11 @@ impl VncFramebuffer {
     fn frame_update(&self, rect: RfbRect) -> Option<RemoteDesktopFrameUpdate> {
         let rect = self.clipped_rect(rect)?;
         let bytes = self.rect_bytes(rect)?;
-        Some(RemoteDesktopFrameUpdate::new(
+        Some(self.frame_update_from_bytes(rect, bytes))
+    }
+
+    fn frame_update_from_bytes(&self, rect: RfbRect, bytes: Vec<u8>) -> RemoteDesktopFrameUpdate {
+        RemoteDesktopFrameUpdate::new(
             RemoteDesktopSize {
                 width: self.width,
                 height: self.height,
@@ -985,10 +991,10 @@ impl VncFramebuffer {
             ),
             RemoteDesktopFrameFormat::Bgra8,
             bytes,
-        ))
+        )
     }
 
-    fn draw_rect(&mut self, rect: RfbRect, data: &[u8]) -> Option<VncFramebufferChange> {
+    fn draw_rect(&mut self, rect: RfbRect, mut data: Vec<u8>) -> Option<VncFramebufferChange> {
         if self.width == 0 || self.height == 0 {
             return None;
         }
@@ -997,6 +1003,11 @@ impl VncFramebuffer {
         if data.len() < needed {
             return None;
         }
+        data.truncate(needed);
+        set_bgra_alpha_opaque(&mut data);
+        let mut clipped_bytes = (clipped != rect).then(|| {
+            Vec::with_capacity(usize::from(clipped.width) * usize::from(clipped.height) * 4)
+        });
 
         for y in 0..u32::from(clipped.height) {
             let src_y = u32::from(clipped.y - rect.y) + y;
@@ -1008,9 +1019,14 @@ impl VncFramebuffer {
             let dst_end = dst_start + (u32::from(clipped.width) * 4) as usize;
             let dst_row = &mut self.bgra[dst_start..dst_end];
             dst_row.copy_from_slice(&data[src_start..src_end]);
-            set_bgra_alpha_opaque(dst_row);
+            if let Some(clipped_bytes) = clipped_bytes.as_mut() {
+                clipped_bytes.extend_from_slice(&data[src_start..src_end]);
+            }
         }
-        Some(VncFramebufferChange::Rect(clipped))
+        let update_bytes = clipped_bytes.unwrap_or(data);
+        Some(VncFramebufferChange::Updates(vec![
+            self.frame_update_from_bytes(clipped, update_bytes),
+        ]))
     }
 
     fn copy_rect(&mut self, dst: RfbRect, src_x: u16, src_y: u16) -> Option<VncFramebufferChange> {
@@ -1050,12 +1066,15 @@ impl VncFramebuffer {
             let dst_end = dst_start + (copy_w * 4) as usize;
             self.bgra[dst_start..dst_end].copy_from_slice(&scratch[tmp_start..tmp_end]);
         }
-        Some(VncFramebufferChange::Rect(RfbRect {
+        let rect = RfbRect {
             x: dst.x,
             y: dst.y,
             width: copy_w as u16,
             height: copy_h as u16,
-        }))
+        };
+        Some(VncFramebufferChange::Updates(vec![
+            self.frame_update_from_bytes(rect, scratch),
+        ]))
     }
 
     fn clipped_rect(&self, rect: RfbRect) -> Option<RfbRect> {
@@ -1089,6 +1108,70 @@ impl VncFramebuffer {
         }
         Some(bytes)
     }
+
+    fn merge_framebuffer_change(
+        &self,
+        existing: Option<VncFramebufferChange>,
+        incoming: Option<VncFramebufferChange>,
+    ) -> Result<Option<VncFramebufferChange>, String> {
+        match (existing, incoming) {
+            (Some(VncFramebufferChange::Full), _) | (_, Some(VncFramebufferChange::Full)) => {
+                Ok(Some(VncFramebufferChange::Full))
+            }
+            (
+                Some(VncFramebufferChange::Updates(mut updates)),
+                Some(VncFramebufferChange::Updates(incoming_updates)),
+            ) => {
+                for update in incoming_updates {
+                    self.push_bounded_frame_update(&mut updates, update)?;
+                }
+                let updated_pixels = updates
+                    .iter()
+                    .map(|update| {
+                        u64::from(update.rect.width).saturating_mul(u64::from(update.rect.height))
+                    })
+                    .fold(0_u64, u64::saturating_add);
+                let framebuffer_pixels =
+                    u64::from(self.width).saturating_mul(u64::from(self.height));
+                if updated_pixels >= framebuffer_pixels {
+                    Ok(Some(VncFramebufferChange::Full))
+                } else {
+                    Ok(Some(VncFramebufferChange::Updates(updates)))
+                }
+            }
+            (Some(change), None) | (None, Some(change)) => Ok(Some(change)),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn push_bounded_frame_update(
+        &self,
+        updates: &mut Vec<RemoteDesktopFrameUpdate>,
+        incoming: RemoteDesktopFrameUpdate,
+    ) -> Result<(), String> {
+        for existing in updates.iter_mut().rev() {
+            if existing.merge(&incoming) {
+                // The merge call already copied the newer pixels into this update.
+                return Ok(());
+            }
+        }
+        updates.push(incoming);
+        while updates.len() > VNC_MAX_FRAME_UPDATE_REGIONS {
+            let (first, second, union) = smallest_frame_update_union(updates)
+                .ok_or_else(|| "VNC dirty regions could not be bounded.".to_string())?;
+            updates.swap_remove(second);
+            updates.swap_remove(first);
+            let union = remote_rect_to_rfb(union)
+                .ok_or_else(|| "VNC merged dirty region exceeds protocol bounds.".to_string())?;
+            let merged = self
+                .frame_update(union)
+                .ok_or_else(|| "VNC merged dirty region is outside the framebuffer.".to_string())?;
+            // The framebuffer contains every update applied so far, so the
+            // merged snapshot safely supersedes all earlier overlapping regions.
+            updates.push(merged);
+        }
+        Ok(())
+    }
 }
 
 fn try_opaque_bgra_buffer(width: u32, height: u32) -> Result<Vec<u8>, String> {
@@ -1121,36 +1204,36 @@ fn set_bgra_alpha_opaque(bytes: &mut [u8]) {
     }
 }
 
-fn merge_vnc_framebuffer_change(
-    existing: Option<VncFramebufferChange>,
-    incoming: Option<VncFramebufferChange>,
-) -> Option<VncFramebufferChange> {
-    match (existing, incoming) {
-        (Some(VncFramebufferChange::Full), _) | (_, Some(VncFramebufferChange::Full)) => {
-            Some(VncFramebufferChange::Full)
+fn smallest_frame_update_union(
+    updates: &[RemoteDesktopFrameUpdate],
+) -> Option<(usize, usize, RemoteDesktopRect)> {
+    let mut best = None;
+    for first in 0..updates.len() {
+        for second in (first + 1)..updates.len() {
+            let union = updates[first].rect.union(updates[second].rect)?;
+            let union_pixels = u64::from(union.width).saturating_mul(u64::from(union.height));
+            let source_pixels = [updates[first].rect, updates[second].rect]
+                .into_iter()
+                .map(|rect| u64::from(rect.width).saturating_mul(u64::from(rect.height)))
+                .fold(0_u64, u64::saturating_add);
+            let inflation = union_pixels.saturating_sub(source_pixels);
+            if best
+                .as_ref()
+                .is_none_or(|(_, _, _, best_inflation)| inflation < *best_inflation)
+            {
+                best = Some((first, second, union, inflation));
+            }
         }
-        (Some(VncFramebufferChange::Rect(left)), Some(VncFramebufferChange::Rect(right))) => {
-            union_rfb_rect(left, right).map(VncFramebufferChange::Rect)
-        }
-        (Some(change), None) | (None, Some(change)) => Some(change),
-        (None, None) => None,
     }
+    best.map(|(first, second, union, _)| (first, second, union))
 }
 
-fn union_rfb_rect(left: RfbRect, right: RfbRect) -> Option<RfbRect> {
-    let x = left.x.min(right.x);
-    let y = left.y.min(right.y);
-    let right_edge = u32::from(left.x)
-        .checked_add(u32::from(left.width))?
-        .max(u32::from(right.x).checked_add(u32::from(right.width))?);
-    let bottom_edge = u32::from(left.y)
-        .checked_add(u32::from(left.height))?
-        .max(u32::from(right.y).checked_add(u32::from(right.height))?);
+fn remote_rect_to_rfb(rect: RemoteDesktopRect) -> Option<RfbRect> {
     Some(RfbRect {
-        x,
-        y,
-        width: right_edge.checked_sub(u32::from(x))?.min(u16::MAX as u32) as u16,
-        height: bottom_edge.checked_sub(u32::from(y))?.min(u16::MAX as u32) as u16,
+        x: u16::try_from(rect.x).ok()?,
+        y: u16::try_from(rect.y).ok()?,
+        width: u16::try_from(rect.width).ok()?,
+        height: u16::try_from(rect.height).ok()?,
     })
 }
 

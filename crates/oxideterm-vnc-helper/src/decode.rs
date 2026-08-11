@@ -5,6 +5,7 @@ use super::*;
 
 const MAX_VNC_RECTS_PER_UPDATE: usize = 4096;
 const MAX_VNC_UPDATE_DECODED_BYTES: usize = MAX_VNC_FRAME_BYTES;
+const VNC_ZRLE_OUTPUT_GROWTH_BYTES: usize = 64 * 1024;
 
 pub(super) struct VncDecodeState {
     zrle_decompressor: Decompress,
@@ -186,17 +187,23 @@ pub(super) fn vnc_frame_event_for_change(
                 frame: framebuffer.frame(),
             }
         }
-        VncFramebufferChange::Rect(rect) if *sent_initial_frame => {
-            if let Some(update) = framebuffer.frame_update(rect) {
-                RemoteDesktopHelperEvent::FrameUpdate { update }
-            } else {
-                *sent_initial_frame = true;
+        VncFramebufferChange::Updates(mut updates) if *sent_initial_frame => {
+            if updates.len() == 1 {
+                RemoteDesktopHelperEvent::FrameUpdate {
+                    update: updates.remove(0),
+                }
+            } else if updates.is_empty() {
+                // An empty incremental change cannot advance the UI backing frame.
                 RemoteDesktopHelperEvent::Frame {
                     frame: framebuffer.frame(),
                 }
+            } else {
+                RemoteDesktopHelperEvent::FrameUpdateBatch {
+                    batch: RemoteDesktopFrameUpdateBatch::new(updates),
+                }
             }
         }
-        VncFramebufferChange::Rect(_) => {
+        VncFramebufferChange::Updates(_) => {
             *sent_initial_frame = true;
             RemoteDesktopHelperEvent::Frame {
                 frame: framebuffer.frame(),
@@ -680,9 +687,22 @@ pub(super) fn inflate_zrle_payload(
 ) -> Result<Vec<u8>, String> {
     let input_start = decompressor.total_in();
     let mut input_offset = 0usize;
-    let mut output = Vec::with_capacity(output_limit.min(64 * 1024));
+    // One extra byte lets the inflater prove that a payload exceeds the limit
+    // instead of silently accepting output that exactly filled the buffer.
+    let allocation_limit = output_limit.saturating_add(1);
+    let mut output = Vec::with_capacity(allocation_limit.min(VNC_ZRLE_OUTPUT_GROWTH_BYTES));
 
-    while input_offset < compressed.len() {
+    loop {
+        if output.len() == output.capacity() {
+            let remaining_capacity = allocation_limit.saturating_sub(output.len());
+            if remaining_capacity == 0 {
+                return Err("VNC ZRLE rectangle expanded beyond the helper limit.".to_string());
+            }
+            // Grow in bounded steps so a small compressed payload cannot force
+            // allocation of the rectangle's complete theoretical upper bound.
+            output.reserve_exact(remaining_capacity.min(VNC_ZRLE_OUTPUT_GROWTH_BYTES));
+        }
+
         let total_in_before = decompressor.total_in();
         let total_out_before = decompressor.total_out();
         let status = decompressor
@@ -698,16 +718,22 @@ pub(super) fn inflate_zrle_payload(
         }
         let consumed = decompressor.total_in() != total_in_before;
         let produced = decompressor.total_out() != total_out_before;
-        if input_offset >= compressed.len() {
+        if matches!(status, Status::StreamEnd) {
+            if input_offset < compressed.len() {
+                return Err(
+                    "VNC ZRLE stream ended before the rectangle payload was consumed.".to_string(),
+                );
+            }
             break;
         }
-        if matches!(status, Status::StreamEnd) {
-            return Err(
-                "VNC ZRLE stream ended before the rectangle payload was consumed.".to_string(),
-            );
-        }
         if !consumed && !produced {
-            return Err("VNC ZRLE inflater made no progress.".to_string());
+            if input_offset < compressed.len() {
+                return Err("VNC ZRLE inflater made no progress.".to_string());
+            }
+            // ZRLE keeps one zlib stream across rectangles. Once the supplied
+            // chunk is consumed and no buffered output remains, this rectangle
+            // is complete even though the stream itself has not ended.
+            break;
         }
     }
 

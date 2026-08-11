@@ -11,7 +11,7 @@ use super::*;
 
 const VNC_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const VNC_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
-const VNC_SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(200);
+const VNC_HANDSHAKE_SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const VNC_SOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const VNC_SECURITY_TIGHT: u8 = 16;
 const VNC_SECURITY_VENCRYPT: u8 = 19;
@@ -166,14 +166,14 @@ fn connect_vnc_tcp(
                 return Err(VncError::cancelled());
             }
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            let attempt_timeout = remaining.min(VNC_SOCKET_POLL_INTERVAL);
+            let attempt_timeout = remaining.min(VNC_HANDSHAKE_SOCKET_POLL_INTERVAL);
             match TcpStream::connect_timeout(&address, attempt_timeout) {
                 Ok(stream) => {
                     stream.set_nodelay(true).map_err(|error| {
                         VncError::network(format!("VNC TCP option setup failed: {error}"))
                     })?;
                     stream
-                        .set_read_timeout(Some(VNC_SOCKET_POLL_INTERVAL))
+                        .set_read_timeout(Some(VNC_HANDSHAKE_SOCKET_POLL_INTERVAL))
                         .map_err(|error| {
                             VncError::network(format!("VNC read timeout setup failed: {error}"))
                         })?;

@@ -2,6 +2,29 @@ use super::*;
 use flate2::{Compression, write::ZlibEncoder};
 use std::io::Cursor;
 
+fn only_frame_update(change: Option<VncFramebufferChange>) -> RemoteDesktopFrameUpdate {
+    let Some(VncFramebufferChange::Updates(mut updates)) = change else {
+        panic!("expected one incremental framebuffer update");
+    };
+    assert_eq!(updates.len(), 1);
+    updates.remove(0)
+}
+
+fn apply_frame_updates(target: &mut [u8], target_width: u32, updates: &[RemoteDesktopFrameUpdate]) {
+    for update in updates {
+        for row in 0..update.rect.height as usize {
+            let source_start = row * update.rect.width as usize * 4;
+            let source_end = source_start + update.rect.width as usize * 4;
+            let target_start = ((update.rect.y as usize + row) * target_width as usize
+                + update.rect.x as usize)
+                * 4;
+            let target_end = target_start + update.rect.width as usize * 4;
+            target[target_start..target_end]
+                .copy_from_slice(&update.bytes[source_start..source_end]);
+        }
+    }
+}
+
 #[test]
 fn framebuffer_draws_bgra_rect() {
     let mut framebuffer = VncFramebuffer::new(2, 2);
@@ -12,14 +35,13 @@ fn framebuffer_draws_bgra_rect() {
         height: 2,
     };
 
-    assert_eq!(
-        framebuffer.apply(VncServerEvent::RawImage(
-            rect,
-            vec![1, 2, 3, 255, 4, 5, 6, 255],
-        )),
-        Some(VncFramebufferChange::Rect(rect))
-    );
+    let update = only_frame_update(framebuffer.apply(VncServerEvent::RawImage(
+        rect,
+        vec![1, 2, 3, 255, 4, 5, 6, 255],
+    )));
 
+    assert_eq!(update.rect, RemoteDesktopRect::new(1, 0, 1, 2));
+    assert_eq!(update.bytes, vec![1, 2, 3, 255, 4, 5, 6, 255]);
     assert_eq!(
         framebuffer.frame().bytes,
         vec![0, 0, 0, 255, 1, 2, 3, 255, 0, 0, 0, 255, 4, 5, 6, 255]
@@ -64,15 +86,14 @@ fn framebuffer_copies_rect_without_overlapping_corruption() {
         height: 1,
     };
 
-    assert_eq!(
-        framebuffer.apply(VncServerEvent::CopyRect {
-            dst,
-            src_x: 0,
-            src_y: 0,
-        }),
-        Some(VncFramebufferChange::Rect(dst))
-    );
+    let update = only_frame_update(framebuffer.apply(VncServerEvent::CopyRect {
+        dst,
+        src_x: 0,
+        src_y: 0,
+    }));
 
+    assert_eq!(update.rect, RemoteDesktopRect::new(1, 0, 2, 1));
+    assert_eq!(update.bytes, vec![1, 0, 0, 255, 2, 0, 0, 255]);
     assert_eq!(
         framebuffer.frame().bytes,
         vec![1, 0, 0, 255, 1, 0, 0, 255, 2, 0, 0, 255]
@@ -89,15 +110,10 @@ fn framebuffer_update_contains_only_changed_rect() {
         height: 1,
     };
 
-    assert_eq!(
-        framebuffer.apply(VncServerEvent::RawImage(
-            rect,
-            vec![7, 8, 9, 255, 10, 11, 12, 255],
-        )),
-        Some(VncFramebufferChange::Rect(rect))
-    );
-
-    let update = framebuffer.frame_update(rect).unwrap();
+    let update = only_frame_update(framebuffer.apply(VncServerEvent::RawImage(
+        rect,
+        vec![7, 8, 9, 255, 10, 11, 12, 255],
+    )));
     assert_eq!(
         update.size,
         RemoteDesktopSize {
@@ -107,6 +123,73 @@ fn framebuffer_update_contains_only_changed_rect() {
     );
     assert_eq!(update.rect, RemoteDesktopRect::new(1, 1, 2, 1));
     assert_eq!(update.bytes, vec![7, 8, 9, 255, 10, 11, 12, 255]);
+}
+
+#[test]
+fn framebuffer_keeps_sparse_batch_regions_separate() {
+    let mut framebuffer = VncFramebuffer::new(100, 100);
+    let change = framebuffer
+        .apply(VncServerEvent::Batch(vec![
+            VncServerEvent::RawImage(
+                RfbRect {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+                vec![1, 2, 3, 255],
+            ),
+            VncServerEvent::RawImage(
+                RfbRect {
+                    x: 99,
+                    y: 99,
+                    width: 1,
+                    height: 1,
+                },
+                vec![4, 5, 6, 255],
+            ),
+        ]))
+        .unwrap();
+    let mut sent_initial_frame = true;
+
+    let event = vnc_frame_event_for_change(&framebuffer, change, &mut sent_initial_frame, false);
+
+    let RemoteDesktopHelperEvent::FrameUpdateBatch { batch } = event else {
+        panic!("expected sparse framebuffer update batch");
+    };
+    assert_eq!(batch.updates.len(), 2);
+    assert_eq!(batch.byte_len(), 8);
+    assert_eq!(batch.updates[0].rect, RemoteDesktopRect::new(0, 0, 1, 1));
+    assert_eq!(batch.updates[1].rect, RemoteDesktopRect::new(99, 99, 1, 1));
+}
+
+#[test]
+fn framebuffer_bounds_large_sparse_batches_without_losing_pixels() {
+    let mut framebuffer = VncFramebuffer::new(64, 4);
+    let events = (0..=VNC_MAX_FRAME_UPDATE_REGIONS)
+        .map(|index| {
+            VncServerEvent::RawImage(
+                RfbRect {
+                    x: (index * 3) as u16,
+                    y: 1,
+                    width: 1,
+                    height: 1,
+                },
+                vec![index as u8, 20, 30, 255],
+            )
+        })
+        .collect();
+
+    let Some(VncFramebufferChange::Updates(updates)) =
+        framebuffer.apply(VncServerEvent::Batch(events))
+    else {
+        panic!("expected bounded incremental updates");
+    };
+
+    assert!(updates.len() <= VNC_MAX_FRAME_UPDATE_REGIONS);
+    let mut reconstructed = VncFramebuffer::new(64, 4).frame().bytes;
+    apply_frame_updates(&mut reconstructed, 64, &updates);
+    assert_eq!(reconstructed, framebuffer.frame().bytes);
 }
 
 #[test]
@@ -331,6 +414,31 @@ fn zrle_rectangle_inflates_persistent_zlib_stream() {
     .unwrap();
 
     assert_eq!(bytes, vec![1, 2, 3, 0, 4, 5, 6, 0]);
+}
+
+#[test]
+fn zrle_inflater_grows_beyond_initial_output_capacity() {
+    // Large ZRLE rectangles can legitimately expand beyond the inflater's
+    // small initial allocation even when the compressed payload is tiny.
+    let expanded = vec![0x5a; 96 * 1024];
+    let compressed = zlib_payload(&expanded);
+
+    let output =
+        inflate_zrle_payload(&mut Decompress::new(true), &compressed, expanded.len()).unwrap();
+
+    assert_eq!(output.len(), expanded.len());
+    assert!(output.iter().all(|byte| *byte == 0x5a));
+}
+
+#[test]
+fn zrle_inflater_rejects_output_beyond_limit() {
+    let expanded = vec![0x3c; 96 * 1024];
+    let compressed = zlib_payload(&expanded);
+
+    let error = inflate_zrle_payload(&mut Decompress::new(true), &compressed, expanded.len() - 1)
+        .unwrap_err();
+
+    assert!(error.contains("expanded beyond"));
 }
 
 #[test]
@@ -678,15 +786,12 @@ fn forced_vnc_recovery_promotes_dirty_rect_to_base_frame() {
         width: 1,
         height: 1,
     };
-    let _ = framebuffer.apply(VncServerEvent::RawImage(rect, vec![9, 8, 7, 255]));
+    let change = framebuffer
+        .apply(VncServerEvent::RawImage(rect, vec![9, 8, 7, 255]))
+        .unwrap();
     let mut sent_initial_frame = true;
 
-    let event = vnc_frame_event_for_change(
-        &framebuffer,
-        VncFramebufferChange::Rect(rect),
-        &mut sent_initial_frame,
-        true,
-    );
+    let event = vnc_frame_event_for_change(&framebuffer, change, &mut sent_initial_frame, true);
 
     match event {
         RemoteDesktopHelperEvent::Frame { frame } => {
@@ -713,15 +818,12 @@ fn ordinary_vnc_dirty_rect_stays_incremental_after_base_frame() {
         width: 1,
         height: 1,
     };
-    let _ = framebuffer.apply(VncServerEvent::RawImage(rect, vec![9, 8, 7, 255]));
+    let change = framebuffer
+        .apply(VncServerEvent::RawImage(rect, vec![9, 8, 7, 255]))
+        .unwrap();
     let mut sent_initial_frame = true;
 
-    let event = vnc_frame_event_for_change(
-        &framebuffer,
-        VncFramebufferChange::Rect(rect),
-        &mut sent_initial_frame,
-        false,
-    );
+    let event = vnc_frame_event_for_change(&framebuffer, change, &mut sent_initial_frame, false);
 
     match event {
         RemoteDesktopHelperEvent::FrameUpdate { update } => {

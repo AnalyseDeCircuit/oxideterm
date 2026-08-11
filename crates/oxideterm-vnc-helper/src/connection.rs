@@ -6,6 +6,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TryRecvError};
 use super::*;
 
 pub(super) const VNC_IO_COMMAND_CAPACITY: usize = 128;
+const VNC_ACTIVE_SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const VNC_IO_MESSAGE_TIMEOUT: Duration = Duration::from_secs(30);
 const VNC_IO_JOIN_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_VNC_DESKTOP_NAME_BYTES: usize = 1024 * 1024;
@@ -85,6 +86,15 @@ impl VncConnection {
         write_encodings(&mut transport, encoding_preferences, h264.is_some())?;
         diagnostics.log("encodings advertised from negotiated VNC preferences");
         transport.set_phase_timeout(None);
+        // The active owner must revisit queued keyboard and pointer commands
+        // promptly even while the server has no framebuffer messages pending.
+        transport
+            .set_read_poll_interval(VNC_ACTIVE_SOCKET_POLL_INTERVAL)
+            .map_err(|error| {
+                VncError::network(format!(
+                    "VNC active-session read timeout setup failed: {error}"
+                ))
+            })?;
 
         let (writer, io_rx) = std::sync::mpsc::sync_channel(VNC_IO_COMMAND_CAPACITY);
         let session_state = Arc::new(VncSessionSharedState::new(width, height));
@@ -749,6 +759,7 @@ fn run_vnc_io_owner(
         };
         if let Some(change) = framebuffer_change {
             session_state.store_size(framebuffer.width as u16, framebuffer.height as u16);
+            let framebuffer_resized = matches!(change, VncFramebufferChange::Full);
             let frame_event = vnc_frame_event_for_change(
                 &framebuffer,
                 change,
@@ -759,7 +770,7 @@ fn run_vnc_io_owner(
             if active_generation.load(Ordering::Acquire) == generation {
                 let _ = send_event(&event_writer, frame_event);
             }
-            if change == VncFramebufferChange::Full
+            if framebuffer_resized
                 && let Some(message) = performance_state.framebuffer_resized_message(
                     framebuffer.width as u16,
                     framebuffer.height as u16,
@@ -909,6 +920,10 @@ mod io_owner_tests {
 
         fn set_phase_timeout(&mut self, _timeout: Option<Duration>) {}
 
+        fn set_read_poll_interval(&mut self, _interval: Duration) -> io::Result<()> {
+            Ok(())
+        }
+
         fn peer_certificate_der(&self) -> VncResult<Option<Vec<u8>>> {
             Ok(None)
         }
@@ -1015,6 +1030,23 @@ fn record_vnc_frame_diagnostics(
                 "frame kind=update rect={}x{} helper_frames={} helper_updates={} server_messages={} dirty_rects_total={} dirty_rects_batch={} dirty_pixels={} side_events={}",
                 update.rect.width,
                 update.rect.height,
+                counters.helper_frames,
+                counters.helper_frame_updates,
+                counters.server_messages,
+                counters.dirty_rects,
+                summary.dirty_rects,
+                counters.dirty_pixels,
+                counters.helper_side_events
+            ));
+        }
+        RemoteDesktopHelperEvent::FrameUpdateBatch { batch } => {
+            counters.helper_frame_updates = counters
+                .helper_frame_updates
+                .saturating_add(batch.updates.len() as u64);
+            diagnostics.log(format!(
+                "frame kind=batch regions={} bytes={} helper_frames={} helper_updates={} server_messages={} dirty_rects_total={} dirty_rects_batch={} dirty_pixels={} side_events={}",
+                batch.updates.len(),
+                batch.byte_len(),
                 counters.helper_frames,
                 counters.helper_frame_updates,
                 counters.server_messages,
