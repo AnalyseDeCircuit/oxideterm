@@ -53,6 +53,12 @@
       "forwards": "포워딩",
       "summary": "총: {{total}} 연결 • 참조: {{refs}}",
       "live": "실시간",
+      "overview_pool_usage": "풀 사용량",
+      "overview_consumers": "사용 현황",
+      "overview_attention": "주의 필요",
+      "overview_healthy": "재연결 중이거나 끊어진 연결이 없습니다",
+      "overview_error": "오류",
+      "overview_refresh_interval": "{{seconds}}초마다 업데이트",
       "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
       "topology_roots_children": "{{roots}} roots / {{children}} children"
     },

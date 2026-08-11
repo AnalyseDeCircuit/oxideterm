@@ -640,6 +640,12 @@ impl HostToolsEntity {
         self.pool_stats.clone()
     }
 
+    pub(super) fn pool_summaries_snapshot(&self) -> Vec<ConnectionPoolEntrySummary> {
+        // Runtime views receive an immutable projection instead of borrowing
+        // the registry-owned cache across GPUI rendering callbacks.
+        self.pool_summaries.clone()
+    }
+
     #[cfg(test)]
     pub(super) fn pool_summary_count(&self) -> usize {
         self.pool_summaries.len()

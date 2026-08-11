@@ -53,6 +53,12 @@
       "forwards": "Weiterleitungen",
       "summary": "Gesamt: {{total}} Verbindungen • Referenzen: {{refs}}",
       "live": "Live",
+      "overview_pool_usage": "Pool-Auslastung",
+      "overview_consumers": "Nutzung nach Typ",
+      "overview_attention": "Erfordert Aufmerksamkeit",
+      "overview_healthy": "Keine unterbrochenen oder wiederherzustellenden Verbindungen",
+      "overview_error": "Fehler",
+      "overview_refresh_interval": "Aktualisierung alle {{seconds}} Sekunden",
       "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
       "topology_roots_children": "{{roots}} roots / {{children}} children"
     },

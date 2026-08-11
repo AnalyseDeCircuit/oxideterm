@@ -53,6 +53,12 @@
       "forwards": "Reenvíos",
       "summary": "Total: {{total}} conexiones • Referencias: {{refs}}",
       "live": "EN VIVO",
+      "overview_pool_usage": "Uso del pool",
+      "overview_consumers": "Consumidores",
+      "overview_attention": "Requiere atención",
+      "overview_healthy": "No hay conexiones reconectando ni interrumpidas",
+      "overview_error": "Error",
+      "overview_refresh_interval": "Se actualiza cada {{seconds}} segundos",
       "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
       "topology_roots_children": "{{roots}} roots / {{children}} children"
     },

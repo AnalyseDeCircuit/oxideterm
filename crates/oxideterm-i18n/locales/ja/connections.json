@@ -53,6 +53,12 @@
       "forwards": "転送",
       "summary": "合計: {{total}}接続 • 参照: {{refs}}",
       "live": "ライブ",
+      "overview_pool_usage": "プール使用状況",
+      "overview_consumers": "利用状況",
+      "overview_attention": "要確認",
+      "overview_healthy": "再接続中または切断された接続はありません",
+      "overview_error": "エラー",
+      "overview_refresh_interval": "{{seconds}}秒ごとに更新",
       "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
       "topology_roots_children": "{{roots}} roots / {{children}} children"
     },

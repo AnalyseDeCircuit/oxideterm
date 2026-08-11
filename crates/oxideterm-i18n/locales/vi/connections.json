@@ -53,6 +53,12 @@
       "forwards": "Chuyển tiếp",
       "summary": "Tổng: {{total}} kết nối • Tham chiếu: {{refs}}",
       "live": "Trực tiếp",
+      "overview_pool_usage": "Mức sử dụng nhóm",
+      "overview_consumers": "Thành phần sử dụng",
+      "overview_attention": "Cần chú ý",
+      "overview_healthy": "Không có kết nối nào đang kết nối lại hoặc bị gián đoạn",
+      "overview_error": "Lỗi",
+      "overview_refresh_interval": "Cập nhật mỗi {{seconds}} giây",
       "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
       "topology_roots_children": "{{roots}} roots / {{children}} children"
     },

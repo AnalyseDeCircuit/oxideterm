@@ -53,6 +53,12 @@
       "forwards": "转发",
       "summary": "总计: {{total}} 个连接 • 引用: {{refs}}",
       "live": "实时",
+      "overview_pool_usage": "连接池使用情况",
+      "overview_consumers": "使用情况",
+      "overview_attention": "需要关注",
+      "overview_healthy": "没有重连中或链路断开的连接",
+      "overview_error": "错误",
+      "overview_refresh_interval": "每 {{seconds}} 秒更新",
       "topology_nodes_edges": "节点: {{nodes}} • 边: {{edges}}",
       "topology_roots_children": "{{roots}} 个根 / {{children}} 个子节点"
     },
