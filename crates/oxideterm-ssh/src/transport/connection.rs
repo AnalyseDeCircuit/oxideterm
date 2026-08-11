@@ -395,11 +395,47 @@ impl SshConnectionHandle {
         })
     }
 
+    pub async fn run_secret_pty_command_capture(
+        &self,
+        command: &str,
+        columns: u32,
+        rows: u32,
+        timeout: Duration,
+        max_output_size: usize,
+    ) -> Result<SshSecretCommandOutput, SshTransportError> {
+        let output = self
+            .run_command_capture_bytes_with_pty(
+                command,
+                timeout,
+                max_output_size,
+                Some((columns.max(1), rows.max(1))),
+            )
+            .await?;
+        // The PTY can echo secret bootstrap material, so both streams retain zeroizing owners.
+        Ok(SshSecretCommandOutput {
+            stdout: Zeroizing::new(output.stdout),
+            stderr: Zeroizing::new(output.stderr),
+            exit_code: output.exit_code,
+            truncated: output.truncated,
+        })
+    }
+
     async fn run_command_capture_bytes(
         &self,
         command: &str,
         timeout: Duration,
         max_output_size: usize,
+    ) -> Result<SshCommandCaptureBytes, SshTransportError> {
+        self.run_command_capture_bytes_with_pty(command, timeout, max_output_size, None)
+            .await
+    }
+
+    async fn run_command_capture_bytes_with_pty(
+        &self,
+        command: &str,
+        timeout: Duration,
+        max_output_size: usize,
+        pty_size: Option<(u32, u32)>,
     ) -> Result<SshCommandCaptureBytes, SshTransportError> {
         let Some(pooled) = self.physical::<PooledSshConnection>() else {
             return Err(SshTransportError::ConnectionFailed(
@@ -419,6 +455,20 @@ impl SshConnectionHandle {
                 .await
                 .map_err(|error| SshTransportError::Channel(error.to_string()))?
         };
+        if let Some((columns, rows)) = pty_size {
+            channel
+                .request_pty(
+                    false,
+                    "xterm-256color",
+                    columns,
+                    rows,
+                    0,
+                    0,
+                    DEFAULT_PTY_MODES,
+                )
+                .await
+                .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+        }
         channel
             .exec(true, command)
             .await

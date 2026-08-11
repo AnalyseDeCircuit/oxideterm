@@ -12,6 +12,8 @@ use oxideterm_ssh::{
 };
 
 const DEFAULT_MOSH_SERVER_EXECUTABLE: &str = "mosh-server";
+const DEFAULT_BOOTSTRAP_COLUMNS: u16 = 80;
+const DEFAULT_BOOTSTRAP_ROWS: u16 = 24;
 const DEFAULT_COLOR_COUNT: u16 = 256;
 const DEFAULT_BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_BOOTSTRAP_OUTPUT_BYTES: usize = 64 * 1024;
@@ -63,6 +65,8 @@ pub struct MoshBootstrapConfig {
     pub color_count: u16,
     pub locale_assignments: Vec<(String, String)>,
     pub timeout: Duration,
+    pub terminal_columns: u16,
+    pub terminal_rows: u16,
 }
 
 impl MoshBootstrapConfig {
@@ -78,6 +82,8 @@ impl MoshBootstrapConfig {
             color_count: DEFAULT_COLOR_COUNT,
             locale_assignments: Vec::new(),
             timeout: DEFAULT_BOOTSTRAP_TIMEOUT,
+            terminal_columns: DEFAULT_BOOTSTRAP_COLUMNS,
+            terminal_rows: DEFAULT_BOOTSTRAP_ROWS,
         }
     }
 }
@@ -95,6 +101,8 @@ impl fmt::Debug for MoshBootstrapConfig {
             .field("color_count", &self.color_count)
             .field("locale_assignment_count", &self.locale_assignments.len())
             .field("timeout", &self.timeout)
+            .field("terminal_columns", &self.terminal_columns)
+            .field("terminal_rows", &self.terminal_rows)
             .finish()
     }
 }
@@ -133,6 +141,8 @@ pub enum MoshBootstrapError {
     EmptyServerExecutable,
     #[error("Mosh color count must be greater than zero")]
     InvalidColorCount,
+    #[error("Mosh bootstrap terminal size must be greater than zero")]
+    InvalidTerminalSize,
     #[error("Mosh UDP port or range is invalid")]
     InvalidUdpPortSelection,
     #[error("Mosh locale assignment is invalid")]
@@ -171,7 +181,13 @@ pub async fn bootstrap_mosh(
     let connection_id = connection.connection_id().to_string();
     let release_guard = BootstrapConsumerGuard::new(context.registry, connection_id, consumer);
     let output = connection
-        .run_secret_command_capture(&command, config.timeout, MAX_BOOTSTRAP_OUTPUT_BYTES)
+        .run_secret_pty_command_capture(
+            &command,
+            u32::from(config.terminal_columns),
+            u32::from(config.terminal_rows),
+            config.timeout,
+            MAX_BOOTSTRAP_OUTPUT_BYTES,
+        )
         .await?;
     drop(release_guard);
 
@@ -197,6 +213,9 @@ fn validate_config(config: &MoshBootstrapConfig) -> Result<(), MoshBootstrapErro
     }
     if config.color_count == 0 {
         return Err(MoshBootstrapError::InvalidColorCount);
+    }
+    if config.terminal_columns == 0 || config.terminal_rows == 0 {
+        return Err(MoshBootstrapError::InvalidTerminalSize);
     }
     let _ = config.udp_port.server_value()?;
     if config
@@ -350,6 +369,21 @@ mod tests {
             build_server_command(&config).expect("command must build"),
             "'/opt/Mosh Server/bin/mosh-server' 'new' '-c' '256' '-s' '-p' '60000:60010' '-l' 'LANG=en_US.UTF-8'\\''x'"
         );
+    }
+
+    #[test]
+    fn bootstrap_requires_a_non_zero_pty_size() {
+        let mut config = MoshBootstrapConfig::new("session", SshConfig::default());
+        assert_eq!(
+            (config.terminal_columns, config.terminal_rows),
+            (DEFAULT_BOOTSTRAP_COLUMNS, DEFAULT_BOOTSTRAP_ROWS)
+        );
+
+        config.terminal_rows = 0;
+        assert!(matches!(
+            validate_config(&config),
+            Err(MoshBootstrapError::InvalidTerminalSize)
+        ));
     }
 
     #[test]

@@ -1,13 +1,14 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use fernomade_crypto::SessionKey;
 use fernomade_runtime::{
-    ConnectionState, MonotonicTime, SessionAction, SessionRuntime, ShutdownOutcome,
+    ConnectionState, MonotonicTime, RuntimeError, SessionAction, SessionRuntime, ShutdownOutcome,
     TerminalInputEvent,
 };
 use tokio::net::UdpSocket;
@@ -46,7 +47,7 @@ impl fmt::Debug for MoshSessionConfig {
 }
 
 enum MoshSessionCommand {
-    Input { frame_id: u64, bytes: Vec<u8> },
+    Input { prediction_id: u64, bytes: Vec<u8> },
     Resize { columns: u16, rows: u16 },
     Shutdown,
     Cancel,
@@ -55,9 +56,12 @@ enum MoshSessionCommand {
 impl fmt::Debug for MoshSessionCommand {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Input { frame_id, bytes } => formatter
+            Self::Input {
+                prediction_id,
+                bytes,
+            } => formatter
                 .debug_struct("Input")
-                .field("frame_id", frame_id)
+                .field("prediction_id", prediction_id)
                 .field("bytes", &bytes.len())
                 .finish(),
             Self::Resize { columns, rows } => formatter
@@ -122,13 +126,16 @@ pub struct MoshSessionClient {
 }
 
 impl MoshSessionClient {
-    pub async fn send_input_for_frame(
+    pub async fn send_input_for_prediction(
         &self,
-        frame_id: u64,
+        prediction_id: u64,
         bytes: Vec<u8>,
     ) -> Result<(), MoshSessionCommandError> {
         self.command_tx
-            .send(MoshSessionCommand::Input { frame_id, bytes })
+            .send(MoshSessionCommand::Input {
+                prediction_id,
+                bytes,
+            })
             .await
             .map_err(|_| MoshSessionCommandError::Closed)
     }
@@ -266,6 +273,7 @@ async fn run_session(
     let mut previous_loop = started_at;
     let mut runtime = SessionRuntime::new(key, monotonic_time(started_at));
     runtime.queue_resize(columns, rows);
+    let mut prediction_ids = PredictionIdMap::default();
     let mut receive_buffer = vec![0_u8; MAX_DATAGRAM_BYTES];
 
     loop {
@@ -284,7 +292,7 @@ async fn run_session(
                 return;
             }
         };
-        if !apply_actions(&socket, &event_tx, actions).await {
+        if !apply_actions(&socket, &event_tx, &mut prediction_ids, actions).await {
             let _ = runtime.cancel();
             return;
         }
@@ -298,19 +306,16 @@ async fn run_session(
         tokio::select! {
             command = command_rx.recv() => {
                 match command {
-                    Some(MoshSessionCommand::Input { frame_id, bytes }) => {
-                        if runtime.prediction_frame_id() != frame_id {
-                            let _ = event_tx.send(MoshSessionEvent::Failed(
-                                "Mosh prediction frame sequence diverged".to_string(),
-                            )).await;
+                    Some(MoshSessionCommand::Input { prediction_id, bytes }) => {
+                        if let Err(error) = queue_prediction_input(
+                            &mut runtime,
+                            &mut prediction_ids,
+                            prediction_id,
+                            bytes,
+                        ) {
+                            let _ = event_tx.send(MoshSessionEvent::Failed(error.to_string())).await;
                             let _ = runtime.cancel();
                             return;
-                        }
-                        if let Err(error) = runtime.queue_terminal_event(TerminalInputEvent::Bytes(bytes)) {
-                            if event_tx.send(MoshSessionEvent::Failed(error.to_string())).await.is_err() {
-                                let _ = runtime.cancel();
-                                return;
-                            }
                         }
                     }
                     Some(MoshSessionCommand::Resize { columns, rows }) => {
@@ -321,7 +326,12 @@ async fn run_session(
                     Some(MoshSessionCommand::Shutdown) => {
                         match runtime.request_shutdown(monotonic_time(started_at)) {
                             Ok(actions) => {
-                                if !apply_actions(&socket, &event_tx, actions).await {
+                                if !apply_actions(
+                                    &socket,
+                                    &event_tx,
+                                    &mut prediction_ids,
+                                    actions,
+                                ).await {
                                     let _ = runtime.cancel();
                                     return;
                                 }
@@ -346,7 +356,12 @@ async fn run_session(
                             &receive_buffer[..length],
                             monotonic_time(started_at),
                         );
-                        if !apply_actions(&socket, &event_tx, actions).await {
+                        if !apply_actions(
+                            &socket,
+                            &event_tx,
+                            &mut prediction_ids,
+                            actions,
+                        ).await {
                             let _ = runtime.cancel();
                             return;
                         }
@@ -368,6 +383,7 @@ async fn run_session(
 async fn apply_actions(
     socket: &UdpSocket,
     event_tx: &mpsc::Sender<MoshSessionEvent>,
+    prediction_ids: &mut PredictionIdMap,
     actions: Vec<SessionAction>,
 ) -> bool {
     for action in actions {
@@ -385,8 +401,11 @@ async fn apply_actions(
             SessionAction::ResizeTerminal { columns, rows } => {
                 MoshSessionEvent::RemoteResize { columns, rows }
             }
-            SessionAction::AcknowledgePrediction(state_id) => {
-                MoshSessionEvent::PredictionAcknowledged(state_id)
+            SessionAction::AcknowledgePrediction(protocol_frame_id) => {
+                let Some(prediction_id) = prediction_ids.acknowledge(protocol_frame_id) else {
+                    continue;
+                };
+                MoshSessionEvent::PredictionAcknowledged(prediction_id)
             }
             SessionAction::RemoteStateAdvanced(state_id) => {
                 MoshSessionEvent::RemoteStateAdvanced(state_id)
@@ -411,7 +430,87 @@ async fn apply_actions(
     true
 }
 
+#[derive(Default)]
+struct PredictionIdMap {
+    by_protocol_frame: BTreeMap<u64, u64>,
+}
+
+impl PredictionIdMap {
+    fn record(&mut self, protocol_frame_id: u64, prediction_id: u64) {
+        self.by_protocol_frame
+            .entry(protocol_frame_id)
+            .and_modify(|current| *current = (*current).max(prediction_id))
+            .or_insert(prediction_id);
+    }
+
+    fn acknowledge(&mut self, protocol_frame_id: u64) -> Option<u64> {
+        let prediction_id = self
+            .by_protocol_frame
+            .range(..=protocol_frame_id)
+            .next_back()
+            .map(|(_, prediction_id)| *prediction_id);
+        self.by_protocol_frame
+            .retain(|frame_id, _| *frame_id > protocol_frame_id);
+        prediction_id
+    }
+}
+
+fn queue_prediction_input(
+    runtime: &mut SessionRuntime,
+    prediction_ids: &mut PredictionIdMap,
+    prediction_id: u64,
+    bytes: Vec<u8>,
+) -> Result<(), RuntimeError> {
+    // The runtime alone owns SSP numbering; bridge its frame back to the terminal-local prediction.
+    let protocol_frame_id = runtime.prediction_frame_id();
+    runtime.queue_terminal_event(TerminalInputEvent::Bytes(bytes))?;
+    prediction_ids.record(protocol_frame_id, prediction_id);
+    Ok(())
+}
+
 fn monotonic_time(started_at: Instant) -> MonotonicTime {
     let elapsed = Instant::now().duration_since(started_at).as_millis();
     MonotonicTime::from_milliseconds(u64::try_from(elapsed).unwrap_or(u64::MAX))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SYNTHETIC_KEY: &str = "AQIDBAUGBwgJCgsMDQ4PEA==";
+
+    #[test]
+    fn terminal_prediction_ids_do_not_depend_on_protocol_state_numbers() {
+        let key = SessionKey::decode(SYNTHETIC_KEY).expect("synthetic key must decode");
+        let mut runtime = SessionRuntime::new(key, MonotonicTime::from_milliseconds(0));
+        runtime.queue_resize(80, 24);
+        runtime
+            .poll(MonotonicTime::from_milliseconds(0))
+            .expect("initial protocol state must open");
+        let protocol_frame_id = runtime.prediction_frame_id();
+        assert_ne!(protocol_frame_id, 0);
+
+        let mut prediction_ids = PredictionIdMap::default();
+        queue_prediction_input(
+            &mut runtime,
+            &mut prediction_ids,
+            0,
+            b"first input".to_vec(),
+        )
+        .expect("terminal-local prediction zero must be accepted");
+
+        assert_eq!(prediction_ids.acknowledge(protocol_frame_id), Some(0));
+    }
+
+    #[test]
+    fn prediction_acknowledgements_coalesce_by_protocol_frame() {
+        let mut prediction_ids = PredictionIdMap::default();
+        prediction_ids.record(4, 0);
+        prediction_ids.record(4, 1);
+        prediction_ids.record(7, 2);
+
+        assert_eq!(prediction_ids.acknowledge(4), Some(1));
+        assert_eq!(prediction_ids.acknowledge(6), None);
+        assert_eq!(prediction_ids.acknowledge(7), Some(2));
+    }
 }

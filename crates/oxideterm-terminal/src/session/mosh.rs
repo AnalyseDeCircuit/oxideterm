@@ -30,12 +30,15 @@ pub struct MoshTerminalSession {
     output_events_enabled: bool,
     shell_integration: TerminalShellIntegration,
     predictor: PredictionOverlay,
-    next_prediction_frame_id: u64,
+    next_prediction_id: u64,
     prediction_started_at: Instant,
 }
 
 enum MoshTerminalCommand {
-    Data { frame_id: u64, bytes: Vec<u8> },
+    Data {
+        prediction_id: u64,
+        bytes: Vec<u8>,
+    },
     Resize { columns: u16, rows: u16 },
     Close,
 }
@@ -43,9 +46,12 @@ enum MoshTerminalCommand {
 impl fmt::Debug for MoshTerminalCommand {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Data { frame_id, bytes } => formatter
+            Self::Data {
+                prediction_id,
+                bytes,
+            } => formatter
                 .debug_struct("Data")
-                .field("frame_id", frame_id)
+                .field("prediction_id", prediction_id)
                 .field("bytes", &bytes.len())
                 .finish(),
             Self::Resize { columns, rows } => formatter
@@ -130,7 +136,7 @@ impl MoshTerminalSession {
             output_events_enabled: false,
             shell_integration: TerminalShellIntegration::default(),
             predictor: PredictionOverlay::new(prediction_display, false),
-            next_prediction_frame_id: 0,
+            next_prediction_id: 0,
             prediction_started_at: Instant::now(),
         }
     }
@@ -361,15 +367,15 @@ impl MoshTerminalSession {
         if !self.lifecycle.is_running() || bytes.is_empty() {
             return Ok(());
         }
-        let frame_id = self.next_prediction_frame_id;
+        let prediction_id = self.next_prediction_id;
         self.send_command(MoshTerminalCommand::Data {
-            frame_id,
+            prediction_id,
             bytes: bytes.to_vec(),
         })?;
-        self.next_prediction_frame_id = self.next_prediction_frame_id.saturating_add(1);
+        self.next_prediction_id = self.next_prediction_id.saturating_add(1);
         let context = self.prediction_context();
         if let Some(overlay) = self.predictor.offer_for_frame_with_context_at(
-            frame_id,
+            prediction_id,
             action,
             Some(&context),
             self.prediction_elapsed_milliseconds(),
@@ -644,12 +650,14 @@ impl TerminalSessionBackend for MoshTerminalSession {
 }
 
 async fn run_mosh_terminal_worker(
-    bootstrap: oxideterm_mosh::MoshBootstrapConfig,
+    mut bootstrap: oxideterm_mosh::MoshBootstrapConfig,
     bootstrap_context: oxideterm_mosh::MoshBootstrapContext,
     initial_resize: TerminalResize,
     mut command_rx: tokio::sync::mpsc::Receiver<MoshTerminalCommand>,
     worker_tx: crate::backpressure::ByteBoundedSender<MoshTerminalWorkerEvent>,
 ) {
+    bootstrap.terminal_columns = u16::try_from(initial_resize.cols).unwrap_or(u16::MAX);
+    bootstrap.terminal_rows = u16::try_from(initial_resize.rows).unwrap_or(u16::MAX);
     let bootstrap = match oxideterm_mosh::bootstrap_mosh(bootstrap, bootstrap_context).await {
         Ok(bootstrap) => bootstrap,
         Err(error) => {
@@ -680,8 +688,8 @@ async fn run_mosh_terminal_worker(
             biased;
             command = command_rx.recv() => {
                 match command {
-                    Some(MoshTerminalCommand::Data { frame_id, bytes }) => {
-                        if client.send_input_for_frame(frame_id, bytes).await.is_err() {
+                    Some(MoshTerminalCommand::Data { prediction_id, bytes }) => {
+                        if client.send_input_for_prediction(prediction_id, bytes).await.is_err() {
                             let _ = worker_tx.send_control(MoshTerminalWorkerEvent::Closed);
                             return;
                         }
