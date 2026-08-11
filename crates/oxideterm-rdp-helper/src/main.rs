@@ -445,6 +445,10 @@ enum ClientRdpOutput {
     Event(RemoteDesktopHelperEvent),
     ConnectionFailure(connector::ConnectorError),
     ProtocolFailure(String),
+    SessionFailure {
+        message: String,
+        category: RemoteDesktopErrorCategory,
+    },
     Terminated(String),
     OutputEnded,
 }

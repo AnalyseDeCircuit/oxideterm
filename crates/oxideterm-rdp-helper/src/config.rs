@@ -219,6 +219,10 @@ pub(super) fn remote_desktop_error_category_from_message(
         || normalized.contains("socket")
         || normalized.contains("network")
         || normalized.contains("transport")
+        || normalized.contains("server closed established")
+        || normalized.contains("connection reset")
+        || normalized.contains("broken pipe")
+        || normalized.contains("unexpected eof")
     {
         RemoteDesktopErrorCategory::Network
     } else if normalized.contains("protocol")

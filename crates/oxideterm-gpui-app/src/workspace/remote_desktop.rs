@@ -98,6 +98,33 @@ const REMOTE_DESKTOP_DELIVERY_BUDGET: delivery::DeliveryBudget =
 const REMOTE_DESKTOP_FRAME_READY_DRAIN_LIMIT: usize = 32;
 const REMOTE_DESKTOP_FRAME_READY_DRAIN_BUDGET: Duration = Duration::from_millis(6);
 const REMOTE_DESKTOP_DIAGNOSTICS_ENV: &str = "OXIDETERM_REMOTE_DESKTOP_DIAGNOSTICS";
+const REMOTE_DESKTOP_AUTOMATIC_RECONNECT_DELAYS: [Duration; 4] = [
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+    Duration::from_secs(10),
+];
+
+fn remote_desktop_automatic_reconnect_delay(attempt: usize) -> Duration {
+    REMOTE_DESKTOP_AUTOMATIC_RECONNECT_DELAYS
+        .get(attempt)
+        .copied()
+        .unwrap_or_else(|| {
+            REMOTE_DESKTOP_AUTOMATIC_RECONNECT_DELAYS
+                .last()
+                .copied()
+                .unwrap_or(Duration::ZERO)
+        })
+}
+
+fn remote_desktop_network_failure_allows_automatic_reconnect(
+    has_connected: bool,
+    category: Option<RemoteDesktopErrorCategory>,
+) -> bool {
+    // Initial setup, authentication, protocol, and dependency failures need a
+    // user decision. Only a network failure after a proven session is retried.
+    has_connected && category == Some(RemoteDesktopErrorCategory::Network)
+}
 
 fn remote_desktop_tab_visible(main_tab_visible: bool, detached_tab_visible: bool) -> bool {
     main_tab_visible || detached_tab_visible
@@ -184,7 +211,11 @@ impl RemoteDesktopWorkerWake {
 
 #[cfg(test)]
 mod visibility_tests {
-    use super::remote_desktop_tab_visible;
+    use super::{
+        REMOTE_DESKTOP_AUTOMATIC_RECONNECT_DELAYS, remote_desktop_automatic_reconnect_delay,
+        remote_desktop_network_failure_allows_automatic_reconnect, remote_desktop_tab_visible,
+    };
+    use oxideterm_remote_desktop::RemoteDesktopErrorCategory;
 
     #[test]
     fn remote_desktop_visibility_covers_main_detached_and_hidden_tabs() {
@@ -192,6 +223,38 @@ mod visibility_tests {
         assert!(remote_desktop_tab_visible(false, true));
         assert!(remote_desktop_tab_visible(true, true));
         assert!(!remote_desktop_tab_visible(false, false));
+    }
+
+    #[test]
+    fn automatic_reconnect_backoff_caps_at_the_last_delay() {
+        assert_eq!(
+            remote_desktop_automatic_reconnect_delay(0),
+            REMOTE_DESKTOP_AUTOMATIC_RECONNECT_DELAYS[0]
+        );
+        assert_eq!(
+            remote_desktop_automatic_reconnect_delay(usize::MAX),
+            *REMOTE_DESKTOP_AUTOMATIC_RECONNECT_DELAYS.last().unwrap()
+        );
+    }
+
+    #[test]
+    fn automatic_reconnect_requires_an_established_network_session() {
+        assert!(remote_desktop_network_failure_allows_automatic_reconnect(
+            true,
+            Some(RemoteDesktopErrorCategory::Network)
+        ));
+        assert!(!remote_desktop_network_failure_allows_automatic_reconnect(
+            false,
+            Some(RemoteDesktopErrorCategory::Network)
+        ));
+        assert!(!remote_desktop_network_failure_allows_automatic_reconnect(
+            true,
+            Some(RemoteDesktopErrorCategory::Authentication)
+        ));
+        assert!(!remote_desktop_network_failure_allows_automatic_reconnect(
+            true,
+            Some(RemoteDesktopErrorCategory::Unknown)
+        ));
     }
 }
 
@@ -394,6 +457,10 @@ pub(in crate::workspace) struct RemoteDesktopSessionEntity {
     worker: Option<RemoteDesktopWorkerOwner>,
     worker_wake: Option<RemoteDesktopWorkerWake>,
     worker_generation: u64,
+    has_connected: bool,
+    automatic_reconnect_attempt: usize,
+    automatic_reconnect_worker_generation: Option<u64>,
+    automatic_reconnect_task: Option<Task<()>>,
     window_handle: AnyWindowHandle,
     last_viewport_size: Option<RemoteDesktopSize>,
     last_sent_resize: Option<RemoteDesktopResizeRequestState>,
@@ -451,8 +518,8 @@ impl RemoteDesktopSessionEntity {
             tab_id,
             profile,
             provider,
-            // The tab owns the credential only until one accepted certificate
-            // moves it into the helper authentication request.
+            // The tab retains one zeroizing credential owner so a reconnect
+            // can answer a fresh certificate-gated authentication request.
             password,
             certificate_store_path,
             certificate_challenge: None,
@@ -467,6 +534,10 @@ impl RemoteDesktopSessionEntity {
             worker: None,
             worker_wake: None,
             worker_generation: 0,
+            has_connected: false,
+            automatic_reconnect_attempt: 0,
+            automatic_reconnect_worker_generation: None,
+            automatic_reconnect_task: None,
             window_handle,
             last_viewport_size: None,
             last_sent_resize: None,

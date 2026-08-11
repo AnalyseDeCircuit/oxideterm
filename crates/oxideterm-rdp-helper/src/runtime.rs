@@ -169,9 +169,14 @@ pub(super) fn run_client_rdp_thread(
                     break;
                 }
                 Err(error) => {
-                    let _ = client_output_tx.send_control(ClientRdpOutput::Terminated(format!(
-                        "RDP session ended: {error}"
-                    )));
+                    let diagnostic = format!("RDP session ended: {error}");
+                    let category = remote_desktop_error_category_from_message(&diagnostic);
+                    let message = sanitize_rdp_disconnect_reason(Some(&error.to_string()))
+                        .unwrap_or_else(|| "RDP session ended.".to_string());
+                    // Active-session failures stay typed so the UI can retry
+                    // network loss without retrying protocol or auth failures.
+                    let _ = client_output_tx
+                        .send_control(ClientRdpOutput::SessionFailure { message, category });
                     break;
                 }
             }

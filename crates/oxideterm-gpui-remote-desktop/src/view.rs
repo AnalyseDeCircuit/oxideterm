@@ -240,7 +240,7 @@ fn paint_remote_desktop_surface(
             ),
         );
         if window
-            .update_dynamic_texture(&surface.texture, update_bounds, &update.bytes)
+            .update_dynamic_texture(&surface.texture, update_bounds, update.bytes.as_ref())
             .is_ok()
         {
             upload_count = upload_count.saturating_add(1);

@@ -589,6 +589,28 @@ fn connector_failure_exit_preserves_structured_category() {
 }
 
 #[test]
+fn active_session_failure_exit_preserves_structured_category() {
+    let writer = SharedEventWriter::inert_for_tests();
+    let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+    output_tx
+        .send_control(ClientRdpOutput::SessionFailure {
+            message: "RDP session ended after transport loss.".to_string(),
+            category: RemoteDesktopErrorCategory::Network,
+        })
+        .unwrap();
+
+    let drain = drain_client_rdp_outputs(&writer, &output_rx).unwrap();
+
+    assert!(matches!(
+        drain.exit,
+        Some(ClientRdpSessionExit::ConnectionFailed {
+            category: RemoteDesktopErrorCategory::Network,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn clipboard_formats_prefer_unicode_text() {
     let formats = text_clipboard_formats();
 
@@ -981,6 +1003,16 @@ fn disconnect_reason_hides_local_dependency_paths() {
     ));
 
     assert_eq!(message.as_deref(), Some("RDP session ended."));
+}
+
+#[test]
+fn established_transport_closure_is_classified_as_network_failure() {
+    assert_eq!(
+        remote_desktop_error_category_from_message(
+            "server closed established RDP session while reading frames: unexpected EOF"
+        ),
+        RemoteDesktopErrorCategory::Network
+    );
 }
 
 #[test]
