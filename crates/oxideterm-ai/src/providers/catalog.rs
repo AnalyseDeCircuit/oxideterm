@@ -11,7 +11,7 @@ pub const AI_PROVIDER_TEMPLATES: &[AiProviderTemplate] = &[
         provider_type: "deepseek",
         label_key: "settings_view.ai.provider_template_deepseek",
         base_url: "https://api.deepseek.com",
-        initial_models: &["deepseek-v4-flash"],
+        initial_models: &["deepseek-v4-flash", "deepseek-v4-pro"],
     },
     AiProviderTemplate {
         provider_type: "kimi",

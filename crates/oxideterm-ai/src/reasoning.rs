@@ -113,7 +113,7 @@ struct CapabilityRow {
 use AiReasoningLevel::{High, Low, Max, Medium, Minimal, None, Xhigh};
 
 const NONE: &[AiReasoningLevel] = &[];
-const NONE_HIGH_MAX: &[AiReasoningLevel] = &[None, High, Max];
+const NONE_LOW_HIGH_XHIGH_MAX: &[AiReasoningLevel] = &[None, Low, High, Xhigh, Max];
 const NONE_LOW_MEDIUM_HIGH: &[AiReasoningLevel] = &[None, Low, Medium, High];
 const NONE_LOW_MEDIUM_HIGH_XHIGH: &[AiReasoningLevel] = &[None, Low, Medium, High, Xhigh];
 const NONE_LOW_MEDIUM_HIGH_XHIGH_MAX: &[AiReasoningLevel] = &[None, Low, Medium, High, Xhigh, Max];
@@ -130,7 +130,7 @@ const MINIMAL_HIGH: &[AiReasoningLevel] = &[Minimal, High];
 
 // The table is intentionally ordered from the most specific rule to the
 // broadest prefix. Sources were verified against provider documentation on
-// 2026-07-25; unknown future models fall back to user-selectable raw levels.
+// 2026-08-12; unknown future models fall back to user-selectable raw levels.
 const CAPABILITY_ROWS: &[CapabilityRow] = &[
     // https://developers.openai.com/api/docs/models/gpt-5.4-pro
     CapabilityRow {
@@ -288,7 +288,7 @@ const CAPABILITY_ROWS: &[CapabilityRow] = &[
     CapabilityRow {
         provider_type: "deepseek",
         model_match: ModelMatch::Prefix("deepseek-v4"),
-        levels: NONE_HIGH_MAX,
+        levels: NONE_LOW_HIGH_XHIGH_MAX,
         request_format: AiReasoningRequestFormat::DeepSeek,
     },
     // https://platform.kimi.com/docs/guide/use-reasoning-effort
@@ -428,7 +428,10 @@ mod tests {
     #[test]
     fn capability_table_keeps_model_specific_level_sets() {
         let deepseek = model_reasoning_capability("deepseek", "deepseek-v4-pro");
-        assert_eq!(deepseek.levels, vec![None, High, Max]);
+        assert_eq!(deepseek.levels, vec![None, Low, High, Xhigh, Max]);
+
+        let deepseek_flash = model_reasoning_capability("deepseek", "deepseek-v4-flash");
+        assert_eq!(deepseek_flash.levels, vec![None, Low, High, Xhigh, Max]);
 
         let gemini = model_reasoning_capability("gemini", "gemini-3-pro-preview");
         assert_eq!(gemini.levels, vec![Low, High]);
@@ -478,6 +481,10 @@ mod tests {
         assert_eq!(
             normalize_reasoning_level_for_model("deepseek", "deepseek-v4-pro", "medium"),
             AiReasoningLevel::Auto
+        );
+        assert_eq!(
+            normalize_reasoning_level_for_model("deepseek", "deepseek-v4-pro", "xhigh"),
+            AiReasoningLevel::Xhigh
         );
         assert_eq!(
             normalize_reasoning_level_for_model(

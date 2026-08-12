@@ -102,14 +102,9 @@ fn apply_reasoning_options(body: &mut serde_json::Map<String, Value>, config: &A
             );
             body.insert(
                 "reasoning_effort".to_string(),
-                serde_json::json!(if matches!(
-                    effort,
-                    AiReasoningLevel::Max | AiReasoningLevel::Xhigh
-                ) {
-                    "max"
-                } else {
-                    "high"
-                }),
+                // DeepSeek performs its own model-specific effort mapping, so
+                // preserve the user's documented low/high/xhigh/max request.
+                serde_json::json!(effort.as_str()),
             );
         }
         AiReasoningRequestFormat::OpenAi => {
@@ -360,9 +355,18 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_reasoning_payload_matches_tauri_mapping() {
+    fn deepseek_reasoning_payload_preserves_documented_effort_levels() {
         let body = openai_chat_body(&config("deepseek", "none"), &[]);
         assert_eq!(body["thinking"]["type"].as_str(), Some("disabled"));
+        assert!(body.get("reasoning_effort").is_none());
+
+        let body = openai_chat_body(&config("deepseek", "low"), &[]);
+        assert_eq!(body["thinking"]["type"].as_str(), Some("enabled"));
+        assert_eq!(body["reasoning_effort"].as_str(), Some("low"));
+
+        let body = openai_chat_body(&config("deepseek", "xhigh"), &[]);
+        assert_eq!(body["thinking"]["type"].as_str(), Some("enabled"));
+        assert_eq!(body["reasoning_effort"].as_str(), Some("xhigh"));
 
         let body = openai_chat_body(&config("deepseek", "max"), &[]);
         assert_eq!(body["thinking"]["type"].as_str(), Some("enabled"));
