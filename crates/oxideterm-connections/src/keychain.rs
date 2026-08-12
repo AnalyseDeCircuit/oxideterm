@@ -22,6 +22,11 @@ pub(crate) struct ConnectionKeychain {
     test_max_secret_bytes: Option<usize>,
 }
 
+/// Grants multiple reads after one operation-scoped authentication.
+pub(crate) struct ConnectionKeychainBatchAccess<'a> {
+    keychain: &'a ConnectionKeychain,
+}
+
 impl Default for ConnectionKeychain {
     fn default() -> Self {
         Self {
@@ -119,6 +124,28 @@ impl ConnectionKeychain {
     }
 
     pub(crate) fn get_optional(&self, id: &str) -> Result<Option<SecretString>> {
+        self.get_optional_with_authentication(id, true)
+    }
+
+    pub(crate) fn authenticate_batch_access(&self) -> Result<ConnectionKeychainBatchAccess<'_>> {
+        #[cfg(test)]
+        if self.test_store.is_some() {
+            return Ok(ConnectionKeychainBatchAccess { keychain: self });
+        }
+
+        #[cfg(target_os = "macos")]
+        if let Some(reason) = self.authentication_reason.as_deref() {
+            oxideterm_secret_store::authenticate_device_owner(reason)
+                .context("failed to authenticate batch keychain access")?;
+        }
+        Ok(ConnectionKeychainBatchAccess { keychain: self })
+    }
+
+    fn get_optional_with_authentication(
+        &self,
+        id: &str,
+        authenticate_device_owner: bool,
+    ) -> Result<Option<SecretString>> {
         #[cfg(test)]
         if let Some(store) = &self.test_store {
             return Ok(store
@@ -145,7 +172,7 @@ impl ConnectionKeychain {
         }
 
         #[cfg(target_os = "macos")]
-        if let Some(reason) = self.authentication_reason.as_deref() {
+        if authenticate_device_owner && let Some(reason) = self.authentication_reason.as_deref() {
             oxideterm_secret_store::authenticate_device_owner(reason)
                 .with_context(|| format!("failed to authenticate keychain access for {id}"))?;
         }
@@ -189,6 +216,13 @@ impl ConnectionKeychain {
     }
 }
 
+impl ConnectionKeychainBatchAccess<'_> {
+    pub(crate) fn get_optional(&self, id: &str) -> Result<Option<SecretString>> {
+        // The guard can only be constructed after the batch authorization step.
+        self.keychain.get_optional_with_authentication(id, false)
+    }
+}
+
 fn portable_account(id: &str) -> String {
     // Portable Vault authentication, rather than the host OS account, owns
     // access to this stable entry across machines and system users.
@@ -217,6 +251,26 @@ mod tests {
         assert_eq!(
             legacy_portable_account_suffix("managed-key-id"),
             "@managed-key-id"
+        );
+    }
+
+    #[test]
+    fn batch_access_reuses_one_guard_for_multiple_secret_reads() {
+        let keychain = ConnectionKeychain::with_service("com.oxideterm.test.batch");
+        keychain.store("first", &SecretString::from("one")).unwrap();
+        keychain
+            .store("second", &SecretString::from("two"))
+            .unwrap();
+
+        let access = keychain.authenticate_batch_access().unwrap();
+
+        assert_eq!(
+            access.get_optional("first").unwrap(),
+            Some(SecretString::from("one"))
+        );
+        assert_eq!(
+            access.get_optional("second").unwrap(),
+            Some(SecretString::from("two"))
         );
     }
 }

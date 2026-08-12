@@ -1145,9 +1145,35 @@ impl ConnectionStore {
         connections: Vec<SavedConnection>,
         managed_keys: Vec<ImportedManagedSshKey>,
     ) -> Result<Vec<ConnectionInfo>> {
+        let mut connections = connections;
+        for connection in &mut connections {
+            if connection.id.trim().is_empty() {
+                // Assign import identities before computing rollback targets so
+                // staged secrets and their snapshots always use the same id.
+                connection.id = Uuid::new_v4().to_string();
+            }
+        }
         let original_data = self.data.clone();
         let original_keychain = self.snapshot_keychain_entries(&original_data)?;
-        let original_privilege_keychain = self.snapshot_privilege_keychain_entries(&original_data)?;
+        let imported_privilege_keychain_ids =
+            collect_imported_privilege_keychain_ids(&connections);
+        let existing_privilege_keychain_ids = original_data
+            .connections
+            .iter()
+            .flat_map(collect_privilege_keychain_ids)
+            .chain(
+                original_data
+                    .local_privilege_credentials
+                    .iter()
+                    .filter_map(|credential| credential.keychain_id.clone()),
+            )
+            .collect::<HashSet<_>>();
+        let overwritten_privilege_keychain_ids = imported_privilege_keychain_ids
+            .intersection(&existing_privilege_keychain_ids)
+            .cloned()
+            .collect::<HashSet<_>>();
+        let original_privilege_keychain =
+            self.snapshot_privilege_keychain_entries(&overwritten_privilege_keychain_ids)?;
         let original_managed_keychain = self.snapshot_managed_keychain_entries(&original_data)?;
         let mut touched_keychain_ids = HashSet::new();
         let mut touched_privilege_keychain_ids = HashSet::new();
@@ -2134,19 +2160,20 @@ impl ConnectionStore {
 
     fn snapshot_privilege_keychain_entries(
         &self,
-        data: &ConnectionStoreData,
+        keychain_ids: &HashSet<String>,
     ) -> Result<HashMap<String, Option<SecretString>>> {
-        data.connections
+        if keychain_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        // Import rollback needs a snapshot of every protected credential.
+        // Authenticate once for the transaction instead of prompting once
+        // per keychain item on macOS.
+        let keychain_access = self.privilege_keychain.authenticate_batch_access()?;
+        keychain_ids
             .iter()
-            .flat_map(collect_privilege_keychain_ids)
-            .chain(
-                data.local_privilege_credentials
-                    .iter()
-                    .filter_map(|credential| credential.keychain_id.clone()),
-            )
             .map(|keychain_id| {
-                let value = self.privilege_keychain.get_optional(&keychain_id)?;
-                Ok((keychain_id, value))
+                let value = keychain_access.get_optional(&keychain_id)?;
+                Ok((keychain_id.clone(), value))
             })
             .collect()
     }

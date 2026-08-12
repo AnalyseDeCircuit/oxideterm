@@ -271,6 +271,30 @@ fn collect_privilege_keychain_ids(connection: &SavedConnection) -> Vec<String> {
         .collect()
 }
 
+fn collect_imported_privilege_keychain_ids(
+    connections: &[SavedConnection],
+) -> HashSet<String> {
+    // Only imported plaintext values can overwrite the protected store. Existing
+    // metadata without a secret leaves the local keychain entry unchanged.
+    connections
+        .iter()
+        .flat_map(|connection| {
+            connection
+                .privilege_credentials
+                .iter()
+                .filter(|credential| credential.plaintext_secret.is_some())
+                .map(|credential| {
+                    let connection_id = if credential.connection_id.trim().is_empty() {
+                        connection.id.as_str()
+                    } else {
+                        credential.connection_id.as_str()
+                    };
+                    privilege_keychain_id(connection_id, &credential.id)
+                })
+        })
+        .collect()
+}
+
 fn collect_keychain_ids_for_parts(
     auth: &SavedAuth,
     proxy_chain: &[SavedProxyHop],

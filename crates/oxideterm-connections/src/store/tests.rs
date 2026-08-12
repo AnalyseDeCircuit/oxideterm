@@ -1511,6 +1511,51 @@ mod tests {
     }
 
     #[test]
+    fn imported_privilege_targets_only_include_secrets_that_will_be_written() {
+        let mut store = load_empty_store("import-privilege-snapshot-scope");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        let mut imported = store.get("conn-1").unwrap().clone();
+        let now = Utc::now();
+        imported.privilege_credentials = vec![
+            SavedPrivilegeCredential {
+                id: "preserved".to_string(),
+                connection_id: imported.id.clone(),
+                label: "Preserved".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                keychain_id: Some(privilege_keychain_id(&imported.id, "preserved")),
+                plaintext_secret: None,
+                enabled: true,
+                require_click_to_send: true,
+                created_at: now,
+                updated_at: now,
+            },
+            SavedPrivilegeCredential {
+                id: "replaced".to_string(),
+                connection_id: imported.id.clone(),
+                label: "Replaced".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                keychain_id: None,
+                plaintext_secret: Some(SecretString::from("replacement")),
+                enabled: true,
+                require_click_to_send: true,
+                created_at: now,
+                updated_at: now,
+            },
+        ];
+
+        let ids = collect_imported_privilege_keychain_ids(&[imported]);
+
+        assert_eq!(
+            ids,
+            HashSet::from([privilege_keychain_id("conn-1", "replaced")])
+        );
+    }
+
+    #[test]
     fn saved_connection_sync_snapshot_exports_delete_tombstones() {
         let mut store = load_empty_store("sync-tombstone-export");
         store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
