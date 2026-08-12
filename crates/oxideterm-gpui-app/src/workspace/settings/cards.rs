@@ -803,6 +803,8 @@ impl WorkspaceApp {
                         | SettingsInput::AppLockConfirmPassword
                 ) {
                     self.commit_focused_app_lock_input();
+                } else if self.commit_focused_cloud_sync_input(input, cx) {
+                    self.focused_settings_input = None;
                 } else {
                     self.focused_settings_input = None;
                     self.clear_settings_input_draft(input);
@@ -824,6 +826,8 @@ impl WorkspaceApp {
                         | SettingsInput::AppLockConfirmPassword
                 ) {
                     self.commit_focused_app_lock_input();
+                } else if self.commit_focused_cloud_sync_input(input, cx) {
+                    self.focused_settings_input = None;
                 } else {
                     self.focused_settings_input = None;
                     self.clear_settings_input_draft(input);
@@ -870,6 +874,9 @@ impl WorkspaceApp {
             ) {
                 self.focused_settings_input = Some(input);
                 self.commit_focused_app_lock_input();
+            } else if self.commit_focused_cloud_sync_input(input, cx) {
+                // Cloud Sync fields move out of their Entity while focused, so
+                // every blur boundary must return the owned draft before release.
             } else {
                 self.clear_settings_input_draft(input);
             }

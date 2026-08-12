@@ -916,6 +916,9 @@ impl WorkspaceApp {
                 cx.notify();
             }
         });
+        // Modal actions may originate from the Cloud Sync form. Return the
+        // active IME-owned value before the modal replaces the focus owner.
+        self.apply_focused_cloud_sync_input_draft(cx);
         self.focused_settings_input = None;
         self.settings_slider_drag = None;
         self.ime_marked_text = None;

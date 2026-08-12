@@ -2412,6 +2412,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn cloud_sync_inputs_commit_at_keyboard_blur_and_modal_boundaries() {
+        let cards_source = include_str!("cards.rs");
+        let helpers_source = include_str!("../root/helpers.rs");
+
+        // A focused Cloud Sync value is moved out of its Entity, so dropping
+        // the generic input draft at any release boundary would lose the edit.
+        assert!(
+            cards_source
+                .matches("commit_focused_cloud_sync_input(input, cx)")
+                .count()
+                >= 3
+        );
+        assert!(helpers_source.contains("apply_focused_cloud_sync_input_draft(cx)"));
+    }
+
     #[gpui::test]
     fn settings_route_and_navigation_draft_are_entity_owned(cx: &mut TestAppContext) {
         let entity = cx.new(SettingsWorkspaceEntity::new);
