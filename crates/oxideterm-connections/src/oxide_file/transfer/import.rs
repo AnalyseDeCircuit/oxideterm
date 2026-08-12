@@ -21,7 +21,7 @@ pub fn apply_oxide_import_with_options(
     password: &str,
     options: OxideImportOptions,
 ) -> Result<ImportResultEnvelope, OxideFileError> {
-    apply_oxide_import_with_options_inner(store, bytes, password, options, None)
+    apply_oxide_import_with_options_inner(store, bytes, Some(password), options, None, None)
 }
 
 pub fn apply_oxide_import_with_options_with_progress<F>(
@@ -34,14 +34,42 @@ pub fn apply_oxide_import_with_options_with_progress<F>(
 where
     F: FnMut(&str, usize, usize),
 {
-    apply_oxide_import_with_options_inner(store, bytes, password, options, Some(&mut on_progress))
+    apply_oxide_import_with_options_inner(
+        store,
+        bytes,
+        Some(password),
+        options,
+        None,
+        Some(&mut on_progress),
+    )
+}
+
+pub fn apply_oxide_import_with_options_with_context_and_progress<F>(
+    store: &mut ConnectionStore,
+    bytes: &[u8],
+    decryption_context: &mut OxideBatchDecryptionContext,
+    options: OxideImportOptions,
+    mut on_progress: F,
+) -> Result<ImportResultEnvelope, OxideFileError>
+where
+    F: FnMut(&str, usize, usize),
+{
+    apply_oxide_import_with_options_inner(
+        store,
+        bytes,
+        None,
+        options,
+        Some(decryption_context),
+        Some(&mut on_progress),
+    )
 }
 
 fn apply_oxide_import_with_options_inner(
     store: &mut ConnectionStore,
     bytes: &[u8],
-    password: &str,
+    password: Option<&str>,
     options: OxideImportOptions,
+    decryption_context: Option<&mut OxideBatchDecryptionContext>,
     mut on_progress: Option<&mut dyn FnMut(&str, usize, usize)>,
 ) -> Result<ImportResultEnvelope, OxideFileError> {
     const APPLY_IMPORT_TOTAL_STEPS: usize = 10;
@@ -53,10 +81,18 @@ fn apply_oxide_import_with_options_inner(
     };
     let file = OxideFile::from_bytes(bytes)?;
     report_progress("parsing_file", current_step);
-    let payload = decrypt_oxide_file_with_progress(&file, password, |stage| {
-        current_step += 1;
-        report_progress(stage, current_step);
-    })?;
+    let payload = if let Some(decryption_context) = decryption_context {
+        decrypt_oxide_file_with_context_and_progress(&file, decryption_context, |stage| {
+            current_step += 1;
+            report_progress(stage, current_step);
+        })?
+    } else {
+        let password = password.ok_or(OxideFileError::CryptoError)?;
+        decrypt_oxide_file_with_progress(&file, password, |stage| {
+            current_step += 1;
+            report_progress(stage, current_step);
+        })?
+    };
     let EncryptedPayload {
         connections,
         app_settings_json,

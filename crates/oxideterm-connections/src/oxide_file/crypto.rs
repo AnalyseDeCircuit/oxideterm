@@ -15,6 +15,58 @@ struct KdfParams {
     parallelism: u32,
 }
 
+/// Owns one password-derived key for a batch of independently authenticated
+/// `.oxide` files. Every file still receives a fresh nonce, while the expensive
+/// Argon2id derivation is paid only once for the batch.
+pub struct OxideBatchEncryptionContext {
+    salt: [u8; SALT_LEN],
+    key: Zeroizing<[u8; 32]>,
+    kdf_version: u32,
+}
+
+struct CachedOxideDecryptionKey {
+    salt: [u8; SALT_LEN],
+    key: Zeroizing<[u8; 32]>,
+    kdf_version: u32,
+}
+
+/// Reuses a zeroizing derived key while consecutive `.oxide` files share the
+/// same salt and KDF version. Older batches with per-file salts remain readable
+/// and simply derive a replacement key when the salt changes.
+pub struct OxideBatchDecryptionContext {
+    password: Zeroizing<String>,
+    cached: Option<CachedOxideDecryptionKey>,
+}
+
+impl OxideBatchEncryptionContext {
+    pub fn new(password: &str) -> Result<Self, OxideFileError> {
+        if password.len() < 6 {
+            return Err(OxideFileError::PasswordTooShort);
+        }
+        let mut salt = [0u8; SALT_LEN];
+        rand::rngs::OsRng.fill_bytes(&mut salt);
+        let kdf_version = kdf_flags::CURRENT_KDF;
+        let key = derive_key(password, &salt, kdf_version)?;
+        Ok(Self {
+            salt,
+            key,
+            kdf_version,
+        })
+    }
+}
+
+impl OxideBatchDecryptionContext {
+    pub fn new(password: &str) -> Result<Self, OxideFileError> {
+        if password.len() < 6 {
+            return Err(OxideFileError::PasswordTooShort);
+        }
+        Ok(Self {
+            password: Zeroizing::new(password.to_string()),
+            cached: None,
+        })
+    }
+}
+
 impl KdfParams {
     fn for_version(version: u32) -> Result<Self, OxideFileError> {
         match version {
@@ -75,11 +127,57 @@ where
     let key = derive_key(password, &salt, kdf_flags::CURRENT_KDF)?;
     on_progress("deriving_key");
 
+    encrypt_oxide_payload(
+        payload,
+        metadata,
+        salt,
+        nonce,
+        &key,
+        kdf_flags::CURRENT_KDF,
+        on_progress,
+    )
+}
+
+pub fn encrypt_oxide_file_with_context_and_progress<F>(
+    payload: &EncryptedPayload,
+    context: &OxideBatchEncryptionContext,
+    metadata: OxideMetadata,
+    mut on_progress: F,
+) -> Result<OxideFile, OxideFileError>
+where
+    F: FnMut(&'static str),
+{
+    let mut nonce = [0u8; NONCE_LEN];
+    rand::rngs::OsRng.fill_bytes(&mut nonce);
+    on_progress("generating_nonce");
+    on_progress("reusing_derived_key");
+    encrypt_oxide_payload(
+        payload,
+        metadata,
+        context.salt,
+        nonce,
+        &context.key,
+        context.kdf_version,
+        on_progress,
+    )
+}
+
+fn encrypt_oxide_payload<F>(
+    payload: &EncryptedPayload,
+    metadata: OxideMetadata,
+    salt: [u8; SALT_LEN],
+    nonce: [u8; NONCE_LEN],
+    key: &[u8; 32],
+    kdf_version: u32,
+    mut on_progress: F,
+) -> Result<OxideFile, OxideFileError>
+where
+    F: FnMut(&'static str),
+{
     let plaintext = Zeroizing::new(rmp_serde::to_vec_named(payload)?);
     on_progress("serializing_payload");
 
-    let cipher =
-        ChaCha20Poly1305::new_from_slice(&*key).map_err(|_| OxideFileError::CryptoError)?;
+    let cipher = ChaCha20Poly1305::new_from_slice(key).map_err(|_| OxideFileError::CryptoError)?;
     let ciphertext = cipher
         .encrypt(Nonce::from_slice(&nonce), plaintext.as_ref())
         .map_err(|_| OxideFileError::EncryptionFailed)?;
@@ -99,7 +197,7 @@ where
         nonce,
         encrypted_data: encrypted_data.to_vec(),
         tag,
-        kdf_version: kdf_flags::CURRENT_KDF,
+        kdf_version,
     })
 }
 
@@ -121,8 +219,52 @@ where
     let key = derive_key(password, &oxide_file.salt, oxide_file.kdf_version)?;
     on_progress("deriving_key");
 
-    let cipher =
-        ChaCha20Poly1305::new_from_slice(&*key).map_err(|_| OxideFileError::CryptoError)?;
+    decrypt_oxide_payload(oxide_file, &key, on_progress)
+}
+
+pub fn decrypt_oxide_file_with_context_and_progress<F>(
+    oxide_file: &OxideFile,
+    context: &mut OxideBatchDecryptionContext,
+    mut on_progress: F,
+) -> Result<EncryptedPayload, OxideFileError>
+where
+    F: FnMut(&'static str),
+{
+    let matches_cached = context.cached.as_ref().is_some_and(|cached| {
+        cached.salt == oxide_file.salt && cached.kdf_version == oxide_file.kdf_version
+    });
+    if matches_cached {
+        on_progress("reusing_derived_key");
+    } else {
+        let key = derive_key(
+            context.password.as_str(),
+            &oxide_file.salt,
+            oxide_file.kdf_version,
+        )?;
+        context.cached = Some(CachedOxideDecryptionKey {
+            salt: oxide_file.salt,
+            key,
+            kdf_version: oxide_file.kdf_version,
+        });
+        on_progress("deriving_key");
+    }
+    let key = &context
+        .cached
+        .as_ref()
+        .ok_or(OxideFileError::CryptoError)?
+        .key;
+    decrypt_oxide_payload(oxide_file, key, on_progress)
+}
+
+fn decrypt_oxide_payload<F>(
+    oxide_file: &OxideFile,
+    key: &[u8; 32],
+    mut on_progress: F,
+) -> Result<EncryptedPayload, OxideFileError>
+where
+    F: FnMut(&'static str),
+{
+    let cipher = ChaCha20Poly1305::new_from_slice(key).map_err(|_| OxideFileError::CryptoError)?;
     let mut ciphertext_with_tag = oxide_file.encrypted_data.clone();
     ciphertext_with_tag.extend_from_slice(&oxide_file.tag);
 

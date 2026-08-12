@@ -104,6 +104,11 @@ impl CloudSyncOperationService {
         let encrypted_entry_count = manifest.sections.app_settings.len()
             + manifest.sections.plugin_settings.len()
             + usize::from(manifest.sections.sensitive_credentials.is_some());
+        let mut decryption_context = sync_password
+            .as_ref()
+            .map(|password| OxideBatchDecryptionContext::new(password.as_str()))
+            .transpose()
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         let total_units = 4.0;
         report_progress(
             progress,
@@ -232,11 +237,11 @@ impl CloudSyncOperationService {
             let object = self
                 .read_required_object(settings, &metadata_secrets, entry)
                 .await?;
-            if let Some(password) = sync_password.as_ref().map(|password| password.as_str()) {
-                let import_preview = preview_oxide_import_with_progress(
+            if let Some(decryption_context) = decryption_context.as_mut() {
+                let import_preview = preview_oxide_import_with_context_and_progress(
                     connection_store,
                     &object.bytes,
-                    password,
+                    decryption_context,
                     ImportConflictStrategy::Merge,
                     |stage, current, total| {
                         let fraction = fractional_import_progress(current, total);
@@ -261,11 +266,11 @@ impl CloudSyncOperationService {
             let object = self
                 .read_required_object(settings, &metadata_secrets, entry)
                 .await?;
-            if let Some(password) = sync_password.as_ref().map(|password| password.as_str()) {
-                let import_preview = preview_oxide_import_with_progress(
+            if let Some(decryption_context) = decryption_context.as_mut() {
+                let import_preview = preview_oxide_import_with_context_and_progress(
                     connection_store,
                     &object.bytes,
-                    password,
+                    decryption_context,
                     ImportConflictStrategy::Replace,
                     |stage, current, total| {
                         let fraction = fractional_import_progress(current, total);
@@ -318,11 +323,11 @@ impl CloudSyncOperationService {
             let object = self
                 .read_required_object(settings, &metadata_secrets, entry)
                 .await?;
-            if let Some(password) = sync_password.as_ref().map(|password| password.as_str()) {
-                let import_preview = preview_oxide_import_with_progress(
+            if let Some(decryption_context) = decryption_context.as_mut() {
+                let import_preview = preview_oxide_import_with_context_and_progress(
                     connection_store,
                     &object.bytes,
-                    password,
+                    decryption_context,
                     ImportConflictStrategy::Replace,
                     |stage, current, total| {
                         let fraction = fractional_import_progress(current, total);

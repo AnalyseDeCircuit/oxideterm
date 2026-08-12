@@ -53,6 +53,10 @@ impl CloudSyncOperationService {
         } else {
             None
         };
+        let mut decryption_context = sync_password
+            .map(OxideBatchDecryptionContext::new)
+            .transpose()
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
 
         let total = (app_settings_entry_ids.len()
             + plugin_entry_ids.len()
@@ -118,13 +122,13 @@ impl CloudSyncOperationService {
         let mut app_settings_snapshots = std::collections::BTreeMap::new();
         let mut plugin_settings_snapshot = Vec::new();
         let mut sensitive_credentials_envelope = None;
-        if let Some(password) = sync_password {
+        if let Some(decryption_context) = decryption_context.as_mut() {
             if apply_sensitive_credentials {
                 if let Some(bytes) = preview.sensitive_credentials_entry.as_ref() {
-                    let envelope = apply_oxide_import_with_options_with_progress(
+                    let envelope = apply_oxide_import_with_options_with_context_and_progress(
                         connection_store,
                         bytes,
-                        password,
+                        decryption_context,
                         OxideImportOptions {
                             selected_names: None,
                             selected_forward_ids: None,
@@ -162,10 +166,10 @@ impl CloudSyncOperationService {
                 let Some(bytes) = preview.app_settings_entries.get(section_id) else {
                     continue;
                 };
-                let envelope = apply_oxide_import_with_options_with_progress(
+                let envelope = apply_oxide_import_with_options_with_context_and_progress(
                     connection_store,
                     bytes,
-                    password,
+                    decryption_context,
                     OxideImportOptions {
                         selected_names: Some(Vec::new()),
                         selected_forward_ids: None,
@@ -201,10 +205,10 @@ impl CloudSyncOperationService {
                 let Some(bytes) = preview.plugin_settings_entries.get(plugin_id) else {
                     continue;
                 };
-                let envelope = apply_oxide_import_with_options_with_progress(
+                let envelope = apply_oxide_import_with_options_with_context_and_progress(
                     connection_store,
                     bytes,
-                    password,
+                    decryption_context,
                     OxideImportOptions {
                         selected_names: Some(Vec::new()),
                         selected_forward_ids: None,

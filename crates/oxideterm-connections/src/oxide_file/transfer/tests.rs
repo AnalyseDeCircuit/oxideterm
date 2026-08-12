@@ -808,6 +808,129 @@ mod tests {
     }
 
     #[test]
+    fn batch_encryption_context_keeps_files_independent_and_compatible() {
+        let source = temp_store("batch-encryption-source");
+        let context = OxideBatchEncryptionContext::new("secret!").unwrap();
+        let mut first_progress = Vec::new();
+        let first = export_connections_to_oxide_with_context_and_progress(
+            &source,
+            &[],
+            OxideExportOptions {
+                description: Some("first".to_string()),
+                app_settings_json: Some(r#"{"general":{"language":"en"}}"#.to_string()),
+                ..OxideExportOptions::default()
+            },
+            &context,
+            |stage, _, _| first_progress.push(stage.to_string()),
+        )
+        .unwrap();
+        let second = export_connections_to_oxide_with_context_and_progress(
+            &source,
+            &[],
+            OxideExportOptions {
+                description: Some("second".to_string()),
+                app_settings_json: Some(r#"{"general":{"language":"zh-CN"}}"#.to_string()),
+                ..OxideExportOptions::default()
+            },
+            &context,
+            |_, _, _| {},
+        )
+        .unwrap();
+
+        let first_file = OxideFile::from_bytes(&first).unwrap();
+        let second_file = OxideFile::from_bytes(&second).unwrap();
+        assert_eq!(first_file.salt, second_file.salt);
+        assert_ne!(first_file.nonce, second_file.nonce);
+        assert!(first_progress.iter().any(|stage| stage == "reusing_derived_key"));
+        assert!(!first_progress.iter().any(|stage| stage == "deriving_key"));
+
+        let payload = decrypt_payload(&first, "secret!").unwrap();
+        assert_eq!(
+            payload.app_settings_json.as_deref(),
+            Some(r#"{"general":{"language":"en"}}"#)
+        );
+    }
+
+    #[test]
+    fn batch_encryption_context_rejects_short_passwords_before_derivation() {
+        assert!(matches!(
+            OxideBatchEncryptionContext::new("short"),
+            Err(OxideFileError::PasswordTooShort)
+        ));
+    }
+
+    #[test]
+    fn batch_decryption_context_reuses_matching_salt_and_supports_legacy_salts() {
+        let source = temp_store("batch-decryption-source");
+        let encryption_context = OxideBatchEncryptionContext::new("secret!").unwrap();
+        let first = export_connections_to_oxide_with_context_and_progress(
+            &source,
+            &[],
+            OxideExportOptions {
+                app_settings_json: Some(r#"{"general":{"language":"en"}}"#.to_string()),
+                ..OxideExportOptions::default()
+            },
+            &encryption_context,
+            |_, _, _| {},
+        )
+        .unwrap();
+        let second = export_connections_to_oxide_with_context_and_progress(
+            &source,
+            &[],
+            OxideExportOptions {
+                app_settings_json: Some(r#"{"general":{"language":"zh-CN"}}"#.to_string()),
+                ..OxideExportOptions::default()
+            },
+            &encryption_context,
+            |_, _, _| {},
+        )
+        .unwrap();
+        let legacy = export_connections_to_oxide(
+            &source,
+            &[],
+            "secret!",
+            OxideExportOptions {
+                app_settings_json: Some(r#"{"general":{"language":"fr"}}"#.to_string()),
+                ..OxideExportOptions::default()
+            },
+        )
+        .unwrap();
+
+        let mut decryption_context = OxideBatchDecryptionContext::new("secret!").unwrap();
+        let mut first_stages = Vec::new();
+        preview_oxide_import_with_context_and_progress(
+            &source,
+            &first,
+            &mut decryption_context,
+            ImportConflictStrategy::Replace,
+            |stage, _, _| first_stages.push(stage.to_string()),
+        )
+        .unwrap();
+        let mut second_stages = Vec::new();
+        preview_oxide_import_with_context_and_progress(
+            &source,
+            &second,
+            &mut decryption_context,
+            ImportConflictStrategy::Replace,
+            |stage, _, _| second_stages.push(stage.to_string()),
+        )
+        .unwrap();
+        let mut legacy_stages = Vec::new();
+        preview_oxide_import_with_context_and_progress(
+            &source,
+            &legacy,
+            &mut decryption_context,
+            ImportConflictStrategy::Replace,
+            |stage, _, _| legacy_stages.push(stage.to_string()),
+        )
+        .unwrap();
+
+        assert!(first_stages.iter().any(|stage| stage == "deriving_key"));
+        assert!(second_stages.iter().any(|stage| stage == "reusing_derived_key"));
+        assert!(legacy_stages.iter().any(|stage| stage == "deriving_key"));
+    }
+
+    #[test]
     fn rename_strategy_matches_copy_suffix_contract() {
         let mut store = temp_store("rename");
         store

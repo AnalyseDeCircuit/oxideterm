@@ -56,7 +56,7 @@ pub fn export_connections_to_oxide(
     password: &str,
     options: OxideExportOptions,
 ) -> Result<Vec<u8>, OxideFileError> {
-    export_connections_to_oxide_inner(store, connection_ids, password, options, None)
+    export_connections_to_oxide_inner(store, connection_ids, Some(password), options, None, None)
 }
 
 pub fn export_connections_to_oxide_with_progress<F>(
@@ -72,8 +72,29 @@ where
     export_connections_to_oxide_inner(
         store,
         connection_ids,
-        password,
+        Some(password),
         options,
+        None,
+        Some(&mut on_progress),
+    )
+}
+
+pub fn export_connections_to_oxide_with_context_and_progress<F>(
+    store: &ConnectionStore,
+    connection_ids: &[String],
+    options: OxideExportOptions,
+    encryption_context: &OxideBatchEncryptionContext,
+    mut on_progress: F,
+) -> Result<Vec<u8>, OxideFileError>
+where
+    F: FnMut(&str, usize, usize),
+{
+    export_connections_to_oxide_inner(
+        store,
+        connection_ids,
+        None,
+        options,
+        Some(encryption_context),
         Some(&mut on_progress),
     )
 }
@@ -81,11 +102,14 @@ where
 fn export_connections_to_oxide_inner(
     store: &ConnectionStore,
     connection_ids: &[String],
-    password: &str,
+    password: Option<&str>,
     options: OxideExportOptions,
+    encryption_context: Option<&OxideBatchEncryptionContext>,
     mut on_progress: Option<&mut dyn FnMut(&str, usize, usize)>,
 ) -> Result<Vec<u8>, OxideFileError> {
-    validate_password(password)?;
+    if let Some(password) = password {
+        validate_password(password)?;
+    }
 
     let total_steps = connection_ids.len() + 9;
     let mut current_step = 0usize;
@@ -194,11 +218,22 @@ fn export_connections_to_oxide_inner(
     };
     report_progress("building_metadata");
 
-    let oxide_file = if has_progress {
+    let oxide_file = if let Some(encryption_context) = encryption_context {
+        encrypt_oxide_file_with_context_and_progress(
+            &payload,
+            encryption_context,
+            metadata,
+            |stage| {
+                report_progress(stage);
+            },
+        )?
+    } else if has_progress {
+        let password = password.ok_or(OxideFileError::CryptoError)?;
         encrypt_oxide_file_with_progress(&payload, password, metadata, |stage| {
             report_progress(stage);
         })?
     } else {
+        let password = password.ok_or(OxideFileError::CryptoError)?;
         encrypt_oxide_file(&payload, password, metadata)?
     };
     let bytes = oxide_file.to_bytes()?;

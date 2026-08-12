@@ -27,6 +27,23 @@ impl CloudSyncOperationService {
         );
         let mut objects = Vec::new();
         let mut completed_exports = 0usize;
+        let has_encrypted_objects = local_snapshot.scope.sync_sensitive_credentials
+            || (local_snapshot.scope.sync_app_settings
+                && !local_snapshot.scope.app_settings_sections.is_empty())
+            || (local_snapshot.scope.sync_plugin_settings
+                && !local_snapshot.metadata.plugin_settings_revisions.is_empty());
+        let encryption_context = if has_encrypted_objects {
+            let password =
+                sync_password.context("missing_sync_password: cloud sync password is required")?;
+            // A cloud upload contains multiple independently authenticated files.
+            // Reuse one zeroizing batch key while retaining a fresh nonce per file.
+            Some(
+                OxideBatchEncryptionContext::new(password)
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+            )
+        } else {
+            None
+        };
 
         if local_snapshot.scope.sync_connections {
             let mut snapshot = connection_store.export_saved_connections_snapshot()?;
@@ -191,8 +208,6 @@ impl CloudSyncOperationService {
         }
 
         if local_snapshot.scope.sync_sensitive_credentials {
-            let password =
-                sync_password.context("missing_sync_password: cloud sync password is required")?;
             if let Some(revision) = local_snapshot
                 .metadata
                 .sensitive_credentials_revision
@@ -209,10 +224,9 @@ impl CloudSyncOperationService {
                             .is_none_or(|ids| ids.contains(connection_id))
                     })
                     .collect::<Vec<_>>();
-                let bytes = export_connections_to_oxide_with_progress(
+                let bytes = export_connections_to_oxide_with_context_and_progress(
                     connection_store,
                     &connection_ids,
-                    password,
                     OxideExportOptions {
                         description: Some("Cloud Sync sensitive credentials".to_string()),
                         embed_keys: false,
@@ -223,6 +237,9 @@ impl CloudSyncOperationService {
                         portable_secrets,
                         ..OxideExportOptions::default()
                     },
+                    encryption_context
+                        .as_ref()
+                        .context("missing cloud sync encryption context")?,
                     |_stage, current, export_total| {
                         report_fractional_progress(
                             progress,
@@ -256,8 +273,6 @@ impl CloudSyncOperationService {
         }
 
         if local_snapshot.scope.sync_app_settings {
-            let password =
-                sync_password.context("missing_sync_password: cloud sync password is required")?;
             for section_id in &local_snapshot.scope.app_settings_sections {
                 let Some(section_revision) = local_snapshot
                     .metadata
@@ -272,16 +287,18 @@ impl CloudSyncOperationService {
                     Some(&selected),
                     local_snapshot.scope.include_local_terminal_env_vars,
                 )?;
-                let bytes = export_connections_to_oxide_with_progress(
+                let bytes = export_connections_to_oxide_with_context_and_progress(
                     connection_store,
                     &[],
-                    password,
                     OxideExportOptions {
                         description: Some(format!("Cloud Sync app settings {section_id}")),
                         embed_keys: false,
                         app_settings_json: Some(app_settings_json),
                         ..OxideExportOptions::default()
                     },
+                    encryption_context
+                        .as_ref()
+                        .context("missing cloud sync encryption context")?,
                     |_stage, current, export_total| {
                         report_fractional_progress(
                             progress,
@@ -318,8 +335,6 @@ impl CloudSyncOperationService {
         }
 
         if local_snapshot.scope.sync_plugin_settings {
-            let password =
-                sync_password.context("missing_sync_password: cloud sync password is required")?;
             let entries = crate::plugin_settings::load_plugin_settings(settings_store.path())
                 .map_err(anyhow::Error::msg)?;
             for plugin_id in scoped_plugin_ids(local_snapshot) {
@@ -338,16 +353,18 @@ impl CloudSyncOperationService {
                     })
                     .cloned()
                     .collect::<Vec<_>>();
-                let bytes = export_connections_to_oxide_with_progress(
+                let bytes = export_connections_to_oxide_with_context_and_progress(
                     connection_store,
                     &[],
-                    password,
                     OxideExportOptions {
                         description: Some(format!("Cloud Sync plugin settings {plugin_id}")),
                         embed_keys: false,
                         plugin_settings,
                         ..OxideExportOptions::default()
                     },
+                    encryption_context
+                        .as_ref()
+                        .context("missing cloud sync encryption context")?,
                     |_stage, current, export_total| {
                         report_fractional_progress(
                             progress,

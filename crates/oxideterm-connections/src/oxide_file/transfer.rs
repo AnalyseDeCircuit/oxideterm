@@ -25,8 +25,10 @@ use super::{
     EncryptedAuth, EncryptedConnection, EncryptedForward, EncryptedManagedKeyMetadata,
     EncryptedPayload, EncryptedPluginSetting, EncryptedPortableSecret,
     EncryptedPrivilegeCredential, EncryptedProxyHop, EncryptedUpstreamProxyAuth,
-    EncryptedUpstreamProxyConfig, EncryptedUpstreamProxyPolicy, OxideFile, OxideFileError,
-    OxideMetadata, compute_checksum, decrypt_oxide_file_with_progress, encrypt_oxide_file,
+    EncryptedUpstreamProxyConfig, EncryptedUpstreamProxyPolicy, OxideBatchDecryptionContext,
+    OxideBatchEncryptionContext, OxideFile, OxideFileError, OxideMetadata, compute_checksum,
+    decrypt_oxide_file_with_context_and_progress, decrypt_oxide_file_with_progress,
+    encrypt_oxide_file, encrypt_oxide_file_with_context_and_progress,
     encrypt_oxide_file_with_progress,
 };
 

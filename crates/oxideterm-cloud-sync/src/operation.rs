@@ -13,9 +13,12 @@ use oxideterm_connections::{
     SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot, SerialProfilesSyncSnapshot,
     oxide_file::{
         AppSettingsSectionPreview, EncryptedPortableSecret, ImportConflictStrategy, ImportPreview,
-        ImportResultEnvelope, OxideExportOptions, OxideFile, OxideImportOptions, OxideMetadata,
-        apply_oxide_import_with_options_with_progress, export_connections_to_oxide_with_progress,
-        preflight_export, preview_oxide_import_with_progress,
+        ImportResultEnvelope, OxideBatchDecryptionContext, OxideBatchEncryptionContext,
+        OxideExportOptions, OxideFile, OxideImportOptions, OxideMetadata,
+        apply_oxide_import_with_options_with_context_and_progress,
+        apply_oxide_import_with_options_with_progress,
+        export_connections_to_oxide_with_context_and_progress, preflight_export,
+        preview_oxide_import_with_context_and_progress, preview_oxide_import_with_progress,
     },
 };
 use oxideterm_forwarding::{ForwardingRegistry, SavedForwardsSyncSnapshot};
