@@ -353,34 +353,6 @@ pub(super) fn vnc_modifier_equivalent(left: u32, right: u32) -> bool {
     }
 }
 
-#[cfg(test)]
-pub(super) fn vnc_key_events(
-    key: &RemoteDesktopKey,
-    state: RemoteDesktopKeyState,
-) -> Vec<VncKeyEvent> {
-    let Some(key_event) = vnc_key_event(key, state == RemoteDesktopKeyState::Pressed) else {
-        return Vec::new();
-    };
-    let modifiers = vnc_modifier_keysyms(key);
-    match state {
-        RemoteDesktopKeyState::Pressed => modifiers
-            .iter()
-            .copied()
-            .map(|keysym| vnc_key_identity_for_keysym(keysym).event(true))
-            .chain([key_event])
-            .collect(),
-        RemoteDesktopKeyState::Released => [key_event]
-            .into_iter()
-            .chain(
-                modifiers
-                    .into_iter()
-                    .rev()
-                    .map(|keysym| vnc_key_identity_for_keysym(keysym).event(false)),
-            )
-            .collect(),
-    }
-}
-
 pub(super) fn vnc_modifier_keysyms(key: &RemoteDesktopKey) -> Vec<u32> {
     let current = vnc_modifier_keysym_for_code(&key.code);
     let mut modifiers = Vec::with_capacity(4);

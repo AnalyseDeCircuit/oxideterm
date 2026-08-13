@@ -187,26 +187,6 @@ fn accumulator_rects_touch(first: RemoteDesktopRect, second: RemoteDesktopRect) 
         && second.y <= first.y.saturating_add(first.height)
 }
 
-#[cfg(test)]
-pub(crate) fn graphics_update_event(
-    image: &DecodedImage,
-    region: InclusiveRectangle,
-    sync_state: &mut RdpGraphicsSyncState,
-) -> SessionResult<Option<RemoteDesktopHelperEvent>> {
-    let Some(rect) = normalized_update_rect(image, region)? else {
-        return Ok(None);
-    };
-
-    if sync_state.needs_base() || rect_covers_image(rect, image) {
-        // A full decoded image is the only recovery boundary. Dirty rectangles
-        // are only safe after this helper has published a complete base frame.
-        sync_state.mark_synced();
-        return Ok(Some(base_frame_event(image)));
-    }
-
-    Ok(Some(graphics_update_rect_event(image, rect)))
-}
-
 pub(crate) fn graphics_update_rect_event(
     image: &DecodedImage,
     rect: RemoteDesktopRect,

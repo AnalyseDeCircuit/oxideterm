@@ -214,52 +214,6 @@ fn modifier_equivalent(left: Scancode, right: Scancode) -> bool {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn rdp_key_operations(
-    key: &RemoteDesktopKey,
-    state: RemoteDesktopKeyState,
-) -> Vec<RdpInputOperation> {
-    if let Some(scancode) = rdp_scancode(&key.code) {
-        let mut operations = Vec::new();
-        let is_modifier_key = rdp_modifier_scancode_for_key(&key.code).is_some();
-        let mut modifiers = if is_modifier_key {
-            Vec::new()
-        } else {
-            rdp_modifier_scancodes(key)
-        };
-        match state {
-            RemoteDesktopKeyState::Pressed => {
-                operations.extend(modifiers.iter().copied().map(RdpInputOperation::KeyPressed));
-                operations.push(RdpInputOperation::KeyPressed(scancode));
-            }
-            RemoteDesktopKeyState::Released => {
-                operations.push(RdpInputOperation::KeyReleased(scancode));
-                modifiers.reverse();
-                operations.extend(modifiers.into_iter().map(RdpInputOperation::KeyReleased));
-            }
-        }
-        return operations;
-    }
-
-    if let Some(character) = printable_remote_text(key) {
-        return vec![match state {
-            RemoteDesktopKeyState::Pressed => RdpInputOperation::UnicodeKeyPressed(character),
-            RemoteDesktopKeyState::Released => RdpInputOperation::UnicodeKeyReleased(character),
-        }];
-    }
-
-    key.text
-        .as_deref()
-        .and_then(single_non_control_char)
-        .map(|character| {
-            vec![match state {
-                RemoteDesktopKeyState::Pressed => RdpInputOperation::UnicodeKeyPressed(character),
-                RemoteDesktopKeyState::Released => RdpInputOperation::UnicodeKeyReleased(character),
-            }]
-        })
-        .unwrap_or_default()
-}
-
 fn unicode_key_operations(character: char, state: RemoteDesktopKeyState) -> Vec<RdpInputOperation> {
     vec![match state {
         RemoteDesktopKeyState::Pressed => RdpInputOperation::UnicodeKeyPressed(character),

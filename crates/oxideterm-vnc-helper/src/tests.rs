@@ -1073,49 +1073,6 @@ fn unknown_physical_keycode_keeps_standard_keysym_fallback() {
 }
 
 #[test]
-fn key_events_wrap_modified_shortcut() {
-    let key = RemoteDesktopKey {
-        code: "KeyC".to_string(),
-        text: Some("c".to_string()),
-        alt: false,
-        ctrl: true,
-        shift: false,
-        meta: false,
-    };
-
-    assert_eq!(
-        vnc_key_events(&key, RemoteDesktopKeyState::Pressed),
-        vec![
-            VncKeyEvent {
-                keysym: 0xffe3,
-                raw_keycode: Some(0x1d),
-                down: true,
-            },
-            VncKeyEvent {
-                keysym: 'c' as u32,
-                raw_keycode: Some(0x2e),
-                down: true,
-            },
-        ]
-    );
-    assert_eq!(
-        vnc_key_events(&key, RemoteDesktopKeyState::Released),
-        vec![
-            VncKeyEvent {
-                keysym: 'c' as u32,
-                raw_keycode: Some(0x2e),
-                down: false,
-            },
-            VncKeyEvent {
-                keysym: 0xffe3,
-                raw_keycode: Some(0x1d),
-                down: false,
-            },
-        ]
-    );
-}
-
-#[test]
 fn keyboard_mapper_keeps_physical_modifier_pressed_until_release() {
     let mut mapper = VncKeyboardInputMapper::default();
     let control = RemoteDesktopKey {
