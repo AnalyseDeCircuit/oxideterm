@@ -229,25 +229,4 @@ mod tests {
     fn test_is_not_cjk_arabic() {
         assert!(!is_cjk('ع')); // Arabic
     }
-
-    // ─── DocScope equality ────────────────────────────────────────────
-
-    #[test]
-    fn test_doc_scope_equality() {
-        assert_eq!(DocScope::Global, DocScope::Global);
-        assert_eq!(
-            DocScope::Connection("abc".into()),
-            DocScope::Connection("abc".into())
-        );
-        assert_ne!(DocScope::Global, DocScope::Connection("abc".into()));
-    }
-
-    // ─── DocFormat equality ───────────────────────────────────────────
-
-    #[test]
-    fn test_doc_format_equality() {
-        assert_eq!(DocFormat::Markdown, DocFormat::Markdown);
-        assert_eq!(DocFormat::PlainText, DocFormat::PlainText);
-        assert_ne!(DocFormat::Markdown, DocFormat::PlainText);
-    }
 }

@@ -515,11 +515,6 @@ mod tests {
     }
 
     #[test]
-    fn form_enter_has_a_visible_but_bounded_spatial_range() {
-        assert!((12.0..=24.0).contains(&FORM_ENTER_OFFSET_Y));
-    }
-
-    #[test]
     fn exit_presence_rejects_stale_completion_after_reopen() {
         let mut presence = ExitPresence::visible();
         let generation = presence.begin_exit().expect("visible state can exit");

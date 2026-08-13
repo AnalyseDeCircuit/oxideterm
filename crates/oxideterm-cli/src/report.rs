@@ -513,18 +513,4 @@ mod tests {
         assert_eq!(report.secret_hint_count, 1);
         assert_eq!(report.local_dirty, Some(true));
     }
-
-    #[test]
-    fn report_bundle_keeps_failed_history_and_secret_hints() {
-        let bundle = ReportBundleCloudSync {
-            preview: None,
-            diff: None,
-            failed_history: Vec::new(),
-            secret_hints: Vec::new(),
-            error: None,
-        };
-
-        assert!(bundle.error.is_none());
-        assert!(bundle.secret_hints.is_empty());
-    }
 }

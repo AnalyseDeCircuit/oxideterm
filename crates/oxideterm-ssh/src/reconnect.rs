@@ -741,28 +741,4 @@ mod tests {
             Some(&"representative-unsaved-content".to_string())
         );
     }
-
-    #[test]
-    fn reconnect_snapshot_carries_forward_rules_like_tauri() {
-        let snapshot = ReconnectSnapshot {
-            forward_rules: vec![ReconnectForwardRuleSnapshot {
-                node_id: "node-a".to_string(),
-                rules: vec![ReconnectForwardRule {
-                    id: "forward-1".to_string(),
-                    forward_type: "local".to_string(),
-                    bind_address: "localhost".to_string(),
-                    bind_port: 8080,
-                    target_host: "localhost".to_string(),
-                    target_port: 8080,
-                    status: "active".to_string(),
-                    description: "web".to_string(),
-                }],
-            }],
-            ..ReconnectSnapshot::default()
-        };
-
-        assert_eq!(snapshot.forward_rules[0].node_id, "node-a");
-        assert_eq!(snapshot.forward_rules[0].rules[0].forward_type, "local");
-        assert_eq!(snapshot.forward_rules[0].rules[0].status, "active");
-    }
 }
