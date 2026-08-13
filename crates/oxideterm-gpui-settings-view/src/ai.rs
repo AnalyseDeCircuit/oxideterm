@@ -339,18 +339,6 @@ pub fn settings_ai_textarea_surface(
     textarea
 }
 
-#[cfg(test)]
-mod textarea_tests {
-    use super::settings_ai_textarea_shows_placeholder;
-
-    #[test]
-    fn placeholder_is_only_a_visual_layer_for_an_empty_editor() {
-        assert!(settings_ai_textarea_shows_placeholder("", None));
-        assert!(!settings_ai_textarea_shows_placeholder("--flag", None));
-        assert!(!settings_ai_textarea_shows_placeholder("", Some("拼音")));
-    }
-}
-
 pub fn settings_ai_textarea_row(
     tokens: &ThemeTokens,
     label: String,

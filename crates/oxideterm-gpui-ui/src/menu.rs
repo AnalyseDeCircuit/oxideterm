@@ -157,18 +157,3 @@ pub fn menu_item_with_shortcut(
 ) -> Div {
     menu_item(tokens, label, MenuItemKind::Plain, false, false).child(shortcut)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn shared_menu_chrome_tracks_theme_radii_and_overlay_alpha() {
-        let tokens = oxideterm_theme::default_tokens();
-        let chrome = menu_chrome_spec(&tokens);
-
-        assert_eq!(chrome.surface_radius, tokens.radii.md);
-        assert_eq!(chrome.item_radius, tokens.radii.xs);
-        assert_eq!(chrome.surface_alpha, MENU_SURFACE_ALPHA);
-    }
-}

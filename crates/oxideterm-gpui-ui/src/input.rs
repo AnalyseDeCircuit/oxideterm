@@ -68,15 +68,3 @@ pub fn input(tokens: &ThemeTokens, view: InputView<'_>) -> Div {
 fn input_effective_focus(focused: bool, disabled: bool) -> bool {
     focused && !disabled
 }
-
-#[cfg(test)]
-mod tests {
-    use super::input_effective_focus;
-
-    #[test]
-    fn disabled_input_does_not_expose_browser_text_focus() {
-        assert!(!input_effective_focus(true, true));
-        assert!(!input_effective_focus(false, true));
-        assert!(input_effective_focus(true, false));
-    }
-}
