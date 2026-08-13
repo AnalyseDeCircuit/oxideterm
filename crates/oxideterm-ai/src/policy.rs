@@ -95,6 +95,7 @@ pub const ORCHESTRATOR_TOOL_NAMES: &[&str] = &[
     "list_remote_desktop_sessions",
     "manage_remote_desktop_session",
     "get_cloud_sync_state",
+    "configure_cloud_sync",
     "manage_cloud_sync",
     "list_credentials",
     "manage_credential",
@@ -252,6 +253,7 @@ pub fn orchestrator_risk_for_tool(name: &str, args: Option<&Value>) -> AiActionR
         | "open_app_surface"
         | "open_transport_profile"
         | "manage_remote_desktop_session"
+        | "configure_cloud_sync"
         | "remember_preference"
         | "manage_memory_entry"
         | "create_background_task"

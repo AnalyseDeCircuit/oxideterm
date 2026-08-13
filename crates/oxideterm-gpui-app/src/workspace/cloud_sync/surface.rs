@@ -407,7 +407,7 @@ impl WorkspaceApp {
         items
     }
 
-    pub(super) fn invalidate_cloud_sync_snapshot_caches(&self, cx: &App) {
+    pub(in crate::workspace) fn invalidate_cloud_sync_snapshot_caches(&self, cx: &App) {
         // Source mutations advance one explicit generation so render-time cache
         // hits never need to rescan stores or query filesystem metadata.
         self.cloud_sync.read(cx).view.snapshot_cache_generation.set(

@@ -362,11 +362,28 @@ impl CloudSyncWorkspaceEntity {
     pub(in crate::workspace) fn ai_snapshot(&self) -> serde_json::Value {
         let state = self.controller.store.state();
         let settings = &state.settings;
+        let scope = normalize_sync_scope(Some(&state.sync_scope), &[]);
         serde_json::json!({
-            "backend": format!("{:?}", settings.backend_type).to_lowercase(),
             "configured": !settings.endpoint.trim().is_empty()
                 || !settings.git_repository.trim().is_empty()
                 || !settings.s3_bucket.trim().is_empty(),
+            "configuration": {
+                "backendType": settings.backend_type,
+                "authMode": settings.auth_mode,
+                "endpoint": cloud_sync_location_for_ai(&settings.endpoint),
+                "namespace": settings.namespace,
+                "s3Bucket": settings.s3_bucket,
+                "s3Region": settings.s3_region,
+                "gitRepository": cloud_sync_location_for_ai(&settings.git_repository),
+                "gitBranch": settings.git_branch,
+                "githubOauthClientId": settings.github_oauth_client_id,
+                "microsoftOauthClientId": settings.microsoft_oauth_client_id,
+                "googleOauthClientId": settings.google_oauth_client_id,
+                "autoUploadEnabled": settings.auto_upload_enabled,
+                "autoUploadIntervalMins": settings.auto_upload_interval_mins,
+                "defaultConflictStrategy": settings.default_conflict_strategy,
+            },
+            "scope": scope,
             "status": format!("{:?}", state.status).to_lowercase(),
             "activeAction": self.controller.active_action,
             "progress": self.controller.progress.as_ref().map(|progress| serde_json::json!({
@@ -384,7 +401,6 @@ impl CloudSyncWorkspaceEntity {
             "lastCheckAt": state.last_check_at,
             "lastError": state.last_error,
             "historyCount": state.sync_history.len(),
-            "autoUploadEnabled": settings.auto_upload_enabled,
         })
     }
 
@@ -643,6 +659,20 @@ impl CloudSyncWorkspaceEntity {
     }
 }
 
+fn cloud_sync_location_for_ai(value: &str) -> String {
+    let mut sanitized = oxideterm_ai::sanitize_for_ai(value);
+    let Ok(mut parsed) = url::Url::parse(&sanitized) else {
+        return sanitized;
+    };
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        // Location fields are configuration, but embedded URL userinfo is still a secret.
+        let _ = parsed.set_username("[REDACTED]");
+        let _ = parsed.set_password(Some("[REDACTED]"));
+        sanitized = parsed.to_string();
+    }
+    sanitized
+}
+
 impl CloudSyncDeliverySink for crate::workspace::delivery::ActiveDeliverySender<CloudSyncDelivery> {
     fn send(&self, delivery: CloudSyncDelivery) -> Result<(), CloudSyncDelivery> {
         crate::workspace::delivery::ActiveDeliverySender::send(self, delivery)
@@ -787,6 +817,24 @@ mod tests {
         )
         .expect("test cloud sync store");
         cx.new(|cx| CloudSyncWorkspaceEntity::new(store, cx))
+    }
+
+    #[test]
+    fn cloud_sync_location_for_ai_redacts_url_userinfo() {
+        let sanitized =
+            cloud_sync_location_for_ai("https://cloud-user:cloud-password@sync.example.test/root");
+
+        assert!(sanitized.contains("%5BREDACTED%5D"));
+        assert!(!sanitized.contains("cloud-user"));
+        assert!(!sanitized.contains("cloud-password"));
+    }
+
+    #[test]
+    fn cloud_sync_location_for_ai_preserves_ordinary_locations() {
+        assert_eq!(
+            cloud_sync_location_for_ai("https://sync.example.test/root"),
+            "https://sync.example.test/root"
+        );
     }
 
     #[gpui::test]

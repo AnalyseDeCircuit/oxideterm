@@ -966,6 +966,7 @@
       "tool_policy_manage_plugin": "플러그인 관리",
       "tool_policy_manage_remote_desktop": "원격 데스크톱 세션 제어",
       "tool_policy_manage_cloud_sync": "Cloud Sync 확인 및 미리보기 시작",
+      "tool_policy_configure_cloud_sync": "Cloud Sync 구성 수정",
       "tool_policy_manage_credentials": "자격 증명 삭제 또는 관리 열기",
       "execution_profiles": "실행 프로필",
       "execution_profiles_hint": "모델, 도구 정책, 컨텍스트 칩, 메모리/RAG 기본값을 묶습니다.",

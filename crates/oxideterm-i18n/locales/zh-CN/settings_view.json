@@ -968,6 +968,7 @@
       "tool_policy_manage_plugin": "管理插件",
       "tool_policy_manage_remote_desktop": "控制远程桌面会话",
       "tool_policy_manage_cloud_sync": "启动 Cloud Sync 检查和预览",
+      "tool_policy_configure_cloud_sync": "修改 Cloud Sync 配置",
       "tool_policy_manage_credentials": "删除凭据或打开凭据管理",
       "execution_profiles": "执行配置档",
       "execution_profiles_hint": "组合模型、工具策略、上下文卡片和记忆/知识库偏好。",

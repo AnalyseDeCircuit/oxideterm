@@ -966,6 +966,7 @@
       "tool_policy_manage_plugin": "Gestionar plugins",
       "tool_policy_manage_remote_desktop": "Controlar sesiones de escritorio remoto",
       "tool_policy_manage_cloud_sync": "Iniciar comprobaciones y vistas previas de Cloud Sync",
+      "tool_policy_configure_cloud_sync": "Modificar la configuración de Cloud Sync",
       "tool_policy_manage_credentials": "Eliminar credenciales o abrir su gestión",
       "execution_profiles": "Perfiles de ejecución",
       "execution_profiles_hint": "Agrupa modelo, política de herramientas, chips de contexto y preferencias de memoria/RAG.",

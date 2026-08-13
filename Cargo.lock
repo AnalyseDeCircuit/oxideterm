@@ -7883,6 +7883,7 @@ dependencies = [
  "oxideterm-theme",
  "serde_json",
  "tokio",
+ "url",
  "uuid",
  "zeroize",
 ]

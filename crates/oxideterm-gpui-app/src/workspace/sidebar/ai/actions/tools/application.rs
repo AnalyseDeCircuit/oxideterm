@@ -749,6 +749,62 @@ impl WorkspaceApp {
         Ok(serde_json::json!({ "accepted": true, "action": action }))
     }
 
+    pub(in crate::workspace) fn execute_ai_configure_cloud_sync(
+        &mut self,
+        arguments: &serde_json::Value,
+        cx: &mut Context<Self>,
+    ) -> Result<serde_json::Value, String> {
+        if self.cloud_sync.read(cx).operation_in_flight() {
+            return Err("Cloud Sync configuration cannot change while an operation is running."
+                .to_string());
+        }
+        // Return any active IME-owned draft before refreshing the form projection.
+        self.apply_focused_cloud_sync_input_draft(cx);
+        let (current_settings, current_scope) = {
+            let cloud_sync = self.cloud_sync.read(cx);
+            let state = cloud_sync.controller.store.state();
+            (state.settings.clone(), state.sync_scope.clone())
+        };
+        let (settings, scope, updated_fields) =
+            oxideterm_gpui_cloud_sync::apply_cloud_sync_configuration_patch(
+                &current_settings,
+                &current_scope,
+                arguments,
+            )?;
+        let settings_for_view = settings.clone();
+        let save_result = self.cloud_sync.update(cx, |cloud_sync, cx| {
+            let state = cloud_sync.controller.store.state_mut();
+            state.settings = settings;
+            state.sync_scope = scope;
+            state.last_error = None;
+            if let Err(error) = cloud_sync.controller.store.save() {
+                // Roll back only non-secret state; protected credentials were never read or moved.
+                let message = error.to_string();
+                let state = cloud_sync.controller.store.state_mut();
+                state.settings = current_settings.clone();
+                state.sync_scope = current_scope.clone();
+                state.last_error = Some(message.clone());
+                return Err(message);
+            }
+            cloud_sync
+                .view
+                .form
+                .apply_changed_non_secret_settings(&current_settings, &settings_for_view);
+            cx.notify();
+            Ok(())
+        });
+        save_result.map_err(|error| format!("Failed to save Cloud Sync configuration: {error}"))?;
+
+        self.invalidate_cloud_sync_snapshot_caches(cx);
+        self.reschedule_cloud_sync_auto_upload(cx);
+        self.queue_cloud_sync_dirty_refresh(cx);
+        Ok(serde_json::json!({
+            "accepted": true,
+            "updatedFields": updated_fields,
+            "state": self.execute_ai_get_cloud_sync_state(cx),
+        }))
+    }
+
     pub(in crate::workspace) fn execute_ai_list_credentials(
         &self,
         arguments: &serde_json::Value,

@@ -18,6 +18,7 @@ pub const AI_TOOL_LIST_REMOTE_DESKTOP_SESSIONS: &str = "list_remote_desktop_sess
 pub const AI_TOOL_MANAGE_REMOTE_DESKTOP_SESSION: &str = "manage_remote_desktop_session";
 pub const AI_TOOL_GET_CLOUD_SYNC_STATE: &str = "get_cloud_sync_state";
 pub const AI_TOOL_MANAGE_CLOUD_SYNC: &str = "manage_cloud_sync";
+pub const AI_TOOL_CONFIGURE_CLOUD_SYNC: &str = "configure_cloud_sync";
 pub const AI_TOOL_LIST_CREDENTIALS: &str = "list_credentials";
 pub const AI_TOOL_MANAGE_CREDENTIAL: &str = "manage_credential";
 pub const AI_TOOL_LOAD_SKILL: &str = "load_skill";
@@ -207,6 +208,7 @@ impl Default for AiToolUseSettings {
             (AI_TOOL_MANAGE_TELNET_SESSION, false),
             (AI_TOOL_MANAGE_REMOTE_DESKTOP_SESSION, false),
             (AI_TOOL_MANAGE_CLOUD_SYNC, false),
+            (AI_TOOL_CONFIGURE_CLOUD_SYNC, false),
             (AI_TOOL_MANAGE_CREDENTIAL, false),
         ] {
             auto_approve_tools.insert(name.to_string(), json!(enabled));

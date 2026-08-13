@@ -1013,6 +1013,15 @@ impl WorkspaceApp {
                     "read",
                 )
             }
+            "configure_cloud_sync" => {
+                let result = self.execute_ai_configure_cloud_sync(&args, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Cloud Sync configuration updated.",
+                    "write",
+                )
+            }
             "manage_cloud_sync" => {
                 let result = self.execute_ai_manage_cloud_sync(&args, window, cx);
                 ai_application_action_result(

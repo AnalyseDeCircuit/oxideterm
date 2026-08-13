@@ -20,5 +20,6 @@ oxideterm-settings-model = { path = "../oxideterm-settings-model" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 serde_json.workspace = true
 tokio.workspace = true
+url.workspace = true
 uuid.workspace = true
 zeroize.workspace = true

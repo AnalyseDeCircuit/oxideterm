@@ -966,6 +966,7 @@
       "tool_policy_manage_plugin": "プラグインを管理",
       "tool_policy_manage_remote_desktop": "リモートデスクトップセッションを制御",
       "tool_policy_manage_cloud_sync": "Cloud Sync の確認とプレビューを開始",
+      "tool_policy_configure_cloud_sync": "Cloud Sync の設定を変更",
       "tool_policy_manage_credentials": "認証情報を削除または管理画面を開く",
       "execution_profiles": "実行プロファイル",
       "execution_profiles_hint": "モデル、ツールポリシー、コンテキストチップ、メモリ/RAG 設定をまとめます。",

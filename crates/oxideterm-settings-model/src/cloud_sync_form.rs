@@ -145,6 +145,45 @@ impl CloudSyncFormDraft {
         }
     }
 
+    /// Merges persisted changes without disturbing unrelated or credential drafts.
+    pub fn apply_changed_non_secret_settings(
+        &mut self,
+        previous: &CloudSyncSettings,
+        current: &CloudSyncSettings,
+    ) {
+        if previous.backend_type != current.backend_type {
+            self.backend_type = current.backend_type.clone();
+        }
+        if previous.auth_mode != current.auth_mode {
+            self.auth_mode = current.auth_mode.clone();
+        }
+        macro_rules! apply_changed_string {
+            ($field:ident) => {
+                if previous.$field != current.$field {
+                    self.$field = current.$field.clone();
+                }
+            };
+        }
+        apply_changed_string!(endpoint);
+        apply_changed_string!(namespace);
+        apply_changed_string!(s3_bucket);
+        apply_changed_string!(s3_region);
+        apply_changed_string!(git_repository);
+        apply_changed_string!(git_branch);
+        apply_changed_string!(github_oauth_client_id);
+        apply_changed_string!(microsoft_oauth_client_id);
+        apply_changed_string!(google_oauth_client_id);
+        if previous.auto_upload_enabled != current.auto_upload_enabled {
+            self.auto_upload_enabled = current.auto_upload_enabled;
+        }
+        if previous.auto_upload_interval_mins != current.auto_upload_interval_mins {
+            self.auto_upload_interval_mins = current.auto_upload_interval_mins.to_string();
+        }
+        if previous.default_conflict_strategy != current.default_conflict_strategy {
+            self.default_conflict_strategy = current.default_conflict_strategy.clone();
+        }
+    }
+
     pub fn take_secret_handoff(&mut self) -> CloudSyncSecretDraftHandoff {
         // `mem::take` transfers each edited buffer without creating another
         // allocation containing the secret.
@@ -420,6 +459,24 @@ mod tests {
         assert!(!debug.contains("s3-secret"));
         assert!(!debug.contains("session-secret"));
         assert!(!debug.contains("sync-secret"));
+    }
+
+    #[test]
+    fn applying_changed_non_secret_settings_preserves_unrelated_and_secret_drafts() {
+        let mut draft = CloudSyncFormDraft::from_settings(&CloudSyncSettings::default());
+        draft.namespace = "unsaved-namespace".to_string();
+        draft.token = "token-secret".to_string();
+        draft.token_touched = true;
+        let previous = CloudSyncSettings::default();
+        let mut current = previous.clone();
+        current.endpoint = "https://sync.example.test".to_string();
+
+        draft.apply_changed_non_secret_settings(&previous, &current);
+
+        assert_eq!(draft.endpoint, "https://sync.example.test");
+        assert_eq!(draft.namespace, "unsaved-namespace");
+        assert_eq!(draft.token, "token-secret");
+        assert!(draft.token_touched);
     }
 
     #[test]

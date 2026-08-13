@@ -966,6 +966,7 @@
       "tool_policy_manage_plugin": "Gérer les extensions",
       "tool_policy_manage_remote_desktop": "Contrôler les sessions de bureau distant",
       "tool_policy_manage_cloud_sync": "Lancer les vérifications et aperçus Cloud Sync",
+      "tool_policy_configure_cloud_sync": "Modifier la configuration de Cloud Sync",
       "tool_policy_manage_credentials": "Supprimer des identifiants ou ouvrir leur gestion",
       "execution_profiles": "Profils d’exécution",
       "execution_profiles_hint": "Regroupe modèle, stratégie d’outils, pastilles de contexte et préférences mémoire/RAG.",

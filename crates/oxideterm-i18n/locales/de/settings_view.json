@@ -966,6 +966,7 @@
       "tool_policy_manage_plugin": "Plugins verwalten",
       "tool_policy_manage_remote_desktop": "Remotedesktop-Sitzungen steuern",
       "tool_policy_manage_cloud_sync": "Cloud-Sync-Prüfungen und Vorschauen starten",
+      "tool_policy_configure_cloud_sync": "Cloud-Sync-Konfiguration ändern",
       "tool_policy_manage_credentials": "Anmeldedaten löschen oder Verwaltung öffnen",
       "execution_profiles": "Ausführungsprofile",
       "execution_profiles_hint": "Bündelt Modell, Werkzeugrichtlinie, Kontext-Chips und Speicher/RAG-Vorgaben.",

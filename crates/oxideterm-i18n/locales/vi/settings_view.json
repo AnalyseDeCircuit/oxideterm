@@ -966,6 +966,7 @@
       "tool_policy_manage_plugin": "Quản lý plugin",
       "tool_policy_manage_remote_desktop": "Điều khiển phiên máy tính từ xa",
       "tool_policy_manage_cloud_sync": "Bắt đầu kiểm tra và xem trước Cloud Sync",
+      "tool_policy_configure_cloud_sync": "Sửa cấu hình Cloud Sync",
       "tool_policy_manage_credentials": "Xóa thông tin xác thực hoặc mở quản lý",
       "execution_profiles": "Hồ sơ thực thi",
       "execution_profiles_hint": "Gộp mô hình, chính sách công cụ, thẻ ngữ cảnh và tùy chọn bộ nhớ/RAG.",
