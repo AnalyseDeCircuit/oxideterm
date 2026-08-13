@@ -438,14 +438,48 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (transport, drill_down_parent_id, mode) = {
+        let (transport, local_shell_id, drill_down_parent_id, mode) = {
             let state = self.connection_form_state(cx);
             (
                 state.form.as_ref().map(|form| form.transport),
+                state
+                    .form
+                    .as_ref()
+                    .and_then(|form| form.local_shell_id.clone()),
                 state.drill_down_parent_node_id.clone(),
                 state.mode(),
             )
         };
+        if transport == Some(NewConnectionTransport::LocalTerminal)
+            && drill_down_parent_id.is_none()
+            && mode == NewConnectionFormMode::NewConnection
+        {
+            // The modal is only another launch surface; the terminal tab owns the local PTY.
+            let selected_shell = self.resolved_local_shell(local_shell_id.as_deref());
+            self.close_new_connection_form(window, cx);
+            if let Some(shell) = selected_shell {
+                let mut terminal_config = self.local_terminal_config();
+                terminal_config.shell = Some(shell.clone());
+                self.edit_settings(
+                    |settings| {
+                        let recent = &mut settings.local_terminal.recent_shell_ids;
+                        recent.retain(|id| id != &shell.id);
+                        recent.insert(0, shell.id.clone());
+                        recent.truncate(5);
+                    },
+                    cx,
+                );
+                let _ = self.create_local_terminal_tab_with_config(
+                    terminal_config,
+                    shell.label,
+                    window,
+                    cx,
+                );
+            } else {
+                let _ = self.create_local_terminal_tab(window, cx);
+            }
+            return;
+        }
         if transport == Some(NewConnectionTransport::Serial)
             && drill_down_parent_id.is_none()
             && mode == NewConnectionFormMode::NewConnection

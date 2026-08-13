@@ -62,6 +62,19 @@ pub(in crate::workspace) fn effective_local_shells(
     effective
 }
 
+pub(in crate::workspace) fn resolve_local_shell(
+    shells: &[ShellInfo],
+    selected_shell_id: Option<&str>,
+    default_shell_id: Option<&str>,
+) -> Option<ShellInfo> {
+    // An explicit one-shot choice wins, then the configured default, then discovery order.
+    selected_shell_id
+        .and_then(|id| shells.iter().find(|shell| shell.id == id))
+        .or_else(|| default_shell_id.and_then(|id| shells.iter().find(|shell| shell.id == id)))
+        .or_else(|| shells.first())
+        .cloned()
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn effective_local_shells_for_settings(
         &self,
@@ -70,6 +83,19 @@ impl WorkspaceApp {
         effective_local_shells(
             &self.local_shells,
             settings.local_terminal.git_bash_path.as_deref(),
+        )
+    }
+
+    pub(in crate::workspace) fn resolved_local_shell(
+        &self,
+        selected_shell_id: Option<&str>,
+    ) -> Option<ShellInfo> {
+        let settings = self.settings_store.settings();
+        let effective_shells = self.effective_local_shells_for_settings(settings);
+        resolve_local_shell(
+            &effective_shells,
+            selected_shell_id,
+            settings.local_terminal.default_shell_id.as_deref(),
         )
     }
 
@@ -279,5 +305,26 @@ mod local_terminal_tests {
         assert!(!local_shell_supports_oh_my_posh(Some("wsl-ubuntu")));
         assert!(!local_shell_supports_oh_my_posh(Some("zsh")));
         assert!(!local_shell_supports_oh_my_posh(None));
+    }
+
+    #[test]
+    pub(in crate::workspace) fn one_shot_shell_choice_precedes_default_and_fallback() {
+        let shells = vec![
+            ShellInfo::new("bash", "Bash", "/bin/bash"),
+            ShellInfo::new("zsh", "Zsh", "/bin/zsh"),
+        ];
+
+        assert_eq!(
+            resolve_local_shell(&shells, Some("zsh"), Some("bash")).map(|shell| shell.id),
+            Some("zsh".to_string())
+        );
+        assert_eq!(
+            resolve_local_shell(&shells, Some("missing"), Some("zsh")).map(|shell| shell.id),
+            Some("zsh".to_string())
+        );
+        assert_eq!(
+            resolve_local_shell(&shells, None, None).map(|shell| shell.id),
+            Some("bash".to_string())
+        );
     }
 }

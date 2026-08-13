@@ -18,7 +18,8 @@ pub use connection_import::{
 pub use connection_transport::{
     ConnectionTransport, MOSH_DEFAULT_PORT_TEXT, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
     TELNET_DEFAULT_PORT_TEXT, TransportUsernameTransition, VNC_DEFAULT_PORT_TEXT,
-    transport_default_port, transport_port_replacement, transport_username_transition,
+    transport_default_port, transport_is_persistable, transport_port_replacement,
+    transport_username_transition,
 };
 pub use draft::{
     ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, IMPORTED_GROUP, ProxyHopDraft,

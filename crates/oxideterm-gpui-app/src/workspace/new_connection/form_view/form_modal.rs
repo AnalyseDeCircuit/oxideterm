@@ -120,6 +120,11 @@ impl WorkspaceApp {
             .is_some();
         let modal_max_height = f32::from(window.viewport_size().height)
             * self.tokens.metrics.modal_max_viewport_height_ratio;
+        let local_terminal_mode = !prompt_mode
+            && !duplicate_mode
+            && !edit_properties_mode
+            && !drill_down_mode
+            && form.transport == NewConnectionTransport::LocalTerminal;
         let serial_mode = !prompt_mode
             && !duplicate_mode
             && !edit_properties_mode
@@ -156,8 +161,11 @@ impl WorkspaceApp {
             && form.transport == NewConnectionTransport::WslGraphics;
         let local_transport_mode = serial_mode || telnet_mode;
         let remote_desktop_mode = remote_desktop_protocol.is_some();
-        let ssh_submission_mode =
-            !local_transport_mode && !remote_desktop_mode && !wsl_graphics_mode && !mosh_mode;
+        let ssh_submission_mode = !local_terminal_mode
+            && !local_transport_mode
+            && !remote_desktop_mode
+            && !wsl_graphics_mode
+            && !mosh_mode;
         let shows_transport_selector = !prompt_mode
             && !duplicate_mode
             && !edit_properties_mode
@@ -165,7 +173,10 @@ impl WorkspaceApp {
             && !mosh_edit_mode
             && !drill_down_mode;
         let shows_icon_field = connection_icon_field_visible(mode, drill_down_mode, form.transport);
-        let title = if drill_down_mode {
+        let title = if local_terminal_mode {
+            self.i18n
+                .t("modals.new_connection.transport_local_terminal")
+        } else if drill_down_mode {
             self.i18n.t("ssh.drill_down.title")
         } else if prompt_mode {
             self.i18n
@@ -181,7 +192,10 @@ impl WorkspaceApp {
         } else {
             self.i18n.t("ssh.form.title")
         };
-        let description = if drill_down_mode {
+        let description = if local_terminal_mode {
+            self.i18n
+                .t("modals.new_connection.local_terminal_description")
+        } else if drill_down_mode {
             let parent_host = self
                 .connection_form_state(cx)
                 .drill_down_parent_node_id
@@ -221,7 +235,9 @@ impl WorkspaceApp {
         } else {
             self.i18n.t("ssh.form.subtitle")
         };
-        let has_required_fields = if serial_mode {
+        let has_required_fields = if local_terminal_mode {
+            true
+        } else if serial_mode {
             !form.serial_port_path.trim().is_empty()
                 && form
                     .serial_baud_rate
@@ -341,6 +357,9 @@ impl WorkspaceApp {
                                         .flex_col()
                                         .min_w(px(0.0))
                                         .gap(px(self.tokens.metrics.modal_section_gap))
+                                        .when(local_terminal_mode, |content| {
+                                            content.child(self.render_local_terminal_form_branch(cx))
+                                        })
                                         .when(serial_mode, |content| {
                                             content.child(self.render_serial_form_branch(cx))
                                         })
@@ -356,6 +375,7 @@ impl WorkspaceApp {
                                         })
                                         .when(
                                             !serial_mode
+                                                && !local_terminal_mode
                                                 && !telnet_mode
                                                 && !wsl_graphics_mode
                                                 && !remote_desktop_mode,
@@ -1058,6 +1078,18 @@ impl WorkspaceApp {
                             cx,
                         ))
                         .when(
+                            local_terminal_mode,
+                            |footer| {
+                                footer.child(self.render_connection_button(
+                                    self.i18n.t("modals.new_connection.local_terminal_open"),
+                                    true,
+                                    ConnectionButtonAction::Connect,
+                                    primary_disabled,
+                                    cx,
+                                ))
+                            },
+                        )
+                        .when(
                             !edit_properties_mode
                                 && self.connection_form_state(cx).saved_connection_prompt_action.is_none()
                                 && !drill_down_mode
@@ -1077,7 +1109,8 @@ impl WorkspaceApp {
                                 && !mosh_edit_mode
                                 && self.connection_form_state(cx).saved_connection_prompt_action.is_none()
                                 && !remote_desktop_mode
-                                && !wsl_graphics_mode,
+                                && !wsl_graphics_mode
+                                && !local_terminal_mode,
                             |footer| {
                                 footer
                                     .child(self.render_connection_button(

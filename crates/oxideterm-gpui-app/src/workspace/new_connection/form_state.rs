@@ -137,15 +137,7 @@ pub(in crate::workspace) fn connection_icon_field_visible(
     // Only persisted session assets expose custom icons in this shared form.
     mode != NewConnectionFormMode::SavedConnectionPrompt
         && !drill_down_mode
-        && matches!(
-            transport,
-            NewConnectionTransport::Ssh
-                | NewConnectionTransport::Mosh
-                | NewConnectionTransport::Serial
-                | NewConnectionTransport::Telnet
-                | NewConnectionTransport::Rdp
-                | NewConnectionTransport::Vnc
-        )
+        && oxideterm_connections::transport_is_persistable(transport)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -476,6 +468,8 @@ impl Drop for NewConnectionProxyHop {
 
 pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) transport: NewConnectionTransport,
+    /// Selects one discovered shell for this one-shot local terminal launch.
+    pub(in crate::workspace) local_shell_id: Option<String>,
     pub(in crate::workspace) name: String,
     pub(in crate::workspace) host: String,
     pub(in crate::workspace) port: String,
@@ -557,6 +551,7 @@ impl fmt::Debug for NewConnectionForm {
         formatter
             .debug_struct("NewConnectionForm")
             .field("transport", &self.transport)
+            .field("local_shell_id", &self.local_shell_id)
             .field("name", &self.name)
             .field("host", &self.host)
             .field("port", &self.port)
@@ -653,6 +648,7 @@ impl Default for NewConnectionForm {
     fn default() -> Self {
         Self {
             transport: NewConnectionTransport::Ssh,
+            local_shell_id: None,
             name: String::new(),
             host: String::new(),
             port: SSH_DEFAULT_PORT_TEXT.to_string(),
@@ -909,6 +905,10 @@ pub(in crate::workspace) fn next_connection_field(
     upstream_proxy_auth: NewConnectionUpstreamProxyAuth,
     forward: bool,
 ) -> NewConnectionField {
+    if transport == NewConnectionTransport::LocalTerminal {
+        // A one-shot local terminal has no editable or persistable form fields.
+        return field;
+    }
     if transport == NewConnectionTransport::WslGraphics {
         return NewConnectionField::Name;
     }
@@ -1669,6 +1669,11 @@ mod tests {
             NewConnectionFormMode::NewConnection,
             false,
             NewConnectionTransport::WslGraphics
+        ));
+        assert!(!connection_icon_field_visible(
+            NewConnectionFormMode::NewConnection,
+            false,
+            NewConnectionTransport::LocalTerminal
         ));
         assert!(!connection_icon_field_visible(
             NewConnectionFormMode::SavedConnectionPrompt,

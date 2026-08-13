@@ -104,6 +104,13 @@ fn new_connection_transport_index(transport: NewConnectionTransport) -> usize {
         NewConnectionTransport::Rdp => 4,
         NewConnectionTransport::Vnc => 5,
         NewConnectionTransport::WslGraphics => 6,
+        NewConnectionTransport::LocalTerminal => {
+            if cfg!(target_os = "windows") {
+                7
+            } else {
+                6
+            }
+        }
     }
 }
 
@@ -1676,6 +1683,14 @@ impl WorkspaceApp {
                 LucideIcon::AppWindow,
             ));
         }
+        // Local terminals are one-shot launch targets, so keep them after saved transports.
+        choices.push((
+            NewConnectionTransport::LocalTerminal,
+            self.i18n
+                .t("modals.new_connection.transport_local_terminal"),
+            NewConnectionField::Name,
+            LucideIcon::Terminal,
+        ));
         let mut sidebar = div()
             .w(px(NEW_CONNECTION_TYPE_SIDEBAR_WIDTH))
             .flex_none()
@@ -1819,6 +1834,145 @@ impl WorkspaceApp {
             sidebar = sidebar.child(row);
         }
         sidebar.into_any_element()
+    }
+
+    pub(super) fn render_local_terminal_form_branch(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let selected_shell_id = self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .and_then(|form| form.local_shell_id.as_deref());
+        let resolved_shell = self.resolved_local_shell(selected_shell_id);
+        let resolved_shell_id = resolved_shell.as_ref().map(|shell| shell.id.as_str());
+        let default_shell_id = self
+            .settings_store
+            .settings()
+            .local_terminal
+            .default_shell_id
+            .as_deref();
+        let shells = self.effective_local_shells_for_settings(self.settings_store.settings());
+
+        let mut shell_list = div()
+            .w_full()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg_panel))
+            .flex()
+            .flex_col()
+            .overflow_hidden();
+        for (index, shell) in shells.into_iter().enumerate() {
+            let shell_id = shell.id.clone();
+            let selected = resolved_shell_id == Some(shell.id.as_str());
+            let is_default = default_shell_id == Some(shell.id.as_str());
+            shell_list = shell_list.child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .when(index > 0, |row| {
+                        row.border_t_1().border_color(rgb(theme.border))
+                    })
+                    .bg(if selected {
+                        rgba((theme.accent << 8) | 0x14)
+                    } else {
+                        rgba((theme.bg_panel << 8) | 0x00)
+                    })
+                    .hover(move |row| row.bg(rgb(theme.bg_hover)))
+                    .px(px(self.tokens.spacing.three))
+                    .py(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(self.tokens.spacing.three))
+                    .cursor_pointer()
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::Terminal,
+                        17.0,
+                        rgb(if selected {
+                            theme.accent
+                        } else {
+                            theme.text_muted
+                        }),
+                    ))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.0))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(theme.text))
+                                    .child(shell.label)
+                                    .when(is_default, |label| {
+                                        label.child(self.text_badge(
+                                            self.i18n.t("settings_view.local_terminal.default"),
+                                            theme.warning,
+                                        ))
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(shell.path.display().to_string()),
+                            ),
+                    )
+                    .when(selected, |row| {
+                        row.child(Self::render_lucide_icon(
+                            LucideIcon::Check,
+                            16.0,
+                            rgb(theme.accent),
+                        ))
+                    })
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.update_connection_form_state(cx, |state| {
+                                if let Some(form) = state.form.as_mut() {
+                                    form.local_shell_id = Some(shell_id.clone());
+                                    form.field_focused = false;
+                                    clear_connection_selection(form);
+                                    form.error = None;
+                                }
+                            });
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ),
+            );
+        }
+
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.three))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(theme.text_heading))
+                            .child(self.i18n.t("settings_view.local_terminal.select_shell")),
+                    )
+                    .child(self.render_connection_hint(
+                        self.i18n.t("modals.new_connection.local_terminal_detail"),
+                    )),
+            )
+            .child(shell_list)
+            .into_any_element()
     }
 
     pub(super) fn render_wsl_graphics_form_branch(&self, _cx: &mut Context<Self>) -> AnyElement {
@@ -3567,6 +3721,10 @@ mod tests {
         assert_eq!(
             new_connection_transport_index(NewConnectionTransport::WslGraphics),
             6,
+        );
+        assert_eq!(
+            new_connection_transport_index(NewConnectionTransport::LocalTerminal),
+            if cfg!(target_os = "windows") { 7 } else { 6 },
         );
     }
 
