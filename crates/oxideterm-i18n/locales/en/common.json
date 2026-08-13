@@ -23,9 +23,22 @@
   "layout": {
     "empty": {
       "title": "OxideTerm",
+      "subtitle": "Remote connections, terminals, and operations in one native workspace",
       "new_connection": "New Connection",
+      "new_connection_hint": "Create and save a remote connection",
       "new_local_terminal": "Local Terminal",
-      "keyboard_shortcuts": "Keyboard Shortcuts"
+      "new_local_terminal_hint": "Open a terminal on this device",
+      "keyboard_shortcuts": "Keyboard Shortcuts",
+      "recent_connections": "Continue working",
+      "recent_connections_hint": "Open a recently used saved connection",
+      "recent_connections_empty": "Recently used saved connections will appear here.",
+      "saved_count": "{{count}} saved",
+      "get_started": "Start and manage",
+      "import_connections": "Import connections",
+      "import_connections_hint": "Bring in SSH config and supported app data",
+      "open_session_manager": "Session Manager",
+      "open_session_manager_hint": "Browse, edit, import, and export saved connections",
+      "cloud_sync_hint": "Back up encrypted workspace data to your own service"
     },
     "connection_monitor": {
       "title": "Connection Monitor"

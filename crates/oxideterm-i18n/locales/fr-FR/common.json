@@ -23,9 +23,22 @@
   "layout": {
     "empty": {
       "title": "OxideTerm",
+      "subtitle": "Connexions distantes, terminaux et opérations dans un espace de travail natif",
       "new_connection": "Nouvelle connexion",
+      "new_connection_hint": "Créer et enregistrer une connexion distante",
       "new_local_terminal": "Terminal local",
-      "keyboard_shortcuts": "Raccourcis clavier"
+      "new_local_terminal_hint": "Ouvrir un terminal sur cet appareil",
+      "keyboard_shortcuts": "Raccourcis clavier",
+      "recent_connections": "Reprendre le travail",
+      "recent_connections_hint": "Ouvrir une connexion enregistrée utilisée récemment",
+      "recent_connections_empty": "Les connexions enregistrées utilisées récemment apparaîtront ici.",
+      "saved_count": "{{count}} enregistrées",
+      "get_started": "Démarrer et gérer",
+      "import_connections": "Importer des connexions",
+      "import_connections_hint": "Importer la configuration SSH et les données des applications prises en charge",
+      "open_session_manager": "Gestionnaire de sessions",
+      "open_session_manager_hint": "Parcourir, modifier, importer et exporter les connexions enregistrées",
+      "cloud_sync_hint": "Sauvegarder les données chiffrées de l’espace de travail sur votre propre service"
     },
     "connection_monitor": {
       "title": "Moniteur de connexions"

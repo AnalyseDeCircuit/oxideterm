@@ -23,9 +23,22 @@
   "layout": {
     "empty": {
       "title": "OxideTerm",
+      "subtitle": "Kết nối từ xa, terminal và vận hành trong một không gian làm việc gốc",
       "new_connection": "Kết nối mới",
+      "new_connection_hint": "Tạo và lưu kết nối từ xa",
       "new_local_terminal": "Terminal cục bộ",
-      "keyboard_shortcuts": "Phím tắt"
+      "new_local_terminal_hint": "Mở terminal trên thiết bị này",
+      "keyboard_shortcuts": "Phím tắt",
+      "recent_connections": "Tiếp tục công việc",
+      "recent_connections_hint": "Mở kết nối đã lưu được dùng gần đây",
+      "recent_connections_empty": "Các kết nối đã lưu dùng gần đây sẽ xuất hiện tại đây.",
+      "saved_count": "Đã lưu {{count}}",
+      "get_started": "Bắt đầu và quản lý",
+      "import_connections": "Nhập kết nối",
+      "import_connections_hint": "Nhập cấu hình SSH và dữ liệu từ ứng dụng được hỗ trợ",
+      "open_session_manager": "Trình quản lý phiên",
+      "open_session_manager_hint": "Duyệt, sửa, nhập và xuất các kết nối đã lưu",
+      "cloud_sync_hint": "Sao lưu dữ liệu không gian làm việc đã mã hóa lên dịch vụ của bạn"
     },
     "connection_monitor": {
       "title": "Giám sát kết nối"

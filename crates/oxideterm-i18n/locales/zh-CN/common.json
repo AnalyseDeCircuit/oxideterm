@@ -23,9 +23,22 @@
   "layout": {
     "empty": {
       "title": "OxideTerm",
+      "subtitle": "连接、终端与远程运维，一处完成",
       "new_connection": "新建连接",
+      "new_connection_hint": "创建并保存新的远程连接",
       "new_local_terminal": "本地终端",
-      "keyboard_shortcuts": "快捷键"
+      "new_local_terminal_hint": "在此设备上打开终端",
+      "keyboard_shortcuts": "快捷键",
+      "recent_connections": "继续工作",
+      "recent_connections_hint": "打开最近使用的已保存连接",
+      "recent_connections_empty": "最近使用的已保存连接会显示在这里。",
+      "saved_count": "已保存 {{count}} 个",
+      "get_started": "开始与管理",
+      "import_connections": "导入连接",
+      "import_connections_hint": "导入 SSH 配置和受支持应用的数据",
+      "open_session_manager": "会话管理器",
+      "open_session_manager_hint": "浏览、编辑、导入和导出已保存连接",
+      "cloud_sync_hint": "将加密的工作区数据备份到自建服务"
     },
     "connection_monitor": {
       "title": "连接监控"

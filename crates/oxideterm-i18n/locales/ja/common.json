@@ -23,9 +23,22 @@
   "layout": {
     "empty": {
       "title": "OxideTerm",
+      "subtitle": "リモート接続、ターミナル、運用を一つのネイティブワークスペースに",
       "new_connection": "新規接続",
+      "new_connection_hint": "リモート接続を作成して保存します",
       "new_local_terminal": "ローカルターミナル",
-      "keyboard_shortcuts": "キーボードショートカット"
+      "new_local_terminal_hint": "このデバイスでターミナルを開きます",
+      "keyboard_shortcuts": "キーボードショートカット",
+      "recent_connections": "作業を続ける",
+      "recent_connections_hint": "最近使用した保存済み接続を開きます",
+      "recent_connections_empty": "最近使用した保存済み接続がここに表示されます。",
+      "saved_count": "保存済み {{count}} 件",
+      "get_started": "開始と管理",
+      "import_connections": "接続をインポート",
+      "import_connections_hint": "SSH 設定と対応アプリのデータを取り込みます",
+      "open_session_manager": "セッションマネージャー",
+      "open_session_manager_hint": "保存済み接続の閲覧、編集、インポート、エクスポート",
+      "cloud_sync_hint": "暗号化したワークスペースデータを独自サービスにバックアップ"
     },
     "connection_monitor": {
       "title": "接続モニター"

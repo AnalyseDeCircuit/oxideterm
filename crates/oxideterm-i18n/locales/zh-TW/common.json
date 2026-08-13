@@ -23,9 +23,22 @@
   "layout": {
     "empty": {
       "title": "OxideTerm",
+      "subtitle": "連線、終端與遠端維運，一處完成",
       "new_connection": "新增連線",
+      "new_connection_hint": "建立並儲存新的遠端連線",
       "new_local_terminal": "本機終端",
-      "keyboard_shortcuts": "鍵盤快捷鍵"
+      "new_local_terminal_hint": "在此裝置上開啟終端",
+      "keyboard_shortcuts": "鍵盤快捷鍵",
+      "recent_connections": "繼續工作",
+      "recent_connections_hint": "開啟最近使用的已儲存連線",
+      "recent_connections_empty": "最近使用的已儲存連線會顯示在這裡。",
+      "saved_count": "已儲存 {{count}} 個",
+      "get_started": "開始與管理",
+      "import_connections": "匯入連線",
+      "import_connections_hint": "匯入 SSH 設定與支援應用程式的資料",
+      "open_session_manager": "工作階段管理器",
+      "open_session_manager_hint": "瀏覽、編輯、匯入與匯出已儲存連線",
+      "cloud_sync_hint": "將加密的工作區資料備份到自建服務"
     },
     "connection_monitor": {
       "title": "連線監控"

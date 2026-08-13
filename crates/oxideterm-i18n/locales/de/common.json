@@ -23,9 +23,22 @@
   "layout": {
     "empty": {
       "title": "OxideTerm",
+      "subtitle": "Remote-Verbindungen, Terminals und Betrieb in einem nativen Arbeitsbereich",
       "new_connection": "Neue Verbindung",
+      "new_connection_hint": "Eine neue Remote-Verbindung erstellen und speichern",
       "new_local_terminal": "Lokales Terminal",
-      "keyboard_shortcuts": "Tastaturkürzel"
+      "new_local_terminal_hint": "Ein Terminal auf diesem Gerät öffnen",
+      "keyboard_shortcuts": "Tastaturkürzel",
+      "recent_connections": "Weiterarbeiten",
+      "recent_connections_hint": "Eine kürzlich verwendete gespeicherte Verbindung öffnen",
+      "recent_connections_empty": "Kürzlich verwendete gespeicherte Verbindungen erscheinen hier.",
+      "saved_count": "{{count}} gespeichert",
+      "get_started": "Starten und verwalten",
+      "import_connections": "Verbindungen importieren",
+      "import_connections_hint": "SSH-Konfiguration und unterstützte App-Daten übernehmen",
+      "open_session_manager": "Sitzungsverwaltung",
+      "open_session_manager_hint": "Gespeicherte Verbindungen durchsuchen, bearbeiten, importieren und exportieren",
+      "cloud_sync_hint": "Verschlüsselte Arbeitsbereichsdaten im eigenen Dienst sichern"
     },
     "connection_monitor": {
       "title": "Verbindungsmonitor"

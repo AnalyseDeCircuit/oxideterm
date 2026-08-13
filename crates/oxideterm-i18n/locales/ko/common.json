@@ -23,9 +23,22 @@
   "layout": {
     "empty": {
       "title": "OxideTerm",
+      "subtitle": "원격 연결, 터미널 및 운영을 하나의 네이티브 작업 공간에서",
       "new_connection": "새 연결",
+      "new_connection_hint": "원격 연결을 만들고 저장합니다",
       "new_local_terminal": "로컬 터미널",
-      "keyboard_shortcuts": "키보드 단축키"
+      "new_local_terminal_hint": "이 기기에서 터미널을 엽니다",
+      "keyboard_shortcuts": "키보드 단축키",
+      "recent_connections": "작업 계속하기",
+      "recent_connections_hint": "최근 사용한 저장된 연결 열기",
+      "recent_connections_empty": "최근 사용한 저장된 연결이 여기에 표시됩니다.",
+      "saved_count": "{{count}}개 저장됨",
+      "get_started": "시작 및 관리",
+      "import_connections": "연결 가져오기",
+      "import_connections_hint": "SSH 설정과 지원되는 앱 데이터를 가져옵니다",
+      "open_session_manager": "세션 관리자",
+      "open_session_manager_hint": "저장된 연결 탐색, 편집, 가져오기 및 내보내기",
+      "cloud_sync_hint": "암호화된 작업 공간 데이터를 자체 서비스에 백업"
     },
     "connection_monitor": {
       "title": "연결 모니터"

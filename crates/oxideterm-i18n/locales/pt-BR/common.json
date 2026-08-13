@@ -23,9 +23,22 @@
   "layout": {
     "empty": {
       "title": "OxideTerm",
+      "subtitle": "Conexões remotas, terminais e operações em um espaço de trabalho nativo",
       "new_connection": "Nova conexão",
+      "new_connection_hint": "Crie e salve uma conexão remota",
       "new_local_terminal": "Terminal local",
-      "keyboard_shortcuts": "Atalhos de teclado"
+      "new_local_terminal_hint": "Abra um terminal neste dispositivo",
+      "keyboard_shortcuts": "Atalhos de teclado",
+      "recent_connections": "Continuar trabalhando",
+      "recent_connections_hint": "Abra uma conexão salva usada recentemente",
+      "recent_connections_empty": "As conexões salvas usadas recentemente aparecerão aqui.",
+      "saved_count": "{{count}} salvas",
+      "get_started": "Iniciar e gerenciar",
+      "import_connections": "Importar conexões",
+      "import_connections_hint": "Importe a configuração SSH e dados de aplicativos compatíveis",
+      "open_session_manager": "Gerenciador de sessões",
+      "open_session_manager_hint": "Navegue, edite, importe e exporte conexões salvas",
+      "cloud_sync_hint": "Faça backup dos dados criptografados no seu próprio serviço"
     },
     "connection_monitor": {
       "title": "Monitor de conexão"
