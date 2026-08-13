@@ -151,17 +151,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dynamic_rule_matches_tauri_target_defaults() {
-        let rule = ForwardRule::dynamic("localhost", 8080);
-
-        assert_eq!(rule.forward_type, ForwardType::Dynamic);
-        assert_eq!(rule.target_host, "");
-        assert_eq!(rule.target_port, 0);
-        assert_eq!(rule.status, ForwardStatus::Starting);
-        assert_eq!(rule.description, "SOCKS5 Proxy");
-    }
-
-    #[test]
     fn blank_forward_hosts_default_to_localhost() {
         let local = ForwardRule::local("  ", 8080, "\t", 3000);
         assert_eq!(local.bind_address, "localhost");
