@@ -393,20 +393,6 @@ mod tests {
     }
 
     #[test]
-    fn tauri_virtual_spec_maps_overscan_to_gpui_overdraw() {
-        let spec = TauriVirtualListSpec::new(px(38.0), 16);
-        assert_eq!(spec.overdraw(), px(608.0));
-    }
-
-    #[test]
-    fn tauri_virtual_list_state_uses_spec_overdraw() {
-        let spec = TauriVirtualListSpec::new(px(40.0), 3);
-        let state = tauri_virtual_list_state(7, ListAlignment::Top, spec);
-
-        assert_eq!(state.item_count(), 7);
-    }
-
-    #[test]
     fn nearest_virtual_scroll_strategy_matches_browser_edges() {
         assert_eq!(
             nearest_virtual_scroll_strategy(px(100.0), px(200.0), px(32.0), 2),

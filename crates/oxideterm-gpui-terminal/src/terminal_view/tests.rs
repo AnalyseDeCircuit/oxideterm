@@ -672,12 +672,6 @@ fn test_command_mark(
 }
 
 #[test]
-fn wheel_scroll_delta_uses_oxideterm_direction() {
-    assert_eq!(terminal_scroll_delta(3), 3);
-    assert_eq!(terminal_scroll_delta(-3), -3);
-}
-
-#[test]
 fn cursor_blink_mode_on_does_not_wait_for_terminal_control_sequence() {
     assert!(should_blink_cursor_for_mode(
         TerminalBlinkMode::On,

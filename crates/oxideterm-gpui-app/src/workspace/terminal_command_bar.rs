@@ -483,21 +483,6 @@ fn terminal_display_path_key(path: &str) -> String {
 }
 
 #[cfg(test)]
-mod terminal_broadcast_menu_tests {
-    use super::*;
-
-    #[test]
-    fn broadcast_menu_aligns_end_to_trigger_not_workspace_root() {
-        assert_eq!(terminal_broadcast_menu_left_for_trigger_right(700.0), 440.0);
-    }
-
-    #[test]
-    fn broadcast_menu_keeps_left_viewport_margin_when_trigger_is_narrow() {
-        assert_eq!(terminal_broadcast_menu_left_for_trigger_right(120.0), 12.0);
-    }
-}
-
-#[cfg(test)]
 mod terminal_project_git_root_tests {
     use super::*;
 

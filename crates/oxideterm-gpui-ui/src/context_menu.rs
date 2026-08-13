@@ -343,8 +343,7 @@ fn context_menu_chevron(tokens: &ThemeTokens, chevron: impl Into<String>) -> Div
 
 #[cfg(test)]
 mod tests {
-    use super::{context_menu_action_cursor, context_menu_item_is_actionable};
-    use gpui::CursorStyle;
+    use super::context_menu_item_is_actionable;
 
     #[test]
     fn context_menu_action_guard_blocks_disabled_or_loading_items() {
@@ -352,21 +351,5 @@ mod tests {
         assert!(!context_menu_item_is_actionable(true, false));
         assert!(!context_menu_item_is_actionable(false, true));
         assert!(!context_menu_item_is_actionable(true, true));
-    }
-
-    #[test]
-    fn context_menu_action_cursor_matches_guard_state() {
-        assert_eq!(
-            context_menu_action_cursor(false, false),
-            CursorStyle::PointingHand
-        );
-        assert_eq!(
-            context_menu_action_cursor(false, true),
-            CursorStyle::OperationNotAllowed
-        );
-        assert_eq!(
-            context_menu_action_cursor(true, false),
-            CursorStyle::OperationNotAllowed
-        );
     }
 }

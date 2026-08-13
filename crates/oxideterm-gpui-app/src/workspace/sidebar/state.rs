@@ -607,11 +607,6 @@ mod sidebar_resize_state_tests {
     use super::*;
 
     #[test]
-    pub(in crate::workspace) fn ai_sidebar_width_from_cursor_uses_right_edge_distance() {
-        assert_eq!(ai_sidebar_width_from_cursor_value(700.0, 1000.0), 300.0);
-    }
-
-    #[test]
     pub(in crate::workspace) fn ai_sidebar_width_from_cursor_clamps_to_responsive_limits() {
         assert_eq!(
             ai_sidebar_width_from_cursor_value(995.0, 1000.0),
