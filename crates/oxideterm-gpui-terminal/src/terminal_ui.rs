@@ -34,7 +34,6 @@ pub(crate) const TERMINAL_TIMESTAMP_LABEL_CELLS: usize = 12;
 pub(crate) const TERMINAL_TIMESTAMP_GUTTER_GAP_CELLS: f32 = 1.0;
 pub(crate) const TERMINAL_SCROLL_MULTIPLIER: f32 = 1.0;
 pub(crate) const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
-pub(crate) const TERMINAL_BLINK_MODE: TerminalBlinkMode = TerminalBlinkMode::On;
 pub(crate) const TERMINAL_PASTE_PROTECTION: bool = true;
 pub(crate) const TERMINAL_SMART_COPY: bool = true;
 pub(crate) const TERMINAL_OSC52_CLIPBOARD: bool = true;
@@ -574,34 +573,6 @@ pub(crate) struct TerminalUiSettings {
     pub(crate) command_marks_enabled: bool,
     pub(crate) command_marks_user_input_observed: bool,
     pub(crate) command_marks_show_hover_actions: bool,
-}
-
-impl Default for TerminalUiSettings {
-    fn default() -> Self {
-        Self {
-            blink_mode: TERMINAL_BLINK_MODE,
-            paste_protection: TERMINAL_PASTE_PROTECTION,
-            smart_copy: TERMINAL_SMART_COPY,
-            osc52_clipboard: TERMINAL_OSC52_CLIPBOARD,
-            osc52_clipboard_read: TERMINAL_OSC52_CLIPBOARD_READ,
-            copy_on_select: TERMINAL_COPY_ON_SELECT,
-            middle_click_paste: TERMINAL_MIDDLE_CLICK_PASTE,
-            right_click_paste: TERMINAL_RIGHT_CLICK_PASTE,
-            open_links_with_modifier: TERMINAL_OPEN_LINKS_WITH_MODIFIER,
-            detect_file_paths_as_links: TERMINAL_DETECT_FILE_PATHS_AS_LINKS,
-            keep_selection_on_copy: TERMINAL_KEEP_SELECTION_ON_COPY,
-            selection_requires_shift: TERMINAL_SELECTION_REQUIRES_SHIFT,
-            free_type_mode: TERMINAL_FREE_TYPE_MODE,
-            backspace_sequence: TERMINAL_BACKSPACE_SEQUENCE,
-            delete_sequence: TERMINAL_DELETE_SEQUENCE,
-            smooth_scroll: true,
-            bidi_enabled: TERMINAL_BIDI_ENABLED,
-            current_directory_awareness_enabled: false,
-            command_marks_enabled: TERMINAL_COMMAND_MARKS_ENABLED,
-            command_marks_user_input_observed: false,
-            command_marks_show_hover_actions: TERMINAL_COMMAND_MARKS_SHOW_HOVER_ACTIONS,
-        }
-    }
 }
 
 impl TerminalUiSettings {

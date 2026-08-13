@@ -410,15 +410,7 @@ fn marked_text_is_laid_out_at_terminal_cursor() {
 }
 
 #[test]
-fn copy_policy_defaults_keep_current_terminal_behavior() {
-    let settings = TerminalUiSettings::default();
-    assert!(!settings.copy_on_select);
-    assert!(!settings.osc52_clipboard_read);
-    assert!(settings.open_links_with_modifier);
-    assert!(settings.detect_file_paths_as_links);
-    assert!(settings.keep_selection_on_copy);
-    assert_eq!(settings.blink_mode, TerminalBlinkMode::On);
-
+fn terminal_preferences_keep_copy_and_osc52_read_disabled_by_default() {
     let preferences = TerminalUiPreferences::default();
     assert_eq!(preferences.scrollback_lines, DEFAULT_SCROLLBACK_LINES);
     assert!(!preferences.osc52_clipboard_read);

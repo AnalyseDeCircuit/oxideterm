@@ -58,10 +58,7 @@ pub use confirm::{
 pub use entity_row::{EntityListRowDensity, EntityListRowOptions, entity_list_row};
 pub use form_field::form_field;
 pub use modal::{modal_body, modal_container, modal_footer, modal_header, modal_overlay};
-pub use scroll::{
-    ScrollViewportContract, ScrollViewportKind, Scrollable, ScrollableElement, Scrollbar,
-    ScrollbarAxis,
-};
+pub use scroll::{Scrollable, ScrollableElement, Scrollbar, ScrollbarAxis};
 pub use section::{SectionHeaderOptions, section_header};
 pub use segmented_control::{
     SegmentedControlLayout, SegmentedControlMotion, SegmentedControlOptions, segmented_control,

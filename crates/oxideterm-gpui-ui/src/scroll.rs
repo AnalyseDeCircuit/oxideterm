@@ -235,34 +235,6 @@ pub enum ScrollbarAxis {
     Both,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ScrollViewportKind {
-    VirtualList,
-    TrackedOverflow,
-    Terminal,
-    HorizontalTabs,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ScrollViewportContract {
-    pub kind: ScrollViewportKind,
-    pub visible_scrollbar: bool,
-    pub anchored_overlays: bool,
-}
-
-impl ScrollViewportContract {
-    pub const fn new(kind: ScrollViewportKind) -> Self {
-        Self {
-            kind,
-            visible_scrollbar: matches!(
-                kind,
-                ScrollViewportKind::TrackedOverflow | ScrollViewportKind::Terminal
-            ),
-            anchored_overlays: !matches!(kind, ScrollViewportKind::HorizontalTabs),
-        }
-    }
-}
-
 #[derive(IntoElement)]
 pub struct Scrollbar {
     id: ElementId,
@@ -435,17 +407,6 @@ pub fn vertical_scrollbar_layer(id: impl Into<ElementId>, handle: &ScrollHandle)
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn scroll_viewport_contract_documents_default_scrollbar_behavior() {
-        assert!(ScrollViewportContract::new(ScrollViewportKind::TrackedOverflow).visible_scrollbar);
-        assert!(!ScrollViewportContract::new(ScrollViewportKind::VirtualList).visible_scrollbar);
-    }
-
-    #[test]
-    fn horizontal_tab_scroll_contract_does_not_require_overlay_anchors() {
-        assert!(!ScrollViewportContract::new(ScrollViewportKind::HorizontalTabs).anchored_overlays);
-    }
 
     #[test]
     fn scrollbar_position_uses_negative_gpui_content_offset() {
