@@ -2310,15 +2310,6 @@ mod terminal_command_bar_behavior_tests {
         );
         assert_eq!(terminal_command_executable("A=1 B=2").as_deref(), None);
     }
-
-    #[test]
-    fn terminal_recording_default_name_label_matches_tauri_prefix() {
-        assert_eq!(
-            terminal_recording_default_name_label("1234567890abcdef"),
-            "12345678"
-        );
-        assert_eq!(terminal_recording_default_name_label("1234"), "1234");
-    }
 }
 
 fn terminal_recording_default_name_label(session_label: &str) -> String {

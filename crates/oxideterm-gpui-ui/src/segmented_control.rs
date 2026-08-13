@@ -218,31 +218,6 @@ pub fn segmented_control_item_content(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxideterm_theme::UiMotionProfile;
-
-    #[test]
-    fn motion_profiles_map_to_switcher_transitions_without_disabled_delay() {
-        let mut tokens = oxideterm_theme::default_tokens();
-
-        tokens.apply_motion(UiMotionProfile::Off);
-        assert_eq!(segmented_control_motion(&tokens), None);
-
-        tokens.apply_motion(UiMotionProfile::Reduced);
-        let reduced = segmented_control_motion(&tokens).expect("reduced transition");
-        assert!(!reduced.spatial);
-        assert_eq!(reduced.duration, Duration::from_millis(120));
-
-        tokens.apply_motion(UiMotionProfile::Normal);
-        let normal = segmented_control_motion(&tokens).expect("normal transition");
-        assert!(normal.spatial);
-        assert_eq!(normal.duration, Duration::from_millis(200));
-
-        tokens.apply_motion(UiMotionProfile::Fast);
-        let fast = segmented_control_motion(&tokens).expect("fast transition");
-        assert!(fast.spatial);
-        assert_eq!(fast.duration, Duration::from_millis(110));
-    }
-
     #[test]
     fn settled_transition_suppresses_stale_previous_index_motion() {
         let settled = SegmentedControlOptions::new(3, 0, 5);

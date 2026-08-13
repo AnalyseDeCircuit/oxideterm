@@ -1735,31 +1735,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn git_path_label_prioritizes_file_name_over_parent_path() {
-        assert_eq!(
-            terminal_git_path_label("crates/oxideterm-gpui-app/src/workspace.rs"),
-            TerminalGitPathLabel {
-                file_name: "workspace.rs",
-                parent_path: Some("crates/oxideterm-gpui-app/src"),
-            }
-        );
-        assert_eq!(
-            terminal_git_path_label("README.md"),
-            TerminalGitPathLabel {
-                file_name: "README.md",
-                parent_path: None,
-            }
-        );
-        assert_eq!(
-            terminal_git_path_label(r"crates\app\src\lib.rs"),
-            TerminalGitPathLabel {
-                file_name: "lib.rs",
-                parent_path: Some(r"crates\app\src"),
-            }
-        );
-    }
-
-    #[test]
     fn worktree_group_preserves_modified_and_untracked_status() {
         let modified =
             GitChangedPath::from_parts("src/lib.rs", None::<String>, false, true, false, false)

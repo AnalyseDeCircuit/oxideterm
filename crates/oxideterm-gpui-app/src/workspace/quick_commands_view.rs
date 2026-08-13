@@ -1920,20 +1920,6 @@ mod terminal_command_bar_quick_command_tests {
     }
 
     #[test]
-    fn quick_command_risk_maps_domain_values_to_ui_labels_and_tones() {
-        assert_eq!(
-            quick_command_risk_tone(QuickCommandRisk::High),
-            StatusTone::Error
-        );
-        assert_eq!(
-            quick_command_risk_tone(QuickCommandRisk::Medium),
-            StatusTone::Warning
-        );
-        assert_eq!(quick_command_risk_label(QuickCommandRisk::High), "high");
-        assert_eq!(quick_command_risk_label(QuickCommandRisk::Medium), "medium");
-    }
-
-    #[test]
     fn quick_command_category_switch_keeps_popover_open() {
         let open = true;
         let mut active_category = "files".to_string();

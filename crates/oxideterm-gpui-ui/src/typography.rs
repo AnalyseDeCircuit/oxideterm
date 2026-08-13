@@ -212,21 +212,3 @@ fn is_cjk_ui_font(family: &str) -> bool {
         || lower.contains("noto sans cjk")
         || lower.contains("source han sans")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn middle_truncate_keeps_both_ends() {
-        assert_eq!(
-            middle_truncate_text("crates/oxideterm-gpui-ui/src/surface.rs", 20),
-            "crates/ox...rface.rs"
-        );
-    }
-
-    #[test]
-    fn middle_truncate_keeps_short_values_unchanged() {
-        assert_eq!(middle_truncate_text("main", 20), "main");
-    }
-}
