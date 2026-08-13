@@ -2987,7 +2987,18 @@ fn graphics_options_from_preferences(preferences: &TerminalUiPreferences) -> Gra
 
 fn current_terminal_timestamp_label() -> String {
     let now = chrono::Local::now();
-    format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
+    terminal_timestamp_label(
+        now.hour(),
+        now.minute(),
+        now.second(),
+        now.timestamp_subsec_millis(),
+    )
+}
+
+fn terminal_timestamp_label(hour: u32, minute: u32, second: u32, millis: u32) -> String {
+    // Fixed-width millisecond labels keep the paint-only gutter stable while
+    // making closely spaced device output distinguishable at a glance.
+    format!("{hour:02}:{minute:02}:{second:02}.{millis:03}")
 }
 
 fn record_timestampable_snapshot_rows(
@@ -3442,6 +3453,11 @@ mod tests {
         record_timestampable_snapshot_rows(&mut row_timestamps, &cleared_snapshot, "10:00:04");
 
         assert!(!row_timestamps.contains_key(&42));
+    }
+
+    #[test]
+    fn terminal_timestamp_label_includes_zero_padded_milliseconds() {
+        assert_eq!(terminal_timestamp_label(1, 2, 3, 7), "01:02:03.007");
     }
 
     #[test]
