@@ -644,6 +644,32 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Terminal, SettingsSelect::HighlightMatchScope(index)) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                let selected = settings
+                    .terminal
+                    .highlight_rules
+                    .get(index)
+                    .map(|rule| rule.match_scope)
+                    .unwrap_or_default();
+                for &scope in highlight_match_scope_options() {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            highlight_match_scope_label(scope, &self.i18n),
+                            scope == selected,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_settings_select();
+                            this.edit_highlight_rule(index, |rule| rule.match_scope = scope, cx);
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
             (SettingsTab::Terminal, SettingsSelect::LocalShell) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 let selected = settings.local_terminal.default_shell_id.as_deref();

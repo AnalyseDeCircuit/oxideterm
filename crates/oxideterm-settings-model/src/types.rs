@@ -116,6 +116,7 @@ pub enum SettingsSelect {
     SftpConflict,
     HighlightPreset,
     HighlightRenderMode(usize),
+    HighlightMatchScope(usize),
     ConnectionImportSource,
     ConnectionImportDuplicateStrategy,
 }

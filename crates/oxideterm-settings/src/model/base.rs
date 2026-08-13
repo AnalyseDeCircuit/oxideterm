@@ -366,3 +366,11 @@ pub enum HighlightRuleRenderMode {
     Underline,
     Outline,
 }
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HighlightRuleMatchScope {
+    #[default]
+    Match,
+    LogicalLine,
+}

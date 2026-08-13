@@ -1333,6 +1333,12 @@ fn hash_highlight_rules(rules: &[TerminalHighlightRule], hasher: &mut impl Hashe
             TerminalHighlightRenderMode::Outline => 2,
         }
         .hash(hasher);
+        match rule.match_scope {
+            crate::terminal_ui::TerminalHighlightMatchScope::Match => 0u8,
+            crate::terminal_ui::TerminalHighlightMatchScope::LogicalLine => 1,
+        }
+        .hash(hasher);
+        rule.preserve_background.hash(hasher);
         rule.enabled.hash(hasher);
         rule.priority.hash(hasher);
     }

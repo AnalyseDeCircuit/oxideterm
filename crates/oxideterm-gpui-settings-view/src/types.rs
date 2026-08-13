@@ -97,6 +97,7 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::SftpConflict => SelectAnchorId::SettingsSftpConflict,
             Self::HighlightPreset => SelectAnchorId::SettingsHighlightPreset,
             Self::HighlightRenderMode(index) => SelectAnchorId::SettingsHighlightRenderMode(index),
+            Self::HighlightMatchScope(index) => SelectAnchorId::SettingsHighlightMatchScope(index),
             Self::ConnectionImportSource => SelectAnchorId::SettingsConnectionImportSource,
             Self::ConnectionImportDuplicateStrategy => {
                 SelectAnchorId::SettingsConnectionImportDuplicateStrategy

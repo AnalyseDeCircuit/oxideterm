@@ -513,6 +513,13 @@ pub enum TerminalHighlightRenderMode {
     Outline,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TerminalHighlightMatchScope {
+    #[default]
+    Match,
+    LogicalLine,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct TerminalHighlightRule {
     pub id: String,
@@ -522,6 +529,8 @@ pub struct TerminalHighlightRule {
     pub foreground: Option<String>,
     pub background: Option<String>,
     pub render_mode: TerminalHighlightRenderMode,
+    pub match_scope: TerminalHighlightMatchScope,
+    pub preserve_background: bool,
     pub enabled: bool,
     pub priority: i64,
 }

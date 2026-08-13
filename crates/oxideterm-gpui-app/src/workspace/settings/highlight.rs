@@ -174,6 +174,7 @@ impl WorkspaceApp {
             rule.label.clone()
         };
         let mode_label = highlight_render_mode_label(rule.render_mode, &self.i18n);
+        let scope_label = highlight_match_scope_label(rule.match_scope, &self.i18n);
         let validation_error = highlight_rule_validation_error(rule);
 
         div()
@@ -316,18 +317,44 @@ impl WorkspaceApp {
                             cx,
                         ),
                     )
-                    .child(
-                        self.highlight_input_block(
-                            self.i18n
-                                .t("settings_view.terminal.highlight_rules.background"),
-                            SettingsInput::HighlightBackground(index),
-                            rule.background.clone().unwrap_or_default(),
-                            "#991b1b".to_string(),
-                            150.0,
-                            cx,
-                        ),
+                    .when(
+                        rule.render_mode != HighlightRuleRenderMode::Background
+                            || !rule.preserve_background,
+                        |row| {
+                            row.child(
+                                self.highlight_input_block(
+                                    self.i18n
+                                        .t("settings_view.terminal.highlight_rules.background"),
+                                    SettingsInput::HighlightBackground(index),
+                                    rule.background.clone().unwrap_or_default(),
+                                    "#991b1b".to_string(),
+                                    150.0,
+                                    cx,
+                                ),
+                            )
+                        },
                     )
                     .child(self.highlight_render_mode_control(index, mode_label, cx))
+                    .child(self.highlight_match_scope_control(index, scope_label, cx))
+                    .when(
+                        rule.render_mode == HighlightRuleRenderMode::Background,
+                        |row| {
+                            row.child(self.highlight_checkbox(
+                                self.i18n.t(
+                                    "settings_view.terminal.highlight_rules.preserve_background",
+                                ),
+                                rule.preserve_background,
+                                move |settings, value| {
+                                    if let Some(rule) =
+                                        settings.terminal.highlight_rules.get_mut(index)
+                                    {
+                                        rule.preserve_background = value;
+                                    }
+                                },
+                                cx,
+                            ))
+                        },
+                    )
                     .child(
                         self.highlight_checkbox(
                             self.i18n
@@ -464,6 +491,30 @@ impl WorkspaceApp {
                     .child(
                         self.i18n
                             .t("settings_view.terminal.highlight_rules.render_mode"),
+                    ),
+            )
+            .child(self.settings_select_control(select_id, value, false, Some(148.0), cx))
+            .into_any_element()
+    }
+
+    pub(in crate::workspace) fn highlight_match_scope_control(
+        &self,
+        index: usize,
+        value: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let select_id = SettingsSelect::HighlightMatchScope(index);
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(
+                        self.i18n
+                            .t("settings_view.terminal.highlight_rules.match_scope"),
                     ),
             )
             .child(self.settings_select_control(select_id, value, false, Some(148.0), cx))

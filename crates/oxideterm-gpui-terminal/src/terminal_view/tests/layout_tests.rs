@@ -609,6 +609,8 @@ fn terminal_element_keeps_highlights_across_output_rescans() {
         foreground: None,
         background: Some("#ff0000".to_string()),
         render_mode: TerminalHighlightRenderMode::Background,
+        match_scope: TerminalHighlightMatchScope::Match,
+        preserve_background: false,
         enabled: true,
         priority: 0,
     }];
@@ -651,6 +653,84 @@ fn terminal_element_keeps_highlights_across_output_rescans() {
     assert_eq!(after_layout.highlight_backgrounds[0].row, 0);
     assert_eq!(after_layout.highlight_backgrounds[0].col, 0);
     assert_eq!(after_layout.highlight_backgrounds[0].cells, 5);
+}
+
+#[test]
+fn terminal_highlight_can_preserve_existing_background() {
+    let layout = TerminalElement::new(
+        selection_snapshot("ERROR output"),
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .highlight_rules(vec![TerminalHighlightRule {
+        id: "error".to_string(),
+        pattern: "ERROR".to_string(),
+        foreground: Some("#ff0000".to_string()),
+        render_mode: TerminalHighlightRenderMode::Background,
+        match_scope: TerminalHighlightMatchScope::Match,
+        preserve_background: true,
+        enabled: true,
+        ..TerminalHighlightRule::default()
+    }])
+    .layout();
+
+    assert!(layout.highlight_backgrounds.is_empty());
+    assert!(
+        layout
+            .text_runs
+            .iter()
+            .any(|run| run.text == "ERROR" && run.style.color == rgb(0xff0000).into())
+    );
+}
+
+#[test]
+fn logical_line_scope_highlights_all_soft_wrapped_rows() {
+    let mut snapshot = multirow_snapshot(&["prefix ER", "ROR suffix", "next line"]);
+    snapshot.cols = 9;
+    for row in &mut snapshot.lines {
+        row.cells_mut().truncate(snapshot.cols);
+        row.refresh_signature();
+    }
+    snapshot.lines[1].wrapped = true;
+    snapshot.lines[1].refresh_signature();
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .highlight_rules(vec![TerminalHighlightRule {
+        id: "error-line".to_string(),
+        pattern: "ERROR".to_string(),
+        background: Some("#ff0000".to_string()),
+        render_mode: TerminalHighlightRenderMode::Background,
+        match_scope: TerminalHighlightMatchScope::LogicalLine,
+        preserve_background: false,
+        enabled: true,
+        ..TerminalHighlightRule::default()
+    }])
+    .layout();
+
+    assert_eq!(layout.highlight_backgrounds.len(), 2);
+    assert_eq!(layout.highlight_backgrounds[0].row, 0);
+    assert_eq!(layout.highlight_backgrounds[0].col, 0);
+    assert_eq!(layout.highlight_backgrounds[0].cells, 9);
+    assert_eq!(layout.highlight_backgrounds[1].row, 1);
+    assert_eq!(layout.highlight_backgrounds[1].col, 0);
+    assert_eq!(layout.highlight_backgrounds[1].cells, 9);
 }
 
 #[test]

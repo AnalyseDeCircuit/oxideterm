@@ -1186,6 +1186,13 @@ impl WorkspaceApp {
                                 TerminalHighlightRenderMode::Outline
                             }
                         },
+                        match_scope: match rule.match_scope {
+                            HighlightRuleMatchScope::Match => TerminalHighlightMatchScope::Match,
+                            HighlightRuleMatchScope::LogicalLine => {
+                                TerminalHighlightMatchScope::LogicalLine
+                            }
+                        },
+                        preserve_background: rule.preserve_background,
                         enabled: rule.enabled,
                         priority: rule.priority,
                     })

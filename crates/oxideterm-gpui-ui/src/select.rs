@@ -99,6 +99,7 @@ pub enum SelectAnchorId {
     SettingsSftpConflict,
     SettingsHighlightPreset,
     SettingsHighlightRenderMode(usize),
+    SettingsHighlightMatchScope(usize),
     AiPanelRoot,
     AiConversationList,
     AiChatMenu,
@@ -194,6 +195,7 @@ impl SelectAnchorId {
                 | Self::SettingsSftpConflict
                 | Self::SettingsHighlightPreset
                 | Self::SettingsHighlightRenderMode(_)
+                | Self::SettingsHighlightMatchScope(_)
                 | Self::SettingsConnectionImportSource
                 | Self::SettingsConnectionImportDuplicateStrategy
         )

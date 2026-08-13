@@ -9,6 +9,10 @@ pub struct HighlightRule {
     pub background: Option<String>,
     #[serde(default)]
     pub render_mode: HighlightRuleRenderMode,
+    #[serde(default)]
+    pub match_scope: HighlightRuleMatchScope,
+    #[serde(default)]
+    pub preserve_background: bool,
     pub enabled: bool,
     pub priority: i64,
 }
@@ -24,6 +28,9 @@ impl Default for HighlightRule {
             foreground: Some("#f8fafc".to_string()),
             background: Some("#991b1b".to_string()),
             render_mode: HighlightRuleRenderMode::Background,
+            match_scope: HighlightRuleMatchScope::Match,
+            // New rules should preserve theme, image, and ANSI backgrounds by default.
+            preserve_background: true,
             enabled: true,
             priority: 1,
         }
@@ -153,3 +160,36 @@ fn color_function_like(value: &str, name: &str) -> bool {
         .is_some_and(|rest| rest.ends_with(')'))
 }
 
+#[cfg(test)]
+mod highlight_rule_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_rule_keeps_original_background_behavior() {
+        let legacy = serde_json::json!({
+            "id": "legacy",
+            "label": "Legacy",
+            "pattern": "ERROR",
+            "is_regex": false,
+            "case_sensitive": false,
+            "foreground": "#ffffff",
+            "background": "#991b1b",
+            "render_mode": "background",
+            "enabled": true,
+            "priority": 1
+        });
+
+        let rule: HighlightRule = serde_json::from_value(legacy).expect("legacy highlight rule");
+
+        assert_eq!(rule.match_scope, HighlightRuleMatchScope::Match);
+        assert!(!rule.preserve_background);
+    }
+
+    #[test]
+    fn new_rule_preserves_terminal_background() {
+        let rule = HighlightRule::default();
+
+        assert_eq!(rule.match_scope, HighlightRuleMatchScope::Match);
+        assert!(rule.preserve_background);
+    }
+}

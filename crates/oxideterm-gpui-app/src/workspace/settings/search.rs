@@ -280,6 +280,8 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
                 "settings_view.terminal.highlight_rules.pattern",
                 "settings_view.terminal.highlight_rules.foreground",
                 "settings_view.terminal.highlight_rules.background",
+                "settings_view.terminal.highlight_rules.match_scope",
+                "settings_view.terminal.highlight_rules.preserve_background",
             ],
         ),
         settings_search_entry(

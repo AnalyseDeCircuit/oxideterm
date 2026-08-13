@@ -8,8 +8,8 @@ use gpui::{Hsla, rgba};
 use regex::RegexBuilder;
 
 use crate::terminal_ui::{
-    MAX_HIGHLIGHT_PATTERN_LENGTH, MAX_HIGHLIGHT_RULES, TerminalHighlightRenderMode,
-    TerminalHighlightRule,
+    MAX_HIGHLIGHT_PATTERN_LENGTH, MAX_HIGHLIGHT_RULES, TerminalHighlightMatchScope,
+    TerminalHighlightRenderMode, TerminalHighlightRule,
 };
 use crate::terminal_view::element::{TerminalRect, to_hsla};
 use oxideterm_terminal::{TerminalColor, TerminalRow, TerminalSnapshot};
@@ -41,6 +41,8 @@ impl TerminalHighlightLayout {
 struct LogicalLine {
     text: String,
     map: Vec<TextCell>,
+    // The line paint range excludes fixed-width terminal padding.
+    content_len: usize,
 }
 
 #[derive(Clone)]
@@ -96,7 +98,7 @@ pub(crate) fn terminal_highlights_for_rows(
             continue;
         }
         let line = build_logical_line(snapshot, line_range);
-        let matches = accepted_matches(&line.text, &rules);
+        let matches = accepted_matches(&line.text, line.content_len, &rules);
         apply_matches(&line, matches, &mut layout);
     }
 
@@ -134,7 +136,7 @@ fn highlight_rules_signature(rules: &[TerminalHighlightRule]) -> String {
         .take(MAX_HIGHLIGHT_RULES)
         .map(|rule| {
             format!(
-                "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{:?}\u{1f}{}",
+                "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{:?}\u{1f}{:?}\u{1f}{}\u{1f}{}",
                 rule.id,
                 rule.enabled,
                 rule.pattern,
@@ -143,6 +145,8 @@ fn highlight_rules_signature(rules: &[TerminalHighlightRule]) -> String {
                 rule.foreground.as_deref().unwrap_or_default(),
                 rule.background.as_deref().unwrap_or_default(),
                 rule.render_mode,
+                rule.match_scope,
+                rule.preserve_background,
                 rule.priority,
             )
         })
@@ -216,7 +220,12 @@ fn build_logical_line(snapshot: &TerminalSnapshot, rows: Range<usize>) -> Logica
         };
         append_row_text(row, row_index, snapshot.cols, &mut text, &mut map);
     }
-    LogicalLine { text, map }
+    let content_len = text.trim_end_matches(' ').chars().count();
+    LogicalLine {
+        text,
+        map,
+        content_len,
+    }
 }
 
 fn append_row_text(
@@ -245,10 +254,23 @@ fn append_row_text(
     }
 }
 
-fn accepted_matches<'a>(text: &str, rules: &'a [RuntimeHighlightRule]) -> Vec<MatchCandidate<'a>> {
+fn accepted_matches<'a>(
+    text: &str,
+    content_len: usize,
+    rules: &'a [RuntimeHighlightRule],
+) -> Vec<MatchCandidate<'a>> {
     let mut matches = Vec::new();
     for rule in rules {
+        let first_rule_match = matches.len();
         collect_rule_matches(text, rule, &mut matches);
+        if rule.source.match_scope == TerminalHighlightMatchScope::LogicalLine
+            && matches.len() > first_rule_match
+        {
+            // One match is enough to promote this rule to the complete logical line.
+            matches.truncate(first_rule_match + 1);
+            matches[first_rule_match].start = 0;
+            matches[first_rule_match].len = content_len;
+        }
     }
 
     matches.sort_by(|left, right| {
@@ -339,7 +361,7 @@ fn apply_matches(
             .foreground
             .as_deref()
             .and_then(parse_hex_color);
-        let color = matched
+        let decoration_color = matched
             .rule
             .source
             .background
@@ -347,16 +369,27 @@ fn apply_matches(
             .and_then(parse_hex_color)
             .or(foreground)
             .unwrap_or_else(|| rgba(0xf59e0bff).into());
-        let rects = rects_for_match(&line.map[matched.start..end], color);
-        for cell in &line.map[matched.start..end] {
+        let paint_cells = &line.map[matched.start..end];
+        for cell in paint_cells {
             if let Some(foreground) = foreground {
                 layout.foregrounds.insert((cell.row, cell.col), foreground);
             }
         }
         match matched.rule.source.render_mode {
-            TerminalHighlightRenderMode::Background => layout.backgrounds.extend(rects),
-            TerminalHighlightRenderMode::Underline => layout.underlines.extend(rects),
-            TerminalHighlightRenderMode::Outline => layout.outlines.extend(rects),
+            TerminalHighlightRenderMode::Background => {
+                // Omitting the overlay preserves both theme and ANSI cell backgrounds.
+                if !matched.rule.source.preserve_background {
+                    layout
+                        .backgrounds
+                        .extend(rects_for_match(paint_cells, decoration_color));
+                }
+            }
+            TerminalHighlightRenderMode::Underline => layout
+                .underlines
+                .extend(rects_for_match(paint_cells, decoration_color)),
+            TerminalHighlightRenderMode::Outline => layout
+                .outlines
+                .extend(rects_for_match(paint_cells, decoration_color)),
         }
     }
 }

@@ -28,7 +28,8 @@ pub use privilege_prompt::{
 };
 pub use terminal_ui::{
     TerminalBackgroundFit, TerminalBackgroundPreferences, TerminalCommandSelectionLabels,
-    TerminalHighlightRenderMode, TerminalHighlightRule, TerminalModemLabels, TerminalNotice,
-    TerminalNoticeVariant, TerminalPasteLabels, TerminalSerialControlLabels, TerminalTrzszLabels,
-    TerminalUiPreferenceOverrides, TerminalUiPreferences, TerminalUiTheme,
+    TerminalHighlightMatchScope, TerminalHighlightRenderMode, TerminalHighlightRule,
+    TerminalModemLabels, TerminalNotice, TerminalNoticeVariant, TerminalPasteLabels,
+    TerminalSerialControlLabels, TerminalTrzszLabels, TerminalUiPreferenceOverrides,
+    TerminalUiPreferences, TerminalUiTheme,
 };

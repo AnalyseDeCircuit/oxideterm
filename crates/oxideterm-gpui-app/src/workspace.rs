@@ -162,13 +162,14 @@ use oxideterm_gpui_platform::{
 use oxideterm_gpui_terminal::{
     BackgroundImageRenderCache, PrivilegePromptMatch, SharedTerminalSession, TerminalBackgroundFit,
     TerminalBackgroundPreferences, TerminalBroadcastInputKind, TerminalCommandSelectionLabels,
-    TerminalContextAction, TerminalHighlightRenderMode, TerminalHighlightRule as UiHighlightRule,
-    TerminalInputBroadcaster, TerminalInputInterceptor, TerminalInputInterceptorResult,
-    TerminalModemLabels, TerminalNotice, TerminalNoticeVariant, TerminalOutputProcessor,
-    TerminalPane, TerminalPaneEvent, TerminalPasteLabels, TerminalRecordingState,
-    TerminalRecordingStatus, TerminalSearchStatus, TerminalSerialControlLabels,
-    TerminalTrzszLabels, TerminalUiPreferenceOverrides, TerminalUiPreferences, TerminalUiTheme,
-    TerminalWorkingDirectorySource, detect_custom_privilege_prompt,
+    TerminalContextAction, TerminalHighlightMatchScope, TerminalHighlightRenderMode,
+    TerminalHighlightRule as UiHighlightRule, TerminalInputBroadcaster, TerminalInputInterceptor,
+    TerminalInputInterceptorResult, TerminalModemLabels, TerminalNotice, TerminalNoticeVariant,
+    TerminalOutputProcessor, TerminalPane, TerminalPaneEvent, TerminalPasteLabels,
+    TerminalRecordingState, TerminalRecordingStatus, TerminalSearchStatus,
+    TerminalSerialControlLabels, TerminalTrzszLabels, TerminalUiPreferenceOverrides,
+    TerminalUiPreferences, TerminalUiTheme, TerminalWorkingDirectorySource,
+    detect_custom_privilege_prompt,
 };
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{
@@ -207,10 +208,11 @@ use oxideterm_session_adapter::{
 };
 use oxideterm_settings::{
     AI_SIDEBAR_ABSOLUTE_MAX_WIDTH, AI_SIDEBAR_ABSOLUTE_MIN_WIDTH, BackgroundFit, BackgroundScope,
-    CursorStyle as SettingsCursorStyle, FontFamily, FrostedGlassMode, HighlightRuleRenderMode,
-    Language, MAX_TERMINAL_BACKGROUND_OPACITY, MAX_WINDOW_OPACITY, MIN_TERMINAL_BACKGROUND_OPACITY,
-    MIN_WINDOW_OPACITY, PersistedSettings, SettingsStore, background_images_directory,
-    default_settings_path, ensure_bundled_background_image, list_background_images,
+    CursorStyle as SettingsCursorStyle, FontFamily, FrostedGlassMode, HighlightRuleMatchScope,
+    HighlightRuleRenderMode, Language, MAX_TERMINAL_BACKGROUND_OPACITY, MAX_WINDOW_OPACITY,
+    MIN_TERMINAL_BACKGROUND_OPACITY, MIN_WINDOW_OPACITY, PersistedSettings, SettingsStore,
+    background_images_directory, default_settings_path, ensure_bundled_background_image,
+    list_background_images,
 };
 use oxideterm_settings_model::{
     AiMcpServerDraft, AiProviderKeyStatusDelivery, SettingsNavigationLayout,
