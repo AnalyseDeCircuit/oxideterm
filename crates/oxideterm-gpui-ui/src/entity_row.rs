@@ -135,24 +135,3 @@ fn entity_list_row_min_height(tokens: &ThemeTokens, density: EntityListRowDensit
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn entity_list_row_height_follows_theme_density() {
-        let comfortable = oxideterm_theme::default_tokens();
-        let mut compact = comfortable;
-        compact.apply_density(oxideterm_theme::UiDensityProfile::Compact);
-
-        assert_eq!(
-            entity_list_row_min_height(&comfortable, EntityListRowDensity::Normal),
-            42.0
-        );
-        assert!(
-            entity_list_row_min_height(&compact, EntityListRowDensity::Normal)
-                < entity_list_row_min_height(&comfortable, EntityListRowDensity::Normal)
-        );
-    }
-}

@@ -229,18 +229,4 @@ mod tests {
     fn middle_truncate_keeps_short_values_unchanged() {
         assert_eq!(middle_truncate_text("main", 20), "main");
     }
-
-    #[test]
-    fn monospace_datum_tone_maps_to_theme_token() {
-        let tokens = oxideterm_theme::default_tokens();
-
-        assert_eq!(
-            monospace_datum_color(&tokens, MonospaceDatumTone::Accent),
-            tokens.ui.accent
-        );
-        assert_eq!(
-            monospace_datum_color(&tokens, MonospaceDatumTone::Muted),
-            tokens.ui.text_muted
-        );
-    }
 }

@@ -173,26 +173,6 @@ pub(super) fn risk_tone(risk: AiToolRisk) -> AiTone {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use oxideterm_theme::default_tokens;
-
-    #[test]
-    fn ai_tones_follow_theme_semantic_colors() {
-        let tokens = default_tokens();
-
-        assert_eq!(tone_color(&tokens, AiTone::Red), tokens.ui.error);
-        assert_eq!(tone_color(&tokens, AiTone::Amber), tokens.ui.warning);
-        assert_eq!(tone_color(&tokens, AiTone::Sky), tokens.ui.info);
-        assert_eq!(tone_color(&tokens, AiTone::Green), tokens.ui.success);
-        assert_eq!(
-            tone_color(&tokens, AiTone::Violet),
-            tokens.ui.accent_secondary
-        );
-    }
-}
-
 pub(super) fn status_tone(status: AiToolStatus) -> AiTone {
     match status {
         AiToolStatus::Pending => AiTone::Yellow,

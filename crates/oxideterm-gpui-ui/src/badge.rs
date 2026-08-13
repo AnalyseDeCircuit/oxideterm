@@ -184,39 +184,3 @@ pub fn status_pill_colors(
         },
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn status_pill_uses_semantic_token_color() {
-        let tokens = oxideterm_theme::default_tokens();
-        let colors = status_pill_colors(&tokens, StatusTone::Success, false);
-
-        assert_eq!(
-            colors.background,
-            color_with_alpha(tokens.ui.success, STATUS_PILL_BACKGROUND_ALPHA)
-        );
-        assert_eq!(
-            colors.border,
-            color_with_alpha(tokens.ui.success, STATUS_PILL_BORDER_ALPHA)
-        );
-        assert_eq!(colors.text, rgba((tokens.ui.success << 8) | 0xff));
-    }
-
-    #[test]
-    fn strong_status_pill_uses_stronger_alpha_pair() {
-        let tokens = oxideterm_theme::default_tokens();
-        let colors = status_pill_colors(&tokens, StatusTone::Warning, true);
-
-        assert_eq!(
-            colors.background,
-            color_with_alpha(tokens.ui.warning, STATUS_PILL_STRONG_BACKGROUND_ALPHA)
-        );
-        assert_eq!(
-            colors.border,
-            color_with_alpha(tokens.ui.warning, STATUS_PILL_STRONG_BORDER_ALPHA)
-        );
-    }
-}

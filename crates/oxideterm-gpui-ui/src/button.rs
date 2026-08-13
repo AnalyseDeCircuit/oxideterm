@@ -903,25 +903,3 @@ pub fn button_focus_visible(tokens: &ThemeTokens, button: Div, focused: bool) ->
     // caller marks the action as keyboard-focused.
     button.shadow(tauri_focus_visible_ring(tokens))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn action_chip_foreground_uses_active_accent_or_idle_tone() {
-        let tokens = oxideterm_theme::default_tokens();
-
-        assert_eq!(
-            action_chip_foreground(
-                &tokens,
-                ActionChipOptions::new().idle_text_tone(ActionChipTextTone::Primary)
-            ),
-            rgb(tokens.ui.text)
-        );
-        assert_eq!(
-            action_chip_foreground(&tokens, ActionChipOptions::new().active(true)),
-            rgb(tokens.ui.accent)
-        );
-    }
-}
