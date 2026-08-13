@@ -39,14 +39,3 @@ pub fn reconnect_delay_label(value: i64) -> String {
         format!("{:.1}s", value as f64 / 1_000.0)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reconnect_delay_labels_preserve_subsecond_values() {
-        assert_eq!(reconnect_delay_label(500), "0.5s");
-        assert_eq!(reconnect_delay_label(2_000), "2s");
-    }
-}

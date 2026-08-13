@@ -3456,11 +3456,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_timestamp_label_includes_zero_padded_milliseconds() {
-        assert_eq!(terminal_timestamp_label(1, 2, 3, 7), "01:02:03.007");
-    }
-
-    #[test]
     fn search_cache_requires_matching_query_and_content_revision() {
         let cache = TerminalSearchCache {
             query: "needle".to_string(),

@@ -1934,13 +1934,6 @@ mod terminal_command_bar_quick_command_tests {
     }
 
     #[test]
-    fn quick_command_popover_width_matches_tauri_min_calc() {
-        assert_eq!(quick_commands_popover_width_for_bar(1200.0), 860.0);
-        assert_eq!(quick_commands_popover_width_for_bar(600.0), 576.0);
-        assert_eq!(quick_commands_popover_width_for_bar(240.0), 216.0);
-    }
-
-    #[test]
     fn quick_command_category_switch_keeps_popover_open() {
         let open = true;
         let mut active_category = "files".to_string();

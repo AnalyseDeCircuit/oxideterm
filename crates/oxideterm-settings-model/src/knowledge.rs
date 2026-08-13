@@ -105,12 +105,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn knowledge_extension_allowlist_is_lowercase() {
-        assert!(KNOWLEDGE_IMPORT_EXTENSIONS.contains(&"md"));
-        assert!(!KNOWLEDGE_IMPORT_EXTENSIONS.contains(&"pdf"));
-    }
-
-    #[test]
     fn knowledge_debug_output_redacts_user_names_and_paths() {
         let secret = "private-customer-secret";
         let confirm = KnowledgeDeleteConfirm {

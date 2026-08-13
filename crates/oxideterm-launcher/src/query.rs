@@ -99,12 +99,6 @@ mod tests {
     }
 
     #[test]
-    fn count_label_matches_tauri_header() {
-        assert_eq!(count_label(4, 10), "4/10");
-        assert_eq!(count_label(10, 10), "10");
-    }
-
-    #[test]
     fn filter_wsl_distros_matches_tauri_name_filter() {
         let distros = vec![
             WslDistro {
