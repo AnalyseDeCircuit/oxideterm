@@ -458,23 +458,15 @@ impl TerminalPane {
             }
         );
 
-        div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .h(px(SERIAL_CONTROL_BAR_HEIGHT))
+        // The scroll wrapper transfers its own styles to the viewport, so the
+        // control row must remain a separately styled child to stay horizontal.
+        let control_row = div()
+            .size_full()
             .flex()
+            .flex_row()
             .items_center()
             .gap(px(8.0))
             .px(px(10.0))
-            .overflow_x_scrollbar()
-            .border_b_1()
-            .border_color(rgba(serial_color_alpha(self.theme.foreground, 0x33)))
-            .bg(rgba(serial_color_alpha(self.theme.background, 0xf0)))
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx: &mut App| {
-                cx.stop_propagation();
-            })
             .child(
                 div()
                     .min_w(px(180.0))
@@ -633,7 +625,21 @@ impl TerminalPane {
                         );
                     }),
                 ),
-            )
+            );
+
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .h(px(SERIAL_CONTROL_BAR_HEIGHT))
+            .border_b_1()
+            .border_color(rgba(serial_color_alpha(self.theme.foreground, 0x33)))
+            .bg(rgba(serial_color_alpha(self.theme.background, 0xf0)))
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx: &mut App| {
+                cx.stop_propagation();
+            })
+            .child(div().size_full().overflow_x_scrollbar().child(control_row))
             .into_any_element()
     }
 

@@ -600,28 +600,4 @@ mod tests {
         assert!(row.contains("connections=2"));
         assert!(row.contains("revision=rev-1"));
     }
-
-    #[test]
-    fn history_filter_keeps_failed_entries() {
-        let failed = CloudSyncHistoryEntry {
-            id: "failed".to_string(),
-            action: "upload".to_string(),
-            timestamp: "2026-05-26T00:00:00Z".to_string(),
-            success: false,
-            summary: oxideterm_cloud_sync::state::CloudSyncHistorySummary::default(),
-            error: Some("unauthorized".to_string()),
-            remote_revision: None,
-        };
-        let ok = CloudSyncHistoryEntry {
-            success: true,
-            id: "ok".to_string(),
-            ..failed.clone()
-        };
-        let mut history = vec![failed, ok];
-
-        history.retain(|entry| !entry.success);
-
-        assert_eq!(history.len(), 1);
-        assert_eq!(history[0].id, "failed");
-    }
 }

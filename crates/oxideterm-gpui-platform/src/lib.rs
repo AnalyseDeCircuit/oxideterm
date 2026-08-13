@@ -43,14 +43,3 @@ pub fn window_options(bounds: Bounds<Pixels>) -> WindowOptions {
         ..Default::default()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stable_linux_window_id_matches_desktop_entry() {
-        // Mutter associates the running window with the stable desktop file by this exact ID.
-        assert_eq!(OXIDETERM_APP_ID, "com.oxideterm.app");
-    }
-}

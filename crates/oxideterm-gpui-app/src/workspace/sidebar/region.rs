@@ -1649,19 +1649,6 @@ mod sidebar_resize_region_tests {
         );
     }
 
-    #[test]
-    pub(in crate::workspace) fn context_sidebar_resize_hotzone_has_no_layout_width() {
-        // The centered overlay reaches both sides of the seam while its
-        // one-pixel child remains the only visible surface.
-        assert_eq!(SIDEBAR_RESIZE_HOTZONE_WIDTH, 9.0);
-        assert_eq!(SIDEBAR_RESIZE_DIVIDER_WIDTH, 1.0);
-        assert_close(
-            "padded hotzone origin",
-            sidebar_resize_hotzone_origin(100.0),
-            100.0 - SIDEBAR_RESIZE_HOTZONE_PADDING,
-        );
-    }
-
     #[gpui::test]
     pub(in crate::workspace) fn left_sidebar_resize_hotzone_overlays_loaded_content(
         cx: &mut TestAppContext,

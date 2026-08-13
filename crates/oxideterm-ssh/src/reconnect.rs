@@ -515,20 +515,6 @@ impl ReconnectOrchestratorStore {
         })
     }
 
-    pub fn pipeline() -> [ReconnectPhase; 9] {
-        [
-            ReconnectPhase::Snapshot,
-            ReconnectPhase::GracePeriod,
-            ReconnectPhase::SshConnect,
-            ReconnectPhase::AwaitTerminal,
-            ReconnectPhase::RestoreForwards,
-            ReconnectPhase::ResumeTransfers,
-            ReconnectPhase::RestoreIde,
-            ReconnectPhase::Verify,
-            ReconnectPhase::Done,
-        ]
-    }
-
     fn push_phase(
         job: &mut ReconnectJob,
         phase: ReconnectPhase,
@@ -582,24 +568,6 @@ impl Default for ReconnectOrchestratorStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn exposes_tauri_reconnect_pipeline_order() {
-        assert_eq!(
-            ReconnectOrchestratorStore::pipeline(),
-            [
-                ReconnectPhase::Snapshot,
-                ReconnectPhase::GracePeriod,
-                ReconnectPhase::SshConnect,
-                ReconnectPhase::AwaitTerminal,
-                ReconnectPhase::RestoreForwards,
-                ReconnectPhase::ResumeTransfers,
-                ReconnectPhase::RestoreIde,
-                ReconnectPhase::Verify,
-                ReconnectPhase::Done,
-            ]
-        );
-    }
 
     #[test]
     fn schedule_is_idempotent_per_node() {

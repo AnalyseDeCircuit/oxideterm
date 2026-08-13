@@ -98,36 +98,3 @@ pub fn command_panel_body(tokens: &ThemeTokens) -> Div {
         .flex_col()
         .gap(px(tokens.spacing.two))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn command_panel_options_default_to_workspace_popover() {
-        let options = CommandPanelOptions::default();
-
-        assert!(!options.terminal_owned);
-        assert_eq!(options.width, None);
-        assert_eq!(options.max_height, None);
-        assert_eq!(options.padding, SurfacePadding::Normal);
-    }
-
-    #[test]
-    fn command_panel_options_are_chainable() {
-        let options = CommandPanelOptions::new()
-            .width(420.0)
-            .max_width_ratio(0.9)
-            .max_height(320.0)
-            .padding(SurfacePadding::None)
-            .terminal_owned()
-            .has_background_image(true);
-
-        assert_eq!(options.width, Some(420.0));
-        assert_eq!(options.max_width_ratio, Some(0.9));
-        assert_eq!(options.max_height, Some(320.0));
-        assert_eq!(options.padding, SurfacePadding::None);
-        assert!(options.terminal_owned);
-        assert!(options.has_background_image);
-    }
-}

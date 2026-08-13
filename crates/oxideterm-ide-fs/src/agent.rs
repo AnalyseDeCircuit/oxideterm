@@ -26,8 +26,6 @@ use oxideterm_ide_core::{
     IdeFileError, IdeFileErrorKind, IdeFsFuture, IdeLocation, IdePathStat, IdeProjectInfo,
     IdeSearchQuery, IdeWatchEvent, IdeWatchKey, SavedFileVersion, WriteMode,
 };
-#[cfg(test)]
-use oxideterm_sftp::{FileInfo, FileType};
 use oxideterm_sftp::{SftpError, SftpExecChannelOpener};
 use oxideterm_ssh::{
     ConnectionConsumer, NodeId, NodeRouter, ResolvedConnection, RouteError, SshConnectionHandle,

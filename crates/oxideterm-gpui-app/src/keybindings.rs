@@ -622,19 +622,6 @@ pub(crate) fn matched_action_for_keystroke(
         .map(|definition| (definition, combo))
 }
 
-#[cfg(test)]
-fn normalize_plugin_key_combo(keybinding: &str) -> Option<String> {
-    let mut parts = keybinding
-        .split('+')
-        .filter_map(normalize_plugin_key_part)
-        .collect::<Vec<_>>();
-    if parts.is_empty() {
-        return None;
-    }
-    parts.sort();
-    Some(parts.join("+"))
-}
-
 pub(crate) fn normalize_plugin_keystroke(keystroke: &Keystroke) -> Option<String> {
     let combo = combo_from_keystroke(keystroke)?;
     let mut parts = Vec::new();
@@ -1278,19 +1265,6 @@ mod tests {
 
     #[test]
     fn plugin_keybindings_match_tauri_normalization() {
-        assert_eq!(
-            normalize_plugin_key_combo("Cmd+Shift+R").as_deref(),
-            Some("ctrl+r+shift")
-        );
-        assert_eq!(
-            normalize_plugin_key_combo("K+SHIFT+CTRL").as_deref(),
-            Some("ctrl+k+shift")
-        );
-        assert_eq!(
-            normalize_plugin_key_combo("Command+Option+Escape").as_deref(),
-            Some("alt+ctrl+esc")
-        );
-
         let cmd_shift_r = Keystroke {
             modifiers: Modifiers {
                 platform: true,

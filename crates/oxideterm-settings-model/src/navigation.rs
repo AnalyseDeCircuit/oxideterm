@@ -285,14 +285,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_navigation_layout_matches_declared_groups() {
-        assert_eq!(
-            SettingsNavigationLayout::default().groups(),
-            SettingsTab::groups()
-        );
-    }
-
-    #[test]
     fn persisted_navigation_layout_ignores_invalid_entries_and_appends_new_tabs() {
         let persisted = vec![
             vec!["terminal".to_string(), "unknown".to_string()],

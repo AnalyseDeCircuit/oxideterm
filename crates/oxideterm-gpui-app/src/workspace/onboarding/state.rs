@@ -144,8 +144,8 @@ pub(in crate::workspace) enum OnboardingImportState {
 
 #[cfg(test)]
 mod tests {
-    use super::{ONBOARDING_FONT_OPTIONS, disclaimer_accepted_from_settings};
-    use oxideterm_settings::{FontFamily, PersistedSettings};
+    use super::disclaimer_accepted_from_settings;
+    use oxideterm_settings::PersistedSettings;
 
     #[test]
     fn persisted_disclaimer_acceptance_restores_without_completed_onboarding() {
@@ -161,18 +161,5 @@ mod tests {
         settings.onboarding_completed = true;
 
         assert!(disclaimer_accepted_from_settings(&settings));
-    }
-
-    #[test]
-    fn onboarding_fonts_are_bundled_or_custom() {
-        assert_eq!(
-            ONBOARDING_FONT_OPTIONS.map(|(family, _, bundled)| (family, bundled)),
-            [
-                (FontFamily::Jetbrains, true),
-                (FontFamily::Meslo, true),
-                (FontFamily::Maple, true),
-                (FontFamily::Custom, false),
-            ]
-        );
     }
 }

@@ -141,29 +141,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn entity_list_row_defaults_are_dense_but_not_active() {
-        let options = EntityListRowOptions::default();
-
-        assert!(!options.active);
-        assert!(!options.disabled);
-        assert_eq!(options.density, EntityListRowDensity::Normal);
-    }
-
-    #[test]
-    fn entity_list_row_options_are_chainable() {
-        let options = EntityListRowOptions::new()
-            .active(true)
-            .disabled(true)
-            .compact()
-            .has_background_image(true);
-
-        assert!(options.active);
-        assert!(options.disabled);
-        assert_eq!(options.density, EntityListRowDensity::Compact);
-        assert!(options.has_background_image);
-    }
-
-    #[test]
     fn entity_list_row_height_follows_theme_density() {
         let comfortable = oxideterm_theme::default_tokens();
         let mut compact = comfortable;

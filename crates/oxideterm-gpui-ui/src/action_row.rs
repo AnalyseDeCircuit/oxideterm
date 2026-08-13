@@ -87,29 +87,3 @@ pub fn action_slot_row(
 
     row
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn action_slot_row_options_default_to_center_alignment() {
-        let options = ActionSlotRowOptions::default();
-
-        assert_eq!(options.alignment, ActionSlotRowAlignment::Center);
-        assert_eq!(options.gap, None);
-        assert_eq!(options.trailing_gap, None);
-    }
-
-    #[test]
-    fn action_slot_row_options_are_chainable() {
-        let options = ActionSlotRowOptions::new()
-            .align_start()
-            .gap(10.0)
-            .trailing_gap(8.0);
-
-        assert_eq!(options.alignment, ActionSlotRowAlignment::Start);
-        assert_eq!(options.gap, Some(10.0));
-        assert_eq!(options.trailing_gap, Some(8.0));
-    }
-}

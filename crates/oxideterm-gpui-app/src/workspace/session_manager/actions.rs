@@ -719,6 +719,11 @@ impl WorkspaceApp {
             ),
         };
         self.session_manager.update(cx, |session_manager, cx| {
+            if changed {
+                session_manager
+                    .selected_items
+                    .remove(&SessionManagerSelectionTarget::Serial(id.to_string()));
+            }
             session_manager.set_status(Some(status), cx)
         });
         if changed {
@@ -727,17 +732,26 @@ impl WorkspaceApp {
     }
 
     pub(super) fn delete_telnet_profile(&mut self, id: &str, cx: &mut Context<Self>) {
-        let status = match self.connection_store.delete_telnet_profile(id) {
-            Ok(true) => self.i18n.t("sessionManager.telnet_profiles.delete"),
-            Ok(false) => self.i18n.t("sessionManager.telnet_profiles.delete_failed"),
-            Err(error) => {
+        let (status, deleted) = match self.connection_store.delete_telnet_profile(id) {
+            Ok(true) => (self.i18n.t("sessionManager.telnet_profiles.delete"), true),
+            Ok(false) => (
+                self.i18n.t("sessionManager.telnet_profiles.delete_failed"),
+                false,
+            ),
+            Err(error) => (
                 format!(
                     "{}: {error}",
                     self.i18n.t("sessionManager.telnet_profiles.delete_failed")
-                )
-            }
+                ),
+                false,
+            ),
         };
         self.session_manager.update(cx, |session_manager, cx| {
+            if deleted {
+                session_manager
+                    .selected_items
+                    .remove(&SessionManagerSelectionTarget::Telnet(id.to_string()));
+            }
             session_manager.set_status(Some(status), cx)
         });
     }
@@ -758,6 +772,11 @@ impl WorkspaceApp {
             ),
         };
         self.session_manager.update(cx, |session_manager, cx| {
+            if changed {
+                session_manager
+                    .selected_items
+                    .remove(&SessionManagerSelectionTarget::Mosh(id.to_string()));
+            }
             session_manager.set_status(Some(status), cx)
         });
         if changed {
@@ -1002,6 +1021,33 @@ impl WorkspaceApp {
                         deleted += 1;
                     }
                 }
+                SessionManagerSelectionTarget::Serial(id) => {
+                    if self
+                        .connection_store
+                        .delete_serial_profile(&id)
+                        .unwrap_or(false)
+                    {
+                        deleted += 1;
+                    }
+                }
+                SessionManagerSelectionTarget::Telnet(id) => {
+                    if self
+                        .connection_store
+                        .delete_telnet_profile(&id)
+                        .unwrap_or(false)
+                    {
+                        deleted += 1;
+                    }
+                }
+                SessionManagerSelectionTarget::Mosh(id) => {
+                    if self
+                        .connection_store
+                        .delete_mosh_profile(&id)
+                        .unwrap_or(false)
+                    {
+                        deleted += 1;
+                    }
+                }
                 SessionManagerSelectionTarget::RemoteDesktop(id) => {
                     if self
                         .connection_store
@@ -1103,15 +1149,24 @@ impl WorkspaceApp {
             .cloned()
             .collect::<Vec<_>>();
         let mut connection_ids = Vec::new();
+        let mut serial_profile_ids = Vec::new();
+        let mut telnet_profile_ids = Vec::new();
+        let mut mosh_profile_ids = Vec::new();
         let mut remote_desktop_ids = Vec::new();
         for target in targets {
             match target {
                 SessionManagerSelectionTarget::Connection(id) => connection_ids.push(id),
+                SessionManagerSelectionTarget::Serial(id) => serial_profile_ids.push(id),
+                SessionManagerSelectionTarget::Telnet(id) => telnet_profile_ids.push(id),
+                SessionManagerSelectionTarget::Mosh(id) => mosh_profile_ids.push(id),
                 SessionManagerSelectionTarget::RemoteDesktop(id) => remote_desktop_ids.push(id),
             }
         }
         match self.connection_store.move_session_assets_to_group(
             &connection_ids,
+            &serial_profile_ids,
+            &telnet_profile_ids,
+            &mosh_profile_ids,
             &remote_desktop_ids,
             group,
         ) {

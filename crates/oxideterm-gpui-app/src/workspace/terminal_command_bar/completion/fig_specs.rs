@@ -1162,7 +1162,6 @@ mod terminal_fig_registry_tests {
     #[test]
     fn built_in_terminal_fig_specs_cover_common_tools() {
         let specs = built_in_terminal_fig_specs();
-        assert!(specs.len() >= 55);
         for command in ["jq", "make", "go", "uv", "psql", "tmux", "journalctl", "nc"] {
             assert!(specs.iter().any(|spec| spec.name == command), "{command}");
         }

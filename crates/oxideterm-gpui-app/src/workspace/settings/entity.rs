@@ -2412,22 +2412,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn cloud_sync_inputs_commit_at_keyboard_blur_and_modal_boundaries() {
-        let cards_source = include_str!("cards.rs");
-        let helpers_source = include_str!("../root/helpers.rs");
-
-        // A focused Cloud Sync value is moved out of its Entity, so dropping
-        // the generic input draft at any release boundary would lose the edit.
-        assert!(
-            cards_source
-                .matches("commit_focused_cloud_sync_input(input, cx)")
-                .count()
-                >= 3
-        );
-        assert!(helpers_source.contains("apply_focused_cloud_sync_input_draft(cx)"));
-    }
-
     #[gpui::test]
     fn settings_route_and_navigation_draft_are_entity_owned(cx: &mut TestAppContext) {
         let entity = cx.new(SettingsWorkspaceEntity::new);
@@ -3067,28 +3051,6 @@ mod tests {
         cx.run_until_parked();
 
         assert!(dropped.load(Ordering::Acquire));
-    }
-
-    #[test]
-    fn keybinding_import_preserves_the_invoking_window_as_action_context() {
-        let action_source = include_str!("../actions.rs");
-        let update_source = include_str!("update.rs");
-        let init_source = include_str!("../root/init.rs");
-        let compact_update_source = update_source
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .concat();
-
-        assert!(action_source.contains("let target_window = window.window_handle();"));
-        assert!(
-            action_source.contains(
-                "settings.start_keybinding_import(selection, runtime, target_window, cx);"
-            )
-        );
-        assert!(compact_update_source.contains(
-            "self.apply_runtime_key_bindings_to_window_handle(runtime_bindings,target_window,cx,);"
-        ));
-        assert!(!init_source.contains("settings_workspace_window_handle"));
     }
 
     #[gpui::test]

@@ -301,6 +301,9 @@ pub(super) enum SessionManagerDeleteConfirm {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(super) enum SessionManagerSelectionTarget {
     Connection(String),
+    Serial(String),
+    Telnet(String),
+    Mosh(String),
     RemoteDesktop(String),
 }
 

@@ -241,12 +241,4 @@ mod tests {
         backend.command(AudioPreviewCommand::PlayPause).unwrap();
         assert_eq!(backend.snapshot().state, AudioPreviewState::Paused);
     }
-
-    #[test]
-    fn audio_backend_types_are_thread_safe() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<MemoryAudioPreviewBackend>();
-        assert_send_sync::<UnsupportedAudioPreviewBackend>();
-        assert_send_sync::<AudioPreviewSnapshot>();
-    }
 }

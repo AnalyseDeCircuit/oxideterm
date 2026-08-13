@@ -2737,6 +2737,9 @@ mod tests {
             store
                 .move_session_assets_to_group(
                     &["ssh-move".to_string()],
+                    &[],
+                    &[],
+                    &[],
                     std::slice::from_ref(&cleared.id),
                     Some("Moved"),
                 )
@@ -2750,6 +2753,92 @@ mod tests {
         assert_eq!(
             store
                 .get_remote_desktop_profile(&cleared.id)
+                .and_then(|profile| profile.group.as_deref()),
+            Some("Moved")
+        );
+    }
+
+    #[test]
+    fn move_session_assets_to_group_includes_every_saved_profile_type() {
+        let mut store = load_empty_store("move-all-session-assets");
+        store
+            .upsert(request("ssh-move", SavedAuth::Agent))
+            .unwrap();
+        let serial = store
+            .upsert_serial_profile(SaveSerialProfileRequest {
+                id: Some("serial-move".to_string()),
+                name: "Serial console".to_string(),
+                port_path: "/dev/tty.test".to_string(),
+                ..SaveSerialProfileRequest::default()
+            })
+            .unwrap();
+        let telnet = store
+            .upsert_telnet_profile(SaveTelnetProfileRequest {
+                id: Some("telnet-move".to_string()),
+                name: "Telnet console".to_string(),
+                host: "telnet.example.test".to_string(),
+                port: 23,
+                ..SaveTelnetProfileRequest::default()
+            })
+            .unwrap();
+        let mosh = store
+            .upsert_mosh_profile(mosh_request("mosh-move", SavedAuth::Agent))
+            .unwrap();
+        let remote = store
+            .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+                id: Some("remote-move".to_string()),
+                name: "Remote desktop".to_string(),
+                protocol: RemoteDesktopProtocol::Rdp,
+                host: "remote.example.test".to_string(),
+                port: 3389,
+                ..SaveRemoteDesktopProfileRequest::default()
+            })
+            .unwrap();
+
+        assert_eq!(
+            store
+                .move_session_assets_to_group(
+                    &["ssh-move".to_string()],
+                    std::slice::from_ref(&serial.id),
+                    std::slice::from_ref(&telnet.id),
+                    std::slice::from_ref(&mosh.id),
+                    std::slice::from_ref(&remote.id),
+                    Some("Moved"),
+                )
+                .unwrap(),
+            5
+        );
+        assert_eq!(
+            store.get("ssh-move").and_then(|connection| connection.group.as_deref()),
+            Some("Moved")
+        );
+        assert_eq!(
+            store
+                .serial_profiles()
+                .iter()
+                .find(|profile| profile.id == serial.id)
+                .and_then(|profile| profile.group.as_deref()),
+            Some("Moved")
+        );
+        assert_eq!(
+            store
+                .telnet_profiles()
+                .iter()
+                .find(|profile| profile.id == telnet.id)
+                .and_then(|profile| profile.group.as_deref()),
+            Some("Moved")
+        );
+        assert_eq!(
+            store
+                .mosh_profiles()
+                .iter()
+                .find(|profile| profile.id == mosh.id)
+                .and_then(|profile| profile.group.as_deref()),
+            Some("Moved")
+        );
+        assert_eq!(
+            store
+                .get_remote_desktop_profile(&remote.id)
                 .and_then(|profile| profile.group.as_deref()),
             Some("Moved")
         );

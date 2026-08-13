@@ -503,18 +503,24 @@ impl ConnectionStore {
     }
 
     pub fn move_to_group(&mut self, ids: &[String], group: Option<&str>) -> Result<usize> {
-        self.move_session_assets_to_group(ids, &[], group)
+        self.move_session_assets_to_group(ids, &[], &[], &[], &[], group)
     }
 
-    /// Moves a mixed Session Manager selection in one metadata save.
+    /// Moves all saved Session Manager asset types in one metadata save.
     pub fn move_session_assets_to_group(
         &mut self,
         connection_ids: &[String],
+        serial_profile_ids: &[String],
+        telnet_profile_ids: &[String],
+        mosh_profile_ids: &[String],
         remote_desktop_ids: &[String],
         group: Option<&str>,
     ) -> Result<usize> {
         let group = normalize_optional_group_name(group)?;
         let connection_id_set = connection_ids.iter().collect::<HashSet<_>>();
+        let serial_profile_id_set = serial_profile_ids.iter().collect::<HashSet<_>>();
+        let telnet_profile_id_set = telnet_profile_ids.iter().collect::<HashSet<_>>();
+        let mosh_profile_id_set = mosh_profile_ids.iter().collect::<HashSet<_>>();
         let remote_desktop_id_set = remote_desktop_ids.iter().collect::<HashSet<_>>();
         let now = Utc::now();
         let mut updated = 0;
@@ -522,6 +528,27 @@ impl ConnectionStore {
             if connection_id_set.contains(&conn.id) {
                 conn.group = group.clone();
                 conn.updated_at = Some(now);
+                updated += 1;
+            }
+        }
+        for profile in &mut self.data.serial_profiles {
+            if serial_profile_id_set.contains(&profile.id) {
+                profile.group = group.clone();
+                profile.updated_at = now;
+                updated += 1;
+            }
+        }
+        for profile in &mut self.data.telnet_profiles {
+            if telnet_profile_id_set.contains(&profile.id) {
+                profile.group = group.clone();
+                profile.updated_at = now;
+                updated += 1;
+            }
+        }
+        for profile in &mut self.data.mosh_profiles {
+            if mosh_profile_id_set.contains(&profile.id) {
+                profile.group = group.clone();
+                profile.updated_at = now;
                 updated += 1;
             }
         }

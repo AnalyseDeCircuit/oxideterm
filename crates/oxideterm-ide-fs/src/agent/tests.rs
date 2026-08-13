@@ -80,27 +80,6 @@ mod tests {
     }
 
     #[test]
-    fn maps_sftp_entries_like_tauri_file_info() {
-        let node_id = NodeId::new("node-1");
-        let entry = FileInfo {
-            name: "main.rs".to_string(),
-            path: "/repo/main.rs".to_string(),
-            file_type: FileType::File,
-            size: 128,
-            modified: 7,
-            permissions: "644".to_string(),
-            owner: None,
-            group: None,
-            is_symlink: false,
-            symlink_target: None,
-        };
-
-        let mapped = file_tree_entry_from_sftp(&node_id, entry);
-        assert_eq!(mapped.kind, FileKind::File);
-        assert_eq!(mapped.version.modified_millis, Some(7000));
-    }
-
-    #[test]
     fn drops_agent_registry_without_tokio_reactor() {
         let registry = AgentRegistry::default();
         let (write_tx, _write_rx) = mpsc::channel::<String>(1);

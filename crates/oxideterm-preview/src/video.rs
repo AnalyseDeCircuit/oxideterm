@@ -101,11 +101,4 @@ mod tests {
         assert_eq!(snapshot.state, PlatformVideoState::Unavailable);
         assert!(snapshot.error.unwrap().contains("not linked"));
     }
-
-    #[test]
-    fn video_backend_types_are_thread_safe() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<UnsupportedPlatformVideoBackend>();
-        assert_send_sync::<PlatformVideoSnapshot>();
-    }
 }

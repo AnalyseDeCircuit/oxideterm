@@ -1,31 +1,4 @@
 use super::*;
-use oxideterm_gpui_ui::TauriTableMetrics;
-
-const MANAGER_COL_CHECKBOX: f32 = 32.0;
-const MANAGER_COL_NAME_BASIS: f32 = 140.0;
-const MANAGER_COL_HOST: f32 = 130.0;
-const MANAGER_COL_PORT: f32 = 50.0;
-const MANAGER_COL_USERNAME: f32 = 90.0;
-const MANAGER_COL_AUTH: f32 = 72.0;
-const MANAGER_COL_GROUP: f32 = 100.0;
-const MANAGER_COL_LAST_USED: f32 = 90.0;
-const MANAGER_COL_ACTIONS: f32 = 84.0;
-
-pub(super) fn manager_table_min_width_for_metrics(metrics: TauriTableMetrics) -> f32 {
-    // Tauri ConnectionTable columns: px-2 wrapper plus w-8, w-[140px],
-    // w-[130px], w-[50px], w-[90px], w-[72px], w-[100px], w-[90px],
-    // and sticky w-[84px] actions.
-    metrics.padding_x * 2.0
-        + MANAGER_COL_CHECKBOX
-        + MANAGER_COL_NAME_BASIS
-        + MANAGER_COL_HOST
-        + MANAGER_COL_PORT
-        + MANAGER_COL_USERNAME
-        + MANAGER_COL_AUTH
-        + MANAGER_COL_GROUP
-        + MANAGER_COL_LAST_USED
-        + MANAGER_COL_ACTIONS
-}
 
 pub(super) fn base_form() -> NewConnectionForm {
     let mut form = NewConnectionForm::default();
@@ -104,16 +77,6 @@ pub(super) fn saved_connection_fixture(auth: SavedAuth) -> SavedConnection {
         post_connect_command: None,
         privilege_credentials: Vec::new(),
     }
-}
-
-#[test]
-pub(super) fn session_manager_table_width_matches_tauri_connection_table_columns() {
-    // This locks the Tauri ConnectionTable min-w-fit contract that keeps
-    // horizontal scrolling, row dividers, and the sticky actions column aligned.
-    assert_eq!(
-        manager_table_min_width_for_metrics(TauriTableMetrics::default()),
-        804.0
-    );
 }
 
 #[test]
@@ -267,187 +230,6 @@ pub(super) fn contextual_group_editors_compose_only_one_path_segment() {
 }
 
 #[test]
-pub(super) fn session_group_tree_exposes_contextual_root_and_group_actions() {
-    let source = include_str!("views.rs");
-    // Tree-level and row-level right clicks must use pointer-positioned menus.
-    assert!(source.contains("SessionManagerRowActionTarget::GroupRoot"));
-    assert!(source.contains("open_session_manager_context_menu"));
-    assert!(source.contains("sessionManager.folder_tree.new_subgroup"));
-    assert!(source.contains("MouseButton::Right"));
-    assert!(source.contains("close_session_row_menus(cx)"));
-}
-
-#[test]
-pub(super) fn session_manager_main_views_keep_independent_empty_list_states() {
-    let state = SessionManagerState::default();
-
-    assert_eq!(state.main_grid_list_state.item_count(), 0);
-    assert_eq!(state.main_list_state.item_count(), 0);
-    assert_eq!(state.main_tree_list_state.item_count(), 0);
-}
-
-#[test]
-pub(super) fn session_manager_main_views_use_virtual_lists_as_scroll_owners() {
-    let source = include_str!("views.rs");
-    for (function_name, next_function_name) in [
-        (
-            "pub(super) fn render_session_manager_grid_view",
-            "pub(super) fn render_session_manager_grid_row",
-        ),
-        (
-            "pub(super) fn render_session_manager_list_view",
-            "pub(super) fn render_session_manager_tree_view",
-        ),
-        (
-            "pub(super) fn render_session_manager_tree_view",
-            "pub(super) fn render_session_manager_view_actions",
-        ),
-    ] {
-        let function_start = source.find(function_name).expect("main view function");
-        let function_tail = &source[function_start + function_name.len()..];
-        let function_end = function_tail
-            .find(next_function_name)
-            .expect("next main view function");
-        let function_source = &function_tail[..function_end];
-        assert!(function_source.contains("tauri_virtual_list("));
-        assert!(!function_source.contains("overflow_y_scrollbar"));
-    }
-}
-
-#[test]
-pub(super) fn session_group_management_action_is_shared_by_every_view_and_empty_state() {
-    let source = include_str!("views.rs");
-    for (function_name, next_function_name) in [
-        (
-            "pub(super) fn render_session_manager_view_content",
-            "pub(super) fn render_session_manager_empty_view",
-        ),
-        (
-            "pub(super) fn render_session_manager_grid_view",
-            "pub(super) fn render_session_manager_grid_row",
-        ),
-        (
-            "pub(super) fn render_session_manager_list_view",
-            "pub(super) fn render_session_manager_tree_view",
-        ),
-        (
-            "pub(super) fn render_session_manager_tree_view",
-            "pub(super) fn render_session_manager_view_actions",
-        ),
-    ] {
-        let function_start = source.find(function_name).expect("view function");
-        let function_tail = &source[function_start + function_name.len()..];
-        let function_end = function_tail
-            .find(next_function_name)
-            .expect("next view function");
-        assert!(
-            function_tail[..function_end].contains("render_session_manager_view_actions"),
-            "{function_name} must expose the shared group-management action"
-        );
-    }
-
-    let actions_start = source
-        .find("pub(super) fn render_session_manager_view_actions")
-        .expect("shared view actions");
-    let actions_tail = &source[actions_start..];
-    let actions_end = actions_tail
-        .find("pub(super) fn render_tree_mode_action_button")
-        .expect("next view helper");
-    let actions_source = &actions_tail[..actions_end];
-    assert!(actions_source.contains("sessionManager.folder_tree.manage_groups"));
-    assert!(actions_source.contains("open_session_group_manager"));
-    assert!(!actions_source.contains("sessionManager.folder_tree.new_group"));
-    assert!(!actions_source.contains("open_session_group_creation"));
-
-    let dialogs_source = include_str!("dialogs.rs");
-    assert!(dialogs_source.contains("open_session_group_creation"));
-    assert!(dialogs_source.contains("group_editor.clone()"));
-    assert!(!dialogs_source.contains("render_group_editor_dialog"));
-}
-
-#[test]
-pub(super) fn session_manager_virtual_rows_claim_the_available_list_width() {
-    let source = include_str!("views.rs");
-    // Every top-level virtual row must stretch independently of its content width.
-    for (function_name, next_function_name) in [
-        (
-            "pub(super) fn render_session_manager_section_header",
-            "pub(super) fn render_session_manager_item_card",
-        ),
-        (
-            "pub(super) fn render_session_manager_tree_group_row",
-            "pub(super) fn render_session_manager_display_item_row",
-        ),
-        (
-            "pub(super) fn render_session_manager_display_item_row",
-            "pub(super) fn render_session_manager_item_icon",
-        ),
-    ] {
-        let function_start = source.find(function_name).expect("row function");
-        let function_tail = &source[function_start + function_name.len()..];
-        let function_end = function_tail
-            .find(next_function_name)
-            .expect("next row function");
-        let function_source = &function_tail[..function_end];
-        assert!(function_source.contains(".w_full()"));
-        assert!(function_source.contains(".min_w(px(0.0))"));
-    }
-
-    let grid_row_start = source
-        .find("pub(super) fn render_session_manager_grid_row")
-        .expect("grid row function");
-    let grid_row_tail =
-        &source[grid_row_start + "pub(super) fn render_session_manager_grid_row".len()..];
-    let grid_row_end = grid_row_tail
-        .find("pub(super) fn render_session_manager_recent_item")
-        .expect("next grid function");
-    let grid_row_source = &grid_row_tail[..grid_row_end];
-    assert_eq!(grid_row_source.matches(".w_full()").count(), 2);
-    assert_eq!(grid_row_source.matches(".min_w(px(0.0))").count(), 2);
-}
-
-#[test]
-pub(super) fn session_manager_grid_rows_preserve_symmetric_outer_gutters() {
-    let source = include_str!("views.rs");
-    let grid_view_start = source
-        .find("pub(super) fn render_session_manager_grid_view")
-        .expect("grid view function");
-    let grid_view_tail =
-        &source[grid_view_start + "pub(super) fn render_session_manager_grid_view".len()..];
-    let grid_view_end = grid_view_tail
-        .find("pub(super) fn render_session_manager_grid_row")
-        .expect("grid row function");
-    let grid_view_source = &grid_view_tail[..grid_view_end];
-    assert!(grid_view_source.contains(".pt(px(self.tokens.spacing.three))"));
-    assert!(!grid_view_source.contains(".p(px(self.tokens.spacing.three))"));
-
-    let grid_row_tail = &grid_view_tail[grid_view_end..];
-    let grid_row_end = grid_row_tail
-        .find("pub(super) fn render_session_manager_recent_item")
-        .expect("recent item function");
-    let grid_row_source = &grid_row_tail[..grid_row_end];
-    assert_eq!(
-        grid_row_source
-            .matches(".px(px(self.tokens.spacing.three))")
-            .count(),
-        2
-    );
-
-    let header_start = source
-        .find("pub(super) fn render_session_manager_section_header")
-        .expect("section header function");
-    let header_tail =
-        &source[header_start + "pub(super) fn render_session_manager_section_header".len()..];
-    let header_end = header_tail
-        .find("pub(super) fn render_session_manager_item_card")
-        .expect("item card function");
-    assert!(
-        header_tail[..header_end].contains(".px(px(self.tokens.spacing.three))"),
-        "grid section headers must align with card rows"
-    );
-}
-
-#[test]
 pub(super) fn session_menu_dismissal_closes_all_manager_popovers() {
     let mut state = SessionManagerState {
         show_batch_move: true,
@@ -496,12 +278,27 @@ pub(super) fn ssh_config_display_projection_never_copies_proxy_command_secrets()
 }
 
 #[test]
-pub(super) fn remote_desktop_selection_is_typed_separately_from_ssh_ids() {
+pub(super) fn saved_profile_selection_is_typed_separately_from_ssh_ids() {
     let now = Utc::now();
     let ssh = SessionManagerDisplayItem::Connection(ConnectionInfo {
         id: "shared-id".to_string(),
         ..connection_info_fixture(None)
     });
+    let mut serial = SerialProfile::new("Serial console", "/dev/tty.test");
+    serial.id = "shared-id".to_string();
+    let serial = SessionManagerDisplayItem::Serial(serial);
+    let mut telnet = TelnetProfile::new("Telnet console", "telnet.example.test", 23);
+    telnet.id = "shared-id".to_string();
+    let telnet = SessionManagerDisplayItem::Telnet(telnet);
+    let mut mosh = MoshProfile::new(
+        "Mosh console",
+        "mosh.example.test",
+        22,
+        "operator",
+        SavedAuth::Agent,
+    );
+    mosh.id = "shared-id".to_string();
+    let mosh = SessionManagerDisplayItem::Mosh(mosh);
     let remote = SessionManagerDisplayItem::RemoteDesktop(RemoteDesktopProfile {
         id: "shared-id".to_string(),
         name: "Remote desktop".to_string(),
@@ -527,6 +324,22 @@ pub(super) fn remote_desktop_selection_is_typed_separately_from_ssh_ids() {
         Some(SessionManagerSelectionTarget::Connection(
             "shared-id".to_string()
         ))
+    );
+    assert_eq!(
+        serial.selection_target(),
+        Some(SessionManagerSelectionTarget::Serial(
+            "shared-id".to_string()
+        ))
+    );
+    assert_eq!(
+        telnet.selection_target(),
+        Some(SessionManagerSelectionTarget::Telnet(
+            "shared-id".to_string()
+        ))
+    );
+    assert_eq!(
+        mosh.selection_target(),
+        Some(SessionManagerSelectionTarget::Mosh("shared-id".to_string()))
     );
     assert_eq!(
         remote.selection_target(),

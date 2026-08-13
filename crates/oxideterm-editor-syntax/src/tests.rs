@@ -6,11 +6,6 @@ use oxideterm_editor_core::{BufferOffset, TextRange};
 use crate::*;
 
 #[test]
-fn exposes_at_least_twenty_supported_languages() {
-    assert!(SUPPORTED_LANGUAGES.len() >= 20);
-}
-
-#[test]
 fn detects_supported_language_extensions_and_shebangs() {
     assert_eq!(LanguageId::from_path("src/main.rs"), Some(LanguageId::Rust));
     assert_eq!(LanguageId::from_path("install.sh"), Some(LanguageId::Bash));

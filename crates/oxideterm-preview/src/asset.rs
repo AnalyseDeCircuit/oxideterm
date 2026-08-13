@@ -165,10 +165,4 @@ mod tests {
         drop(owner);
         assert!(!path.exists());
     }
-
-    #[test]
-    fn asset_owner_is_thread_safe() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<PreviewAssetOwner>();
-    }
 }

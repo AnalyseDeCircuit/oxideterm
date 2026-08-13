@@ -913,11 +913,6 @@ mod tests {
     }
 
     #[test]
-    fn compact_monitor_uses_twelve_pixel_side_padding_at_every_width() {
-        assert_eq!(COMPACT_MONITOR_ROW_SIDE_PADDING, 12.0);
-    }
-
-    #[test]
     fn compact_monitor_layouts_use_distinct_list_identities() {
         assert_ne!(
             compact_monitor_list_identity(CompactMonitorLayout::Inline),

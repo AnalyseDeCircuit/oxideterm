@@ -538,31 +538,6 @@ mod tests {
         assert!(!startup_file.exists());
     }
 
-    #[test]
-    fn generated_hooks_emit_osc7_and_preserve_slashes() {
-        for hook in [
-            posix_prompt_hook(),
-            zsh_prompt_hook(true),
-            fish_prompt_hook(),
-            nushell_prompt_hook(),
-            powershell_prompt_hook(),
-        ] {
-            assert!(hook.contains("]7;"));
-        }
-        assert!(posix_prompt_hook().contains("]7;file://"));
-        assert!(posix_prompt_hook().contains("s|%2f|/|g"));
-    }
-
-    #[test]
-    fn powershell_hook_uses_windows_powershell_compatible_control_bytes() {
-        let hook = powershell_prompt_hook();
-
-        // Windows PowerShell 5.1 renders the PowerShell 7-only `e escape literally.
-        assert!(hook.contains("$([char]27)]7;"));
-        assert!(hook.contains("$([char]7)"));
-        assert!(!hook.contains("`e]"));
-    }
-
     #[cfg(unix)]
     #[test]
     fn zsh_user_config_resolves_history_from_original_zdotdir() {

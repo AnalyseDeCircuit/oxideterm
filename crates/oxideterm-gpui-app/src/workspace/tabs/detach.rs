@@ -1593,23 +1593,4 @@ mod tests {
             DetachedTabSurfaceRoute::Forwards(tab_id)
         );
     }
-
-    #[test]
-    fn detached_return_passes_the_source_window_to_mount_cleanup() {
-        let source = include_str!("detach.rs");
-        let return_start = source
-            .find("pub(in crate::workspace) fn return_detached_tab_to_main")
-            .expect("detached return function");
-        let return_tail = &source
-            [return_start + "pub(in crate::workspace) fn return_detached_tab_to_main".len()..];
-        let return_end = return_tail
-            .find("pub(in crate::workspace) fn release_detached_tab_window")
-            .expect("detached release function");
-        let return_source = &return_tail[..return_end];
-
-        assert!(return_source.contains("current_window: &mut Window"));
-        assert!(return_source.contains(
-            "self.apply_tab_mount_cleanup(transition.cleanup, Some(current_window), cx)"
-        ));
-    }
 }

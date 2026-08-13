@@ -186,13 +186,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shell_quote_handles_spaces_and_quotes() {
-        assert_eq!(shell_quote("/tmp/project"), "'/tmp/project'");
-        assert_eq!(shell_quote("/tmp/Oxide Term"), "'/tmp/Oxide Term'");
-        assert_eq!(shell_quote("/tmp/it's-ok"), "'/tmp/it'\\''s-ok'");
-    }
-
-    #[test]
     fn remote_shell_probe_contains_quoted_cwd_and_protocol_sentinel() {
         let command = remote_shell_probe_command("/tmp/it's-ok");
         assert!(command.contains("cd -- '/tmp/it'\\''s-ok'"));

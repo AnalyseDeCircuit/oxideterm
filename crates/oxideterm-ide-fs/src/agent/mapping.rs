@@ -146,22 +146,3 @@ fn should_write_via_agent(expected_version: Option<&SavedFileVersion>) -> bool {
     // becomes available. `None` is the explicit conflict-overwrite path.
     expected_version.is_none() || expected_version.and_then(|version| version.etag.as_ref()).is_some()
 }
-
-#[cfg(test)]
-fn file_tree_entry_from_sftp(node_id: &NodeId, entry: FileInfo) -> FileTreeEntry {
-    FileTreeEntry {
-        location: IdeLocation::remote(node_id.0.clone(), entry.path),
-        kind: match entry.file_type {
-            FileType::File => FileKind::File,
-            FileType::Directory => FileKind::Directory,
-            FileType::Symlink => FileKind::Symlink,
-            FileType::Unknown => FileKind::Other,
-        },
-        name: entry.name,
-        version: SavedFileVersion {
-            size_bytes: Some(entry.size),
-            modified_millis: (entry.modified > 0).then_some(entry.modified * 1000),
-            etag: None,
-        },
-    }
-}

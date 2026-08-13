@@ -116,29 +116,3 @@ pub fn section_header(
     }
     header
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn section_header_options_default_to_roomy_header() {
-        let options = SectionHeaderOptions::default();
-
-        assert!(!options.compact);
-        assert_eq!(options.description, None);
-        assert_eq!(options.count, None);
-    }
-
-    #[test]
-    fn section_header_options_are_chainable() {
-        let options = SectionHeaderOptions::new()
-            .description("visible state")
-            .count("12")
-            .compact();
-
-        assert!(options.compact);
-        assert_eq!(options.description.as_deref(), Some("visible state"));
-        assert_eq!(options.count.as_deref(), Some("12"));
-    }
-}

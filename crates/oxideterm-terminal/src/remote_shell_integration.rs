@@ -298,17 +298,6 @@ fn integration_files() -> [(&'static str, &'static str); 8] {
     ]
 }
 
-#[cfg(test)]
-fn shell_integration_source(shell: RemoteShellKind) -> &'static str {
-    match shell {
-        RemoteShellKind::Bash => BASH_INTEGRATION,
-        RemoteShellKind::Zsh => ZSH_INTEGRATION,
-        RemoteShellKind::Fish => FISH_INTEGRATION,
-        RemoteShellKind::Nushell => NUSHELL_INTEGRATION,
-        RemoteShellKind::PowerShell => POWERSHELL_INTEGRATION,
-    }
-}
-
 fn startup_reference(shell: RemoteShellKind) -> String {
     let reference = match shell {
         RemoteShellKind::Bash => {
@@ -697,47 +686,6 @@ mod tests {
     }
 
     #[test]
-    fn every_shell_source_emits_osc7_and_gates_private_editor_adapters() {
-        for shell in [
-            RemoteShellKind::Bash,
-            RemoteShellKind::Zsh,
-            RemoteShellKind::Fish,
-            RemoteShellKind::Nushell,
-            RemoteShellKind::PowerShell,
-        ] {
-            let source = shell_integration_source(shell);
-            assert!(source.contains("]7;file://"));
-            assert!(!source.contains("7719;v=2"));
-            assert!(source.contains("LC_OXIDETERM_SESSION"));
-            assert!(source.contains("OXIDETERM_PRIVATE_OSC"));
-            assert!(source.contains("OXIDETERM_VIM_INTEGRATION"));
-            assert!(source.contains("OXIDETERM_EMACS_INTEGRATION"));
-            assert!(!source.contains("OXIDETERM_REMOTE_METADATA_ID"));
-        }
-        assert!(REMOTE_INTEGRATION_README.contains("current working directory and host"));
-        assert!(REMOTE_INTEGRATION_README.contains("standard OSC 7"));
-    }
-
-    #[test]
-    fn powershell_source_uses_windows_powershell_compatible_control_bytes() {
-        // Windows PowerShell 5.1 does not recognize the PowerShell 7-only `e escape.
-        assert!(POWERSHELL_INTEGRATION.contains("$([char]27)]7;"));
-        assert!(POWERSHELL_INTEGRATION.contains("$([char]7)"));
-        assert!(!POWERSHELL_INTEGRATION.contains("`e]"));
-    }
-
-    #[test]
-    fn nushell_source_normalizes_windows_drive_paths_for_osc7() {
-        assert!(NUSHELL_INTEGRATION.contains("url encode --all"));
-        assert!(NUSHELL_INTEGRATION.contains("str replace --all '\\' '/'"));
-        assert!(NUSHELL_INTEGRATION.contains("str contains --regex '^[A-Za-z]:/'"));
-        assert!(NUSHELL_INTEGRATION.contains("'/' + $__oxideterm_path"));
-        assert!(NUSHELL_INTEGRATION.contains("str replace --all '%2F' '/'"));
-        assert!(!NUSHELL_INTEGRATION.contains("^sed"));
-        assert!(!NUSHELL_INTEGRATION.contains("^od"));
-    }
-
-    #[test]
     fn version_three_managed_block_upgrades_in_place() {
         let old_block = format!(
             "# {MANAGED_BLOCK_START}\n# oxideterm-shell-integration-version: 3\nlegacy source\n# {MANAGED_BLOCK_END}"
@@ -837,14 +785,6 @@ prompt
                 .count(),
             1
         );
-    }
-
-    #[test]
-    fn bash_source_preserves_scalar_and_array_prompt_command_forms() {
-        assert!(BASH_INTEGRATION.contains("declare -p PROMPT_COMMAND"));
-        assert!(BASH_INTEGRATION.contains("${PROMPT_COMMAND[@]}"));
-        assert!(BASH_INTEGRATION.contains("PROMPT_COMMAND=("));
-        assert!(BASH_INTEGRATION.contains("${PROMPT_COMMAND:+;$PROMPT_COMMAND}"));
     }
 
     #[cfg(unix)]

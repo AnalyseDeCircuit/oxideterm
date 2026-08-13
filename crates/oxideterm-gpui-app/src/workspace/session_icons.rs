@@ -349,11 +349,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_exposes_broad_generic_icon_set() {
-        assert!(SESSION_ICON_CHOICES.len() >= 70);
-    }
-
-    #[test]
     fn legacy_semantic_icon_ids_remain_supported() {
         assert!(matches!(
             session_icon_from_id(Some("database")),

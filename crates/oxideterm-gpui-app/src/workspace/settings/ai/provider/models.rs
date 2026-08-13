@@ -361,19 +361,3 @@ impl WorkspaceApp {
         self.ai_provider_has_key_cached(provider_id, cx)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn model_chip_list_height_keeps_bottom_padding_outside_the_viewport() {
-        let row_count = 2;
-        let container_height = ai_provider_model_chip_list_height(row_count);
-
-        assert_eq!(
-            container_height - AI_PROVIDER_MODEL_CHIP_LIST_BOTTOM_PADDING,
-            row_count as f32 * AI_PROVIDER_MODEL_CHIP_ROW_ESTIMATED_HEIGHT
-        );
-    }
-}

@@ -103,14 +103,22 @@ impl SessionManagerDisplayItem {
     }
 
     pub(super) fn selection_target(&self) -> Option<SessionManagerSelectionTarget> {
+        // Only SSH config discoveries are transient; every saved profile can use batch actions.
         match self {
             Self::Connection(connection) => Some(SessionManagerSelectionTarget::Connection(
                 connection.id.clone(),
             )),
+            Self::Serial(profile) => {
+                Some(SessionManagerSelectionTarget::Serial(profile.id.clone()))
+            }
+            Self::Telnet(profile) => {
+                Some(SessionManagerSelectionTarget::Telnet(profile.id.clone()))
+            }
+            Self::Mosh(profile) => Some(SessionManagerSelectionTarget::Mosh(profile.id.clone())),
             Self::RemoteDesktop(profile) => Some(SessionManagerSelectionTarget::RemoteDesktop(
                 profile.id.clone(),
             )),
-            Self::SshConfig(_) | Self::Serial(_) | Self::Telnet(_) | Self::Mosh(_) => None,
+            Self::SshConfig(_) => None,
         }
     }
 

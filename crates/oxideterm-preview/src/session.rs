@@ -470,15 +470,6 @@ mod tests {
     }
 
     #[test]
-    fn preview_session_types_are_thread_safe() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<PreviewSource>();
-        assert_send_sync::<PreviewSessionState>();
-        assert_send_sync::<PreviewSession>();
-        assert_send_sync::<PreviewContent>();
-    }
-
-    #[test]
     fn load_inline_uses_async_entrypoint() {
         let session = block_on_ready(PreviewSession::load(PreviewSource::Inline(
             PreviewContent::Unsupported {

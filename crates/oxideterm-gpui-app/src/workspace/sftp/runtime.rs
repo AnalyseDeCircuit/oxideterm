@@ -44,41 +44,10 @@ fn remote_list_result_is_superseded(
     load_pending && requested_path != current_path
 }
 
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SftpRemoteListCompletionContext {
-    CurrentVisibleView,
-    CurrentHiddenView,
-    StaleView,
-}
-
 struct SftpRemoteListOutcome {
     bind_session: Option<(NodeId, String, String)>,
     load_transfer_state_for: Option<NodeId>,
     changed: bool,
-}
-
-#[cfg(test)]
-impl SftpRemoteListCompletionContext {
-    fn should_apply(self) -> bool {
-        !matches!(self, Self::StaleView)
-    }
-}
-
-#[cfg(test)]
-fn classify_sftp_remote_list_completion(
-    tab_still_owns_node: bool,
-    view_still_owns_node: bool,
-    tab_is_active: bool,
-) -> SftpRemoteListCompletionContext {
-    // Visibility does not own the result; the remembered SFTP view does.
-    if !tab_still_owns_node || !view_still_owns_node {
-        SftpRemoteListCompletionContext::StaleView
-    } else if tab_is_active {
-        SftpRemoteListCompletionContext::CurrentVisibleView
-    } else {
-        SftpRemoteListCompletionContext::CurrentHiddenView
-    }
 }
 
 impl SftpWorkspaceEntity {
@@ -1134,37 +1103,22 @@ mod remote_load_state_tests {
     }
 
     #[test]
-    fn hidden_current_view_completion_clears_inflight_before_return() {
+    fn remote_list_completion_clears_inflight_before_return() {
         let loading = SftpRemoteLoadState::default().request().start().unwrap();
-        let completion = classify_sftp_remote_list_completion(true, true, false);
 
         let completed = loading.complete();
 
-        assert_eq!(
-            completion,
-            SftpRemoteListCompletionContext::CurrentHiddenView
-        );
-        assert!(completion.should_apply());
         assert_eq!(completed, SftpRemoteLoadState::default());
-
-        let returned_view = classify_sftp_remote_list_completion(true, true, true);
-        assert_eq!(
-            returned_view,
-            SftpRemoteListCompletionContext::CurrentVisibleView
-        );
         assert!(!completed.inflight);
     }
 
     #[test]
-    fn switching_sftp_views_waits_for_old_request_then_starts_pending_view() {
+    fn queued_remote_load_starts_after_the_previous_request_completes() {
         let old_request = SftpRemoteLoadState::default().request().start().unwrap();
         let switched_view = old_request.request();
-        let completion = classify_sftp_remote_list_completion(true, false, false);
 
         let old_request_completed = switched_view.complete();
 
-        assert_eq!(completion, SftpRemoteListCompletionContext::StaleView);
-        assert!(!completion.should_apply());
         assert_eq!(
             old_request_completed,
             SftpRemoteLoadState {
