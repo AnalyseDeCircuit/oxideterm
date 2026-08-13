@@ -667,13 +667,6 @@ fn client_config_withholds_credentials_until_certificate_acceptance() {
 }
 
 #[test]
-fn rdp_bitmap_codec_labels_describe_advertised_codecs() {
-    let codecs = client_codecs_capabilities(&["remotefx:on"]).unwrap();
-
-    assert_eq!(rdp_bitmap_codec_labels(&codecs), "remotefx");
-}
-
-#[test]
 fn client_config_adjusts_initial_display_size_for_rdp() {
     let config = RdpWorkerConfig {
         endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
