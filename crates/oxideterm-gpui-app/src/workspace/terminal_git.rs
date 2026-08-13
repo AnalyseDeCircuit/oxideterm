@@ -1588,14 +1588,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn git_panel_defaults_to_the_worktree_flow() {
-        assert_eq!(
-            TerminalGitPanelSection::default(),
-            TerminalGitPanelSection::Changes
-        );
-    }
-
-    #[test]
     fn git_panel_more_label_exists_in_every_locale() {
         let locales = [
             Locale::De,

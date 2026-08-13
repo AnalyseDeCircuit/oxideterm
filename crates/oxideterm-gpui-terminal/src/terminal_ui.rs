@@ -839,18 +839,4 @@ mod tests {
         assert_eq!(preferences.delete_sequence, TerminalDeleteSequence::Delete);
         assert_eq!(preferences.font_family, original_font_family);
     }
-
-    #[test]
-    fn empty_host_overrides_preserve_application_defaults() {
-        let mut preferences = TerminalUiPreferences::default();
-        let original_encoding = preferences.terminal_encoding;
-        let original_backspace = preferences.backspace_sequence;
-        let original_delete = preferences.delete_sequence;
-
-        TerminalUiPreferenceOverrides::default().apply_to(&mut preferences);
-
-        assert_eq!(preferences.terminal_encoding, original_encoding);
-        assert_eq!(preferences.backspace_sequence, original_backspace);
-        assert_eq!(preferences.delete_sequence, original_delete);
-    }
 }

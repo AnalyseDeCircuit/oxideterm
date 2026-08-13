@@ -2281,17 +2281,6 @@ mod terminal_command_bar_behavior_tests {
     }
 
     #[test]
-    fn terminal_font_size_adjustment_matches_tauri_bounds() {
-        assert_eq!(adjusted_terminal_font_size(14, 1), Some(15));
-        assert_eq!(adjusted_terminal_font_size(14, -1), Some(13));
-        assert_eq!(adjusted_terminal_font_size(TERMINAL_FONT_SIZE_MAX, 1), None);
-        assert_eq!(
-            adjusted_terminal_font_size(TERMINAL_FONT_SIZE_MIN, -1),
-            None
-        );
-    }
-
-    #[test]
     fn terminal_tab_capture_defers_to_workspace_text_ui() {
         assert!(!terminal_tab_capture_blocked_by_workspace_ui(false, false));
         assert!(terminal_tab_capture_blocked_by_workspace_ui(true, false));

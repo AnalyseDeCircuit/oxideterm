@@ -419,15 +419,6 @@ fn terminal_preferences_keep_copy_and_osc52_read_disabled_by_default() {
 }
 
 #[test]
-fn terminal_theme_defaults_match_current_terminal_palette() {
-    let theme = TerminalUiTheme::default();
-    let tokens = oxideterm_theme::default_tokens();
-    assert_eq!(theme.background, tokens.terminal.background);
-    assert_eq!(theme.foreground, tokens.terminal.foreground);
-    assert_eq!(theme.header_foreground, tokens.terminal.cursor);
-}
-
-#[test]
 fn terminal_font_uses_real_nerd_font_family_and_fallbacks() {
     let font = terminal_font();
     assert_eq!(

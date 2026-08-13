@@ -1821,11 +1821,10 @@ window.focus(&this.focus_handle, cx);
 mod terminal_command_bar_quick_command_tests {
     use super::{
         QuickCommand, QuickCommandCategoryDraft, QuickCommandDraft, QuickCommandIcon,
-        QuickCommandInput, QuickCommandKeyDirection, QuickCommandRisk, StatusTone,
-        quick_command_category_draft_can_save, quick_command_draft_can_save,
-        quick_command_editor_tab_target, quick_command_keyboard_highlight,
-        quick_command_risk_label, quick_command_risk_tone, quick_command_space_inserts_literal,
-        quick_commands_popover_width_for_bar, select_quick_command_category_state,
+        QuickCommandInput, QuickCommandKeyDirection, quick_command_category_draft_can_save,
+        quick_command_draft_can_save, quick_command_editor_tab_target,
+        quick_command_keyboard_highlight, quick_command_space_inserts_literal,
+        select_quick_command_category_state,
     };
 
     #[test]
