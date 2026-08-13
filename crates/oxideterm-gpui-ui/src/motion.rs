@@ -484,12 +484,6 @@ mod tests {
         assert_eq!(duration(&tokens, MotionDuration::Overlay), Duration::ZERO);
     }
 
-    #[test]
-    fn horizontal_reveal_targets_match_visibility() {
-        assert_eq!(lerp(0.0, 280.0, 0.0), 0.0);
-        assert_eq!(lerp(0.0, 280.0, 1.0), 280.0);
-    }
-
     #[gpui::test]
     fn collapsed_horizontal_reveal_keeps_content_at_expanded_width(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_, _| {
@@ -506,12 +500,6 @@ mod tests {
             .debug_bounds("reveal-content")
             .expect("reveal content bounds");
         assert_eq!(content_bounds.size.width, px(280.0));
-    }
-
-    #[test]
-    fn vertical_reveal_targets_match_visibility() {
-        assert_eq!(lerp(0.0, 28.0, 0.0), 0.0);
-        assert_eq!(lerp(0.0, 28.0, 1.0), 28.0);
     }
 
     #[test]

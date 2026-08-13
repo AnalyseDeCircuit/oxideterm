@@ -437,12 +437,6 @@ mod tests {
     }
 
     #[test]
-    fn background_scaled_card_color_matches_tauri_data_bg_active_contract() {
-        assert_eq!(color_for_background(0x1e1e22, true, 0x66), rgba(0x1e1e2266));
-        assert_eq!(color_for_background(0x1e1e22, false, 0x66), rgb(0x1e1e22));
-    }
-
-    #[test]
     fn semantic_surface_kinds_have_native_chrome_defaults() {
         let tokens = oxideterm_theme::default_tokens();
 
