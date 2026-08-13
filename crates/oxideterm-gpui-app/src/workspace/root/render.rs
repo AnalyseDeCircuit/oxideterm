@@ -205,10 +205,14 @@ impl WorkspaceApp {
                     self.render_remote_desktop_surface(*tab_id, window, cx)
                 }
                 (_, Some(root_pane)) => self.render_terminal_surface(root_pane, window, cx),
-                _ => self.render_empty_workspace(cx),
+                _ => {
+                    let available_width = self.welcome_main_content_width(window, cx);
+                    self.render_empty_workspace(available_width, cx)
+                }
             }
         } else {
-            self.render_empty_workspace(cx)
+            let available_width = self.welcome_main_content_width(window, cx);
+            self.render_empty_workspace(available_width, cx)
         };
         let content = self.wrap_content_background(
             window_background,

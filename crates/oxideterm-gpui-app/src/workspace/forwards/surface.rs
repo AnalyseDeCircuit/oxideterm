@@ -102,7 +102,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(tab_id) = self.active_tab_id(cx) else {
-            return self.render_empty_workspace(cx);
+            return self.render_empty_workspace(f32::from(window.viewport_size().width), cx);
         };
         self.render_forwards_surface_for_tab(tab_id, window, cx)
     }
@@ -110,12 +110,12 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn render_forwards_surface_for_tab(
         &mut self,
         tab_id: TabId,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let Some(node_id) = self.forwarding.read(cx).node_for_tab(tab_id) else {
-            return self.render_empty_workspace(cx);
+            return self.render_empty_workspace(f32::from(window.viewport_size().width), cx);
         };
         // Detached renders are also mount boundaries for Entity-owned sampling.
         self.sync_forwarding_sampling_visibility(cx);

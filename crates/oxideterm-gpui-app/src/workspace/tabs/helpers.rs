@@ -2,6 +2,13 @@ use chrono::{DateTime, Utc};
 use oxideterm_connections::ConnectionStore;
 use oxideterm_remote_desktop::RemoteDesktopProtocol;
 
+const WELCOME_STACKED_LAYOUT_MAX_WIDTH: f32 = 800.0;
+
+/// Keeps the start-page breakpoint testable without coupling it to GPUI rendering.
+pub(super) fn welcome_layout_is_stacked(available_width: f32) -> bool {
+    available_width < WELCOME_STACKED_LAYOUT_MAX_WIDTH
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Identifies the transport without carrying any connection credentials.
 pub(super) enum WelcomeRecentKind {
@@ -196,5 +203,11 @@ mod tests {
             effective_shortcut_label("app.commandPalette", &overrides),
             None
         );
+    }
+
+    #[test]
+    fn empty_workspace_stacks_only_below_the_main_pane_breakpoint() {
+        assert!(!welcome_layout_is_stacked(800.0));
+        assert!(welcome_layout_is_stacked(799.0));
     }
 }

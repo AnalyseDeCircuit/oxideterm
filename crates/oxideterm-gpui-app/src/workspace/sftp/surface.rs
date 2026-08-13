@@ -82,7 +82,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(tab_id) = self.active_tab_id(cx) else {
-            return self.render_empty_workspace(cx);
+            return self.render_empty_workspace(f32::from(window.viewport_size().width), cx);
         };
         self.render_sftp_surface_for_tab(tab_id, window, cx)
     }
@@ -95,7 +95,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
-            return self.render_empty_workspace(cx);
+            return self.render_empty_workspace(f32::from(window.viewport_size().width), cx);
         };
         let has_background = self.background_surface_active("sftp");
         let context_menu_exit_delay = oxideterm_gpui_ui::motion::duration(

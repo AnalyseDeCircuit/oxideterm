@@ -1,6 +1,6 @@
 use super::helpers::{
     WelcomeRecentConnection, WelcomeRecentKind, WelcomeRecentTarget, effective_shortcut_label,
-    welcome_recent_connections,
+    welcome_layout_is_stacked, welcome_recent_connections,
 };
 use super::*;
 
@@ -954,18 +954,15 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn render_empty_workspace(
         &self,
+        available_width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         const WELCOME_CONTENT_MAX_WIDTH: f32 = 920.0;
 
         let theme = self.tokens.ui;
+        let stacked = welcome_layout_is_stacked(available_width);
         div()
             .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .px(px(24.0))
-            .py(px(24.0))
             // Match both sidebars at the top-level content layer. Fixed tab
             // chrome keeps its stronger tint independently for readability.
             .bg(self.workspace_sidebar_background(theme.bg))
@@ -975,19 +972,55 @@ impl WorkspaceApp {
             ))
             .child(
                 div()
-                    .w_full()
-                    // Leave enough room for all four localized shortcut hints
-                    // while retaining wrapping in genuinely narrow windows.
-                    .max_w(px(WELCOME_CONTENT_MAX_WIDTH))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(px(16.0))
-                    .child(self.render_welcome_header())
-                    .child(self.render_welcome_workbench(cx))
-                    .child(self.render_welcome_shortcuts()),
+                    .id("welcome-workspace-scroll")
+                    .size_full()
+                    .overflow_y_scroll()
+                    .child(
+                        div()
+                            .w_full()
+                            .min_h_full()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .justify_center()
+                            .px(px(24.0))
+                            .py(px(24.0))
+                            .child(
+                                div()
+                                    .w_full()
+                                    // Leave enough room for all four localized shortcut hints
+                                    // while retaining wrapping in genuinely narrow windows.
+                                    .max_w(px(WELCOME_CONTENT_MAX_WIDTH))
+                                    .flex()
+                                    .flex_col()
+                                    .items_center()
+                                    .gap(px(16.0))
+                                    .child(self.render_welcome_header())
+                                    .child(self.render_welcome_workbench(stacked, cx))
+                                    .child(self.render_welcome_shortcuts()),
+                            ),
+                    ),
             )
             .into_any_element()
+    }
+
+    pub(in crate::workspace) fn welcome_main_content_width(
+        &self,
+        window: &Window,
+        cx: &App,
+    ) -> f32 {
+        let settings = self.settings_store.settings();
+        let mut available_width = f32::from(window.viewport_size().width);
+        if !settings.sidebar_ui.zen_mode {
+            available_width -= self.tokens.metrics.activity_bar_width;
+            if !self.sidebar_collapsed {
+                available_width -= self.sidebar_panel_width();
+            }
+            if self.context_sidebar_visible() {
+                available_width -= self.ai_entity.read(cx).chat_ui().sidebar_width;
+            }
+        }
+        available_width.max(self.tokens.metrics.min_main_width)
     }
 
     fn render_welcome_header(&self) -> AnyElement {
@@ -1106,21 +1139,26 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_welcome_workbench(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_welcome_workbench(&self, stacked: bool, cx: &mut Context<Self>) -> AnyElement {
         div()
             .w_full()
             .flex()
             .flex_row()
-            .flex_wrap()
             .items_stretch()
             .justify_center()
             .gap(px(16.0))
-            .child(self.render_welcome_recent_connections(cx))
-            .child(self.render_welcome_guidance(cx))
+            .when(stacked, |workbench| workbench.flex_col())
+            .when(!stacked, |workbench| workbench.flex_wrap())
+            .child(self.render_welcome_recent_connections(stacked, cx))
+            .child(self.render_welcome_guidance(stacked, cx))
             .into_any_element()
     }
 
-    fn render_welcome_recent_connections(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_welcome_recent_connections(
+        &self,
+        stacked: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         const RECENT_CONNECTION_LIMIT: usize = 4;
 
         let theme = self.tokens.ui;
@@ -1141,9 +1179,19 @@ impl WorkspaceApp {
                 .padding(oxideterm_gpui_ui::SurfacePadding::Normal)
                 .has_background_image(has_background),
         )
+        // The start page uses borders and fill for grouping; extra elevation
+        // makes the three peer surfaces feel heavier than the brand above.
+        .shadow_none()
         .min_w(px(360.0))
         .flex_1()
         .flex_basis(px(540.0))
+        .when(stacked, |surface| {
+            surface
+                .w_full()
+                .max_w_full()
+                .min_w(px(0.0))
+                .flex_basis(gpui::auto())
+        })
         .flex()
         .flex_col()
         .gap(px(12.0))
@@ -1314,7 +1362,7 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    fn render_welcome_guidance(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_welcome_guidance(&self, stacked: bool, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let has_background = self.window_background_preferences().is_some();
         oxideterm_gpui_ui::semantic_surface(
@@ -1323,10 +1371,18 @@ impl WorkspaceApp {
                 .padding(oxideterm_gpui_ui::SurfacePadding::Normal)
                 .has_background_image(has_background),
         )
+        .shadow_none()
         .min_w(px(260.0))
         .max_w(px(344.0))
         .flex_1()
         .flex_basis(px(300.0))
+        .when(stacked, |surface| {
+            surface
+                .w_full()
+                .max_w_full()
+                .min_w(px(0.0))
+                .flex_basis(gpui::auto())
+        })
         .flex()
         .flex_col()
         .gap(px(8.0))
@@ -1503,6 +1559,7 @@ impl WorkspaceApp {
                 .padding(oxideterm_gpui_ui::SurfacePadding::Compact)
                 .has_background_image(has_background),
         )
+        .shadow_none()
         .w_full()
         .flex()
         .flex_row()
