@@ -276,23 +276,6 @@ mod ai_turn_order_tests {
         }
     }
 
-    fn test_tool_result_fact_for_assistant(
-        fact_id: &str,
-        assistant_message_id: &str,
-        summary: &str,
-    ) -> AiToolResultFact {
-        AiToolResultFact {
-            fact_id: fact_id.to_string(),
-            conversation_id: "conversation-1".to_string(),
-            assistant_message_id: assistant_message_id.to_string(),
-            tool_call_id: "tool-1".to_string(),
-            tool_name: "run_command".to_string(),
-            source_kind: "output".to_string(),
-            summary: summary.to_string(),
-            created_at: 1,
-        }
-    }
-
     fn test_tool_execution_record(tool_call_id: &str) -> AiToolExecutionRecord {
         AiToolExecutionRecord {
             record_id: format!("tool-exec-{tool_call_id}"),
@@ -1379,28 +1362,6 @@ mod ai_turn_order_tests {
     }
 
     #[test]
-    fn result_binding_filters_facts_to_current_assistant_turn() {
-        let facts = VecDeque::from([
-            test_tool_result_fact_for_assistant(
-                "old-tool.output",
-                "assistant-old",
-                "Filesystem Size Used Avail Use%\n/ 468G 72G 373G 17%",
-            ),
-            test_tool_result_fact_for_assistant(
-                "current-tool.output",
-                "assistant-1",
-                "load average: 0.20, 0.19, 0.24",
-            ),
-        ]);
-
-        let filtered = ai_tool_result_facts_for_message(&facts, "conversation-1", "assistant-1");
-
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].fact_id, "current-tool.output");
-        assert!(!filtered[0].summary.contains("468G"));
-    }
-
-    #[test]
     fn tool_result_fact_extraction_keeps_only_structured_execution_values() {
         let record = test_tool_execution_record("tool-1");
         let result = serde_json::json!({
@@ -1691,26 +1652,6 @@ mod ai_turn_order_tests {
             .expect("tool rounds");
         assert_eq!(rounds[0]["id"], "assistant-1-hard-deny-1");
         assert_eq!(rounds[0]["toolCalls"][0]["approvalState"], "rejected");
-    }
-
-    #[test]
-    fn rag_prompt_inserts_before_suggestions_and_runtime_rules() {
-        let mut system_prompt = [
-            "base",
-            "## Follow-Up Suggestions",
-            "suggestions",
-            "## OxideSens Runtime Rules",
-            "rules",
-        ]
-        .join("\n\n");
-
-        ai_insert_rag_prompt_before_runtime_tail(&mut system_prompt, "## Relevant Knowledge Base");
-
-        let rag_index = system_prompt.find("## Relevant Knowledge Base").unwrap();
-        let suggestions_index = system_prompt.find("## Follow-Up Suggestions").unwrap();
-        let runtime_index = system_prompt.find("## OxideSens Runtime Rules").unwrap();
-        assert!(rag_index < suggestions_index);
-        assert!(rag_index < runtime_index);
     }
 
     #[test]

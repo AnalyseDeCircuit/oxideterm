@@ -1059,24 +1059,6 @@ pub(in crate::workspace) fn strip_ai_evidence_claims_block_from_turn_text_parts(
     });
 }
 
-#[cfg(test)]
-pub(in crate::workspace) fn ai_tool_result_facts_for_message(
-    facts: &VecDeque<AiToolResultFact>,
-    conversation_id: &str,
-    assistant_message_id: &str,
-) -> Vec<AiToolResultFact> {
-    // Group facts by the assistant turn that produced the tool result so
-    // diagnostics and transcript projections do not mix unrelated rounds.
-    facts
-        .iter()
-        .filter(|fact| {
-            fact.conversation_id == conversation_id
-                && fact.assistant_message_id == assistant_message_id
-        })
-        .cloned()
-        .collect()
-}
-
 pub(in crate::workspace) fn ai_tool_argument_summary(
     tool_name: &str,
     args: Option<&serde_json::Value>,

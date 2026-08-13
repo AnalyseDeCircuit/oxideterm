@@ -507,23 +507,6 @@ fn known_hosts_path_from_ssh_dir(ssh_dir: Option<PathBuf>) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("~/.ssh/known_hosts"))
 }
 
-#[cfg(test)]
-fn retain_known_hosts_aliases(line: &str, host_pattern: &str) -> Option<String> {
-    let split = line.find(char::is_whitespace)?;
-    let hosts = &line[..split];
-    let rest = &line[split..];
-    let remaining = hosts
-        .split(',')
-        .filter(|pattern| *pattern != host_pattern)
-        .collect::<Vec<_>>();
-
-    if remaining.len() == hosts.split(',').count() || remaining.is_empty() {
-        return None;
-    }
-
-    Some(format!("{}{}", remaining.join(","), rest))
-}
-
 struct PreflightHandler {
     host: String,
     port: u16,
@@ -701,23 +684,6 @@ mod tests {
                 .unwrap_or_default()
                 .as_nanos()
         ))
-    }
-
-    #[test]
-    fn host_key_removal_preserves_other_aliases_on_same_line() {
-        let line = "example.com,alias.example.com ssh-ed25519 AAAAC3Nza comment";
-
-        assert_eq!(
-            retain_known_hosts_aliases(line, "example.com").as_deref(),
-            Some("alias.example.com ssh-ed25519 AAAAC3Nza comment")
-        );
-    }
-
-    #[test]
-    fn host_key_removal_drops_single_host_line() {
-        let line = "[example.com]:2222 ssh-ed25519 AAAAC3Nza";
-
-        assert_eq!(retain_known_hosts_aliases(line, "[example.com]:2222"), None);
     }
 
     #[test]

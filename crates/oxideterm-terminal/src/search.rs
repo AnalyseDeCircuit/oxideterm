@@ -147,42 +147,6 @@ pub(crate) fn viewport_row_for_grid_line(line: i32, display_offset: usize) -> Op
     (line + display_offset as i32).try_into().ok()
 }
 
-#[cfg(test)]
-pub(crate) fn search_line_matches(
-    line: i32,
-    text: &str,
-    query: &str,
-    max_cols: usize,
-) -> Vec<TerminalSearchMatch> {
-    if query.is_empty() {
-        return Vec::new();
-    }
-
-    text.match_indices(query)
-        .filter_map(|(start_byte, matched)| {
-            let start_col = text[..start_byte].chars().count();
-            if start_col >= max_cols {
-                return None;
-            }
-
-            let cells = matched
-                .chars()
-                .count()
-                .min(max_cols.saturating_sub(start_col));
-            (cells > 0).then_some(TerminalSearchMatch {
-                line,
-                start_col,
-                end_col: start_col + cells,
-                ranges: vec![TerminalSearchRange {
-                    line,
-                    start_col,
-                    end_col: start_col + cells,
-                }],
-            })
-        })
-        .collect()
-}
-
 pub(crate) fn search_logical_line_matches(
     text: &str,
     cell_map: &[(i32, usize)],

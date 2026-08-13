@@ -19,7 +19,6 @@ mod tests {
             perceptual_contrast_score, style_colors_for_cell,
         },
         process::{parse_lsof_cwd, parse_process_table_for_group},
-        search::search_line_matches,
     };
 
     #[test]
@@ -338,56 +337,6 @@ wait
             .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
             .map(|directory| directory.join(name))
             .find(|candidate| candidate.is_file())
-    }
-
-    #[test]
-    fn search_line_matches_reports_terminal_range_columns() {
-        let matches = search_line_matches(-3, "cargo test cargo", "cargo", 80);
-
-        assert_eq!(
-            matches,
-            vec![
-                TerminalSearchMatch {
-                    line: -3,
-                    start_col: 0,
-                    end_col: 5,
-                    ranges: vec![TerminalSearchRange {
-                        line: -3,
-                        start_col: 0,
-                        end_col: 5,
-                    }],
-                },
-                TerminalSearchMatch {
-                    line: -3,
-                    start_col: 11,
-                    end_col: 16,
-                    ranges: vec![TerminalSearchRange {
-                        line: -3,
-                        start_col: 11,
-                        end_col: 16,
-                    }],
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn search_line_matches_clips_to_terminal_columns() {
-        let matches = search_line_matches(0, "abcde", "cde", 4);
-
-        assert_eq!(
-            matches,
-            vec![TerminalSearchMatch {
-                line: 0,
-                start_col: 2,
-                end_col: 4,
-                ranges: vec![TerminalSearchRange {
-                    line: 0,
-                    start_col: 2,
-                    end_col: 4,
-                }],
-            }]
-        );
     }
 
     #[test]

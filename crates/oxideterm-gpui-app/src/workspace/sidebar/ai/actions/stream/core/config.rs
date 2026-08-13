@@ -862,20 +862,3 @@ pub(in crate::workspace) fn ai_chat_request_max_response_tokens(
             .ok()
         })
 }
-
-#[cfg(test)]
-pub(in crate::workspace) fn ai_insert_rag_prompt_before_runtime_tail(
-    system_prompt: &mut String,
-    rag_prompt: &str,
-) {
-    let insert_at = [
-        "\n\n## Follow-Up Suggestions",
-        "\n\n## OxideSens Runtime Rules",
-    ]
-    .into_iter()
-    .filter_map(|marker| system_prompt.find(marker))
-    .min()
-    .unwrap_or(system_prompt.len());
-    let insertion = format!("\n\n{rag_prompt}");
-    system_prompt.insert_str(insert_at, &insertion);
-}
