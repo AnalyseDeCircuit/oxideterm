@@ -409,13 +409,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scrollbar_position_uses_negative_gpui_content_offset() {
+    fn scrollbar_coordinates_translate_gpui_offsets_and_thumb_edges() {
         assert_eq!(scroll_position_from_handle_offset(-125.0, 300.0), 125.0);
         assert_eq!(scroll_position_from_handle_offset(20.0, 300.0), 0.0);
-    }
-
-    #[test]
-    fn scrollbar_thumb_edges_map_to_scroll_range_edges() {
         let geometry = scrollbar_geometry(200.0, 600.0, 300.0).expect("scrollbar geometry");
         let thumb_travel = geometry.viewport_length - geometry.thumb_length;
 
