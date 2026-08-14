@@ -399,26 +399,25 @@ mod tests {
     }
 
     #[test]
-    fn terminal_settings_default_smooth_scroll_when_missing() {
-        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
-        value.as_object_mut().unwrap().remove("smoothScroll");
+    fn terminal_settings_restore_legacy_presentation_defaults() {
+        let defaults: [(&str, bool, fn(&TerminalSettings) -> bool); 4] = [
+            ("smoothScroll", true, |settings| settings.smooth_scroll),
+            (
+                "freeTypeCursorPositioning",
+                false,
+                |settings| settings.free_type_mode,
+            ),
+            ("fontLigatures", false, |settings| settings.font_ligatures),
+            ("rightClickPaste", false, |settings| settings.right_click_paste),
+        ];
 
-        let settings: TerminalSettings = serde_json::from_value(value).unwrap();
+        for (field, expected, read) in defaults {
+            let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
+            value.as_object_mut().unwrap().remove(field);
 
-        assert!(settings.smooth_scroll);
-    }
-
-    #[test]
-    fn terminal_settings_default_free_type_mode_when_missing() {
-        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("freeTypeCursorPositioning");
-
-        let settings: TerminalSettings = serde_json::from_value(value).unwrap();
-
-        assert!(!settings.free_type_mode);
+            let settings: TerminalSettings = serde_json::from_value(value).unwrap();
+            assert_eq!(read(&settings), expected, "legacy {field} default");
+        }
     }
 
     #[test]
@@ -464,16 +463,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_settings_default_font_ligatures_when_missing() {
-        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
-        value.as_object_mut().unwrap().remove("fontLigatures");
-
-        let settings: TerminalSettings = serde_json::from_value(value).unwrap();
-
-        assert!(!settings.font_ligatures);
-    }
-
-    #[test]
     fn terminal_settings_default_osc52_clipboard_read_when_missing() {
         let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
         value
@@ -484,19 +473,6 @@ mod tests {
         let settings: TerminalSettings = serde_json::from_value(value).unwrap();
 
         assert!(!settings.osc52_clipboard_read);
-    }
-
-    #[test]
-    fn terminal_settings_default_right_click_paste_when_missing() {
-        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("rightClickPaste");
-
-        let settings: TerminalSettings = serde_json::from_value(value).unwrap();
-
-        assert!(!settings.right_click_paste);
     }
 
     #[test]
@@ -557,35 +533,23 @@ mod tests {
     }
 
     #[test]
-    fn command_bar_settings_default_current_directory_awareness_when_missing() {
-        let mut value = serde_json::to_value(TerminalCommandBarSettings::default()).unwrap();
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("currentDirectoryAwareness");
+    fn command_bar_settings_restore_legacy_defaults() {
+        let defaults: [(&str, bool, fn(&TerminalCommandBarSettings) -> bool); 3] = [
+            (
+                "currentDirectoryAwareness",
+                true,
+                |settings| settings.current_directory_awareness,
+            ),
+            ("projectTasks", true, |settings| settings.project_tasks),
+            ("quickBarEnabled", false, |settings| settings.quick_bar_enabled),
+        ];
 
-        let settings: TerminalCommandBarSettings = serde_json::from_value(value).unwrap();
+        for (field, expected, read) in defaults {
+            let mut value = serde_json::to_value(TerminalCommandBarSettings::default()).unwrap();
+            value.as_object_mut().unwrap().remove(field);
 
-        assert!(settings.current_directory_awareness);
-    }
-
-    #[test]
-    fn command_bar_settings_default_project_tasks_when_missing() {
-        let mut value = serde_json::to_value(TerminalCommandBarSettings::default()).unwrap();
-        value.as_object_mut().unwrap().remove("projectTasks");
-
-        let settings: TerminalCommandBarSettings = serde_json::from_value(value).unwrap();
-
-        assert!(settings.project_tasks);
-    }
-
-    #[test]
-    fn command_bar_settings_default_quick_bar_to_disabled_when_missing() {
-        let mut value = serde_json::to_value(TerminalCommandBarSettings::default()).unwrap();
-        value.as_object_mut().unwrap().remove("quickBarEnabled");
-
-        let settings: TerminalCommandBarSettings = serde_json::from_value(value).unwrap();
-
-        assert!(!settings.quick_bar_enabled);
+            let settings: TerminalCommandBarSettings = serde_json::from_value(value).unwrap();
+            assert_eq!(read(&settings), expected, "legacy {field} default");
+        }
     }
 }
