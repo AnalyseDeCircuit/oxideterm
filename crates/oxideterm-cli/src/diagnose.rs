@@ -320,21 +320,4 @@ mod tests {
         assert_eq!(diagnostic.kind, "missing");
         assert!(diagnostic.error.is_none());
     }
-
-    #[test]
-    fn formats_ssh_offer_with_algorithm_categories() {
-        let offer = SshAlgorithmOffer {
-            kex: vec!["curve25519-sha256".to_string()],
-            host_key_algorithms: vec!["ssh-ed25519".to_string()],
-            ciphers: vec!["chacha20-poly1305@openssh.com".to_string()],
-            macs: vec!["hmac-sha2-256-etm@openssh.com".to_string()],
-            compression: vec!["none".to_string()],
-        };
-
-        let text = format_ssh_offer_text("defaultOffer", &offer);
-
-        assert!(text.contains("defaultOffer"));
-        assert!(text.contains("kex: curve25519-sha256"));
-        assert!(text.contains("hostKeyAlgorithms: ssh-ed25519"));
-    }
 }

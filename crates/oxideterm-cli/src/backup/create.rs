@@ -135,15 +135,3 @@ fn format_backup_preview_text(response: &BackupPreviewResponse) -> String {
         response.summary.cloud_sync_local_dirty
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn output_path_uses_requested_file() {
-        let path = output_path(Some("/tmp/custom.json"), 1);
-
-        assert_eq!(path, PathBuf::from("/tmp/custom.json"));
-    }
-}

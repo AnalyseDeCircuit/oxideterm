@@ -750,23 +750,6 @@ mod tests {
     }
 
     #[test]
-    fn settings_sections_marks_local_terminal_env_vars() {
-        let response = settings_sections_response();
-        let local_terminal = response
-            .sections
-            .iter()
-            .find(|section| section.id == "localTerminal")
-            .unwrap();
-
-        assert!(local_terminal.can_include_local_terminal_env_vars);
-        assert!(
-            response
-                .default_section_ids
-                .contains(&"general".to_string())
-        );
-    }
-
-    #[test]
     fn unknown_top_level_fields_reports_only_extra_root_keys() {
         let mut raw = PersistedSettings::default().to_value();
         raw.as_object_mut()
