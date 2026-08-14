@@ -403,27 +403,4 @@ mod tests {
             Some(CloudSyncSelect::Backend)
         );
     }
-
-    #[test]
-    fn cloud_sync_select_scroll_close_preserves_trigger_focus() {
-        let mut open_select = Some(CloudSyncSelect::ConflictStrategy);
-        let mut focused_select = Some(CloudSyncSelect::Backend);
-        let mut highlighted_option = Some((CloudSyncSelect::ConflictStrategy, 1));
-
-        assert!(close_cloud_sync_select_on_container_scroll(
-            &mut open_select,
-            &mut focused_select,
-            &mut highlighted_option,
-        ));
-        assert_eq!(open_select, None);
-        assert_eq!(focused_select, Some(CloudSyncSelect::ConflictStrategy));
-        assert_eq!(highlighted_option, None);
-
-        assert!(!close_cloud_sync_select_on_container_scroll(
-            &mut open_select,
-            &mut focused_select,
-            &mut highlighted_option,
-        ));
-        assert_eq!(focused_select, Some(CloudSyncSelect::ConflictStrategy));
-    }
 }

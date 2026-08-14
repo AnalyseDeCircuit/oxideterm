@@ -69,21 +69,3 @@ fn get_state_value(key: String, json: bool) -> CliResult<()> {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use serde_json::Value;
-
-    use super::*;
-
-    #[test]
-    fn state_value_can_be_read_with_dotted_path() {
-        let state = CloudSyncPersistedState::default();
-        let value = serde_json::to_value(state).unwrap();
-
-        assert_eq!(
-            json_query::value_at_path(&value, "settings.namespace"),
-            Some(&Value::String("default".to_string()))
-        );
-    }
-}

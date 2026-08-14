@@ -49,15 +49,30 @@ fn parses_temporary_ssh_launch() {
 }
 
 #[test]
-fn parses_cloud_sync_status() {
-    let cli = Cli::parse_from(["oxideterm", "cloud-sync", "status", "--json"]);
-    match cli.command {
-        Command::CloudSync(command) => match command.action {
-            CloudSyncAction::Status(args) => assert!(args.json),
-            _ => panic!("expected status command"),
-        },
-        _ => panic!("expected cloud-sync command"),
-    }
+fn parses_json_only_commands() {
+    let cloud_sync_status = Cli::parse_from(["oxideterm", "cloud-sync", "status", "--json"]);
+    assert!(matches!(
+        cloud_sync_status.command,
+        Command::CloudSync(command)
+            if matches!(&command.action, CloudSyncAction::Status(args) if args.json)
+    ));
+
+    let settings_sections = Cli::parse_from(["oxideterm", "settings", "sections", "--json"]);
+    assert!(matches!(
+        settings_sections.command,
+        Command::Settings(command)
+            if matches!(&command.action, SettingsAction::Sections(args) if args.json)
+    ));
+
+    let diagnostics = Cli::parse_from(["oxideterm", "diagnose", "--json"]);
+    assert!(matches!(diagnostics.command, Command::Diagnose(args) if args.json));
+
+    let backup_preview = Cli::parse_from(["oxideterm", "backup", "preview", "--json"]);
+    assert!(matches!(
+        backup_preview.command,
+        Command::Backup(command)
+            if matches!(&command.action, BackupAction::Preview(args) if args.json)
+    ));
 }
 
 #[test]
@@ -390,18 +405,6 @@ fn parses_oxide_export() {
 }
 
 #[test]
-fn parses_settings_sections() {
-    let cli = Cli::parse_from(["oxideterm", "settings", "sections", "--json"]);
-    match cli.command {
-        Command::Settings(command) => match command.action {
-            SettingsAction::Sections(args) => assert!(args.json),
-            _ => panic!("expected sections command"),
-        },
-        _ => panic!("expected settings command"),
-    }
-}
-
-#[test]
 fn parses_settings_set_dry_run() {
     let cli = Cli::parse_from([
         "oxideterm",
@@ -501,39 +504,25 @@ fn parses_settings_import_sections() {
 }
 
 #[test]
-fn parses_connections_validate() {
-    let cli = Cli::parse_from(["oxideterm", "connections", "validate", "--strict", "--json"]);
-    match cli.command {
-        Command::Connections(command) => match command.action {
-            ConnectionsAction::Validate(args) => {
-                assert!(args.strict);
-                assert!(args.json);
-            }
-            _ => panic!("expected validate command"),
-        },
-        _ => panic!("expected connections command"),
-    }
-}
+fn parses_strict_validation_commands() {
+    let connection_validation =
+        Cli::parse_from(["oxideterm", "connections", "validate", "--strict", "--json"]);
+    assert!(matches!(
+        connection_validation.command,
+        Command::Connections(command)
+            if matches!(&command.action, ConnectionsAction::Validate(args) if args.strict && args.json)
+    ));
 
-#[test]
-fn parses_top_level_diagnostics() {
-    let cli = Cli::parse_from(["oxideterm", "diagnose", "--json"]);
-    match cli.command {
-        Command::Diagnose(args) => assert!(args.json),
-        _ => panic!("expected diagnose command"),
-    }
-}
+    let doctor = Cli::parse_from(["oxideterm", "doctor", "--strict", "--json"]);
+    assert!(matches!(doctor.command, Command::Doctor(args) if args.strict && args.json));
 
-#[test]
-fn parses_doctor() {
-    let cli = Cli::parse_from(["oxideterm", "doctor", "--strict", "--json"]);
-    match cli.command {
-        Command::Doctor(args) => {
-            assert!(args.strict);
-            assert!(args.json);
-        }
-        _ => panic!("expected doctor command"),
-    }
+    let settings_validation =
+        Cli::parse_from(["oxideterm", "settings", "validate", "--strict", "--json"]);
+    assert!(matches!(
+        settings_validation.command,
+        Command::Settings(command)
+            if matches!(&command.action, SettingsAction::Validate(args) if args.strict && args.json)
+    ));
 }
 
 #[test]
@@ -555,18 +544,6 @@ fn parses_backup_inspect() {
                 assert!(args.json);
             }
             _ => panic!("expected inspect command"),
-        },
-        _ => panic!("expected backup command"),
-    }
-}
-
-#[test]
-fn parses_backup_preview() {
-    let cli = Cli::parse_from(["oxideterm", "backup", "preview", "--json"]);
-    match cli.command {
-        Command::Backup(command) => match command.action {
-            BackupAction::Preview(args) => assert!(args.json),
-            _ => panic!("expected preview command"),
         },
         _ => panic!("expected backup command"),
     }
@@ -606,21 +583,6 @@ fn parses_backup_create_output() {
             _ => panic!("expected create command"),
         },
         _ => panic!("expected backup command"),
-    }
-}
-
-#[test]
-fn parses_settings_validate() {
-    let cli = Cli::parse_from(["oxideterm", "settings", "validate", "--strict", "--json"]);
-    match cli.command {
-        Command::Settings(command) => match command.action {
-            SettingsAction::Validate(args) => {
-                assert!(args.strict);
-                assert!(args.json);
-            }
-            _ => panic!("expected validate command"),
-        },
-        _ => panic!("expected settings command"),
     }
 }
 
