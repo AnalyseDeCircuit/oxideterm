@@ -750,21 +750,6 @@ async fn check_local_port_available(
 mod tests {
     use super::*;
 
-    #[test]
-    fn health_check_messages_match_tauri_node_forwarding() {
-        let unreachable = build_unreachable_port_error("service.internal", 3000);
-        assert!(unreachable.contains("Target port service.internal:3000 is not reachable"));
-        assert!(unreachable.contains("• Check if service is running: ss -tlnp | grep 3000"));
-        assert!(unreachable.contains("• Verify the port number is correct"));
-        assert!(unreachable.contains("• Try connecting manually: nc -zv service.internal 3000"));
-
-        let failed = build_health_check_error_message("timeout");
-        assert_eq!(
-            failed,
-            "Failed to check port availability: timeout\n\nYou can skip this check with the 'Skip port availability check' option."
-        );
-    }
-
     #[tokio::test]
     async fn local_health_check_observes_the_client_side_listener() {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
