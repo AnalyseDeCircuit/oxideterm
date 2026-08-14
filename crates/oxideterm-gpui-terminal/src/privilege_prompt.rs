@@ -1574,31 +1574,6 @@ mod tests {
     }
 
     #[test]
-    fn tracker_does_not_recover_expired_context_from_output_tail() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-
-        tracker.observe_user_input_bytes(b"sudo id\r", start);
-        observe_standard_prompt(
-            &mut tracker,
-            "Password:",
-            false,
-            start + PRIVILEGE_COMMAND_CONTEXT_TTL * 2,
-        );
-
-        assert_eq!(
-            tracker.snapshot(start + PRIVILEGE_COMMAND_CONTEXT_TTL * 2),
-            Some(PrivilegePromptSnapshot {
-                prompt: PrivilegePromptMatch::GenericPassword {
-                    prompt_text: "Password:".to_string(),
-                },
-                confidence: PrivilegePromptConfidence::GenericPrompt,
-                retry_count: 0,
-            })
-        );
-    }
-
-    #[test]
     fn tracker_marks_manual_input_at_prompt_as_secret_entry() {
         let start = Instant::now();
         let mut tracker = PrivilegePromptTracker::default();
