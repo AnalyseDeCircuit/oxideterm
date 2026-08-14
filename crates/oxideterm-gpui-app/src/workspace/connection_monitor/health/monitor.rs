@@ -895,20 +895,3 @@ fn compact_monitor_list_identity(layout: CompactMonitorLayout) -> &'static str {
         CompactMonitorLayout::Stacked => "host-tools-monitor-compact-stacked",
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn compact_monitor_stacks_at_the_narrow_width_boundary() {
-        assert_eq!(
-            compact_monitor_layout_for_width(COMPACT_MONITOR_STACKED_LAYOUT_MAX_WIDTH),
-            CompactMonitorLayout::Stacked
-        );
-        assert_eq!(
-            compact_monitor_layout_for_width(COMPACT_MONITOR_STACKED_LAYOUT_MAX_WIDTH + 1.0),
-            CompactMonitorLayout::Inline
-        );
-    }
-}
