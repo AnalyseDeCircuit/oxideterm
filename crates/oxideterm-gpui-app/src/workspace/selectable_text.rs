@@ -1254,47 +1254,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn row_safe_selectable_single_click_can_select_and_still_bubble() {
-        assert!(selectable_text_should_begin_selection(
-            SelectableTextRole::RowSafe,
-            1,
-        ));
-        assert!(!selectable_text_should_stop_propagation(
-            SelectableTextRole::RowSafe,
-        ));
-    }
-
-    #[test]
-    fn row_safe_selectable_double_click_leaves_row_double_click_intact() {
-        assert!(!selectable_text_should_begin_selection(
-            SelectableTextRole::RowSafe,
-            2,
-        ));
-        assert!(!selectable_text_should_stop_propagation(
-            SelectableTextRole::RowSafe,
-        ));
-    }
-
-    #[test]
-    fn intercepting_selectable_keeps_existing_standalone_text_behavior() {
-        assert!(selectable_text_should_begin_selection(
-            SelectableTextRole::PlainDocument,
-            2,
-        ));
-        assert!(selectable_text_should_stop_propagation(
-            SelectableTextRole::PlainDocument,
-        ));
-    }
-
-    #[test]
-    fn non_selectable_role_matches_tauri_select_none() {
-        assert!(!selectable_text_should_begin_selection(
-            SelectableTextRole::NonSelectable,
-            1,
-        ));
-        assert!(!selectable_text_should_stop_propagation(
-            SelectableTextRole::NonSelectable,
-        ));
+    fn selectable_text_roles_preserve_selection_and_bubbling_policy() {
+        for (role, click_count, should_select, should_stop_propagation) in [
+            (SelectableTextRole::RowSafe, 1, true, false),
+            (SelectableTextRole::RowSafe, 2, false, false),
+            (SelectableTextRole::PlainDocument, 2, true, true),
+            (SelectableTextRole::NonSelectable, 1, false, false),
+        ] {
+            assert_eq!(
+                selectable_text_should_begin_selection(role, click_count),
+                should_select
+            );
+            assert_eq!(
+                selectable_text_should_stop_propagation(role),
+                should_stop_propagation
+            );
+        }
     }
 
     #[test]

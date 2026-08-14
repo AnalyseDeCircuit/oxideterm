@@ -2138,10 +2138,6 @@ mod tests {
             auth_family_from_tab(SshAuthTab::TwoFactor),
             SshAuthFamily::TwoFactor
         );
-    }
-
-    #[test]
-    fn default_key_family_selection_uses_file_key_tab() {
         assert_eq!(
             default_auth_tab_for_family(SshAuthFamily::Key),
             SshAuthTab::SshKey
