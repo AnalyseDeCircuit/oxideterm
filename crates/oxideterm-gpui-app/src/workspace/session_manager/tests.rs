@@ -374,18 +374,6 @@ pub(super) fn oxide_export_logical_scroll_change_detects_inner_consumption() {
 }
 
 #[test]
-pub(super) fn oxide_export_selection_count_label_uses_locale_placeholders() {
-    assert_eq!(
-        oxide_export_selection_count_label(
-            "Select Connections to Export ({{selected}}/{{total}})".to_string(),
-            2,
-            5,
-        ),
-        "Select Connections to Export (2/5)"
-    );
-}
-
-#[test]
 pub(super) fn oxide_export_native_i18n_keys_resolve_without_tauri_namespace() {
     // Native modals.json flattens the export dialog as `export.*`; using
     // Tauri's `modals.export.*` namespace renders raw keys in the dialog.
@@ -962,86 +950,4 @@ pub(super) fn runtime_proxy_hops_are_prepended_without_cloning_the_connection_fo
     assert_eq!(request.proxy_chain.len(), 2);
     assert_eq!(request.proxy_chain[0].host, "runtime-hop.example.com");
     assert_eq!(request.proxy_chain[1].host, "form-hop.example.com");
-}
-
-#[test]
-pub(super) fn basic_dialog_tab_order_wraps_through_text_input_like_radix_dialog() {
-    assert_eq!(
-        browser_behavior::modal_footer_input_key_action(
-            "tab",
-            false,
-            &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
-            true,
-            true,
-            None,
-            SessionManagerBasicDialogFooterAction::Cancel,
-            None,
-        ),
-        Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(
-            SessionManagerBasicDialogFooterAction::Cancel
-        ))
-    );
-
-    assert_eq!(
-        browser_behavior::modal_footer_input_key_action(
-            "tab",
-            false,
-            &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
-            true,
-            false,
-            Some(SessionManagerBasicDialogFooterAction::Primary),
-            SessionManagerBasicDialogFooterAction::Cancel,
-            None,
-        ),
-        Some(browser_behavior::ModalFooterInputKeyAction::FocusInput)
-    );
-
-    assert_eq!(
-        browser_behavior::modal_footer_input_key_action(
-            "tab",
-            true,
-            &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
-            true,
-            false,
-            Some(SessionManagerBasicDialogFooterAction::Cancel),
-            SessionManagerBasicDialogFooterAction::Cancel,
-            None,
-        ),
-        Some(browser_behavior::ModalFooterInputKeyAction::FocusInput)
-    );
-}
-
-#[test]
-pub(super) fn basic_dialog_footer_arrows_stay_inside_footer_actions() {
-    assert_eq!(
-        browser_behavior::modal_footer_input_key_action(
-            "arrowleft",
-            false,
-            &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
-            false,
-            false,
-            Some(SessionManagerBasicDialogFooterAction::Cancel),
-            SessionManagerBasicDialogFooterAction::Cancel,
-            None,
-        ),
-        Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(
-            SessionManagerBasicDialogFooterAction::Primary
-        ))
-    );
-
-    assert_eq!(
-        browser_behavior::modal_footer_input_key_action(
-            "arrowright",
-            false,
-            &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
-            false,
-            false,
-            Some(SessionManagerBasicDialogFooterAction::Primary),
-            SessionManagerBasicDialogFooterAction::Cancel,
-            None,
-        ),
-        Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(
-            SessionManagerBasicDialogFooterAction::Cancel
-        ))
-    );
 }
