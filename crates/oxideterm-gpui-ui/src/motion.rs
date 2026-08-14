@@ -446,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn easing_and_interpolation_keep_exact_endpoints() {
+    fn easing_curves_keep_endpoints_and_spring_settles_after_a_small_overshoot() {
         assert_eq!(ease_out_cubic(0.0), 0.0);
         assert_eq!(ease_out_cubic(1.0), 1.0);
         assert_eq!(ease_in_out_cubic(0.0), 0.0);
@@ -455,10 +455,6 @@ mod tests {
         assert_eq!(spring_out(1.0), 1.0);
         assert_eq!(lerp(4.0, 8.0, 0.0), 4.0);
         assert_eq!(lerp(4.0, 8.0, 1.0), 8.0);
-    }
-
-    #[test]
-    fn spring_out_enters_quickly_and_settles_after_a_small_overshoot() {
         assert!(spring_out(0.5) > 0.9);
         assert!(spring_out(0.75) > 1.0);
         assert!(spring_out(0.75) < 1.03);
