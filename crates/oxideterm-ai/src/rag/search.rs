@@ -337,22 +337,20 @@ mod tests {
     }
 
     #[test]
-    fn test_cosine_sim_identical() {
-        let a = vec![1.0f32, 2.0, 3.0];
-        assert!((cosine_sim(&a, &a) - 1.0).abs() < 1e-6);
-    }
+    fn cosine_similarity_handles_relationships_and_invalid_dimensions() {
+        let cases: [(&str, &[f32], &[f32], f64); 2] = [
+            ("identical", &[1.0, 2.0, 3.0], &[1.0, 2.0, 3.0], 1.0),
+            ("orthogonal", &[1.0, 0.0], &[0.0, 1.0], 0.0),
+        ];
 
-    #[test]
-    fn test_cosine_sim_orthogonal() {
-        let a = vec![1.0f32, 0.0];
-        let b = vec![0.0f32, 1.0];
-        assert!(cosine_sim(&a, &b).abs() < 1e-6);
-    }
+        for (relationship, left, right, expected) in cases {
+            let actual = cosine_sim(left, right);
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "{relationship}: expected {expected}, got {actual}"
+            );
+        }
 
-    #[test]
-    fn test_cosine_sim_dimension_mismatch() {
-        let a = vec![1.0f32, 2.0];
-        let b = vec![1.0f32];
-        assert_eq!(cosine_sim(&a, &b), 0.0);
+        assert_eq!(cosine_sim(&[1.0, 2.0], &[1.0]), 0.0);
     }
 }

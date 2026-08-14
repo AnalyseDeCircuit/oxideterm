@@ -321,43 +321,27 @@ mod tests {
     }
 
     #[test]
-    fn test_cosine_point_identical() {
-        let a = CosinePoint::new(vec![1.0, 0.0, 1.0]);
-        let dist = a.distance(&a);
-        assert!(
-            dist.abs() < 1e-5,
-            "distance to self should be ~0, got {dist}"
-        );
-    }
+    fn cosine_point_distance_handles_vector_relationships() {
+        let cases: [(&str, &[f32], &[f32], f32); 3] = [
+            ("identical", &[1.0, 0.0, 1.0], &[1.0, 0.0, 1.0], 0.0),
+            ("orthogonal", &[1.0, 0.0], &[0.0, 1.0], 1.0),
+            ("opposite", &[1.0, 0.0], &[-1.0, 0.0], 2.0),
+        ];
 
-    #[test]
-    fn test_cosine_point_orthogonal() {
-        let a = CosinePoint::new(vec![1.0, 0.0]);
-        let b = CosinePoint::new(vec![0.0, 1.0]);
-        let dist = a.distance(&b);
-        assert!(
-            (dist - 1.0).abs() < 1e-5,
-            "orthogonal distance should be ~1.0, got {dist}"
-        );
-    }
+        for (relationship, left, right, expected) in cases {
+            let actual =
+                CosinePoint::new(left.to_vec()).distance(&CosinePoint::new(right.to_vec()));
+            assert!(
+                (actual - expected).abs() < 1e-5,
+                "{relationship}: expected {expected}, got {actual}"
+            );
+        }
 
-    #[test]
-    fn test_cosine_point_opposite() {
-        let a = CosinePoint::new(vec![1.0, 0.0]);
-        let b = CosinePoint::new(vec![-1.0, 0.0]);
-        let dist = a.distance(&b);
-        assert!(
-            (dist - 2.0).abs() < 1e-5,
-            "opposite distance should be ~2.0, got {dist}"
+        assert_eq!(
+            CosinePoint::new(vec![1.0, 2.0]).distance(&CosinePoint::new(vec![0.0, 0.0])),
+            1.0,
+            "zero vector distance should be 1.0"
         );
-    }
-
-    #[test]
-    fn test_cosine_point_zero_vector() {
-        let a = CosinePoint::new(vec![1.0, 2.0]);
-        let b = CosinePoint::new(vec![0.0, 0.0]);
-        let dist = a.distance(&b);
-        assert_eq!(dist, 1.0, "zero vector distance should be 1.0");
     }
 
     #[test]

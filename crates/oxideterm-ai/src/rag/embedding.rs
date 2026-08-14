@@ -234,44 +234,26 @@ mod tests {
     }
 
     #[test]
-    fn test_cosine_identical() {
-        let a = vec![1.0, 0.0, 1.0];
-        let norm = l2_norm(&a);
-        let sim = cosine_similarity(&a, &a, norm);
-        assert!((sim - 1.0).abs() < 1e-6);
-    }
+    fn cosine_similarity_handles_vector_relationships() {
+        let cases: [(&str, &[f32], &[f32], f64); 3] = [
+            ("identical", &[1.0, 0.0, 1.0], &[1.0, 0.0, 1.0], 1.0),
+            ("orthogonal", &[1.0, 0.0], &[0.0, 1.0], 0.0),
+            ("opposite", &[1.0, 0.0], &[-1.0, 0.0], -1.0),
+        ];
 
-    #[test]
-    fn test_cosine_orthogonal() {
-        let a = vec![1.0, 0.0];
-        let b = vec![0.0, 1.0];
-        let norm = l2_norm(&a);
-        let sim = cosine_similarity(&a, &b, norm);
-        assert!(sim.abs() < 1e-6);
-    }
+        for (relationship, left, right, expected) in cases {
+            let actual = cosine_similarity(left, right, l2_norm(left));
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "{relationship}: expected {expected}, got {actual}"
+            );
+        }
 
-    #[test]
-    fn test_cosine_opposite() {
-        let a = vec![1.0, 0.0];
-        let b = vec![-1.0, 0.0];
-        let norm = l2_norm(&a);
-        let sim = cosine_similarity(&a, &b, norm);
-        assert!((sim + 1.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn test_l2_norm() {
-        let v = vec![3.0, 4.0];
-        assert!((l2_norm(&v) - 5.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn test_zero_vector() {
-        let a = vec![1.0, 2.0];
-        let b = vec![0.0, 0.0];
-        let norm = l2_norm(&a);
-        let sim = cosine_similarity(&a, &b, norm);
-        assert_eq!(sim, 0.0);
+        assert!((l2_norm(&[3.0, 4.0]) - 5.0).abs() < 1e-6);
+        assert_eq!(
+            cosine_similarity(&[1.0, 2.0], &[0.0, 0.0], l2_norm(&[1.0, 2.0])),
+            0.0
+        );
     }
 
     #[test]
