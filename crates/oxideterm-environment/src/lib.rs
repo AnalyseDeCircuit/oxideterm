@@ -17,8 +17,8 @@ pub use cwd::{
     CurrentDirectoryEntry, CurrentDirectoryEntryKind, CurrentDirectoryKey, CurrentDirectoryScope,
     CurrentDirectorySnapshot, CurrentDirectorySource, current_directory_cd_command,
     current_directory_parent, current_directory_path_is_explicit, current_directory_report_command,
-    current_directory_shell_integration_command, current_directory_shell_path_argument,
-    list_local_current_directory, sort_current_directory_entries,
+    current_directory_shell_path_argument, list_local_current_directory,
+    sort_current_directory_entries,
 };
 pub use git::{
     GitActionPlan, GitBranchIdentity, GitBranchListOutcome, GitBranchReference, GitChangedPath,

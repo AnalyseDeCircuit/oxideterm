@@ -173,11 +173,6 @@ pub fn current_directory_report_command() -> &'static str {
     "___oxide_cwd=${PWD:-$(pwd)}; ___oxide_host=${HOSTNAME:-$(hostname 2>/dev/null || printf localhost)}; ___oxide_path=$(printf '%s' \"$___oxide_cwd\" | awk 'BEGIN{for(i=0;i<256;i++)ord[sprintf(\"%c\",i)]=i}{for(i=1;i<=length($0);i++){c=substr($0,i,1);if(c~/[A-Za-z0-9._~\\/:@-]/)printf \"%s\",c;else printf \"%%%02X\",ord[c]}}'); printf '\\033]7;file://%s%s\\007' \"$___oxide_host\" \"$___oxide_path\"; unset ___oxide_cwd ___oxide_host ___oxide_path"
 }
 
-/// Build a conservative runtime hook that reports cwd via OSC 7 on prompts.
-pub fn current_directory_shell_integration_command() -> &'static str {
-    "if [ -n \"${BASH_VERSION-}${ZSH_VERSION-}\" ]; then __oxideterm_osc7(){ local __oxide_cwd __oxide_host __oxide_path; __oxide_cwd=${PWD:-$(pwd)}; __oxide_host=${HOSTNAME:-$(hostname 2>/dev/null || printf localhost)}; __oxide_path=$(printf '%s' \"$__oxide_cwd\" | awk 'BEGIN{for(i=0;i<256;i++)ord[sprintf(\"%c\",i)]=i}{for(i=1;i<=length($0);i++){c=substr($0,i,1);if(c~/[A-Za-z0-9._~\\/:@-]/)printf \"%s\",c;else printf \"%%%02X\",ord[c]}}'); printf '\\033]7;file://%s%s\\007' \"$__oxide_host\" \"$__oxide_path\"; }; if [ -n \"${ZSH_VERSION-}\" ]; then autoload -Uz add-zsh-hook 2>/dev/null; if typeset -f add-zsh-hook >/dev/null 2>&1; then case \" ${precmd_functions[*]-} \" in *\" __oxideterm_osc7 \"*) ;; *) add-zsh-hook precmd __oxideterm_osc7 ;; esac; fi; elif [ -n \"${BASH_VERSION-}\" ]; then case \";${PROMPT_COMMAND-};\" in *\";__oxideterm_osc7;\"*|\"__oxideterm_osc7;\"*) ;; *) PROMPT_COMMAND=\"__oxideterm_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}\" ;; esac; fi; __oxideterm_osc7; fi"
-}
-
 /// Return a conservative parent path for POSIX, home-relative, and Windows paths.
 pub fn current_directory_parent(path: &str) -> Option<String> {
     let path = normalize_current_directory_path(path)?;
@@ -321,23 +316,6 @@ mod tests {
         assert!(command.contains("]7;file://%s%s"));
         assert!(command.contains("${PWD:-$(pwd)}"));
         assert!(command.contains("%%%02X"));
-    }
-
-    #[test]
-    fn shell_integration_command_installs_bash_and_zsh_hooks() {
-        let command = current_directory_shell_integration_command();
-        assert!(command.contains("]7;file://%s%s"));
-        assert!(command.contains("PROMPT_COMMAND"));
-        assert!(
-            command.contains(
-                "PROMPT_COMMAND=\"__oxideterm_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}\""
-            )
-        );
-        assert!(command.contains("add-zsh-hook precmd"));
-        assert!(command.contains("precmd_functions[*]"));
-        assert!(command.contains("__oxideterm_osc7"));
-        assert!(!command.contains("PS1="));
-        assert!(!command.contains("title"));
     }
 
     #[test]
