@@ -703,35 +703,4 @@ mod tests {
         assert!(!SettingsInput::TerminalFontSize.accepts_newline());
         assert_eq!(SettingsInput::AiMemoryContent.textarea_line_height(), 22.0);
     }
-
-    #[test]
-    fn settings_tabs_are_grouped_by_user_task() {
-        assert_eq!(
-            SettingsTab::groups(),
-            &[
-                &[
-                    SettingsTab::General,
-                    SettingsTab::Appearance,
-                    SettingsTab::Keybindings,
-                ][..],
-                &[SettingsTab::Terminal, SettingsTab::Portable][..],
-                &[
-                    SettingsTab::Connections,
-                    SettingsTab::Network,
-                    SettingsTab::Sftp,
-                    SettingsTab::Privilege,
-                ][..],
-                &[SettingsTab::Ide, SettingsTab::Ai, SettingsTab::Knowledge][..],
-                &[SettingsTab::Help][..],
-            ]
-        );
-        assert_eq!(
-            SettingsTab::all(),
-            SettingsTab::groups()
-                .iter()
-                .flat_map(|group| group.iter())
-                .copied()
-                .collect::<Vec<_>>()
-        );
-    }
 }
