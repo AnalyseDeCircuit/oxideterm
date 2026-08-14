@@ -442,39 +442,24 @@ mod tests {
     use oxideterm_settings::{HighlightRuleMatchScope, create_default_highlight_rule};
 
     #[test]
-    fn regex_preview_and_validation_share_compiled_cache_behavior() {
-        let rule = create_default_highlight_rule(|rule| {
+    fn regex_validation_and_preview_distinguish_valid_patterns() {
+        let valid_rule = create_default_highlight_rule(|rule| {
             rule.pattern = r"\berror\b".to_string();
             rule.is_regex = true;
         });
 
-        // The second validation/preview pass exercises the cached path while
-        // preserving the same public result as Tauri's memoized runtime rules.
-        assert_eq!(highlight_rule_validation_error(&rule), None);
-        assert_eq!(highlight_rule_validation_error(&rule), None);
+        assert_eq!(highlight_rule_validation_error(&valid_rule), None);
         assert_eq!(
-            accepted_highlight_preview_matches("fatal error happened", &[rule.clone()]).len(),
+            accepted_highlight_preview_matches("fatal error happened", &[valid_rule]).len(),
             1
         );
-        assert_eq!(
-            accepted_highlight_preview_matches("fatal error happened", &[rule]).len(),
-            1
-        );
-    }
 
-    #[test]
-    fn invalid_regex_is_cached_as_invalid() {
-        let rule = create_default_highlight_rule(|rule| {
+        let invalid_rule = create_default_highlight_rule(|rule| {
             rule.pattern = "(".to_string();
             rule.is_regex = true;
         });
-
         assert_eq!(
-            highlight_rule_validation_error(&rule),
-            Some("invalid-regex")
-        );
-        assert_eq!(
-            highlight_rule_validation_error(&rule),
+            highlight_rule_validation_error(&invalid_rule),
             Some("invalid-regex")
         );
     }
