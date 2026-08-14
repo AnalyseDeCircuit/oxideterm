@@ -647,19 +647,14 @@ mod tests {
     }
 
     #[test]
-    fn marked_display_parts_insert_at_utf16_position() {
-        assert_eq!(
-            text_input_marked_display_parts("abcd", 2..2),
-            ("ab".to_string(), "cd".to_string())
-        );
-    }
-
-    #[test]
-    fn marked_display_parts_replace_selected_utf16_range() {
-        assert_eq!(
-            text_input_marked_display_parts("a🔒b", 1..3),
-            ("a".to_string(), "b".to_string())
-        );
+    fn marked_display_parts_handle_insertions_and_utf16_replacements() {
+        for (value, range, expected) in [("abcd", 2..2, ("ab", "cd")), ("a🔒b", 1..3, ("a", "b"))]
+        {
+            assert_eq!(
+                text_input_marked_display_parts(value, range),
+                (expected.0.to_string(), expected.1.to_string())
+            );
+        }
     }
 
     #[test]

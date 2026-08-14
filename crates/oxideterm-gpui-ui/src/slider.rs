@@ -77,18 +77,14 @@ mod tests {
     use super::slider_pointer_percent;
 
     #[test]
-    fn pointer_percent_tracks_thumb_centers() {
+    fn pointer_percent_tracks_thumb_centers_and_clamps_boundaries() {
         let width = 128.0;
         let thumb = 16.0;
 
         assert_eq!(slider_pointer_percent(8.0, width, thumb), 0.0);
         assert_eq!(slider_pointer_percent(64.0, width, thumb), 0.5);
         assert_eq!(slider_pointer_percent(120.0, width, thumb), 1.0);
-    }
-
-    #[test]
-    fn pointer_percent_clamps_outside_slider() {
-        assert_eq!(slider_pointer_percent(-20.0, 128.0, 16.0), 0.0);
-        assert_eq!(slider_pointer_percent(200.0, 128.0, 16.0), 1.0);
+        assert_eq!(slider_pointer_percent(-20.0, width, thumb), 0.0);
+        assert_eq!(slider_pointer_percent(200.0, width, thumb), 1.0);
     }
 }
