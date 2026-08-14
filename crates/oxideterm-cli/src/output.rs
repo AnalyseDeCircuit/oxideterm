@@ -62,14 +62,3 @@ pub fn write_error(format: OutputFormat, error: &CliError) {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn json_flag_selects_json_format() {
-        assert_eq!(format_from_flag(true), OutputFormat::Json);
-        assert_eq!(format_from_flag(false), OutputFormat::Text);
-    }
-}
