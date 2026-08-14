@@ -350,6 +350,7 @@ pub(super) fn test_connection_store_with_agent_connection(
             icon_background_color: None,
             icon: None,
             tags: Vec::new(),
+            connect_timeout_seconds: oxideterm_connections::DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
             agent_forwarding: false,
             identity_agent: None,
             agent_forwarding_socket: None,

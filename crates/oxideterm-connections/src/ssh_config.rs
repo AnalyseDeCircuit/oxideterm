@@ -18,6 +18,7 @@ pub struct SshConfigHost {
     pub hostname: Option<String>,
     pub user: Option<String>,
     pub port: Option<u16>,
+    pub connect_timeout_seconds: Option<u64>,
     pub identity_file: Option<String>,
     pub certificate_file: Option<String>,
     pub identity_agent: Option<String>,
@@ -65,6 +66,7 @@ struct SshHostOptions {
     hostname: Option<String>,
     user: Option<String>,
     port: Option<u16>,
+    connect_timeout_seconds: Option<u64>,
     identity_file: Option<String>,
     certificate_file: Option<String>,
     identity_agent: Option<String>,
@@ -265,6 +267,10 @@ fn apply_option(options: &mut SshHostOptions, key: &str, values: &[String]) {
         "hostname" if options.hostname.is_none() => options.hostname = Some(value.clone()),
         "user" if options.user.is_none() => options.user = Some(value.clone()),
         "port" if options.port.is_none() => options.port = value.parse::<u16>().ok(),
+        "connecttimeout" if options.connect_timeout_seconds.is_none() => {
+            options.connect_timeout_seconds =
+                value.parse::<u64>().ok().filter(|seconds| *seconds > 0)
+        }
         "identityfile" if options.identity_file.is_none() => {
             options.identity_file = Some(value.clone())
         }
@@ -304,6 +310,9 @@ fn merge_first_options(base: &mut SshHostOptions, update: &SshHostOptions) {
     base.hostname = base.hostname.clone().or_else(|| update.hostname.clone());
     base.user = base.user.clone().or_else(|| update.user.clone());
     base.port = base.port.or(update.port);
+    base.connect_timeout_seconds = base
+        .connect_timeout_seconds
+        .or(update.connect_timeout_seconds);
     base.identity_file = base
         .identity_file
         .clone()
@@ -435,6 +444,7 @@ fn resolve_ssh_config_host(alias: &str, blocks: &[SshHostBlock]) -> Result<SshCo
         hostname,
         user: options.user,
         port: options.port,
+        connect_timeout_seconds: options.connect_timeout_seconds,
         identity_file,
         certificate_file,
         identity_agent,
@@ -1040,7 +1050,7 @@ mod tests {
         fs::create_dir_all(&directory).unwrap();
         fs::write(
             directory.join("config"),
-            "Host=production\nHostName=prod.example.com\nPort=2200\n",
+            "Host=production\nHostName=prod.example.com\nPort=2200\nConnectTimeout=120\n",
         )
         .unwrap();
 
@@ -1051,6 +1061,7 @@ mod tests {
 
         assert_eq!(host.hostname.as_deref(), Some("prod.example.com"));
         assert_eq!(host.port, Some(2200));
+        assert_eq!(host.connect_timeout_seconds, Some(120));
         let _ = fs::remove_dir_all(directory);
     }
 

@@ -155,6 +155,7 @@ impl ConnectionTerminalOptions {
 }
 
 pub const DEFAULT_X11_UNTRUSTED_TIMEOUT_SECONDS: u32 = 20 * 60;
+pub const DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS: u64 = 30;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -196,6 +197,9 @@ fn default_x11_untrusted_timeout_seconds() -> u32 {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ConnectionOptions {
+    /// Overrides the SSH TCP and protocol-handshake timeout for this host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connect_timeout_seconds: Option<u64>,
     #[serde(default)]
     pub keep_alive_interval: u32,
     #[serde(default)]
@@ -230,6 +234,14 @@ pub struct ConnectionOptions {
         skip_serializing_if = "ConnectionTerminalOptions::inherits_application_defaults"
     )]
     pub terminal: ConnectionTerminalOptions,
+}
+
+impl ConnectionOptions {
+    pub fn effective_connect_timeout_seconds(&self) -> u64 {
+        self.connect_timeout_seconds
+            .filter(|seconds| *seconds > 0)
+            .unwrap_or(DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1069,6 +1081,7 @@ pub struct SaveConnectionRequest {
     pub icon_background_color: Option<String>,
     pub icon: Option<String>,
     pub tags: Vec<String>,
+    pub connect_timeout_seconds: u64,
     pub agent_forwarding: bool,
     pub identity_agent: Option<String>,
     pub agent_forwarding_socket: Option<String>,

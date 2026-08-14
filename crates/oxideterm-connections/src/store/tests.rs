@@ -29,6 +29,7 @@ mod tests {
             icon_background_color: None,
             icon: None,
             tags: Vec::new(),
+            connect_timeout_seconds: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
             agent_forwarding: false,
             identity_agent: None,
             agent_forwarding_socket: None,
@@ -72,6 +73,7 @@ mod tests {
         let default_options = serde_json::to_value(ConnectionOptions::default()).unwrap();
         assert!(default_options.get("terminal").is_none());
         assert!(default_options.get("x11_forwarding").is_none());
+        assert!(default_options.get("connect_timeout_seconds").is_none());
         assert!(
             default_options
                 .get("dedicated_new_terminal_connection")
@@ -106,12 +108,22 @@ mod tests {
         assert!(decoded.dedicated_new_terminal_connection);
 
         let legacy: ConnectionOptions = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(
+            legacy.effective_connect_timeout_seconds(),
+            DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS
+        );
         assert!(legacy.terminal.inherits_application_defaults());
         assert!(!legacy.dedicated_new_terminal_connection);
         assert_eq!(
             legacy.x11_forwarding,
             ConnectionX11ForwardingOptions::default()
         );
+
+        let custom_timeout: ConnectionOptions = serde_json::from_value(serde_json::json!({
+            "connect_timeout_seconds": 120
+        }))
+        .unwrap();
+        assert_eq!(custom_timeout.effective_connect_timeout_seconds(), 120);
     }
 
     #[test]
@@ -1921,6 +1933,7 @@ mod tests {
             },
         };
         source_connection.options = ConnectionOptions {
+            connect_timeout_seconds: Some(180),
             keep_alive_interval: 37,
             compression: true,
             jump_host: Some("legacy-jump".to_string()),
@@ -1952,6 +1965,7 @@ mod tests {
         assert_eq!(imported.color.as_deref(), Some("#123456"));
         assert_eq!(imported.icon.as_deref(), Some("server"));
         assert_eq!(imported.tags, vec!["prod", "critical"]);
+        assert_eq!(imported.options.connect_timeout_seconds, Some(180));
         assert_eq!(imported.options.keep_alive_interval, 37);
         assert!(imported.options.compression);
         assert_eq!(imported.options.jump_host.as_deref(), Some("legacy-jump"));

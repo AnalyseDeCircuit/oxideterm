@@ -214,6 +214,9 @@ impl ConnectionStore {
         // Tauri preserves saved per-connection SSH options on edit and only
         // overwrites fields carried by the current form. This keeps imported
         // Tauri config tails such as compression/term_type from being dropped.
+        options.connect_timeout_seconds =
+            (request.connect_timeout_seconds != DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS)
+                .then_some(request.connect_timeout_seconds.max(1));
         options.agent_forwarding = request.agent_forwarding;
         options.identity_agent = request.identity_agent;
         options.agent_forwarding_socket = request.agent_forwarding_socket;

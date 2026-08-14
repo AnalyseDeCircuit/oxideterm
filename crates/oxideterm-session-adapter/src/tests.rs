@@ -161,6 +161,7 @@ fn saved_proxy_chain_becomes_ssh_config_chain() {
 fn saved_connection_hops_become_independent_runtime_configs() {
     let (store, path) = temp_connection_store("materialized-hops");
     let mut connection = saved_connection(SavedAuth::Agent);
+    connection.options.connect_timeout_seconds = Some(180);
     connection.proxy_chain = vec![SavedProxyHop {
         host: "jump.example.com".to_string(),
         port: 2222,
@@ -179,6 +180,7 @@ fn saved_connection_hops_become_independent_runtime_configs() {
         .expect("target should follow the materialized jumps");
 
     assert_eq!(jump.host, "jump.example.com");
+    assert_eq!(jump.timeout_secs, 180);
     assert!(jump.proxy_chain.is_none());
     assert_eq!(jump.identity_agent.as_deref(), Some("/tmp/jump-agent.sock"));
     assert_eq!(
@@ -186,6 +188,7 @@ fn saved_connection_hops_become_independent_runtime_configs() {
         Some("/tmp/jump-forward.sock")
     );
     assert_eq!(target.host, "target.example.com");
+    assert_eq!(target.timeout_secs, 180);
     assert!(target.proxy_chain.is_none());
     assert!(ssh_config_for_saved_connection_hop(&store, &settings, &connection, 2).is_none());
     let _ = std::fs::remove_file(path);

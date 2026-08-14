@@ -4,6 +4,7 @@ use oxideterm_settings_model::parse_rgb24_hex;
 
 const NEW_CONNECTION_TRANSPORT_ROW_HEIGHT: f32 = 36.0;
 const NEW_CONNECTION_TRANSPORT_ROW_GAP: f32 = 4.0;
+const SSH_CONNECT_TIMEOUT_OPTIONS_SECONDS: [u64; 5] = [10, 30, 60, 120, 300];
 const REMOTE_DESKTOP_CLIPBOARD_FEATURES: &[(RemoteDesktopSessionFeature, &str, &str)] = &[
     (
         RemoteDesktopSessionFeature::ClipboardText,
@@ -2916,15 +2917,21 @@ impl WorkspaceApp {
     pub(super) fn render_connection_terminal_options(&self, cx: &mut Context<Self>) -> AnyElement {
         // Saved host controls are optional overrides so application defaults
         // continue to govern legacy records and temporary local terminals.
-        let Some((terminal, dedicated_new_terminal_connection, x11_forwarding, transport)) =
-            self.connection_form_state(cx).form.as_ref().map(|form| {
-                (
-                    form.terminal,
-                    form.dedicated_new_terminal_connection,
-                    form.x11_forwarding,
-                    form.transport,
-                )
-            })
+        let Some((
+            terminal,
+            dedicated_new_terminal_connection,
+            x11_forwarding,
+            connect_timeout_seconds,
+            transport,
+        )) = self.connection_form_state(cx).form.as_ref().map(|form| {
+            (
+                form.terminal,
+                form.dedicated_new_terminal_connection,
+                form.x11_forwarding,
+                form.connect_timeout_seconds,
+                form.transport,
+            )
+        })
         else {
             return div().into_any_element();
         };
@@ -2981,6 +2988,43 @@ impl WorkspaceApp {
                             .child(self.i18n.t("ssh.form.terminal_options_hint")),
                     ),
             )
+            .when(transport == NewConnectionTransport::Ssh, |section| {
+                let mut timeout_options = SSH_CONNECT_TIMEOUT_OPTIONS_SECONDS.to_vec();
+                if !timeout_options.contains(&connect_timeout_seconds) {
+                    timeout_options.push(connect_timeout_seconds);
+                    timeout_options.sort_unstable();
+                }
+                let timeout_tabs = timeout_options.into_iter().map(|seconds| {
+                    segmented_tab(
+                        &self.tokens,
+                        self.i18n
+                            .t("ssh.form.connect_timeout_value")
+                            .replace("{{seconds}}", &seconds.to_string()),
+                        connect_timeout_seconds == seconds,
+                    )
+                    .id(SharedString::from(format!("ssh-connect-timeout-{seconds}")))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.update_connection_form_state(cx, |state| {
+                                if let Some(form) = state.form.as_mut() {
+                                    form.connect_timeout_seconds = seconds;
+                                }
+                            });
+                            cx.notify();
+                        }),
+                    )
+                });
+                section
+                    .child(form_field(
+                        &self.tokens,
+                        self.i18n.t("ssh.form.connect_timeout"),
+                        segmented_tabs(&self.tokens).children(timeout_tabs),
+                    ))
+                    .child(
+                        self.render_connection_hint(self.i18n.t("ssh.form.connect_timeout_hint")),
+                    )
+            })
             .child(
                 div()
                     .flex()

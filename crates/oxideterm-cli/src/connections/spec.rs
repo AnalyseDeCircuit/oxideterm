@@ -181,6 +181,9 @@ pub(super) fn connection_request_from_spec(
                 .map(|connection| connection.tags.clone())
                 .unwrap_or_default()
         }),
+        connect_timeout_seconds: existing
+            .map(|connection| connection.options.effective_connect_timeout_seconds())
+            .unwrap_or(oxideterm_connections::DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS),
         agent_forwarding: spec.agent_forwarding.unwrap_or_else(|| {
             existing
                 .map(|connection| connection.options.agent_forwarding)

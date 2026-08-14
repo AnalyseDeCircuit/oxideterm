@@ -6,7 +6,7 @@ use std::{
 use gpui::{App, Context, Window};
 use oxideterm_connections::{
     ConnectionTerminalOptions, ConnectionX11ForwardingMode, ConnectionX11ForwardingOptions,
-    MoshIpFamily as SavedMoshIpFamily, MoshPredictionMode,
+    DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS, MoshIpFamily as SavedMoshIpFamily, MoshPredictionMode,
     MoshUdpPortSelection as SavedMoshUdpPortSelection, SaveConnectionRequest,
     SaveMoshProfileRequest, SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest,
     SaveTelnetProfileRequest, SavedConnectionRuntimeSecrets, SavedMoshProfileRuntimeSecrets,

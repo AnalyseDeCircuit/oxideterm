@@ -60,6 +60,7 @@ mod tests {
             }],
             upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
             options: ConnectionOptions {
+                connect_timeout_seconds: Some(120),
                 keep_alive_interval: 30,
                 compression: true,
                 jump_host: None,
@@ -170,6 +171,7 @@ mod tests {
         assert_eq!(imported.host, "example.com");
         assert_eq!(imported.port, 2222);
         assert_eq!(imported.options.keep_alive_interval, 30);
+        assert_eq!(imported.options.connect_timeout_seconds, Some(120));
         assert!(imported.options.compression);
         assert_eq!(imported.proxy_chain.len(), 1);
         assert!(

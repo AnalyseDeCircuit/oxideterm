@@ -505,7 +505,9 @@ pub(super) fn edit_properties_unloaded_password_preserves_saved_keychain_id() {
 #[test]
 pub(super) fn edit_properties_switch_from_agent_to_password_submits_new_password() {
     let existing = SavedAuth::Agent;
-    let saved_connection = saved_connection_fixture(existing.clone());
+    let connect_timeout_seconds = 120;
+    let mut saved_connection = saved_connection_fixture(existing.clone());
+    saved_connection.options.connect_timeout_seconds = Some(connect_timeout_seconds);
     let mut form = form_from_saved_connection(&saved_connection, None);
     form.auth_tab = SshAuthTab::Password;
     form.password = "new-secret".to_string();
@@ -516,6 +518,7 @@ pub(super) fn edit_properties_switch_from_agent_to_password_submits_new_password
         Some(&existing),
     )
     .unwrap();
+    assert_eq!(request.connect_timeout_seconds, connect_timeout_seconds);
 
     match request.auth {
         SavedAuth::Password {

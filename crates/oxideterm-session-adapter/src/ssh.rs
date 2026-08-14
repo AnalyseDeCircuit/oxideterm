@@ -37,6 +37,7 @@ pub fn ssh_config_from_saved_connection_with_auth(
         port: conn.port,
         username: conn.username.clone(),
         auth,
+        timeout_secs: conn.options.effective_connect_timeout_seconds(),
         proxy_chain: (!proxy_chain.is_empty()).then_some(proxy_chain),
         // A configured proxy that cannot be hydrated must stop materialization
         // instead of silently turning into a direct connection.
@@ -112,6 +113,7 @@ pub fn ssh_config_from_saved_connection_with_runtime_secrets(
         port: conn.port,
         username: conn.username.clone(),
         auth,
+        timeout_secs: conn.options.effective_connect_timeout_seconds(),
         proxy_chain: (!proxy_chain.is_empty()).then_some(proxy_chain),
         upstream_proxy,
         proxy_command,
@@ -288,6 +290,7 @@ pub fn ssh_config_for_saved_connection_hop(
             port: hop.port,
             username: hop.username.clone(),
             auth: auth_method_from_saved_auth(store, &hop.auth)?,
+            timeout_secs: connection.options.effective_connect_timeout_seconds(),
             proxy_chain: None,
             upstream_proxy: upstream_proxy_config_from_saved_policy(
                 store,

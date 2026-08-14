@@ -198,6 +198,7 @@ pub(super) fn form_from_runtime_config(
     form.identity_agent = config.identity_agent.clone().unwrap_or_default();
     form.agent_forwarding_socket = config.agent_forwarding_socket.clone();
     form.legacy_ssh_compatibility = config.legacy_ssh_compatibility;
+    form.connect_timeout_seconds = config.timeout_secs;
     form.x11_forwarding = connection_x11_options(config.x11_forwarding);
     form.save_password = auth_fields.save_password;
 
@@ -387,6 +388,7 @@ mod runtime_save_tests {
             icon_background_color: None,
             icon: None,
             tags: Vec::new(),
+            connect_timeout_seconds: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
             agent_forwarding: false,
             identity_agent: None,
             agent_forwarding_socket: None,

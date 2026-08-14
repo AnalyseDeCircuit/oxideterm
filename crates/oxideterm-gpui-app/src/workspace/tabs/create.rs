@@ -702,10 +702,11 @@ impl WorkspaceApp {
         target_title: String,
     ) -> Result<NodeTreeExpansion> {
         let proxy_chain = config.proxy_chain.take().unwrap_or_default();
+        let connect_timeout_seconds = config.timeout_secs;
         // Consume the detached chain so runtime authentication material is not cloned.
         let hops = proxy_chain
             .into_iter()
-            .map(ssh_config_from_proxy_hop)
+            .map(|hop| ssh_config_from_proxy_hop(hop, connect_timeout_seconds))
             .collect::<Vec<_>>();
         let expansion = self
             .node_router
@@ -723,10 +724,11 @@ impl WorkspaceApp {
         target_title: String,
     ) -> Result<NodeTreeExpansion> {
         let proxy_chain = config.proxy_chain.take().unwrap_or_default();
+        let connect_timeout_seconds = config.timeout_secs;
         // Consume the detached chain so runtime authentication material is not cloned.
         let hops = proxy_chain
             .into_iter()
-            .map(ssh_config_from_proxy_hop)
+            .map(|hop| ssh_config_from_proxy_hop(hop, connect_timeout_seconds))
             .collect::<Vec<_>>();
         let expansion = self.node_router.expand_manual_preset_under_parent(
             parent_node_id.clone(),
@@ -1249,7 +1251,7 @@ impl WorkspaceApp {
     }
 }
 
-fn ssh_config_from_proxy_hop(hop: ProxyHopConfig) -> SshConfig {
+fn ssh_config_from_proxy_hop(hop: ProxyHopConfig, connect_timeout_seconds: u64) -> SshConfig {
     let ProxyHopConfig {
         host,
         port,
@@ -1268,6 +1270,7 @@ fn ssh_config_from_proxy_hop(hop: ProxyHopConfig) -> SshConfig {
         port,
         username,
         auth,
+        timeout_secs: connect_timeout_seconds,
         proxy_chain: None,
         agent_forwarding,
         identity_agent,
@@ -1286,23 +1289,28 @@ mod create_tests {
 
     #[test]
     fn proxy_hop_conversion_moves_auth_and_preserves_transport_options() {
-        let config = ssh_config_from_proxy_hop(ProxyHopConfig {
-            host: "jump.example.com".to_string(),
-            port: 2202,
-            username: "operator".to_string(),
-            auth: AuthMethod::password("runtime-secret"),
-            agent_forwarding: true,
-            identity_agent: Some("/tmp/identity-agent.sock".to_string()),
-            agent_forwarding_socket: Some("/tmp/forward-agent.sock".to_string()),
-            legacy_ssh_compatibility: true,
-            strict_host_key_checking: true,
-            trust_host_key: Some(false),
-            expected_host_key_fingerprint: Some("SHA256:test".to_string()),
-        });
+        let connect_timeout_seconds = 180;
+        let config = ssh_config_from_proxy_hop(
+            ProxyHopConfig {
+                host: "jump.example.com".to_string(),
+                port: 2202,
+                username: "operator".to_string(),
+                auth: AuthMethod::password("runtime-secret"),
+                agent_forwarding: true,
+                identity_agent: Some("/tmp/identity-agent.sock".to_string()),
+                agent_forwarding_socket: Some("/tmp/forward-agent.sock".to_string()),
+                legacy_ssh_compatibility: true,
+                strict_host_key_checking: true,
+                trust_host_key: Some(false),
+                expected_host_key_fingerprint: Some("SHA256:test".to_string()),
+            },
+            connect_timeout_seconds,
+        );
 
         assert_eq!(config.host, "jump.example.com");
         assert_eq!(config.port, 2202);
         assert_eq!(config.username, "operator");
+        assert_eq!(config.timeout_secs, connect_timeout_seconds);
         assert!(config.agent_forwarding);
         assert_eq!(
             config.identity_agent.as_deref(),

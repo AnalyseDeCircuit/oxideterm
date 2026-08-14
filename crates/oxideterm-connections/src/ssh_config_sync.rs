@@ -120,12 +120,14 @@ fn sync_resolved_ssh_config_hosts(
         resolved.icon = existing.icon;
         resolved.tags = merged_ssh_config_tags(&existing.tags, &resolved.tags);
         let resolved_agent_forwarding = resolved.options.agent_forwarding;
+        let resolved_connect_timeout_seconds = resolved.options.connect_timeout_seconds;
         let resolved_identity_agent = resolved.options.identity_agent.clone();
         let resolved_agent_forwarding_socket = resolved.options.agent_forwarding_socket.clone();
         let resolved_x11_forwarding = resolved.options.x11_forwarding;
         resolved.options = existing.options;
         // These fields remain owned by the imported OpenSSH config while
         // unrelated application-specific connection options stay untouched.
+        resolved.options.connect_timeout_seconds = resolved_connect_timeout_seconds;
         resolved.options.agent_forwarding = resolved_agent_forwarding;
         resolved.options.identity_agent = resolved_identity_agent;
         resolved.options.agent_forwarding_socket = resolved_agent_forwarding_socket;
@@ -147,6 +149,7 @@ fn ssh_config_fields_match(existing: &SavedConnection, resolved: &SavedConnectio
         && existing.port == resolved.port
         && existing.username == resolved.username
         && auth_source_matches(&existing.auth, &resolved.auth)
+        && existing.options.connect_timeout_seconds == resolved.options.connect_timeout_seconds
         && existing.options.agent_forwarding == resolved.options.agent_forwarding
         && existing.options.identity_agent == resolved.options.identity_agent
         && existing.options.agent_forwarding_socket == resolved.options.agent_forwarding_socket
@@ -317,6 +320,7 @@ mod tests {
                 icon_background_color: None,
                 icon: None,
                 tags: Vec::new(),
+                connect_timeout_seconds: crate::DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
                 agent_forwarding: false,
                 identity_agent: None,
                 agent_forwarding_socket: None,

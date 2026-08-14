@@ -2030,6 +2030,7 @@ impl WorkspaceApp {
         let tx = self.ssh_worker_sender(cx);
         let host = config.host.clone();
         let port = config.port;
+        let connect_timeout_seconds = config.timeout_secs;
         let upstream_proxy = config.upstream_proxy.take();
         let worker_config = config;
         let worker_title = title;
@@ -2038,7 +2039,7 @@ impl WorkspaceApp {
                 Ok(runtime) => runtime.block_on(check_host_key_with_upstream_proxy(
                     &host,
                     port,
-                    10,
+                    connect_timeout_seconds,
                     upstream_proxy.as_ref(),
                 )),
                 Err(error) => HostKeyStatus::Error {

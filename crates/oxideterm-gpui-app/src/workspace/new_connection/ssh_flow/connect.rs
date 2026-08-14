@@ -132,6 +132,7 @@ impl WorkspaceApp {
                 port: port.unwrap_or(22),
                 username: username.clone(),
                 auth,
+                timeout_secs: form.connect_timeout_seconds,
                 agent_forwarding: form.agent_forwarding,
                 identity_agent: identity_agent_from_form(&form.identity_agent),
                 agent_forwarding_socket: form.agent_forwarding_socket.clone(),
@@ -553,6 +554,10 @@ impl WorkspaceApp {
         }
         let tx = self.ssh_worker_sender(cx);
         let router = self.node_router.clone();
+        let connect_timeout_seconds = router
+            .node_runtime_snapshot(&step.node_id)
+            .map(|snapshot| snapshot.config.timeout_secs)
+            .unwrap_or(DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS);
         let Some(preflight_context) = self.connection_flow.update(cx, |connection_flow, cx| {
             connection_flow.take_proxy_connect_preflight_context(cx)
         }) else {
@@ -579,7 +584,7 @@ impl WorkspaceApp {
                                 .acquire_connection_wait(
                                     &parent_id,
                                     consumer.clone(),
-                                    Duration::from_secs(30),
+                                    Duration::from_secs(connect_timeout_seconds),
                                 )
                                 .await
                             {
@@ -588,7 +593,9 @@ impl WorkspaceApp {
                                     let status = parent
                                         .handle
                                         .preflight_host_key_via_direct_tcpip(
-                                            &step.host, step.port, 10,
+                                            &step.host,
+                                            step.port,
+                                            connect_timeout_seconds,
                                         )
                                         .await;
                                     router.release_consumer(&connection_id, &consumer);
@@ -606,7 +613,7 @@ impl WorkspaceApp {
                             check_host_key_with_upstream_proxy(
                                 &step.host,
                                 step.port,
-                                10,
+                                connect_timeout_seconds,
                                 upstream_proxy.as_ref(),
                             )
                             .await

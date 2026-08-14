@@ -501,6 +501,7 @@ fn write_connection_secret(
             icon_background_color: connection.icon_background_color,
             icon: connection.icon,
             tags: connection.tags,
+            connect_timeout_seconds: connection.options.effective_connect_timeout_seconds(),
             agent_forwarding: connection.options.agent_forwarding,
             identity_agent: connection.options.identity_agent,
             agent_forwarding_socket: connection.options.agent_forwarding_socket,
