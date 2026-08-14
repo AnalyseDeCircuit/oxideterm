@@ -994,6 +994,9 @@ fn merge_options(
     imported: ConnectionOptions,
     imported_has_proxy_chain: bool,
 ) -> ConnectionOptions {
+    if imported.connect_timeout_seconds.is_some() {
+        existing.connect_timeout_seconds = imported.connect_timeout_seconds;
+    }
     if imported.keep_alive_interval != 0 {
         existing.keep_alive_interval = imported.keep_alive_interval;
     }

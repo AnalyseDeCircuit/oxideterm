@@ -1295,9 +1295,13 @@ mod tests {
 
     #[test]
     fn replace_and_merge_import_report_forward_owner_operations() {
+        let imported_connect_timeout_seconds = 120;
+        let existing_connect_timeout_seconds = 60;
         let mut source = temp_store("forward-op-source");
+        let mut source_connection = saved_connection("conn-1", "Prod");
+        source_connection.options.connect_timeout_seconds = Some(imported_connect_timeout_seconds);
         source
-            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .upsert_imported_connection(source_connection)
             .unwrap();
         let bytes = export_connections_to_oxide(
             &source,
@@ -1338,8 +1342,10 @@ mod tests {
         assert!(replaced.forward_merge_owner_ids.is_empty());
 
         let mut merge_target = temp_store("forward-op-merge");
+        let mut existing_connection = saved_connection("existing", "Prod");
+        existing_connection.options.connect_timeout_seconds = Some(existing_connect_timeout_seconds);
         merge_target
-            .upsert_imported_connection(saved_connection("existing", "Prod"))
+            .upsert_imported_connection(existing_connection)
             .unwrap();
         let merged = apply_oxide_import(
             &mut merge_target,
@@ -1350,6 +1356,14 @@ mod tests {
         .unwrap();
         assert_eq!(merged.forward_merge_owner_ids, vec!["existing".to_string()]);
         assert!(merged.forward_replace_owner_ids.is_empty());
+        assert_eq!(
+            merge_target
+                .get("existing")
+                .unwrap()
+                .options
+                .connect_timeout_seconds,
+            Some(imported_connect_timeout_seconds)
+        );
     }
 
     #[test]
