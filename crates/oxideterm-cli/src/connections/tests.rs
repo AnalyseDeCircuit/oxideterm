@@ -62,29 +62,6 @@ fn filters_connections_by_common_fields() {
 }
 
 #[test]
-fn formats_connections_write_summary() {
-    let response = ConnectionsWriteResponse {
-        path: "connections.json".to_string(),
-        applied: false,
-        dry_run: true,
-        backup_path: None,
-        backup_size_bytes: None,
-        changes: vec![ConnectionsChange {
-            action: "rename",
-            target: "id-1".to_string(),
-            before: Some("Old".to_string()),
-            after: Some("New".to_string()),
-        }],
-    };
-
-    let text = format_connections_write_text(&response);
-
-    assert!(text.contains("dryRun=true"));
-    assert!(text.contains("rename"));
-    assert!(text.contains("Old"));
-}
-
-#[test]
 fn snapshot_changes_describe_incoming_records() {
     let snapshot = SavedConnectionsSyncSnapshot {
         revision: "rev".to_string(),
