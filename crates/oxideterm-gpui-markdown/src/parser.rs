@@ -1046,28 +1046,17 @@ mod tests {
     }
 
     #[test]
-    fn parses_task_list_checked() {
-        let doc = parse("- [x] done");
-        assert_eq!(doc.blocks.len(), 1);
-        match &doc.blocks[0] {
-            Block::UnorderedList { items } => {
-                assert_eq!(items.len(), 1);
-                assert_eq!(items[0].checked, Some(true));
+    fn task_lists_preserve_checked_state() {
+        for (source, expected) in [("- [x] done", true), ("- [ ] todo", false)] {
+            let doc = parse(source);
+            assert_eq!(doc.blocks.len(), 1, "{source}");
+            match &doc.blocks[0] {
+                Block::UnorderedList { items } => {
+                    assert_eq!(items.len(), 1, "{source}");
+                    assert_eq!(items[0].checked, Some(expected), "{source}");
+                }
+                other => panic!("expected UnorderedList for {source}, got {:?}", other),
             }
-            other => panic!("expected UnorderedList, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_task_list_unchecked() {
-        let doc = parse("- [ ] todo");
-        assert_eq!(doc.blocks.len(), 1);
-        match &doc.blocks[0] {
-            Block::UnorderedList { items } => {
-                assert_eq!(items.len(), 1);
-                assert_eq!(items[0].checked, Some(false));
-            }
-            other => panic!("expected UnorderedList, got {:?}", other),
         }
     }
 
