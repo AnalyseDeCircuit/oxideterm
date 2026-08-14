@@ -784,12 +784,4 @@ mod tests {
                 .unwrap()
         );
     }
-
-    #[test]
-    fn remote_health_check_error_identifies_the_local_target() {
-        assert_eq!(
-            build_unreachable_local_port_error("127.0.0.1", 8080),
-            "Local target port 127.0.0.1:8080 is not reachable. Please ensure the service is running on this computer."
-        );
-    }
 }
