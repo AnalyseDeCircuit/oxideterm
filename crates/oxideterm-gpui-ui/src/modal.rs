@@ -352,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn backdrop_colors_match_tauri_overlay_classes() {
+    fn backdrop_roles_use_the_expected_color_and_blur() {
         // These values mirror Tauri bg-black/{60,40,80} and the transparent
         // outside-hit-test layer used for popovers.
         assert_eq!(
@@ -371,10 +371,6 @@ mod tests {
             rgba_hex(backdrop_color(TauriBackdropRole::Popover)),
             0x00000000
         );
-    }
-
-    #[test]
-    fn backdrop_blur_sources_match_tauri_classes() {
         // Dialog, CommandPalette, and QuickLook all keep
         // linuxBackdropBlurClass("backdrop-blur-sm") in the Tauri source.
         assert_eq!(
