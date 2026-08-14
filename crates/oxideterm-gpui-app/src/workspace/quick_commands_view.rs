@@ -1919,8 +1919,7 @@ mod terminal_command_bar_quick_command_tests {
     }
 
     #[test]
-    fn quick_command_category_switch_keeps_popover_open() {
-        let open = true;
+    fn quick_command_category_switch_clears_editor_state() {
         let mut active_category = "files".to_string();
         let mut command_editor = Some(QuickCommandDraft {
             id: Some("command".to_string()),
@@ -1947,7 +1946,6 @@ mod terminal_command_bar_quick_command_tests {
             "docker",
         );
 
-        assert!(open);
         assert_eq!(active_category, "docker");
         assert!(command_editor.is_none());
         assert!(category_editor.is_none());

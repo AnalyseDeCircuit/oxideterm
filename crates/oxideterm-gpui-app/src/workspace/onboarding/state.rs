@@ -148,18 +148,21 @@ mod tests {
     use oxideterm_settings::PersistedSettings;
 
     #[test]
-    fn persisted_disclaimer_acceptance_restores_without_completed_onboarding() {
-        let mut settings = PersistedSettings::default();
-        settings.onboarding_disclaimer_accepted = true;
-
-        assert!(disclaimer_accepted_from_settings(&settings));
-    }
-
-    #[test]
-    fn completed_legacy_onboarding_implies_disclaimer_acceptance() {
-        let mut settings = PersistedSettings::default();
-        settings.onboarding_completed = true;
-
-        assert!(disclaimer_accepted_from_settings(&settings));
+    fn persisted_and_legacy_onboarding_accept_the_disclaimer() {
+        for mut settings in [
+            PersistedSettings {
+                onboarding_disclaimer_accepted: true,
+                ..PersistedSettings::default()
+            },
+            PersistedSettings {
+                onboarding_completed: true,
+                ..PersistedSettings::default()
+            },
+        ] {
+            assert!(disclaimer_accepted_from_settings(&settings));
+            settings.onboarding_disclaimer_accepted = false;
+            settings.onboarding_completed = false;
+            assert!(!disclaimer_accepted_from_settings(&settings));
+        }
     }
 }
