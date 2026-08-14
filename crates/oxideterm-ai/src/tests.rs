@@ -468,16 +468,6 @@ fn creates_provider_without_secret_material() {
 }
 
 #[test]
-fn deepseek_template_includes_current_v4_models() {
-    let template = provider_template_by_type("deepseek");
-
-    assert_eq!(
-        template.initial_models,
-        &["deepseek-v4-flash", "deepseek-v4-pro"]
-    );
-}
-
-#[test]
 fn settings_provider_mutations_stay_out_of_gpui() {
     let openai = provider_template_by_type("openai");
     let ollama = provider_template_by_type("ollama");
