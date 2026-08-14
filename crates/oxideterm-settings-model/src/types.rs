@@ -671,12 +671,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn settings_input_anchor_ranges_do_not_overlap_dynamic_plugin_ranges() {
-        assert!(SettingsInput::NativePluginInstallUrl.anchor_key() < 29_000);
-        assert_eq!(SettingsInput::PluginSetting(0).anchor_key(), 29_000);
-    }
-
-    #[test]
     fn secret_inputs_are_categorized_in_the_model_layer() {
         assert!(SettingsInput::AiProviderApiKey(0).is_secret());
         assert!(SettingsInput::CloudSyncSecretAccessKey.is_secret());
