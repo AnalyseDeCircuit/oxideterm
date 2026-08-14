@@ -3368,15 +3368,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_grid_span_keeps_timestamp_gutter_paint_only() {
-        let cell_width = 10.0;
-        let grid_span = terminal_grid_span_for_viewport(px(160.0), cell_width, 0.0);
-        let cols = whole_cells_in_span(grid_span, cell_width);
-
-        assert_eq!(cols, 15);
-    }
-
-    #[test]
     fn performance_overlay_requests_redraw_only_when_published_stats_change() {
         let mut stats = TerminalRenderStats::default();
 

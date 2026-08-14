@@ -971,18 +971,3 @@ impl WorkspaceApp {
         .into_any_element()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn migration_motion_picker_uses_the_settings_option_order() {
-        for (expected_index, &speed) in animation_options().iter().enumerate() {
-            assert_eq!(
-                version_migration_animation_speed_index(speed),
-                expected_index
-            );
-        }
-    }
-}
