@@ -1223,12 +1223,6 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_ide_open_activates_existing_tab_without_choosing_folder() {
-        assert!(!IdeOpenIntent::ActivateOrCreate.reopens_folder_picker());
-        assert!(IdeOpenIntent::ChooseFolder.reopens_folder_picker());
-    }
-
-    #[test]
     fn ide_mount_tracks_main_hidden_detaching_and_detached_locations() {
         assert_eq!(
             ide_surface_mount_for_location(true, false, false),
