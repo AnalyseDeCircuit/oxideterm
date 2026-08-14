@@ -233,34 +233,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn auto_software_emulation_uses_compatibility() {
-        let detected = DetectedGraphics::software_emulated("llvmpipe", "mesa", "software");
-        assert_eq!(
-            compute_render_policy(RenderProfile::Auto, &detected).profile,
-            EffectiveRenderProfile::Compatibility
-        );
-    }
+    fn render_profile_selection_respects_detection_and_user_choice() {
+        let automatic_profiles = [
+            (
+                "software emulation",
+                DetectedGraphics::software_emulated("llvmpipe", "mesa", "software"),
+                EffectiveRenderProfile::Compatibility,
+            ),
+            (
+                "unknown hardware",
+                DetectedGraphics::unknown_hardware(),
+                EffectiveRenderProfile::Quality,
+            ),
+            (
+                "virtual GPU",
+                DetectedGraphics::virtual_gpu("VMware SVGA 3D", "Mesa", "virtual"),
+                EffectiveRenderProfile::LowPower,
+            ),
+        ];
 
-    #[test]
-    fn auto_unknown_hardware_uses_quality() {
-        assert_eq!(
-            compute_render_policy(RenderProfile::Auto, &DetectedGraphics::unknown_hardware())
-                .profile,
-            EffectiveRenderProfile::Quality
-        );
-    }
+        for (scenario, detected, expected) in automatic_profiles {
+            assert_eq!(
+                compute_render_policy(RenderProfile::Auto, &detected).profile,
+                expected,
+                "{scenario}"
+            );
+        }
 
-    #[test]
-    fn auto_virtual_gpu_uses_low_power() {
-        let detected = DetectedGraphics::virtual_gpu("VMware SVGA 3D", "Mesa", "virtual");
-        assert_eq!(
-            compute_render_policy(RenderProfile::Auto, &detected).profile,
-            EffectiveRenderProfile::LowPower
-        );
-    }
-
-    #[test]
-    fn explicit_profiles_override_detection() {
         let detected = DetectedGraphics::software_emulated("llvmpipe", "mesa", "software");
         assert_eq!(
             compute_render_policy(RenderProfile::LowPower, &detected).profile,
