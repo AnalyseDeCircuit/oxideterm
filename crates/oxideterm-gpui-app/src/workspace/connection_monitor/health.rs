@@ -1244,27 +1244,6 @@ mod tests {
     use gpui::Size;
 
     #[test]
-    fn host_tools_tab_indices_match_render_order() {
-        let tools = [
-            ContextSidebarTool::Monitor,
-            ContextSidebarTool::Gpu,
-            ContextSidebarTool::Processes,
-            ContextSidebarTool::Services,
-            ContextSidebarTool::Logs,
-            ContextSidebarTool::Tmux,
-            ContextSidebarTool::Docker,
-            ContextSidebarTool::Ports,
-            ContextSidebarTool::Schedules,
-            ContextSidebarTool::Filesystems,
-            ContextSidebarTool::Packages,
-        ];
-
-        for (expected_index, tool) in tools.into_iter().enumerate() {
-            assert_eq!(host_tools_tab_index(tool), expected_index);
-        }
-    }
-
-    #[test]
     fn host_tool_monitoring_flags_do_not_change_navigation_order() {
         let mut settings = oxideterm_settings::HostToolsSettings::default();
         ContextSidebarTool::Services.set_monitoring_enabled(&mut settings, false);

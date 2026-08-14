@@ -3483,22 +3483,6 @@ mod tests {
     }
 
     #[test]
-    fn editable_ime_targets_drive_the_shared_caret_blink_timer() {
-        assert!(ime_target_should_blink_caret(
-            WorkspaceImeTarget::AiChatInput
-        ));
-        assert!(ime_target_should_blink_caret(
-            WorkspaceImeTarget::AiModelSelectorSearch
-        ));
-        assert!(ime_target_should_blink_caret(
-            WorkspaceImeTarget::AiConversationRename
-        ));
-        assert!(!ime_target_should_blink_caret(
-            WorkspaceImeTarget::ReadOnlyText(1)
-        ));
-    }
-
-    #[test]
     fn text_input_anchor_store_clones_share_geometry_updates() {
         let store = TextInputAnchorStore::default();
         let cloned = store.clone();

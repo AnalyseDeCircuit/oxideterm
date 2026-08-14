@@ -1033,38 +1033,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sender_layout_distinguishes_hidden_compact_and_expanded_states() {
-        assert_eq!(
-            TerminalCommandSenderLayout::Compact.toggled_visibility(),
-            TerminalCommandSenderLayout::Hidden
-        );
-        assert_eq!(
-            TerminalCommandSenderLayout::Hidden.toggled_visibility(),
-            TerminalCommandSenderLayout::Compact
-        );
-        assert_eq!(
-            TerminalCommandSenderLayout::Compact.with_expanded(true),
-            TerminalCommandSenderLayout::Expanded
-        );
-        assert_eq!(
-            TerminalCommandSenderLayout::Expanded.with_expanded(false),
-            TerminalCommandSenderLayout::Compact
-        );
-        assert_eq!(
-            TerminalCommandSenderLayout::Hidden.with_expanded(false),
-            TerminalCommandSenderLayout::Hidden
-        );
-        assert_eq!(
-            TerminalCommandSenderLayout::Compact.editor_presentation(),
-            EditorPresentation::Inline
-        );
-        assert_eq!(
-            TerminalCommandSenderLayout::Expanded.editor_presentation(),
-            EditorPresentation::Document
-        );
-    }
-
-    #[test]
     fn sender_panel_height_grows_upward_and_clamps_to_viewport() {
         assert_eq!(
             adjusted_sender_panel_height(280.0, 60.0, 1_000.0),

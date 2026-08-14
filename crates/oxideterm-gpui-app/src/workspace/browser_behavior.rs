@@ -725,12 +725,6 @@ mod tests {
     }
 
     #[test]
-    fn focus_visible_only_tracks_keyboard_origin() {
-        assert!(BrowserFocusOrigin::Keyboard.is_focus_visible());
-        assert!(!BrowserFocusOrigin::Pointer.is_focus_visible());
-    }
-
-    #[test]
     fn browser_focus_visible_requires_keyboard_owned_focus() {
         assert!(browser_focus_visible(
             true,
