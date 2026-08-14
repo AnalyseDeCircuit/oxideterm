@@ -226,9 +226,8 @@ mod tests {
     }
 
     #[test]
-    fn cloud_sync_sections_overview_shows_status_and_recent_history() {
+    fn cloud_sync_sections_follow_tab_preview_and_backup_state() {
         let state = CloudSyncPersistedState::default();
-
         assert_eq!(
             cloud_sync_sections(&state, false, CloudSyncTab::Overview),
             vec![
@@ -237,12 +236,6 @@ mod tests {
                 CloudSyncSection::RecentHistory,
             ]
         );
-    }
-
-    #[test]
-    fn cloud_sync_sections_configure_shows_config_and_guide() {
-        let state = CloudSyncPersistedState::default();
-
         assert_eq!(
             cloud_sync_sections(&state, false, CloudSyncTab::Configure),
             vec![
@@ -255,15 +248,9 @@ mod tests {
                 CloudSyncSection::Guide,
             ]
         );
-    }
-
-    #[test]
-    fn cloud_sync_sections_history_keeps_history_and_backups() {
         let mut state = CloudSyncPersistedState::default();
         state.rollback_backups.push(rollback_backup());
-
         let sections = cloud_sync_sections(&state, true, CloudSyncTab::History);
-
         assert_eq!(sections.last(), Some(&CloudSyncSection::Rollback));
         assert_eq!(
             sections,
