@@ -1511,16 +1511,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tab_drag_reorder_requires_horizontal_browser_axis() {
+    fn tab_drag_axes_distinguish_reorder_and_detach() {
         assert!(!tab_drag_is_horizontal_reorder(9.0, 0.0));
         assert!(!tab_drag_is_horizontal_reorder(0.0, 18.0));
         assert!(!tab_drag_is_horizontal_reorder(12.0, 24.0));
         assert!(tab_drag_is_horizontal_reorder(12.0, 8.0));
         assert!(tab_drag_is_horizontal_reorder(-18.0, 4.0));
-    }
-
-    #[test]
-    fn tab_drag_detach_requires_downward_browser_axis() {
         assert!(!tab_drag_is_detach(4.0, 10.0, 36.0));
         assert!(!tab_drag_is_detach(36.0, 30.0, 36.0));
         assert!(!tab_drag_is_detach(4.0, -36.0, 36.0));
@@ -1557,14 +1553,10 @@ mod tests {
     }
 
     #[test]
-    fn tabbar_wheel_matches_tauri_delta_y_adapter() {
+    fn tabbar_wheel_delta_selects_the_browser_axis_and_clamps_scroll() {
         assert_eq!(tabbar_tauri_wheel_scroll_delta(0.0, 24.0), 24.0);
         assert_eq!(tabbar_tauri_wheel_scroll_delta(18.0, 24.0), 24.0);
         assert_eq!(tabbar_tauri_wheel_scroll_delta(-18.0, 0.0), -18.0);
-    }
-
-    #[test]
-    fn tabbar_wheel_delta_maps_to_gpui_negative_scroll_offset() {
         assert_eq!(tabbar_scroll_x_after_wheel(0.0, -24.0, 120.0), 24.0);
         assert_eq!(tabbar_scroll_x_after_wheel(0.0, 24.0, 120.0), 0.0);
         assert_eq!(tabbar_scroll_x_after_wheel(24.0, 24.0, 120.0), 0.0);
