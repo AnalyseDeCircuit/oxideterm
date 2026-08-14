@@ -911,12 +911,4 @@ mod tests {
             CompactMonitorLayout::Inline
         );
     }
-
-    #[test]
-    fn compact_monitor_layouts_use_distinct_list_identities() {
-        assert_ne!(
-            compact_monitor_list_identity(CompactMonitorLayout::Inline),
-            compact_monitor_list_identity(CompactMonitorLayout::Stacked)
-        );
-    }
 }

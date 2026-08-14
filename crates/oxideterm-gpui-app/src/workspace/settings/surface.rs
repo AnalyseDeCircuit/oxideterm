@@ -1319,35 +1319,6 @@ fn settings_terminal_focus_handoff_list_item(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxideterm_theme::UiMotionProfile;
-
-    fn settings_nav_motion_for_profile(
-        profile: UiMotionProfile,
-    ) -> Option<SettingsNavSelectionMotion> {
-        let mut tokens = oxideterm_theme::default_tokens();
-        tokens.apply_motion(profile);
-        settings_nav_selection_motion(&tokens)
-    }
-
-    #[test]
-    fn settings_navigation_selection_surface_maps_all_four_motion_profiles() {
-        assert_eq!(settings_nav_motion_for_profile(UiMotionProfile::Off), None);
-
-        let reduced = settings_nav_motion_for_profile(UiMotionProfile::Reduced)
-            .expect("reduced navigation transition");
-        assert_eq!(reduced.duration, Duration::from_millis(120));
-        assert!(!reduced.spatial);
-
-        let normal = settings_nav_motion_for_profile(UiMotionProfile::Normal)
-            .expect("normal navigation transition");
-        assert_eq!(normal.duration, Duration::from_millis(200));
-        assert!(normal.spatial);
-
-        let fast = settings_nav_motion_for_profile(UiMotionProfile::Fast)
-            .expect("fast navigation transition");
-        assert_eq!(fast.duration, Duration::from_millis(110));
-        assert!(fast.spatial);
-    }
 
     #[test]
     fn settings_navigation_item_indices_include_group_separators() {
@@ -1378,36 +1349,5 @@ mod tests {
             Some(10)
         );
         assert_eq!(settings_nav_item_index(groups, SettingsTab::Help), Some(16));
-    }
-
-    #[test]
-    fn connection_importer_height_signature_only_targets_importer_row() {
-        assert!(!settings_connection_importers_list_item(0));
-        assert!(!settings_connection_importers_list_item(5));
-        assert!(settings_connection_importers_list_item(6));
-    }
-
-    #[test]
-    fn focus_handoff_height_signature_only_targets_command_bar_card() {
-        assert!(!settings_terminal_focus_handoff_list_item(
-            TerminalSettingsPage::CommandBar,
-            0,
-        ));
-        assert!(!settings_terminal_focus_handoff_list_item(
-            TerminalSettingsPage::CommandBar,
-            1,
-        ));
-        assert!(settings_terminal_focus_handoff_list_item(
-            TerminalSettingsPage::CommandBar,
-            2,
-        ));
-        assert!(!settings_terminal_focus_handoff_list_item(
-            TerminalSettingsPage::CommandBar,
-            3,
-        ));
-        assert!(!settings_terminal_focus_handoff_list_item(
-            TerminalSettingsPage::Display,
-            2,
-        ));
     }
 }

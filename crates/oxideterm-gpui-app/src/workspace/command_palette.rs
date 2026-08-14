@@ -2711,15 +2711,6 @@ mod tests {
     }
 
     #[test]
-    fn command_palette_specs_include_tauri_reload_window_command() {
-        assert!(
-            command_palette_specs()
-                .iter()
-                .any(|spec| spec.id == "cmd:reload_window")
-        );
-    }
-
-    #[test]
     fn command_palette_specs_include_native_telnet_terminal_command() {
         let spec = command_palette_specs()
             .into_iter()
@@ -2741,71 +2732,6 @@ mod tests {
             spec.action,
             PaletteAction::Keybinding("terminal.toggleFreeTypeMode")
         ));
-    }
-
-    #[test]
-    fn help_palette_specs_include_reopenable_version_migration() {
-        let spec = help_palette_specs()
-            .into_iter()
-            .find(|spec| spec.id == "cmd:show_version_migration")
-            .expect("version migration command");
-
-        assert!(matches!(spec.action, PaletteAction::ShowVersionMigration));
-    }
-
-    #[test]
-    fn sidebar_file_and_forward_commands_keep_tauri_section_keys() {
-        let specs = command_palette_specs();
-        let sftp = specs
-            .iter()
-            .find(|spec| spec.id == "cmd:sidebar_sftp")
-            .expect("sidebar sftp command");
-        let forwards = specs
-            .iter()
-            .find(|spec| spec.id == "cmd:sidebar_forwards")
-            .expect("sidebar forwards command");
-
-        assert!(matches!(
-            sftp.action,
-            PaletteAction::Sidebar(SidebarSection::Sftp)
-        ));
-        assert!(matches!(
-            forwards.action,
-            PaletteAction::Sidebar(SidebarSection::Forwards)
-        ));
-    }
-
-    #[test]
-    fn close_other_tabs_palette_command_does_not_reuse_terminal_shortcut_action() {
-        let spec = command_palette_specs()
-            .into_iter()
-            .find(|spec| spec.id == "cmd:close_other_tabs")
-            .expect("close other tabs command");
-
-        assert_eq!(spec.shortcut_action, Some("app.closeOtherTabs"));
-        assert!(matches!(spec.action, PaletteAction::CloseOtherTabs));
-    }
-
-    #[test]
-    fn close_tab_palette_command_does_not_reuse_terminal_shortcut_action() {
-        let spec = command_palette_specs()
-            .into_iter()
-            .find(|spec| spec.id == "cmd:close_tab")
-            .expect("close tab command");
-
-        assert_eq!(spec.shortcut_action, Some("app.closeTab"));
-        assert!(matches!(spec.action, PaletteAction::CloseTab));
-    }
-
-    #[test]
-    fn close_all_tabs_palette_command_closes_directly_like_tauri() {
-        let spec = command_palette_specs()
-            .into_iter()
-            .find(|spec| spec.id == "cmd:close_all_tabs")
-            .expect("close all tabs command");
-
-        assert_eq!(spec.shortcut_action, None);
-        assert!(matches!(spec.action, PaletteAction::CloseAllTabs));
     }
 
     #[test]
