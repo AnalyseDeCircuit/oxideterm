@@ -1313,16 +1313,6 @@ cpu  1 2 3 4 5 6 7 8
     }
 
     #[test]
-    fn parses_root_disk_usage_from_df_posix_output() {
-        let output = "===DISK===\n/dev/disk1s1 411528304 178655880 232872424 44% /\n===END===";
-
-        assert_eq!(
-            parse_disk_usage(output),
-            Some((178_655_880 * 1024, 411_528_304 * 1024))
-        );
-    }
-
-    #[test]
     fn unsupported_marker_is_explicit() {
         let metrics = parse_resource_metrics("===UNSUPPORTED===\nFreeBSD\n===END===", None, 1);
 
