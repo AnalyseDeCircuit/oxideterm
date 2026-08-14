@@ -340,13 +340,7 @@ mod tests {
     }
 
     #[test]
-    fn keybindings_page_keeps_an_empty_scope_section() {
-        assert_eq!(keybinding_settings_section_count(0), 2);
-        assert_eq!(keybinding_settings_section_count(3), 4);
-    }
-
-    #[test]
-    fn general_page_includes_application_lock_card() {
+    fn section_counts_match_navigation_cards() {
         let dynamic = SettingsDynamicSectionCounts {
             terminal_page: TerminalSettingsPage::Display,
             ai_page: AiSettingsPage::General,
@@ -360,96 +354,48 @@ mod tests {
             5
         };
 
-        assert_eq!(
-            settings_tab_section_count(SettingsTab::General, dynamic),
-            expected
-        );
-    }
+        for (tab, section_count) in [
+            (SettingsTab::General, expected),
+            (SettingsTab::Connections, 6),
+            (SettingsTab::Network, 2),
+            (SettingsTab::Help, 6),
+        ] {
+            assert_eq!(
+                settings_tab_section_count(tab, dynamic),
+                section_count,
+                "{tab:?} section count"
+            );
+        }
 
-    #[test]
-    fn knowledge_page_counts_error_and_selected_collection_sections() {
+        for (page, section_count) in [
+            (TerminalSettingsPage::Display, 5),
+            (TerminalSettingsPage::Input, 2),
+            (TerminalSettingsPage::CommandBar, 4),
+            (TerminalSettingsPage::Awareness, 3),
+            (TerminalSettingsPage::Local, 5),
+        ] {
+            assert_eq!(
+                terminal_settings_section_count(page),
+                section_count,
+                "{page:?} terminal section count"
+            );
+        }
+
+        for (page, section_count) in [
+            (AiSettingsPage::Tools, 4),
+            (AiSettingsPage::General, 3),
+            (AiSettingsPage::Context, 5),
+        ] {
+            assert_eq!(
+                ai_settings_section_count(page),
+                section_count,
+                "{page:?} AI section count"
+            );
+        }
+
+        assert_eq!(keybinding_settings_section_count(0), 2);
+        assert_eq!(keybinding_settings_section_count(3), 4);
         assert_eq!(knowledge_settings_section_count(false, false), 1);
         assert_eq!(knowledge_settings_section_count(true, true), 3);
-    }
-
-    #[test]
-    fn terminal_page_count_includes_subtab_picker() {
-        assert_eq!(
-            terminal_settings_section_count(TerminalSettingsPage::Display),
-            5
-        );
-        assert_eq!(
-            terminal_settings_section_count(TerminalSettingsPage::Input),
-            2
-        );
-        assert_eq!(
-            terminal_settings_section_count(TerminalSettingsPage::CommandBar),
-            4
-        );
-        assert_eq!(
-            terminal_settings_section_count(TerminalSettingsPage::Awareness),
-            3
-        );
-        assert_eq!(
-            terminal_settings_section_count(TerminalSettingsPage::Local),
-            5
-        );
-    }
-
-    #[test]
-    fn help_page_count_includes_safety_guidance() {
-        let dynamic = SettingsDynamicSectionCounts {
-            terminal_page: TerminalSettingsPage::Display,
-            ai_page: AiSettingsPage::General,
-            visible_keybinding_scope_count: 0,
-            knowledge_has_error: false,
-            knowledge_has_selected_collection: false,
-        };
-
-        assert_eq!(settings_tab_section_count(SettingsTab::Help, dynamic), 6);
-    }
-
-    #[test]
-    fn connections_page_counts_each_top_level_card_once() {
-        let dynamic = SettingsDynamicSectionCounts {
-            terminal_page: TerminalSettingsPage::Display,
-            ai_page: AiSettingsPage::General,
-            visible_keybinding_scope_count: 0,
-            knowledge_has_error: false,
-            knowledge_has_selected_collection: false,
-        };
-
-        assert_eq!(
-            settings_tab_section_count(SettingsTab::Connections, dynamic),
-            6
-        );
-    }
-
-    #[test]
-    fn network_page_groups_proxy_definition_and_routing_policy() {
-        let dynamic = SettingsDynamicSectionCounts {
-            terminal_page: TerminalSettingsPage::Display,
-            ai_page: AiSettingsPage::General,
-            visible_keybinding_scope_count: 0,
-            knowledge_has_error: false,
-            knowledge_has_selected_collection: false,
-        };
-
-        assert_eq!(settings_tab_section_count(SettingsTab::Network, dynamic), 2);
-    }
-
-    #[test]
-    fn ai_tools_page_counts_tool_policy_skills_and_mcp_cards() {
-        assert_eq!(ai_settings_section_count(AiSettingsPage::Tools), 4);
-    }
-
-    #[test]
-    fn ai_general_page_counts_toggle_and_privacy_cards() {
-        assert_eq!(ai_settings_section_count(AiSettingsPage::General), 3);
-    }
-
-    #[test]
-    fn ai_context_page_counts_independent_context_cards() {
-        assert_eq!(ai_settings_section_count(AiSettingsPage::Context), 5);
     }
 }
