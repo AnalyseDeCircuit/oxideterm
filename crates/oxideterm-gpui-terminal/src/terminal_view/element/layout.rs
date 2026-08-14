@@ -7,29 +7,6 @@ use oxideterm_terminal_unicode::visual_line_for_row;
 use crate::terminal_ui::*;
 use crate::terminal_view::element::{TerminalRect, TerminalScrollbar};
 
-#[cfg(test)]
-pub(crate) fn terminal_scrollbar(
-    snapshot: &TerminalSnapshot,
-    metrics: &TerminalMetrics,
-) -> Option<TerminalScrollbar> {
-    terminal_scrollbar_for_viewport(snapshot, metrics, snapshot.rows, snapshot.display_offset)
-}
-
-#[cfg(test)]
-pub(crate) fn terminal_scrollbar_for_viewport(
-    snapshot: &TerminalSnapshot,
-    metrics: &TerminalMetrics,
-    viewport_rows: usize,
-    display_offset: usize,
-) -> Option<TerminalScrollbar> {
-    terminal_scrollbar_for_viewport_display_offset(
-        snapshot,
-        metrics,
-        viewport_rows,
-        display_offset as f32,
-    )
-}
-
 pub(crate) fn terminal_scrollbar_for_viewport_display_offset(
     snapshot: &TerminalSnapshot,
     metrics: &TerminalMetrics,

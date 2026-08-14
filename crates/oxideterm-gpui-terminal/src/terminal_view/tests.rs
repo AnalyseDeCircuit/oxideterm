@@ -248,28 +248,27 @@ fn smooth_scroll_layout_includes_one_overscan_row() {
 #[test]
 fn scrollbar_thumb_tracks_display_offset_direction() {
     let metrics = test_metrics();
-    let bottom = terminal_scrollbar(&test_snapshot(0, 90), &metrics).unwrap();
-    let top = terminal_scrollbar(&test_snapshot(90, 90), &metrics).unwrap();
+    let bottom_snapshot = test_snapshot(0, 90);
+    let bottom = terminal_scrollbar_for_viewport_display_offset(
+        &bottom_snapshot,
+        &metrics,
+        bottom_snapshot.rows,
+        bottom_snapshot.display_offset as f32,
+    )
+    .unwrap();
+    let top_snapshot = test_snapshot(90, 90);
+    let top = terminal_scrollbar_for_viewport_display_offset(
+        &top_snapshot,
+        &metrics,
+        top_snapshot.rows,
+        top_snapshot.display_offset as f32,
+    )
+    .unwrap();
 
     assert!(bottom.top > top.top);
     assert_eq!(top.top, 0.0);
     assert_eq!(bottom.top, 76.0);
     assert_eq!(bottom.height, 24.0);
-}
-
-#[test]
-fn scrollbar_thumb_tracks_fractional_smooth_offset() {
-    let metrics = test_metrics();
-    let snapshot = test_snapshot(10, 90);
-    let current =
-        terminal_scrollbar_for_viewport_display_offset(&snapshot, &metrics, 10, 10.0).unwrap();
-    let halfway =
-        terminal_scrollbar_for_viewport_display_offset(&snapshot, &metrics, 10, 10.5).unwrap();
-    let next =
-        terminal_scrollbar_for_viewport_display_offset(&snapshot, &metrics, 10, 11.0).unwrap();
-
-    assert!(current.top > halfway.top);
-    assert!(halfway.top > next.top);
 }
 
 #[test]
@@ -309,7 +308,16 @@ fn terminal_element_scrollbar_uses_fractional_display_offset() {
 
 #[test]
 fn scrollbar_is_hidden_without_scrollback() {
-    assert!(terminal_scrollbar(&test_snapshot(0, 0), &test_metrics()).is_none());
+    let snapshot = test_snapshot(0, 0);
+    assert!(
+        terminal_scrollbar_for_viewport_display_offset(
+            &snapshot,
+            &test_metrics(),
+            snapshot.rows,
+            snapshot.display_offset as f32,
+        )
+        .is_none()
+    );
 }
 
 #[test]
