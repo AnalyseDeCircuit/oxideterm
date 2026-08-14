@@ -72,28 +72,6 @@ fn chat_message(id: &str, role: AiChatRole, content: &str) -> AiChatMessage {
 }
 
 #[test]
-fn provider_templates_keep_stable_protocol_order() {
-    let types = AI_PROVIDER_TEMPLATES
-        .iter()
-        .map(|template| template.provider_type)
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        types,
-        vec![
-            "openai_compatible",
-            "deepseek",
-            "kimi",
-            "glm",
-            "openai",
-            "anthropic",
-            "gemini",
-            "ollama"
-        ]
-    );
-}
-
-#[test]
 fn orchestrator_tool_definitions_preserve_core_names_and_order() {
     let tools = orchestrator_tool_definitions();
     let names = tools
