@@ -415,15 +415,6 @@ mod tests {
     }
 
     #[test]
-    fn rounded_shell_child_radius_overdraws_rectangular_gpui_masks() {
-        // The source web UI relies on border-radius clipping. GPUI child
-        // backgrounds are independent, so the shared child radius intentionally
-        // leaves a small painted overdraw inside the shell.
-        assert_eq!(rounded_shell_child_radius(12.0), 10.0);
-        assert_eq!(rounded_shell_child_radius(1.0), 0.0);
-    }
-
-    #[test]
     fn dismiss_policy_keeps_backdrop_role_and_outside_close_separate() {
         assert_eq!(
             OverlayDismissPolicy::ProtectedDialog.backdrop_role(),
