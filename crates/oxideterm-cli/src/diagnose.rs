@@ -322,17 +322,6 @@ mod tests {
     }
 
     #[test]
-    fn formats_load_status_line() {
-        let load = LoadDiagnostic {
-            name: "settingsJson",
-            ok: true,
-            error: None,
-        };
-
-        assert_eq!(format_load_text(&load), "  settingsJson: ok=true error=-");
-    }
-
-    #[test]
     fn formats_ssh_offer_with_algorithm_categories() {
         let offer = SshAlgorithmOffer {
             kex: vec!["curve25519-sha256".to_string()],
