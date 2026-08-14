@@ -592,11 +592,6 @@ pub(super) struct WorkspaceInputHandler {
     fallback_bounds: Bounds<Pixels>,
 }
 
-#[cfg(test)]
-fn keystroke_commits_platform_text(keystroke: &Keystroke) -> bool {
-    keystroke_platform_text(keystroke).is_some()
-}
-
 pub(super) fn active_ime_should_defer_input_key(
     active_ime_target: bool,
     ime_composing: bool,
@@ -3311,7 +3306,7 @@ mod tests {
         active_ime_should_defer_input_key, collapsed_copy_shortcut_is_owned_by_target,
         control_k_delete_end, copy_shortcut_owner_for_target,
         effective_platform_text_replacement_range, ime_target_is_secret,
-        ime_target_should_blink_caret, ime_text_snapshot, keystroke_commits_platform_text,
+        ime_target_should_blink_caret, ime_text_snapshot, keystroke_platform_text,
         keystroke_uses_text_edit_modifier, line_end_for_utf16_offset, line_range_for_utf16_offset,
         line_start_for_utf16_offset, next_utf16_boundary, next_word_boundary,
         normalize_clipboard_text_for_ime_target, path_completion_owns_vertical_navigation,
@@ -3370,49 +3365,46 @@ mod tests {
 
     #[test]
     fn printable_keystrokes_are_platform_text_input() {
-        assert!(keystroke_commits_platform_text(&key(
-            "a",
-            Some("a"),
-            Modifiers::default()
-        )));
-        assert!(keystroke_commits_platform_text(&key(
-            "space",
-            Some(" "),
-            Modifiers::default()
-        )));
-        assert!(keystroke_commits_platform_text(&key(
-            "s",
-            Some("ß"),
-            Modifiers {
-                alt: true,
-                ..Modifiers::default()
-            }
-        )));
+        assert!(keystroke_platform_text(&key("a", Some("a"), Modifiers::default())).is_some());
+        assert!(keystroke_platform_text(&key("space", Some(" "), Modifiers::default())).is_some());
+        assert!(
+            keystroke_platform_text(&key(
+                "s",
+                Some("ß"),
+                Modifiers {
+                    alt: true,
+                    ..Modifiers::default()
+                }
+            ))
+            .is_some()
+        );
     }
 
     #[test]
     fn shortcuts_and_control_keys_stay_on_manual_key_path() {
-        assert!(!keystroke_commits_platform_text(&key(
-            "backspace",
-            None,
-            Modifiers::default()
-        )));
-        assert!(!keystroke_commits_platform_text(&key(
-            "v",
-            None,
-            Modifiers {
-                platform: true,
-                ..Modifiers::default()
-            }
-        )));
-        assert!(!keystroke_commits_platform_text(&key(
-            "a",
-            Some("\u{1}"),
-            Modifiers {
-                control: true,
-                ..Modifiers::default()
-            }
-        )));
+        assert!(keystroke_platform_text(&key("backspace", None, Modifiers::default())).is_none());
+        assert!(
+            keystroke_platform_text(&key(
+                "v",
+                None,
+                Modifiers {
+                    platform: true,
+                    ..Modifiers::default()
+                }
+            ))
+            .is_none()
+        );
+        assert!(
+            keystroke_platform_text(&key(
+                "a",
+                Some("\u{1}"),
+                Modifiers {
+                    control: true,
+                    ..Modifiers::default()
+                }
+            ))
+            .is_none()
+        );
     }
 
     #[test]

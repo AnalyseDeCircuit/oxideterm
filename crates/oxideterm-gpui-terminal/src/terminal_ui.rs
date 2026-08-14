@@ -736,11 +736,6 @@ pub(crate) fn fallback_cell_width(window: &mut Window, font: &Font, font_size: P
         .width
 }
 
-#[cfg(test)]
-pub(crate) fn terminal_font() -> Font {
-    terminal_font_with_family_and_cjk(TERMINAL_FONT, None, TERMINAL_FONT_LIGATURES)
-}
-
 pub(crate) fn terminal_font_with_family_and_cjk(
     family: &str,
     cjk_family: Option<&str>,

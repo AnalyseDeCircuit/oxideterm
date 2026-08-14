@@ -12,7 +12,7 @@ use crate::terminal_ui::*;
 
 fn test_metrics() -> TerminalMetrics {
     TerminalMetrics {
-        font: terminal_font(),
+        font: terminal_font_with_family_and_cjk(TERMINAL_FONT, None, TERMINAL_FONT_LIGATURES),
         font_size: px(14.0),
         cell_width: px(8.0),
         line_height: px(10.0),
@@ -428,7 +428,7 @@ fn terminal_preferences_keep_copy_and_osc52_read_disabled_by_default() {
 
 #[test]
 fn terminal_font_uses_real_nerd_font_family_and_fallbacks() {
-    let font = terminal_font();
+    let font = terminal_font_with_family_and_cjk(TERMINAL_FONT, None, TERMINAL_FONT_LIGATURES);
     assert_eq!(
         font.family.as_ref(),
         oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY

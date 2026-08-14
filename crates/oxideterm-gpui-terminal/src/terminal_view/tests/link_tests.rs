@@ -3,7 +3,11 @@ use super::*;
 #[test]
 fn link_detection_finds_urls_and_trims_trailing_punctuation() {
     let snapshot = selection_snapshot("open https://example.com/docs).");
-    let links = detect_link_ranges(&snapshot);
+    let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
+        &snapshot,
+        0..snapshot.lines.len(),
+        true,
+    );
 
     assert_eq!(links.len(), 1);
     assert_eq!(links[0].kind, TerminalLinkKind::Url);
@@ -15,7 +19,11 @@ fn link_detection_finds_urls_and_trims_trailing_punctuation() {
 #[test]
 fn link_detection_finds_path_like_targets() {
     let snapshot = selection_snapshot("see ./crates/oxideterm-gpui-app/src/main.rs");
-    let links = detect_link_ranges(&snapshot);
+    let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
+        &snapshot,
+        0..snapshot.lines.len(),
+        true,
+    );
 
     assert_eq!(links.len(), 1);
     assert_eq!(links[0].kind, TerminalLinkKind::Path);
@@ -52,7 +60,11 @@ fn disabling_path_detection_preserves_urls_and_osc8_links() {
 fn link_detection_preserves_unicode_wide_path_segments() {
     let target = "~/Documents/OxideTerm/tauri版本代码/src";
     let snapshot = wide_snapshot(target);
-    let links = detect_link_ranges(&snapshot);
+    let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
+        &snapshot,
+        0..snapshot.lines.len(),
+        true,
+    );
 
     assert_eq!(links.len(), 1);
     assert_eq!(links[0].kind, TerminalLinkKind::Path);
@@ -88,8 +100,12 @@ fn display_links_skip_path_like_text_on_active_input_row() {
     snapshot.lines[0].active_input = true;
     snapshot.lines[0].refresh_signature();
 
-    let links = detect_link_ranges(&snapshot);
-    let display_links = display_link_ranges(&snapshot);
+    let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
+        &snapshot,
+        0..snapshot.lines.len(),
+        true,
+    );
+    let display_links = display_link_ranges_with_path_detection(&snapshot, true);
 
     assert_eq!(links.len(), 1);
     assert_eq!(links[0].target, "../");
@@ -104,8 +120,12 @@ fn display_links_skip_path_like_text_on_wrapped_active_input_rows() {
     snapshot.lines[0].refresh_signature();
     snapshot.lines[1].refresh_signature();
 
-    let links = detect_link_ranges(&snapshot);
-    let display_links = display_link_ranges(&snapshot);
+    let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
+        &snapshot,
+        0..snapshot.lines.len(),
+        true,
+    );
+    let display_links = display_link_ranges_with_path_detection(&snapshot, true);
 
     assert_eq!(links.len(), 1);
     assert!(display_links.is_empty());
@@ -119,7 +139,11 @@ fn link_detection_prefers_osc8_hyperlink_ranges() {
     }
     snapshot.lines[0].refresh_signature();
 
-    let links = detect_link_ranges(&snapshot);
+    let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
+        &snapshot,
+        0..snapshot.lines.len(),
+        true,
+    );
 
     assert_eq!(links.len(), 1);
     assert_eq!(links[0].kind, TerminalLinkKind::Url);
@@ -136,7 +160,11 @@ fn link_detection_does_not_duplicate_url_inside_osc8_range() {
     }
     snapshot.lines[0].refresh_signature();
 
-    let links = detect_link_ranges(&snapshot);
+    let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
+        &snapshot,
+        0..snapshot.lines.len(),
+        true,
+    );
 
     assert_eq!(links.len(), 1);
     assert_eq!(links[0].target, "https://example.com/osc8");

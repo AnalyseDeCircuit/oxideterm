@@ -37,16 +37,6 @@ pub(crate) fn is_link_stylable_cell(cell: &TerminalCell) -> bool {
     cell.bg == TerminalColor::rgb(0x0d, 0x0f, 0x12)
 }
 
-#[cfg(test)]
-pub(crate) fn detect_link_ranges(snapshot: &TerminalSnapshot) -> Vec<TerminalLinkRange> {
-    detect_link_ranges_for_rows(snapshot, 0..snapshot.lines.len())
-}
-
-#[cfg(test)]
-pub(crate) fn display_link_ranges(snapshot: &TerminalSnapshot) -> Vec<TerminalLinkRange> {
-    display_link_ranges_with_path_detection(snapshot, true)
-}
-
 pub(crate) fn display_link_ranges_with_path_detection(
     snapshot: &TerminalSnapshot,
     detect_file_paths: bool,
@@ -90,15 +80,7 @@ fn should_display_link(snapshot: &TerminalSnapshot, link: &TerminalLinkRange) ->
             .is_some_and(|row| row.active_input)
 }
 
-#[cfg(test)]
-pub(crate) fn detect_link_ranges_for_rows(
-    snapshot: &TerminalSnapshot,
-    rows: Range<usize>,
-) -> Vec<TerminalLinkRange> {
-    detect_link_ranges_for_rows_with_path_detection(snapshot, rows, true)
-}
-
-fn detect_link_ranges_for_rows_with_path_detection(
+pub(super) fn detect_link_ranges_for_rows_with_path_detection(
     snapshot: &TerminalSnapshot,
     rows: Range<usize>,
     detect_file_paths: bool,
