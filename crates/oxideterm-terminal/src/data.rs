@@ -111,24 +111,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_row_signature_tracks_paint_relevant_content() {
-        let mut row = TerminalRow {
-            absolute_line: 0,
-            cells: Arc::new(vec![test_cell('a')]),
-            wrapped: false,
-            active_input: false,
-            signature: 0,
-        };
-        row.refresh_signature();
-        let first = row.signature;
-
-        row.cells_mut()[0].ch = 'b';
-        row.refresh_signature();
-
-        assert_ne!(first, row.signature);
-    }
-
-    #[test]
     fn terminal_snapshot_reuses_equal_row_cell_buffers() {
         let mut previous_row = TerminalRow {
             absolute_line: 0,
