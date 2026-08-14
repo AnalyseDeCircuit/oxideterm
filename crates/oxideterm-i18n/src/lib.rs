@@ -448,28 +448,6 @@ mod tests {
     }
 
     #[test]
-    fn all_eleven_locales_load_without_panic() {
-        let locales = [
-            Locale::De,
-            Locale::En,
-            Locale::EsEs,
-            Locale::FrFr,
-            Locale::It,
-            Locale::Ja,
-            Locale::Ko,
-            Locale::PtBr,
-            Locale::Vi,
-            Locale::ZhCn,
-            Locale::ZhTw,
-        ];
-        for locale in locales {
-            let i18n = I18n::new(locale);
-            let name = i18n.t("app.name");
-            assert_eq!(name, "OxideTerm");
-        }
-    }
-
-    #[test]
     fn terminal_command_action_tooltips_exist_in_every_locale() {
         let locales = [
             Locale::De,

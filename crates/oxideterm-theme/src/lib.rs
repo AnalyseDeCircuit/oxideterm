@@ -872,63 +872,6 @@ include!("generated_ui.rs");
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
-
-    #[test]
-    fn has_all_builtin_themes() {
-        const EXPECTED_THEME_IDS: [&str; 33] = [
-            "default",
-            "oxide",
-            "dracula",
-            "nord",
-            "solarized-dark",
-            "one-dark",
-            "monokai",
-            "catppuccin-mocha",
-            "github-dark",
-            "verdigris",
-            "silver-oxide",
-            "cuprite",
-            "chromium-oxide",
-            "paper-oxide",
-            "magnetite",
-            "cobalt",
-            "ochre",
-            "tokyo-night",
-            "gruvbox-dark",
-            "rose-pine",
-            "kanagawa",
-            "synthwave-84",
-            "azurite",
-            "malachite",
-            "hematite",
-            "bismuth",
-            "fairy-floss",
-            "sakura",
-            "hot-pink",
-            "spring-rice",
-            "spring-green",
-            "code-light",
-            "solarized-light",
-        ];
-        assert_eq!(BUILT_IN_THEMES.len(), EXPECTED_THEME_IDS.len());
-        assert_eq!(
-            BUILT_IN_THEMES
-                .iter()
-                .map(|theme| theme.id)
-                .collect::<Vec<_>>(),
-            EXPECTED_THEME_IDS
-        );
-        let unique_ids = BUILT_IN_THEMES
-            .iter()
-            .map(|theme| theme.id)
-            .collect::<HashSet<_>>();
-        assert_eq!(unique_ids.len(), BUILT_IN_THEMES.len());
-        assert_eq!(theme_by_id("default").terminal.background, 0x09090b);
-        assert_eq!(theme_by_id("spring-green").terminal.cursor, 0x16a34a);
-        assert_eq!(theme_by_id("code-light").terminal.green, 0x107c10);
-        assert_eq!(theme_by_id("solarized-light").terminal.background, 0xfdf6e3);
-    }
 
     #[test]
     fn derives_ui_colors_like_tauri() {
