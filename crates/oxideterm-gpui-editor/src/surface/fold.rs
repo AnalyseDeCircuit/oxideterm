@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn syntax_ranges_choose_widest_range_for_same_header() {
+    fn syntax_ranges_normalize_headers_and_single_line_ranges() {
         assert_eq!(
             normalize_syntax_fold_ranges(vec![
                 syntax_range(0, 2),
@@ -183,10 +183,6 @@ mod tests {
                 },
             ]
         );
-    }
-
-    #[test]
-    fn syntax_ranges_ignore_single_line_ranges() {
         assert_eq!(
             normalize_syntax_fold_ranges(vec![syntax_range(2, 2), syntax_range(3, 5)]),
             vec![FoldRange {

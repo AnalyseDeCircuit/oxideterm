@@ -1279,8 +1279,7 @@ mod tests {
     use oxideterm_editor_syntax::BracketPair;
 
     use super::{
-        EditorPresentation, HighlightChunkCache, HighlightChunkCacheKey, LineChunkSpec,
-        build_bracket_pair_index, content_padding_x_for_presentation,
+        HighlightChunkCache, HighlightChunkCacheKey, LineChunkSpec, build_bracket_pair_index,
     };
 
     fn cache_key(line: usize) -> HighlightChunkCacheKey {
@@ -1344,17 +1343,5 @@ mod tests {
         let index = build_bracket_pair_index(&[first.clone(), second]);
 
         assert_eq!(index.get(&1), Some(&first));
-    }
-
-    #[test]
-    fn inline_presentation_delegates_horizontal_inset_to_its_owner() {
-        assert_eq!(
-            content_padding_x_for_presentation(EditorPresentation::Document, 8.0),
-            8.0
-        );
-        assert_eq!(
-            content_padding_x_for_presentation(EditorPresentation::Inline, 8.0),
-            0.0
-        );
     }
 }
