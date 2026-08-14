@@ -155,78 +155,34 @@ pub fn is_cjk(c: char) -> bool {
 mod tests {
     use super::*;
 
-    // ─── CJK Unified ──────────────────────────────────────────────────
-
     #[test]
-    fn test_is_cjk_chinese_character() {
-        assert!(is_cjk('中')); // U+4E2D — CJK Unified
-        assert!(is_cjk('国')); // U+56FD
+    fn recognizes_supported_cjk_scripts() {
+        for (script, samples) in [
+            ("CJK Unified", &['中', '国'][..]),
+            ("CJK Extension A", &['\u{3400}', '\u{4DBF}'][..]),
+            ("CJK Compat", &['\u{F900}'][..]),
+            ("CJK Symbols", &['〇', '\u{3000}'][..]),
+            ("Hiragana", &['あ', 'ん'][..]),
+            ("Katakana", &['ア', 'ン'][..]),
+            ("Hangul", &['가', '힣'][..]),
+        ] {
+            for character in samples {
+                assert!(is_cjk(*character), "{script}: {character:?}");
+            }
+        }
     }
 
     #[test]
-    fn test_is_cjk_cjk_extension_a() {
-        assert!(is_cjk('\u{3400}')); // first char of Extension A
-        assert!(is_cjk('\u{4DBF}')); // last char of Extension A
-    }
-
-    #[test]
-    fn test_is_cjk_compat_ideograph() {
-        assert!(is_cjk('\u{F900}')); // CJK Compat Ideographs start
-    }
-
-    // ─── CJK Symbols ─────────────────────────────────────────────────
-
-    #[test]
-    fn test_is_cjk_symbols() {
-        assert!(is_cjk('〇')); // U+3007 — CJK Symbols & Punctuation
-        assert!(is_cjk('\u{3000}')); // Ideographic space
-    }
-
-    // ─── Hiragana / Katakana ──────────────────────────────────────────
-
-    #[test]
-    fn test_is_cjk_hiragana() {
-        assert!(is_cjk('あ')); // U+3042
-        assert!(is_cjk('ん')); // U+3093
-    }
-
-    #[test]
-    fn test_is_cjk_katakana() {
-        assert!(is_cjk('ア')); // U+30A2
-        assert!(is_cjk('ン')); // U+30F3
-    }
-
-    // ─── Hangul ───────────────────────────────────────────────────────
-
-    #[test]
-    fn test_is_cjk_hangul() {
-        assert!(is_cjk('가')); // U+AC00 — first Hangul syllable
-        assert!(is_cjk('힣')); // U+D7A3 — last Hangul syllable
-    }
-
-    // ─── Non-CJK ─────────────────────────────────────────────────────
-
-    #[test]
-    fn test_is_not_cjk_ascii() {
-        assert!(!is_cjk('A'));
-        assert!(!is_cjk('z'));
-        assert!(!is_cjk('0'));
-        assert!(!is_cjk(' '));
-    }
-
-    #[test]
-    fn test_is_not_cjk_latin_extended() {
-        assert!(!is_cjk('é')); // Latin
-        assert!(!is_cjk('ñ'));
-    }
-
-    #[test]
-    fn test_is_not_cjk_cyrillic() {
-        assert!(!is_cjk('Д')); // Cyrillic
-    }
-
-    #[test]
-    fn test_is_not_cjk_arabic() {
-        assert!(!is_cjk('ع')); // Arabic
+    fn rejects_non_cjk_scripts() {
+        for (script, samples) in [
+            ("ASCII", &['A', 'z', '0', ' '][..]),
+            ("Latin", &['é', 'ñ'][..]),
+            ("Cyrillic", &['Д'][..]),
+            ("Arabic", &['ع'][..]),
+        ] {
+            for character in samples {
+                assert!(!is_cjk(*character), "{script}: {character:?}");
+            }
+        }
     }
 }
