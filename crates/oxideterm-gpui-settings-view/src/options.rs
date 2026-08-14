@@ -559,13 +559,6 @@ pub fn language_options() -> [Language; 11] {
     ]
 }
 
-pub fn cycle_update_channel(settings: &mut PersistedSettings) {
-    settings.general.update_channel = match settings.general.update_channel {
-        UpdateChannel::Stable => UpdateChannel::Beta,
-        UpdateChannel::Beta => UpdateChannel::Stable,
-    };
-}
-
 pub fn cycle_sftp_conflict(settings: &mut PersistedSettings) {
     settings.sftp.conflict_action = match settings.sftp.conflict_action {
         ConflictAction::Ask => ConflictAction::Overwrite,
@@ -663,17 +656,6 @@ pub fn background_fit_label(fit: BackgroundFit, i18n: &I18n) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn update_channel_cycle_contains_only_stable_and_beta() {
-        let mut settings = PersistedSettings::default();
-        settings.general.update_channel = UpdateChannel::Stable;
-
-        cycle_update_channel(&mut settings);
-        assert_eq!(settings.general.update_channel, UpdateChannel::Beta);
-        cycle_update_channel(&mut settings);
-        assert_eq!(settings.general.update_channel, UpdateChannel::Stable);
-    }
 
     #[test]
     fn modal_border_radius_sliders_have_dedicated_anchors() {
