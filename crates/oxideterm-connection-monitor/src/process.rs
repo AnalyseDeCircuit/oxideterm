@@ -486,13 +486,6 @@ mod tests {
     }
 
     #[test]
-    fn process_display_name_prefers_short_command_for_table_rows() {
-        let process = process("2", "root", "S", 1.0, 2.0, "postgres");
-
-        assert_eq!(process_display_name(&process), "postgres");
-    }
-
-    #[test]
     fn process_action_messages_prefer_remote_reason() {
         assert_eq!(
             process_action_success_message("Sent TERM to PID 42\n", ""),

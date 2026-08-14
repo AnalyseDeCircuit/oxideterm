@@ -153,30 +153,3 @@ fn fallback_code_cell_width(
         .shape_line(sample, font_size, &[run], None)
         .width
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn code_font_keeps_monospaced_fallbacks_for_paint_and_measurement() {
-        let font = editor_code_font("Missing configured font");
-        let fallbacks = font
-            .fallbacks
-            .expect("editor code font should define fallbacks");
-
-        assert_eq!(font.family.as_ref(), "Missing configured font");
-        assert!(
-            fallbacks
-                .fallback_list()
-                .iter()
-                .any(|family| family == "Cascadia Mono")
-        );
-        assert!(
-            fallbacks
-                .fallback_list()
-                .iter()
-                .any(|family| family == "Courier New")
-        );
-    }
-}

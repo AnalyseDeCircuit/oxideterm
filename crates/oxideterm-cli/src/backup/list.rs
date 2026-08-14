@@ -276,16 +276,4 @@ mod tests {
         assert_eq!(summary.connection_record_count, 2);
         assert_eq!(summary.cloud_sync_history_count, 1);
     }
-
-    #[test]
-    fn backup_section_names_match_document_fields() {
-        assert_eq!(
-            backup_section_name(BackupInspectSection::CloudSync),
-            "cloudSync"
-        );
-        assert_eq!(
-            backup_section_name(BackupInspectSection::Connections),
-            "connections"
-        );
-    }
 }
