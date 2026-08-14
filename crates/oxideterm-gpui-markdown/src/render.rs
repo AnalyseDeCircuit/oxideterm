@@ -2735,32 +2735,26 @@ mod tests {
     }
 
     #[test]
-    fn classifies_local_image_paths() {
+    fn image_path_resolution_uses_local_paths_and_defers_remote_uris() {
         let opts = MarkdownOptions::default();
-        assert_eq!(
-            image_path_from_url("images/logo.png", &opts),
-            Some(PathBuf::from("images/logo.png")),
-        );
-        assert_eq!(
-            image_path_from_url("file:///tmp/logo.png", &opts),
-            Some(PathBuf::from("/tmp/logo.png")),
-        );
-    }
+        for (url, expected) in [
+            ("images/logo.png", Some("images/logo.png")),
+            ("file:///tmp/logo.png", Some("/tmp/logo.png")),
+            ("https://example.com/logo.png", None),
+            ("http://example.com/logo.png", None),
+            ("data:image/png;base64,AAAA", None),
+        ] {
+            assert_eq!(
+                image_path_from_url(url, &opts),
+                expected.map(PathBuf::from),
+                "{url}"
+            );
+        }
 
-    #[test]
-    fn leaves_remote_images_for_async_uri_loading() {
-        let opts = MarkdownOptions::default();
+        let source_opts = MarkdownOptions::default().with_source_path("/tmp/docs/README.md");
         assert_eq!(
-            image_path_from_url("https://example.com/logo.png", &opts),
-            None
-        );
-        assert_eq!(
-            image_path_from_url("http://example.com/logo.png", &opts),
-            None
-        );
-        assert_eq!(
-            image_path_from_url("data:image/png;base64,AAAA", &opts),
-            None
+            image_path_from_url("./assets/logo.png", &source_opts),
+            Some(PathBuf::from("/tmp/docs/./assets/logo.png")),
         );
     }
 
@@ -2774,15 +2768,6 @@ mod tests {
         assert_eq!(
             image_path_from_url("ftp://example.com/logo.png", &opts),
             None
-        );
-    }
-
-    #[test]
-    fn resolves_relative_images_against_markdown_source_dir() {
-        let opts = MarkdownOptions::default().with_source_path("/tmp/docs/README.md");
-        assert_eq!(
-            image_path_from_url("./assets/logo.png", &opts),
-            Some(PathBuf::from("/tmp/docs/./assets/logo.png")),
         );
     }
 
