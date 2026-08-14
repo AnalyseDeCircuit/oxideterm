@@ -3,6 +3,26 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.0.20
+
+OxideTerm 2.0.20 adds native Mosh and local-terminal workflows, refreshes session and start-page management, improves remote-desktop and Cloud Sync reliability, and expands terminal feedback and SSH controls.
+
+### ✨ Highlights
+
+- Added native Mosh sessions with SSH bootstrap, adaptive prediction, saved-profile editing, Session Manager and sidebar integration, `.xoide` import and export, and Cloud Sync support.
+- Redesigned the start page around recent connections, local terminals, imports, Session Manager, and Cloud Sync, with responsive layouts for narrow workspaces and a clearer view of standalone active connections.
+- Expanded Session Manager selection and batch group operations to saved serial, Telnet, Mosh, and remote-desktop profiles, and added complete in-place editing for serial and Telnet settings without disturbing active sessions.
+- Added millisecond terminal timestamps, richer matched-text or logical-line highlight controls, and an optional accent for background tabs with unread terminal output.
+- Added direct local-terminal launch from the connection flow, refined the terminal Git workflow with inline commit messages and clearer action grouping, and updated DeepSeek v4 reasoning support.
+- Redesigned the connection runtime overview around pool usage, consumers, health attention, and refresh status, and allowed approved OxideSens tools to update non-secret Cloud Sync configuration.
+
+### 🛠️ Fixes
+
+- Improved RDP automatic reconnect and frame uploads, preserved sparse update regions through presentation, and reduced RDP and VNC work for incremental framebuffer changes.
+- Repaired HTTP JSON Cloud Sync revision baselines, preserved configuration drafts across provider changes, reused snapshot encryption keys within one operation, and batched macOS credential authorization during imports.
+- Made SSH connection timeouts configurable across saved connections, SSH config import, `.xoide` transfer, Cloud Sync, and CLI specifications while preserving imported timeout values.
+- Preserved serial and Telnet profile identity and automatic-open metadata when editing, and ensured Telnet changes mark Cloud Sync state dirty.
+
 ## 2.0.19
 
 OxideTerm 2.0.19 improves native window and terminal behavior, repairs Windows PowerShell and OneDrive compatibility, and simplifies supported update channels.

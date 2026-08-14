@@ -1631,6 +1631,7 @@ impl WorkspaceApp {
             }
             SessionManagerDisplayItem::Serial(profile) => {
                 let open_id = profile.id.clone();
+                let edit_id = profile.id.clone();
                 let menu_id = profile.id.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
@@ -1647,6 +1648,18 @@ impl WorkspaceApp {
                         has_background,
                         move |this, _event, window, cx| {
                             this.open_saved_serial_profile(&open_id, window, cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Pencil,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.text),
+                        has_background,
+                        move |this, _event, window, cx| {
+                            this.open_saved_serial_profile_editor(&edit_id, window, cx);
                             cx.stop_propagation();
                         },
                         cx,
@@ -1671,6 +1684,7 @@ impl WorkspaceApp {
             }
             SessionManagerDisplayItem::Telnet(profile) => {
                 let open_id = profile.id.clone();
+                let edit_id = profile.id.clone();
                 let menu_id = profile.id.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
@@ -1687,6 +1701,18 @@ impl WorkspaceApp {
                         has_background,
                         move |this, _event, window, cx| {
                             this.open_saved_telnet_profile(&open_id, window, cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Pencil,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.text),
+                        has_background,
+                        move |this, _event, window, cx| {
+                            this.open_saved_telnet_profile_editor(&edit_id, window, cx);
                             cx.stop_propagation();
                         },
                         cx,
@@ -1830,12 +1856,11 @@ impl WorkspaceApp {
             SessionManagerRowActionTarget::Connection(_) => {
                 MANAGER_ROW_ACTION_MENU_CONNECTION_HEIGHT
             }
-            SessionManagerRowActionTarget::Mosh(_)
+            SessionManagerRowActionTarget::Serial(_)
+            | SessionManagerRowActionTarget::Telnet(_)
+            | SessionManagerRowActionTarget::Mosh(_)
             | SessionManagerRowActionTarget::RemoteDesktop(_) => {
                 MANAGER_ROW_ACTION_MENU_EDITABLE_PROFILE_HEIGHT
-            }
-            SessionManagerRowActionTarget::Serial(_) | SessionManagerRowActionTarget::Telnet(_) => {
-                MANAGER_ROW_ACTION_MENU_PROFILE_HEIGHT
             }
             SessionManagerRowActionTarget::GroupRoot => MANAGER_ROW_ACTION_MENU_PROFILE_HEIGHT,
             SessionManagerRowActionTarget::Group(_) => MANAGER_ROW_ACTION_MENU_GROUP_HEIGHT,
@@ -2002,6 +2027,52 @@ impl WorkspaceApp {
                     has_background,
                     move |this, _event, window, cx| {
                         this.open_saved_mosh_profile_editor(&edit_id, window, cx);
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ))
+                .child(dropdown_menu_separator(&self.tokens));
+        }
+
+        if let SessionManagerRowActionTarget::Serial(id) = &menu.target {
+            let edit_id = id.clone();
+            popup = popup
+                .child(self.render_session_manager_menu_action(
+                    dropdown_menu_item(
+                        &self.tokens,
+                        self.i18n.t("sessionManager.actions.edit"),
+                        DropdownMenuItemKind::Plain,
+                        false,
+                        false,
+                    ),
+                    false,
+                    false,
+                    has_background,
+                    move |this, _event, window, cx| {
+                        this.open_saved_serial_profile_editor(&edit_id, window, cx);
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ))
+                .child(dropdown_menu_separator(&self.tokens));
+        }
+
+        if let SessionManagerRowActionTarget::Telnet(id) = &menu.target {
+            let edit_id = id.clone();
+            popup = popup
+                .child(self.render_session_manager_menu_action(
+                    dropdown_menu_item(
+                        &self.tokens,
+                        self.i18n.t("sessionManager.actions.edit"),
+                        DropdownMenuItemKind::Plain,
+                        false,
+                        false,
+                    ),
+                    false,
+                    false,
+                    has_background,
+                    move |this, _event, window, cx| {
+                        this.open_saved_telnet_profile_editor(&edit_id, window, cx);
                         cx.stop_propagation();
                     },
                     cx,

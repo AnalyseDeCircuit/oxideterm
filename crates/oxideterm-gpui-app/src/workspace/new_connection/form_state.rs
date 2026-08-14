@@ -4,8 +4,8 @@ use oxideterm_connections::{
     AuthType, ConnectionInfo, ConnectionTerminalOptions, ConnectionX11ForwardingOptions,
     DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS, MoshIpFamily, MoshPredictionMode, MoshProfile,
     MoshUdpPortSelection, RemoteDesktopProfile, SavedAuth, SavedConnection,
-    SavedUpstreamProxyProtocol, TransportUsernameTransition, transport_port_replacement,
-    transport_username_transition,
+    SavedUpstreamProxyProtocol, SerialProfile, TelnetProfile, TransportUsernameTransition,
+    transport_port_replacement, transport_username_transition,
 };
 pub(in crate::workspace) use oxideterm_connections::{
     ConnectionTransport as NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
@@ -482,6 +482,10 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) remote_desktop_profile_id: Option<String>,
     /// Identifies an existing Mosh asset without creating an SSH node edit owner.
     pub(in crate::workspace) mosh_profile_id: Option<String>,
+    /// Identifies an existing serial asset without changing a live serial session.
+    pub(in crate::workspace) serial_profile_id: Option<String>,
+    /// Identifies an existing Telnet asset without changing a live Telnet session.
+    pub(in crate::workspace) telnet_profile_id: Option<String>,
     pub(in crate::workspace) saved_password_keychain_id: Option<String>,
     pub(in crate::workspace) password_loaded: bool,
     pub(in crate::workspace) password_visible: bool,
@@ -566,6 +570,8 @@ impl fmt::Debug for NewConnectionForm {
             )
             .field("remote_desktop_profile_id", &self.remote_desktop_profile_id)
             .field("mosh_profile_id", &self.mosh_profile_id)
+            .field("serial_profile_id", &self.serial_profile_id)
+            .field("telnet_profile_id", &self.telnet_profile_id)
             .field(
                 "saved_password_keychain_id",
                 &self.saved_password_keychain_id,
@@ -661,6 +667,8 @@ impl Default for NewConnectionForm {
             remote_desktop_session_options: RemoteDesktopSessionOptions::default(),
             remote_desktop_profile_id: None,
             mosh_profile_id: None,
+            serial_profile_id: None,
+            telnet_profile_id: None,
             saved_password_keychain_id: None,
             password_loaded: true,
             password_visible: false,
@@ -821,6 +829,75 @@ pub(in crate::workspace) fn form_from_mosh_profile(
     form.mosh_ip_family = profile.ip_family;
     form.mosh_prediction = profile.prediction;
     form.focused_field = NewConnectionField::Name;
+    form
+}
+
+pub(in crate::workspace) fn terminal_serial_parity_from_profile(
+    parity: &oxideterm_connections::SerialParity,
+) -> oxideterm_terminal::SerialParity {
+    match parity {
+        oxideterm_connections::SerialParity::None => oxideterm_terminal::SerialParity::None,
+        oxideterm_connections::SerialParity::Odd => oxideterm_terminal::SerialParity::Odd,
+        oxideterm_connections::SerialParity::Even => oxideterm_terminal::SerialParity::Even,
+    }
+}
+
+pub(in crate::workspace) fn terminal_serial_flow_from_profile(
+    flow: &oxideterm_connections::SerialFlowControl,
+) -> oxideterm_terminal::SerialFlowControl {
+    match flow {
+        oxideterm_connections::SerialFlowControl::None => {
+            oxideterm_terminal::SerialFlowControl::None
+        }
+        oxideterm_connections::SerialFlowControl::Software => {
+            oxideterm_terminal::SerialFlowControl::Software
+        }
+        oxideterm_connections::SerialFlowControl::Hardware => {
+            oxideterm_terminal::SerialFlowControl::Hardware
+        }
+    }
+}
+
+pub(in crate::workspace) fn form_from_serial_profile(
+    profile: &SerialProfile,
+    ungrouped_label: String,
+) -> NewConnectionForm {
+    // The edit form owns only persisted settings; live serial sessions keep their current port.
+    let mut form = NewConnectionForm::default();
+    form.transport = NewConnectionTransport::Serial;
+    form.serial_profile_id = Some(profile.id.clone());
+    form.serial_profile_name = profile.name.clone();
+    form.group = profile.group.clone().unwrap_or(ungrouped_label);
+    form.icon = profile.icon.clone().unwrap_or_default();
+    form.color = profile.color.clone().unwrap_or_default();
+    form.icon_background_color = profile.icon_background_color.clone().unwrap_or_default();
+    form.serial_port_path = profile.port_path.clone();
+    form.serial_baud_rate = profile.baud_rate.to_string();
+    form.serial_data_bits = profile.data_bits;
+    form.serial_stop_bits = profile.stop_bits;
+    form.serial_parity = terminal_serial_parity_from_profile(&profile.parity);
+    form.serial_flow_control = terminal_serial_flow_from_profile(&profile.flow_control);
+    form.focused_field = NewConnectionField::SerialProfileName;
+    form
+}
+
+pub(in crate::workspace) fn form_from_telnet_profile(
+    profile: &TelnetProfile,
+    ungrouped_label: String,
+) -> NewConnectionForm {
+    // The edit form owns only persisted settings; live Telnet sessions keep their current socket.
+    let mut form = NewConnectionForm::default();
+    form.transport = NewConnectionTransport::Telnet;
+    form.telnet_profile_id = Some(profile.id.clone());
+    form.telnet_profile_name = profile.name.clone();
+    form.group = profile.group.clone().unwrap_or(ungrouped_label);
+    form.icon = profile.icon.clone().unwrap_or_default();
+    form.color = profile.color.clone().unwrap_or_default();
+    form.icon_background_color = profile.icon_background_color.clone().unwrap_or_default();
+    form.host = profile.host.clone();
+    form.port = profile.port.to_string();
+    form.terminal = profile.terminal;
+    form.focused_field = NewConnectionField::TelnetProfileName;
     form
 }
 
@@ -1429,6 +1506,7 @@ mod tests {
     use oxideterm_connections::{
         AuthType, ConnectionInfo, MoshIpFamily, MoshPredictionMode, MoshProfile,
         MoshUdpPortSelection, RemoteDesktopProfile, SavedAuth, SavedUpstreamProxyPolicy,
+        SerialFlowControl, SerialParity, SerialProfile, TelnetProfile,
     };
     use oxideterm_remote_desktop::{
         RemoteDesktopAudioOptions, RemoteDesktopClipboardOptions, RemoteDesktopDisplayOptions,
@@ -1447,7 +1525,8 @@ mod tests {
         apply_transport_default_username, auth_family_from_tab, auth_tab_from_key_source,
         backspace_current_connection_field, connection_icon_field_visible,
         connection_secret_field_visible, default_auth_tab_for_family, form_from_mosh_profile,
-        form_from_remote_desktop_profile, identity_agent_from_form, identity_agent_selector,
+        form_from_remote_desktop_profile, form_from_serial_profile, form_from_telnet_profile,
+        identity_agent_from_form, identity_agent_selector,
         insert_text_into_current_connection_field, key_source_from_tab, new_connection_form_mode,
         next_connection_field, next_jump_connection_field, remote_desktop_feature_supported,
         remote_desktop_vnc_preference_selected, select_current_connection_field,
@@ -1650,6 +1729,66 @@ mod tests {
         );
         assert!(form.save_password);
         assert!(form.password.is_empty());
+    }
+
+    #[test]
+    fn serial_profile_form_restores_saved_line_settings_for_editing() {
+        let mut profile = SerialProfile::new("Console cable", "/dev/cu.usbserial-10");
+        profile.id = "serial-1".to_string();
+        profile.group = Some("Lab".to_string());
+        profile.icon = Some("radio".to_string());
+        profile.color = Some("#fbbf24".to_string());
+        profile.icon_background_color = Some("#451a03".to_string());
+        profile.baud_rate = 57_600;
+        profile.data_bits = 7;
+        profile.stop_bits = 2;
+        profile.parity = SerialParity::Even;
+        profile.flow_control = SerialFlowControl::Hardware;
+
+        let form = form_from_serial_profile(&profile, "Ungrouped".to_string());
+
+        assert_eq!(form.serial_profile_id.as_deref(), Some("serial-1"));
+        assert_eq!(form.transport, NewConnectionTransport::Serial);
+        assert_eq!(form.serial_profile_name, "Console cable");
+        assert_eq!(form.group, "Lab");
+        assert_eq!(form.icon, "radio");
+        assert_eq!(form.color, "#fbbf24");
+        assert_eq!(form.icon_background_color, "#451a03");
+        assert_eq!(form.serial_port_path, "/dev/cu.usbserial-10");
+        assert_eq!(form.serial_baud_rate, "57600");
+        assert_eq!(form.serial_data_bits, 7);
+        assert_eq!(form.serial_stop_bits, 2);
+        assert_eq!(form.serial_parity, oxideterm_terminal::SerialParity::Even);
+        assert_eq!(
+            form.serial_flow_control,
+            oxideterm_terminal::SerialFlowControl::Hardware
+        );
+    }
+
+    #[test]
+    fn telnet_profile_form_restores_endpoint_and_terminal_settings_for_editing() {
+        let mut profile = TelnetProfile::new("Router console", "router.example.com", 2323);
+        profile.id = "telnet-1".to_string();
+        profile.group = Some("Lab".to_string());
+        profile.icon = Some("network".to_string());
+        profile.color = Some("#86efac".to_string());
+        profile.icon_background_color = Some("#052e16".to_string());
+        profile.terminal.encoding = Some(oxideterm_connections::ConnectionTerminalEncoding::Big5);
+        profile.terminal.backspace_sequence =
+            Some(oxideterm_connections::ConnectionTerminalBackspaceSequence::Delete);
+
+        let form = form_from_telnet_profile(&profile, "Ungrouped".to_string());
+
+        assert_eq!(form.telnet_profile_id.as_deref(), Some("telnet-1"));
+        assert_eq!(form.transport, NewConnectionTransport::Telnet);
+        assert_eq!(form.telnet_profile_name, "Router console");
+        assert_eq!(form.group, "Lab");
+        assert_eq!(form.icon, "network");
+        assert_eq!(form.color, "#86efac");
+        assert_eq!(form.icon_background_color, "#052e16");
+        assert_eq!(form.host, "router.example.com");
+        assert_eq!(form.port, "2323");
+        assert_eq!(form.terminal, profile.terminal);
     }
 
     #[test]

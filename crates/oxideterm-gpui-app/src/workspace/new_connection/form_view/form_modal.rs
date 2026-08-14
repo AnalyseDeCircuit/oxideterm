@@ -12,6 +12,8 @@ struct ConnectionFormModalSnapshot {
     password_present: bool,
     remote_desktop_profile_id: Option<String>,
     mosh_profile_id: Option<String>,
+    serial_profile_id: Option<String>,
+    telnet_profile_id: Option<String>,
     saved_password_keychain_id: Option<String>,
     password_visible: bool,
     password_loading: bool,
@@ -53,6 +55,8 @@ impl ConnectionFormModalSnapshot {
             password_present: !form.password.is_empty(),
             remote_desktop_profile_id: form.remote_desktop_profile_id.clone(),
             mosh_profile_id: form.mosh_profile_id.clone(),
+            serial_profile_id: form.serial_profile_id.clone(),
+            telnet_profile_id: form.telnet_profile_id.clone(),
             saved_password_keychain_id: form.saved_password_keychain_id.clone(),
             password_visible: form.password_visible,
             password_loading: form.password_loading,
@@ -114,6 +118,11 @@ impl WorkspaceApp {
         let edit_properties_mode = mode.submits_saved_connection_properties();
         let remote_desktop_edit_mode = form.remote_desktop_profile_id.is_some();
         let mosh_edit_mode = form.mosh_profile_id.is_some();
+        let serial_edit_mode = form.serial_profile_id.is_some();
+        let telnet_edit_mode = form.telnet_profile_id.is_some();
+        // Saved non-SSH profiles edit persisted assets without acquiring a runtime owner.
+        let saved_profile_edit_mode =
+            remote_desktop_edit_mode || mosh_edit_mode || serial_edit_mode || telnet_edit_mode;
         let drill_down_mode = self
             .connection_form_state(cx)
             .drill_down_parent_node_id
@@ -169,8 +178,7 @@ impl WorkspaceApp {
         let shows_transport_selector = !prompt_mode
             && !duplicate_mode
             && !edit_properties_mode
-            && !remote_desktop_edit_mode
-            && !mosh_edit_mode
+            && !saved_profile_edit_mode
             && !drill_down_mode;
         let shows_icon_field = connection_icon_field_visible(mode, drill_down_mode, form.transport);
         let title = if local_terminal_mode {
@@ -185,7 +193,7 @@ impl WorkspaceApp {
         } else if duplicate_mode {
             self.i18n
                 .t("sessionManager.edit_properties.duplicate_title")
-        } else if edit_properties_mode || remote_desktop_edit_mode || mosh_edit_mode {
+        } else if edit_properties_mode || saved_profile_edit_mode {
             self.i18n.t("sessionManager.edit_properties.title")
         } else if mosh_mode {
             self.i18n.t("mosh.form.title")
@@ -213,7 +221,7 @@ impl WorkspaceApp {
         } else if duplicate_mode {
             self.i18n
                 .t("sessionManager.edit_properties.duplicate_description")
-        } else if edit_properties_mode || remote_desktop_edit_mode || mosh_edit_mode {
+        } else if edit_properties_mode || saved_profile_edit_mode {
             self.i18n.t("sessionManager.edit_properties.description")
         } else if telnet_mode {
             self.i18n.t("modals.new_connection.telnet_description")
@@ -296,8 +304,7 @@ impl WorkspaceApp {
                     TAURI_DRILL_DOWN_MODAL_WIDTH
                 } else if prompt_mode
                     || edit_properties_mode
-                    || remote_desktop_edit_mode
-                    || mosh_edit_mode
+                    || saved_profile_edit_mode
                 {
                     TAURI_EDIT_MODAL_WIDTH
                 } else if shows_transport_selector {
@@ -1106,7 +1113,7 @@ impl WorkspaceApp {
                         )
                         .when(
                             !edit_properties_mode
-                                && !mosh_edit_mode
+                                && !saved_profile_edit_mode
                                 && self.connection_form_state(cx).saved_connection_prompt_action.is_none()
                                 && !remote_desktop_mode
                                 && !wsl_graphics_mode
@@ -1150,8 +1157,7 @@ impl WorkspaceApp {
                         )
                         .when(
                             edit_properties_mode
-                                || remote_desktop_edit_mode
-                                || mosh_edit_mode
+                                || saved_profile_edit_mode
                                 || self.connection_form_state(cx).saved_connection_prompt_action.is_some(),
                             |footer| {
                                 footer.child(self.render_connection_button(
@@ -1170,18 +1176,13 @@ impl WorkspaceApp {
                                     {
                                         self.i18n
                                             .t("sessionManager.edit_properties.save_and_reconnect")
-                                    } else if edit_properties_mode
-                                        || remote_desktop_edit_mode
-                                        || mosh_edit_mode
-                                    {
+                                    } else if edit_properties_mode || saved_profile_edit_mode {
                                         self.i18n.t("sessionManager.edit_properties.save")
                                     } else {
                                         self.i18n.t("modals.new_connection.local_open")
                                     },
                                     true,
-                                    if (edit_properties_mode
-                                        || remote_desktop_edit_mode
-                                        || mosh_edit_mode)
+                                    if (edit_properties_mode || saved_profile_edit_mode)
                                         && self.connection_form_state(cx).saved_connection_prompt_action.is_none()
                                     {
                                         ConnectionButtonAction::Save

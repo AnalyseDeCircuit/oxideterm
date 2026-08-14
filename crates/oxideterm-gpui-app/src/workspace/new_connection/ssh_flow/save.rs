@@ -841,9 +841,19 @@ impl WorkspaceApp {
                     parity: form.serial_parity,
                     flow_control: form.serial_flow_control,
                 };
-                let should_save_profile = action != NewConnectionSubmitAction::Connect;
+                let editing_profile_id = form.serial_profile_id.clone();
+                let existing_connect_on_open = editing_profile_id.as_deref().and_then(|id| {
+                    this.connection_store
+                        .serial_profiles()
+                        .iter()
+                        .find(|profile| profile.id == id)
+                        .map(|profile| profile.connect_on_open)
+                });
+                // Editing always updates the persisted asset and preserves hidden sync metadata.
+                let should_save_profile =
+                    editing_profile_id.is_some() || action != NewConnectionSubmitAction::Connect;
                 let save_request = should_save_profile.then(|| SaveSerialProfileRequest {
-                    id: None,
+                    id: editing_profile_id,
                     name: serial_profile_name_or_port(&form.serial_profile_name, &port_path),
                     group: serial_profile_group_from_form(&form.group, &this.i18n),
                     icon: asset_icon_from_form(&form.icon),
@@ -855,7 +865,7 @@ impl WorkspaceApp {
                     stop_bits: Some(form.serial_stop_bits),
                     parity: Some(serial_profile_parity_from_terminal(form.serial_parity)),
                     flow_control: Some(serial_profile_flow_from_terminal(form.serial_flow_control)),
-                    connect_on_open: None,
+                    connect_on_open: existing_connect_on_open,
                 });
                 form.pending = true;
                 form.error = None;
@@ -962,9 +972,19 @@ impl WorkspaceApp {
                     cx.notify();
                     return None;
                 };
-                let should_save_profile = action != NewConnectionSubmitAction::Connect;
+                let editing_profile_id = form.telnet_profile_id.clone();
+                let existing_connect_on_open = editing_profile_id.as_deref().and_then(|id| {
+                    this.connection_store
+                        .telnet_profiles()
+                        .iter()
+                        .find(|profile| profile.id == id)
+                        .map(|profile| profile.connect_on_open)
+                });
+                // Editing always updates the persisted asset and preserves hidden sync metadata.
+                let should_save_profile =
+                    editing_profile_id.is_some() || action != NewConnectionSubmitAction::Connect;
                 let save_request = should_save_profile.then(|| SaveTelnetProfileRequest {
-                    id: None,
+                    id: editing_profile_id,
                     name: telnet_profile_name_or_endpoint(&form.telnet_profile_name, &host, port),
                     group: serial_profile_group_from_form(&form.group, &this.i18n),
                     icon: asset_icon_from_form(&form.icon),
@@ -973,7 +993,7 @@ impl WorkspaceApp {
                     host: host.clone(),
                     port,
                     terminal: form.terminal,
-                    connect_on_open: None,
+                    connect_on_open: existing_connect_on_open,
                 });
                 let config = TelnetSessionConfig { host, port };
                 let terminal_options = form.terminal;
@@ -990,6 +1010,7 @@ impl WorkspaceApp {
                 save_request.expect("telnet save action must build a telnet profile request");
             match self.connection_store.upsert_telnet_profile(request) {
                 Ok(_) => {
+                    self.queue_cloud_sync_dirty_refresh(cx);
                     self.update_connection_form_state(cx, ConnectionFormState::clear);
                 }
                 Err(error) => {
@@ -1013,7 +1034,7 @@ impl WorkspaceApp {
                 .take()
                 .expect("telnet save-and-open action must build a telnet profile request");
             match self.connection_store.upsert_telnet_profile(request) {
-                Ok(_) => {}
+                Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
                 Err(error) => {
                     self.update_connection_form_state(cx, |state| {
                         if let Some(form) = state.form.as_mut() {
@@ -1036,7 +1057,7 @@ impl WorkspaceApp {
             Ok(_) => {
                 if let Some(request) = save_request {
                     match self.connection_store.upsert_telnet_profile(request) {
-                        Ok(_) => {}
+                        Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
                         Err(error) => {
                             let message = format!(
                                 "{}: {error}",

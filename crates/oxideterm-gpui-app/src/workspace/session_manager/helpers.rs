@@ -243,32 +243,6 @@ pub(super) fn connections_moved_label(i18n: &I18n, count: usize, group: String) 
         .replace("{{group}}", &group)
 }
 
-pub(super) fn terminal_serial_parity_from_profile(
-    parity: &oxideterm_connections::SerialParity,
-) -> oxideterm_terminal::SerialParity {
-    match parity {
-        oxideterm_connections::SerialParity::None => oxideterm_terminal::SerialParity::None,
-        oxideterm_connections::SerialParity::Odd => oxideterm_terminal::SerialParity::Odd,
-        oxideterm_connections::SerialParity::Even => oxideterm_terminal::SerialParity::Even,
-    }
-}
-
-pub(super) fn terminal_serial_flow_from_profile(
-    flow: &oxideterm_connections::SerialFlowControl,
-) -> oxideterm_terminal::SerialFlowControl {
-    match flow {
-        oxideterm_connections::SerialFlowControl::None => {
-            oxideterm_terminal::SerialFlowControl::None
-        }
-        oxideterm_connections::SerialFlowControl::Software => {
-            oxideterm_terminal::SerialFlowControl::Software
-        }
-        oxideterm_connections::SerialFlowControl::Hardware => {
-            oxideterm_terminal::SerialFlowControl::Hardware
-        }
-    }
-}
-
 pub(in crate::workspace) fn form_from_saved_connection(
     conn: &SavedConnection,
     error: Option<String>,

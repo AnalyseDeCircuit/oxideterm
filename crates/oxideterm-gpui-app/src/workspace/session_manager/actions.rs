@@ -1,6 +1,8 @@
 use super::*;
 use crate::workspace::new_connection::{
     NewConnectionTransport, form_from_mosh_profile, form_from_remote_desktop_profile,
+    form_from_serial_profile, form_from_telnet_profile, terminal_serial_flow_from_profile,
+    terminal_serial_parity_from_profile,
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopSecret,
@@ -857,6 +859,29 @@ impl WorkspaceApp {
         }
     }
 
+    pub(super) fn open_saved_serial_profile_editor(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(saved) = self
+            .connection_store
+            .serial_profiles()
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        self.open_new_connection_form(window, cx);
+        let form = form_from_serial_profile(&saved, self.i18n.t("ssh.form.ungrouped"));
+        self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
+        // Refresh discovery without replacing the persisted port selected by the editor.
+        self.refresh_serial_ports(cx);
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn open_saved_telnet_profile(
         &mut self,
         id: &str,
@@ -890,6 +915,27 @@ impl WorkspaceApp {
                 });
             }
         }
+    }
+
+    pub(super) fn open_saved_telnet_profile_editor(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(saved) = self
+            .connection_store
+            .telnet_profiles()
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        self.open_new_connection_form(window, cx);
+        let form = form_from_telnet_profile(&saved, self.i18n.t("ssh.form.ungrouped"));
+        self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
+        cx.notify();
     }
 
     pub(in crate::workspace) fn open_saved_remote_desktop_profile(
