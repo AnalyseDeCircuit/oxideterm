@@ -1573,12 +1573,8 @@ mod tests {
     }
 
     #[test]
-    fn tabbar_scrollbar_is_hidden_without_horizontal_overflow() {
+    fn tabbar_scrollbar_geometry_handles_visibility_position_and_drag_edges() {
         assert!(calculate_tabbar_scrollbar_geometry(20.0, 600.0, 0.0, 0.0).is_none());
-    }
-
-    #[test]
-    fn tabbar_scrollbar_thumb_tracks_horizontal_scroll() {
         let at_start = calculate_tabbar_scrollbar_geometry(20.0, 600.0, 600.0, 0.0)
             .expect("overflow should produce scrollbar geometry");
         let at_end = calculate_tabbar_scrollbar_geometry(20.0, 600.0, 600.0, 600.0)
@@ -1591,10 +1587,6 @@ mod tests {
             at_end.thumb_left,
             TABBAR_SCROLLBAR_HORIZONTAL_INSET + at_end.track_width - at_end.thumb_width
         );
-    }
-
-    #[test]
-    fn tabbar_scrollbar_drag_maps_track_edges_to_scroll_edges() {
         let geometry = calculate_tabbar_scrollbar_geometry(20.0, 600.0, 600.0, 0.0)
             .expect("overflow should produce scrollbar geometry");
         let track_start = TABBAR_SCROLLBAR_HORIZONTAL_INSET;
