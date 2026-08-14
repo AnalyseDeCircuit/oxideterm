@@ -924,15 +924,6 @@ pub fn revision_id(timestamp: DateTime<Utc>, device_id: &str, sequence: u64) -> 
     )
 }
 
-pub fn next_revision(
-    timestamp: DateTime<Utc>,
-    device_id: &str,
-    previous_sequence: u64,
-) -> (String, u64) {
-    let sequence = previous_sequence + 1;
-    (revision_id(timestamp, device_id, sequence), sequence)
-}
-
 fn default_namespace() -> String {
     "default".to_string()
 }
@@ -1291,10 +1282,11 @@ mod tests {
     #[test]
     fn preserves_tauri_revision_shape_and_snapshot_paths() {
         let timestamp = Utc.with_ymd_and_hms(2026, 5, 19, 4, 5, 6).unwrap();
-        let (revision, sequence) = next_revision(timestamp, "macos-abcd1234", 8);
 
-        assert_eq!(sequence, 9);
-        assert_eq!(revision, "2026-05-19T04:05:06.000Z-macos-abcd1234-009");
+        assert_eq!(
+            revision_id(timestamp, "macos-abcd1234", 9),
+            "2026-05-19T04:05:06.000Z-macos-abcd1234-009"
+        );
         assert_eq!(
             snapshot_object_paths("/team/default/"),
             SnapshotObjectPaths {
