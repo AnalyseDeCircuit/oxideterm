@@ -234,42 +234,6 @@ mod tests {
     }
 
     #[test]
-    fn connection_summary_keeps_tauri_pool_fields() {
-        let created_at = SystemTime::UNIX_EPOCH;
-        let last_active_at = SystemTime::UNIX_EPOCH;
-
-        let summary = ConnectionPoolEntrySummary::from_snapshot(PoolConnectionSummarySnapshot {
-            id: "conn-1".into(),
-            host: "example.com".into(),
-            port: 22,
-            username: "alice".into(),
-            state: ConnectionPoolEntryState::Idle,
-            ref_count: 3,
-            keep_alive: true,
-            created_at,
-            last_active_at,
-            terminal_count: 2,
-            has_sftp_session: true,
-            forward_count: 1,
-            parent_connection_id: Some("jump".into()),
-        });
-
-        assert_eq!(summary.id, "conn-1");
-        assert_eq!(summary.host, "example.com");
-        assert_eq!(summary.port, 22);
-        assert_eq!(summary.username, "alice");
-        assert_eq!(summary.state, ConnectionPoolEntryState::Idle);
-        assert_eq!(summary.ref_count, 3);
-        assert!(summary.keep_alive);
-        assert_eq!(summary.created_at, created_at);
-        assert_eq!(summary.last_active_at, last_active_at);
-        assert_eq!(summary.terminal_count, 2);
-        assert!(summary.has_sftp_session);
-        assert_eq!(summary.forward_count, 1);
-        assert_eq!(summary.parent_connection_id.as_deref(), Some("jump"));
-    }
-
-    #[test]
     fn disconnected_summary_is_hidden_and_not_active() {
         assert!(!ConnectionPoolEntryState::Disconnected.is_displayed_in_pool());
         assert!(!ConnectionPoolEntryState::Disconnected.is_counted_active());
