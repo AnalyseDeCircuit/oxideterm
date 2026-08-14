@@ -51,14 +51,8 @@ mod tests {
 
     #[test]
     fn recognizes_agent_write_conflicts() {
-        assert!(is_agent_conflict(&AgentRpcError {
-            code: -4,
-            message: "File modified externally".to_string(),
-        }));
-        assert!(is_agent_conflict(&AgentRpcError {
-            code: -1,
-            message: "hash mismatch".to_string(),
-        }));
+        assert!(is_agent_conflict_parts(-4, "File modified externally"));
+        assert!(is_agent_conflict_parts(-1, "hash mismatch"));
     }
 
     #[test]

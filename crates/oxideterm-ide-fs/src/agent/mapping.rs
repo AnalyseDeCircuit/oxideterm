@@ -55,11 +55,6 @@ fn file_tree_entry_from_agent(node_id: &NodeId, entry: FileEntry) -> FileTreeEnt
     }
 }
 
-#[cfg(test)]
-fn is_agent_conflict(error: &AgentRpcError) -> bool {
-    is_agent_conflict_parts(error.code, &error.message)
-}
-
 fn is_agent_conflict_parts(code: i32, message: &str) -> bool {
     code == -4
         || message.contains("CONFLICT")
