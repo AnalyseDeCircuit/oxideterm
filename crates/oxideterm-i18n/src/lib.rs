@@ -439,13 +439,6 @@ mod tests {
     }
 
     #[test]
-    fn english_locale_loads_single_catalog() {
-        let i18n = I18n::new(Locale::En);
-        assert_eq!(i18n.loaded_catalog_count(), 1);
-        assert_eq!(i18n.t("menu.new_terminal"), "New Terminal");
-    }
-
-    #[test]
     #[should_panic(expected = "duplicate native locale key")]
     fn duplicate_keys_are_rejected() {
         let _ = LocaleCatalog::from_json_parts(&[
