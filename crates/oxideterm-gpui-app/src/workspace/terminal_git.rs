@@ -1619,13 +1619,6 @@ mod tests {
     }
 
     #[test]
-    fn local_git_command_platform_options_are_applied() {
-        let mut command = Command::new("git");
-
-        configure_local_git_command(&mut command);
-    }
-
-    #[test]
     fn ai_commit_message_becomes_an_editable_subject() {
         assert_eq!(
             terminal_git_clean_ai_commit_subject("feat: add terminal git actions").as_deref(),
