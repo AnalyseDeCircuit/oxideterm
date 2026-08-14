@@ -1301,7 +1301,7 @@ mod tests {
     }
 
     #[test]
-    fn editor_scrollbar_maps_track_edges_to_document_edges() {
+    fn editor_scrollbar_geometry_maps_overflow_and_hides_without_it() {
         let geometry =
             editor_scrollbar_geometry(200.0, 1_000.0, 400.0).expect("document should overflow");
         let thumb_travel = geometry.viewport_height - geometry.thumb_height;
@@ -1311,10 +1311,6 @@ mod tests {
             editor_scroll_y_for_thumb_top(thumb_travel, geometry),
             geometry.max_scroll_y
         );
-    }
-
-    #[test]
-    fn editor_scrollbar_is_hidden_without_overflow() {
         assert!(editor_scrollbar_geometry(200.0, 200.0, 0.0).is_none());
         assert!(editor_scrollbar_geometry(200.0, 120.0, 0.0).is_none());
     }
