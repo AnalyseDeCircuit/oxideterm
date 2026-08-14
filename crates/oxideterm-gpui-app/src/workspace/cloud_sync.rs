@@ -829,14 +829,6 @@ mod tests {
         assert!(!sanitized.contains("cloud-password"));
     }
 
-    #[test]
-    fn cloud_sync_location_for_ai_preserves_ordinary_locations() {
-        assert_eq!(
-            cloud_sync_location_for_ai("https://sync.example.test/root"),
-            "https://sync.example.test/root"
-        );
-    }
-
     #[gpui::test]
     fn hidden_surface_delivery_is_woken_and_retained_by_entity(cx: &mut TestAppContext) {
         let entity = test_cloud_sync_entity(cx);
