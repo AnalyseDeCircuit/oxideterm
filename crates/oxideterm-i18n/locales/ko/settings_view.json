@@ -243,6 +243,8 @@
       "adaptive_renderer_off": "꺼짐 (직접 쓰기)",
       "show_performance_overlay": "터미널 성능 오버레이 표시",
       "show_performance_overlay_hint": "터미널 모서리에 현재 렌더링 단계(B=부스트/N=일반/I=유휴), 초당 쓰기 이벤트 수와 대기 중인 바이트를 표시합니다",
+      "highlight_tab_on_new_output": "새 출력이 있는 탭 강조",
+      "highlight_tab_on_new_output_hint": "백그라운드 터미널에 새 출력이 도착하면 탭 아이콘과 제목을 눈에 띄는 색상으로 표시합니다",
       "cursor": "커서",
       "cursor_style": "커서 스타일",
       "cursor_style_hint": "텍스트 커서 모양",

@@ -90,6 +90,8 @@ const BACKGROUND_IMAGE_COMPLETION_POLL_INTERVAL: Duration = Duration::from_milli
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalPaneEvent {
     Exited { exit_code: Option<i32> },
+    // Output contents stay pane-owned; consumers only learn that the visible buffer changed.
+    OutputActivity,
     // CWD payloads stay pane-owned; Workspace only recomputes the active metadata key.
     CurrentDirectoryChanged,
     // Recording contents stay pane-owned; consumers only reschedule visible elapsed chrome.
@@ -2023,6 +2025,7 @@ impl TerminalPane {
             // built only when GPUI actually renders this pane.
             self.snapshot_dirty = true;
             self.mark_terminal_content_changed(cx);
+            cx.emit(TerminalPaneEvent::OutputActivity);
         }
         let render_stats_changed = self.update_render_stats(&report, now);
 

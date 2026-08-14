@@ -232,6 +232,10 @@ fn default_terminal_smooth_scroll() -> bool {
     true
 }
 
+fn default_highlight_tab_on_new_output() -> bool {
+    true
+}
+
 fn default_open_links_with_modifier() -> bool {
     // Terminal clicks commonly focus or select text, so opening links requires deliberate input.
     true
@@ -273,6 +277,9 @@ pub struct TerminalSettings {
     pub adaptive_renderer: AdaptiveRendererMode,
     // Keep the legacy serialized field name so existing settings continue to load.
     pub show_fps_overlay: bool,
+    // This controls transient tab chrome without changing terminal polling or session ownership.
+    #[serde(default = "default_highlight_tab_on_new_output")]
+    pub highlight_tab_on_new_output: bool,
     pub paste_protection: bool,
     pub smart_copy: bool,
     pub osc52_clipboard: bool,
@@ -341,6 +348,7 @@ impl Default for TerminalSettings {
             delete_sequence: TerminalDeleteSequence::default(),
             adaptive_renderer: AdaptiveRendererMode::Auto,
             show_fps_overlay: false,
+            highlight_tab_on_new_output: true,
             paste_protection: true,
             smart_copy: true,
             osc52_clipboard: true,
@@ -400,8 +408,11 @@ mod tests {
 
     #[test]
     fn terminal_settings_restore_legacy_presentation_defaults() {
-        let defaults: [(&str, bool, fn(&TerminalSettings) -> bool); 4] = [
+        let defaults: [(&str, bool, fn(&TerminalSettings) -> bool); 5] = [
             ("smoothScroll", true, |settings| settings.smooth_scroll),
+            ("highlightTabOnNewOutput", true, |settings| {
+                settings.highlight_tab_on_new_output
+            }),
             (
                 "freeTypeCursorPositioning",
                 false,

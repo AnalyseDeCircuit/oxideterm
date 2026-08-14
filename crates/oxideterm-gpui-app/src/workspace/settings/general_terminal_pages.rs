@@ -979,13 +979,23 @@ impl WorkspaceApp {
             (TerminalSettingsPage::Display, 3) => self.settings_card(
                 "settings_view.terminal.buffer",
                 "settings_view.terminal.scrollback_hint",
-                vec![self.number_row(
-                    "settings_view.terminal.scrollback",
-                    "settings_view.terminal.scrollback_hint",
-                    SettingsInput::TerminalScrollback,
-                    settings.terminal.scrollback,
-                    cx,
-                )],
+                vec![
+                    self.number_row(
+                        "settings_view.terminal.scrollback",
+                        "settings_view.terminal.scrollback_hint",
+                        SettingsInput::TerminalScrollback,
+                        settings.terminal.scrollback,
+                        cx,
+                    ),
+                    self.card_separator(),
+                    self.checkbox_row(
+                        "settings_view.terminal.highlight_tab_on_new_output",
+                        "settings_view.terminal.highlight_tab_on_new_output_hint",
+                        settings.terminal.highlight_tab_on_new_output,
+                        set_highlight_tab_on_new_output,
+                        cx,
+                    ),
+                ],
             ),
             (TerminalSettingsPage::Input, 0) => self.terminal_input_settings_card(settings, cx),
             (TerminalSettingsPage::Local, local_section_index) => {

@@ -243,6 +243,8 @@
       "adaptive_renderer_off": "Desactivado (escritura directa)",
       "show_performance_overlay": "Mostrar superposición de rendimiento del terminal",
       "show_performance_overlay_hint": "Muestra el nivel de renderizado actual (B=boost/N=normal/I=inactivo), los eventos de escritura por segundo y los bytes pendientes en la esquina del terminal",
+      "highlight_tab_on_new_output": "Resaltar pestañas con salida nueva",
+      "highlight_tab_on_new_output_hint": "Mostrar con un color destacado el icono y el título de las pestañas de terminal en segundo plano cuando llegue nueva salida",
       "cursor": "Cursor",
       "cursor_style": "Estilo de cursor",
       "cursor_style_hint": "Forma del cursor de texto",

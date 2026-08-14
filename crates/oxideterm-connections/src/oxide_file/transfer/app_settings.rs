@@ -122,6 +122,7 @@ fn build_sectioned_app_settings_sections(
                     "renderer",
                     "adaptiveRenderer",
                     "showFpsOverlay",
+                    "highlightTabOnNewOutput",
                     "pasteProtection",
                     "smartCopy",
                     "osc52Clipboard",

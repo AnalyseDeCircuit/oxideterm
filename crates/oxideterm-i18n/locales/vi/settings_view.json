@@ -243,6 +243,8 @@
       "adaptive_renderer_off": "Tắt (ghi trực tiếp)",
       "show_performance_overlay": "Hiển thị lớp phủ hiệu năng terminal",
       "show_performance_overlay_hint": "Hiển thị mức kết xuất hiện tại (B=tăng tốc/N=bình thường/I=không hoạt động), số sự kiện ghi mỗi giây và số byte đang chờ ở góc terminal",
+      "highlight_tab_on_new_output": "Làm nổi bật tab có đầu ra mới",
+      "highlight_tab_on_new_output_hint": "Dùng màu nổi bật cho biểu tượng và tiêu đề của tab terminal nền khi có đầu ra mới",
       "cursor": "Con trỏ",
       "cursor_style": "Kiểu con trỏ",
       "cursor_style_hint": "Hình dạng con trỏ văn bản",

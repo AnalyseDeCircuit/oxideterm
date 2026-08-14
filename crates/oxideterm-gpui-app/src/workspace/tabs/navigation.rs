@@ -89,6 +89,7 @@ impl WorkspaceApp {
                     self.sync_active_terminal_recording_elapsed_tick(cx);
                 }
             }
+            WorkspaceTabHostEvent::TerminalOutputUnread => cx.notify(),
             WorkspaceTabHostEvent::TerminalPaneDelivery {
                 pane_id,
                 session_id,

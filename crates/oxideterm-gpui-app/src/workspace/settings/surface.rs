@@ -1189,6 +1189,10 @@ impl WorkspaceApp {
                 settings.terminal.command_bar.current_directory_awareness,
             );
         });
+        self.tab_host.update(cx, |tab_host, _cx| {
+            tab_host
+                .configure_terminal_output_highlight(settings.terminal.highlight_tab_on_new_output);
+        });
         self.ai_entity.update(cx, |ai, _cx| {
             ai.set_agent_fs_mode(crate::workspace::ide::node_agent_mode_from_settings(
                 &settings,

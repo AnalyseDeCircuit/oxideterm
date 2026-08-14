@@ -121,6 +121,8 @@ impl WorkspaceApp {
             })
         });
         let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
+        let tabs_with_unread_terminal_output =
+            self.tab_host.read(cx).unread_terminal_output_tab_ids();
         let active_tab_id = self.active_tab_id(cx);
         let mut live_tabs = self
             .tabs(cx)
@@ -194,6 +196,7 @@ impl WorkspaceApp {
             let current_visible_index = visible_tab_index;
             visible_tab_index += 1;
             let active = Some(tab_id) == active_tab_id;
+            let has_unread_terminal_output = tabs_with_unread_terminal_output.contains(&tab_id);
             let drag_state = self.main_window_tabs.drag.as_ref();
             let drag_active = drag_state.is_some_and(|drag| drag.active);
             let is_being_dragged = drag_state.is_some_and(|drag| drag.tab_id == tab_id);
@@ -213,6 +216,8 @@ impl WorkspaceApp {
             let close_button_tooltip_id = tab_tooltip_id.clone();
             let tab_text_color = if active {
                 rgb(theme.text)
+            } else if has_unread_terminal_output {
+                rgb(theme.success)
             } else {
                 rgb(theme.text_muted)
             };
@@ -240,11 +245,7 @@ impl WorkspaceApp {
                 } else {
                     theme.bg
                 }))
-                .text_color(if active {
-                    rgb(theme.text)
-                } else {
-                    rgb(theme.text_muted)
-                })
+                .text_color(tab_text_color)
                 .opacity(if is_being_dragged && drag_active {
                     0.5
                 } else {

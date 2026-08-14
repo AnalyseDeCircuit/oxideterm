@@ -245,6 +245,8 @@
       "adaptive_renderer_off": "关闭（直写模式）",
       "show_performance_overlay": "显示终端性能浮层",
       "show_performance_overlay_hint": "在终端角落显示实时渲染档位（B=高速/N=正常/I=空闲）、每秒写入事件数和待处理字节",
+      "highlight_tab_on_new_output": "高亮有新输出的标签",
+      "highlight_tab_on_new_output_hint": "后台终端出现新输出时，以醒目颜色显示标签图标和标题",
       "cursor": "光标",
       "cursor_style": "光标样式",
       "cursor_style_hint": "文本光标形状",

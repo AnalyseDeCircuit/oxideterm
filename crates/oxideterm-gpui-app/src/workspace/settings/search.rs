@@ -163,6 +163,8 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             &[
                 "settings_view.terminal.scrollback",
                 "settings_view.terminal.scrollback_hint",
+                "settings_view.terminal.highlight_tab_on_new_output",
+                "settings_view.terminal.highlight_tab_on_new_output_hint",
             ],
         ),
         terminal_search_entry(

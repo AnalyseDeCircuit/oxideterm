@@ -245,6 +245,8 @@
       "adaptive_renderer_off": "Off (Direct Write)",
       "show_performance_overlay": "Show Terminal Performance Overlay",
       "show_performance_overlay_hint": "Display the live render tier (B=boost, N=normal, I=idle), terminal write-event rate, and queued bytes in the terminal corner",
+      "highlight_tab_on_new_output": "Highlight Tabs with New Output",
+      "highlight_tab_on_new_output_hint": "Use a noticeable color for the icon and title of background terminal tabs when new output arrives",
       "cursor": "Cursor",
       "cursor_style": "Cursor Style",
       "cursor_style_hint": "Shape of the text cursor",

@@ -243,6 +243,8 @@
       "adaptive_renderer_off": "Aus (Direktschreiben)",
       "show_performance_overlay": "Terminal-Leistungsanzeige anzeigen",
       "show_performance_overlay_hint": "Zeigt die aktuelle Renderstufe (B=Boost/N=Normal/I=Idle), Schreibereignisse pro Sekunde und ausstehende Bytes in der Terminalecke an",
+      "highlight_tab_on_new_output": "Tabs bei neuer Ausgabe hervorheben",
+      "highlight_tab_on_new_output_hint": "Symbol und Titel von Terminal-Tabs im Hintergrund bei neuer Ausgabe farblich hervorheben",
       "cursor": "Cursor",
       "cursor_style": "Cursor-Stil",
       "cursor_style_hint": "Form des Textcursors",

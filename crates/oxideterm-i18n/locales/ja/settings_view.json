@@ -243,6 +243,8 @@
       "adaptive_renderer_off": "オフ（ダイレクト書き込み）",
       "show_performance_overlay": "ターミナル性能オーバーレイを表示",
       "show_performance_overlay_hint": "ターミナルの隅に現在のレンダリング段階（B=ブースト/N=通常/I=アイドル）、1秒あたりの書き込みイベント数、保留中のバイト数を表示します",
+      "highlight_tab_on_new_output": "新しい出力があるタブを強調表示",
+      "highlight_tab_on_new_output_hint": "バックグラウンドのターミナルに新しい出力が届いたとき、タブのアイコンとタイトルを目立つ色で表示します",
       "cursor": "カーソル",
       "cursor_style": "カーソルスタイル",
       "cursor_style_hint": "テキストカーソルの形状",

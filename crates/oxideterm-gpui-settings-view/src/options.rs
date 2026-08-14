@@ -21,6 +21,10 @@ pub fn set_show_terminal_performance_overlay(settings: &mut PersistedSettings, v
     settings.terminal.show_fps_overlay = value;
 }
 
+pub fn set_highlight_tab_on_new_output(settings: &mut PersistedSettings, value: bool) {
+    settings.terminal.highlight_tab_on_new_output = value;
+}
+
 pub fn set_terminal_smooth_scroll(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.smooth_scroll = value;
 }

@@ -243,6 +243,8 @@
       "adaptive_renderer_off": "Disattivato (scrittura diretta)",
       "show_performance_overlay": "Mostra overlay prestazioni terminale",
       "show_performance_overlay_hint": "Mostra il livello di rendering corrente (B=boost/N=normale/I=inattivo), gli eventi di scrittura al secondo e i byte in attesa nell'angolo del terminale",
+      "highlight_tab_on_new_output": "Evidenzia le schede con nuovo output",
+      "highlight_tab_on_new_output_hint": "Usa un colore evidente per l’icona e il titolo delle schede terminale in background quando arriva un nuovo output",
       "cursor": "Cursore",
       "cursor_style": "Stile Cursore",
       "cursor_style_hint": "Forma del cursore del testo",

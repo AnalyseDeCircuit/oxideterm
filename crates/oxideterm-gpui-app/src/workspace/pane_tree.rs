@@ -126,6 +126,8 @@ impl WorkspaceApp {
             TerminalPaneEvent::Exited { .. } => {
                 self.queue_auto_close_terminal_session(session_id, cx);
             }
+            // TabHost consumes this signal before ordinary pane delivery.
+            TerminalPaneEvent::OutputActivity => {}
             TerminalPaneEvent::CurrentDirectoryChanged => {
                 if self.active_pane_id(cx) == Some(pane_id) {
                     self.sync_active_terminal_metadata_context(cx);
