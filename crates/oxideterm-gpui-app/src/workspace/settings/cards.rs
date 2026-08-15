@@ -1300,6 +1300,7 @@ impl WorkspaceApp {
             };
         }
         match input {
+            SettingsInput::PublicMcpPort => self.public_mcp.port_draft().to_owned(),
             SettingsInput::TerminalCommandSpecsJson => {
                 self.terminal_command_specs_editor_initial_value()
             }
@@ -1388,6 +1389,11 @@ impl WorkspaceApp {
             return;
         }
         match input {
+            SettingsInput::PublicMcpPort => {
+                self.public_mcp
+                    .set_port_draft(self.settings_input_draft.clone());
+                cx.notify();
+            }
             SettingsInput::TerminalCommandSpecsJson => {
                 cx.notify();
             }

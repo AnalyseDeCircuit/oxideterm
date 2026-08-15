@@ -95,7 +95,9 @@ pub fn persisted_settings_input_value(
             })
             .unwrap_or_default(),
         SettingsInput::NetworkProxyPassword => String::new(),
-        SettingsInput::NetworkProxyTestHost | SettingsInput::NetworkProxyTestPort => return None,
+        SettingsInput::NetworkProxyTestHost
+        | SettingsInput::NetworkProxyTestPort
+        | SettingsInput::PublicMcpPort => return None,
         SettingsInput::UpdateProxyHost => settings.general.update_proxy.host.clone(),
         SettingsInput::UpdateProxyPort => settings.general.update_proxy.port.to_string(),
         SettingsInput::UpdateProxyNoProxy => settings.general.update_proxy.no_proxy.clone(),
@@ -354,9 +356,9 @@ pub fn apply_persisted_settings_input_draft(
             };
         }),
         SettingsInput::NetworkProxyPassword => SettingsInputDraftApply::Unhandled,
-        SettingsInput::NetworkProxyTestHost | SettingsInput::NetworkProxyTestPort => {
-            SettingsInputDraftApply::Unhandled
-        }
+        SettingsInput::NetworkProxyTestHost
+        | SettingsInput::NetworkProxyTestPort
+        | SettingsInput::PublicMcpPort => SettingsInputDraftApply::Unhandled,
         SettingsInput::UpdateProxyHost => {
             settings.general.update_proxy.host = draft.trim().to_string();
             SettingsInputDraftApply::Applied

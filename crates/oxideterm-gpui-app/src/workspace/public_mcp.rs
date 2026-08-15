@@ -69,6 +69,8 @@ pub(in crate::workspace) struct PublicMcpWorkspaceBridge {
     endpoint_url: Option<String>,
     startup_error: Option<String>,
     server: Option<PublicMcpHttpServer>,
+    port_draft: String,
+    client_registry_ready: bool,
     state: Arc<PublicMcpState>,
     settings_path: PathBuf,
     receiver: Option<DomainRequestReceiver>,
@@ -132,6 +134,9 @@ struct PublicMcpOperationRecord {
 struct PublicMcpEndpointState {
     version: u32,
     port: u16,
+    // Zero keeps automatic allocation while retaining the last live port for discovery.
+    #[serde(default)]
+    preferred_port: u16,
 }
 
 #[derive(Clone)]
@@ -306,6 +311,7 @@ impl PublicMcpWorkspaceBridge {
             Ok(clients) => (Arc::new(clients), None),
             Err(error) => (Arc::new(ClientRegistry::default()), Some(error.to_string())),
         };
+        let client_registry_ready = registry_error.is_none();
         let (broker, receiver) = DomainBroker::channel(PUBLIC_MCP_BROKER_CAPACITY);
         let state = Arc::new(PublicMcpState {
             clients,
@@ -314,11 +320,21 @@ impl PublicMcpWorkspaceBridge {
             artifacts: Arc::default(),
             broker,
         });
-        let preferred_port = read_endpoint_port(&endpoint_state_path).unwrap_or(0);
-        let (server, endpoint_url, server_error) = if registry_error.is_none() {
+        let endpoint_state = read_endpoint_state(&endpoint_state_path);
+        let preferred_port = endpoint_state
+            .as_ref()
+            .map(|state| state.preferred_port)
+            .unwrap_or(0);
+        let initial_port = if preferred_port == 0 {
+            endpoint_state.as_ref().map(|state| state.port).unwrap_or(0)
+        } else {
+            preferred_port
+        };
+        let (server, endpoint_url, server_error) = if client_registry_ready {
             let started =
-                start_http_server(runtime, state.clone(), preferred_port).or_else(|first_error| {
-                    if preferred_port == 0 {
+                start_http_server(runtime, state.clone(), initial_port).or_else(|first_error| {
+                    // Only automatic mode may move away from the previous discovery port.
+                    if preferred_port != 0 || initial_port == 0 {
                         Err(first_error)
                     } else {
                         start_http_server(runtime, state.clone(), 0)
@@ -328,7 +344,8 @@ impl PublicMcpWorkspaceBridge {
                 Ok(server) => {
                     let endpoint_url = Some(server.endpoint_url());
                     // A persistence failure must not hide a healthy live endpoint.
-                    let _ = persist_endpoint_port(&endpoint_state_path, server.port());
+                    let _ =
+                        persist_endpoint_state(&endpoint_state_path, server.port(), preferred_port);
                     (Some(server), endpoint_url, None)
                 }
                 Err(error) => (None, None, Some(error.to_string())),
@@ -340,6 +357,8 @@ impl PublicMcpWorkspaceBridge {
             endpoint_url,
             startup_error: registry_error.or(server_error),
             server,
+            port_draft: preferred_port.to_string(),
+            client_registry_ready,
             state,
             settings_path: settings_path.to_path_buf(),
             receiver: Some(receiver),
@@ -367,6 +386,51 @@ impl PublicMcpWorkspaceBridge {
 
     pub(in crate::workspace) fn startup_error(&self) -> Option<&str> {
         self.startup_error.as_deref()
+    }
+
+    pub(in crate::workspace) fn port_draft(&self) -> &str {
+        &self.port_draft
+    }
+
+    pub(in crate::workspace) fn set_port_draft(&mut self, draft: String) {
+        self.port_draft = draft;
+    }
+
+    pub(in crate::workspace) fn apply_preferred_port(
+        &mut self,
+        runtime: &tokio::runtime::Handle,
+        preferred_port: u16,
+    ) -> std::io::Result<()> {
+        if !self.client_registry_ready {
+            return Err(std::io::Error::other(
+                "The Public MCP client registry is unavailable",
+            ));
+        }
+        let current_port = self.server.as_ref().map(PublicMcpHttpServer::port);
+        let endpoint_state_path = public_mcp_endpoint_state_path(&self.settings_path);
+
+        if preferred_port == 0 && current_port.is_some() {
+            // Automatic mode can keep the healthy listener and choose again on a later startup.
+            persist_endpoint_state(
+                &endpoint_state_path,
+                current_port.unwrap_or_default(),
+                preferred_port,
+            )?;
+        } else if current_port == Some(preferred_port) {
+            persist_endpoint_state(&endpoint_state_path, preferred_port, preferred_port)?;
+        } else {
+            // Bind the replacement before dropping the current listener so a failed choice
+            // never takes a working endpoint offline.
+            let replacement = start_http_server(runtime, self.state.clone(), preferred_port)?;
+            let replacement_url = replacement.endpoint_url();
+            persist_endpoint_state(&endpoint_state_path, replacement.port(), preferred_port)?;
+            self.server = Some(replacement);
+            self.endpoint_url = Some(replacement_url);
+        }
+
+        self.port_draft = preferred_port.to_string();
+        self.startup_error = None;
+        Ok(())
     }
 
     pub(in crate::workspace) fn record_action_error(&mut self, error: String) {
@@ -2732,10 +2796,10 @@ fn public_command_error(error: SshTransportError) -> String {
     }
 }
 
-fn read_endpoint_port(path: &Path) -> Option<u16> {
+fn read_endpoint_state(path: &Path) -> Option<PublicMcpEndpointState> {
     let bytes = std::fs::read(path).ok()?;
     let state: PublicMcpEndpointState = serde_json::from_slice(&bytes).ok()?;
-    (state.version == 1 && state.port != 0).then_some(state.port)
+    (state.version == 1 && state.port != 0).then_some(state)
 }
 
 fn public_mcp_endpoint_state_path(settings_path: &Path) -> PathBuf {
@@ -2745,8 +2809,12 @@ fn public_mcp_endpoint_state_path(settings_path: &Path) -> PathBuf {
         .join(PUBLIC_MCP_ENDPOINT_FILE)
 }
 
-fn persist_endpoint_port(path: &Path, port: u16) -> std::io::Result<()> {
-    let bytes = serde_json::to_vec_pretty(&PublicMcpEndpointState { version: 1, port })
-        .map_err(std::io::Error::other)?;
+fn persist_endpoint_state(path: &Path, port: u16, preferred_port: u16) -> std::io::Result<()> {
+    let bytes = serde_json::to_vec_pretty(&PublicMcpEndpointState {
+        version: 1,
+        port,
+        preferred_port,
+    })
+    .map_err(std::io::Error::other)?;
     oxideterm_atomic_file::durable_write(path, &bytes)
 }

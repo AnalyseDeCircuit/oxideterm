@@ -144,6 +144,7 @@ External editors, command-line AI tools, and other MCP clients can use saved SSH
 
 1. Create a standard or full-access client. Standard mode requires in-app approval for high-risk actions; full-access mode skips per-action approval only for enabled tool groups.
 2. Copy the loopback HTTP endpoint and the client credential, which is shown only once.
+   The listening port defaults to `0`, which lets the app choose automatically. Enter and apply a value from `1` to `65535` when a fixed port is required. The preference remains device-local and is excluded from ordinary settings, `.oxide` exports, and cloud sync.
 3. Configure the endpoint as a Streamable HTTP URL in the external MCP client and add an `Authorization: Bearer <credential>` request header.
    If the client supports stdio only, configure the command as `oxideterm mcp bridge` and provide `OXIDETERM_MCP_TOKEN=<credential>` through the client's secret environment settings. The bridge discovers the current loopback endpoint automatically. Never put the credential in command arguments.
 4. Have the client call `connections_browse`, then inspect the selected connection. The connection-management group can create, update, or remove SSH, Mosh, Telnet, serial, RDP, and VNC profiles. Credential tools can store a new value, report presence, or forget a slot, but never read an existing secret.

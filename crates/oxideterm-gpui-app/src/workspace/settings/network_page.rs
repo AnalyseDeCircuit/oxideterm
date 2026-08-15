@@ -396,6 +396,50 @@ impl WorkspaceApp {
 
         content = content.child(
             div()
+                .w_full()
+                .min_w(px(0.0))
+                .flex()
+                .flex_wrap()
+                .items_end()
+                .gap(px(SETTINGS_PUBLIC_MCP_ENDPOINT_GAP))
+                .child(
+                    div()
+                        .w(px(SETTINGS_NETWORK_PORT_FIELD_WIDTH))
+                        .max_w_full()
+                        .child(self.network_input_field(
+                            "settings_view.network.public_mcp_port",
+                            "settings_view.network.public_mcp_port_hint",
+                            SettingsInput::PublicMcpPort,
+                            self.current_settings_input_value(SettingsInput::PublicMcpPort, cx),
+                            "0".to_string(),
+                            true,
+                            cx,
+                        )),
+                )
+                .child(self.workspace_toolbar_action_button(
+                    self.i18n.t("settings_view.network.apply_public_mcp_port"),
+                    None,
+                    ToolbarButtonOptions::default(),
+                    cx.listener(move |this, _event, _window, cx| {
+                        let draft = this.public_mcp.port_draft().trim().to_owned();
+                        let Ok(port) = draft.parse::<u16>() else {
+                            let error =
+                                this.i18n.t("settings_view.network.invalid_public_mcp_port");
+                            this.public_mcp.record_action_error(error);
+                            cx.notify();
+                            return;
+                        };
+                        let runtime = this.forwarding_runtime.handle().clone();
+                        if let Err(error) = this.public_mcp.apply_preferred_port(&runtime, port) {
+                            this.public_mcp.record_action_error(error.to_string());
+                        }
+                        cx.notify();
+                    }),
+                )),
+        );
+
+        content = content.child(
+            div()
                 .text_size(px(self.tokens.metrics.ui_text_xs))
                 .text_color(rgb(self.tokens.ui.text_muted))
                 .child(
