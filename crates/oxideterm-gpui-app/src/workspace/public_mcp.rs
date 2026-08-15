@@ -976,6 +976,10 @@ impl WorkspaceApp {
             .state
             .approvals
             .revoke_client_tool_group(client_ref, tool_group);
+        self.public_mcp
+            .state
+            .broker
+            .cancel_client_tool_group(client_ref, tool_group);
         match tool_group {
             ToolGroup::NodeSession => self.revoke_public_mcp_client_runtime(client_ref, cx),
             ToolGroup::TerminalSession => self.revoke_public_mcp_client_terminals(client_ref, cx),
@@ -1069,6 +1073,8 @@ impl WorkspaceApp {
     }
 
     fn revoke_public_mcp_client_runtime(&mut self, client_ref: &ClientRef, cx: &mut Context<Self>) {
+        // Active domain work shares the broker cancellation token used by timeout and disconnect.
+        self.public_mcp.state.broker.cancel_client(client_ref);
         self.revoke_public_mcp_client_recordings(client_ref, cx);
         self.revoke_public_mcp_client_desktops(client_ref, cx);
         self.revoke_public_mcp_client_terminals(client_ref, cx);
