@@ -1492,6 +1492,8 @@
       "mcp_group_command_execute": "命令執行",
       "mcp_group_audit_read": "MCP 稽核記錄",
       "mcp_group_artifact_transfer": "暫存內容傳輸",
+      "mcp_group_host_tools_observe": "Host Tools 快照",
+      "mcp_group_host_tools_operate": "Host Tools 操作",
       "client_enabled": "已啟用",
       "client_disabled": "已停用",
       "enable_client": "啟用",

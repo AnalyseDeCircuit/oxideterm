@@ -26,7 +26,10 @@ pub use auth::{
     RegisteredClient, ToolGroup,
 };
 pub use broker::{BrokerError, DomainBroker, DomainMessage, DomainRequest, DomainRequestReceiver};
-pub use calls::{PublicToolCall, ToolEnvelope, ToolOutcome};
+pub use calls::{
+    HostToolLogPreset, HostToolOperation, HostToolResource, PublicToolCall, ToolEnvelope,
+    ToolOutcome,
+};
 pub use handles::{
     ApprovalRef, ArtifactRef, AuditRef, ClientRef, CommandRef, ConnectionRef, HandleParseError,
     NodeRef, OperationRef, TerminalRef,

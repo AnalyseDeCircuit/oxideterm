@@ -25,6 +25,8 @@ use zeroize::Zeroizing;
 
 use super::WorkspaceApp;
 
+mod host_tools;
+
 const PUBLIC_MCP_CLIENTS_FILE: &str = "public-mcp-clients.json";
 const PUBLIC_MCP_ENDPOINT_FILE: &str = "public-mcp-endpoint.json";
 const PUBLIC_MCP_BROKER_CAPACITY: usize = 64;
@@ -525,7 +527,9 @@ impl WorkspaceApp {
                 | ToolGroup::ConnectionDirectory
                 | ToolGroup::ConnectionRead
                 | ToolGroup::CommandObserve
-                | ToolGroup::AuditRead => {}
+                | ToolGroup::AuditRead
+                | ToolGroup::HostToolsObserve
+                | ToolGroup::HostToolsOperate => {}
             }
         }
         Ok(())
@@ -591,6 +595,15 @@ impl WorkspaceApp {
             PublicToolCall::StageArtifact(_) => self.handle_public_mcp_stage_artifact(request),
             PublicToolCall::ReadArtifact(_) => self.handle_public_mcp_read_artifact(request),
             PublicToolCall::AuditSearch(_) => self.handle_public_mcp_audit_search(request),
+            PublicToolCall::HostToolsCatalog(_) => {
+                self.handle_public_mcp_host_tools_catalog(request)
+            }
+            PublicToolCall::HostToolsCapture(_) => {
+                self.handle_public_mcp_host_tools_capture(request)
+            }
+            PublicToolCall::HostToolsOperate(_) => {
+                self.handle_public_mcp_host_tools_operate(request)
+            }
         }
     }
 
@@ -1263,6 +1276,8 @@ fn all_tool_groups() -> BTreeSet<ToolGroup> {
         ToolGroup::CommandExecute,
         ToolGroup::AuditRead,
         ToolGroup::ArtifactTransfer,
+        ToolGroup::HostToolsObserve,
+        ToolGroup::HostToolsOperate,
     ])
 }
 

@@ -25,8 +25,9 @@ use crate::{
     calls::{
         AuditSearchArgs, BrowseConnectionsArgs, CancelCommandArgs, CommandOutputArgs,
         CommandStateArgs, ConnectNodeArgs, DescribeConnectionArgs, DisconnectNodeArgs,
-        InspectNodeArgs, PublicToolCall, ReadArtifactArgs, ReleaseNodeArgs, StageArtifactArgs,
-        StartCommandArgs, ToolEnvelope, ToolOutcome,
+        HostToolsCaptureArgs, HostToolsCatalogArgs, HostToolsOperateArgs, InspectNodeArgs,
+        PublicToolCall, ReadArtifactArgs, ReleaseNodeArgs, StageArtifactArgs, StartCommandArgs,
+        ToolEnvelope, ToolOutcome,
     },
     handles::{ApprovalRef, ClientRef, NodeRef},
 };
@@ -407,6 +408,31 @@ impl ServerHandler for PublicMcpService {
                 ),
                 Err(error) => *error,
             },
+            "hosttools_catalog" => match parse_arguments::<HostToolsCatalogArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::HostToolsCatalog(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "hosttools_capture" => match parse_arguments::<HostToolsCaptureArgs>(arguments) {
+                Ok(args) if args.limit > 0 && args.limit <= 500 => {
+                    self.execute_call(&client, PublicToolCall::HostToolsCapture(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "The Host Tools row limit must be between 1 and 500",
+                ),
+                Err(error) => *error,
+            },
+            "hosttools_operate" => match parse_arguments::<HostToolsOperateArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::HostToolsOperate(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
             _ => tool_error("unknown_tool", "The requested tool is not implemented"),
         };
         Ok(result.into())
@@ -539,6 +565,27 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             ToolGroup::AuditRead,
             true,
             false,
+        ),
+        define_tool::<HostToolsCatalogArgs>(
+            "hosttools_catalog",
+            "List the fixed typed Host Tools resources available for an acquired SSH node.",
+            ToolGroup::HostToolsObserve,
+            true,
+            false,
+        ),
+        define_tool::<HostToolsCaptureArgs>(
+            "hosttools_capture",
+            "Capture one bounded typed Host Tools snapshot without accepting shell text.",
+            ToolGroup::HostToolsObserve,
+            true,
+            false,
+        ),
+        define_tool::<HostToolsOperateArgs>(
+            "hosttools_operate",
+            "Run one fixed typed Host Tools action without accepting shell or plugin calls.",
+            ToolGroup::HostToolsOperate,
+            false,
+            true,
         ),
     ]
 }

@@ -127,6 +127,109 @@ pub struct AuditSearchArgs {
     pub limit: u32,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HostToolResource {
+    System,
+    Processes,
+    Docker,
+    Services,
+    Logs,
+    Tmux,
+    Ports,
+    Filesystems,
+    Packages,
+    ScheduledTasks,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HostToolLogPreset {
+    #[default]
+    All,
+    Errors,
+    Auth,
+    Kernel,
+    System,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct HostToolsCatalogArgs {
+    pub node_ref: NodeRef,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct HostToolsCaptureArgs {
+    pub node_ref: NodeRef,
+    pub resource: HostToolResource,
+    #[serde(default)]
+    pub log_preset: HostToolLogPreset,
+    #[serde(default = "default_host_tool_limit")]
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum HostToolOperation {
+    ProcessStop { pid: String },
+    ProcessContinue { pid: String },
+    ProcessRenice { pid: String, nice: i32 },
+    ProcessTerminate { pid: String },
+    ProcessKill { pid: String },
+    DockerStart { container_id: String },
+    DockerStop { container_id: String },
+    DockerRestart { container_id: String },
+    ServiceStart { service_id: String },
+    ServiceStop { service_id: String },
+    ServiceRestart { service_id: String },
+    ServiceReload { service_id: String },
+    ServiceEnable { service_id: String },
+    ServiceDisable { service_id: String },
+    TmuxRenameSession { target: String, name: String },
+    TmuxRenameWindow { target: String, name: String },
+    TmuxKillSession { target: String },
+    TmuxKillWindow { target: String },
+    TmuxKillPane { target: String },
+    ScheduledTaskRun { id: String, unit: String },
+    ScheduledTaskEnable { id: String, source: String },
+    ScheduledTaskDisable { id: String, source: String },
+}
+
+impl HostToolOperation {
+    fn target_summary(&self) -> &str {
+        match self {
+            Self::ProcessStop { pid }
+            | Self::ProcessContinue { pid }
+            | Self::ProcessRenice { pid, .. }
+            | Self::ProcessTerminate { pid }
+            | Self::ProcessKill { pid } => pid,
+            Self::DockerStart { container_id }
+            | Self::DockerStop { container_id }
+            | Self::DockerRestart { container_id } => container_id,
+            Self::ServiceStart { service_id }
+            | Self::ServiceStop { service_id }
+            | Self::ServiceRestart { service_id }
+            | Self::ServiceReload { service_id }
+            | Self::ServiceEnable { service_id }
+            | Self::ServiceDisable { service_id } => service_id,
+            Self::TmuxRenameSession { target, .. }
+            | Self::TmuxRenameWindow { target, .. }
+            | Self::TmuxKillSession { target }
+            | Self::TmuxKillWindow { target }
+            | Self::TmuxKillPane { target } => target,
+            Self::ScheduledTaskRun { id, .. }
+            | Self::ScheduledTaskEnable { id, .. }
+            | Self::ScheduledTaskDisable { id, .. } => id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct HostToolsOperateArgs {
+    pub node_ref: NodeRef,
+    pub operation: HostToolOperation,
+}
+
 fn default_output_limit() -> u32 {
     64 * 1024
 }
@@ -137,6 +240,10 @@ fn default_artifact_read_length() -> u32 {
 
 fn default_audit_limit() -> u32 {
     50
+}
+
+fn default_host_tool_limit() -> u32 {
+    200
 }
 
 pub enum PublicToolCall {
@@ -153,6 +260,9 @@ pub enum PublicToolCall {
     StageArtifact(StageArtifactArgs),
     ReadArtifact(ReadArtifactArgs),
     AuditSearch(AuditSearchArgs),
+    HostToolsCatalog(HostToolsCatalogArgs),
+    HostToolsCapture(HostToolsCaptureArgs),
+    HostToolsOperate(HostToolsOperateArgs),
 }
 
 impl PublicToolCall {
@@ -171,6 +281,9 @@ impl PublicToolCall {
             Self::StageArtifact(_) => "artifacts_stage",
             Self::ReadArtifact(_) => "artifacts_read",
             Self::AuditSearch(_) => "mcp_audit_search",
+            Self::HostToolsCatalog(_) => "hosttools_catalog",
+            Self::HostToolsCapture(_) => "hosttools_capture",
+            Self::HostToolsOperate(_) => "hosttools_operate",
         }
     }
 
@@ -186,13 +299,18 @@ impl PublicToolCall {
             Self::CommandState(_) | Self::CommandOutput(_) => ToolGroup::CommandObserve,
             Self::StageArtifact(_) | Self::ReadArtifact(_) => ToolGroup::ArtifactTransfer,
             Self::AuditSearch(_) => ToolGroup::AuditRead,
+            Self::HostToolsCatalog(_) | Self::HostToolsCapture(_) => ToolGroup::HostToolsObserve,
+            Self::HostToolsOperate(_) => ToolGroup::HostToolsOperate,
         }
     }
 
     pub fn requires_approval(&self) -> bool {
         matches!(
             self,
-            Self::ConnectNode(_) | Self::DisconnectNode(_) | Self::StartCommand(_)
+            Self::ConnectNode(_)
+                | Self::DisconnectNode(_)
+                | Self::StartCommand(_)
+                | Self::HostToolsOperate(_)
         )
     }
 
@@ -211,6 +329,13 @@ impl PublicToolCall {
             Self::StageArtifact(_) => "artifact staging".to_owned(),
             Self::ReadArtifact(args) => args.artifact_ref.to_string(),
             Self::AuditSearch(_) => "audit log".to_owned(),
+            Self::HostToolsCatalog(args) => args.node_ref.to_string(),
+            Self::HostToolsCapture(args) => args.node_ref.to_string(),
+            Self::HostToolsOperate(args) => format!(
+                "{} host tool target {}",
+                args.node_ref,
+                args.operation.target_summary()
+            ),
         }
     }
 }

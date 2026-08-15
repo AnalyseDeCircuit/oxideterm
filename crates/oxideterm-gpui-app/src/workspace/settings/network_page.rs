@@ -91,6 +91,12 @@ fn public_mcp_tool_group_label_key(tool_group: oxideterm_public_mcp::ToolGroup) 
         oxideterm_public_mcp::ToolGroup::ArtifactTransfer => {
             "settings_view.network.mcp_group_artifact_transfer"
         }
+        oxideterm_public_mcp::ToolGroup::HostToolsObserve => {
+            "settings_view.network.mcp_group_host_tools_observe"
+        }
+        oxideterm_public_mcp::ToolGroup::HostToolsOperate => {
+            "settings_view.network.mcp_group_host_tools_operate"
+        }
     }
 }
 

@@ -20,6 +20,8 @@ pub enum ToolGroup {
     CommandExecute,
     AuditRead,
     ArtifactTransfer,
+    HostToolsObserve,
+    HostToolsOperate,
 }
 
 impl ToolGroup {
@@ -32,6 +34,8 @@ impl ToolGroup {
             Self::CommandExecute,
             Self::AuditRead,
             Self::ArtifactTransfer,
+            Self::HostToolsObserve,
+            Self::HostToolsOperate,
         ]
     }
 }
