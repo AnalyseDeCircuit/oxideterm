@@ -145,6 +145,10 @@ impl ConnectionStore {
         build_serial_profiles_sync_snapshot(&self.data)
     }
 
+    pub fn export_telnet_profiles_snapshot(&self) -> Result<TelnetProfilesSyncSnapshot> {
+        build_telnet_profiles_sync_snapshot(&self.data)
+    }
+
     pub fn export_mosh_profiles_snapshot(&self) -> Result<MoshProfilesSyncSnapshot> {
         build_mosh_profiles_sync_snapshot(&self.data)
     }
@@ -468,6 +472,38 @@ impl ConnectionStore {
         Ok(applied)
     }
 
+    pub fn apply_telnet_profiles_snapshot(
+        &mut self,
+        snapshot: TelnetProfilesSyncSnapshot,
+    ) -> Result<usize> {
+        // Validate the complete batch before changing the shared connection store.
+        for profile in &snapshot.records {
+            profile.validate()?;
+        }
+        let mut applied = 0usize;
+        for profile in snapshot.records {
+            if let Some(existing) = self
+                .data
+                .telnet_profiles
+                .iter_mut()
+                .find(|existing| existing.id == profile.id)
+            {
+                if profile.updated_at >= existing.updated_at {
+                    *existing = profile;
+                    applied += 1;
+                }
+            } else {
+                self.data.telnet_profiles.push(profile);
+                applied += 1;
+            }
+        }
+        if applied > 0 {
+            self.normalize();
+            self.save()?;
+        }
+        Ok(applied)
+    }
+
     pub fn apply_remote_desktop_profiles_snapshot(
         &mut self,
         snapshot: RemoteDesktopProfilesSyncSnapshot,
@@ -567,7 +603,11 @@ fn build_saved_connection_from_sync_payload(
         username: non_empty(payload.username.trim(), "Username")?.to_string(),
         auth,
         proxy_chain,
-        upstream_proxy: payload.upstream_proxy.clone(),
+        upstream_proxy: build_synced_upstream_proxy(
+            &payload.upstream_proxy,
+            existing,
+            preserve_auth,
+        ),
         options: synced_options
             .cloned()
             .unwrap_or_else(|| ConnectionOptions {
@@ -647,6 +687,25 @@ fn build_serial_profiles_sync_snapshot(
     )?;
 
     Ok(SerialProfilesSyncSnapshot {
+        revision,
+        exported_at: Utc::now().to_rfc3339(),
+        records,
+    })
+}
+
+fn build_telnet_profiles_sync_snapshot(
+    data: &ConnectionStoreData,
+) -> Result<TelnetProfilesSyncSnapshot> {
+    let mut records = data.telnet_profiles.clone();
+    records.sort_by(|left, right| left.id.cmp(&right.id));
+    let revision = sha256_hex(
+        &records
+            .iter()
+            .map(|profile| (&profile.id, profile.updated_at.to_rfc3339()))
+            .collect::<Vec<_>>(),
+    )?;
+
+    Ok(TelnetProfilesSyncSnapshot {
         revision,
         exported_at: Utc::now().to_rfc3339(),
         records,
@@ -760,7 +819,9 @@ fn build_remote_desktop_profiles_sync_snapshot(
 fn build_saved_connection_sync_record(
     connection: &SavedConnection,
 ) -> Result<SavedConnectionSyncRecord> {
-    let payload = ConnectionInfo::from(connection);
+    let mut payload = ConnectionInfo::from(connection);
+    // Protected-store references identify one device and must never enter a portable snapshot.
+    payload.upstream_proxy = portable_upstream_proxy(&payload.upstream_proxy);
     let options = connection.options.clone();
     Ok(SavedConnectionSyncRecord {
         id: connection.id.clone(),
@@ -895,6 +956,76 @@ fn build_synced_proxy_chain(
             }
         })
         .collect()
+}
+
+fn portable_upstream_proxy(policy: &SavedUpstreamProxyPolicy) -> SavedUpstreamProxyPolicy {
+    match policy {
+        SavedUpstreamProxyPolicy::Custom { proxy } => {
+            let mut proxy = proxy.clone();
+            if let SavedUpstreamProxyAuth::Password {
+                username,
+                ..
+            } = &proxy.auth
+            {
+                proxy.auth = SavedUpstreamProxyAuth::Password {
+                    username: username.clone(),
+                    keychain_id: None,
+                    plaintext_password: None,
+                };
+            }
+            SavedUpstreamProxyPolicy::Custom { proxy }
+        }
+        SavedUpstreamProxyPolicy::UseGlobal => SavedUpstreamProxyPolicy::UseGlobal,
+        SavedUpstreamProxyPolicy::Direct => SavedUpstreamProxyPolicy::Direct,
+    }
+}
+
+fn build_synced_upstream_proxy(
+    incoming: &SavedUpstreamProxyPolicy,
+    existing: Option<&SavedConnection>,
+    preserve_auth: bool,
+) -> SavedUpstreamProxyPolicy {
+    let mut synced_policy = portable_upstream_proxy(incoming);
+    if !preserve_auth {
+        return synced_policy;
+    }
+    let (
+        SavedUpstreamProxyPolicy::Custom {
+            proxy: incoming_proxy,
+        },
+        Some(SavedUpstreamProxyPolicy::Custom {
+            proxy: existing_proxy,
+        }),
+    ) = (
+        &mut synced_policy,
+        existing.map(|connection| &connection.upstream_proxy),
+    )
+    else {
+        return synced_policy;
+    };
+    let (
+        SavedUpstreamProxyAuth::Password {
+            username: incoming_username,
+            keychain_id: incoming_keychain_id,
+            ..
+        },
+        SavedUpstreamProxyAuth::Password {
+            username: existing_username,
+            keychain_id: existing_keychain_id,
+            ..
+        },
+    ) = (&mut incoming_proxy.auth, &existing_proxy.auth)
+    else {
+        return synced_policy;
+    };
+    if incoming_proxy.protocol == existing_proxy.protocol
+        && incoming_proxy.host == existing_proxy.host
+        && incoming_proxy.port == existing_proxy.port
+        && incoming_username == existing_username
+    {
+        *incoming_keychain_id = existing_keychain_id.clone();
+    }
+    synced_policy
 }
 
 fn active_connection_tombstones(

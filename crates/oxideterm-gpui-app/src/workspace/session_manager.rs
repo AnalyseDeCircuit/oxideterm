@@ -350,6 +350,8 @@ pub(super) struct OxideImportResultView {
     pub(super) skipped_quick_commands: bool,
     pub(super) imported_serial_profiles: usize,
     pub(super) skipped_serial_profiles: usize,
+    pub(super) imported_telnet_profiles: usize,
+    pub(super) skipped_telnet_profiles: usize,
     pub(super) imported_mosh_profiles: usize,
     pub(super) skipped_mosh_profiles: usize,
     pub(super) quick_commands_errors: Vec<String>,
@@ -750,6 +752,7 @@ pub(super) struct OxideImportDialogState {
     pub(super) expanded_app_settings_sections: HashSet<String>,
     pub(super) import_quick_commands: bool,
     pub(super) import_serial_profiles: bool,
+    pub(super) import_telnet_profiles: bool,
     pub(super) import_mosh_profiles: bool,
     pub(super) import_plugin_settings: bool,
     pub(super) selected_plugin_ids: HashSet<String>,
@@ -793,6 +796,7 @@ impl Default for OxideImportDialogState {
             expanded_app_settings_sections: HashSet::new(),
             import_quick_commands: true,
             import_serial_profiles: true,
+            import_telnet_profiles: true,
             import_mosh_profiles: true,
             import_plugin_settings: true,
             selected_plugin_ids: HashSet::new(),
@@ -834,6 +838,7 @@ impl std::fmt::Debug for OxideImportDialogState {
             )
             .field("import_quick_commands", &self.import_quick_commands)
             .field("import_serial_profiles", &self.import_serial_profiles)
+            .field("import_telnet_profiles", &self.import_telnet_profiles)
             .field("import_mosh_profiles", &self.import_mosh_profiles)
             .field("import_plugin_settings", &self.import_plugin_settings)
             .field("selected_plugin_ids", &self.selected_plugin_ids)
@@ -867,6 +872,7 @@ pub(super) struct OxideExportDialogState {
     pub(super) include_local_terminal_env_vars: bool,
     pub(super) include_quick_commands: bool,
     pub(super) include_serial_profiles: bool,
+    pub(super) include_telnet_profiles: bool,
     pub(super) include_mosh_profiles: bool,
     pub(super) include_remote_desktop_profiles: bool,
     pub(super) include_plugin_settings: bool,
@@ -909,6 +915,7 @@ impl Default for OxideExportDialogState {
             include_local_terminal_env_vars: false,
             include_quick_commands: true,
             include_serial_profiles: true,
+            include_telnet_profiles: true,
             include_mosh_profiles: true,
             include_remote_desktop_profiles: true,
             include_plugin_settings: true,
@@ -954,6 +961,7 @@ impl std::fmt::Debug for OxideExportDialogState {
             )
             .field("include_quick_commands", &self.include_quick_commands)
             .field("include_serial_profiles", &self.include_serial_profiles)
+            .field("include_telnet_profiles", &self.include_telnet_profiles)
             .field(
                 "include_remote_desktop_profiles",
                 &self.include_remote_desktop_profiles,

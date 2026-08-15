@@ -350,6 +350,7 @@
         "sync_forwards": "Sincronizar reenvíos guardados",
         "sync_quick_commands": "Sincronizar comandos rápidos",
         "sync_serial_profiles": "Sincronizar perfiles serie",
+        "sync_telnet_profiles": "Sincronizar perfiles Telnet",
         "sync_mosh_profiles": "Sincronizar perfiles Mosh",
         "sync_remote_desktop_profiles": "Sincronizar conexiones de escritorio remoto",
         "sync_app_settings": "Sincronizar ajustes de la aplicación",
@@ -392,6 +393,7 @@
         "forwards_detail": "Las reglas de reenvío guardadas se incluyen junto con los metadatos de su conexión propietaria.",
         "quick_commands_detail": "Se incluyen las definiciones de comandos rápidos.",
         "serial_profiles_detail": "Se incluyen los perfiles de conexión serie.",
+        "telnet_profiles_detail": "Se incluyen los perfiles de conexión Telnet.",
         "mosh_profiles_detail": "Se incluyen los perfiles Mosh sin las credenciales locales del dispositivo.",
         "app_settings_sections_detail": "Secciones seleccionadas: {{sections}}",
         "app_settings_disabled_detail": "La configuración de la aplicación está excluida del alcance de sincronización actual.",
@@ -415,13 +417,13 @@
       },
       "backup": {
         "description": "Copia de respaldo de Oxide Cloud Sync",
-        "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfiles serie, {{pluginSettingsCount}} ajustes de plugins, {{size}}, {{sensitiveCredentials}} credenciales sensibles"
+        "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfiles serie, {{telnetProfiles}} perfiles Telnet, {{pluginSettingsCount}} ajustes de plugins, {{size}}, {{sensitiveCredentials}} credenciales sensibles"
       },
       "history": {
         "action_upload": "Subir",
         "action_pull": "Descargar",
         "action_restore": "Restaurar",
-        "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfiles serie, {{pluginSettingsCount}} ajustes de plugins, {{sensitiveCredentials}} credenciales sensibles"
+        "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfiles serie, {{telnetProfiles}} perfiles Telnet, {{pluginSettingsCount}} ajustes de plugins, {{sensitiveCredentials}} credenciales sensibles"
       },
       "errors": {
         "operation_in_progress": "Ya se está ejecutando otra operación de Cloud Sync.",
@@ -562,6 +564,7 @@
         "total_forwards": "Reenvíos",
         "quick_commands_label": "Comandos rápidos",
         "serial_profiles_label": "Perfiles serie",
+        "telnet_profiles_label": "Perfiles Telnet",
         "mosh_profiles_label": "Perfiles Mosh",
         "will_import": "Se importará",
         "will_merge": "Se fusionará",
@@ -581,6 +584,7 @@
         "toggle_forwards": "Importar reenvíos guardados ({{count}})",
         "toggle_quick_commands": "Importar comandos rápidos ({{count}})",
         "toggle_serial_profiles": "Importar perfiles serie ({{count}})",
+        "toggle_telnet_profiles": "Importar perfiles Telnet ({{count}})",
         "toggle_mosh_profiles": "Importar perfiles Mosh ({{count}})",
         "toggle_remote_desktop_profiles": "Importar conexiones de escritorio remoto ({{count}})",
         "section_field_count": "{{count}} campos",

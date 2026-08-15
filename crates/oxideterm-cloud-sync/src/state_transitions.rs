@@ -43,6 +43,12 @@ pub fn history_summary_from_manifest(manifest: &StructuredManifest) -> CloudSync
             .as_ref()
             .and_then(|entry| entry.record_count)
             .unwrap_or(0),
+        telnet_profiles: manifest
+            .sections
+            .telnet_profiles
+            .as_ref()
+            .and_then(|entry| entry.record_count)
+            .unwrap_or(0),
         mosh_profiles: manifest
             .sections
             .mosh_profiles
@@ -110,6 +116,7 @@ pub fn structured_apply_covers_full_remote(
         && (manifest.sections.forwards.is_none() || selection.forwards)
         && (manifest.sections.quick_commands.is_none() || selection.quick_commands)
         && (manifest.sections.serial_profiles.is_none() || selection.serial_profiles)
+        && (manifest.sections.telnet_profiles.is_none() || selection.telnet_profiles)
         && (manifest.sections.mosh_profiles.is_none() || selection.mosh_profiles)
         && (manifest.sections.remote_desktop_profiles.is_none()
             || selection.remote_desktop_profiles)
@@ -144,6 +151,9 @@ pub fn merge_structured_remote_baseline(
     }
     if selection.serial_profiles {
         merged.serial_profiles = next.serial_profiles.clone();
+    }
+    if selection.telnet_profiles {
+        merged.telnet_profiles = next.telnet_profiles.clone();
     }
     if selection.mosh_profiles {
         merged.mosh_profiles = next.mosh_profiles.clone();
@@ -348,6 +358,7 @@ mod tests {
             forwards: None,
             quick_commands: None,
             serial_profiles: None,
+            telnet_profiles: None,
             mosh_profiles: None,
             remote_desktop_profiles: None,
             sensitive_credentials: None,
@@ -373,6 +384,7 @@ mod tests {
             forwards_record_count: 0,
             quick_commands_record_count: 0,
             serial_profiles_record_count: 0,
+            telnet_profiles_record_count: 0,
             mosh_profiles_record_count: 0,
             remote_desktop_profiles_record_count: 0,
             sensitive_credentials_record_count: 0,
@@ -447,6 +459,7 @@ mod tests {
             forwards: None,
             quick_commands: None,
             serial_profiles: None,
+            telnet_profiles: None,
             mosh_profiles: None,
             remote_desktop_profiles: None,
             sensitive_credentials: None,
@@ -469,6 +482,7 @@ mod tests {
             forwards_record_count: 0,
             quick_commands_record_count: 0,
             serial_profiles_record_count: 0,
+            telnet_profiles_record_count: 0,
             mosh_profiles_record_count: 0,
             remote_desktop_profiles_record_count: 0,
             sensitive_credentials_record_count: 0,
@@ -480,6 +494,7 @@ mod tests {
                 forwards: None,
                 quick_commands_applied: 0,
                 serial_profiles_applied: 0,
+                telnet_profiles_applied: 0,
                 mosh_profiles_applied: 0,
                 remote_desktop_profiles_applied: 0,
                 app_settings_applied: 0,
@@ -494,6 +509,7 @@ mod tests {
                 forwards: false,
                 quick_commands: false,
                 serial_profiles: false,
+                telnet_profiles: false,
                 mosh_profiles: false,
                 remote_desktop_profiles: false,
                 sensitive_credentials: false,
@@ -633,6 +649,7 @@ mod tests {
             forwards_record_count: 0,
             quick_commands_record_count: 0,
             serial_profiles_record_count: 0,
+            telnet_profiles_record_count: 0,
             mosh_profiles_record_count: 0,
             remote_desktop_profiles_record_count: 0,
             sensitive_credentials_record_count: 0,

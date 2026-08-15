@@ -164,6 +164,13 @@ pub fn cloud_sync_coverage_model(raw_scope: &RawSyncScope) -> Vec<CloudSyncCover
             ),
         },
         CloudSyncCoverageItem {
+            label_key: "plugin.cloud_sync.settings.sync_telnet_profiles",
+            status: coverage_status_from_bool(scope.sync_telnet_profiles),
+            detail: CloudSyncCoverageDetail::Static(
+                "plugin.cloud_sync.coverage.telnet_profiles_detail",
+            ),
+        },
+        CloudSyncCoverageItem {
             label_key: "plugin.cloud_sync.settings.sync_mosh_profiles",
             status: coverage_status_from_bool(scope.sync_mosh_profiles),
             detail: CloudSyncCoverageDetail::Static(
@@ -229,6 +236,12 @@ pub fn cloud_sync_preview_impact_items(
         "plugin.cloud_sync.preview.serial_profiles_label",
         summary.serial_profiles,
         selection.import_serial_profiles,
+    );
+    push_preview_impact(
+        &mut items,
+        "plugin.cloud_sync.preview.telnet_profiles_label",
+        summary.telnet_profiles,
+        selection.import_telnet_profiles,
     );
     push_preview_impact(
         &mut items,
@@ -333,6 +346,16 @@ pub fn cloud_sync_upload_diff_items(
     );
     push_section_diff(
         &mut items,
+        CloudSyncDiffLabel::Key("plugin.cloud_sync.settings.sync_telnet_profiles"),
+        scope.sync_telnet_profiles,
+        current.telnet_profiles.as_deref(),
+        baseline.and_then(|state| state.telnet_profiles.as_deref()),
+        remote.and_then(|sections| sections.telnet_profiles.as_deref()),
+        remote_known,
+        Some(snapshot.telnet_profiles_record_count),
+    );
+    push_section_diff(
+        &mut items,
         CloudSyncDiffLabel::Key("plugin.cloud_sync.settings.sync_sensitive_credentials"),
         scope.sync_sensitive_credentials,
         current.sensitive_credentials.as_deref(),
@@ -402,6 +425,19 @@ pub fn cloud_sync_apply_diff_items(
         Some(
             preview
                 .serial_profiles_snapshot
+                .as_ref()
+                .map_or(0, |snapshot| snapshot.records.len()),
+        ),
+    );
+    push_apply_section_diff(
+        &mut items,
+        CloudSyncDiffLabel::Key("plugin.cloud_sync.settings.sync_telnet_profiles"),
+        selection.import_telnet_profiles,
+        remote.telnet_profiles.as_deref(),
+        local.telnet_profiles.as_deref(),
+        Some(
+            preview
+                .telnet_profiles_snapshot
                 .as_ref()
                 .map_or(0, |snapshot| snapshot.records.len()),
         ),

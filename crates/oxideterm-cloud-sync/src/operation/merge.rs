@@ -107,6 +107,16 @@ pub(super) fn merge_structured_preview_fields(
         changed |=
             merge_serial_profile_records(remote, base, &local, conflict_strategy, Utc::now())?;
     }
+    if selection.telnet_profiles
+        && let (Some(remote), Some(base)) = (
+            preview.telnet_profiles_snapshot.as_mut(),
+            preview.base_telnet_profiles_snapshot.as_ref(),
+        )
+    {
+        let local = connection_store.export_telnet_profiles_snapshot()?;
+        changed |=
+            merge_telnet_profile_records(remote, base, &local, conflict_strategy, Utc::now())?;
+    }
     if selection.mosh_profiles
         && let (Some(remote), Some(base)) = (
             preview.mosh_profiles_snapshot.as_mut(),
@@ -304,6 +314,46 @@ pub(super) fn merge_remote_desktop_profile_records(
     conflict_strategy: &ConflictStrategy,
     merged_at: chrono::DateTime<Utc>,
 ) -> Result<bool> {
+    let base_records = base
+        .records
+        .iter()
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect::<BTreeMap<_, _>>();
+    let local_records = local
+        .records
+        .iter()
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect::<BTreeMap<_, _>>();
+    let mut changed = false;
+    for remote_profile in &mut remote.records {
+        let Some(base_profile) = base_records.get(remote_profile.id.as_str()).copied() else {
+            continue;
+        };
+        let Some(local_profile) = local_records.get(remote_profile.id.as_str()).copied() else {
+            continue;
+        };
+        if let Some(mut merged_profile) = merge_structured_model_fields(
+            base_profile,
+            local_profile,
+            remote_profile,
+            conflict_strategy,
+        )? {
+            merged_profile.updated_at = merged_at;
+            *remote_profile = merged_profile;
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
+pub(super) fn merge_telnet_profile_records(
+    remote: &mut TelnetProfilesSyncSnapshot,
+    base: &TelnetProfilesSyncSnapshot,
+    local: &TelnetProfilesSyncSnapshot,
+    conflict_strategy: &ConflictStrategy,
+    merged_at: chrono::DateTime<Utc>,
+) -> Result<bool> {
+    // Telnet profiles use the same three-way field merge as other saved profile resources.
     let base_records = base
         .records
         .iter()

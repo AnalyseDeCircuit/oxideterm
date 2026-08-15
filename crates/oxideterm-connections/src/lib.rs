@@ -55,5 +55,5 @@ pub use store::{
     SavedConnectionsSyncSnapshot, SavedMoshProfileRuntimeSecrets, SavedPrivilegeCredential,
     SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
     SavedUpstreamProxyProtocol, SerialFlowControl, SerialParity, SerialProfile,
-    SerialProfilesSyncSnapshot, TelnetProfile, validate_group_name,
+    SerialProfilesSyncSnapshot, TelnetProfile, TelnetProfilesSyncSnapshot, validate_group_name,
 };

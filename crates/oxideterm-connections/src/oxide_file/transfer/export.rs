@@ -167,6 +167,8 @@ fn export_connections_to_oxide_inner(
         count_quick_commands_for_export(options.quick_commands_json.as_deref());
     let serial_profiles_count =
         count_serial_profiles_for_export(options.serial_profiles_json.as_deref());
+    let telnet_profiles_count =
+        count_telnet_profiles_for_export(options.telnet_profiles_json.as_deref());
     let mosh_profiles_count =
         count_mosh_profiles_for_export(options.mosh_profiles_json.as_deref());
     let remote_desktop_profiles_count =
@@ -174,6 +176,7 @@ fn export_connections_to_oxide_inner(
     let has_extra_payload = options.app_settings_json.is_some()
         || options.quick_commands_json.is_some()
         || options.serial_profiles_json.is_some()
+        || options.telnet_profiles_json.is_some()
         || options.mosh_profiles_json.is_some()
         || options.remote_desktop_profiles_json.is_some()
         || !options.plugin_settings.is_empty()
@@ -184,6 +187,7 @@ fn export_connections_to_oxide_inner(
         app_settings_json: options.app_settings_json,
         quick_commands_json: options.quick_commands_json,
         serial_profiles_json: options.serial_profiles_json,
+        telnet_profiles_json: options.telnet_profiles_json,
         mosh_profiles_json: options.mosh_profiles_json,
         remote_desktop_profiles_json: options.remote_desktop_profiles_json,
         plugin_settings: options.plugin_settings,
@@ -208,6 +212,7 @@ fn export_connections_to_oxide_inner(
         quick_commands_count: quick_command_counts.map(|counts| counts.0),
         quick_command_categories_count: quick_command_counts.map(|counts| counts.1),
         serial_profiles_count,
+        telnet_profiles_count,
         mosh_profiles_count,
         remote_desktop_profiles_count,
         plugin_settings_count: (!payload.plugin_settings.is_empty())
@@ -608,6 +613,11 @@ fn count_quick_commands_for_export(snapshot_json: Option<&str>) -> Option<(usize
 }
 
 fn count_serial_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
+    let value = serde_json::from_str::<Value>(snapshot_json?).ok()?;
+    value.get("records")?.as_array().map(Vec::len)
+}
+
+fn count_telnet_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
     let value = serde_json::from_str::<Value>(snapshot_json?).ok()?;
     value.get("records")?.as_array().map(Vec::len)
 }

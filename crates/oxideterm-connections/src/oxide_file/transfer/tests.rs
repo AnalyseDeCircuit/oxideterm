@@ -6,8 +6,8 @@ mod tests {
     use crate::{
         ConnectionTerminalOptions, PrivilegeCredentialKind, SavePrivilegeCredentialRequest,
         MoshIpFamily, MoshPredictionMode, MoshUdpPortSelection, SaveMoshProfileRequest,
-        SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest, SavedUpstreamProxyProtocol,
-        SerialFlowControl, SerialProfile, SerialProfilesSyncSnapshot,
+        SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest, SaveTelnetProfileRequest,
+        SavedUpstreamProxyProtocol, SerialFlowControl, SerialProfile, SerialProfilesSyncSnapshot,
     };
     use oxideterm_remote_desktop::RemoteDesktopProtocol;
     use rand10::{rand_core::UnwrapErr, rngs::SysRng};
@@ -327,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn export_import_roundtrip_preserves_serial_profiles() {
+    fn export_import_roundtrip_preserves_serial_and_telnet_profiles() {
         let mut source = temp_store("serial-profile-source");
         source
             .upsert_imported_connection(saved_connection("conn-1", "Prod"))
@@ -344,6 +344,18 @@ mod tests {
         let serial_profiles_json =
             serde_json::to_string_pretty(&source.export_serial_profiles_snapshot().unwrap())
                 .unwrap();
+        let telnet_profile = source
+            .upsert_telnet_profile(SaveTelnetProfileRequest {
+                id: Some("telnet-1".to_string()),
+                name: "Router console".to_string(),
+                host: "router.example.test".to_string(),
+                port: 2323,
+                ..SaveTelnetProfileRequest::default()
+            })
+            .unwrap();
+        let telnet_profiles_json =
+            serde_json::to_string_pretty(&source.export_telnet_profiles_snapshot().unwrap())
+                .unwrap();
 
         let bytes = export_connections_to_oxide(
             &source,
@@ -351,12 +363,14 @@ mod tests {
             "secret!",
             OxideExportOptions {
                 serial_profiles_json: Some(serial_profiles_json),
+                telnet_profiles_json: Some(telnet_profiles_json),
                 ..OxideExportOptions::default()
             },
         )
         .unwrap();
         let file = OxideFile::from_bytes(&bytes).unwrap();
         assert_eq!(file.metadata.serial_profiles_count, Some(1));
+        assert_eq!(file.metadata.telnet_profiles_count, Some(1));
 
         let preview = preview_oxide_import(
             &temp_store("serial-profile-preview"),
@@ -366,6 +380,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(preview.serial_profiles_count, 1);
+        assert_eq!(preview.telnet_profiles_count, 1);
 
         let mut target = temp_store("serial-profile-target");
         let imported = apply_oxide_import(
@@ -376,7 +391,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(imported.imported_serial_profiles, 1);
+        assert_eq!(imported.imported_telnet_profiles, 1);
         assert_eq!(target.serial_profiles(), &[profile]);
+        assert_eq!(target.telnet_profiles(), &[telnet_profile]);
 
         let mut skipped_target = temp_store("serial-profile-skip-target");
         let skipped = apply_oxide_import_with_options(
@@ -385,13 +402,17 @@ mod tests {
             "secret!",
             OxideImportOptions {
                 import_serial_profiles: false,
+                import_telnet_profiles: false,
                 ..OxideImportOptions::default()
             },
         )
         .unwrap();
         assert_eq!(skipped.imported_serial_profiles, 0);
         assert_eq!(skipped.skipped_serial_profiles, 1);
+        assert_eq!(skipped.imported_telnet_profiles, 0);
+        assert_eq!(skipped.skipped_telnet_profiles, 1);
         assert!(skipped_target.serial_profiles().is_empty());
+        assert!(skipped_target.telnet_profiles().is_empty());
     }
 
     #[test]

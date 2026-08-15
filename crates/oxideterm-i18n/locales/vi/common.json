@@ -350,6 +350,7 @@
         "sync_forwards": "Đồng bộ chuyển tiếp đã lưu",
         "sync_quick_commands": "Đồng bộ lệnh nhanh",
         "sync_serial_profiles": "Đồng bộ hồ sơ serial",
+        "sync_telnet_profiles": "Đồng bộ hồ sơ Telnet",
         "sync_mosh_profiles": "Đồng bộ hồ sơ Mosh",
         "sync_remote_desktop_profiles": "Đồng bộ kết nối máy tính từ xa",
         "sync_app_settings": "Đồng bộ cài đặt ứng dụng",
@@ -392,6 +393,7 @@
         "forwards_detail": "Quy tắc chuyển tiếp cổng đã lưu được đưa vào cùng siêu dữ liệu kết nối sở hữu.",
         "quick_commands_detail": "Định nghĩa lệnh nhanh được đưa vào.",
         "serial_profiles_detail": "Hồ sơ kết nối serial được đưa vào.",
+        "telnet_profiles_detail": "Hồ sơ kết nối Telnet được đưa vào.",
         "mosh_profiles_detail": "Hồ sơ kết nối Mosh được đưa vào nhưng không có thông tin xác thực cục bộ của thiết bị.",
         "app_settings_sections_detail": "Phần đã chọn: {{sections}}",
         "app_settings_disabled_detail": "Cài đặt ứng dụng bị loại trừ khỏi phạm vi đồng bộ hiện tại.",
@@ -415,13 +417,13 @@
       },
       "backup": {
         "description": "Bản sao lưu khôi phục Oxide Cloud Sync",
-        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{pluginSettingsCount}} cài đặt plugin, {{size}}, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
+        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{telnetProfiles}} hồ sơ Telnet, {{pluginSettingsCount}} cài đặt plugin, {{size}}, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
       },
       "history": {
         "action_upload": "Tải lên",
         "action_pull": "Tải xuống",
         "action_restore": "Khôi phục",
-        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{pluginSettingsCount}} cài đặt plugin, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
+        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{telnetProfiles}} hồ sơ Telnet, {{pluginSettingsCount}} cài đặt plugin, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
       },
       "errors": {
         "operation_in_progress": "Một thao tác đồng bộ đám mây khác đang chạy.",
@@ -562,6 +564,7 @@
         "total_forwards": "Chuyển tiếp",
         "quick_commands_label": "Lệnh nhanh",
         "serial_profiles_label": "Hồ sơ serial",
+        "telnet_profiles_label": "Hồ sơ Telnet",
         "mosh_profiles_label": "Hồ sơ Mosh",
         "will_import": "Sẽ nhập",
         "will_merge": "Sẽ được gộp",
@@ -581,6 +584,7 @@
         "toggle_forwards": "Nhập chuyển tiếp đã lưu ({{count}})",
         "toggle_quick_commands": "Nhập lệnh nhanh ({{count}})",
         "toggle_serial_profiles": "Nhập hồ sơ serial ({{count}})",
+        "toggle_telnet_profiles": "Nhập hồ sơ Telnet ({{count}})",
         "toggle_mosh_profiles": "Nhập hồ sơ Mosh ({{count}})",
         "toggle_remote_desktop_profiles": "Nhập kết nối máy tính từ xa ({{count}})",
         "section_field_count": "{{count}} trường",

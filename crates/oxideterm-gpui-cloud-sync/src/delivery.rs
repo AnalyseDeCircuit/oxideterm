@@ -734,6 +734,11 @@ fn filter_structured_preview_for_selection(
             .records
             .retain(|profile| selection.selected_serial_profile_ids.contains(&profile.id));
     }
+    if let Some(snapshot) = preview.telnet_profiles_snapshot.as_mut() {
+        snapshot
+            .records
+            .retain(|profile| selection.selected_telnet_profile_ids.contains(&profile.id));
+    }
     if let Some(snapshot) = preview.mosh_profiles_snapshot.as_mut() {
         snapshot
             .records
@@ -1095,6 +1100,7 @@ fn create_cloud_sync_rollback_backup(
             forwards: preview.total_forwards,
             quick_commands: metadata.quick_commands_count.unwrap_or(0),
             serial_profiles: metadata.serial_profiles_count.unwrap_or(0),
+            telnet_profiles: metadata.telnet_profiles_count.unwrap_or(0),
             mosh_profiles: metadata.mosh_profiles_count.unwrap_or(0),
             remote_desktop_profiles: metadata.remote_desktop_profiles_count.unwrap_or(0),
             sensitive_credentials: metadata.portable_secret_count.unwrap_or(0),

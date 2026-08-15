@@ -98,6 +98,7 @@ fn apply_oxide_import_with_options_inner(
         app_settings_json,
         quick_commands_json,
         serial_profiles_json,
+        telnet_profiles_json,
         mosh_profiles_json,
         remote_desktop_profiles_json,
         plugin_settings,
@@ -127,6 +128,29 @@ fn apply_oxide_import_with_options_inner(
             profile.validate().map_err(|error| {
                 OxideFileError::InvalidFormat(format!(
                     "Failed to validate serial profiles from .oxide payload: {error}"
+                ))
+            })?;
+        }
+    }
+    let telnet_profiles_snapshot = telnet_profiles_json
+        .as_deref()
+        .map(|snapshot_json| {
+            serde_json::from_str::<TelnetProfilesSyncSnapshot>(snapshot_json).map_err(|error| {
+                OxideFileError::InvalidFormat(format!(
+                    "Invalid Telnet profiles snapshot in .oxide payload: {error}"
+                ))
+            })
+        })
+        .transpose()?;
+    if options.import_telnet_profiles {
+        for profile in telnet_profiles_snapshot
+            .as_ref()
+            .into_iter()
+            .flat_map(|snapshot| &snapshot.records)
+        {
+            profile.validate().map_err(|error| {
+                OxideFileError::InvalidFormat(format!(
+                    "Failed to validate Telnet profiles from .oxide payload: {error}"
                 ))
             })?;
         }
@@ -200,6 +224,7 @@ fn apply_oxide_import_with_options_inner(
         app_settings_json,
         quick_commands_json,
         serial_profiles_json,
+        telnet_profiles_json,
         mosh_profiles_json,
         remote_desktop_profiles_json,
         plugin_settings,
@@ -349,6 +374,22 @@ fn apply_oxide_import_with_options_inner(
                     serial_profiles_count.saturating_sub(result.imported_serial_profiles);
             } else {
                 result.skipped_serial_profiles = serial_profiles_count;
+            }
+        }
+        if let Some(telnet_profiles_snapshot) = telnet_profiles_snapshot {
+            let profile_count = telnet_profiles_snapshot.records.len();
+            if options.import_telnet_profiles {
+                result.imported_telnet_profiles = store
+                    .apply_telnet_profiles_snapshot(telnet_profiles_snapshot)
+                    .map_err(|error| {
+                        OxideFileError::InvalidFormat(format!(
+                            "Failed to import Telnet profiles from .oxide payload: {error}"
+                        ))
+                    })?;
+                result.skipped_telnet_profiles =
+                    profile_count.saturating_sub(result.imported_telnet_profiles);
+            } else {
+                result.skipped_telnet_profiles = profile_count;
             }
         }
         if let Some(mosh_profiles_snapshot) = mosh_profiles_snapshot {

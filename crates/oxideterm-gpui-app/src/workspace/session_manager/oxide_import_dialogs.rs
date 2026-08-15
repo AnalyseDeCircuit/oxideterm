@@ -277,6 +277,14 @@ impl WorkspaceApp {
                                 .replace("{{count}}", &count.to_string()),
                         ));
                     }
+                    if let Some(count) = metadata.telnet_profiles_count.filter(|count| *count > 0) {
+                        rows.push((
+                            self.i18n.t("modals.import.contains_telnet_profiles"),
+                            self.i18n
+                                .t("modals.import.telnet_profiles_count")
+                                .replace("{{count}}", &count.to_string()),
+                        ));
+                    }
                     if let Some(count) = metadata.mosh_profiles_count.filter(|count| *count > 0) {
                         rows.push((
                             self.i18n.t("modals.import.contains_mosh_profiles"),

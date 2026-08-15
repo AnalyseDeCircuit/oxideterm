@@ -60,6 +60,19 @@ fn count_serial_profiles(snapshot_json: Option<&str>) -> usize {
         .map_or(0, Vec::len)
 }
 
+fn count_telnet_profiles(snapshot_json: Option<&str>) -> usize {
+    let Some(json) = snapshot_json else {
+        return 0;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(json) else {
+        return 0;
+    };
+    value
+        .get("records")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len)
+}
+
 fn count_mosh_profiles(snapshot_json: Option<&str>) -> usize {
     let Some(json) = snapshot_json else {
         return 0;

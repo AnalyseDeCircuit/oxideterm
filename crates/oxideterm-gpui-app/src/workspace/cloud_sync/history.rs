@@ -151,6 +151,7 @@ impl CloudSyncPageRenderer {
                 ("forwards", entry.summary.forwards.to_string()),
                 ("quickCommands", entry.summary.quick_commands.to_string()),
                 ("serialProfiles", entry.summary.serial_profiles.to_string()),
+                ("telnetProfiles", entry.summary.telnet_profiles.to_string()),
                 (
                     "sensitiveCredentials",
                     entry.summary.sensitive_credentials.to_string(),
@@ -698,6 +699,7 @@ impl CloudSyncWorkspaceEntity {
                 forwards,
                 quick_commands,
                 serial_profiles,
+                telnet_profiles,
                 sensitive_credentials,
                 plugin_settings_count,
                 size,
@@ -708,6 +710,7 @@ impl CloudSyncWorkspaceEntity {
                     ("forwards", forwards.to_string()),
                     ("quickCommands", quick_commands.to_string()),
                     ("serialProfiles", serial_profiles.to_string()),
+                    ("telnetProfiles", telnet_profiles.to_string()),
                     ("sensitiveCredentials", sensitive_credentials.to_string()),
                     ("pluginSettingsCount", plugin_settings_count.to_string()),
                     ("size", size),
@@ -788,6 +791,7 @@ impl CloudSyncWorkspaceEntity {
                 ("forwards", entry.summary.forwards.to_string()),
                 ("quickCommands", entry.summary.quick_commands.to_string()),
                 ("serialProfiles", entry.summary.serial_profiles.to_string()),
+                ("telnetProfiles", entry.summary.telnet_profiles.to_string()),
                 (
                     "sensitiveCredentials",
                     entry.summary.sensitive_credentials.to_string(),

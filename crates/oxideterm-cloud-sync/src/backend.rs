@@ -823,6 +823,9 @@ fn normalize_structured_section_revisions(
     revisions.serial_profiles = revisions
         .serial_profiles
         .or_else(|| sections.serial_profiles.map(|entry| entry.revision));
+    revisions.telnet_profiles = revisions
+        .telnet_profiles
+        .or_else(|| sections.telnet_profiles.map(|entry| entry.revision));
     revisions.mosh_profiles = revisions
         .mosh_profiles
         .or_else(|| sections.mosh_profiles.map(|entry| entry.revision));

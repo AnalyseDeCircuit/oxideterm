@@ -123,12 +123,14 @@ impl CloudSyncOperationService {
             forwards_snapshot: None,
             quick_commands_snapshot_json: None,
             serial_profiles_snapshot: None,
+            telnet_profiles_snapshot: None,
             mosh_profiles_snapshot: None,
             remote_desktop_profiles_snapshot: None,
             base_connections_snapshot: None,
             base_forwards_snapshot: None,
             base_quick_commands_snapshot_json: None,
             base_serial_profiles_snapshot: None,
+            base_telnet_profiles_snapshot: None,
             base_mosh_profiles_snapshot: None,
             base_remote_desktop_profiles_snapshot: None,
             sensitive_credentials_entry: None,
@@ -165,6 +167,12 @@ impl CloudSyncOperationService {
                 .read_required_object(settings, &metadata_secrets, entry)
                 .await?;
             preview.serial_profiles_snapshot = Some(serde_json::from_slice(&object.bytes)?);
+        }
+        if let Some(entry) = preview.manifest.sections.telnet_profiles.as_ref() {
+            let object = self
+                .read_required_object(settings, &metadata_secrets, entry)
+                .await?;
+            preview.telnet_profiles_snapshot = Some(serde_json::from_slice(&object.bytes)?);
         }
         if let Some(entry) = preview.manifest.sections.mosh_profiles.as_ref() {
             let object = self
@@ -211,6 +219,14 @@ impl CloudSyncOperationService {
                 &metadata_secrets,
                 previous.serial_profiles.as_deref(),
                 serial_profiles_object_path,
+            )
+            .await?;
+            preview.base_telnet_profiles_snapshot = read_optional_snapshot_at_revision(
+                self,
+                settings,
+                &metadata_secrets,
+                previous.telnet_profiles.as_deref(),
+                telnet_profiles_object_path,
             )
             .await?;
             preview.base_mosh_profiles_snapshot = read_optional_snapshot_at_revision(

@@ -22,6 +22,9 @@ impl WorkspaceApp {
         let skipped_serial_profiles = preview.as_ref().is_some_and(|preview| {
             preview.serial_profiles_count > 0 && result.skipped_serial_profiles > 0
         });
+        let skipped_telnet_profiles = preview.as_ref().is_some_and(|preview| {
+            preview.telnet_profiles_count > 0 && result.skipped_telnet_profiles > 0
+        });
         let skipped_mosh_profiles = preview.as_ref().is_some_and(|preview| {
             preview.mosh_profiles_count > 0 && result.skipped_mosh_profiles > 0
         });
@@ -109,6 +112,24 @@ impl WorkspaceApp {
         if skipped_serial_profiles {
             card = card.child(self.render_oxide_import_result_line(
                 self.i18n.t("modals.import.skipped_serial_profiles"),
+                tone,
+                cx,
+            ));
+        }
+        if result.imported_telnet_profiles > 0 {
+            card = card.child(
+                self.render_oxide_import_result_line(
+                    self.i18n
+                        .t("modals.import.imported_telnet_profiles")
+                        .replace("{{count}}", &result.imported_telnet_profiles.to_string()),
+                    tone,
+                    cx,
+                ),
+            );
+        }
+        if skipped_telnet_profiles {
+            card = card.child(self.render_oxide_import_result_line(
+                self.i18n.t("modals.import.skipped_telnet_profiles"),
                 tone,
                 cx,
             ));

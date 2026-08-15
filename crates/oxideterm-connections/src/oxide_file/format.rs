@@ -114,6 +114,8 @@ pub struct OxideMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serial_profiles_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telnet_profiles_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mosh_profiles_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_desktop_profiles_count: Option<usize>,
@@ -135,6 +137,8 @@ pub struct EncryptedPayload {
     pub quick_commands_json: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serial_profiles_json: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telnet_profiles_json: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mosh_profiles_json: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -161,6 +165,10 @@ impl fmt::Debug for EncryptedPayload {
             .field(
                 "has_serial_profiles_json",
                 &self.serial_profiles_json.is_some(),
+            )
+            .field(
+                "has_telnet_profiles_json",
+                &self.telnet_profiles_json.is_some(),
             )
             .field("has_mosh_profiles_json", &self.mosh_profiles_json.is_some())
             .field(

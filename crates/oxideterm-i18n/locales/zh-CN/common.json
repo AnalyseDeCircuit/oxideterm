@@ -342,6 +342,7 @@
         "sync_forwards": "同步已保存的转发",
         "sync_quick_commands": "同步快捷命令",
         "sync_serial_profiles": "同步串口配置",
+        "sync_telnet_profiles": "同步 Telnet 配置",
         "sync_mosh_profiles": "同步 Mosh 配置",
         "sync_remote_desktop_profiles": "同步远程桌面连接",
         "sync_app_settings": "同步应用设置",
@@ -384,6 +385,7 @@
         "forwards_detail": "已保存的端口转发规则会连同所属连接元数据一起同步。",
         "quick_commands_detail": "快捷命令定义会参与同步。",
         "serial_profiles_detail": "串口连接配置会参与同步。",
+        "telnet_profiles_detail": "Telnet 连接配置会参与同步。",
         "mosh_profiles_detail": "Mosh 连接配置会参与同步，但不包含当前设备的凭据。",
         "app_settings_sections_detail": "已选择分组：{{sections}}",
         "app_settings_disabled_detail": "当前同步范围已排除应用设置。",
@@ -407,13 +409,13 @@
       },
       "backup": {
         "description": "Oxide 云同步回滚备份",
-        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{pluginSettingsCount}} 项插件设置，{{size}}，{{sensitiveCredentials}} 个敏感凭据"
+        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{telnetProfiles}} 个 Telnet 配置，{{pluginSettingsCount}} 项插件设置，{{size}}，{{sensitiveCredentials}} 个敏感凭据"
       },
       "history": {
         "action_upload": "上传",
         "action_pull": "拉取",
         "action_restore": "恢复",
-        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{pluginSettingsCount}} 项插件设置，{{sensitiveCredentials}} 个敏感凭据"
+        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{telnetProfiles}} 个 Telnet 配置，{{pluginSettingsCount}} 项插件设置，{{sensitiveCredentials}} 个敏感凭据"
       },
       "errors": {
         "operation_in_progress": "另一个云同步操作正在运行，请稍后再试。",
@@ -554,6 +556,7 @@
         "total_forwards": "转发数",
         "quick_commands_label": "快捷命令",
         "serial_profiles_label": "串口配置",
+        "telnet_profiles_label": "Telnet 配置",
         "mosh_profiles_label": "Mosh 配置",
         "will_import": "将导入",
         "will_merge": "将合并",
@@ -573,6 +576,7 @@
         "toggle_forwards": "导入已保存的转发（{{count}}）",
         "toggle_quick_commands": "导入快捷命令（{{count}}）",
         "toggle_serial_profiles": "导入串口配置（{{count}}）",
+        "toggle_telnet_profiles": "导入 Telnet 配置（{{count}}）",
         "toggle_mosh_profiles": "导入 Mosh 配置（{{count}}）",
         "toggle_remote_desktop_profiles": "导入远程桌面连接（{{count}}）",
         "section_field_count": "{{count}} 个字段",

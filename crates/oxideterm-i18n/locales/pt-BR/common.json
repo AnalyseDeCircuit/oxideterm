@@ -350,6 +350,7 @@
         "sync_forwards": "Sincronizar encaminhamentos salvos",
         "sync_quick_commands": "Sincronizar comandos rápidos",
         "sync_serial_profiles": "Sincronizar perfis seriais",
+        "sync_telnet_profiles": "Sincronizar perfis Telnet",
         "sync_mosh_profiles": "Sincronizar perfis Mosh",
         "sync_remote_desktop_profiles": "Sincronizar conexões de área de trabalho remota",
         "sync_app_settings": "Sincronizar configurações do aplicativo",
@@ -392,6 +393,7 @@
         "forwards_detail": "Regras de encaminhamento de porta salvas são incluídas com os metadados da conexão proprietária.",
         "quick_commands_detail": "Definições de comandos rápidos são incluídas.",
         "serial_profiles_detail": "Perfis de conexão serial são incluídos.",
+        "telnet_profiles_detail": "Perfis de conexão Telnet são incluídos.",
         "mosh_profiles_detail": "Perfis Mosh são incluídos sem as credenciais locais do dispositivo.",
         "app_settings_sections_detail": "Seções selecionadas: {{sections}}",
         "app_settings_disabled_detail": "As configurações do aplicativo estão excluídas do escopo de sincronização atual.",
@@ -415,13 +417,13 @@
       },
       "backup": {
         "description": "Backup de reversão Oxide Cloud Sync",
-        "summary_line": "{{connections}} conexões, {{forwards}} encaminhamentos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfis seriais, {{pluginSettingsCount}} configurações de plugin, {{size}}, {{sensitiveCredentials}} credenciais sensíveis"
+        "summary_line": "{{connections}} conexões, {{forwards}} encaminhamentos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfis seriais, {{telnetProfiles}} perfis Telnet, {{pluginSettingsCount}} configurações de plugin, {{size}}, {{sensitiveCredentials}} credenciais sensíveis"
       },
       "history": {
         "action_upload": "Enviar",
         "action_pull": "Baixar",
         "action_restore": "Restaurar",
-        "summary_line": "{{connections}} conexões, {{forwards}} encaminhamentos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfis seriais, {{pluginSettingsCount}} configurações de plugin, {{sensitiveCredentials}} credenciais sensíveis"
+        "summary_line": "{{connections}} conexões, {{forwards}} encaminhamentos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfis seriais, {{telnetProfiles}} perfis Telnet, {{pluginSettingsCount}} configurações de plugin, {{sensitiveCredentials}} credenciais sensíveis"
       },
       "errors": {
         "operation_in_progress": "Outra operação de sincronização na nuvem já está em execução.",
@@ -562,6 +564,7 @@
         "total_forwards": "Encaminhamentos",
         "quick_commands_label": "Comandos rápidos",
         "serial_profiles_label": "Perfis seriais",
+        "telnet_profiles_label": "Perfis Telnet",
         "mosh_profiles_label": "Perfis Mosh",
         "will_import": "Será importado",
         "will_merge": "Serão mesclados",
@@ -581,6 +584,7 @@
         "toggle_forwards": "Importar encaminhamentos salvos ({{count}})",
         "toggle_quick_commands": "Importar comandos rápidos ({{count}})",
         "toggle_serial_profiles": "Importar perfis seriais ({{count}})",
+        "toggle_telnet_profiles": "Importar perfis Telnet ({{count}})",
         "toggle_mosh_profiles": "Importar perfis Mosh ({{count}})",
         "toggle_remote_desktop_profiles": "Importar conexões de área de trabalho remota ({{count}})",
         "section_field_count": "{{count}} campos",

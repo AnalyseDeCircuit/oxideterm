@@ -1954,6 +1954,8 @@ mod tests {
         source.save().unwrap();
 
         let snapshot = source.export_saved_connections_snapshot().unwrap();
+        let snapshot_json = serde_json::to_string(&snapshot).unwrap();
+        assert!(!snapshot_json.contains("proxy-keychain-id"));
         let mut target = load_empty_store("sync-all-fields-target");
         target
             .apply_saved_connections_snapshot(snapshot, SavedConnectionsConflictStrategy::Replace)
@@ -2002,7 +2004,7 @@ mod tests {
             panic!("proxy password metadata should survive sync");
         };
         assert_eq!(username, "proxy-user");
-        assert_eq!(keychain_id.as_deref(), Some("proxy-keychain-id"));
+        assert!(keychain_id.is_none());
         assert!(plaintext_password.is_none());
     }
 

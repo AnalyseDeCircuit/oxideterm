@@ -350,6 +350,7 @@
         "sync_forwards": "저장된 포워딩 동기화",
         "sync_quick_commands": "빠른 명령 동기화",
         "sync_serial_profiles": "시리얼 프로필 동기화",
+        "sync_telnet_profiles": "Telnet 프로필 동기화",
         "sync_mosh_profiles": "Mosh 프로필 동기화",
         "sync_remote_desktop_profiles": "원격 데스크톱 연결 동기화",
         "sync_app_settings": "앱 설정 동기화",
@@ -392,6 +393,7 @@
         "forwards_detail": "저장된 포트 포워딩 규칙이 소유 연결 메타데이터와 함께 포함됩니다.",
         "quick_commands_detail": "빠른 명령 정의가 포함됩니다.",
         "serial_profiles_detail": "시리얼 연결 프로필이 포함됩니다.",
+        "telnet_profiles_detail": "Telnet 연결 프로필이 포함됩니다.",
         "mosh_profiles_detail": "기기 로컬 자격 증명을 제외한 Mosh 연결 프로필이 포함됩니다.",
         "app_settings_sections_detail": "선택한 섹션: {{sections}}",
         "app_settings_disabled_detail": "현재 동기화 범위에서 애플리케이션 설정이 제외됩니다.",
@@ -415,13 +417,13 @@
       },
       "backup": {
         "description": "Oxide 클라우드 동기화 롤백 백업",
-        "summary_line": "연결 {{connections}}개, 포워딩 {{forwards}}개, 빠른 명령 {{quickCommands}}개, 시리얼 프로필 {{serialProfiles}}개, 플러그인 설정 {{pluginSettingsCount}}개, {{size}}, 민감한 자격 증명 {{sensitiveCredentials}}개"
+        "summary_line": "연결 {{connections}}개, 포워딩 {{forwards}}개, 빠른 명령 {{quickCommands}}개, 시리얼 프로필 {{serialProfiles}}개, Telnet 프로필 {{telnetProfiles}}개, 플러그인 설정 {{pluginSettingsCount}}개, {{size}}, 민감한 자격 증명 {{sensitiveCredentials}}개"
       },
       "history": {
         "action_upload": "업로드",
         "action_pull": "가져오기",
         "action_restore": "복원",
-        "summary_line": "연결 {{connections}}개, 포워딩 {{forwards}}개, 빠른 명령 {{quickCommands}}개, 시리얼 프로필 {{serialProfiles}}개, 플러그인 설정 {{pluginSettingsCount}}개, 민감한 자격 증명 {{sensitiveCredentials}}개"
+        "summary_line": "연결 {{connections}}개, 포워딩 {{forwards}}개, 빠른 명령 {{quickCommands}}개, 시리얼 프로필 {{serialProfiles}}개, Telnet 프로필 {{telnetProfiles}}개, 플러그인 설정 {{pluginSettingsCount}}개, 민감한 자격 증명 {{sensitiveCredentials}}개"
       },
       "errors": {
         "operation_in_progress": "다른 클라우드 동기화 작업이 실행 중입니다. 잠시 후 다시 시도하세요.",
@@ -562,6 +564,7 @@
         "total_forwards": "포워딩 수",
         "quick_commands_label": "빠른 명령",
         "serial_profiles_label": "시리얼 프로필",
+        "telnet_profiles_label": "Telnet 프로필",
         "mosh_profiles_label": "Mosh 프로필",
         "will_import": "가져올 항목",
         "will_merge": "병합 대상",
@@ -581,6 +584,7 @@
         "toggle_forwards": "저장된 포워딩 가져오기 ({{count}})",
         "toggle_quick_commands": "빠른 명령 가져오기 ({{count}})",
         "toggle_serial_profiles": "시리얼 프로필 가져오기 ({{count}})",
+        "toggle_telnet_profiles": "Telnet 프로필 가져오기 ({{count}})",
         "toggle_mosh_profiles": "Mosh 프로필 가져오기 ({{count}})",
         "toggle_remote_desktop_profiles": "원격 데스크톱 연결 가져오기 ({{count}})",
         "section_field_count": "{{count}}개 필드",

@@ -350,6 +350,7 @@
         "sync_forwards": "Sincronizza inoltri salvati",
         "sync_quick_commands": "Sincronizza comandi rapidi",
         "sync_serial_profiles": "Sincronizza profili seriali",
+        "sync_telnet_profiles": "Sincronizza profili Telnet",
         "sync_mosh_profiles": "Sincronizza profili Mosh",
         "sync_remote_desktop_profiles": "Sincronizza connessioni desktop remoto",
         "sync_app_settings": "Sincronizza impostazioni applicazione",
@@ -392,6 +393,7 @@
         "forwards_detail": "Le regole di port forwarding salvate sono incluse insieme ai metadati della connessione proprietaria.",
         "quick_commands_detail": "Le definizioni dei comandi rapidi sono incluse.",
         "serial_profiles_detail": "I profili di connessione seriale sono inclusi.",
+        "telnet_profiles_detail": "I profili di connessione Telnet sono inclusi.",
         "mosh_profiles_detail": "I profili Mosh sono inclusi senza le credenziali locali del dispositivo.",
         "app_settings_sections_detail": "Sezioni selezionate: {{sections}}",
         "app_settings_disabled_detail": "Le impostazioni dell'applicazione sono escluse dall'ambito di sincronizzazione corrente.",
@@ -415,13 +417,13 @@
       },
       "backup": {
         "description": "Backup di ripristino Oxide Cloud Sync",
-        "summary_line": "{{connections}} connessioni, {{forwards}} inoltri, {{quickCommands}} comandi rapidi, {{serialProfiles}} profili seriali, {{pluginSettingsCount}} impostazioni plugin, {{size}}, {{sensitiveCredentials}} credenziali sensibili"
+        "summary_line": "{{connections}} connessioni, {{forwards}} inoltri, {{quickCommands}} comandi rapidi, {{serialProfiles}} profili seriali, {{telnetProfiles}} profili Telnet, {{pluginSettingsCount}} impostazioni plugin, {{size}}, {{sensitiveCredentials}} credenziali sensibili"
       },
       "history": {
         "action_upload": "Caricamento",
         "action_pull": "Scaricamento",
         "action_restore": "Ripristino",
-        "summary_line": "{{connections}} connessioni, {{forwards}} inoltri, {{quickCommands}} comandi rapidi, {{serialProfiles}} profili seriali, {{pluginSettingsCount}} impostazioni plugin, {{sensitiveCredentials}} credenziali sensibili"
+        "summary_line": "{{connections}} connessioni, {{forwards}} inoltri, {{quickCommands}} comandi rapidi, {{serialProfiles}} profili seriali, {{telnetProfiles}} profili Telnet, {{pluginSettingsCount}} impostazioni plugin, {{sensitiveCredentials}} credenziali sensibili"
       },
       "errors": {
         "operation_in_progress": "Un'altra operazione di sincronizzazione cloud è già in corso.",
@@ -562,6 +564,7 @@
         "total_forwards": "Inoltri",
         "quick_commands_label": "Comandi rapidi",
         "serial_profiles_label": "Profili seriali",
+        "telnet_profiles_label": "Profili Telnet",
         "mosh_profiles_label": "Profili Mosh",
         "will_import": "Verrà importato",
         "will_merge": "Saranno uniti",
@@ -581,6 +584,7 @@
         "toggle_forwards": "Importa inoltri salvati ({{count}})",
         "toggle_quick_commands": "Importa comandi rapidi ({{count}})",
         "toggle_serial_profiles": "Importa profili seriali ({{count}})",
+        "toggle_telnet_profiles": "Importa profili Telnet ({{count}})",
         "toggle_mosh_profiles": "Importa profili Mosh ({{count}})",
         "toggle_remote_desktop_profiles": "Importa connessioni desktop remoto ({{count}})",
         "section_field_count": "{{count}} campi",

@@ -239,6 +239,7 @@ fn apply_cloud_sync_scope_patch(
     apply_scope_bool!("sync_forwards", sync_forwards);
     apply_scope_bool!("sync_quick_commands", sync_quick_commands);
     apply_scope_bool!("sync_serial_profiles", sync_serial_profiles);
+    apply_scope_bool!("sync_telnet_profiles", sync_telnet_profiles);
     apply_scope_bool!("sync_mosh_profiles", sync_mosh_profiles);
     apply_scope_bool!("sync_remote_desktop_profiles", sync_remote_desktop_profiles);
     apply_scope_bool!("sync_sensitive_credentials", sync_sensitive_credentials);

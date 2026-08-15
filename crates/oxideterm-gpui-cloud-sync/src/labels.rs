@@ -357,6 +357,7 @@ pub enum CloudSyncRollbackBackupSummarySpec {
         forwards: usize,
         quick_commands: usize,
         serial_profiles: usize,
+        telnet_profiles: usize,
         sensitive_credentials: usize,
         plugin_settings_count: usize,
         size: String,
@@ -374,6 +375,7 @@ pub fn cloud_sync_rollback_backup_summary_spec(
             forwards: metadata.forwards,
             quick_commands: metadata.quick_commands,
             serial_profiles: metadata.serial_profiles,
+            telnet_profiles: metadata.telnet_profiles,
             sensitive_credentials: metadata.sensitive_credentials,
             plugin_settings_count: metadata.plugin_settings_count,
             size,
@@ -577,9 +579,10 @@ mod tests {
                 forwards: 4,
                 quick_commands: 5,
                 serial_profiles: 6,
+                telnet_profiles: 7,
                 mosh_profiles: 0,
-                remote_desktop_profiles: 7,
-                sensitive_credentials: 8,
+                remote_desktop_profiles: 8,
+                sensitive_credentials: 9,
             }),
         };
 
@@ -590,7 +593,8 @@ mod tests {
                 forwards: 4,
                 quick_commands: 5,
                 serial_profiles: 6,
-                sensitive_credentials: 8,
+                telnet_profiles: 7,
+                sensitive_credentials: 9,
                 plugin_settings_count: 2,
                 size: "1.5 KB".to_string()
             }

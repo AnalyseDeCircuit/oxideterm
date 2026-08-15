@@ -522,6 +522,8 @@ fn history_summary(
         forwards,
         quick_commands: 0,
         serial_profiles: 0,
+        // Legacy cloud-sync payloads predate saved Telnet profiles.
+        telnet_profiles: 0,
         // Legacy cloud-sync payloads predate saved Mosh profiles.
         mosh_profiles: 0,
         // Legacy cloud-sync payloads predate saved remote desktop profiles.

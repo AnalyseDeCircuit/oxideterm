@@ -1184,6 +1184,15 @@ pub struct SerialProfilesSyncSnapshot {
     pub records: Vec<SerialProfile>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TelnetProfilesSyncSnapshot {
+    pub revision: String,
+    pub exported_at: String,
+    #[serde(default)]
+    pub records: Vec<TelnetProfile>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MoshProfilesSyncSnapshot {

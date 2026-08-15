@@ -340,6 +340,16 @@ impl WorkspaceApp {
                         ),
                 );
             }
+            if dialog.include_telnet_profiles {
+                items.push(
+                    self.i18n
+                        .t("export.content_summary_telnet_profiles")
+                        .replace(
+                            "{{count}}",
+                            &self.connection_store.telnet_profiles().len().to_string(),
+                        ),
+                );
+            }
             if dialog.include_mosh_profiles {
                 items.push(self.i18n.t("export.content_summary_mosh_profiles").replace(
                     "{{count}}",
