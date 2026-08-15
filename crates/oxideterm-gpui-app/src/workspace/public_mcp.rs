@@ -417,6 +417,17 @@ impl PublicMcpWorkspaceBridge {
             .map_err(|error| error.to_string())
     }
 
+    fn set_client_groups(
+        &self,
+        client_ref: &ClientRef,
+        tool_groups: BTreeSet<ToolGroup>,
+    ) -> Result<(), String> {
+        self.state
+            .clients
+            .set_groups(client_ref, tool_groups)
+            .map_err(|error| error.to_string())
+    }
+
     pub(in crate::workspace) fn remove_client(&self, client_ref: &ClientRef) -> Result<(), String> {
         self.state
             .clients
@@ -897,74 +908,90 @@ impl WorkspaceApp {
     ) -> Result<(), String> {
         self.public_mcp
             .set_client_tool_group(client_ref, tool_group, enabled)?;
-        if enabled && tool_group == ToolGroup::DesktopObserve {
-            self.set_public_mcp_client_desktop_observation(client_ref, true, cx);
-        }
-        if enabled && tool_group == ToolGroup::WorkspaceEdit {
-            self.reset_public_mcp_client_workspace_edit_cancellation(client_ref);
-        }
-        if !enabled {
-            self.public_mcp
-                .state
-                .approvals
-                .revoke_client_tool_group(client_ref, tool_group);
-            match tool_group {
-                ToolGroup::NodeSession => self.revoke_public_mcp_client_runtime(client_ref, cx),
-                ToolGroup::TerminalSession => {
-                    self.revoke_public_mcp_client_terminals(client_ref, cx)
-                }
-                ToolGroup::RecordingControl => {
-                    self.stop_public_mcp_client_recordings(client_ref, cx)
-                }
-                ToolGroup::RecordingContent => {
-                    self.revoke_public_mcp_client_recording_artifacts(client_ref)
-                }
-                ToolGroup::DesktopSession => self.revoke_public_mcp_client_desktops(client_ref, cx),
-                ToolGroup::DesktopObserve => {
-                    self.set_public_mcp_client_desktop_observation(client_ref, false, cx)
-                }
-                ToolGroup::DesktopInput => {
-                    self.release_public_mcp_client_desktop_inputs(client_ref, cx)
-                }
-                ToolGroup::DesktopClipboard => {
-                    self.revoke_public_mcp_client_desktop_clipboard_artifacts(client_ref)
-                }
-                ToolGroup::CommandExecute => self.public_mcp.revoke_client_commands(client_ref),
-                ToolGroup::QuickCommandExecute => self
-                    .public_mcp
-                    .revoke_client_commands_for_group(client_ref, ToolGroup::QuickCommandExecute),
-                ToolGroup::ArtifactTransfer => {
-                    self.revoke_public_mcp_client_transfers(client_ref);
-                    self.public_mcp.state.artifacts.revoke_client(client_ref)
-                }
-                ToolGroup::ForwardManage => self.revoke_public_mcp_client_forwards(client_ref),
-                ToolGroup::FileRead => self.revoke_public_mcp_client_file_sessions(client_ref),
-                ToolGroup::FileWrite => self.cancel_public_mcp_client_uploads(client_ref),
-                ToolGroup::WorkspaceRead => self.revoke_public_mcp_client_workspaces(client_ref),
-                ToolGroup::WorkspaceEdit => {
-                    self.cancel_public_mcp_client_workspace_edits(client_ref)
-                }
-                ToolGroup::CloudSync => self.public_mcp.revoke_client_sync_handles(client_ref),
-                ToolGroup::Basic
-                | ToolGroup::ConnectionDirectory
-                | ToolGroup::ConnectionRead
-                | ToolGroup::ConnectionManage
-                | ToolGroup::CredentialManage
-                | ToolGroup::TerminalObserve
-                | ToolGroup::TerminalInput
-                | ToolGroup::CommandObserve
-                | ToolGroup::AuditRead
-                | ToolGroup::HostToolsObserve
-                | ToolGroup::HostToolsOperate
-                | ToolGroup::QuickCommandRead
-                | ToolGroup::QuickCommandContentRead
-                | ToolGroup::QuickCommandManage
-                | ToolGroup::AddonRead
-                | ToolGroup::AddonManage
-                | ToolGroup::ForwardRead => {}
-            }
+        if enabled {
+            self.enable_public_mcp_client_tool_group(client_ref, tool_group, cx);
+        } else {
+            self.disable_public_mcp_client_tool_group(client_ref, tool_group, cx);
         }
         Ok(())
+    }
+
+    fn enable_public_mcp_client_tool_group(
+        &mut self,
+        client_ref: &ClientRef,
+        tool_group: ToolGroup,
+        cx: &mut Context<Self>,
+    ) {
+        match tool_group {
+            ToolGroup::DesktopObserve => {
+                self.set_public_mcp_client_desktop_observation(client_ref, true, cx)
+            }
+            ToolGroup::WorkspaceEdit => {
+                self.reset_public_mcp_client_workspace_edit_cancellation(client_ref)
+            }
+            _ => {}
+        }
+    }
+
+    fn disable_public_mcp_client_tool_group(
+        &mut self,
+        client_ref: &ClientRef,
+        tool_group: ToolGroup,
+        cx: &mut Context<Self>,
+    ) {
+        self.public_mcp
+            .state
+            .approvals
+            .revoke_client_tool_group(client_ref, tool_group);
+        match tool_group {
+            ToolGroup::NodeSession => self.revoke_public_mcp_client_runtime(client_ref, cx),
+            ToolGroup::TerminalSession => self.revoke_public_mcp_client_terminals(client_ref, cx),
+            ToolGroup::RecordingControl => self.stop_public_mcp_client_recordings(client_ref, cx),
+            ToolGroup::RecordingContent => {
+                self.revoke_public_mcp_client_recording_artifacts(client_ref)
+            }
+            ToolGroup::DesktopSession => self.revoke_public_mcp_client_desktops(client_ref, cx),
+            ToolGroup::DesktopObserve => {
+                self.set_public_mcp_client_desktop_observation(client_ref, false, cx)
+            }
+            ToolGroup::DesktopInput => {
+                self.release_public_mcp_client_desktop_inputs(client_ref, cx)
+            }
+            ToolGroup::DesktopClipboard => {
+                self.revoke_public_mcp_client_desktop_clipboard_artifacts(client_ref)
+            }
+            ToolGroup::CommandExecute => self.public_mcp.revoke_client_commands(client_ref),
+            ToolGroup::QuickCommandExecute => self
+                .public_mcp
+                .revoke_client_commands_for_group(client_ref, ToolGroup::QuickCommandExecute),
+            ToolGroup::ArtifactTransfer => {
+                self.revoke_public_mcp_client_transfers(client_ref);
+                self.public_mcp.state.artifacts.revoke_client(client_ref)
+            }
+            ToolGroup::ForwardManage => self.revoke_public_mcp_client_forwards(client_ref),
+            ToolGroup::FileRead => self.revoke_public_mcp_client_file_sessions(client_ref),
+            ToolGroup::FileWrite => self.cancel_public_mcp_client_uploads(client_ref),
+            ToolGroup::WorkspaceRead => self.revoke_public_mcp_client_workspaces(client_ref),
+            ToolGroup::WorkspaceEdit => self.cancel_public_mcp_client_workspace_edits(client_ref),
+            ToolGroup::CloudSync => self.public_mcp.revoke_client_sync_handles(client_ref),
+            ToolGroup::Basic
+            | ToolGroup::ConnectionDirectory
+            | ToolGroup::ConnectionRead
+            | ToolGroup::ConnectionManage
+            | ToolGroup::CredentialManage
+            | ToolGroup::TerminalObserve
+            | ToolGroup::TerminalInput
+            | ToolGroup::CommandObserve
+            | ToolGroup::AuditRead
+            | ToolGroup::HostToolsObserve
+            | ToolGroup::HostToolsOperate
+            | ToolGroup::QuickCommandRead
+            | ToolGroup::QuickCommandContentRead
+            | ToolGroup::QuickCommandManage
+            | ToolGroup::AddonRead
+            | ToolGroup::AddonManage
+            | ToolGroup::ForwardRead => {}
+        }
     }
 
     pub(in crate::workspace) fn remove_public_mcp_client(
@@ -1088,6 +1115,8 @@ impl WorkspaceApp {
             return;
         }
         match &request.call {
+            PublicToolCall::RequestAccess(_) => self.handle_public_mcp_request_access(request, cx),
+            PublicToolCall::RevokeAccess(_) => self.handle_public_mcp_revoke_access(request, cx),
             PublicToolCall::BrowseConnections(_) => {
                 self.handle_public_mcp_browse_connections(request)
             }
@@ -1235,6 +1264,85 @@ impl WorkspaceApp {
             PublicToolCall::WorkspaceSearch(_) => self.handle_public_mcp_workspace_search(request),
             PublicToolCall::WorkspaceClose(_) => self.handle_public_mcp_workspace_close(request),
         }
+    }
+
+    fn handle_public_mcp_request_access(&mut self, request: DomainRequest, cx: &mut Context<Self>) {
+        let PublicToolCall::RequestAccess(args) = &request.call else {
+            return;
+        };
+        let Some(client) = self.public_mcp.state.clients.get(&request.client_ref) else {
+            request.finish(ToolEnvelope::failed(
+                "The external MCP client no longer exists",
+            ));
+            return;
+        };
+        let previous_groups = client.tool_groups;
+        let mut tool_groups = previous_groups.clone();
+        tool_groups.extend(args.groups.iter().copied());
+        // Persist the complete grant set before enabling any group-specific runtime behavior.
+        if let Err(error) = self
+            .public_mcp
+            .set_client_groups(&request.client_ref, tool_groups.clone())
+        {
+            request.finish(ToolEnvelope::failed(error));
+            return;
+        }
+        for tool_group in tool_groups.difference(&previous_groups).copied() {
+            self.enable_public_mcp_client_tool_group(&request.client_ref, tool_group, cx);
+        }
+        let client = self.public_mcp.state.clients.get(&request.client_ref);
+        finish_serialized(
+            request,
+            json!({
+                "outcome": "granted",
+                "client": client,
+            }),
+        );
+        cx.notify();
+    }
+
+    fn handle_public_mcp_revoke_access(&mut self, request: DomainRequest, cx: &mut Context<Self>) {
+        let PublicToolCall::RevokeAccess(args) = &request.call else {
+            return;
+        };
+        let Some(client) = self.public_mcp.state.clients.get(&request.client_ref) else {
+            request.finish(ToolEnvelope::failed(
+                "The external MCP client no longer exists",
+            ));
+            return;
+        };
+        let previous_groups = client.tool_groups;
+        let revoked_groups = args
+            .groups
+            .iter()
+            .copied()
+            .filter(|group| previous_groups.contains(group))
+            .collect::<BTreeSet<_>>();
+        let tool_groups = previous_groups
+            .difference(&revoked_groups)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        // Persist revocation first so stale calls fail before owned runtime handles are released.
+        if let Err(error) = self
+            .public_mcp
+            .set_client_groups(&request.client_ref, tool_groups)
+        {
+            request.finish(ToolEnvelope::failed(error));
+            return;
+        }
+        for tool_group in revoked_groups.iter().copied() {
+            self.disable_public_mcp_client_tool_group(&request.client_ref, tool_group, cx);
+        }
+        let client = self.public_mcp.state.clients.get(&request.client_ref);
+        finish_serialized(
+            request,
+            json!({
+                "outcome": "revoked",
+                "revoked_groups": revoked_groups,
+                "client": client,
+            }),
+        );
+        cx.notify();
     }
 
     fn handle_public_mcp_browse_connections(&mut self, request: DomainRequest) {

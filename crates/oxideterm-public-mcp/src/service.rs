@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use base64::Engine;
 use http::{header::AUTHORIZATION, request::Parts};
@@ -36,13 +36,14 @@ use crate::{
         PublicToolCall, QuickCommandsDescribeArgs, QuickCommandsListArgs, QuickCommandsRemoveArgs,
         QuickCommandsRunArgs, QuickCommandsSaveArgs, ReadArtifactArgs, ReadDesktopClipboardArgs,
         ReadTerminalArgs, RecordingsControlArgs, RecordingsExportArgs, RecordingsSearchArgs,
-        RecordingsStatusArgs, ReleaseNodeArgs, RemovePublicConnectionArgs, ResizeDesktopArgs,
-        ResizeTerminalArgs, SavePublicConnectionArgs, StageArtifactArgs, StartCommandArgs,
-        StartTransferArgs, StoreCredentialArgs, SubmitTerminalArgs, SyncApplyPlanArgs,
-        SyncPublishPreviewArgs, SyncPullPreviewArgs, SyncRestoreArgs, SyncStatusArgs,
-        TerminalHandleArgs, ToolEnvelope, ToolOutcome, TransferHandleArgs, WorkspaceApplyEditsArgs,
-        WorkspaceCloseArgs, WorkspaceFileEdits, WorkspaceMountArgs, WorkspaceReadArgs,
-        WorkspaceSearchArgs, WorkspaceTextEdit, WorkspaceTreeArgs, WriteDesktopClipboardArgs,
+        RecordingsStatusArgs, ReleaseNodeArgs, RemovePublicConnectionArgs, RequestAccessArgs,
+        ResizeDesktopArgs, ResizeTerminalArgs, RevokeAccessArgs, SavePublicConnectionArgs,
+        StageArtifactArgs, StartCommandArgs, StartTransferArgs, StoreCredentialArgs,
+        SubmitTerminalArgs, SyncApplyPlanArgs, SyncPublishPreviewArgs, SyncPullPreviewArgs,
+        SyncRestoreArgs, SyncStatusArgs, TerminalHandleArgs, ToolEnvelope, ToolOutcome,
+        TransferHandleArgs, WorkspaceApplyEditsArgs, WorkspaceCloseArgs, WorkspaceFileEdits,
+        WorkspaceMountArgs, WorkspaceReadArgs, WorkspaceSearchArgs, WorkspaceTextEdit,
+        WorkspaceTreeArgs, WriteDesktopClipboardArgs,
     },
     handles::{ApprovalRef, ClientRef, ConnectionRef, NodeRef, TerminalRef, WorkspaceRef},
 };
@@ -378,7 +379,11 @@ impl PublicMcpService {
             );
         }
 
-        if call.requires_approval() && client.approval_mode == ClientApprovalMode::Standard {
+        // Access expansion always crosses the local approval boundary, including unattended mode.
+        if call.requires_approval()
+            && (client.approval_mode == ClientApprovalMode::Standard
+                || call.requires_explicit_app_approval())
+        {
             let tool_name = call.tool_name();
             let target = call.target_summary();
             let approval = match self.state.approvals.stage(client.client_ref.clone(), call) {
@@ -527,23 +532,97 @@ impl ServerHandler for PublicMcpService {
                     "server": "OxideTerm Public MCP",
                     "protocol": ProtocolVersion::V_2026_07_28.to_string(),
                     "approval_policy": approval_policy,
+                    "enabled_tool_groups": client.tool_groups,
+                    "available_tool_groups": ToolGroup::selectable(),
                     "security": "Bearer authentication, per-client tool groups, app-lock enforcement, secret hard boundaries, and audit remain active in every mode",
                 }))
             }
             "mcp_catalog" => {
-                let catalog = tool_definitions()
+                let tools = tool_definitions()
                     .into_iter()
                     .filter(|definition| client.tool_groups.contains(&definition.group))
                     .map(|definition| CatalogEntry {
                         name: definition.tool.name.into_owned(),
                         tool_group: definition.group,
                         requires_approval: definition.requires_approval
-                            && client.approval_mode == ClientApprovalMode::Standard,
+                            && (client.approval_mode == ClientApprovalMode::Standard
+                                || definition.requires_explicit_app_approval),
                     })
                     .collect::<Vec<_>>();
-                CallToolResult::structured(json!({ "tools": catalog }))
+                let tool_groups = ToolGroup::selectable()
+                    .iter()
+                    .map(|group| {
+                        json!({
+                            "group": group,
+                            "enabled": client.tool_groups.contains(group),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                CallToolResult::structured(json!({
+                    "tools": tools,
+                    "tool_groups": tool_groups,
+                }))
             }
-            "mcp_access_state" => CallToolResult::structured(json!({ "client": client })),
+            "mcp_access_state" => {
+                let access_requests = self
+                    .state
+                    .approvals
+                    .list()
+                    .into_iter()
+                    .filter(|approval| {
+                        approval.client_ref == client.client_ref
+                            && approval.tool_name == "mcp_request_access"
+                    })
+                    .collect::<Vec<_>>();
+                CallToolResult::structured(json!({
+                    "client": client,
+                    "selectable_groups": ToolGroup::selectable(),
+                    "access_requests": access_requests,
+                }))
+            }
+            "mcp_request_access" => match parse_arguments::<RequestAccessArgs>(arguments) {
+                Ok(mut args) if access_groups_are_valid(&args.groups) => {
+                    let requested_groups = args.groups.into_iter().collect::<BTreeSet<_>>();
+                    args.groups = requested_groups
+                        .into_iter()
+                        .filter(|group| !client.tool_groups.contains(group))
+                        .collect();
+                    if args.groups.is_empty() {
+                        CallToolResult::structured(json!({
+                            "outcome": "already_granted",
+                            "client": client,
+                        }))
+                    } else {
+                        self.execute_call(&client, PublicToolCall::RequestAccess(args))
+                            .await
+                    }
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "Select one or more non-basic Public MCP tool groups",
+                ),
+                Err(error) => *error,
+            },
+            "mcp_revoke_access" => match parse_arguments::<RevokeAccessArgs>(arguments) {
+                Ok(args) if access_groups_are_valid(&args.groups) => {
+                    let groups = args
+                        .groups
+                        .into_iter()
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect();
+                    self.execute_call(
+                        &client,
+                        PublicToolCall::RevokeAccess(RevokeAccessArgs { groups }),
+                    )
+                    .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "Select one or more non-basic Public MCP tool groups",
+                ),
+                Err(error) => *error,
+            },
             "mcp_commit_action" => self.commit_action(&client, arguments).await,
             "connections_browse" => match parse_arguments::<BrowseConnectionsArgs>(arguments) {
                 Ok(args) => {
@@ -1245,6 +1324,7 @@ struct ToolDefinition {
     tool: Tool,
     group: ToolGroup,
     requires_approval: bool,
+    requires_explicit_app_approval: bool,
 }
 
 fn tool_definitions() -> Vec<ToolDefinition> {
@@ -1268,6 +1348,18 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             "Show the current client's enabled tool groups without returning its credential.",
             ToolGroup::Basic,
             true,
+            false,
+        ),
+        define_explicit_approval_tool::<RequestAccessArgs>(
+            "mcp_request_access",
+            "Request additional tool groups for this client through an in-app approval.",
+            ToolGroup::Basic,
+        ),
+        define_tool::<RevokeAccessArgs>(
+            "mcp_revoke_access",
+            "Immediately disable selected tool groups for this client and release their capabilities.",
+            ToolGroup::Basic,
+            false,
             false,
         ),
         define_tool::<CommitActionArgs>(
@@ -1872,7 +1964,18 @@ fn define_tool<T: JsonSchema>(
         tool: Tool::new(name, description, schema_object::<T>()).with_annotations(annotations),
         group,
         requires_approval,
+        requires_explicit_app_approval: false,
     }
+}
+
+fn define_explicit_approval_tool<T: JsonSchema>(
+    name: &'static str,
+    description: &'static str,
+    group: ToolGroup,
+) -> ToolDefinition {
+    let mut definition = define_tool::<T>(name, description, group, false, true);
+    definition.requires_explicit_app_approval = true;
+    definition
 }
 
 fn schema_object<T: JsonSchema>() -> JsonObject {
@@ -1889,6 +1992,14 @@ fn parse_arguments<T: DeserializeOwned>(arguments: JsonObject) -> Result<T, Box<
             format!("The tool arguments are invalid: {error}"),
         ))
     })
+}
+
+fn access_groups_are_valid(groups: &[ToolGroup]) -> bool {
+    !groups.is_empty()
+        && groups.len() <= ToolGroup::selectable().len()
+        && groups
+            .iter()
+            .all(|group| ToolGroup::selectable().contains(group))
 }
 
 fn parse_start_command(mut arguments: JsonObject) -> Result<StartCommandArgs, Box<CallToolResult>> {

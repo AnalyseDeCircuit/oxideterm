@@ -1,6 +1,7 @@
 use std::{collections::BTreeSet, fmt, fs, path::PathBuf};
 
 use parking_lot::RwLock;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
@@ -9,7 +10,9 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::handles::ClientRef;
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolGroup {
     Basic,
@@ -49,6 +52,45 @@ pub enum ToolGroup {
 }
 
 impl ToolGroup {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Basic => "basic",
+            Self::ConnectionDirectory => "connection_directory",
+            Self::ConnectionRead => "connection_read",
+            Self::ConnectionManage => "connection_manage",
+            Self::CredentialManage => "credential_manage",
+            Self::NodeSession => "node_session",
+            Self::TerminalSession => "terminal_session",
+            Self::TerminalObserve => "terminal_observe",
+            Self::TerminalInput => "terminal_input",
+            Self::RecordingControl => "recording_control",
+            Self::RecordingContent => "recording_content",
+            Self::DesktopSession => "desktop_session",
+            Self::DesktopObserve => "desktop_observe",
+            Self::DesktopInput => "desktop_input",
+            Self::DesktopClipboard => "desktop_clipboard",
+            Self::CommandObserve => "command_observe",
+            Self::CommandExecute => "command_execute",
+            Self::AuditRead => "audit_read",
+            Self::ArtifactTransfer => "artifact_transfer",
+            Self::HostToolsObserve => "host_tools_observe",
+            Self::HostToolsOperate => "host_tools_operate",
+            Self::QuickCommandRead => "quick_command_read",
+            Self::QuickCommandContentRead => "quick_command_content_read",
+            Self::QuickCommandManage => "quick_command_manage",
+            Self::QuickCommandExecute => "quick_command_execute",
+            Self::AddonRead => "addon_read",
+            Self::AddonManage => "addon_manage",
+            Self::ForwardRead => "forward_read",
+            Self::ForwardManage => "forward_manage",
+            Self::FileRead => "file_read",
+            Self::FileWrite => "file_write",
+            Self::WorkspaceRead => "workspace_read",
+            Self::WorkspaceEdit => "workspace_edit",
+            Self::CloudSync => "cloud_sync",
+        }
+    }
+
     pub const fn selectable() -> &'static [Self] {
         &[
             Self::ConnectionDirectory,

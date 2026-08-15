@@ -14,6 +14,20 @@ use crate::{
     },
 };
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// Requests persistent tool groups without allowing an unattended client to self-grant them.
+pub struct RequestAccessArgs {
+    pub groups: Vec<ToolGroup>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// Lets a client reduce only its own Public MCP capabilities.
+pub struct RevokeAccessArgs {
+    pub groups: Vec<ToolGroup>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct BrowseConnectionsArgs {
     #[serde(default)]
@@ -1465,6 +1479,8 @@ fn sync_selection_summary(selection: &SyncSelection) -> String {
 }
 
 pub enum PublicToolCall {
+    RequestAccess(RequestAccessArgs),
+    RevokeAccess(RevokeAccessArgs),
     BrowseConnections(BrowseConnectionsArgs),
     DescribeConnection(DescribeConnectionArgs),
     SaveConnection(Box<SavePublicConnectionArgs>),
@@ -1552,6 +1568,8 @@ pub enum PublicToolCall {
 impl PublicToolCall {
     pub fn tool_name(&self) -> &'static str {
         match self {
+            Self::RequestAccess(_) => "mcp_request_access",
+            Self::RevokeAccess(_) => "mcp_revoke_access",
             Self::BrowseConnections(_) => "connections_browse",
             Self::DescribeConnection(_) => "connections_describe",
             Self::SaveConnection(_) => "connections_save",
@@ -1639,6 +1657,7 @@ impl PublicToolCall {
 
     pub fn required_group(&self) -> ToolGroup {
         match self {
+            Self::RequestAccess(_) | Self::RevokeAccess(_) => ToolGroup::Basic,
             Self::BrowseConnections(_) => ToolGroup::ConnectionDirectory,
             Self::DescribeConnection(_) => ToolGroup::ConnectionRead,
             Self::SaveConnection(_) | Self::RemoveConnection(_) => ToolGroup::ConnectionManage,
@@ -1727,7 +1746,8 @@ impl PublicToolCall {
     pub fn requires_approval(&self) -> bool {
         matches!(
             self,
-            Self::SaveConnection(_)
+            Self::RequestAccess(_)
+                | Self::SaveConnection(_)
                 | Self::RemoveConnection(_)
                 | Self::StoreCredential(_)
                 | Self::ForgetCredential(_)
@@ -1765,8 +1785,29 @@ impl PublicToolCall {
         )
     }
 
+    pub fn requires_explicit_app_approval(&self) -> bool {
+        matches!(self, Self::RequestAccess(_))
+    }
+
     pub fn target_summary(&self) -> String {
         match self {
+            Self::RequestAccess(args) => {
+                let groups = args
+                    .groups
+                    .iter()
+                    .map(|group| group.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("enable tool groups: {groups}")
+            }
+            Self::RevokeAccess(args) => format!(
+                "disable tool groups: {}",
+                args.groups
+                    .iter()
+                    .map(|group| group.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Self::BrowseConnections(_) => "connection directory".to_owned(),
             Self::DescribeConnection(args) => args.connection_ref.to_string(),
             Self::SaveConnection(args) => args
