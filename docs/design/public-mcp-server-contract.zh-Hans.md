@@ -332,7 +332,7 @@ RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控�
 | `sync_apply_plan` | 云同步 / X / 必须 | `sync_plan_ref` | 应用已预览的 pull 或 publish 计划；再次比较完整本地状态和远端 revision/etag/content hash，失配即拒绝。只有能精确恢复的本地 pull 分区返回 `undo_ref`；publish 不可撤销。 |
 | `sync_restore` | 云同步 / X / 必须 | `undo_ref` | 在本地状态仍等于 apply 后快照时恢复严格 checkpoint；句柄绑定客户端、十五分钟过期且只可消费一次。不把远端写入或无法恢复的密钥删除伪装成可恢复；`mcp_revert` 是保持相同工具组与检查的通用入口。 |
 | `addons_list` | 插件管理 / D / 否 | `include_disabled?` | 插件 ID、版本、来源类别、启用状态、声明能力和公开适配器摘要；不列出任意内部 host function。 |
-| `addons_install` | 插件管理 + 传输数据 / X / 必须 | `artifact_ref`、`expected_identity`、`checksum`、`replace_existing?` | 从客户端私有 artifact 安装 ZIP，先核对 SHA-256 与 manifest 身份，再经应用插件 owner 完成安装和运行时 bootstrap；同步返回公开 addon 投影，不返回虚假 operation/undo。不执行客户端提供的任意命令。 |
+| `addons_install` | 插件管理 + 传输数据 / X / 必须 | `artifact_ref`、`expected_identity`、`checksum`、`replace_existing?` | 从客户端私有 artifact 安装 ZIP，先核对 SHA-256 与 manifest 身份，再经应用插件 owner 完成安装和运行时 bootstrap；同步返回公开 addon 投影，不返回虚假 operation/undo。不执行客户端提供的任意命令。撤权发生在工作线程启动前会取消；原子文件替换已经开始时会完成磁盘一致性收尾，但不会在撤权后启动插件运行时或返回成功。 |
 | `addons_set_enabled` | 插件管理 / X / 必须 | `addon_ref`、`enabled` | 启用或禁用，重新核对所需权限并返回状态。 |
 | `addons_remove` | 插件管理 / X / 必须 | `addon_ref`、`retain_settings` | 卸载插件，选择保留或删除其设置；绝不调用插件自定义 RPC。 |
 | `quickcommands_list` | 快速命令 / R / 否 | `query?` | 名称、描述、分类、host pattern、风险分类和整个存储 revision；不返回命令正文。 |

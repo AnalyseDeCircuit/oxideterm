@@ -29,6 +29,7 @@ const NATIVE_PLUGIN_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(5);
 const NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL: Duration = Duration::from_millis(80);
 const NATIVE_PLUGIN_RELEASE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const NATIVE_PLUGIN_WORKSPACE_RELEASED_CODE: &str = "plugin_workspace_released";
+const NATIVE_PLUGIN_MANAGED_INSTALL_CANCELLED_CODE: &str = "managed_plugin_install_cancelled";
 
 pub(in crate::workspace) enum PluginWorkspaceEvent {
     ManagerDeliveryReady,
@@ -701,6 +702,7 @@ impl PluginWorkspaceEntity {
         checksum: String,
         package_bytes: Zeroizing<Vec<u8>>,
         overwrite: bool,
+        cancellation: tokio_util::sync::CancellationToken,
     ) -> Option<
         tokio::sync::oneshot::Receiver<Result<plugin_host::NativePluginUrlInstallResult, String>>,
     > {
@@ -710,6 +712,11 @@ impl PluginWorkspaceEntity {
         self.manager_operation_in_flight = true;
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         self.spawn_owned_task(async move {
+            if cancellation.is_cancelled() {
+                let _ =
+                    result_tx.send(Err(NATIVE_PLUGIN_MANAGED_INSTALL_CANCELLED_CODE.to_owned()));
+                return;
+            }
             // The package bytes stay zeroizing while the registry validates and extracts them.
             let result = plugin_host::NativePluginRegistry::install_managed_plugin_package(
                 &settings_path,

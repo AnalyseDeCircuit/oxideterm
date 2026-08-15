@@ -101,6 +101,7 @@ impl WorkspaceApp {
             return;
         }
         let settings_path = self.settings_store.path().to_path_buf();
+        let cancellation = request.cancellation_token();
         let receiver = self.plugin_entity.update(cx, |plugins, _cx| {
             plugins.start_managed_package_install(
                 settings_path.clone(),
@@ -108,6 +109,7 @@ impl WorkspaceApp {
                 checksum,
                 artifact.bytes,
                 args.replace_existing,
+                cancellation,
             )
         });
         let Some(receiver) = receiver else {
@@ -144,6 +146,7 @@ impl WorkspaceApp {
         >,
         cx: &mut Context<Self>,
     ) {
+        let request_cancelled = request.is_cancelled();
         let result = match result {
             Ok(result) => result,
             Err(_) => {
@@ -160,6 +163,17 @@ impl WorkspaceApp {
         self.plugin_entity.update(cx, |plugins, _cx| {
             plugins.finish_managed_package_install(settings_path, installed);
         });
+        if request_cancelled {
+            if let Err(error) = result {
+                // Discard package-controlled diagnostics when the caller can no longer receive them.
+                drop(Zeroizing::new(error));
+            }
+            request.finish(ToolEnvelope::failed(
+                "The addon authorization changed before installation completed",
+            ));
+            cx.notify();
+            return;
+        }
         let install_result = match result {
             Ok(result) => result,
             Err(error) => {
