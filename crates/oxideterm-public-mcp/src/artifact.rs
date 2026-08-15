@@ -253,6 +253,16 @@ impl ArtifactStore {
         true
     }
 
+    /// Reports whether a client-scoped artifact is still live after TTL cleanup.
+    pub fn is_available(&self, client_ref: &ClientRef, artifact_ref: &ArtifactRef) -> bool {
+        let mut state = self.state.lock();
+        cleanup_expired(&mut state);
+        state
+            .records
+            .get(artifact_ref)
+            .is_some_and(|record| &record.client_ref == client_ref)
+    }
+
     /// Removes expired content independently of client traffic.
     pub fn expire(&self) {
         cleanup_expired(&mut self.state.lock());

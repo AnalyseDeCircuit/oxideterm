@@ -138,6 +138,7 @@ impl WorkspaceApp {
             let result = encode_task.await;
             let _ = workspace.update(cx, move |workspace, _cx| match result {
                 Ok(artifact) => {
+                    let artifact_store = workspace.public_mcp.state.artifacts.clone();
                     let live =
                         workspace
                             .public_mcp
@@ -162,6 +163,9 @@ impl WorkspaceApp {
                         return;
                     }
                     if let Some(live) = live {
+                        live.frame_artifacts.retain(|artifact_ref| {
+                            artifact_store.is_available(&client_ref, artifact_ref)
+                        });
                         live.frame_artifacts.insert(artifact.artifact_ref.clone());
                     }
                     finish_serialized(
@@ -266,7 +270,8 @@ impl WorkspaceApp {
             ),
             Ok(RemoteDesktopPublicClipboardSnapshot::Image { format, bytes }) => {
                 let media_type = remote_desktop_clipboard_media_type(format).to_owned();
-                match self.public_mcp.state.artifacts.stage(
+                let artifact_store = self.public_mcp.state.artifacts.clone();
+                match artifact_store.stage(
                     request.client_ref.clone(),
                     &bytes,
                     media_type,
@@ -274,6 +279,9 @@ impl WorkspaceApp {
                 ) {
                     Ok(artifact) => {
                         if let Some(record) = self.public_mcp.desktops.get_mut(&desktop_ref) {
+                            record.clipboard_artifacts.retain(|artifact_ref| {
+                                artifact_store.is_available(&request.client_ref, artifact_ref)
+                            });
                             record
                                 .clipboard_artifacts
                                 .insert(artifact.artifact_ref.clone());

@@ -155,7 +155,8 @@ impl WorkspaceApp {
             .name
             .clone()
             .or_else(|| Some(DEFAULT_RECORDING_ARTIFACT_NAME.to_owned()));
-        let artifact = match self.public_mcp.state.artifacts.stage(
+        let artifact_store = self.public_mcp.state.artifacts.clone();
+        let artifact = match artifact_store.stage(
             request.client_ref.clone(),
             content.as_bytes(),
             media_type.to_owned(),
@@ -168,6 +169,9 @@ impl WorkspaceApp {
             }
         };
         if let Some(record) = self.public_mcp.recordings.get_mut(&args.recording_ref) {
+            record.artifact_refs.retain(|artifact_ref| {
+                artifact_store.is_available(&request.client_ref, artifact_ref)
+            });
             record.artifact_refs.insert(artifact.artifact_ref.clone());
         }
         finish_serialized(
