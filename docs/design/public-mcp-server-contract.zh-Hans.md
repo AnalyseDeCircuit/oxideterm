@@ -68,7 +68,7 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 - `commands_start` 使用当前物理 SSH 连接的独立 exec channel，返回真实退出码、有界输出和可取消 `command_ref`。
 - `artifacts_stage`/`artifacts_read` 使用客户端隔离、容量受限且会过期的临时文件，不接受任意本机路径；`mcp_audit_search` 只能读取调用客户端自身的脱敏记录。
 - `hosttools_catalog`/`hosttools_capture`/`hosttools_operate` 只接产品已有的类型化资源与固定动作，不暴露自由 shell 或插件调用。
-- 快速命令目录和正文分别授权；保存和删除采用存储 revision 冲突检查并刷新应用内状态。执行只读取已保存的精确命令，并再次校验 revision、节点所有权和 `host_pattern`。当前模型没有参数 schema，因此 `arguments` 必须为空；当前执行目标仅支持 `node_ref`，终端目标随终端句柄阶段接入。
+- 快速命令目录和正文分别授权；保存和删除采用存储 revision 冲突检查并刷新应用内状态。执行只读取已保存的精确命令，并再次校验 revision、节点所有权和 `host_pattern`。当前模型没有参数 schema，因此 `arguments` 必须为空；当前执行目标仅支持 `node_ref`，在交互终端拥有可靠命令完成标记前不宣称支持 terminal exec。
 - 插件目录和插件管理分别授权。插件安装只接受客户端自己的临时 artifact、必填 SHA-256 和预期插件身份，在 staging 阶段核对身份后才替换安装目录；启停和卸载复用应用已有注册表及运行时停用路径。返回值只含 manifest 公开身份、状态、权限请求和声明式贡献数量，绝不返回安装路径、配置路径、任意 `api.invoke`、运行时命令或 Host Monitor 命令正文。
 - 端口转发读取和管理分别授权。`forwards_*` 复用应用唯一的 `ForwardingRuntimeService` 和独立 `PortForward` 消费者，支持类型化创建、带 revision 的受控修改、停止、重启、删除、统计和单次端口发现。关闭终端或释放 Public MCP 节点租约不会停止转发；显式物理节点断开、客户端撤销或关闭转发管理授权才按所有权清理。外部只看到客户端作用域的 `forward_ref`。
 - SFTP 文件读取和修改分别授权。`files_open` 为规范化远端根目录登记独立 SFTP 消费者，后续列表、元数据、分段读取、比较、写入、移动和删除都重新校验规范化路径边界。正文只经客户端自己的有界 artifact 传递；重连时先取得当前连接的消费者再释放旧消费者，`files_close` 不断开共享 SSH 节点。
@@ -117,36 +117,31 @@ MCP `2026-07-28` 请求使用 `server/discover` 做可选发现，并在每次�
 
 ### 2.3 统一请求和结果信封
 
-每个工具的业务参数外，以下通用字段按需适用：
+当前工具 schema 只接受自己声明的业务字段。以下是跨领域采用的稳定语义；没有出现在具体工具 schema 中的保留字段不能发送：
 
 | 字段 | 含义 |
 |---|---|
-| `request_key` | 客户端生成的幂等键；创建、写入、上传和提交操作必须支持。 |
-| `operation_ref` | 继续查询、等待或取消一个异步操作的外部句柄。 |
+| `request_key` | 为未来持久幂等账本保留；当前工具 schema 尚不接受，客户端不得假定网络错误后的自动重试不会重复执行。 |
+| `operation_ref` | 查询或取消后台 SSH/快速命令与 SFTP 传输的外部句柄。 |
 | `approval_ref` | 对一份不可变动作摘要的一次性批准票据；不能与新参数混用。 |
 | `expected_revision` | 乐观并发条件；文件、配置、同步计划和快速命令写入应优先使用。 |
-| `dry_run` | 仅生成计划、冲突、影响范围和所需授权；绝不产生副作用。 |
+| `dry_run` | 为支持安全预检的后续领域保留；当前云同步使用独立 preview 工具，其他写工具不接受通用 `dry_run`。 |
 
-工具结果的 `structuredContent` 使用以下稳定形状；另附简短文本以兼容只消费文本的 MCP 客户端：
+普通领域工具结果的 `structuredContent` 使用以下稳定信封；批准请求由协议层直接返回 `outcome:"approval_required"` 与 `approval` 投影：
 
 ```json
 {
-  "outcome": "completed | queued | approval_required | conflict | rejected | failed",
-  "operation_ref": "op_…",
-  "approval_ref": "apr_…",
-  "undo_ref": "undo_…",
-  "revision": "rev_…",
+  "outcome": "completed | failed",
   "data": {},
-  "warnings": [],
-  "error": { "code": "…", "message": "…", "retryable": false }
+  "error": "脱敏错误消息或 null"
 }
 ```
 
-`operation_ref` 只表示服务端跟踪的工作，不等价于内部任务句柄。长时间工作必须脱离 MCP 请求生命周期，由应用运行时保留取消、完成和清理所有权。
+领域数据中的 `operation_ref`、`approval_ref`、`undo_ref` 和 revision 都是各自的 typed 字段，不会提升到不存在的统一顶层。`operation_ref` 只表示服务端跟踪的工作，不等价于内部任务句柄；后台命令和传输由应用运行时保留取消、完成和清理所有权。
 
 ### 2.5 内容传递与状态变化
 
-第一版以版本 cursor、`mcp_operation` 的有界等待和再次读取为可靠状态获取方式；客户端不得假定自己一定能接收自定义 server notification。服务端在 MCP `2026-07-28` 下可声明官方 Tasks/Subscriptions 扩展，但 `operation_ref` 始终是产品级事实来源，不依赖扩展才能查询或取消。Node、terminal、command、forward、transfer、desktop 与同步的内部事件会更新各自的 revision/cursor，但不直接把内部事件 DTO 变成公共协议。
+当前以版本 cursor、`mcp_operation` 即时查询和领域状态工具的再次读取为可靠状态获取方式；客户端不得假定自己一定能接收自定义 server notification。服务端未来可采用官方 Tasks/Subscriptions 扩展，但 `operation_ref` 始终是产品级事实来源，不依赖扩展才能查询或取消。Node、terminal、command、forward、transfer、desktop 与同步的内部事件会更新各自的 revision/cursor，但不直接把内部事件 DTO 变成公共协议。
 
 二进制和大内容必须作为 MCP image content 或带大小/过期限制的 `artifact_ref` 返回。画面、录制、文件和剪贴板不能以无限制 base64 JSON 塞入普通结果。`artifacts_read` 分段读取，且所有 artifact 都继承产生它的客户端和内容授权范围。
 
@@ -156,7 +151,7 @@ MCP `2026-07-28` 请求使用 `server/discover` 做可选发现，并在每次�
 
 批准票据默认五分钟有效、仅能提交一次，并在客户端断开、权限撤销、目标 revision 变化或应用锁定时失效。`mcp_commit_action` 不接受替换后的命令、路径、内容或目标，因此不能把一次确认挪作另一项操作。
 
-可真实回滚的副作用返回 `undo_ref`；`mcp_revert` 会在必要时再次确认。不能可靠回滚的操作必须显式标为 `non_reversible`，并在确认页中说明。例如已经发送的终端输入不能假装可撤销，而带保留备份的单文件替换可以。
+可真实回滚的副作用才返回 `undo_ref`；`mcp_revert` 会按原工具组和批准模式再次检查。不能可靠回滚的操作不返回句柄，并在结果或确认语义中说明。例如已经发送的终端输入、命令、SFTP 写入或远端发布不能假装可撤销；当前只有云同步本地 apply 的严格 checkpoint 进入通用撤销入口。
 
 ## 3. 外部句柄与生命周期
 
@@ -226,15 +221,15 @@ NodeRouter / connection registry ── 物理 SSH node
 |---|---|---|---|
 | `connections_browse` | 连接目录 / D / 否 | `query?`、`connection_types?` | SSH、Mosh、Telnet、串口、RDP/VNC 的 `connection_ref`、显示名、传输类型、分组、标签和最近使用时间；不返回精确端点或凭据。 |
 | `connections_describe` | 连接读取 / R / 否 | `connection_ref` | 经授权的主机/端口、用户名、跳板与代理元数据、保存转发摘要；秘密字段仅以存在标记表示。 |
-| `connections_save` | 连接管理 / W / 确认新建或覆盖 | `connection_ref?`、`profile`、`expected_revision?` | 新建或更新可保存的 SSH、Mosh、Telnet、串口、RDP/VNC 配置；返回新 `connection_ref`、revision 和可用时 `undo_ref`。`profile` 中的秘密字段一律拒绝，必须使用 `credentials_store`；`local` 一律拒绝保存。 |
+| `connections_save` | 连接管理 / W / 确认新建或覆盖 | `connection_ref?`、`profile`、`expected_revision?` | 新建或更新可保存的 SSH、Mosh、Telnet、串口、RDP/VNC 配置；更新必须携带当前 revision，结果返回 `connection_ref`、新 revision 与是否新建。`profile` 中的秘密字段一律拒绝，必须使用 `credentials_store`；`local` 一律拒绝保存。当前不返回撤销句柄。 |
 | `connections_remove` | 连接管理 / X / 必须 | `connection_ref`、`forget_credentials?` | 删除保存配置及其公开映射；若存在受保护凭据，默认拒绝删除，只有显式设为 `true` 才同时遗忘凭据，避免静默删除或留下孤儿引用。 |
 | `credentials_status` | 凭据管理 / D / 否 | `connection_ref` | 各认证槽是否存在、来源是否为受保护存储、最后更新摘要；不返回值或内部存储键。 |
 | `credentials_store` | 凭据管理 / X / 必须 | `connection_ref`、`slot`、`new_secret` | 将新值直接写入指定受保护存储槽，并尽快归零输入；结果只报告 `stored`。不允许读取或替换为任意内部引用。 |
 | `credentials_forget` | 凭据管理 / X / 必须 | `connection_ref`、`slot` | 删除指定受保护槽；返回影响的配置摘要。 |
-| `nodes_connect` | 节点会话 / X / 必须 | `connection_ref` 或短暂 `ssh_profile`、`lease`、`request_key` | 通过 NodeRouter 建立/复用物理 SSH node，返回 `node_ref`、状态、协商能力和认证等待状态。短暂 profile 不会自动保存。 |
-| `nodes_inspect` | 节点会话 / R / 否 | `node_ref` | readiness、父子拓扑的外部引用、消费者计数、SFTP/转发可用性、重连状态；不返回 NodeId、pool key 或 transport。 |
+| `nodes_connect` | 节点会话 / X / 必须 | `connection_ref` | 仅从已保存的 SSH 配置经 NodeRouter 建立或复用物理 node，等待至多 30 秒并返回 `node_ref` 与真实 ready 状态。短暂 profile 在凭据交互与幂等契约完成前不开放。 |
+| `nodes_inspect` | 节点会话 / R / 否 | `node_ref` | 返回 readiness 与当前主机、端口、用户名投影；不返回 NodeId、pool key、transport 或内部拓扑身份。 |
 | `nodes_release` | 节点会话 / W / 否 | `node_ref` | 释放该客户端的节点租约；其他消费者仍可保留节点。 |
-| `nodes_disconnect` | 节点会话 / X / 必须 | `node_ref`、`cascade` | 显式断开该节点，按记录的父子关系级联并撤销依赖句柄；不是关闭某个终端的别名。 |
+| `nodes_disconnect` | 节点会话 / X / 必须 | `node_ref` | 显式断开该节点的真实运行时子树并撤销依赖句柄；不是关闭某个终端的别名。级联范围由 NodeRouter 的真实父子关系决定，不接受客户端自定义内部节点范围。 |
 
 `credentials_store` 接受新的秘密是为了让用户已授权的自动化能够完成配置和连接；它绝不提供相反方向的读取工具。连接时优先让应用经受保护 broker 使用已有秘密。若需要键盘交互认证，结果进入 `waiting_for_user_auth`，由应用拥有的认证界面完成，不将旧秘密回传给 MCP 客户端。
 
@@ -245,12 +240,12 @@ NodeRouter / connection registry ── 物理 SSH node
 | `terminals_open` | 终端会话 / W / 确认新会话 | `source`、`cols`、`rows`、`title?` | `source` 为 `{kind:"node",node_ref}`、`{kind:"connection",connection_ref}` 或一次性 `{kind:"local"}`；保存的 Mosh、Telnet、串口经连接句柄解析，SSH 必须先取得 node。返回 `terminal_ref`、实际 transport、生命周期和能力。 |
 | `terminals_state` | 终端观察 / D / 否 | `terminal_ref` | 生命周期、尺寸、标题、编码、交互性、缓冲区计数与实际能力；不含屏幕文字。 |
 | `terminals_read` | 终端观察 / R / 否 | `terminal_ref`、`cursor?`、`line_limit`、`tail?` | 有界终端快照、增量 cursor、截断标记；原始内容按敏感数据处理。 |
-| `terminals_find` | 终端观察 / R / 否 | `terminal_ref`、`query`、`options` | 有界匹配位置与行片段，支持大小写、正则和整词；不返回完整缓冲区。 |
-| `commands_start` | 命令执行 / X / 必须 | `target`、`command`、`cwd?`、`timeout_ms?`、`output_limit?`、`request_key` | `target` 严格为 `node_ref` 或 `terminal_ref`。SSH node 使用现有物理连接的独立 exec channel；terminal 使用真实可见会话和命令标记。返回 `command_ref`、`operation_ref` 与 `completion_reliability`。 |
-| `commands_state` | 命令观察 / R / 否 | `command_ref` | `queued/running/waiting_for_input/completed/cancelled/failed`、可靠性、可取消性、实际可用时的退出码与截断状态。不得把输出稳定误报为进程成功。 |
-| `commands_output` | 命令观察 / R / 否 | `command_ref`、`cursor?`、`max_chars?` | SSH exec 分离 stdout/stderr；交互终端返回有界增量和命令标记范围。内容按终端敏感读取处理。 |
-| `commands_cancel` | 命令执行 / W / 视能力确认 | `command_ref` | SSH exec 关闭该 command channel；交互终端默认只停止等待，发送 interrupt 必须显式调用 `terminals_control`。返回真实取消结果。 |
-| `terminals_submit` | 终端输入 / X / 必须 | `terminal_ref`、`text` 或 `bytes_base64`、`append_enter`、`request_key` | 向真实 PTY/SSH/Mosh/Telnet/串口写入精确输入；不宣称 shell 执行、退出码或命令回滚。确认页展示经保护的输入摘要。 |
+| `terminals_find` | 终端观察 / R / 否 | `terminal_ref`、`query`、`limit?` | 复用终端后端的字面量 scrollback 搜索并返回有界网格坐标；当前不接受正则、大小写或整词选项。 |
+| `commands_start` | 命令执行 / X / 必须 | `node_ref`、`command`、`working_directory?` | 在已取得的 SSH node 上使用当前物理连接的独立 exec channel；固定超时 5 分钟、合并输出上限 1 MiB，返回 `command_ref` 与 `operation_ref`。交互终端精确输入使用 `terminals_submit`，不会伪装成有退出码的 exec。 |
+| `commands_state` | 命令观察 / R / 否 | `command_ref` | `running/succeeded/cancelled/failed`、真实退出码、截断状态和脱敏错误。 |
+| `commands_output` | 命令观察 / R / 否 | `command_ref`、`offset?`、`limit?` | 分段返回 SSH exec 的 stdout/stderr，单次最多 256 KiB；内容按终端敏感读取处理。 |
+| `commands_cancel` | 命令执行 / W / 否 | `command_ref` | 取消该客户端拥有的 SSH exec channel；已经发生的远端副作用不会被称为回滚。交互终端 interrupt 必须显式调用 `terminals_control`。 |
+| `terminals_submit` | 终端输入 / X / 必须 | `terminal_ref`、`text` 或 `bytes_base64`、`append_enter` | 向真实 PTY/SSH/Mosh/Telnet/串口写入精确输入；不宣称 shell 执行、退出码或命令回滚。确认页只展示输入类型、长度和回车意图。 |
 | `terminals_resize` | 终端会话 / W / 否 | `terminal_ref`、`cols`、`rows` | 调整真实终端；返回最终尺寸。 |
 | `terminals_control` | 终端输入 / X / 必须 | `terminal_ref`、`action` | `interrupt`、`terminate`、`kill`、`serial_break`、`serial_line`、`telnet_control` 等只在真实支持时可用。 |
 | `terminals_close` | 终端会话 / W / 确认有活动任务时 | `terminal_ref` | 关闭终端消费者/后端；SSH node 是否继续存活只由节点 owner 和其他消费者决定。 |
@@ -336,14 +331,14 @@ RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控�
 | `sync_apply_plan` | 云同步 / X / 必须 | `sync_plan_ref` | 应用已预览的 pull 或 publish 计划；再次比较完整本地状态和远端 revision/etag/content hash，失配即拒绝。只有能精确恢复的本地 pull 分区返回 `undo_ref`；publish 不可撤销。 |
 | `sync_restore` | 云同步 / X / 必须 | `undo_ref` | 在本地状态仍等于 apply 后快照时恢复严格 checkpoint；句柄绑定客户端、十五分钟过期且只可消费一次。不把远端写入或无法恢复的密钥删除伪装成可恢复；`mcp_revert` 是保持相同工具组与检查的通用入口。 |
 | `addons_list` | 插件管理 / D / 否 | `include_disabled?` | 插件 ID、版本、来源类别、启用状态、声明能力和公开适配器摘要；不列出任意内部 host function。 |
-| `addons_install` | 插件管理 / X / 必须 | `artifact_ref` 或受管 `source`、`expected_identity` | 经现有签名/完整性/权限审核安装插件；返回 `operation_ref` 和可用时 `undo_ref`。不执行客户端提供的任意二进制命令。 |
+| `addons_install` | 插件管理 / X / 必须 | `artifact_ref`、`expected_identity`、`checksum`、`replace_existing?` | 从客户端私有 artifact 安装 ZIP，先核对 SHA-256 与 manifest 身份，再经应用插件 owner 完成安装和运行时 bootstrap；同步返回公开 addon 投影，不返回虚假 operation/undo。不执行客户端提供的任意命令。 |
 | `addons_set_enabled` | 插件管理 / X / 必须 | `addon_ref`、`enabled` | 启用或禁用，重新核对所需权限并返回状态。 |
 | `addons_remove` | 插件管理 / X / 必须 | `addon_ref`、`retain_settings` | 卸载插件，选择保留或删除其设置；绝不调用插件自定义 RPC。 |
-| `quickcommands_list` | 快速命令 / R / 否 | `scope?` | 名称、描述、参数 schema、风险分类和 revision；命令正文按敏感命令读取权限另行返回。 |
-| `quickcommands_describe` | 快速命令 / R / 否 | `quickcommand_ref`、`include_body?` | 结构化模板、声明参数和目标限制；含正文时必须已授权敏感读取。 |
-| `quickcommands_save` | 快速命令 / X / 必须 | `quickcommand_ref?`、`definition`、`expected_revision?` | 新建或更新保存的固定模板，返回 revision/undo。此工具不执行模板。 |
-| `quickcommands_remove` | 快速命令 / X / 必须 | `quickcommand_ref` | 删除保存模板，可在保留快照时返回 `undo_ref`。 |
-| `quickcommands_run` | 快速命令 / X / 必须 | `quickcommand_ref`、`terminal_ref` 或 `node_ref`、`arguments` | 只渲染已保存模板的声明参数后投递给真实终端；确认页展示目标和最终渲染摘要。不能借此执行未保存的任意插件函数。 |
+| `quickcommands_list` | 快速命令 / R / 否 | `query?` | 名称、描述、分类、host pattern、风险分类和整个存储 revision；不返回命令正文。 |
+| `quickcommands_describe` | 快速命令正文读取 / R / 否 | `quickcommand_ref` | 在独立正文读取组下返回保存的精确命令、元数据和当前存储 revision。 |
+| `quickcommands_save` | 快速命令管理 / X / 必须 | `quickcommand_ref?`、`name`、`command`、`category`、`description?`、`host_pattern?`、`expected_revision` | 新建或更新保存命令并刷新应用内 store；当前格式没有参数 schema，也没有持久撤销句柄。此工具不执行命令。 |
+| `quickcommands_remove` | 快速命令管理 / X / 必须 | `quickcommand_ref`、`expected_revision` | 在 store revision 匹配时删除保存命令并刷新应用状态；当前不返回撤销句柄。 |
+| `quickcommands_run` | 快速命令执行 / X / 必须 | `quickcommand_ref`、`node_ref`、`expected_revision`、空 `arguments` | 读取已保存的精确命令，重新核对 store revision、节点所有权和 host pattern，再通过 SSH exec 执行并返回 `command_ref`/`operation_ref`。当前模型没有参数 schema，因此非空 `arguments` 明确拒绝。 |
 | `recordings_control` | 录制控制 / X / 仅 `start` 必须 | 严格 tagged action：`start {terminal_ref,title?,capture_input}`，或 `pause/resume/stop {recording_ref}` | 返回 `recording_ref`、状态和时长；当前真实 recorder 为 output-only，拒绝 `capture_input=true`。录制可能包含敏感终端文本，默认不公开。 |
 | `recordings_status` | 录制控制 / D / 否 | `target` 严格为 `{kind:"recording",recording_ref}` 或 `{kind:"terminal",terminal_ref}` | 状态、时长、尺寸、事件数、是否由当前客户端管理、是否可读取正文及截断状态，不含事件正文。 |
 | `recordings_search` | 终端录制 / R / 否 | `recording_ref`、`query`、`limit` | 有界时间点与片段；内容按终端敏感读取策略处理。 |
@@ -387,14 +382,14 @@ RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控�
 
 ### 5.3 审计记录
 
-每次工具调用记录：`audit_ref`、时间、`client_ref`、工具、外部目标句柄、权限/批准引用、结果状态、耗时、可撤销性、参数结构摘要和内容 digest。敏感正文只记录存在性、大小和单向 digest；不记录秘密、完整命令、终端文本、文件内容、剪贴板或画面像素。
+当前有界内存审计为每次已接收或已执行的工具动作记录：`audit_ref`、时间、`client_ref`、工具名、外部目标摘要的 SHA-256、授权路径（无需确认、应用批准或完全权限跳过）和结果状态。对外查询再移除 `client_ref`，且只能读取当前客户端自己的记录。不记录秘密、完整命令、终端文本、文件内容、剪贴板或画面像素。
 
 审计策略还必须做到：
 
-- 请求、结果、MCP protocol error 和取消路径在构造日志前脱敏；
+- 已进入工具执行/批准路径的请求与结果在构造记录前脱敏；认证失败和底层 MCP protocol error 当前不进入这份产品审计；
 - 凭据写入和云同步的秘密只记录“使用了受保护输入”，不记录值、存储账户或密文；
 - `mcp_audit_search` 只能查询当前授权客户端自己的记录，且再做字段投影；
-- 句柄撤销、客户端停用、服务关闭和应用退出均为可审计事件。
+- 句柄撤销、客户端停用、服务关闭、耗时和审批引用仍属于后续持久审计系统范围，当前不会伪装成已有字段。
 
 ## 6. 数据与秘密规则
 
@@ -412,17 +407,17 @@ RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控�
 |---|---|---|
 | MCP 协议与临时 HTTP 处理 | 官方 Rust SDK `rmcp` 支持 MCP `2026-07-28`；`oxideterm-acp-host-tools` 已有旧协议回环 listener、限流、取消和授权头经验 | Public MCP 使用官方 SDK 和独立公共运行时；不得共享 ACP 会话 listener、工具定义或 token。ACP handler 不作为公共协议实现。 |
 | 反向 MCP 客户端 | `oxideterm-ai`、`McpRegistry` 和应用设置中的 MCP 配置 | 明确隔离，防止 Public MCP 的 grant 或 client credential 被外部 MCP 配置使用。 |
-| 连接与凭据 | `oxideterm-connections`、`oxideterm-secret-store`、`SecretString` | 做脱敏 profile 投影、外部 `connection_ref` 映射、受保护存储写入 broker 和 revision/undo 账本。 |
+| 连接与凭据 | `oxideterm-connections`、`oxideterm-secret-store`、`SecretString` | 做脱敏 profile 投影、外部 `connection_ref` 映射、受保护存储写入 broker 和 revision 冲突检查。 |
 | SSH node | `oxideterm-ssh::NodeRouter`、`SshConnectionRegistry`、node runtime store | 为每个 MCP lease 建立专用 `ConnectionConsumer`；只通过 `acquire_connection`/`release_consumer` 使用共享物理 node。 |
-| 终端与命令 | `oxideterm-terminal::TerminalSession` facade、命令标记账本、`SshTransportClient::run_command_capture`、local/SSH/Mosh/Telnet/serial backend | 建立 `terminal_ref`/`command_ref` 表、串行输入队列、受限快照/搜索投影和生命周期事件；SSH exec 通过 NodeRouter 当前物理连接，交互命令按实际可靠性报告；不从 tab 推断活性。 |
-| SFTP/传输 | `oxideterm-sftp`、connection registry 的 SFTP acquire、`oxideterm-trzsz`、`oxideterm-modem-transfer` | 通过真实 SFTP session 建立 file consumer；把大内容改为有界 artifact 和 transfer operation。 |
+| 终端与命令 | `oxideterm-terminal::TerminalSession` facade、`SshTransportClient::run_command_capture`、local/SSH/Mosh/Telnet/serial backend | 建立 `terminal_ref`/`command_ref` 表、受限快照与字面量搜索投影；SSH exec 通过 NodeRouter 当前物理连接，交互终端只提供精确输入与真实 transport 控制，不从 tab 推断活性或伪造退出码。 |
+| SFTP/传输 | `oxideterm-sftp`、connection registry 的 SFTP acquire 与 transfer manager | 通过真实 SFTP session 建立 file consumer；把大内容改为有界 artifact 和单文件 transfer operation。trzsz/modem 仍是终端内协议，不冒充 SFTP 公共工具。 |
 | IDE | `oxideterm-ide-fs`、`oxideterm-ide-core`、`oxideterm-editor-core` | 创建非 GPUI 的 `workspace_ref` 投影，采用结构化 edits 与 revision，而不暴露 editor entity。 |
 | Host Tools | `oxideterm-connection-monitor`、`oxideterm-acp-host-tools`、插件 host-tools adapter | 映射为固定 catalog/capture/operate；禁止把 `runExtension` 或 shell command 原样公开。 |
 | 转发 | `oxideterm-forwarding::ForwardingManager`、registry、事件、profiler | `forward_ref` 映射到规则所有者；listener/bridge 的取消路径归 forward owner，节点断开时级联。 |
 | RDP/VNC | `oxideterm-remote-desktop`、`oxideterm-gpui-remote-desktop`、RDP/VNC helper | 提取应用拥有的会话 broker，向 MCP 投影 frame、状态、严格 input 和剪贴板；不穿透 helper 协议。 |
 | 云同步 | `oxideterm-cloud-sync` 的 preview/apply/upload、`oxideterm-gpui-cloud-sync` | 将 preview 固化为带 revision 的 `sync_plan_ref`，应用前比较 revision，保留实际存在的 checkpoint。 |
 | 插件 | plugin manifest/registry/runtime/host API crate | 仅管理插件生命周期和已审核声明式 adapter；绝不暴露 `api.invoke` 或插件自定义方法。 |
-| 快速命令 | `oxideterm-quick-commands`、应用 product host calls | 公开保存模板和声明参数；运行经确认后投递至真正 terminal，不建立任意函数调用通道。 |
+| 快速命令 | `oxideterm-quick-commands`、应用内存 store | 公开目录、独立正文读取、revision 保护的保存/删除；运行已保存的无参数命令时复用 SSH command owner，不建立任意函数调用通道。 |
 | 录制 | `oxideterm-terminal-recording` | `recording_ref` 管理状态、搜索与有明确内容授权的 export artifact。 |
 | 审计与批准 | 应用已有 AI tool approval 生命周期可作 UI 所有权参考 | 新建 Public MCP 专用 grant、不可变 action、audit 和 undo store；不要共用 AI 对话批准。 |
 
@@ -437,13 +432,13 @@ RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控�
 | 0. 契约冻结 | MCP `2026-07-28` 与旧版兼容、句柄编码、DTO schema、错误码、授权账本、审计字段、client discovery 和 threat model | 评审确认方向是“外部客户端调用 OxideTerm”；验证没有复用反向 MCP 或 ACP 会话的 token；新旧协议得到相同的产品授权结果。 |
 | 1. 服务骨架 | `PublicMcpRuntime`、stdio/回环入口、client registration、基础目录、动态工具可见性、operation/approval/audit store | 未获授权的客户端只看到基础目录；撤销能断开会话并使所有其句柄不可用；Host/Origin/认证校验完整；日志中没有 token/参数正文。 |
 | 2. 连接与节点 | 连接投影、凭据只写 broker、`nodes_*`、节点租约 | 打开和关闭最后一个 MCP terminal 后，另一个 SFTP/forward consumer 仍能使用同一 node；显式 node disconnect 才级联停止。 |
-| 3. 终端、命令与文件 | `terminals_*`、`commands_*`、真实 SFTP、artifact、transfer、IDE、revision/undo | SSH exec 返回真实退出码；交互终端明确完成可靠性；Mosh、Telnet、串口和本地 terminal 只报告真实能力；本地 terminal 保存被拒绝；文件覆盖冲突、取消和实际备份回滚可验证。 |
+| 3. 终端、命令与文件 | `terminals_*`、SSH `commands_*`、真实 SFTP、artifact、transfer、IDE 与 revision 检查 | SSH exec 返回真实退出码；交互终端只提供精确输入而不伪造完成状态；Mosh、Telnet、串口和本地 terminal 只报告真实能力；本地 terminal 保存被拒绝；文件覆盖冲突、取消和多文件编辑的补偿回滚结果可验证。 |
 | 4. Host Tools 与转发 | typed Host Tools catalog、操作确认、forward 生命周期/统计/端口发现 | 无自由 shell/plugin RPC；forward 在 terminal 关闭后仍存活，在节点断开时停止；公开 bind 的确认信息正确。 |
 | 5. 远程桌面 | desktop session broker、frame artifact、input epoch、剪贴板方向授权 | 不泄露 helper protocol；过期 frame epoch 不接受坐标输入；关闭会话销毁 helper、frame 与 clipboard 句柄。 |
 | 6. 同步和产品资产 | sync plan/apply/restore、插件生命周期、快速命令、录制 export | 同步 preview 与 apply revision 不一致时拒绝；秘密引用不出现在 preview；无法真实回滚的外部写入不会返回 `undo_ref`。 |
 | 7. 稳定化 | schema versioning、迁移、压力/断线测试、跨平台 credential 验证、文档和客户端配置向导 | 每组工具都有授权拒绝、批准、取消、撤销、客户端断线、应用退出、重连和审计脱敏测试；在 macOS/Windows/Linux 实际验证受保护存储路径。 |
 
-每一阶段都必须先实现相应的 ownership、撤销和审计，再放开工具组。功能不完整时应从 `mcp_catalog` 报告 `unavailable` 原因，而不是伪造成功、降级为未声明 shell 路径或暴露内部实现。
+每一阶段都必须先实现相应的 ownership、撤销和审计，再放开工具组。当前 `mcp_catalog` 只发布已启用工具和全部可选组的启用状态；尚未实现的目标或参数不进入 schema，调用已接入工具但请求不受支持的真实动作时会明确拒绝，而不是伪造成功、降级为未声明 shell 路径或暴露内部实现。
 
 ## 9. 明确拒绝的接口形态
 
