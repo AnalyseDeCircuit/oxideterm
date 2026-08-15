@@ -21,7 +21,7 @@ use crate::{
     artifact::ArtifactStore,
     audit::{AuditAuthorization, AuditStore},
     auth::{ClientApprovalMode, ClientProjection, ClientRegistry, ToolGroup},
-    broker::DomainBroker,
+    broker::{BrokerError, DomainBroker},
     calls::{
         AddonsInstallArgs, AddonsListArgs, AddonsRemoveArgs, AddonsSetEnabledArgs, AuditSearchArgs,
         BrowseConnectionsArgs, CancelCommandArgs, CancelOperationArgs, CommandOutputArgs,
@@ -411,19 +411,34 @@ impl PublicMcpService {
         } else {
             AuditAuthorization::NotRequired
         };
-        self.execute_approved_call(client.client_ref.clone(), call, authorization)
-            .await
+        self.execute_approved_call(
+            client.client_ref.clone(),
+            client.approval_mode,
+            call,
+            authorization,
+        )
+        .await
     }
 
     async fn execute_approved_call(
         &self,
         client_ref: ClientRef,
+        expected_approval_mode: ClientApprovalMode,
         call: PublicToolCall,
         authorization: AuditAuthorization,
     ) -> CallToolResult {
         let tool_name = call.tool_name().to_owned();
         let target = call.target_summary();
-        let response = self.state.broker.execute(client_ref.clone(), call).await;
+        let response = self
+            .state
+            .broker
+            .execute(
+                &self.state.clients,
+                expected_approval_mode,
+                client_ref.clone(),
+                call,
+            )
+            .await;
         match response {
             Ok(envelope) => {
                 self.state.audit.record_fields(
@@ -443,7 +458,11 @@ impl PublicMcpService {
                     authorization,
                     ToolOutcome::Failed,
                 );
-                tool_error("workspace_unavailable", error.to_string())
+                let error_code = match error {
+                    BrokerError::AuthorizationChanged => "authorization_changed",
+                    _ => "workspace_unavailable",
+                };
+                tool_error(error_code, error.to_string())
             }
         }
     }
@@ -478,6 +497,7 @@ impl PublicMcpService {
         }
         self.execute_approved_call(
             client.client_ref.clone(),
+            client.approval_mode,
             call,
             AuditAuthorization::AppApproval,
         )

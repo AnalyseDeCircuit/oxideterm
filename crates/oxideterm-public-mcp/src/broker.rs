@@ -6,7 +6,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
-    auth::ToolGroup,
+    auth::{ClientApprovalMode, ClientRegistry, ToolGroup},
     calls::{PublicToolCall, ToolEnvelope},
     handles::ClientRef,
 };
@@ -96,6 +96,8 @@ pub enum BrokerError {
     ResponseDropped,
     #[error("the OxideTerm workspace did not complete the request in time")]
     TimedOut,
+    #[error("the MCP client authorization changed before the request was delivered")]
+    AuthorizationChanged,
 }
 
 const DOMAIN_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
@@ -116,6 +118,8 @@ impl DomainBroker {
 
     pub async fn execute(
         &self,
+        clients: &ClientRegistry,
+        expected_approval_mode: ClientApprovalMode,
         client_ref: ClientRef,
         call: PublicToolCall,
     ) -> Result<ToolEnvelope, BrokerError> {
@@ -137,8 +141,21 @@ impl DomainBroker {
         let (response, receiver) = oneshot::channel();
         let cancellation = CancellationToken::new();
         let cancellation_guard = cancellation.clone().drop_guard();
-        let active_request_guard =
-            self.track_active_request(client_ref.clone(), required_groups, cancellation.clone());
+        let active_request_guard = self.track_active_request(
+            client_ref.clone(),
+            required_groups.clone(),
+            cancellation.clone(),
+        );
+        let authorized = clients.get(&client_ref).is_some_and(|client| {
+            client.enabled
+                && client.approval_mode == expected_approval_mode
+                && required_groups
+                    .iter()
+                    .all(|group| client.tool_groups.contains(group))
+        });
+        if !authorized {
+            return Err(BrokerError::AuthorizationChanged);
+        }
         self.sender
             .send(DomainMessage::Request(Box::new(DomainRequest {
                 client_ref,
