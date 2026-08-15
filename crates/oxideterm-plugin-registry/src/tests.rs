@@ -483,6 +483,25 @@ fn plugin_package_rejects_zip_slip_and_checksum_mismatch_without_replacing_exist
     .unwrap_err();
     assert!(bad_path_error.contains("escapes target dir"));
 
+    let mismatched_identity = plugin_package(&[(
+        "plugin.json",
+        manifest_json("com.example.unexpected", "1.0.0"),
+    )]);
+    let identity_error = NativePluginRegistry::install_managed_plugin_package(
+        &settings_path,
+        "com.example.expected",
+        None,
+        &mismatched_identity,
+        false,
+    )
+    .unwrap_err();
+    assert!(identity_error.contains("Plugin ID mismatch"));
+    assert!(
+        !native_plugins_dir(&settings_path)
+            .join("com.example.unexpected")
+            .exists()
+    );
+
     let replacement =
         plugin_package(&[("plugin.json", manifest_json("com.example.demo", "2.0.0"))]);
     let checksum_error = NativePluginRegistry::install_plugin_package_from_bytes(

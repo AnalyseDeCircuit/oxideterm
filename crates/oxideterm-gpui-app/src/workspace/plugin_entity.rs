@@ -694,6 +694,46 @@ impl PluginWorkspaceEntity {
         true
     }
 
+    pub(in crate::workspace) fn start_managed_package_install(
+        &mut self,
+        settings_path: PathBuf,
+        expected_id: String,
+        checksum: String,
+        package_bytes: Zeroizing<Vec<u8>>,
+        overwrite: bool,
+    ) -> Option<
+        tokio::sync::oneshot::Receiver<Result<plugin_host::NativePluginUrlInstallResult, String>>,
+    > {
+        if self.manager_operation_in_flight || self.release_shutdown_started {
+            return None;
+        }
+        self.manager_operation_in_flight = true;
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        self.spawn_owned_task(async move {
+            // The package bytes stay zeroizing while the registry validates and extracts them.
+            let result = plugin_host::NativePluginRegistry::install_managed_plugin_package(
+                &settings_path,
+                &expected_id,
+                Some(&checksum),
+                &package_bytes,
+                overwrite,
+            );
+            let _ = result_tx.send(result);
+        });
+        Some(result_rx)
+    }
+
+    pub(in crate::workspace) fn finish_managed_package_install(
+        &mut self,
+        settings_path: &Path,
+        installed: bool,
+    ) {
+        self.manager_operation_in_flight = false;
+        if installed {
+            self.replace_registry(plugin_host::NativePluginRegistry::discover(settings_path));
+        }
+    }
+
     pub(in crate::workspace) fn start_update_check(
         &mut self,
         registry_url: Zeroizing<String>,

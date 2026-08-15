@@ -23,10 +23,11 @@ use crate::{
     auth::{ClientApprovalMode, ClientProjection, ClientRegistry, ToolGroup},
     broker::DomainBroker,
     calls::{
-        AuditSearchArgs, BrowseConnectionsArgs, CancelCommandArgs, CommandOutputArgs,
-        CommandStateArgs, ConnectNodeArgs, DescribeConnectionArgs, DisconnectNodeArgs,
-        HostToolsCaptureArgs, HostToolsCatalogArgs, HostToolsOperateArgs, InspectNodeArgs,
-        PublicToolCall, QuickCommandsDescribeArgs, QuickCommandsListArgs, QuickCommandsRemoveArgs,
+        AddonsInstallArgs, AddonsListArgs, AddonsRemoveArgs, AddonsSetEnabledArgs, AuditSearchArgs,
+        BrowseConnectionsArgs, CancelCommandArgs, CommandOutputArgs, CommandStateArgs,
+        ConnectNodeArgs, DescribeConnectionArgs, DisconnectNodeArgs, HostToolsCaptureArgs,
+        HostToolsCatalogArgs, HostToolsOperateArgs, InspectNodeArgs, PublicToolCall,
+        QuickCommandsDescribeArgs, QuickCommandsListArgs, QuickCommandsRemoveArgs,
         QuickCommandsRunArgs, QuickCommandsSaveArgs, ReadArtifactArgs, ReleaseNodeArgs,
         StageArtifactArgs, StartCommandArgs, ToolEnvelope, ToolOutcome,
     },
@@ -509,6 +510,38 @@ impl ServerHandler for PublicMcpService {
                 ),
                 Err(error) => *error,
             },
+            "addons_list" => match parse_arguments::<AddonsListArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::AddonsList(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "addons_install" => match parse_arguments::<AddonsInstallArgs>(arguments) {
+                Ok(args) if managed_addon_install_args_are_valid(&args) => {
+                    self.execute_call(&client, PublicToolCall::AddonsInstall(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "The expected identity and SHA-256 checksum must be valid",
+                ),
+                Err(error) => *error,
+            },
+            "addons_set_enabled" => match parse_arguments::<AddonsSetEnabledArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::AddonsSetEnabled(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "addons_remove" => match parse_arguments::<AddonsRemoveArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::AddonsRemove(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
             _ => tool_error("unknown_tool", "The requested tool is not implemented"),
         };
         Ok(result.into())
@@ -698,6 +731,34 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             false,
             true,
         ),
+        define_tool::<AddonsListArgs>(
+            "addons_list",
+            "List installed addon metadata without exposing local paths or plugin call surfaces.",
+            ToolGroup::AddonRead,
+            true,
+            false,
+        ),
+        define_tool::<AddonsInstallArgs>(
+            "addons_install",
+            "Install a checksum-verified addon package from a client-owned temporary artifact.",
+            ToolGroup::AddonManage,
+            false,
+            true,
+        ),
+        define_tool::<AddonsSetEnabledArgs>(
+            "addons_set_enabled",
+            "Enable or disable an installed addon through OxideTerm's managed lifecycle.",
+            ToolGroup::AddonManage,
+            false,
+            true,
+        ),
+        define_tool::<AddonsRemoveArgs>(
+            "addons_remove",
+            "Remove an installed addon while explicitly choosing whether to retain its settings.",
+            ToolGroup::AddonManage,
+            false,
+            true,
+        ),
     ]
 }
 
@@ -847,6 +908,19 @@ fn parse_quick_commands_save(
         host_pattern: metadata.host_pattern,
         expected_revision: metadata.expected_revision,
     })
+}
+
+fn managed_addon_install_args_are_valid(args: &AddonsInstallArgs) -> bool {
+    let expected_identity = args.expected_identity.trim();
+    let checksum = args
+        .checksum
+        .strip_prefix("sha256:")
+        .unwrap_or(&args.checksum);
+    !expected_identity.is_empty()
+        && expected_identity.len() <= 255
+        && !expected_identity.chars().any(char::is_control)
+        && checksum.len() == 64
+        && checksum.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn envelope_result(envelope: ToolEnvelope) -> CallToolResult {

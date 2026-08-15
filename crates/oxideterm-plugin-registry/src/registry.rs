@@ -118,16 +118,32 @@ impl NativePluginRegistry {
         checksum: Option<&str>,
         package_bytes: &[u8],
     ) -> Result<NativePluginManifest, String> {
+        Self::install_managed_plugin_package(
+            settings_path,
+            expected_id,
+            checksum,
+            package_bytes,
+            true,
+        )
+        .map(|result| result.manifest)
+    }
+
+    /// Installs a verified package only after its manifest identity is known.
+    pub fn install_managed_plugin_package(
+        settings_path: &Path,
+        expected_id: &str,
+        checksum: Option<&str>,
+        package_bytes: &[u8],
+        overwrite: bool,
+    ) -> Result<NativePluginUrlInstallResult, String> {
         validate_native_plugin_id(expected_id)?;
-        let result =
-            install_native_plugin_package_bytes(settings_path, package_bytes, checksum, true)?;
-        if result.manifest.id != expected_id {
-            return Err(format!(
-                "Plugin ID mismatch: expected \"{}\", got \"{}\"",
-                expected_id, result.manifest.id
-            ));
-        }
-        Ok(result.manifest)
+        install_native_plugin_package_bytes(
+            settings_path,
+            package_bytes,
+            checksum,
+            overwrite,
+            Some(expected_id),
+        )
     }
 
     #[allow(dead_code)]
@@ -137,7 +153,7 @@ impl NativePluginRegistry {
         checksum: Option<&str>,
         overwrite: bool,
     ) -> Result<NativePluginUrlInstallResult, String> {
-        install_native_plugin_package_bytes(settings_path, package_bytes, checksum, overwrite)
+        install_native_plugin_package_bytes(settings_path, package_bytes, checksum, overwrite, None)
     }
 
     #[allow(dead_code)]
@@ -200,7 +216,7 @@ impl NativePluginRegistry {
             .bytes()
             .await
             .map_err(|error| format!("Failed to read download body: {error}"))?;
-        install_native_plugin_package_bytes(settings_path, &bytes, checksum, overwrite)
+        install_native_plugin_package_bytes(settings_path, &bytes, checksum, overwrite, None)
     }
 
     #[allow(dead_code)]

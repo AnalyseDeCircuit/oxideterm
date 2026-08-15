@@ -38,6 +38,11 @@ pub struct ArtifactPage {
     pub next_offset: Option<u64>,
 }
 
+pub struct ArtifactContent {
+    pub projection: ArtifactProjection,
+    pub bytes: Zeroizing<Vec<u8>>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ArtifactError {
     #[error("the temporary artifact store is unavailable")]
@@ -48,6 +53,8 @@ pub enum ArtifactError {
     NotFound,
     #[error("the requested artifact range is invalid")]
     InvalidRange,
+    #[error("the artifact exceeds the supported size for this operation")]
+    TooLarge,
     #[error("the artifact name is invalid")]
     InvalidName,
     #[error("the artifact media type is invalid")]
@@ -183,6 +190,37 @@ impl ArtifactStore {
             offset,
             bytes,
             next_offset: (next < record.projection.size).then_some(next),
+        })
+    }
+
+    /// Reads an owned artifact for a bounded internal product operation.
+    pub fn read_all(
+        &self,
+        client_ref: &ClientRef,
+        artifact_ref: &ArtifactRef,
+        maximum_size: u64,
+    ) -> Result<ArtifactContent, ArtifactError> {
+        let mut state = self.state.lock();
+        cleanup_expired(&mut state);
+        let record = state
+            .records
+            .get(artifact_ref)
+            .filter(|record| &record.client_ref == client_ref)
+            .ok_or(ArtifactError::NotFound)?;
+        if record.projection.size > maximum_size {
+            return Err(ArtifactError::TooLarge);
+        }
+        let buffer_length =
+            usize::try_from(record.projection.size).map_err(|_| ArtifactError::TooLarge)?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .open(&record.private_path)
+            .map_err(ArtifactError::Read)?;
+        let mut bytes = Zeroizing::new(vec![0; buffer_length]);
+        file.read_exact(&mut bytes).map_err(ArtifactError::Read)?;
+        Ok(ArtifactContent {
+            projection: record.projection.clone(),
+            bytes,
         })
     }
 

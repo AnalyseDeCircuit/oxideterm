@@ -17,7 +17,9 @@ pub mod service;
 pub use approval::{
     ApprovalError, ApprovalProjection, ApprovalReview, ApprovalStatus, ApprovalStore,
 };
-pub use artifact::{ArtifactError, ArtifactPage, ArtifactProjection, ArtifactStore};
+pub use artifact::{
+    ArtifactContent, ArtifactError, ArtifactPage, ArtifactProjection, ArtifactStore,
+};
 pub use audit::{
     AuditAuthorization, AuditPage, AuditProjection, AuditQuery, AuditRecord, AuditStore,
 };
@@ -31,8 +33,8 @@ pub use calls::{
     ToolOutcome,
 };
 pub use handles::{
-    ApprovalRef, ArtifactRef, AuditRef, ClientRef, CommandRef, ConnectionRef, HandleParseError,
-    NodeRef, OperationRef, QuickCommandRef, TerminalRef,
+    AddonRef, ApprovalRef, ArtifactRef, AuditRef, ClientRef, CommandRef, ConnectionRef,
+    HandleParseError, NodeRef, OperationRef, QuickCommandRef, TerminalRef,
 };
 pub use runtime::{PublicMcpHttpServer, start_http_server};
 pub use service::{PublicMcpService, PublicMcpState};

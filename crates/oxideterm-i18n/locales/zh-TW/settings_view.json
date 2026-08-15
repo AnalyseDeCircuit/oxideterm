@@ -1498,6 +1498,8 @@
       "mcp_group_quick_command_content_read": "快速命令正文",
       "mcp_group_quick_command_manage": "快速命令管理",
       "mcp_group_quick_command_execute": "快速命令執行",
+      "mcp_group_addon_read": "外掛目錄",
+      "mcp_group_addon_manage": "外掛管理",
       "client_enabled": "已啟用",
       "client_disabled": "已停用",
       "enable_client": "啟用",

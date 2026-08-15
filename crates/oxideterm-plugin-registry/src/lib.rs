@@ -93,6 +93,9 @@ pub use validation::{
     validate_native_plugin_id, validate_plugin_relative_path,
 };
 
+/// Maximum package size accepted by every managed plugin install path.
+pub const NATIVE_PLUGIN_PACKAGE_MAX_BYTES: u64 = PLUGIN_PACKAGE_MAX_BYTES;
+
 // Internal modules intentionally share helper functions through the crate root;
 // that keeps the split mechanical while the public API remains explicit above.
 pub(crate) use constants::*;

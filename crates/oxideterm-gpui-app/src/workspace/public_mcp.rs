@@ -9,8 +9,9 @@ use base64::Engine;
 use gpui::{App, Context, Task};
 use oxideterm_connections::{ConnectionInfo, ConnectionStore};
 use oxideterm_gpui_terminal::{TerminalNotice, TerminalNoticeVariant};
+use oxideterm_plugin_registry as plugin_host;
 use oxideterm_public_mcp::{
-    ApprovalRef, ApprovalStatus, AuditQuery, ClientApprovalMode, ClientCredential,
+    AddonRef, ApprovalRef, ApprovalStatus, AuditQuery, ClientApprovalMode, ClientCredential,
     ClientProjection, ClientRef, ClientRegistry, CommandRef, ConnectionRef, DomainBroker,
     DomainMessage, DomainRequest, DomainRequestReceiver, NodeRef, PublicMcpHttpServer,
     PublicMcpState, PublicToolCall, QuickCommandRef, ToolEnvelope, ToolGroup, ToolOutcome,
@@ -26,6 +27,7 @@ use zeroize::Zeroizing;
 
 use super::WorkspaceApp;
 
+mod addons;
 mod host_tools;
 mod quick_commands;
 
@@ -53,6 +55,8 @@ pub(in crate::workspace) struct PublicMcpWorkspaceBridge {
     connection_ids: HashMap<ConnectionRef, (ClientRef, String)>,
     quick_command_refs: HashMap<(ClientRef, String), QuickCommandRef>,
     quick_command_ids: HashMap<QuickCommandRef, (ClientRef, String)>,
+    addon_refs: HashMap<(ClientRef, String), AddonRef>,
+    addon_ids: HashMap<AddonRef, (ClientRef, String)>,
     runtime_handles: Arc<Mutex<PublicMcpRuntimeHandles>>,
 }
 
@@ -180,6 +184,8 @@ impl PublicMcpWorkspaceBridge {
             connection_ids: HashMap::new(),
             quick_command_refs: HashMap::new(),
             quick_command_ids: HashMap::new(),
+            addon_refs: HashMap::new(),
+            addon_ids: HashMap::new(),
             runtime_handles: Arc::default(),
         }
     }
@@ -406,6 +412,7 @@ impl PublicMcpWorkspaceBridge {
         target: &str,
         store: &ConnectionStore,
         node_router: &NodeRouter,
+        plugin_registry: &plugin_host::NativePluginRegistry,
     ) -> String {
         if let Some(quickcommand_ref) = target
             .split_whitespace()
@@ -431,6 +438,22 @@ impl PublicMcpWorkspaceBridge {
                 "{} ({}@{}:{})",
                 connection.name, connection.username, connection.host, connection.port
             );
+        }
+        let (addon_target, addon_action) = target.split_once(' ').unwrap_or((target, ""));
+        if let Ok(addon_ref) = addon_target.parse::<AddonRef>()
+            && let Some((owner, plugin_id)) = self.addon_ids.get(&addon_ref)
+            && owner == client_ref
+            && let Some(plugin) = plugin_registry
+                .plugins()
+                .iter()
+                .find(|plugin| &plugin.manifest.id == plugin_id)
+        {
+            return format!(
+                "{} ({}) {}",
+                plugin.manifest.name, plugin.manifest.id, addon_action
+            )
+            .trim()
+            .to_owned();
         }
         if let Ok(node_ref) = target.parse::<NodeRef>()
             && let Some(lease) = self.runtime_handles.lock().nodes.get(&node_ref).cloned()
@@ -520,6 +543,7 @@ impl WorkspaceApp {
                 .revoke_client_runtime(client_ref, &self.node_router);
             self.public_mcp.remove_client_connection_refs(client_ref);
             self.public_mcp.remove_client_quick_command_refs(client_ref);
+            self.public_mcp.remove_client_addon_refs(client_ref);
         }
         Ok(())
     }
@@ -570,7 +594,9 @@ impl WorkspaceApp {
                 | ToolGroup::HostToolsOperate
                 | ToolGroup::QuickCommandRead
                 | ToolGroup::QuickCommandContentRead
-                | ToolGroup::QuickCommandManage => {}
+                | ToolGroup::QuickCommandManage
+                | ToolGroup::AddonRead
+                | ToolGroup::AddonManage => {}
             }
         }
         Ok(())
@@ -585,6 +611,7 @@ impl WorkspaceApp {
             .revoke_client_runtime(client_ref, &self.node_router);
         self.public_mcp.remove_client_connection_refs(client_ref);
         self.public_mcp.remove_client_quick_command_refs(client_ref);
+        self.public_mcp.remove_client_addon_refs(client_ref);
         Ok(())
     }
 
@@ -592,12 +619,15 @@ impl WorkspaceApp {
         &self,
         client_ref: &ClientRef,
         target: &str,
+        cx: &App,
     ) -> String {
+        let plugin_registry = self.plugin_entity.read(cx).registry_snapshot();
         self.public_mcp.target_label(
             client_ref,
             target,
             &self.connection_store,
             &self.node_router,
+            &plugin_registry,
         )
     }
 
@@ -661,6 +691,12 @@ impl WorkspaceApp {
             PublicToolCall::QuickCommandsRun(_) => {
                 self.handle_public_mcp_quick_commands_run(request)
             }
+            PublicToolCall::AddonsList(_) => self.handle_public_mcp_addons_list(request, cx),
+            PublicToolCall::AddonsInstall(_) => self.handle_public_mcp_addons_install(request, cx),
+            PublicToolCall::AddonsSetEnabled(_) => {
+                self.handle_public_mcp_addons_set_enabled(request, cx)
+            }
+            PublicToolCall::AddonsRemove(_) => self.handle_public_mcp_addons_remove(request, cx),
         }
     }
 
@@ -1358,22 +1394,12 @@ fn connection_directory_matches_query(connection: &ConnectionInfo, query: &str) 
 }
 
 fn all_tool_groups() -> BTreeSet<ToolGroup> {
-    BTreeSet::from([
-        ToolGroup::Basic,
-        ToolGroup::ConnectionDirectory,
-        ToolGroup::ConnectionRead,
-        ToolGroup::NodeSession,
-        ToolGroup::CommandObserve,
-        ToolGroup::CommandExecute,
-        ToolGroup::AuditRead,
-        ToolGroup::ArtifactTransfer,
-        ToolGroup::HostToolsObserve,
-        ToolGroup::HostToolsOperate,
-        ToolGroup::QuickCommandRead,
-        ToolGroup::QuickCommandContentRead,
-        ToolGroup::QuickCommandManage,
-        ToolGroup::QuickCommandExecute,
-    ])
+    let mut tool_groups = ToolGroup::selectable()
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    tool_groups.insert(ToolGroup::Basic);
+    tool_groups
 }
 
 fn finish_serialized(request: DomainRequest, value: serde_json::Value) {

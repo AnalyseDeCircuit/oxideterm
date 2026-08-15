@@ -10,6 +10,7 @@ pub(crate) fn install_native_plugin_package_bytes(
     package_bytes: &[u8],
     checksum: Option<&str>,
     overwrite: bool,
+    expected_id: Option<&str>,
 ) -> Result<NativePluginUrlInstallResult, String> {
     if package_bytes.len() as u64 > PLUGIN_PACKAGE_MAX_BYTES {
         return Err(format!(
@@ -40,6 +41,14 @@ pub(crate) fn install_native_plugin_package_bytes(
         let manifest = read_native_plugin_manifest_from_dir(&source_dir)?;
         validate_native_plugin_id(&manifest.id)
             .map_err(|error| format!("Invalid plugin ID in manifest: {error}"))?;
+        if let Some(expected_id) = expected_id
+            && manifest.id != expected_id
+        {
+            return Err(format!(
+                "Plugin ID mismatch: expected \"{expected_id}\", got \"{}\"",
+                manifest.id
+            ));
+        }
         let dest_dir = plugins_dir.join(&manifest.id);
         let backup_dir = plugins_dir.join(format!(".{}-backup", manifest.id));
         let replaced_existing = dest_dir.exists();

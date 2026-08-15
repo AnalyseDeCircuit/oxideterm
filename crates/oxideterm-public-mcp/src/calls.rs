@@ -7,7 +7,9 @@ use zeroize::Zeroizing;
 
 use crate::{
     auth::ToolGroup,
-    handles::{ArtifactRef, AuditRef, CommandRef, ConnectionRef, NodeRef, QuickCommandRef},
+    handles::{
+        AddonRef, ArtifactRef, AuditRef, CommandRef, ConnectionRef, NodeRef, QuickCommandRef,
+    },
 };
 
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
@@ -281,6 +283,34 @@ pub struct QuickCommandsRunArgs {
     pub arguments: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct AddonsListArgs {
+    #[serde(default)]
+    pub include_disabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct AddonsInstallArgs {
+    pub artifact_ref: ArtifactRef,
+    pub expected_identity: String,
+    pub checksum: String,
+    #[serde(default)]
+    pub replace_existing: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct AddonsSetEnabledArgs {
+    pub addon_ref: AddonRef,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct AddonsRemoveArgs {
+    pub addon_ref: AddonRef,
+    #[serde(default)]
+    pub retain_settings: Option<bool>,
+}
+
 fn default_output_limit() -> u32 {
     64 * 1024
 }
@@ -319,6 +349,10 @@ pub enum PublicToolCall {
     QuickCommandsSave(Box<QuickCommandsSaveArgs>),
     QuickCommandsRemove(QuickCommandsRemoveArgs),
     QuickCommandsRun(QuickCommandsRunArgs),
+    AddonsList(AddonsListArgs),
+    AddonsInstall(AddonsInstallArgs),
+    AddonsSetEnabled(AddonsSetEnabledArgs),
+    AddonsRemove(AddonsRemoveArgs),
 }
 
 impl PublicToolCall {
@@ -345,6 +379,10 @@ impl PublicToolCall {
             Self::QuickCommandsSave(_) => "quickcommands_save",
             Self::QuickCommandsRemove(_) => "quickcommands_remove",
             Self::QuickCommandsRun(_) => "quickcommands_run",
+            Self::AddonsList(_) => "addons_list",
+            Self::AddonsInstall(_) => "addons_install",
+            Self::AddonsSetEnabled(_) => "addons_set_enabled",
+            Self::AddonsRemove(_) => "addons_remove",
         }
     }
 
@@ -368,6 +406,10 @@ impl PublicToolCall {
                 ToolGroup::QuickCommandManage
             }
             Self::QuickCommandsRun(_) => ToolGroup::QuickCommandExecute,
+            Self::AddonsList(_) => ToolGroup::AddonRead,
+            Self::AddonsInstall(_) | Self::AddonsSetEnabled(_) | Self::AddonsRemove(_) => {
+                ToolGroup::AddonManage
+            }
         }
     }
 
@@ -381,6 +423,9 @@ impl PublicToolCall {
                 | Self::QuickCommandsSave(_)
                 | Self::QuickCommandsRemove(_)
                 | Self::QuickCommandsRun(_)
+                | Self::AddonsInstall(_)
+                | Self::AddonsSetEnabled(_)
+                | Self::AddonsRemove(_)
         )
     }
 
@@ -416,6 +461,25 @@ impl PublicToolCall {
             Self::QuickCommandsRun(args) => {
                 format!("{} on {}", args.quickcommand_ref, args.node_ref)
             }
+            Self::AddonsList(_) => "addon catalog".to_owned(),
+            Self::AddonsInstall(args) => format!(
+                "{} sha256:{} replace_existing={}",
+                args.expected_identity,
+                args.checksum
+                    .strip_prefix("sha256:")
+                    .unwrap_or(&args.checksum),
+                args.replace_existing
+            ),
+            Self::AddonsSetEnabled(args) => format!(
+                "{} {}",
+                args.addon_ref,
+                if args.enabled { "enable" } else { "disable" }
+            ),
+            Self::AddonsRemove(args) => format!(
+                "{} remove retain_settings={}",
+                args.addon_ref,
+                args.retain_settings.unwrap_or(true)
+            ),
         }
     }
 }
