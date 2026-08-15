@@ -989,6 +989,7 @@ impl WorkspaceApp {
                     form.username = saved.username.unwrap_or_default();
                     form.group = saved.group.unwrap_or_default();
                     form.remote_desktop_session_options = saved.session_options;
+                    form.remote_desktop_ssh_gateway_connection_id = saved.ssh_gateway_connection_id;
                     form.error = Some(password_required);
                     form.focused_field = NewConnectionField::Password;
                 }
@@ -1000,13 +1001,20 @@ impl WorkspaceApp {
             label: saved.name,
             protocol: saved.protocol,
             endpoint: RemoteDesktopEndpoint::new(saved.host, saved.port),
+            transport_endpoint: None,
             username: saved.username,
             domain: saved.domain,
             credential_ref: saved.credential_ref,
             read_only: saved.read_only,
             session_options: saved.session_options,
         };
-        self.open_remote_desktop_connection_tab(profile, password, window, cx);
+        self.open_remote_desktop_connection_with_gateway(
+            profile,
+            password,
+            saved.ssh_gateway_connection_id,
+            window,
+            cx,
+        );
         let _ = self.connection_store.mark_remote_desktop_profile_used(id);
         self.queue_cloud_sync_dirty_refresh(cx);
     }

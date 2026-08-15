@@ -166,7 +166,10 @@ pub(super) async fn connect_native_rdp(
 ) -> connector::ConnectorResult<(ConnectionResult, UpgradedRdpFramed, EgfxSessionBridge)> {
     let mut deferred_inputs = VecDeque::new();
     let socket = {
-        let connect = TcpStream::connect((config.destination.host(), config.destination.port()));
+        let connect = TcpStream::connect((
+            config.transport_destination.host(),
+            config.transport_destination.port(),
+        ));
         tokio::pin!(connect);
         loop {
             tokio::select! {

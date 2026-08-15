@@ -178,7 +178,7 @@ fn apply_oxide_import_with_options_inner(
             })?;
         }
     }
-    let remote_desktop_profiles_snapshot = remote_desktop_profiles_json
+    let mut remote_desktop_profiles_snapshot = remote_desktop_profiles_json
         .as_deref()
         .map(|snapshot_json| {
             serde_json::from_str::<RemoteDesktopProfilesSyncSnapshot>(snapshot_json).map_err(
@@ -250,16 +250,36 @@ fn apply_oxide_import_with_options_inner(
     result.restored_managed_key_passphrases = credential_counts.restored_managed_key_passphrases;
     result.restored_privilege_credentials = credential_counts.restored_privilege_credentials;
     result.skipped_sensitive_credentials = credential_counts.skipped_sensitive_credentials;
+    let mut seen_source_connection_ids = HashSet::new();
+    for connection in &selected_connections {
+        let Some(source_connection_id) = connection.source_connection_id.as_deref() else {
+            continue;
+        };
+        // Archive-local relation keys must be unique before any import action
+        // can use them to resolve a remote desktop gateway.
+        if !seen_source_connection_ids.insert(source_connection_id) {
+            return Err(OxideFileError::InvalidFormat(format!(
+                "Duplicate source connection id in .oxide payload: {source_connection_id}"
+            )));
+        }
+    }
     let mut connections_to_save = Vec::new();
+    let mut imported_connection_ids = HashMap::<String, String>::new();
     let mut restored_managed_keys = HashMap::new();
     let mut imported_managed_keys = Vec::new();
 
     current_step += 1;
     report_progress("preparing_connections", current_step);
     for (conn, action) in selected_connections.into_iter().zip(plans) {
-        match action {
+        let source_connection_id = conn.source_connection_id.clone();
+        let imported_connection_id = match action {
             PlannedImportAction::Skip => {
                 result.skipped += 1;
+                store
+                    .connections()
+                    .iter()
+                    .find(|existing| existing.name == conn.name)
+                    .map(|existing| existing.id.clone())
             }
             PlannedImportAction::Import => {
                 let saved = encrypted_connection_to_saved(
@@ -275,8 +295,10 @@ fn apply_oxide_import_with_options_inner(
                     result.imported_forwards += saved.1.len();
                     result.forward_records.extend(saved.1);
                 }
+                let imported_id = saved.0.id.clone();
                 connections_to_save.push(saved.0);
                 result.imported += 1;
+                Some(imported_id)
             }
             PlannedImportAction::Rename(new_name) => {
                 let original = conn.name.clone();
@@ -293,10 +315,12 @@ fn apply_oxide_import_with_options_inner(
                     result.imported_forwards += saved.1.len();
                     result.forward_records.extend(saved.1);
                 }
+                let imported_id = saved.0.id.clone();
                 connections_to_save.push(saved.0);
                 result.imported += 1;
                 result.renamed += 1;
                 result.renames.push((original, new_name));
+                Some(imported_id)
             }
             PlannedImportAction::Replace(existing_id) => {
                 let saved = encrypted_connection_to_saved(
@@ -316,6 +340,7 @@ fn apply_oxide_import_with_options_inner(
                 connections_to_save.push(saved.0);
                 result.imported += 1;
                 result.replaced += 1;
+                Some(existing_id)
             }
             PlannedImportAction::Merge(existing_id) => {
                 let existing = store.get(&existing_id).cloned();
@@ -337,12 +362,31 @@ fn apply_oxide_import_with_options_inner(
                 if options.import_forwards {
                     result.imported_forwards += forward_records.len();
                     result.forward_records.extend(forward_records);
-                    result.forward_merge_owner_ids.push(existing_id);
+                    result.forward_merge_owner_ids.push(existing_id.clone());
                 }
                 connections_to_save.push(merged);
                 result.imported += 1;
                 result.merged += 1;
+                Some(existing_id)
             }
+        };
+        if let (Some(source_connection_id), Some(imported_connection_id)) =
+            (source_connection_id, imported_connection_id)
+        {
+            imported_connection_ids.insert(source_connection_id, imported_connection_id);
+        }
+    }
+
+    if let Some(snapshot) = remote_desktop_profiles_snapshot.as_mut() {
+        for profile in &mut snapshot.records {
+            let Some(source_connection_id) = profile.ssh_gateway_connection_id.as_deref() else {
+                continue;
+            };
+            // Archive-local relation ids are remapped to the imported saved
+            // connection and are cleared when their dependency was omitted.
+            profile.ssh_gateway_connection_id = imported_connection_ids
+                .get(source_connection_id)
+                .cloned();
         }
     }
 

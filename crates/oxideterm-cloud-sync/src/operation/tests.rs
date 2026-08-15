@@ -95,7 +95,7 @@ fn remote_desktop_cloud_metadata_omits_device_local_credential_refs() {
 }
 
 #[test]
-fn remote_desktop_apply_preserves_only_the_current_devices_credential_ref() {
+fn remote_desktop_apply_preserves_local_credentials_and_valid_gateway_refs() {
     let path = std::env::temp_dir().join(format!(
         "oxideterm-cloud-sync-remote-desktop-{}.json",
         uuid::Uuid::new_v4()
@@ -104,16 +104,38 @@ fn remote_desktop_apply_preserves_only_the_current_devices_credential_ref() {
     store_data.remote_desktop_profiles =
         remote_desktop_snapshot(Some("current-device-keychain-entry"), "desktop.test").records;
     std::fs::write(&path, serde_json::to_vec(&store_data).unwrap()).unwrap();
-    let store = ConnectionStore::load(&path).expect("connection store should load");
+    let mut store = ConnectionStore::load(&path).expect("connection store should load");
     let mut incoming =
         remote_desktop_snapshot(Some("untrusted-remote-keychain-entry"), "remote.test");
+    incoming.records[0].ssh_gateway_connection_id = Some("conn-1".to_string());
+    let incoming_connections = oxideterm_connections::SavedConnectionsSyncSnapshot {
+        revision: "incoming-connections".to_string(),
+        exported_at: "2026-07-26T00:00:00Z".to_string(),
+        records: vec![connection_sync_record(
+            oxideterm_connections::ConnectionOptions::default(),
+        )],
+    };
+    let _prepared_connections = store
+        .prepare_saved_connections_snapshot(
+            incoming_connections,
+            oxideterm_connections::SavedConnectionsConflictStrategy::Merge,
+        )
+        .expect("incoming gateway connection should prepare");
 
     preserve_local_remote_desktop_credential_refs(&mut incoming, &store);
+    retain_available_remote_desktop_gateway_refs(&mut incoming, &store);
 
     assert_eq!(
         incoming.records[0].credential_ref.as_deref(),
         Some("current-device-keychain-entry")
     );
+    assert_eq!(
+        incoming.records[0].ssh_gateway_connection_id.as_deref(),
+        Some("conn-1")
+    );
+    incoming.records[0].ssh_gateway_connection_id = Some("missing-gateway".to_string());
+    retain_available_remote_desktop_gateway_refs(&mut incoming, &store);
+    assert!(incoming.records[0].ssh_gateway_connection_id.is_none());
     let _ = std::fs::remove_file(path);
 }
 

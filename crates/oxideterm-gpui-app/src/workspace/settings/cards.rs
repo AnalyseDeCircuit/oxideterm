@@ -1677,6 +1677,7 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
             | SelectAnchorId::NewConnectionKeyAuthSource
             | SelectAnchorId::NewConnectionManagedKey
             | SelectAnchorId::NewConnectionJumpSavedConnection
+            | SelectAnchorId::NewConnectionRemoteDesktopSshGateway
             | SelectAnchorId::NewConnectionJumpKeyAuthSource
             | SelectAnchorId::NewConnectionJumpManagedKey
             | SelectAnchorId::NewConnectionSerialPort

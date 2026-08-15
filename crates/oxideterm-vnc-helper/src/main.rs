@@ -69,6 +69,7 @@ type SharedVncWriter = SyncSender<VncIoCommand>;
 
 struct VncSessionConfig {
     endpoint: RemoteDesktopEndpoint,
+    transport_endpoint: Option<RemoteDesktopEndpoint>,
     read_only: bool,
     session_options: RemoteDesktopSessionOptions,
     initial_size: RemoteDesktopSize,
@@ -211,6 +212,7 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
     let RemoteDesktopHelperRequest::StartConnect {
         protocol,
         endpoint,
+        transport_endpoint,
         password_available,
         size,
         scale_factor: _scale_factor,
@@ -242,6 +244,7 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
 
     let session_config = VncSessionConfig {
         endpoint,
+        transport_endpoint,
         read_only,
         session_options,
         initial_size: size,
@@ -376,6 +379,7 @@ fn run_vnc_session(
 
         let mut preflight = match connect_vnc_security_preflight(
             &config.endpoint,
+            config.transport_endpoint.as_ref(),
             config.session_options.vnc.security_policy,
             config.password_available,
             canceled.clone(),

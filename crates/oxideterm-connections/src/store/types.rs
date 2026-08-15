@@ -819,6 +819,9 @@ pub struct RemoteDesktopProfile {
     pub username: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub domain: Option<String>,
+    /// Saved SSH connection used to reach this endpoint through a local tunnel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_gateway_connection_id: Option<String>,
     /// Stable protected-store reference; the credential value is never serialized here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_ref: Option<String>,
@@ -845,6 +848,7 @@ pub struct SaveRemoteDesktopProfileRequest {
     pub port: u16,
     pub username: Option<String>,
     pub domain: Option<String>,
+    pub ssh_gateway_connection_id: Option<String>,
     /// An explicit reference is primarily used by trusted import and sync paths.
     pub credential_ref: Option<String>,
     /// The store moves this secret into the protected credential backend.
@@ -1029,6 +1033,7 @@ impl RemoteDesktopProfile {
             port,
             username: None,
             domain: None,
+            ssh_gateway_connection_id: None,
             credential_ref: None,
             read_only: false,
             session_options: RemoteDesktopSessionOptions::default(),
@@ -1050,6 +1055,13 @@ impl RemoteDesktopProfile {
         }
         if self.port == 0 {
             bail!("Remote desktop port must be greater than zero");
+        }
+        if self
+            .ssh_gateway_connection_id
+            .as_deref()
+            .is_some_and(|connection_id| connection_id.trim().is_empty())
+        {
+            bail!("Remote desktop SSH gateway connection id cannot be empty");
         }
         if self
             .credential_ref

@@ -9,6 +9,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use super::forwards;
+
 use oxideterm_gpui_remote_desktop::{
     RemoteDesktopFrameApplyStats, RemoteDesktopMappedPoint, RemoteDesktopViewState,
     SharedRemoteDesktopGeometry, remote_desktop_surface_with_geometry,
@@ -453,6 +455,82 @@ enum RemoteDesktopPublicClipboard {
     },
 }
 
+pub(in crate::workspace) struct RemoteDesktopSshTunnelLease {
+    lease_id: String,
+    forwarding_service: forwards::ForwardingRuntimeService,
+}
+
+pub(in crate::workspace) struct PendingRemoteDesktopSshTunnel {
+    lease_id: Option<String>,
+    forwarding_service: forwards::ForwardingRuntimeService,
+    worker: Option<tokio::task::JoinHandle<Result<RemoteDesktopEndpoint, String>>>,
+}
+
+impl PendingRemoteDesktopSshTunnel {
+    pub(in crate::workspace) fn new(
+        lease_id: String,
+        forwarding_service: forwards::ForwardingRuntimeService,
+        worker: tokio::task::JoinHandle<Result<RemoteDesktopEndpoint, String>>,
+    ) -> Self {
+        Self {
+            lease_id: Some(lease_id),
+            forwarding_service,
+            worker: Some(worker),
+        }
+    }
+
+    pub(in crate::workspace) async fn finish(
+        mut self,
+    ) -> Result<(RemoteDesktopEndpoint, RemoteDesktopSshTunnelLease), String> {
+        let worker = self
+            .worker
+            .take()
+            .expect("pending remote desktop tunnel owns one worker");
+        let endpoint = worker.await.map_err(|error| error.to_string())??;
+        let lease_id = self
+            .lease_id
+            .take()
+            .expect("pending remote desktop tunnel owns one lease id");
+        let lease = RemoteDesktopSshTunnelLease::new(lease_id, self.forwarding_service.clone());
+        Ok((endpoint, lease))
+    }
+}
+
+impl Drop for PendingRemoteDesktopSshTunnel {
+    fn drop(&mut self) {
+        if let Some(worker) = self.worker.take() {
+            worker.abort();
+        }
+        // Cancellation may race with listener creation, so the shared lease
+        // registry remains the authoritative cleanup boundary.
+        if let Some(lease_id) = self.lease_id.take() {
+            self.forwarding_service
+                .close_remote_desktop_tunnel(lease_id);
+        }
+    }
+}
+
+impl RemoteDesktopSshTunnelLease {
+    pub(in crate::workspace) fn new(
+        lease_id: String,
+        forwarding_service: forwards::ForwardingRuntimeService,
+    ) -> Self {
+        Self {
+            lease_id,
+            forwarding_service,
+        }
+    }
+}
+
+impl Drop for RemoteDesktopSshTunnelLease {
+    fn drop(&mut self) {
+        // The lease stops only its hidden listener; NodeRouter retains the
+        // physical SSH node for every other registered consumer.
+        self.forwarding_service
+            .close_remote_desktop_tunnel(self.lease_id.clone());
+    }
+}
+
 pub(in crate::workspace) struct RemoteDesktopSessionEntity {
     tab_id: TabId,
     profile: RemoteDesktopConnectionProfile,
@@ -467,6 +545,7 @@ pub(in crate::workspace) struct RemoteDesktopSessionEntity {
     ui_frame_visible: bool,
     public_mcp_frame_observers: usize,
     public_mcp_clipboard: Option<RemoteDesktopPublicClipboard>,
+    ssh_tunnel: Option<RemoteDesktopSshTunnelLease>,
     delivery_tx: mpsc::Sender<RemoteDesktopWorkerDelivery>,
     delivery_rx: mpsc::Receiver<RemoteDesktopWorkerDelivery>,
     worker: Option<RemoteDesktopWorkerOwner>,
@@ -545,6 +624,7 @@ impl RemoteDesktopSessionEntity {
             ui_frame_visible: false,
             public_mcp_frame_observers: 0,
             public_mcp_clipboard: None,
+            ssh_tunnel: None,
             // Each tab owns its delivery mailbox. A wake for one detached window
             // must never drain another tab's lifecycle events or frame notices.
             delivery_tx,

@@ -246,6 +246,7 @@ pub fn initial_connect_request(
     RemoteDesktopHelperRequest::StartConnect {
         protocol: profile.protocol,
         endpoint: profile.endpoint.clone(),
+        transport_endpoint: profile.transport_endpoint.clone(),
         password_available,
         size: RemoteDesktopSize::clamped(initial_size.width, initial_size.height),
         scale_factor,
@@ -434,6 +435,7 @@ mod tests {
                 "preview.local",
                 RemoteDesktopProtocol::Rdp,
             ),
+            transport_endpoint: None,
             username: None,
             domain: None,
             credential_ref: None,

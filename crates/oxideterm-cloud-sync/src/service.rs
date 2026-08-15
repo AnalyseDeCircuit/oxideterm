@@ -138,7 +138,7 @@ pub fn apply_structured_snapshots(
     serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
     telnet_profiles_snapshot: Option<TelnetProfilesSyncSnapshot>,
     mosh_profiles_snapshot: Option<MoshProfilesSyncSnapshot>,
-    remote_desktop_profiles_snapshot: Option<RemoteDesktopProfilesSyncSnapshot>,
+    mut remote_desktop_profiles_snapshot: Option<RemoteDesktopProfilesSyncSnapshot>,
     app_settings_snapshots: BTreeMap<String, String>,
     plugin_settings_snapshot: Vec<EncryptedPluginSetting>,
     conflict_strategy: SavedConnectionsConflictStrategy,
@@ -194,6 +194,14 @@ pub fn apply_structured_snapshots(
         } else {
             None
         };
+        if let Some(snapshot) = remote_desktop_profiles_snapshot.as_mut() {
+            // Connection preparation has already resolved skip/replace/merge
+            // conflicts, so only references in the staged store remain valid.
+            crate::operation::selection::retain_available_remote_desktop_gateway_refs(
+                snapshot,
+                connection_store,
+            );
+        }
 
         if let Some(outcome) = connections.as_ref() {
             forwards_attempted = true;

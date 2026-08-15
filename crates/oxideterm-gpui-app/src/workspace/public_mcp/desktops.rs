@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use gpui::{Context, Window};
+use gpui::{AppContext, Context, Window};
 use image::{ExtendedColorType, ImageEncoder, codecs::png::PngEncoder};
 use oxideterm_connections::SecretString;
 use oxideterm_public_mcp::{
@@ -18,7 +18,10 @@ use zeroize::Zeroizing;
 use super::{
     CONNECTION_KEY_DESKTOP_PREFIX, PublicMcpDesktopRecord, WorkspaceApp, finish_serialized,
 };
-use crate::workspace::{TabId, remote_desktop::RemoteDesktopPublicClipboardSnapshot};
+use crate::workspace::{
+    TabId,
+    remote_desktop::{RemoteDesktopPublicClipboardSnapshot, RemoteDesktopSshTunnelLease},
+};
 
 const PUBLIC_MCP_DESKTOP_MAX_FRAME_PIXELS: u64 = 16_777_216;
 const PUBLIC_MCP_DESKTOP_CLIPBOARD_IMAGE_LIMIT_BYTES: u64 = 16 * 1024 * 1024;
@@ -592,32 +595,8 @@ impl WorkspaceApp {
         if request.is_cancelled() {
             return;
         }
-        let session_group_enabled = self
-            .public_mcp
-            .clients()
-            .into_iter()
-            .find(|client| client.client_ref == request.client_ref)
-            .is_some_and(|client| {
-                client.enabled && client.tool_groups.contains(&ToolGroup::DesktopSession)
-            });
-        if !session_group_enabled {
-            request.finish(ToolEnvelope::failed(
-                "The MCP client authorization changed before the desktop opened",
-            ));
-            return;
-        }
-        let client_session_count = self
-            .public_mcp
-            .desktops
-            .values()
-            .filter(|record| record.client_ref == request.client_ref)
-            .count();
-        if self.public_mcp.desktops.len() >= PUBLIC_MCP_DESKTOP_CAPACITY
-            || client_session_count >= PUBLIC_MCP_DESKTOP_CAPACITY_PER_CLIENT
-        {
-            request.finish(ToolEnvelope::failed(
-                "The retained remote desktop session limit has been reached",
-            ));
+        if let Some(error) = self.public_mcp_desktop_open_rejection(&request) {
+            request.finish(ToolEnvelope::failed(error));
             return;
         }
         let PublicToolCall::OpenDesktop(args) = &request.call else {
@@ -648,6 +627,7 @@ impl WorkspaceApp {
             ));
             return;
         };
+        let ssh_gateway_connection_id = saved.ssh_gateway_connection_id.clone();
         let password = match self
             .connection_store
             .get_remote_desktop_credential(profile_id)
@@ -668,17 +648,96 @@ impl WorkspaceApp {
             ));
             return;
         }
-        let profile = RemoteDesktopConnectionProfile {
+        let mut profile = RemoteDesktopConnectionProfile {
             id: saved.id.clone(),
             label: saved.name.clone(),
             protocol: saved.protocol,
             endpoint: RemoteDesktopEndpoint::new(saved.host, saved.port),
+            transport_endpoint: None,
             username: saved.username,
             domain: saved.domain,
             credential_ref: saved.credential_ref,
             read_only: saved.read_only,
             session_options: saved.session_options,
         };
+        if let Some(ssh_gateway_connection_id) = ssh_gateway_connection_id {
+            let pending_tunnel = match self.start_remote_desktop_ssh_tunnel(
+                ssh_gateway_connection_id,
+                profile.endpoint.clone(),
+                cx,
+            ) {
+                Ok(pending_tunnel) => pending_tunnel,
+                Err(error) => {
+                    request.finish(ToolEnvelope::failed(error));
+                    return;
+                }
+            };
+            let window_handle = window.window_handle();
+            cx.spawn(
+                async move |workspace, cx| match pending_tunnel.finish().await {
+                    Ok((transport_endpoint, lease)) => {
+                        profile.transport_endpoint = Some(transport_endpoint);
+                        let _ = cx.update_window(window_handle, move |_, window, cx| {
+                            let _ = workspace.update(cx, |workspace, cx| {
+                                workspace.finish_public_mcp_desktop_open(
+                                    request,
+                                    profile,
+                                    password,
+                                    Some(lease),
+                                    window,
+                                    cx,
+                                );
+                            });
+                        });
+                    }
+                    Err(error) => request.finish(ToolEnvelope::failed(error)),
+                },
+            )
+            .detach();
+            return;
+        }
+        self.finish_public_mcp_desktop_open(request, profile, password, None, window, cx);
+    }
+
+    fn public_mcp_desktop_open_rejection(&self, request: &DomainRequest) -> Option<&'static str> {
+        let session_group_enabled = self
+            .public_mcp
+            .clients()
+            .into_iter()
+            .find(|client| client.client_ref == request.client_ref)
+            .is_some_and(|client| {
+                client.enabled && client.tool_groups.contains(&ToolGroup::DesktopSession)
+            });
+        if !session_group_enabled {
+            return Some("The MCP client authorization changed before the desktop opened");
+        }
+        let client_session_count = self
+            .public_mcp
+            .desktops
+            .values()
+            .filter(|record| record.client_ref == request.client_ref)
+            .count();
+        (self.public_mcp.desktops.len() >= PUBLIC_MCP_DESKTOP_CAPACITY
+            || client_session_count >= PUBLIC_MCP_DESKTOP_CAPACITY_PER_CLIENT)
+            .then_some("The retained remote desktop session limit has been reached")
+    }
+
+    fn finish_public_mcp_desktop_open(
+        &mut self,
+        request: DomainRequest,
+        profile: RemoteDesktopConnectionProfile,
+        password: Option<RemoteDesktopSecret>,
+        ssh_tunnel: Option<RemoteDesktopSshTunnelLease>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if request.is_cancelled() {
+            return;
+        }
+        if let Some(error) = self.public_mcp_desktop_open_rejection(&request) {
+            request.finish(ToolEnvelope::failed(error));
+            return;
+        }
         let provider = match builtin_provider_registry()
             .ok()
             .and_then(|registry| registry.get_for_protocol(profile.protocol).cloned())
@@ -692,8 +751,16 @@ impl WorkspaceApp {
             }
         };
         let title = profile.label.clone();
-        let tab_id =
-            self.open_remote_desktop_tab(profile, provider, title.clone(), password, window, cx);
+        let saved_profile_id = profile.id.clone();
+        let tab_id = self.open_remote_desktop_tab_with_tunnel(
+            profile,
+            provider,
+            title.clone(),
+            password,
+            ssh_tunnel,
+            window,
+            cx,
+        );
         let Some(session) = self.remote_desktop_session_entity(tab_id, cx) else {
             self.close_tab_by_id(tab_id, window, cx);
             request.finish(ToolEnvelope::failed(
@@ -726,7 +793,7 @@ impl WorkspaceApp {
         );
         let _ = self
             .connection_store
-            .mark_remote_desktop_profile_used(profile_id);
+            .mark_remote_desktop_profile_used(&saved_profile_id);
         self.queue_cloud_sync_dirty_refresh(cx);
         match self.public_mcp_desktop_projection(&request.client_ref, &desktop_ref, cx) {
             Ok(desktop) => finish_serialized(request, json!({ "desktop": desktop })),

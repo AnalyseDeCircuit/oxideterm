@@ -146,6 +146,9 @@ pub enum RemoteDesktopHelperRequest {
     StartConnect {
         protocol: RemoteDesktopProtocol,
         endpoint: RemoteDesktopEndpoint,
+        /// Optional network endpoint for an application-owned SSH tunnel.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transport_endpoint: Option<RemoteDesktopEndpoint>,
         /// Indicates whether the UI can answer a later password challenge
         /// without sending any credential material during preflight.
         #[serde(default)]
@@ -231,6 +234,7 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
             Self::StartConnect {
                 protocol,
                 endpoint,
+                transport_endpoint,
                 password_available,
                 size,
                 scale_factor,
@@ -241,6 +245,7 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
                 .debug_struct("StartConnect")
                 .field("protocol", protocol)
                 .field("endpoint", endpoint)
+                .field("transport_endpoint", transport_endpoint)
                 .field("password_available", password_available)
                 .field("size", size)
                 .field("scale_factor", scale_factor)
@@ -584,6 +589,7 @@ mod tests {
         let request = RemoteDesktopHelperRequest::StartConnect {
             protocol: RemoteDesktopProtocol::Rdp,
             endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
+            transport_endpoint: None,
             password_available: true,
             size: RemoteDesktopSize {
                 width: 1280,

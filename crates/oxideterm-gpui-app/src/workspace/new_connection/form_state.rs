@@ -152,6 +152,7 @@ pub(in crate::workspace) enum NewConnectionSelect {
     UpstreamProxyPolicy,
     UpstreamProxyProtocol,
     UpstreamProxyAuth,
+    RemoteDesktopSshGateway,
     SerialPort,
     SerialDataBits,
     SerialStopBits,
@@ -480,6 +481,8 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) remote_desktop_session_options: RemoteDesktopSessionOptions,
     /// Identifies an existing RDP/VNC asset without overloading SSH edit state.
     pub(in crate::workspace) remote_desktop_profile_id: Option<String>,
+    /// References saved SSH metadata only; credentials remain in the protected store.
+    pub(in crate::workspace) remote_desktop_ssh_gateway_connection_id: Option<String>,
     /// Identifies an existing Mosh asset without creating an SSH node edit owner.
     pub(in crate::workspace) mosh_profile_id: Option<String>,
     /// Identifies an existing serial asset without changing a live serial session.
@@ -569,6 +572,10 @@ impl fmt::Debug for NewConnectionForm {
                 &self.remote_desktop_session_options,
             )
             .field("remote_desktop_profile_id", &self.remote_desktop_profile_id)
+            .field(
+                "remote_desktop_ssh_gateway_connection_id",
+                &self.remote_desktop_ssh_gateway_connection_id,
+            )
             .field("mosh_profile_id", &self.mosh_profile_id)
             .field("serial_profile_id", &self.serial_profile_id)
             .field("telnet_profile_id", &self.telnet_profile_id)
@@ -666,6 +673,7 @@ impl Default for NewConnectionForm {
             password: String::new(),
             remote_desktop_session_options: RemoteDesktopSessionOptions::default(),
             remote_desktop_profile_id: None,
+            remote_desktop_ssh_gateway_connection_id: None,
             mosh_profile_id: None,
             serial_profile_id: None,
             telnet_profile_id: None,
@@ -773,6 +781,7 @@ pub(in crate::workspace) fn form_from_remote_desktop_profile(
     form.username = profile.username.clone().unwrap_or_default();
     form.remote_desktop_session_options = profile.session_options;
     form.remote_desktop_profile_id = Some(profile.id.clone());
+    form.remote_desktop_ssh_gateway_connection_id = profile.ssh_gateway_connection_id.clone();
     form.saved_password_keychain_id = profile.credential_ref.clone();
     form.save_password = profile.credential_ref.is_some();
     form.group = profile.group.clone().unwrap_or(ungrouped_label);
@@ -1651,6 +1660,7 @@ mod tests {
             username: Some("operator".to_string()),
             domain: Some("EXAMPLE".to_string()),
             credential_ref: Some("remote-desktop:remote-1".to_string()),
+            ssh_gateway_connection_id: Some("gateway-1".to_string()),
             read_only: true,
             session_options,
             created_at: now,
@@ -1670,6 +1680,10 @@ mod tests {
         assert_eq!(form.icon, "cloud");
         assert_eq!(form.color, "#7dd3fc");
         assert_eq!(form.icon_background_color, "#082f49");
+        assert_eq!(
+            form.remote_desktop_ssh_gateway_connection_id.as_deref(),
+            Some("gateway-1")
+        );
         assert_eq!(form.remote_desktop_session_options, session_options);
         assert_eq!(
             form.saved_password_keychain_id.as_deref(),

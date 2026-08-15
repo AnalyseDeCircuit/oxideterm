@@ -113,6 +113,7 @@ pub enum SelectAnchorId {
     NewConnectionKeyAuthSource,
     NewConnectionManagedKey,
     NewConnectionJumpSavedConnection,
+    NewConnectionRemoteDesktopSshGateway,
     NewConnectionJumpKeyAuthSource,
     NewConnectionJumpManagedKey,
     NewConnectionPrivilegeKind,
@@ -210,6 +211,7 @@ impl SelectAnchorId {
                 | Self::NewConnectionKeyAuthSource
                 | Self::NewConnectionManagedKey
                 | Self::NewConnectionJumpSavedConnection
+                | Self::NewConnectionRemoteDesktopSshGateway
                 | Self::NewConnectionJumpKeyAuthSource
                 | Self::NewConnectionJumpManagedKey
                 | Self::NewConnectionPrivilegeKind

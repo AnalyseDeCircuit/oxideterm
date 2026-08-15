@@ -57,8 +57,15 @@ pub(super) fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<Client
     };
     log_rdp_client_graphics_config(&connector);
 
+    let destination = ClientRdpDestination::from_parts(&config.endpoint.host, config.endpoint.port);
+    let transport_destination = config
+        .transport_endpoint
+        .as_ref()
+        .map(|endpoint| ClientRdpDestination::from_parts(&endpoint.host, endpoint.port))
+        .unwrap_or_else(|| destination.clone());
     Ok(ClientRdpConfig {
-        destination: ClientRdpDestination::from_parts(&config.endpoint.host, config.endpoint.port),
+        destination,
+        transport_destination,
         connector,
         graphics_epoch: config.graphics_epoch,
         session_options: config.session_options,

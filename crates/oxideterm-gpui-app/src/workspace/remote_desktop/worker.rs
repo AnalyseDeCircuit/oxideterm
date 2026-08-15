@@ -16,6 +16,7 @@ pub(super) fn preview_remote_desktop_profile(
         label: label.to_string(),
         protocol,
         endpoint: RemoteDesktopEndpoint::for_protocol("preview.local", protocol),
+        transport_endpoint: None,
         username: None,
         domain: None,
         credential_ref: None,

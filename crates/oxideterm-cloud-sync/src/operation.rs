@@ -276,7 +276,7 @@ mod apply;
 mod merge;
 mod objects;
 mod preview;
-mod selection;
+pub(crate) mod selection;
 mod service;
 mod upload;
 mod upload_plan;

@@ -1123,6 +1123,8 @@ impl ConnectionStore {
         profile.port = request.port;
         profile.username = normalize_optional_text(request.username);
         profile.domain = normalize_optional_text(request.domain);
+        profile.ssh_gateway_connection_id =
+            normalize_optional_text(request.ssh_gateway_connection_id);
         profile.credential_ref = credential_ref.clone();
         profile.read_only = request.read_only;
         profile.session_options = request.session_options;

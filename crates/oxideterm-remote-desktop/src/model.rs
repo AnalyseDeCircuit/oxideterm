@@ -310,6 +310,9 @@ pub struct RemoteDesktopConnectionProfile {
     pub label: String,
     pub protocol: RemoteDesktopProtocol,
     pub endpoint: RemoteDesktopEndpoint,
+    /// Optional loopback tunnel endpoint; the public endpoint remains the server identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_endpoint: Option<RemoteDesktopEndpoint>,
     pub username: Option<String>,
     pub domain: Option<String>,
     pub credential_ref: Option<String>,
@@ -340,6 +343,7 @@ impl RemoteDesktopConnectionProfile {
             label,
             protocol,
             endpoint,
+            transport_endpoint: None,
             username: None,
             domain: None,
             credential_ref: None,

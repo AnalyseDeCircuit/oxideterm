@@ -218,6 +218,9 @@ impl fmt::Debug for EncryptedPortableSecret {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EncryptedConnection {
+    /// Stable relation key used only inside the encrypted archive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_connection_id: Option<String>,
     pub name: String,
     pub group: Option<String>,
     pub host: String,
@@ -248,6 +251,10 @@ pub struct EncryptedConnection {
 impl fmt::Debug for EncryptedConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("EncryptedConnection")
+            .field(
+                "has_source_connection_id",
+                &self.source_connection_id.is_some(),
+            )
             .field("name", &self.name)
             .field("group", &self.group)
             .field("host", &self.host)

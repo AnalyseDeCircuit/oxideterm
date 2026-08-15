@@ -168,6 +168,57 @@ impl WorkspaceApp {
                     ));
                 }
             }
+            NewConnectionSelect::RemoteDesktopSshGateway => {
+                let selected_connection_id = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .and_then(|form| form.remote_desktop_ssh_gateway_connection_id.as_deref());
+                popup = popup.child(select_option_action(
+                    select_option(
+                        &self.tokens,
+                        self.i18n
+                            .t("modals.new_connection.remote_desktop_ssh_gateway_direct"),
+                        selected_connection_id.is_none(),
+                    ),
+                    false,
+                    false,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.close_new_connection_select(cx);
+                        this.update_connection_form_state(cx, |state| {
+                            if let Some(form) = state.form.as_mut() {
+                                form.remote_desktop_ssh_gateway_connection_id = None;
+                            }
+                        });
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                ));
+                for connection in self.connection_store.connection_infos() {
+                    let selected = selected_connection_id == Some(connection.id.as_str());
+                    let connection_id = connection.id.clone();
+                    let label = format!(
+                        "{} · {}@{}:{}",
+                        connection.name, connection.username, connection.host, connection.port
+                    );
+                    popup = popup.child(select_option_action(
+                        select_option(&self.tokens, label, selected),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_new_connection_select(cx);
+                            this.update_connection_form_state(cx, |state| {
+                                if let Some(form) = state.form.as_mut() {
+                                    form.remote_desktop_ssh_gateway_connection_id =
+                                        Some(connection_id.clone());
+                                }
+                            });
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ));
+                }
+            }
             NewConnectionSelect::KeyAuthSource | NewConnectionSelect::JumpKeyAuthSource => {
                 let context = match select_id {
                     NewConnectionSelect::KeyAuthSource => {

@@ -122,6 +122,27 @@ fn export_connections_to_oxide_inner(
     };
 
     let selected: HashSet<&str> = connection_ids.iter().map(String::as_str).collect();
+    if let Some(snapshot_json) = options.remote_desktop_profiles_json.as_deref() {
+        let snapshot = serde_json::from_str::<RemoteDesktopProfilesSyncSnapshot>(snapshot_json)
+            .map_err(|error| {
+                OxideFileError::InvalidFormat(format!(
+                    "Invalid remote desktop profiles snapshot for .oxide export: {error}"
+                ))
+            })?;
+        for profile in snapshot.records {
+            let Some(gateway_connection_id) = profile.ssh_gateway_connection_id else {
+                continue;
+            };
+            if !selected.contains(gateway_connection_id.as_str()) {
+                // The encrypted archive needs both sides of this relation so
+                // import can remap the saved SSH connection safely.
+                return Err(OxideFileError::InvalidFormat(format!(
+                    "Remote desktop profile '{}' requires its SSH gateway connection to be selected",
+                    profile.name
+                )));
+            }
+        }
+    }
     let forwards_by_connection = options
         .forwards
         .iter()
@@ -327,6 +348,7 @@ fn export_connection(
 ) -> Result<EncryptedConnection, OxideFileError> {
     let proxy_chain = export_proxy_chain(store, conn, options)?;
     Ok(EncryptedConnection {
+        source_connection_id: Some(conn.id.clone()),
         name: conn.name.clone(),
         group: conn.group.clone(),
         host: conn.host.clone(),

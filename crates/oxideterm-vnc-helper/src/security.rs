@@ -88,11 +88,12 @@ impl VncSecurityPreflight {
 
 pub(super) fn connect_vnc_security_preflight(
     endpoint: &RemoteDesktopEndpoint,
+    transport_endpoint: Option<&RemoteDesktopEndpoint>,
     security_policy: RemoteDesktopVncSecurityPolicy,
     password_available: bool,
     canceled: Arc<AtomicBool>,
 ) -> VncResult<VncSecurityPreflight> {
-    let stream = connect_vnc_tcp(endpoint, canceled.clone())?;
+    let stream = connect_vnc_tcp(transport_endpoint.unwrap_or(endpoint), canceled.clone())?;
     let mut stream = CancellableTcpStream::new(stream, canceled);
     stream.set_phase_timeout(VNC_HANDSHAKE_TIMEOUT);
     negotiate_vnc_security(&endpoint.host, stream, security_policy, password_available)
@@ -906,13 +907,15 @@ mod tests {
     #[test]
     fn cancellation_interrupts_an_idle_security_preflight() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let endpoint =
+        let endpoint = RemoteDesktopEndpoint::new("identity.example.test", 5900);
+        let transport_endpoint =
             RemoteDesktopEndpoint::new("127.0.0.1", listener.local_addr().unwrap().port());
         let canceled = Arc::new(AtomicBool::new(false));
         let client_canceled = canceled.clone();
         let client = thread::spawn(move || {
             connect_vnc_security_preflight(
                 &endpoint,
+                Some(&transport_endpoint),
                 RemoteDesktopVncSecurityPolicy::RequireVerifiedEncryption,
                 false,
                 client_canceled,

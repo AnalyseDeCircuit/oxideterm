@@ -2,8 +2,152 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
+use oxideterm_session_adapter::ssh_config_from_saved_connection;
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn open_remote_desktop_connection_with_gateway(
+        &mut self,
+        mut profile: RemoteDesktopConnectionProfile,
+        password: Option<RemoteDesktopSecret>,
+        ssh_gateway_connection_id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ssh_gateway_connection_id) = ssh_gateway_connection_id else {
+            self.open_remote_desktop_connection_tab(profile, password, window, cx);
+            return;
+        };
+        let pending_tunnel = match self.start_remote_desktop_ssh_tunnel(
+            ssh_gateway_connection_id,
+            profile.endpoint.clone(),
+            cx,
+        ) {
+            Ok(pending_tunnel) => pending_tunnel,
+            Err(error) => {
+                self.report_remote_desktop_ssh_gateway_error(error, cx);
+                return;
+            }
+        };
+        let window_handle = window.window_handle();
+        cx.spawn(async move |workspace, cx| {
+            match pending_tunnel.finish().await {
+                Ok((transport_endpoint, lease)) => {
+                    profile.transport_endpoint = Some(transport_endpoint);
+                    let _ = cx.update_window(window_handle, move |_, window, cx| {
+                        let _ = workspace.update(cx, |workspace, cx| {
+                            workspace.open_remote_desktop_connection_tab_with_tunnel(
+                                profile,
+                                password,
+                                Some(lease),
+                                window,
+                                cx,
+                            );
+                        });
+                    });
+                    // If the target window vanished, dropping the captured lease
+                    // above tears down the listener without exposing the secret.
+                }
+                Err(error) => {
+                    let _ = workspace.update(cx, |workspace, cx| {
+                        workspace.report_remote_desktop_ssh_gateway_error(error, cx);
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    pub(in crate::workspace) fn start_remote_desktop_ssh_tunnel(
+        &mut self,
+        ssh_gateway_connection_id: String,
+        target_endpoint: RemoteDesktopEndpoint,
+        cx: &mut Context<Self>,
+    ) -> Result<PendingRemoteDesktopSshTunnel, String> {
+        let Some(gateway) = self
+            .connection_store
+            .get(&ssh_gateway_connection_id)
+            .cloned()
+        else {
+            return Err(self
+                .i18n
+                .t("modals.new_connection.remote_desktop_ssh_gateway_missing"));
+        };
+        let Some(config) = ssh_config_from_saved_connection(
+            &self.connection_store,
+            self.settings_store.settings(),
+            &gateway,
+        ) else {
+            return Err(self
+                .i18n
+                .t("modals.new_connection.remote_desktop_ssh_gateway_credentials_missing"));
+        };
+        let node_id = if config
+            .proxy_chain
+            .as_ref()
+            .is_some_and(|chain| !chain.is_empty())
+        {
+            match self.expand_saved_connection_tree(
+                &ssh_gateway_connection_id,
+                config,
+                gateway.name.clone(),
+            ) {
+                Ok(expansion) => expansion.target_node_id,
+                Err(error) => {
+                    return Err(error.to_string());
+                }
+            }
+        } else {
+            self.materialize_ssh_root_node(
+                config,
+                gateway.name.clone(),
+                Some(ssh_gateway_connection_id.clone()),
+            )
+        };
+        if !self.ensure_node_connection_started(&node_id, cx) {
+            return Err(self
+                .i18n
+                .t("modals.new_connection.remote_desktop_ssh_gateway_connect_failed"));
+        }
+        let _ = self.connection_store.mark_used(&ssh_gateway_connection_id);
+
+        let lease_id = uuid::Uuid::new_v4().to_string();
+        let forwarding_service = self.forwarding_service.clone();
+        let worker_service = forwarding_service.clone();
+        let worker_lease_id = lease_id.clone();
+        let worker = self.forwarding_runtime.spawn(async move {
+            worker_service
+                .open_remote_desktop_tunnel(
+                    worker_lease_id,
+                    &node_id,
+                    &ssh_gateway_connection_id,
+                    target_endpoint.host,
+                    target_endpoint.port,
+                )
+                .await
+        });
+        Ok(PendingRemoteDesktopSshTunnel::new(
+            lease_id,
+            forwarding_service,
+            worker,
+        ))
+    }
+
+    fn report_remote_desktop_ssh_gateway_error(&mut self, detail: String, cx: &mut Context<Self>) {
+        let title = self
+            .i18n
+            .t("modals.new_connection.remote_desktop_ssh_gateway_connect_failed");
+        self.push_command_palette_toast(
+            title,
+            Some(detail.clone()),
+            TerminalNoticeVariant::Error,
+            cx,
+        );
+        self.session_manager.update(cx, |session_manager, cx| {
+            session_manager.set_status(Some(detail), cx);
+        });
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn open_remote_desktop_preview_tab(
         &mut self,
         protocol: RemoteDesktopProtocol,
@@ -38,6 +182,17 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_remote_desktop_connection_tab_with_tunnel(profile, password, None, window, cx);
+    }
+
+    pub(in crate::workspace) fn open_remote_desktop_connection_tab_with_tunnel(
+        &mut self,
+        profile: RemoteDesktopConnectionProfile,
+        password: Option<RemoteDesktopSecret>,
+        ssh_tunnel: Option<RemoteDesktopSshTunnelLease>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let provider = match builtin_provider_registry()
             .ok()
             .and_then(|registry| registry.get_for_protocol(profile.protocol).cloned())
@@ -55,7 +210,9 @@ impl WorkspaceApp {
         };
         let title = profile.label.clone();
 
-        self.open_remote_desktop_tab(profile, provider, title, password, window, cx);
+        self.open_remote_desktop_tab_with_tunnel(
+            profile, provider, title, password, ssh_tunnel, window, cx,
+        );
     }
 
     pub(in crate::workspace) fn open_remote_desktop_tab(
@@ -67,6 +224,21 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> TabId {
+        self.open_remote_desktop_tab_with_tunnel(
+            profile, provider, title, password, None, window, cx,
+        )
+    }
+
+    pub(in crate::workspace) fn open_remote_desktop_tab_with_tunnel(
+        &mut self,
+        profile: RemoteDesktopConnectionProfile,
+        provider: RemoteDesktopProviderManifest,
+        title: String,
+        password: Option<RemoteDesktopSecret>,
+        ssh_tunnel: Option<RemoteDesktopSshTunnelLease>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> TabId {
         let tab_id = self.alloc_tab_id(cx);
         let frame_slot = RemoteDesktopFrameDeliverySlot::new();
         let certificate_store_path =
@@ -74,7 +246,7 @@ impl WorkspaceApp {
                 self.settings_store.path(),
             );
         let session = cx.new(|cx| {
-            let session = RemoteDesktopSessionEntity::new(
+            let mut session = RemoteDesktopSessionEntity::new(
                 tab_id,
                 profile,
                 provider,
@@ -83,6 +255,7 @@ impl WorkspaceApp {
                 frame_slot,
                 window.window_handle(),
             );
+            session.ssh_tunnel = ssh_tunnel;
             session.install_release_handler(cx);
             session
         });

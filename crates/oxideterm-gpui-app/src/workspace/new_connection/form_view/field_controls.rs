@@ -166,6 +166,9 @@ impl WorkspaceApp {
             NewConnectionSelect::JumpSavedConnection => {
                 SelectAnchorId::NewConnectionJumpSavedConnection
             }
+            NewConnectionSelect::RemoteDesktopSshGateway => {
+                SelectAnchorId::NewConnectionRemoteDesktopSshGateway
+            }
             NewConnectionSelect::JumpKeyAuthSource => {
                 SelectAnchorId::NewConnectionJumpKeyAuthSource
             }
@@ -748,6 +751,83 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
+    pub(super) fn render_remote_desktop_ssh_gateway_select(
+        &self,
+        selected_id: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let connections = self.connection_store.connection_infos();
+        let selected_connection = selected_id.and_then(|selected_id| {
+            connections
+                .iter()
+                .find(|connection| connection.id == selected_id)
+        });
+        let selected_label = match (selected_id, selected_connection) {
+            (_, Some(connection)) => format!(
+                "{} · {}@{}:{}",
+                connection.name, connection.username, connection.host, connection.port
+            ),
+            (Some(_), None) => self
+                .i18n
+                .t("modals.new_connection.remote_desktop_ssh_gateway_missing"),
+            (None, None) => self
+                .i18n
+                .t("modals.new_connection.remote_desktop_ssh_gateway_direct"),
+        };
+        let unavailable = connections.is_empty() && selected_id.is_none();
+        let trigger = self
+            .new_connection_select_trigger(
+                NewConnectionSelect::RemoteDesktopSshGateway,
+                selected_label,
+                selected_id.is_none(),
+                unavailable,
+                cx,
+            )
+            .cursor_pointer()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    let gateway_selected = this
+                        .connection_form_state(cx)
+                        .form
+                        .as_ref()
+                        .is_some_and(|form| {
+                            form.remote_desktop_ssh_gateway_connection_id.is_some()
+                        });
+                    if this.connection_store.connections().is_empty() && !gateway_selected {
+                        cx.stop_propagation();
+                        return;
+                    }
+                    this.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.field_focused = false;
+                            form.selected_field = None;
+                        }
+                    });
+                    this.ime_marked_text = None;
+                    this.open_new_connection_select_from_pointer(
+                        NewConnectionSelect::RemoteDesktopSshGateway,
+                        cx,
+                    );
+                    window.focus(&this.focus_handle, cx);
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            );
+
+        form_field(
+            &self.tokens,
+            self.i18n
+                .t("modals.new_connection.remote_desktop_ssh_gateway"),
+            self.track_new_connection_select_anchor(
+                NewConnectionSelect::RemoteDesktopSshGateway,
+                trigger,
+                cx,
+            ),
+        )
+        .into_any_element()
+    }
+
     pub(super) fn set_new_connection_managed_key(
         &mut self,
         select_id: NewConnectionSelect,
@@ -771,6 +851,7 @@ impl WorkspaceApp {
                     NewConnectionSelect::Group
                     | NewConnectionSelect::KeyAuthSource
                     | NewConnectionSelect::JumpSavedConnection
+                    | NewConnectionSelect::RemoteDesktopSshGateway
                     | NewConnectionSelect::JumpKeyAuthSource
                     | NewConnectionSelect::UpstreamProxyPolicy
                     | NewConnectionSelect::UpstreamProxyProtocol
@@ -2165,19 +2246,28 @@ impl WorkspaceApp {
         protocol: oxideterm_remote_desktop::RemoteDesktopProtocol,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some((name, host, port, username, keeps_saved_password, save_password, group)) =
-            self.connection_form_state(cx).form.as_ref().map(|form| {
-                (
-                    form.name.clone(),
-                    form.host.clone(),
-                    form.port.clone(),
-                    form.username.clone(),
-                    form.remote_desktop_profile_id.is_some()
-                        && form.saved_password_keychain_id.is_some(),
-                    form.save_password,
-                    form.group.clone(),
-                )
-            })
+        let Some((
+            name,
+            host,
+            port,
+            username,
+            keeps_saved_password,
+            save_password,
+            group,
+            ssh_gateway_connection_id,
+        )) = self.connection_form_state(cx).form.as_ref().map(|form| {
+            (
+                form.name.clone(),
+                form.host.clone(),
+                form.port.clone(),
+                form.username.clone(),
+                form.remote_desktop_profile_id.is_some()
+                    && form.saved_password_keychain_id.is_some(),
+                form.save_password,
+                form.group.clone(),
+                form.remote_desktop_ssh_gateway_connection_id.clone(),
+            )
+        })
         else {
             return div().into_any_element();
         };
@@ -2269,6 +2359,18 @@ impl WorkspaceApp {
                 cx,
             ))
             .child(self.render_connection_group_select(self.i18n.t("ssh.form.group"), &group, cx))
+            .child(
+                self.render_remote_desktop_ssh_gateway_select(
+                    ssh_gateway_connection_id.as_deref(),
+                    cx,
+                ),
+            )
+            .child(
+                self.render_connection_hint(
+                    self.i18n
+                        .t("modals.new_connection.remote_desktop_ssh_gateway_hint"),
+                ),
+            )
             .when(
                 protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc,
                 |section| section.child(self.render_vnc_connection_preferences(cx)),

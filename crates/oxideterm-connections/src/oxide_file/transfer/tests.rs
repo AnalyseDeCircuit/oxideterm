@@ -483,6 +483,9 @@ mod tests {
         const CREDENTIAL: &str = "oxide-remote-desktop-secret";
         let mut source = temp_store("remote-desktop-profile-source");
         source
+            .upsert_imported_connection(saved_connection("gateway-source", "SSH gateway"))
+            .unwrap();
+        source
             .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
                 id: Some("remote-1".to_string()),
                 name: "Lab desktop".to_string(),
@@ -492,6 +495,7 @@ mod tests {
                 port: 5900,
                 username: Some("operator".to_string()),
                 credential: Some(SecretString::from(CREDENTIAL)),
+                ssh_gateway_connection_id: Some("gateway-source".to_string()),
                 ..SaveRemoteDesktopProfileRequest::default()
             })
             .unwrap();
@@ -504,7 +508,7 @@ mod tests {
 
         let bytes = export_connections_to_oxide(
             &source,
-            &[],
+            &["gateway-source".to_string()],
             "secret!",
             OxideExportOptions {
                 remote_desktop_profiles_json: Some(snapshot_json),
@@ -547,6 +551,10 @@ mod tests {
         assert_eq!(imported_profile.protocol, RemoteDesktopProtocol::Vnc);
         assert_eq!(imported_profile.host, "vnc.example.com");
         assert!(imported_profile.credential_ref.is_none());
+        assert_eq!(
+            imported_profile.ssh_gateway_connection_id.as_deref(),
+            Some(target.connections()[0].id.as_str())
+        );
 
         let mut skipped_target = temp_store("remote-desktop-profile-skip-target");
         let skipped = apply_oxide_import_with_options(
@@ -961,6 +969,7 @@ mod tests {
             .unwrap();
 
         let payload = vec![EncryptedConnection {
+            source_connection_id: None,
             name: "Prod".to_string(),
             group: None,
             host: "example.org".to_string(),
@@ -1438,6 +1447,7 @@ mod tests {
 
     fn encrypted_agent_connection(name: &str, host: &str) -> EncryptedConnection {
         EncryptedConnection {
+            source_connection_id: None,
             name: name.to_string(),
             group: None,
             host: host.to_string(),

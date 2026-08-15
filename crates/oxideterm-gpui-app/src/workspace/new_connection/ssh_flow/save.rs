@@ -1291,8 +1291,8 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((mut profile, save_request, mut runtime_password)) = self
-            .with_connection_form_mut(cx, |this, form, cx| {
+        let Some((mut profile, save_request, mut runtime_password, ssh_gateway_connection_id)) =
+            self.with_connection_form_mut(cx, |this, form, cx| {
                 let form = form?;
                 let Some(protocol) = remote_desktop_protocol_for_transport(form.transport) else {
                     return None;
@@ -1328,6 +1328,18 @@ impl WorkspaceApp {
                     cx.notify();
                     return None;
                 }
+                if form
+                    .remote_desktop_ssh_gateway_connection_id
+                    .as_deref()
+                    .is_some_and(|connection_id| this.connection_store.get(connection_id).is_none())
+                {
+                    form.error = Some(
+                        this.i18n
+                            .t("modals.new_connection.remote_desktop_ssh_gateway_missing"),
+                    );
+                    cx.notify();
+                    return None;
+                }
                 let editing_profile_id = form.remote_desktop_profile_id.clone();
                 let existing_profile = editing_profile_id
                     .as_deref()
@@ -1357,6 +1369,8 @@ impl WorkspaceApp {
                     None
                 };
                 let save_credential = form.save_password;
+                let ssh_gateway_connection_id =
+                    form.remote_desktop_ssh_gateway_connection_id.clone();
                 let should_save =
                     editing_profile_id.is_some() || action != NewConnectionSubmitAction::Connect;
                 let clear_credential =
@@ -1385,6 +1399,9 @@ impl WorkspaceApp {
                     port,
                     username: username.clone(),
                     domain: domain.clone(),
+                    ssh_gateway_connection_id: form
+                        .remote_desktop_ssh_gateway_connection_id
+                        .clone(),
                     credential_ref: None,
                     credential: credential_to_save,
                     clear_credential,
@@ -1396,6 +1413,7 @@ impl WorkspaceApp {
                     label,
                     protocol,
                     endpoint: RemoteDesktopEndpoint::new(host, port),
+                    transport_endpoint: None,
                     username,
                     domain,
                     credential_ref: None,
@@ -1406,7 +1424,12 @@ impl WorkspaceApp {
                 };
                 form.pending = true;
                 form.error = None;
-                Some((profile, save_request, runtime_password))
+                Some((
+                    profile,
+                    save_request,
+                    runtime_password,
+                    ssh_gateway_connection_id,
+                ))
             })
         else {
             return;
@@ -1464,7 +1487,13 @@ impl WorkspaceApp {
         if action != NewConnectionSubmitAction::Save {
             let runtime_password =
                 runtime_password.map(|secret| RemoteDesktopSecret::from(secret.into_zeroizing()));
-            self.open_remote_desktop_connection_tab(profile, runtime_password, window, cx);
+            self.open_remote_desktop_connection_with_gateway(
+                profile,
+                runtime_password,
+                ssh_gateway_connection_id,
+                window,
+                cx,
+            );
         }
         cx.notify();
     }

@@ -48,6 +48,7 @@ impl RemoteDesktopFakeBackend {
             RemoteDesktopHelperRequest::StartConnect {
                 protocol,
                 endpoint,
+                transport_endpoint: _,
                 size,
                 scale_factor: _,
                 read_only,

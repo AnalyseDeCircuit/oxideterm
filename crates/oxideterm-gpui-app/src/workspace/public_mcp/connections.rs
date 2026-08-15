@@ -487,6 +487,8 @@ fn save_remote_desktop_profile(
             credential_ref: existing.and_then(|profile| profile.credential_ref.clone()),
             credential: None,
             clear_credential: false,
+            ssh_gateway_connection_id: existing
+                .and_then(|profile| profile.ssh_gateway_connection_id.clone()),
             read_only: profile.read_only,
             session_options: remote_desktop_options(&profile.options),
         })

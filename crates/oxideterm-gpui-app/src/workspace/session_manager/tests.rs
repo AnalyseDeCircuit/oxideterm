@@ -312,6 +312,7 @@ pub(super) fn saved_profile_selection_is_typed_separately_from_ssh_ids() {
         username: Some("operator".to_string()),
         domain: None,
         credential_ref: None,
+        ssh_gateway_connection_id: None,
         read_only: false,
         session_options: oxideterm_remote_desktop::RemoteDesktopSessionOptions::default(),
         created_at: now,

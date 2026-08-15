@@ -19,6 +19,7 @@ impl RemoteDesktopSessionEntity {
             }
             session.cancel_automatic_reconnect();
             session.shutdown_worker();
+            drop(session.ssh_tunnel.take());
             drop(session.password.take());
         })
         .detach();
@@ -118,6 +119,7 @@ impl RemoteDesktopSessionEntity {
         }
         self.shutdown_worker();
         self.public_mcp_clipboard = None;
+        drop(self.ssh_tunnel.take());
         drop(self.password.take());
         let images = self.state.take_all_images();
         let textures = self.state.take_all_textures();

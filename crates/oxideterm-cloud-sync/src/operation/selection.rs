@@ -126,6 +126,28 @@ pub(super) fn preserve_local_remote_desktop_credential_refs(
     }
 }
 
+pub(crate) fn retain_available_remote_desktop_gateway_refs(
+    snapshot: &mut RemoteDesktopProfilesSyncSnapshot,
+    connection_store: &ConnectionStore,
+) {
+    let available_ids = connection_store
+        .connections()
+        .iter()
+        .map(|connection| connection.id.as_str())
+        .collect::<BTreeSet<_>>();
+    // A profile selected without its SSH dependency must remain editable and
+    // must not retain a device-local dangling relation after cloud apply.
+    for profile in &mut snapshot.records {
+        if profile
+            .ssh_gateway_connection_id
+            .as_deref()
+            .is_some_and(|connection_id| !available_ids.contains(connection_id))
+        {
+            profile.ssh_gateway_connection_id = None;
+        }
+    }
+}
+
 pub(super) fn filter_quick_commands_snapshot_json(
     snapshot_json: &mut String,
     selected_ids: Option<&BTreeSet<String>>,
