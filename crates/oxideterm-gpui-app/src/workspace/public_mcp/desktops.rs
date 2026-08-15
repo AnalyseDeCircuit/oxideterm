@@ -22,6 +22,8 @@ use crate::workspace::{TabId, remote_desktop::RemoteDesktopPublicClipboardSnapsh
 
 const PUBLIC_MCP_DESKTOP_MAX_FRAME_PIXELS: u64 = 16_777_216;
 const PUBLIC_MCP_DESKTOP_CLIPBOARD_IMAGE_LIMIT_BYTES: u64 = 16 * 1024 * 1024;
+const PUBLIC_MCP_DESKTOP_CAPACITY: usize = 32;
+const PUBLIC_MCP_DESKTOP_CAPACITY_PER_CLIENT: usize = 8;
 
 pub(in crate::workspace) enum PublicMcpDesktopWindowEffect {
     Open(DomainRequest),
@@ -557,6 +559,20 @@ impl WorkspaceApp {
         if !session_group_enabled {
             request.finish(ToolEnvelope::failed(
                 "The MCP client authorization changed before the desktop opened",
+            ));
+            return;
+        }
+        let client_session_count = self
+            .public_mcp
+            .desktops
+            .values()
+            .filter(|record| record.client_ref == request.client_ref)
+            .count();
+        if self.public_mcp.desktops.len() >= PUBLIC_MCP_DESKTOP_CAPACITY
+            || client_session_count >= PUBLIC_MCP_DESKTOP_CAPACITY_PER_CLIENT
+        {
+            request.finish(ToolEnvelope::failed(
+                "The retained remote desktop session limit has been reached",
             ));
             return;
         }
