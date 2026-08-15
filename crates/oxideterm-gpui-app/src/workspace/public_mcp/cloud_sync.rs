@@ -36,6 +36,7 @@ const SYNC_PLAN_CAPACITY: usize = 32;
 const SYNC_PLAN_CAPACITY_PER_CLIENT: usize = 8;
 const SYNC_UNDO_CAPACITY: usize = 16;
 const SYNC_UNDO_CAPACITY_PER_CLIENT: usize = 4;
+const SYNC_CANCELLED_ERROR: &str = "cancelled";
 
 pub(super) struct PublicMcpSyncPlan {
     client_ref: ClientRef,
@@ -333,7 +334,7 @@ impl WorkspaceApp {
         let cancellation = request.cancellation_token();
         let worker = self.forwarding_runtime.spawn(async move {
             tokio::select! {
-                _ = cancellation.cancelled() => Err("cancelled".to_owned()),
+                _ = cancellation.cancelled() => Err(SYNC_CANCELLED_ERROR.to_owned()),
                 result = run_pull_preview_worker(
                     service,
                     connection_store,
@@ -485,7 +486,7 @@ impl WorkspaceApp {
                 });
             }
             tokio::select! {
-                _ = cancellation.cancelled() => Err("cancelled".to_owned()),
+                _ = cancellation.cancelled() => Err(SYNC_CANCELLED_ERROR.to_owned()),
                 result = run_check_worker(service, settings, hints) => result,
             }
         });
@@ -686,22 +687,21 @@ impl WorkspaceApp {
         let source_revision = state.last_known_remote_revision.clone();
         let cancellation = request.cancellation_token();
         let worker = self.forwarding_runtime.spawn(async move {
-            tokio::select! {
-                _ = cancellation.cancelled() => Err("cancelled".to_owned()),
-                result = run_pull_apply_worker(
-                    service,
-                    connection_store,
-                    forwarding_registry,
-                    settings_store,
-                    settings,
-                    hints,
-                    source_revision,
-                    preview,
-                    selection,
-                    create_rollback_backup,
-                    remote,
-                ) => result,
-            }
+            run_pull_apply_worker(
+                service,
+                connection_store,
+                forwarding_registry,
+                settings_store,
+                settings,
+                hints,
+                source_revision,
+                preview,
+                selection,
+                create_rollback_backup,
+                remote,
+                cancellation,
+            )
+            .await
         });
         cx.spawn(async move |workspace, cx| {
             let result = worker.await;
@@ -723,12 +723,13 @@ impl WorkspaceApp {
         result: Result<Result<PublicMcpApplyWorkerResult, String>, tokio::task::JoinError>,
         cx: &mut gpui::Context<Self>,
     ) {
-        if request.is_cancelled() {
-            self.clear_public_mcp_sync_action(cx);
-            return;
-        }
+        let request_cancelled = request.is_cancelled();
         let worker = match result {
             Ok(Ok(worker)) => worker,
+            Ok(Err(error)) if request_cancelled && error == SYNC_CANCELLED_ERROR => {
+                self.clear_public_mcp_sync_action(cx);
+                return;
+            }
             Ok(Err(error)) => {
                 self.fail_public_mcp_sync_action("apply", &error, request, cx);
                 return;
@@ -754,18 +755,22 @@ impl WorkspaceApp {
         let requires_publish = self.cloud_sync.update(cx, |cloud_sync, _cx| {
             cloud_sync.controller.upload_after_current.take().is_some()
         });
-        let undo_ref = checkpoint.and_then(|checkpoint| {
-            self.public_mcp_full_local_state()
-                .ok()
-                .map(|post_apply_state| {
-                    self.public_mcp.insert_sync_undo(PublicMcpSyncUndo {
-                        client_ref: request.client_ref.clone(),
-                        created_at: Instant::now(),
-                        post_apply_state,
-                        checkpoint,
-                    })
+        let undo_ref = (!request_cancelled)
+            .then(|| {
+                checkpoint.and_then(|checkpoint| {
+                    self.public_mcp_full_local_state()
+                        .ok()
+                        .map(|post_apply_state| {
+                            self.public_mcp.insert_sync_undo(PublicMcpSyncUndo {
+                                client_ref: request.client_ref.clone(),
+                                created_at: Instant::now(),
+                                post_apply_state,
+                                checkpoint,
+                            })
+                        })
                 })
-        });
+            })
+            .flatten();
         finish_serialized(
             request,
             json!({
@@ -837,18 +842,17 @@ impl WorkspaceApp {
             ..UploadOptions::default()
         };
         let worker = self.forwarding_runtime.spawn(async move {
-            tokio::select! {
-                _ = cancellation.cancelled() => Err("cancelled".to_owned()),
-                result = run_upload_worker(
-                    service,
-                    connection_store,
-                    forwarding_registry,
-                    settings_store,
-                    settings,
-                    hints,
-                    options,
-                ) => result,
-            }
+            run_upload_worker(
+                service,
+                connection_store,
+                forwarding_registry,
+                settings_store,
+                settings,
+                hints,
+                options,
+                cancellation,
+            )
+            .await
         });
         cx.spawn(async move |workspace, cx| {
             let result = worker.await;
@@ -866,12 +870,13 @@ impl WorkspaceApp {
         result: Result<Result<PublicMcpUploadWorkerResult, String>, tokio::task::JoinError>,
         cx: &mut gpui::Context<Self>,
     ) {
-        if request.is_cancelled() {
-            self.clear_public_mcp_sync_action(cx);
-            return;
-        }
+        let request_cancelled = request.is_cancelled();
         let worker = match result {
             Ok(Ok(worker)) => worker,
+            Ok(Err(error)) if request_cancelled && error == SYNC_CANCELLED_ERROR => {
+                self.clear_public_mcp_sync_action(cx);
+                return;
+            }
             Ok(Err(error)) => {
                 self.fail_public_mcp_sync_action("upload", &error, request, cx);
                 return;
@@ -1191,12 +1196,20 @@ async fn run_pull_apply_worker(
     selection: CloudSyncPreviewSelection,
     create_rollback_backup: bool,
     remote: PublicMcpRemoteIdentity,
+    cancellation: tokio_util::sync::CancellationToken,
 ) -> Result<PublicMcpApplyWorkerResult, String> {
-    let checked = run_check_worker(service.clone(), settings.clone(), hints).await?;
+    let checked = tokio::select! {
+        _ = cancellation.cancelled() => return Err(SYNC_CANCELLED_ERROR.to_owned()),
+        checked = run_check_worker(service.clone(), settings.clone(), hints) => checked?,
+    };
     if !remote.matches(&checked.metadata) {
         return Err("remote_changed_after_preview".to_owned());
     }
+    if cancellation.is_cancelled() {
+        return Err(SYNC_CANCELLED_ERROR.to_owned());
+    }
     let (sender, receiver) = mpsc::channel();
+    // Once apply starts it owns real local writes and must deliver its completion state.
     deliver_cloud_sync_apply_preview(
         sender,
         service,
@@ -1237,8 +1250,13 @@ async fn run_upload_worker(
     settings: CloudSyncSettings,
     hints: BTreeMap<String, bool>,
     options: UploadOptions,
+    cancellation: tokio_util::sync::CancellationToken,
 ) -> Result<PublicMcpUploadWorkerResult, String> {
+    if cancellation.is_cancelled() {
+        return Err(SYNC_CANCELLED_ERROR.to_owned());
+    }
     let (sender, receiver) = mpsc::channel();
+    // Remote upload has no reliable rollback after dispatch, so completion is always observed.
     deliver_cloud_sync_upload(
         sender,
         service,
@@ -1597,7 +1615,7 @@ fn cloud_sync_is_configured(
 fn public_cloud_sync_error(error: &str) -> &'static str {
     let code = error.split_once(':').map_or(error, |(code, _)| code);
     match code.trim() {
-        "cancelled" => "The Cloud Sync operation was cancelled",
+        SYNC_CANCELLED_ERROR => "The Cloud Sync operation was cancelled",
         "remote_changed_after_preview" | "remote_changed_before_upload" => {
             "The remote Cloud Sync revision changed after the plan was created"
         }
