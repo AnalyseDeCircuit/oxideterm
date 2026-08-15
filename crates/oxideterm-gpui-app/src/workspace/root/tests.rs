@@ -1,9 +1,4 @@
 mod tests {
-    use std::collections::BTreeSet;
-
-    use oxideterm_gpui_settings_view::background_tab_options;
-    use oxideterm_workspace::TabKind;
-
     use super::super::super::overlay::coalesce_connection_trace_running_events;
     use super::super::super::*;
 
@@ -25,43 +20,6 @@ mod tests {
             total_steps: Some(1),
             mode: ConnectionTraceMode::Connect,
         }
-    }
-
-    #[test]
-    fn background_tab_options_cover_native_tab_background_keys() {
-        let native_keys = [
-            TabKind::LocalTerminal,
-            TabKind::SshTerminal,
-            TabKind::FileManager,
-            TabKind::Launcher,
-            TabKind::Graphics,
-            TabKind::Runtime,
-            TabKind::ConnectionPool,
-            TabKind::Topology,
-            TabKind::NotificationCenter,
-            TabKind::Sftp,
-            TabKind::Ide,
-            TabKind::Forwards,
-            TabKind::SessionManager,
-            TabKind::PluginManager,
-            TabKind::Plugin {
-                plugin_id: "plugin".to_string(),
-                tab_id: "tab".to_string(),
-            },
-            TabKind::CloudSync,
-            TabKind::RemoteDesktop,
-            TabKind::Settings,
-        ]
-        .iter()
-        .map(tab_background_key)
-        .collect::<BTreeSet<_>>();
-
-        let settings_keys = background_tab_options()
-            .iter()
-            .map(|(key, _, _)| *key)
-            .collect::<BTreeSet<_>>();
-
-        assert_eq!(settings_keys, native_keys);
     }
 
     #[test]

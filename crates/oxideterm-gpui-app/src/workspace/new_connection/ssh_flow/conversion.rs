@@ -361,44 +361,11 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
 
 #[cfg(test)]
 mod runtime_save_tests {
-    use super::*;
-    use oxideterm_connections::{SavedAuth, SavedUpstreamProxyPolicy};
-    use zeroize::Zeroizing;
+    use std::io::Write;
 
-    fn saved_password_connection_request(
-        id: &str,
-        host: &str,
-        username: &str,
-        password: &str,
-    ) -> SaveConnectionRequest {
-        SaveConnectionRequest {
-            id: Some(id.to_string()),
-            name: id.to_string(),
-            group: None,
-            host: host.to_string(),
-            port: 22,
-            username: username.to_string(),
-            auth: SavedAuth::Password {
-                keychain_id: None,
-                plaintext_password: Some(SecretString::from(password)),
-            },
-            proxy_chain: Vec::new(),
-            upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
-            color: None,
-            icon_background_color: None,
-            icon: None,
-            tags: Vec::new(),
-            connect_timeout_seconds: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
-            agent_forwarding: false,
-            identity_agent: None,
-            agent_forwarding_socket: None,
-            legacy_ssh_compatibility: false,
-            dedicated_new_terminal_connection: false,
-            x11_forwarding: ConnectionX11ForwardingOptions::default(),
-            post_connect_command: None,
-            terminal: ConnectionTerminalOptions::default(),
-        }
-    }
+    use super::*;
+    use tempfile::NamedTempFile;
+    use zeroize::Zeroizing;
 
     #[test]
     fn test_secret_handoff_keeps_the_form_reusable() {
@@ -438,30 +405,50 @@ mod runtime_save_tests {
     }
 
     #[test]
-    fn two_saved_password_hops_resolve_keychain_secrets_without_populating_the_form() {
-        let store_path = std::env::temp_dir().join(format!(
-            "oxideterm-saved-proxy-chain-{}.json",
-            uuid::Uuid::new_v4()
-        ));
-        let mut connection_store = ConnectionStore::load(store_path).unwrap();
-        let public_proxy = connection_store
-            .upsert(saved_password_connection_request(
-                "public-proxy",
-                "proxy.example.com",
-                "proxy-user",
-                "public-proxy-secret",
-            ))
+    fn two_saved_password_hops_hydrate_without_populating_the_form() {
+        let mut store_file = NamedTempFile::new().unwrap();
+        // Read-only legacy data exercises the runtime handoff without requiring
+        // an operating-system credential service in the test environment.
+        let fixture = Zeroizing::new(
+            r#"{
+              "connections": [
+                {
+                  "id": "public-proxy",
+                  "name": "public-proxy",
+                  "host": "proxy.example.com",
+                  "port": 22,
+                  "username": "proxy-user",
+                  "auth": { "type": "password", "password": "public-proxy-secret" },
+                  "created_at": "2026-01-01T00:00:00Z"
+                },
+                {
+                  "id": "gateway",
+                  "name": "gateway",
+                  "host": "gateway.internal",
+                  "port": 22,
+                  "username": "gateway-user",
+                  "auth": { "type": "password", "password": "gateway-secret" },
+                  "created_at": "2026-01-01T00:00:00Z"
+                }
+              ],
+              "groups": []
+            }"#
+            .to_string(),
+        );
+        store_file.write_all(fixture.as_bytes()).unwrap();
+        store_file.flush().unwrap();
+        let connection_store = ConnectionStore::load_read_only(store_file.path()).unwrap();
+        let connection_infos = connection_store.connection_infos();
+        let public_proxy = connection_infos
+            .iter()
+            .find(|connection| connection.id == "public-proxy")
             .unwrap();
-        let gateway = connection_store
-            .upsert(saved_password_connection_request(
-                "gateway",
-                "gateway.internal",
-                "gateway-user",
-                "gateway-secret",
-            ))
+        let gateway = connection_infos
+            .iter()
+            .find(|connection| connection.id == "gateway")
             .unwrap();
         let mut form = NewConnectionForm::default();
-        for connection in [&public_proxy, &gateway] {
+        for connection in [public_proxy, gateway] {
             let mut hop = NewConnectionProxyHop::new();
             hop.apply_saved_connection(connection);
             form.proxy_hops.push(hop);

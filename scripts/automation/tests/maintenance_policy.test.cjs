@@ -104,6 +104,10 @@ VNC 无法满足虚拟机控制场景中的低延迟和设备共享需求。
 ### Proposed solution / 期望方案
 
 增加 SPICE 远程桌面协议支持，并由维护者确定产品边界。
+
+### Why is this important? / 为什么这个功能对你重要？
+
+虚拟机维护需要低延迟画面和设备共享能力。
 `,
   };
   const report = policy.analyzeIssue(issue);
