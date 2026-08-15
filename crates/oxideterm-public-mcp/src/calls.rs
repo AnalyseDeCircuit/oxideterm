@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::BTreeMap, fmt};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -7,7 +7,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     auth::ToolGroup,
-    handles::{ArtifactRef, AuditRef, CommandRef, ConnectionRef, NodeRef},
+    handles::{ArtifactRef, AuditRef, CommandRef, ConnectionRef, NodeRef, QuickCommandRef},
 };
 
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
@@ -230,6 +230,57 @@ pub struct HostToolsOperateArgs {
     pub operation: HostToolOperation,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct QuickCommandsListArgs {
+    #[serde(default)]
+    pub query: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct QuickCommandsDescribeArgs {
+    pub quickcommand_ref: QuickCommandRef,
+}
+
+pub struct QuickCommandsSaveArgs {
+    pub quickcommand_ref: Option<QuickCommandRef>,
+    pub name: String,
+    pub command: Zeroizing<String>,
+    pub category: String,
+    pub description: Option<String>,
+    pub host_pattern: Option<String>,
+    pub expected_revision: u64,
+}
+
+impl fmt::Debug for QuickCommandsSaveArgs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("QuickCommandsSaveArgs")
+            .field("quickcommand_ref", &self.quickcommand_ref)
+            .field("name", &self.name)
+            .field("command", &"[REDACTED]")
+            .field("category", &self.category)
+            .field("description", &self.description)
+            .field("host_pattern", &self.host_pattern)
+            .field("expected_revision", &self.expected_revision)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct QuickCommandsRemoveArgs {
+    pub quickcommand_ref: QuickCommandRef,
+    pub expected_revision: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct QuickCommandsRunArgs {
+    pub quickcommand_ref: QuickCommandRef,
+    pub node_ref: NodeRef,
+    pub expected_revision: u64,
+    #[serde(default)]
+    pub arguments: BTreeMap<String, String>,
+}
+
 fn default_output_limit() -> u32 {
     64 * 1024
 }
@@ -262,7 +313,12 @@ pub enum PublicToolCall {
     AuditSearch(AuditSearchArgs),
     HostToolsCatalog(HostToolsCatalogArgs),
     HostToolsCapture(HostToolsCaptureArgs),
-    HostToolsOperate(HostToolsOperateArgs),
+    HostToolsOperate(Box<HostToolsOperateArgs>),
+    QuickCommandsList(QuickCommandsListArgs),
+    QuickCommandsDescribe(QuickCommandsDescribeArgs),
+    QuickCommandsSave(Box<QuickCommandsSaveArgs>),
+    QuickCommandsRemove(QuickCommandsRemoveArgs),
+    QuickCommandsRun(QuickCommandsRunArgs),
 }
 
 impl PublicToolCall {
@@ -284,6 +340,11 @@ impl PublicToolCall {
             Self::HostToolsCatalog(_) => "hosttools_catalog",
             Self::HostToolsCapture(_) => "hosttools_capture",
             Self::HostToolsOperate(_) => "hosttools_operate",
+            Self::QuickCommandsList(_) => "quickcommands_list",
+            Self::QuickCommandsDescribe(_) => "quickcommands_describe",
+            Self::QuickCommandsSave(_) => "quickcommands_save",
+            Self::QuickCommandsRemove(_) => "quickcommands_remove",
+            Self::QuickCommandsRun(_) => "quickcommands_run",
         }
     }
 
@@ -301,6 +362,12 @@ impl PublicToolCall {
             Self::AuditSearch(_) => ToolGroup::AuditRead,
             Self::HostToolsCatalog(_) | Self::HostToolsCapture(_) => ToolGroup::HostToolsObserve,
             Self::HostToolsOperate(_) => ToolGroup::HostToolsOperate,
+            Self::QuickCommandsList(_) => ToolGroup::QuickCommandRead,
+            Self::QuickCommandsDescribe(_) => ToolGroup::QuickCommandContentRead,
+            Self::QuickCommandsSave(_) | Self::QuickCommandsRemove(_) => {
+                ToolGroup::QuickCommandManage
+            }
+            Self::QuickCommandsRun(_) => ToolGroup::QuickCommandExecute,
         }
     }
 
@@ -311,6 +378,9 @@ impl PublicToolCall {
                 | Self::DisconnectNode(_)
                 | Self::StartCommand(_)
                 | Self::HostToolsOperate(_)
+                | Self::QuickCommandsSave(_)
+                | Self::QuickCommandsRemove(_)
+                | Self::QuickCommandsRun(_)
         )
     }
 
@@ -336,6 +406,16 @@ impl PublicToolCall {
                 args.node_ref,
                 args.operation.target_summary()
             ),
+            Self::QuickCommandsList(_) => "quick command catalog".to_owned(),
+            Self::QuickCommandsDescribe(args) => args.quickcommand_ref.to_string(),
+            Self::QuickCommandsSave(args) => args
+                .quickcommand_ref
+                .as_ref()
+                .map_or_else(|| "new quick command".to_owned(), ToString::to_string),
+            Self::QuickCommandsRemove(args) => args.quickcommand_ref.to_string(),
+            Self::QuickCommandsRun(args) => {
+                format!("{} on {}", args.quickcommand_ref, args.node_ref)
+            }
         }
     }
 }

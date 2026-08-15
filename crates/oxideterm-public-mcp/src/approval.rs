@@ -249,6 +249,10 @@ fn approval_review(call: &PublicToolCall) -> ApprovalReview {
                 .as_ref()
                 .map(|directory| Zeroizing::new(directory.to_string())),
         },
+        PublicToolCall::QuickCommandsSave(args) => ApprovalReview {
+            command: Some(Zeroizing::new(args.command.to_string())),
+            working_directory: None,
+        },
         _ => ApprovalReview::default(),
     }
 }

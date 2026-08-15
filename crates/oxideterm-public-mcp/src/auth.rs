@@ -22,6 +22,10 @@ pub enum ToolGroup {
     ArtifactTransfer,
     HostToolsObserve,
     HostToolsOperate,
+    QuickCommandRead,
+    QuickCommandContentRead,
+    QuickCommandManage,
+    QuickCommandExecute,
 }
 
 impl ToolGroup {
@@ -36,6 +40,10 @@ impl ToolGroup {
             Self::ArtifactTransfer,
             Self::HostToolsObserve,
             Self::HostToolsOperate,
+            Self::QuickCommandRead,
+            Self::QuickCommandContentRead,
+            Self::QuickCommandManage,
+            Self::QuickCommandExecute,
         ]
     }
 }

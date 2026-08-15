@@ -26,8 +26,9 @@ use crate::{
         AuditSearchArgs, BrowseConnectionsArgs, CancelCommandArgs, CommandOutputArgs,
         CommandStateArgs, ConnectNodeArgs, DescribeConnectionArgs, DisconnectNodeArgs,
         HostToolsCaptureArgs, HostToolsCatalogArgs, HostToolsOperateArgs, InspectNodeArgs,
-        PublicToolCall, ReadArtifactArgs, ReleaseNodeArgs, StageArtifactArgs, StartCommandArgs,
-        ToolEnvelope, ToolOutcome,
+        PublicToolCall, QuickCommandsDescribeArgs, QuickCommandsListArgs, QuickCommandsRemoveArgs,
+        QuickCommandsRunArgs, QuickCommandsSaveArgs, ReadArtifactArgs, ReleaseNodeArgs,
+        StageArtifactArgs, StartCommandArgs, ToolEnvelope, ToolOutcome,
     },
     handles::{ApprovalRef, ClientRef, NodeRef},
 };
@@ -36,6 +37,8 @@ const TOOL_LIST_CACHE_TTL_MS: u64 = 1_000;
 const COMMAND_TEXT_LIMIT_BYTES: usize = 64 * 1024;
 const WORKING_DIRECTORY_LIMIT_BYTES: usize = 16 * 1024;
 const ARTIFACT_STAGE_LIMIT_BYTES: usize = 512 * 1024;
+const QUICK_COMMAND_NAME_LIMIT_BYTES: usize = 160;
+const QUICK_COMMAND_BODY_LIMIT_BYTES: usize = 4 * 1024;
 
 #[derive(Clone)]
 pub struct PublicMcpService {
@@ -97,6 +100,38 @@ struct StageArtifactMetadata {
     media_type: Option<String>,
     #[serde(default)]
     name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[expect(
+    dead_code,
+    reason = "this type exists only to generate the public tool schema"
+)]
+struct QuickCommandsSaveSchema {
+    #[serde(default)]
+    quickcommand_ref: Option<crate::QuickCommandRef>,
+    name: String,
+    command: String,
+    category: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    host_pattern: Option<String>,
+    expected_revision: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QuickCommandsSaveMetadata {
+    #[serde(default)]
+    quickcommand_ref: Option<crate::QuickCommandRef>,
+    name: String,
+    category: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    host_pattern: Option<String>,
+    expected_revision: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -428,9 +463,50 @@ impl ServerHandler for PublicMcpService {
             },
             "hosttools_operate" => match parse_arguments::<HostToolsOperateArgs>(arguments) {
                 Ok(args) => {
-                    self.execute_call(&client, PublicToolCall::HostToolsOperate(args))
+                    self.execute_call(&client, PublicToolCall::HostToolsOperate(Box::new(args)))
                         .await
                 }
+                Err(error) => *error,
+            },
+            "quickcommands_list" => match parse_arguments::<QuickCommandsListArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::QuickCommandsList(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "quickcommands_describe" => {
+                match parse_arguments::<QuickCommandsDescribeArgs>(arguments) {
+                    Ok(args) => {
+                        self.execute_call(&client, PublicToolCall::QuickCommandsDescribe(args))
+                            .await
+                    }
+                    Err(error) => *error,
+                }
+            }
+            "quickcommands_save" => match parse_quick_commands_save(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::QuickCommandsSave(Box::new(args)))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "quickcommands_remove" => match parse_arguments::<QuickCommandsRemoveArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::QuickCommandsRemove(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "quickcommands_run" => match parse_arguments::<QuickCommandsRunArgs>(arguments) {
+                Ok(args) if args.arguments.is_empty() => {
+                    self.execute_call(&client, PublicToolCall::QuickCommandsRun(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "unsupported_arguments",
+                    "Saved Quick Commands do not define parameters in the current format",
+                ),
                 Err(error) => *error,
             },
             _ => tool_error("unknown_tool", "The requested tool is not implemented"),
@@ -587,6 +663,41 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             false,
             true,
         ),
+        define_tool::<QuickCommandsListArgs>(
+            "quickcommands_list",
+            "List saved Quick Command metadata without returning command bodies.",
+            ToolGroup::QuickCommandRead,
+            true,
+            false,
+        ),
+        define_tool::<QuickCommandsDescribeArgs>(
+            "quickcommands_describe",
+            "Read one saved Quick Command body under its separate content grant.",
+            ToolGroup::QuickCommandContentRead,
+            true,
+            false,
+        ),
+        define_tool::<QuickCommandsSaveSchema>(
+            "quickcommands_save",
+            "Create or update one saved Quick Command at an expected store revision.",
+            ToolGroup::QuickCommandManage,
+            false,
+            true,
+        ),
+        define_tool::<QuickCommandsRemoveArgs>(
+            "quickcommands_remove",
+            "Remove one saved Quick Command at an expected store revision.",
+            ToolGroup::QuickCommandManage,
+            false,
+            true,
+        ),
+        define_tool::<QuickCommandsRunArgs>(
+            "quickcommands_run",
+            "Execute one unchanged saved Quick Command on an acquired SSH node.",
+            ToolGroup::QuickCommandExecute,
+            false,
+            true,
+        ),
     ]
 }
 
@@ -701,6 +812,40 @@ fn parse_stage_artifact(
             .media_type
             .unwrap_or_else(|| default_media_type.to_owned()),
         name: metadata.name,
+    })
+}
+
+fn parse_quick_commands_save(
+    mut arguments: JsonObject,
+) -> Result<QuickCommandsSaveArgs, Box<CallToolResult>> {
+    let command = match arguments.remove("command") {
+        Some(Value::String(command))
+            if !command.trim().is_empty() && command.len() <= QUICK_COMMAND_BODY_LIMIT_BYTES =>
+        {
+            Zeroizing::new(command)
+        }
+        _ => {
+            return Err(Box::new(tool_error(
+                "invalid_arguments",
+                "The Quick Command body must be non-empty and at most 4096 bytes",
+            )));
+        }
+    };
+    let metadata = parse_arguments::<QuickCommandsSaveMetadata>(arguments)?;
+    if metadata.name.trim().is_empty() || metadata.name.len() > QUICK_COMMAND_NAME_LIMIT_BYTES {
+        return Err(Box::new(tool_error(
+            "invalid_arguments",
+            "The Quick Command name must be non-empty and at most 160 bytes",
+        )));
+    }
+    Ok(QuickCommandsSaveArgs {
+        quickcommand_ref: metadata.quickcommand_ref,
+        name: metadata.name,
+        command,
+        category: metadata.category,
+        description: metadata.description,
+        host_pattern: metadata.host_pattern,
+        expected_revision: metadata.expected_revision,
     })
 }
 

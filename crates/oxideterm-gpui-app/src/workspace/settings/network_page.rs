@@ -97,6 +97,18 @@ fn public_mcp_tool_group_label_key(tool_group: oxideterm_public_mcp::ToolGroup) 
         oxideterm_public_mcp::ToolGroup::HostToolsOperate => {
             "settings_view.network.mcp_group_host_tools_operate"
         }
+        oxideterm_public_mcp::ToolGroup::QuickCommandRead => {
+            "settings_view.network.mcp_group_quick_command_read"
+        }
+        oxideterm_public_mcp::ToolGroup::QuickCommandContentRead => {
+            "settings_view.network.mcp_group_quick_command_content_read"
+        }
+        oxideterm_public_mcp::ToolGroup::QuickCommandManage => {
+            "settings_view.network.mcp_group_quick_command_manage"
+        }
+        oxideterm_public_mcp::ToolGroup::QuickCommandExecute => {
+            "settings_view.network.mcp_group_quick_command_execute"
+        }
     }
 }
 

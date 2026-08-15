@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
@@ -13,7 +13,8 @@ use oxideterm_public_mcp::{
     ApprovalRef, ApprovalStatus, AuditQuery, ClientApprovalMode, ClientCredential,
     ClientProjection, ClientRef, ClientRegistry, CommandRef, ConnectionRef, DomainBroker,
     DomainMessage, DomainRequest, DomainRequestReceiver, NodeRef, PublicMcpHttpServer,
-    PublicMcpState, PublicToolCall, ToolEnvelope, ToolGroup, ToolOutcome, start_http_server,
+    PublicMcpState, PublicToolCall, QuickCommandRef, ToolEnvelope, ToolGroup, ToolOutcome,
+    start_http_server,
 };
 use oxideterm_session_adapter::ssh_config_from_saved_connection;
 use oxideterm_ssh::{ConnectionConsumer, NodeId, NodeRouter, SshTransportError};
@@ -26,6 +27,7 @@ use zeroize::Zeroizing;
 use super::WorkspaceApp;
 
 mod host_tools;
+mod quick_commands;
 
 const PUBLIC_MCP_CLIENTS_FILE: &str = "public-mcp-clients.json";
 const PUBLIC_MCP_ENDPOINT_FILE: &str = "public-mcp-endpoint.json";
@@ -42,12 +44,15 @@ pub(in crate::workspace) struct PublicMcpWorkspaceBridge {
     startup_error: Option<String>,
     server: Option<PublicMcpHttpServer>,
     state: Arc<PublicMcpState>,
+    settings_path: PathBuf,
     receiver: Option<DomainRequestReceiver>,
     delivery_task: Option<Task<()>>,
     revealed_credential: Option<ClientCredential>,
     // Public connection references are client-scoped and never encode saved connection IDs.
     connection_refs: HashMap<(ClientRef, String), ConnectionRef>,
     connection_ids: HashMap<ConnectionRef, (ClientRef, String)>,
+    quick_command_refs: HashMap<(ClientRef, String), QuickCommandRef>,
+    quick_command_ids: HashMap<QuickCommandRef, (ClientRef, String)>,
     runtime_handles: Arc<Mutex<PublicMcpRuntimeHandles>>,
 }
 
@@ -83,6 +88,7 @@ enum PublicMcpCommandState {
 struct PublicMcpCommandRecord {
     client_ref: ClientRef,
     node_ref: NodeRef,
+    owner_group: ToolGroup,
     state: PublicMcpCommandState,
     stdout: Zeroizing<Vec<u8>>,
     stderr: Zeroizing<Vec<u8>>,
@@ -166,11 +172,14 @@ impl PublicMcpWorkspaceBridge {
             startup_error: registry_error.or(server_error),
             server,
             state,
+            settings_path: settings_path.to_path_buf(),
             receiver: Some(receiver),
             delivery_task: None,
             revealed_credential: None,
             connection_refs: HashMap::new(),
             connection_ids: HashMap::new(),
+            quick_command_refs: HashMap::new(),
+            quick_command_ids: HashMap::new(),
             runtime_handles: Arc::default(),
         }
     }
@@ -381,6 +390,16 @@ impl PublicMcpWorkspaceBridge {
             .retain(|connection_ref, _| !removed_refs.contains(connection_ref));
     }
 
+    fn remove_client_quick_command_refs(&mut self, client_ref: &ClientRef) {
+        let removed_refs = self
+            .quick_command_refs
+            .extract_if(|(owner, _), _| owner == client_ref)
+            .map(|(_, quickcommand_ref)| quickcommand_ref)
+            .collect::<HashSet<_>>();
+        self.quick_command_ids
+            .retain(|quickcommand_ref, _| !removed_refs.contains(quickcommand_ref));
+    }
+
     fn target_label(
         &self,
         client_ref: &ClientRef,
@@ -388,6 +407,21 @@ impl PublicMcpWorkspaceBridge {
         store: &ConnectionStore,
         node_router: &NodeRouter,
     ) -> String {
+        if let Some(quickcommand_ref) = target
+            .split_whitespace()
+            .next()
+            .and_then(|value| value.parse::<QuickCommandRef>().ok())
+            && let Some((owner, command_id)) = self.quick_command_ids.get(&quickcommand_ref)
+            && owner == client_ref
+            && let Ok(snapshot) = oxideterm_quick_commands::load_snapshot(&self.settings_path)
+            && let Some(command) = snapshot
+                .commands
+                .into_iter()
+                .find(|command| &command.id == command_id)
+        {
+            // The full saved command is shown only in the local approval UI.
+            return format!("{} — {}", command.name, command.command);
+        }
         if let Ok(connection_ref) = target.parse::<ConnectionRef>()
             && let Some((owner, connection_id)) = self.connection_ids.get(&connection_ref)
             && owner == client_ref
@@ -485,6 +519,7 @@ impl WorkspaceApp {
             self.public_mcp
                 .revoke_client_runtime(client_ref, &self.node_router);
             self.public_mcp.remove_client_connection_refs(client_ref);
+            self.public_mcp.remove_client_quick_command_refs(client_ref);
         }
         Ok(())
     }
@@ -520,6 +555,9 @@ impl WorkspaceApp {
                     .public_mcp
                     .revoke_client_runtime(client_ref, &self.node_router),
                 ToolGroup::CommandExecute => self.public_mcp.revoke_client_commands(client_ref),
+                ToolGroup::QuickCommandExecute => self
+                    .public_mcp
+                    .revoke_client_commands_for_group(client_ref, ToolGroup::QuickCommandExecute),
                 ToolGroup::ArtifactTransfer => {
                     self.public_mcp.state.artifacts.revoke_client(client_ref)
                 }
@@ -529,7 +567,10 @@ impl WorkspaceApp {
                 | ToolGroup::CommandObserve
                 | ToolGroup::AuditRead
                 | ToolGroup::HostToolsObserve
-                | ToolGroup::HostToolsOperate => {}
+                | ToolGroup::HostToolsOperate
+                | ToolGroup::QuickCommandRead
+                | ToolGroup::QuickCommandContentRead
+                | ToolGroup::QuickCommandManage => {}
             }
         }
         Ok(())
@@ -543,6 +584,7 @@ impl WorkspaceApp {
         self.public_mcp
             .revoke_client_runtime(client_ref, &self.node_router);
         self.public_mcp.remove_client_connection_refs(client_ref);
+        self.public_mcp.remove_client_quick_command_refs(client_ref);
         Ok(())
     }
 
@@ -603,6 +645,21 @@ impl WorkspaceApp {
             }
             PublicToolCall::HostToolsOperate(_) => {
                 self.handle_public_mcp_host_tools_operate(request)
+            }
+            PublicToolCall::QuickCommandsList(_) => {
+                self.handle_public_mcp_quick_commands_list(request)
+            }
+            PublicToolCall::QuickCommandsDescribe(_) => {
+                self.handle_public_mcp_quick_commands_describe(request)
+            }
+            PublicToolCall::QuickCommandsSave(_) => {
+                self.handle_public_mcp_quick_commands_save(request, cx)
+            }
+            PublicToolCall::QuickCommandsRemove(_) => {
+                self.handle_public_mcp_quick_commands_remove(request, cx)
+            }
+            PublicToolCall::QuickCommandsRun(_) => {
+                self.handle_public_mcp_quick_commands_run(request)
             }
         }
     }
@@ -924,10 +981,27 @@ impl WorkspaceApp {
         let PublicToolCall::StartCommand(args) = &request.call else {
             return;
         };
+        let node_ref = args.node_ref.clone();
+        let command = command_for_working_directory(
+            &args.command,
+            args.working_directory
+                .as_ref()
+                .map(|directory| directory.as_str()),
+        );
+        self.start_public_mcp_node_command(request, node_ref, command, ToolGroup::CommandExecute);
+    }
+
+    pub(super) fn start_public_mcp_node_command(
+        &self,
+        request: DomainRequest,
+        node_ref: NodeRef,
+        command: Zeroizing<String>,
+        owner_group: ToolGroup,
+    ) {
         let Some(lease) = node_lease_for_client(
             &self.public_mcp.runtime_handles,
             &request.client_ref,
-            &args.node_ref,
+            &node_ref,
         ) else {
             request.finish(ToolEnvelope::failed("The node handle is unavailable"));
             return;
@@ -953,7 +1027,8 @@ impl WorkspaceApp {
             command_ref.clone(),
             PublicMcpCommandRecord {
                 client_ref: request.client_ref.clone(),
-                node_ref: args.node_ref.clone(),
+                node_ref,
+                owner_group,
                 state: PublicMcpCommandState::Running,
                 stdout: Zeroizing::new(Vec::new()),
                 stderr: Zeroizing::new(Vec::new()),
@@ -965,12 +1040,6 @@ impl WorkspaceApp {
         );
         drop(handles);
 
-        let command = command_for_working_directory(
-            &args.command,
-            args.working_directory
-                .as_ref()
-                .map(|directory| directory.as_str()),
-        );
         let router = self.node_router.clone();
         let handles = self.public_mcp.runtime_handles.clone();
         let command_ref_for_task = command_ref.clone();
@@ -1199,6 +1268,28 @@ impl PublicMcpWorkspaceBridge {
         }
     }
 
+    fn revoke_client_commands_for_group(&self, client_ref: &ClientRef, tool_group: ToolGroup) {
+        let cancellations = {
+            let mut handles = self.runtime_handles.lock();
+            let command_refs = handles
+                .commands
+                .iter()
+                .filter_map(|(command_ref, record)| {
+                    (&record.client_ref == client_ref && record.owner_group == tool_group)
+                        .then_some(command_ref.clone())
+                })
+                .collect::<Vec<_>>();
+            command_refs
+                .into_iter()
+                .filter_map(|command_ref| handles.commands.remove(&command_ref))
+                .map(|record| record.cancellation)
+                .collect::<Vec<_>>()
+        };
+        for cancellation in cancellations {
+            cancellation.cancel();
+        }
+    }
+
     fn revoke_client_runtime(&self, client_ref: &ClientRef, node_router: &NodeRouter) {
         self.state.approvals.revoke_client(client_ref);
         self.state.artifacts.revoke_client(client_ref);
@@ -1278,6 +1369,10 @@ fn all_tool_groups() -> BTreeSet<ToolGroup> {
         ToolGroup::ArtifactTransfer,
         ToolGroup::HostToolsObserve,
         ToolGroup::HostToolsOperate,
+        ToolGroup::QuickCommandRead,
+        ToolGroup::QuickCommandContentRead,
+        ToolGroup::QuickCommandManage,
+        ToolGroup::QuickCommandExecute,
     ])
 }
 

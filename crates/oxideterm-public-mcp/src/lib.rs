@@ -32,7 +32,7 @@ pub use calls::{
 };
 pub use handles::{
     ApprovalRef, ArtifactRef, AuditRef, ClientRef, CommandRef, ConnectionRef, HandleParseError,
-    NodeRef, OperationRef, TerminalRef,
+    NodeRef, OperationRef, QuickCommandRef, TerminalRef,
 };
 pub use runtime::{PublicMcpHttpServer, start_http_server};
 pub use service::{PublicMcpService, PublicMcpState};
