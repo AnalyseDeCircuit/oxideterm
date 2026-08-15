@@ -13,9 +13,9 @@ use oxideterm_plugin_registry as plugin_host;
 use oxideterm_public_mcp::{
     AddonRef, ApprovalRef, ApprovalStatus, AuditQuery, ClientApprovalMode, ClientCredential,
     ClientProjection, ClientRef, ClientRegistry, CommandRef, ConnectionRef, DomainBroker,
-    DomainMessage, DomainRequest, DomainRequestReceiver, ForwardRef, NodeRef, PublicMcpHttpServer,
-    PublicMcpState, PublicToolCall, QuickCommandRef, ToolEnvelope, ToolGroup, ToolOutcome,
-    start_http_server,
+    DomainMessage, DomainRequest, DomainRequestReceiver, FileSessionRef, ForwardRef, NodeRef,
+    PublicMcpHttpServer, PublicMcpState, PublicToolCall, QuickCommandRef, ToolEnvelope, ToolGroup,
+    ToolOutcome, start_http_server,
 };
 use oxideterm_session_adapter::ssh_config_from_saved_connection;
 use oxideterm_ssh::{ConnectionConsumer, NodeId, NodeRouter, SshTransportError};
@@ -28,6 +28,7 @@ use zeroize::Zeroizing;
 use super::WorkspaceApp;
 
 mod addons;
+mod files;
 mod forwards;
 mod host_tools;
 mod quick_commands;
@@ -66,6 +67,7 @@ struct PublicMcpRuntimeHandles {
     nodes: HashMap<NodeRef, PublicMcpNodeLease>,
     commands: HashMap<CommandRef, PublicMcpCommandRecord>,
     forwards: HashMap<ForwardRef, PublicMcpForwardRecord>,
+    file_sessions: HashMap<FileSessionRef, PublicMcpFileSessionRecord>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -92,6 +94,17 @@ struct PublicMcpForwardRecord {
     forward_id: String,
     created_by_client: bool,
     persisted: bool,
+}
+
+/// Keeps the SFTP consumer and canonical root private to one external client.
+#[derive(Clone)]
+struct PublicMcpFileSessionRecord {
+    client_ref: ClientRef,
+    node_id: NodeId,
+    root: Option<String>,
+    session: Option<Arc<tokio::sync::Mutex<oxideterm_sftp::SftpSession>>>,
+    physical_connection_id: Option<String>,
+    consumer: ConnectionConsumer,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -498,6 +511,24 @@ impl PublicMcpWorkspaceBridge {
             .trim()
             .to_owned();
         }
+        let (file_target, file_action) = target.split_once(' ').unwrap_or((target, ""));
+        if let Ok(file_session_ref) = file_target.parse::<FileSessionRef>()
+            && let Some(record) = self
+                .runtime_handles
+                .lock()
+                .file_sessions
+                .get(&file_session_ref)
+                .filter(|record| record.client_ref == *client_ref)
+                .cloned()
+        {
+            return format!(
+                "SFTP {} {}",
+                record.root.as_deref().unwrap_or("opening"),
+                file_action
+            )
+            .trim()
+            .to_owned();
+        }
         let node_target = target.split_whitespace().next().unwrap_or(target);
         if let Ok(node_ref) = node_target.parse::<NodeRef>()
             && let Some(lease) = self.runtime_handles.lock().nodes.get(&node_ref).cloned()
@@ -626,6 +657,7 @@ impl WorkspaceApp {
                     self.public_mcp.state.artifacts.revoke_client(client_ref)
                 }
                 ToolGroup::ForwardManage => self.revoke_public_mcp_client_forwards(client_ref),
+                ToolGroup::FileRead => self.revoke_public_mcp_client_file_sessions(client_ref),
                 ToolGroup::Basic
                 | ToolGroup::ConnectionDirectory
                 | ToolGroup::ConnectionRead
@@ -638,7 +670,8 @@ impl WorkspaceApp {
                 | ToolGroup::QuickCommandManage
                 | ToolGroup::AddonRead
                 | ToolGroup::AddonManage
-                | ToolGroup::ForwardRead => {}
+                | ToolGroup::ForwardRead
+                | ToolGroup::FileWrite => {}
             }
         }
         Ok(())
@@ -682,6 +715,7 @@ impl WorkspaceApp {
 
     fn revoke_public_mcp_client_runtime(&self, client_ref: &ClientRef) {
         self.revoke_public_mcp_client_forwards(client_ref);
+        self.revoke_public_mcp_client_file_sessions(client_ref);
         self.public_mcp
             .revoke_client_runtime(client_ref, &self.node_router);
     }
@@ -700,6 +734,16 @@ impl WorkspaceApp {
                     )
                     .await;
             });
+        }
+    }
+
+    fn revoke_public_mcp_client_file_sessions(&self, client_ref: &ClientRef) {
+        for record in files::take_client_file_sessions(&self.public_mcp.runtime_handles, client_ref)
+        {
+            if let Some(connection_id) = record.physical_connection_id {
+                self.node_router
+                    .release_consumer(&connection_id, &record.consumer);
+            }
         }
     }
 
@@ -771,6 +815,15 @@ impl WorkspaceApp {
             PublicToolCall::ForwardsDiscoverPorts(_) => {
                 self.handle_public_mcp_forwards_discover_ports(request)
             }
+            PublicToolCall::FilesOpen(_) => self.handle_public_mcp_files_open(request),
+            PublicToolCall::FilesClose(_) => self.handle_public_mcp_files_close(request),
+            PublicToolCall::FilesList(_) => self.handle_public_mcp_files_list(request),
+            PublicToolCall::FilesStat(_) => self.handle_public_mcp_files_stat(request),
+            PublicToolCall::FilesRead(_) => self.handle_public_mcp_files_read(request),
+            PublicToolCall::FilesCompare(_) => self.handle_public_mcp_files_compare(request),
+            PublicToolCall::FilesWrite(_) => self.handle_public_mcp_files_write(request),
+            PublicToolCall::FilesMove(_) => self.handle_public_mcp_files_move(request),
+            PublicToolCall::FilesRemove(_) => self.handle_public_mcp_files_remove(request),
         }
     }
 
@@ -1080,6 +1133,7 @@ impl WorkspaceApp {
             .map(|record| record.cancellation)
             .collect::<Vec<_>>();
         forwards::invalidate_for_disconnected_nodes(&mut handles, &disconnected);
+        files::invalidate_for_disconnected_nodes(&mut handles, &disconnected);
         drop(handles);
         for cancellation in cancellations {
             cancellation.cancel();

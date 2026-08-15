@@ -25,13 +25,14 @@ use crate::{
     calls::{
         AddonsInstallArgs, AddonsListArgs, AddonsRemoveArgs, AddonsSetEnabledArgs, AuditSearchArgs,
         BrowseConnectionsArgs, CancelCommandArgs, CommandOutputArgs, CommandStateArgs,
-        ConnectNodeArgs, DescribeConnectionArgs, DisconnectNodeArgs, ForwardHandleArgs,
-        ForwardKind, ForwardsChangeArgs, ForwardsDiscoverPortsArgs, ForwardsListArgs,
-        ForwardsOpenArgs, ForwardsRemoveArgs, HostToolsCaptureArgs, HostToolsCatalogArgs,
-        HostToolsOperateArgs, InspectNodeArgs, PublicToolCall, QuickCommandsDescribeArgs,
-        QuickCommandsListArgs, QuickCommandsRemoveArgs, QuickCommandsRunArgs,
-        QuickCommandsSaveArgs, ReadArtifactArgs, ReleaseNodeArgs, StageArtifactArgs,
-        StartCommandArgs, ToolEnvelope, ToolOutcome,
+        ConnectNodeArgs, DescribeConnectionArgs, DisconnectNodeArgs, FilesCloseArgs,
+        FilesCompareArgs, FilesListArgs, FilesMoveArgs, FilesOpenArgs, FilesReadArgs,
+        FilesRemoveArgs, FilesStatArgs, FilesWriteArgs, ForwardHandleArgs, ForwardKind,
+        ForwardsChangeArgs, ForwardsDiscoverPortsArgs, ForwardsListArgs, ForwardsOpenArgs,
+        ForwardsRemoveArgs, HostToolsCaptureArgs, HostToolsCatalogArgs, HostToolsOperateArgs,
+        InspectNodeArgs, PublicToolCall, QuickCommandsDescribeArgs, QuickCommandsListArgs,
+        QuickCommandsRemoveArgs, QuickCommandsRunArgs, QuickCommandsSaveArgs, ReadArtifactArgs,
+        ReleaseNodeArgs, StageArtifactArgs, StartCommandArgs, ToolEnvelope, ToolOutcome,
     },
     handles::{ApprovalRef, ClientRef, NodeRef},
 };
@@ -39,13 +40,16 @@ use crate::{
 const TOOL_LIST_CACHE_TTL_MS: u64 = 1_000;
 const COMMAND_TEXT_LIMIT_BYTES: usize = 64 * 1024;
 const WORKING_DIRECTORY_LIMIT_BYTES: usize = 16 * 1024;
-const ARTIFACT_STAGE_LIMIT_BYTES: usize = 512 * 1024;
+const ARTIFACT_STAGE_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 const QUICK_COMMAND_NAME_LIMIT_BYTES: usize = 160;
 const QUICK_COMMAND_BODY_LIMIT_BYTES: usize = 4 * 1024;
 const ADDON_ID_LIMIT_BYTES: usize = 255;
 const FORWARD_ENDPOINT_LIMIT_BYTES: usize = 255;
 const FORWARD_DESCRIPTION_LIMIT_BYTES: usize = 512;
 const FORWARD_REVISION_LIMIT_BYTES: usize = 80;
+const REMOTE_PATH_LIMIT_BYTES: usize = 16 * 1024;
+const FILE_LIST_LIMIT_MAXIMUM: u32 = 500;
+const FILE_READ_LIMIT_MAXIMUM: u32 = 4 * 1024 * 1024;
 
 #[derive(Clone)]
 pub struct PublicMcpService {
@@ -614,6 +618,77 @@ impl ServerHandler for PublicMcpService {
                     Err(error) => *error,
                 }
             }
+            "files_open" => match parse_arguments::<FilesOpenArgs>(arguments) {
+                Ok(args) if files_open_args_are_valid(&args) => {
+                    self.execute_call(&client, PublicToolCall::FilesOpen(args))
+                        .await
+                }
+                Ok(_) => tool_error("invalid_arguments", "The SFTP root path is invalid"),
+                Err(error) => *error,
+            },
+            "files_close" => match parse_arguments::<FilesCloseArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::FilesClose(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "files_list" => match parse_arguments::<FilesListArgs>(arguments) {
+                Ok(args) if files_list_args_are_valid(&args) => {
+                    self.execute_call(&client, PublicToolCall::FilesList(args))
+                        .await
+                }
+                Ok(_) => tool_error("invalid_arguments", "The file listing request is invalid"),
+                Err(error) => *error,
+            },
+            "files_stat" => match parse_arguments::<FilesStatArgs>(arguments) {
+                Ok(args) if remote_path_is_valid(&args.path) => {
+                    self.execute_call(&client, PublicToolCall::FilesStat(args))
+                        .await
+                }
+                Ok(_) => tool_error("invalid_arguments", "The remote path is invalid"),
+                Err(error) => *error,
+            },
+            "files_read" => match parse_arguments::<FilesReadArgs>(arguments) {
+                Ok(args) if files_read_args_are_valid(&args) => {
+                    self.execute_call(&client, PublicToolCall::FilesRead(args))
+                        .await
+                }
+                Ok(_) => tool_error("invalid_arguments", "The file read request is invalid"),
+                Err(error) => *error,
+            },
+            "files_compare" => match parse_arguments::<FilesCompareArgs>(arguments) {
+                Ok(args) if remote_path_is_valid(&args.path) => {
+                    self.execute_call(&client, PublicToolCall::FilesCompare(args))
+                        .await
+                }
+                Ok(_) => tool_error("invalid_arguments", "The remote path is invalid"),
+                Err(error) => *error,
+            },
+            "files_write" => match parse_arguments::<FilesWriteArgs>(arguments) {
+                Ok(args) if files_write_args_are_valid(&args) => {
+                    self.execute_call(&client, PublicToolCall::FilesWrite(args))
+                        .await
+                }
+                Ok(_) => tool_error("invalid_arguments", "The file write request is invalid"),
+                Err(error) => *error,
+            },
+            "files_move" => match parse_arguments::<FilesMoveArgs>(arguments) {
+                Ok(args) if files_move_args_are_valid(&args) => {
+                    self.execute_call(&client, PublicToolCall::FilesMove(args))
+                        .await
+                }
+                Ok(_) => tool_error("invalid_arguments", "The file move request is invalid"),
+                Err(error) => *error,
+            },
+            "files_remove" => match parse_arguments::<FilesRemoveArgs>(arguments) {
+                Ok(args) if files_remove_args_are_valid(&args) => {
+                    self.execute_call(&client, PublicToolCall::FilesRemove(args))
+                        .await
+                }
+                Ok(_) => tool_error("invalid_arguments", "The file removal request is invalid"),
+                Err(error) => *error,
+            },
             _ => tool_error("unknown_tool", "The requested tool is not implemented"),
         };
         Ok(result.into())
@@ -887,6 +962,69 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             true,
             false,
         ),
+        define_tool::<FilesOpenArgs>(
+            "files_open",
+            "Open a client-scoped SFTP capability rooted at a canonical remote directory.",
+            ToolGroup::FileRead,
+            false,
+            false,
+        ),
+        define_tool::<FilesCloseArgs>(
+            "files_close",
+            "Release one SFTP capability without disconnecting its shared SSH node.",
+            ToolGroup::FileRead,
+            false,
+            false,
+        ),
+        define_tool::<FilesListArgs>(
+            "files_list",
+            "List one bounded page of entries beneath an authorized SFTP root.",
+            ToolGroup::FileRead,
+            true,
+            false,
+        ),
+        define_tool::<FilesStatArgs>(
+            "files_stat",
+            "Read public metadata and a revision for one authorized remote path.",
+            ToolGroup::FileRead,
+            true,
+            false,
+        ),
+        define_tool::<FilesReadArgs>(
+            "files_read",
+            "Read one bounded remote file range into a client-owned temporary artifact.",
+            ToolGroup::FileRead,
+            true,
+            false,
+        ),
+        define_tool::<FilesCompareArgs>(
+            "files_compare",
+            "Compare one bounded remote file with a client-owned artifact without changing it.",
+            ToolGroup::FileRead,
+            true,
+            false,
+        ),
+        define_tool::<FilesWriteArgs>(
+            "files_write",
+            "Write one client-owned artifact to an authorized remote path.",
+            ToolGroup::FileWrite,
+            false,
+            true,
+        ),
+        define_tool::<FilesMoveArgs>(
+            "files_move",
+            "Move one authorized remote path within the same SFTP root.",
+            ToolGroup::FileWrite,
+            false,
+            true,
+        ),
+        define_tool::<FilesRemoveArgs>(
+            "files_remove",
+            "Remove one authorized remote path with explicit recursive intent.",
+            ToolGroup::FileWrite,
+            false,
+            true,
+        ),
     ]
 }
 
@@ -1103,6 +1241,54 @@ fn forward_text_is_valid(value: &str, maximum_bytes: usize) -> bool {
 
 fn forward_description_is_valid(value: &str) -> bool {
     value.len() <= FORWARD_DESCRIPTION_LIMIT_BYTES && !value.chars().any(char::is_control)
+}
+
+fn files_open_args_are_valid(args: &FilesOpenArgs) -> bool {
+    args.root.as_deref().is_none_or(remote_path_is_valid)
+}
+
+fn files_list_args_are_valid(args: &FilesListArgs) -> bool {
+    args.path.as_deref().is_none_or(remote_path_is_valid)
+        && args
+            .limit
+            .is_none_or(|limit| limit > 0 && limit <= FILE_LIST_LIMIT_MAXIMUM)
+        && args.pattern.as_deref().is_none_or(|pattern| {
+            pattern.len() <= FORWARD_ENDPOINT_LIMIT_BYTES && !pattern.chars().any(char::is_control)
+        })
+}
+
+fn files_read_args_are_valid(args: &FilesReadArgs) -> bool {
+    remote_path_is_valid(&args.path)
+        && args
+            .maximum_bytes
+            .is_none_or(|limit| limit > 0 && limit <= FILE_READ_LIMIT_MAXIMUM)
+}
+
+fn files_write_args_are_valid(args: &FilesWriteArgs) -> bool {
+    remote_path_is_valid(&args.path)
+        && optional_revision_is_valid(args.expected_revision.as_deref())
+}
+
+fn files_move_args_are_valid(args: &FilesMoveArgs) -> bool {
+    remote_path_is_valid(&args.source_path)
+        && remote_path_is_valid(&args.destination_path)
+        && args.source_path != args.destination_path
+        && optional_revision_is_valid(args.expected_revision.as_deref())
+}
+
+fn files_remove_args_are_valid(args: &FilesRemoveArgs) -> bool {
+    remote_path_is_valid(&args.path)
+        && optional_revision_is_valid(args.expected_revision.as_deref())
+}
+
+fn optional_revision_is_valid(revision: Option<&str>) -> bool {
+    revision.is_none_or(|revision| forward_text_is_valid(revision, FORWARD_REVISION_LIMIT_BYTES))
+}
+
+fn remote_path_is_valid(path: &str) -> bool {
+    !path.trim().is_empty()
+        && path.len() <= REMOTE_PATH_LIMIT_BYTES
+        && !path.chars().any(char::is_control)
 }
 
 fn envelope_result(envelope: ToolEnvelope) -> CallToolResult {

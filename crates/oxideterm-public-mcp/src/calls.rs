@@ -8,8 +8,8 @@ use zeroize::Zeroizing;
 use crate::{
     auth::ToolGroup,
     handles::{
-        AddonRef, ArtifactRef, AuditRef, CommandRef, ConnectionRef, ForwardRef, NodeRef,
-        QuickCommandRef,
+        AddonRef, ArtifactRef, AuditRef, CommandRef, ConnectionRef, FileSessionRef, ForwardRef,
+        NodeRef, QuickCommandRef,
     },
 };
 
@@ -386,6 +386,89 @@ pub struct ForwardsDiscoverPortsArgs {
     pub node_ref: NodeRef,
 }
 
+/// Opens an SFTP capability rooted at one canonical remote directory.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct FilesOpenArgs {
+    pub node_ref: NodeRef,
+    #[serde(default)]
+    pub root: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct FilesCloseArgs {
+    pub file_session_ref: FileSessionRef,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct FilesListArgs {
+    pub file_session_ref: FileSessionRef,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub show_hidden: bool,
+    #[serde(default)]
+    pub pattern: Option<String>,
+    #[serde(default)]
+    pub cursor: u32,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct FilesStatArgs {
+    pub file_session_ref: FileSessionRef,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct FilesReadArgs {
+    pub file_session_ref: FileSessionRef,
+    pub path: String,
+    #[serde(default)]
+    pub offset: u64,
+    #[serde(default)]
+    pub maximum_bytes: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct FilesCompareArgs {
+    pub file_session_ref: FileSessionRef,
+    pub path: String,
+    pub artifact_ref: ArtifactRef,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct FilesWriteArgs {
+    pub file_session_ref: FileSessionRef,
+    pub path: String,
+    pub artifact_ref: ArtifactRef,
+    #[serde(default)]
+    pub overwrite: bool,
+    #[serde(default)]
+    pub expected_revision: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct FilesMoveArgs {
+    pub file_session_ref: FileSessionRef,
+    pub source_path: String,
+    pub destination_path: String,
+    #[serde(default)]
+    pub overwrite: bool,
+    #[serde(default)]
+    pub expected_revision: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct FilesRemoveArgs {
+    pub file_session_ref: FileSessionRef,
+    pub path: String,
+    #[serde(default)]
+    pub recursive: bool,
+    #[serde(default)]
+    pub expected_revision: Option<String>,
+}
+
 fn default_output_limit() -> u32 {
     64 * 1024
 }
@@ -436,6 +519,15 @@ pub enum PublicToolCall {
     ForwardsRemove(ForwardsRemoveArgs),
     ForwardsMetrics(ForwardHandleArgs),
     ForwardsDiscoverPorts(ForwardsDiscoverPortsArgs),
+    FilesOpen(FilesOpenArgs),
+    FilesClose(FilesCloseArgs),
+    FilesList(FilesListArgs),
+    FilesStat(FilesStatArgs),
+    FilesRead(FilesReadArgs),
+    FilesCompare(FilesCompareArgs),
+    FilesWrite(FilesWriteArgs),
+    FilesMove(FilesMoveArgs),
+    FilesRemove(FilesRemoveArgs),
 }
 
 impl PublicToolCall {
@@ -474,6 +566,15 @@ impl PublicToolCall {
             Self::ForwardsRemove(_) => "forwards_remove",
             Self::ForwardsMetrics(_) => "forwards_metrics",
             Self::ForwardsDiscoverPorts(_) => "forwards_discover_ports",
+            Self::FilesOpen(_) => "files_open",
+            Self::FilesClose(_) => "files_close",
+            Self::FilesList(_) => "files_list",
+            Self::FilesStat(_) => "files_stat",
+            Self::FilesRead(_) => "files_read",
+            Self::FilesCompare(_) => "files_compare",
+            Self::FilesWrite(_) => "files_write",
+            Self::FilesMove(_) => "files_move",
+            Self::FilesRemove(_) => "files_remove",
         }
     }
 
@@ -509,6 +610,13 @@ impl PublicToolCall {
             | Self::ForwardsStop(_)
             | Self::ForwardsRestart(_)
             | Self::ForwardsRemove(_) => ToolGroup::ForwardManage,
+            Self::FilesOpen(_)
+            | Self::FilesClose(_)
+            | Self::FilesList(_)
+            | Self::FilesStat(_)
+            | Self::FilesRead(_)
+            | Self::FilesCompare(_) => ToolGroup::FileRead,
+            Self::FilesWrite(_) | Self::FilesMove(_) | Self::FilesRemove(_) => ToolGroup::FileWrite,
         }
     }
 
@@ -530,6 +638,9 @@ impl PublicToolCall {
                 | Self::ForwardsStop(_)
                 | Self::ForwardsRestart(_)
                 | Self::ForwardsRemove(_)
+                | Self::FilesWrite(_)
+                | Self::FilesMove(_)
+                | Self::FilesRemove(_)
         )
     }
 
@@ -606,6 +717,32 @@ impl PublicToolCall {
                 format!("{} remove_saved={}", args.forward_ref, args.remove_saved)
             }
             Self::ForwardsDiscoverPorts(args) => args.node_ref.to_string(),
+            Self::FilesOpen(args) => format!(
+                "{} root={}",
+                args.node_ref,
+                args.root.as_deref().unwrap_or("home")
+            ),
+            Self::FilesClose(args) => args.file_session_ref.to_string(),
+            Self::FilesList(args) => format!(
+                "{} {}",
+                args.file_session_ref,
+                args.path.as_deref().unwrap_or(".")
+            ),
+            Self::FilesStat(args) => format!("{} {}", args.file_session_ref, args.path),
+            Self::FilesRead(args) => format!("{} {}", args.file_session_ref, args.path),
+            Self::FilesCompare(args) => format!("{} {}", args.file_session_ref, args.path),
+            Self::FilesWrite(args) => format!(
+                "{} {} overwrite={}",
+                args.file_session_ref, args.path, args.overwrite
+            ),
+            Self::FilesMove(args) => format!(
+                "{} {} -> {} overwrite={}",
+                args.file_session_ref, args.source_path, args.destination_path, args.overwrite
+            ),
+            Self::FilesRemove(args) => format!(
+                "{} {} recursive={}",
+                args.file_session_ref, args.path, args.recursive
+            ),
         }
     }
 }

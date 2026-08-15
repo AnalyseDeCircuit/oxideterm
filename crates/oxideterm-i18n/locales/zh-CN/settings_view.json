@@ -1502,6 +1502,8 @@
       "mcp_group_addon_manage": "插件管理",
       "mcp_group_forward_read": "端口转发状态",
       "mcp_group_forward_manage": "端口转发管理",
+      "mcp_group_file_read": "SFTP 文件读取",
+      "mcp_group_file_write": "SFTP 文件修改",
       "client_enabled": "已启用",
       "client_disabled": "已停用",
       "enable_client": "启用",

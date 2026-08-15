@@ -22,6 +22,7 @@ use russh_sftp::{
 };
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tracing::{debug, info, warn};
+use zeroize::Zeroizing;
 
 use super::{
     error::SftpError,

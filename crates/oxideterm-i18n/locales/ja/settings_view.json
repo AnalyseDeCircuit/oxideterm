@@ -1502,6 +1502,8 @@
       "mcp_group_addon_manage": "Addon management",
       "mcp_group_forward_read": "Port forwarding status",
       "mcp_group_forward_manage": "Port forwarding management",
+      "mcp_group_file_read": "SFTP file reading",
+      "mcp_group_file_write": "SFTP file changes",
       "client_enabled": "Enabled",
       "client_disabled": "Disabled",
       "enable_client": "Enable",

@@ -8408,6 +8408,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "zeroize",
  "zstd",
 ]
 

@@ -188,6 +188,58 @@ impl SftpSession {
         .await
     }
 
+    /// Reads one bounded range without allocating for the complete remote file.
+    pub async fn read_file_range(
+        &self,
+        path: &str,
+        offset: u64,
+        maximum_bytes: usize,
+    ) -> Result<(String, u64, Zeroizing<Vec<u8>>), SftpError> {
+        let canonical_path = self.resolve_path(path).await?;
+        let metadata = self
+            .sftp
+            .metadata(&canonical_path)
+            .await
+            .map_err(|error| self.map_sftp_error(error, &canonical_path))?;
+        if metadata.is_dir() {
+            return Err(SftpError::DirectoryNotFound(canonical_path));
+        }
+        let total_size = metadata.size.unwrap_or(0);
+        if offset > total_size {
+            return Err(SftpError::InvalidPath(format!(
+                "offset exceeds remote file size: {canonical_path}"
+            )));
+        }
+        let read_limit = (total_size - offset)
+            .min(u64::try_from(maximum_bytes).unwrap_or(u64::MAX));
+        let mut file = self
+            .sftp
+            .open(&canonical_path)
+            .await
+            .map_err(|error| self.map_sftp_error(error, &canonical_path))?;
+        if offset > 0 {
+            file.seek(std::io::SeekFrom::Start(offset))
+                .await
+                .map_err(SftpError::IoError)?;
+        }
+        let mut bytes = Zeroizing::new(Vec::with_capacity(
+            usize::try_from(read_limit).unwrap_or(maximum_bytes),
+        ));
+        file.take(read_limit)
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(SftpError::IoError)?;
+        Ok((canonical_path, total_size, bytes))
+    }
+
+    /// Resolves an existing path or a new file beneath its canonical parent.
+    pub async fn canonicalize_write_target(&self, path: &str) -> Result<String, SftpError> {
+        match self.resolve_path(path).await {
+            Ok(path) => Ok(path),
+            Err(_) => self.resolve_new_file_path(path).await,
+        }
+    }
+
     pub async fn write_content(
         &self,
         path: &str,

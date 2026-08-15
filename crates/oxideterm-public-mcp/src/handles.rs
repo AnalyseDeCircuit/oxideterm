@@ -75,3 +75,4 @@ opaque_handle!(ArtifactRef, "artifact_");
 opaque_handle!(QuickCommandRef, "quickcommand_");
 opaque_handle!(AddonRef, "addon_");
 opaque_handle!(ForwardRef, "forward_");
+opaque_handle!(FileSessionRef, "files_");

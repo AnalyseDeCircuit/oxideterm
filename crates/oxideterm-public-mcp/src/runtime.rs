@@ -20,7 +20,8 @@ use tower_service::Service;
 use crate::{ClientRegistry, PublicMcpService, PublicMcpState};
 
 const MCP_ENDPOINT_PATH: &str = "/mcp";
-const MCP_REQUEST_BODY_LIMIT: usize = 1024 * 1024;
+// The bound includes base64 expansion for the largest accepted staged artifact.
+const MCP_REQUEST_BODY_LIMIT: usize = 24 * 1024 * 1024;
 const MCP_CONNECTION_LIMIT: usize = 32;
 
 pub struct PublicMcpHttpServer {

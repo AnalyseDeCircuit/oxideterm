@@ -30,6 +30,8 @@ pub enum ToolGroup {
     AddonManage,
     ForwardRead,
     ForwardManage,
+    FileRead,
+    FileWrite,
 }
 
 impl ToolGroup {
@@ -52,6 +54,8 @@ impl ToolGroup {
             Self::AddonManage,
             Self::ForwardRead,
             Self::ForwardManage,
+            Self::FileRead,
+            Self::FileWrite,
         ]
     }
 }

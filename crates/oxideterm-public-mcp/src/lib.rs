@@ -33,8 +33,9 @@ pub use calls::{
     ToolEnvelope, ToolOutcome,
 };
 pub use handles::{
-    AddonRef, ApprovalRef, ArtifactRef, AuditRef, ClientRef, CommandRef, ConnectionRef, ForwardRef,
-    HandleParseError, NodeRef, OperationRef, QuickCommandRef, TerminalRef,
+    AddonRef, ApprovalRef, ArtifactRef, AuditRef, ClientRef, CommandRef, ConnectionRef,
+    FileSessionRef, ForwardRef, HandleParseError, NodeRef, OperationRef, QuickCommandRef,
+    TerminalRef,
 };
 pub use runtime::{PublicMcpHttpServer, start_http_server};
 pub use service::{PublicMcpService, PublicMcpState};
