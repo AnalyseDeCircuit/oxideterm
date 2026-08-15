@@ -1515,6 +1515,8 @@
       "mcp_group_forward_manage": "Port forwarding management",
       "mcp_group_file_read": "SFTP file reading",
       "mcp_group_file_write": "SFTP file changes",
+      "mcp_group_workspace_read": "Lecture de l’espace de travail IDE",
+      "mcp_group_workspace_edit": "Modification de l’espace de travail IDE",
       "mcp_group_cloud_sync": "Synchronisation cloud",
       "client_enabled": "Enabled",
       "client_disabled": "Disabled",

@@ -58,7 +58,7 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 
 - 设置页可创建、停用和撤销独立外部客户端；一次性 Bearer 凭据只向用户显示一次，设备端只持久化 SHA-256 摘要。
 - 每个客户端独立选择普通模式或完全权限模式，并逐项启用工具组。普通模式保留应用内动作批准；完全权限模式只跳过已勾选工具组的逐动作批准，不会绕过 Bearer 认证、应用锁、秘密硬边界、审计或未授权工具组。
-- `tools/list` 按客户端工具组裁剪；当前实际发布基础、连接目录/详情/管理、凭据管理、节点租约、真实终端会话/观察/输入/录制、RDP/VNC 会话/画面/键鼠/剪贴板、命令执行/观察、临时 artifact、后台 SFTP 传输、当前客户端审计、类型化 Host Tools、快速命令、插件生命周期、端口转发、SFTP 文件和云同步工具。
+- `tools/list` 按客户端工具组裁剪；当前实际发布基础、连接目录/详情/管理、凭据管理、节点租约、真实终端会话/观察/输入/录制、RDP/VNC 会话/画面/键鼠/剪贴板、命令执行/观察、临时 artifact、后台 SFTP 传输、远端 IDE 工作区、当前客户端审计、类型化 Host Tools、快速命令、插件生命周期、端口转发、SFTP 文件和云同步工具。
 - `connections_browse` 已覆盖保存的 SSH、串口、Telnet、Mosh、RDP 和 VNC 配置，只返回目录投影；精确端点及协议选项由单独授权的 `connections_describe` 返回，既有凭据只显示存在性。
 - `connections_save` 使用严格 tagged profile 写入上述六类真实保存配置，更新必须携带 `connections_describe` 返回的 revision；schema 不包含秘密字段，本地终端没有保存分支。`connections_remove` 遇到受保护凭据时要求显式 `forget_credentials=true`，因此不会静默删除秘密或制造无法管理的孤儿引用。
 - `credentials_status` 只返回槽位、认证类型、可写性和存在标记；`credentials_store` 把新的零化输入直接交给连接受保护存储，`credentials_forget` 删除指定槽位。三者都不返回既有值或内部存储引用，更新凭据也不会污染最近连接顺序。
@@ -73,6 +73,7 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 - 端口转发读取和管理分别授权。`forwards_*` 复用应用唯一的 `ForwardingRuntimeService` 和独立 `PortForward` 消费者，支持类型化创建、带 revision 的受控修改、停止、重启、删除、统计和单次端口发现。关闭终端或释放 Public MCP 节点租约不会停止转发；显式物理节点断开、客户端撤销或关闭转发管理授权才按所有权清理。外部只看到客户端作用域的 `forward_ref`。
 - SFTP 文件读取和修改分别授权。`files_open` 为规范化远端根目录登记独立 SFTP 消费者，后续列表、元数据、分段读取、比较、写入、移动和删除都重新校验规范化路径边界。正文只经客户端自己的有界 artifact 传递；重连时先取得当前连接的消费者再释放旧消费者，`files_close` 不断开共享 SSH 节点。
 - `transfers_start` 在同一授权根内启动真实后台 SFTP 单文件上传或下载，除传输数据组外，上传还要求远端文件写入组，下载还要求远端文件读取组。进度和取消复用应用的传输控制器。上传源与下载产物都只能是客户端私有 artifact，本机临时路径不会进入结果；客户端撤销、工具组关闭、文件会话关闭或物理节点断开会取消仍在运行的传输。当前 artifact 数据面上限为 64 MiB，尚未保留可跨请求重启的部分文件，因此 `resume=true` 会明确拒绝；上传失败或取消时会如实报告可能存在远端部分文件。
+- IDE 工作区读取和结构化编辑分别授权。`workspaces_mount` 必须从客户端已有的 `file_session_ref` 派生，并再次规范化项目根；它创建独立的 Node Agent/SFTP IDE owner，不借用可见编辑器标签页，也不暴露 NodeId、TabId 或 GPUI Entity。树、文本读取和搜索都有硬上限；编辑使用编辑器核心校验 UTF-8 字节区间，并将客户端先前观察到的 revision 映射回真实 `SavedFileVersion` 做冲突检测。多文件写入不是服务端原子事务，后续文件失败时会尝试用刚写入的版本回滚前项，并明确报告回滚是否完整，不虚构持久 `undo_ref`。关闭工作区、父文件会话、客户端授权或物理节点只释放该工作区自己的 IDE consumer。
 - 终端会话、内容观察和输入控制分别授权。`terminals_open` 只创建应用真实持有的可见终端页：SSH 必须使用已取得的 `node_ref`，保存的 Mosh、Telnet 和串口使用 `connection_ref`，本地终端只允许一次性启动且不会进入保存、导出或同步。读取仅返回有界屏幕快照与 generation cursor；搜索复用终端后端；输入正文不进入审计，普通模式批准页只显示输入类型、长度与回车意图。关闭 SSH 终端只关闭自己的 terminal consumer，不等同于物理节点断开。
 - 终端录制控制和录制内容分别授权。`recordings_control` 复用真实 `TerminalPane` recorder，同一终端不会覆盖既有应用录制；当前后端只支持 output-only，因此 `capture_input=true` 会明确拒绝。停止时保留有界 asciicast 正文，搜索只给有界片段，导出只生成客户端私有且会过期的 artifact，不接受任意本机路径。终端关闭或控制授权关闭会先停止活动录制；客户端撤销会零化保留正文并撤销导出 artifact。
 - 远程桌面会话、画面观察、键鼠控制和剪贴板分别授权。`desktops_open` 只解析保存的 RDP/VNC `connection_ref`，凭据由设备受保护存储直接移交真实 provider，会话仍由可见标签页和 `RemoteDesktopSessionEntity` 持有。隐藏标签页只有在客户端启用画面观察时才继续消费最新帧；`desktops_frame` 把有界 CPU framebuffer 在后台编码成客户端私有 PNG artifact。输入必须携带当前 graphics epoch，坐标按 server framebuffer 校验；远端剪贴板来自会话内零化缓存，绝不读取系统剪贴板冒充远端内容。关闭或撤权会释放所有输入、关闭 helper，并撤销该桌面的帧和剪贴板 artifact。
@@ -81,7 +82,7 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 - 停用或撤销客户端会撤销待批准动作、取消命令并释放其 Public MCP 消费者；`nodes_release` 不会把其他终端、SFTP 或转发消费者仍在使用的物理节点断开。
 - 应用锁定时会拒绝新的 MCP 领域请求、撤销待批准动作、取消 MCP 命令并释放 MCP 节点消费者；解锁后客户端凭据仍有效，但必须重新取得运行时句柄。
 
-stdio bridge 和 IDE 工作区仍按后续阶段实施。已接入领域尚未支持的目标或动作会明确拒绝；其余领域在真实 broker 和生命周期接通前不会出现在 `tools/list`，也不会用空壳结果冒充支持。
+stdio bridge 仍按后续阶段实施。已接入领域尚未支持的目标或动作会明确拒绝；其余领域在真实 broker 和生命周期接通前不会出现在 `tools/list`，也不会用空壳结果冒充支持。
 
 ## 2. 服务形态与协议
 
@@ -283,12 +284,12 @@ NodeRouter / connection registry ── 物理 SSH node
 | `transfers_start` | 传输数据 / X / 上传必须 | 严格 tagged `direction`；上传含 `file_session_ref`、`remote_path`、`artifact_ref`、`overwrite`、`resume`，下载不接受本机路径 | 基于真实 SFTP 传输控制器启动客户端私有单文件作业，返回 `transfer_ref`。当前最多 64 MiB 且 `resume` 必须为 `false`；目录传输等待显式清单协议后再开放。 |
 | `transfers_status` | 传输数据 / D / 否 | `transfer_ref` | `pending/running/completed/cancelled/failed`、字节数、速度、脱敏错误码、远端残留标记和完成后的下载 artifact；不返回内部节点或临时路径。 |
 | `transfers_cancel` | 传输数据 / W / 否 | `transfer_ref` | 请求现有传输控制器取消；上传会准确报告可能的远端部分文件，关闭传输不等于断开共享 SSH 节点。 |
-| `workspaces_mount` | IDE / W / 否 | `file_session_ref`、`root_path` | 创建远端 IDE 工作区投影，返回 `workspace_ref`。 |
-| `workspaces_tree` | IDE / R / 否 | `workspace_ref`、`path?`、`cursor?` | 项目树和增量版本，不泄露 UI 实体。 |
-| `workspaces_read` | IDE / R / 否 | `workspace_ref`、`path`、`range?` | 文本、版本和语言提示；二进制返回 artifact。 |
-| `workspaces_apply_edits` | IDE / X / 必须 | `workspace_ref`、`path`、`edits`、`expected_revision` | 使用编辑核心的结构化 edits 写回，检测冲突并在可用时返回 `undo_ref`；不接受任意编辑器内部操作。 |
-| `workspaces_search` | IDE / R / 否 | `workspace_ref`、`query`、`scope?`、`limit` | 有上限的路径/匹配结果和截断状态。 |
-| `workspaces_close` | IDE / W / 否 | `workspace_ref` | 关闭 IDE 投影并释放其文件消费者。 |
+| `workspaces_mount` | IDE 工作区读取 / W / 否 | `file_session_ref`、`root?`；同时要求远端文件读取组 | 在既有 SFTP 授权根下规范化子目录，创建独立 IDE owner，返回 `workspace_ref`、项目名、Git 摘要和真实能力。 |
+| `workspaces_tree` | IDE 工作区读取 / R / 否 | `workspace_ref`、`path?`、`cursor?`、`limit?` | 有界目录页、相对路径、类型、版本和基础元数据；不泄露内部节点或 UI 实体。 |
+| `workspaces_read` | IDE 工作区读取 / R / 否 | `workspace_ref`、`path` | 最多 4 MiB 的可编辑 UTF-8 文本和 conflict revision；二进制和超限正文明确拒绝，不塞进 JSON base64。 |
+| `workspaces_apply_edits` | IDE 工作区编辑 / X / 必须 | `workspace_ref`、`files[]`，每项含 `path`、`expected_revision`、UTF-8 字节范围 edits；同时要求远端文件写入组 | 先预检全部文件，再用编辑核心应用结构化事务并带真实远端版本写回；跨文件不宣称原子，失败时尝试受版本保护的补偿回滚，不返回虚假 `undo_ref`。 |
+| `workspaces_search` | IDE 工作区读取 / R / 否 | `workspace_ref`、字面量 `pattern`、`root?`、`case_sensitive`、`maximum_results?` | 复用 Node Agent 字面量搜索；不可用时走已有有界远端 grep fallback。结果限制 500 条、片段限制 4 KiB，路径仍受工作区根约束；当前不虚构未贯通的正则、glob 或隐藏文件策略。 |
+| `workspaces_close` | IDE 工作区读取 / W / 否 | `workspace_ref` | 关闭 headless IDE owner 并只释放它自己的 consumer，不断开共享物理节点。 |
 
 ### 4.5 Host Tools 和端口转发
 
@@ -357,7 +358,7 @@ RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控�
 | 连接目录 | 开启 | 当前客户端 | 仅脱敏 metadata；精确端点需要连接读取。 |
 | 连接读取、连接管理、凭据管理、节点会话 | 关闭 | 客户端 + 指定连接或节点 | 配置写入与秘密写入分组授权；使用已存秘密不等于可读取秘密。 |
 | 终端观察、终端输入、录制 | 关闭 | 客户端 + 指定 terminal/transport | 输入和录制分别授权。 |
-| 远端文件读取、写入、IDE、传输 | 关闭 | 客户端 + `connection_ref`/根目录 | 路径范围可由授权页限定。 |
+| 远端文件读取、写入、IDE 工作区读取、IDE 工作区编辑、传输 | 关闭 | 客户端 + `connection_ref`/根目录 | IDE 必须从已授权 SFTP 根派生；读取与结构化编辑独立授予。 |
 | Host Tools 观察、Host Tools 操作 | 关闭 | 客户端 + 指定 node | 操作必须来自固定 typed catalog。 |
 | 转发 | 关闭 | 客户端 + 指定 node | 公网/非回环 bind 和保存规则加重确认。 |
 | 远程桌面观察、控制、剪贴板 | 关闭 | 客户端 + 指定 desktop/profile | 画面、输入、双向剪贴板独立授予。 |

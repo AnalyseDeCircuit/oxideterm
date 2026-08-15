@@ -10,7 +10,7 @@ use crate::{
     handles::{
         AddonRef, ArtifactRef, AuditRef, CommandRef, ConnectionRef, DesktopRef, FileSessionRef,
         ForwardRef, NodeRef, QuickCommandRef, RecordingRef, SyncPlanRef, TerminalRef, TransferRef,
-        UndoRef,
+        UndoRef, WorkspaceRef,
     },
 };
 
@@ -1374,6 +1374,73 @@ pub struct TransferHandleArgs {
     pub transfer_ref: TransferRef,
 }
 
+/// Mounts an IDE workspace beneath an existing authorized SFTP root.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceMountArgs {
+    pub file_session_ref: FileSessionRef,
+    #[serde(default)]
+    pub root: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceTreeArgs {
+    pub workspace_ref: WorkspaceRef,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub cursor: u32,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceReadArgs {
+    pub workspace_ref: WorkspaceRef,
+    pub path: String,
+}
+
+#[derive(Clone)]
+pub struct WorkspaceTextEdit {
+    pub start_byte: u32,
+    pub end_byte: u32,
+    pub replacement: Zeroizing<String>,
+}
+
+#[derive(Clone)]
+pub struct WorkspaceFileEdits {
+    pub path: String,
+    pub expected_revision: String,
+    pub edits: Vec<WorkspaceTextEdit>,
+}
+
+#[derive(Clone)]
+pub struct WorkspaceApplyEditsArgs {
+    pub workspace_ref: WorkspaceRef,
+    pub files: Vec<WorkspaceFileEdits>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceSearchArgs {
+    pub workspace_ref: WorkspaceRef,
+    pub pattern: String,
+    #[serde(default)]
+    pub root: Option<String>,
+    #[serde(default)]
+    pub case_sensitive: bool,
+    #[serde(default)]
+    pub maximum_results: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceCloseArgs {
+    pub workspace_ref: WorkspaceRef,
+}
+
 fn default_output_limit() -> u32 {
     64 * 1024
 }
@@ -1474,6 +1541,12 @@ pub enum PublicToolCall {
     TransferStart(StartTransferArgs),
     TransferStatus(TransferHandleArgs),
     TransferCancel(TransferHandleArgs),
+    WorkspaceMount(WorkspaceMountArgs),
+    WorkspaceTree(WorkspaceTreeArgs),
+    WorkspaceRead(WorkspaceReadArgs),
+    WorkspaceApplyEdits(WorkspaceApplyEditsArgs),
+    WorkspaceSearch(WorkspaceSearchArgs),
+    WorkspaceClose(WorkspaceCloseArgs),
 }
 
 impl PublicToolCall {
@@ -1555,6 +1628,12 @@ impl PublicToolCall {
             Self::TransferStart(_) => "transfers_start",
             Self::TransferStatus(_) => "transfers_status",
             Self::TransferCancel(_) => "transfers_cancel",
+            Self::WorkspaceMount(_) => "workspaces_mount",
+            Self::WorkspaceTree(_) => "workspaces_tree",
+            Self::WorkspaceRead(_) => "workspaces_read",
+            Self::WorkspaceApplyEdits(_) => "workspaces_apply_edits",
+            Self::WorkspaceSearch(_) => "workspaces_search",
+            Self::WorkspaceClose(_) => "workspaces_close",
         }
     }
 
@@ -1626,6 +1705,12 @@ impl PublicToolCall {
             Self::TransferStart(_) | Self::TransferStatus(_) | Self::TransferCancel(_) => {
                 ToolGroup::ArtifactTransfer
             }
+            Self::WorkspaceMount(_)
+            | Self::WorkspaceTree(_)
+            | Self::WorkspaceRead(_)
+            | Self::WorkspaceSearch(_)
+            | Self::WorkspaceClose(_) => ToolGroup::WorkspaceRead,
+            Self::WorkspaceApplyEdits(_) => ToolGroup::WorkspaceEdit,
         }
     }
 
@@ -1633,6 +1718,8 @@ impl PublicToolCall {
         match self {
             Self::TransferStart(StartTransferArgs::Upload { .. }) => &[ToolGroup::FileWrite],
             Self::TransferStart(StartTransferArgs::Download { .. }) => &[ToolGroup::FileRead],
+            Self::WorkspaceMount(_) => &[ToolGroup::FileRead],
+            Self::WorkspaceApplyEdits(_) => &[ToolGroup::FileWrite],
             _ => &[],
         }
     }
@@ -1674,6 +1761,7 @@ impl PublicToolCall {
                 | Self::FilesMove(_)
                 | Self::FilesRemove(_)
                 | Self::TransferStart(StartTransferArgs::Upload { .. })
+                | Self::WorkspaceApplyEdits(_)
         )
     }
 
@@ -1859,6 +1947,38 @@ impl PublicToolCall {
                 "{} {} recursive={}",
                 args.file_session_ref, args.path, args.recursive
             ),
+            Self::WorkspaceMount(args) => format!(
+                "{} root={}",
+                args.file_session_ref,
+                args.root.as_deref().unwrap_or(".")
+            ),
+            Self::WorkspaceTree(args) => format!(
+                "{} {}",
+                args.workspace_ref,
+                args.path.as_deref().unwrap_or(".")
+            ),
+            Self::WorkspaceRead(args) => format!("{} {}", args.workspace_ref, args.path),
+            Self::WorkspaceApplyEdits(args) => format!(
+                "{} {}",
+                args.workspace_ref,
+                args.files
+                    .iter()
+                    .map(|file| format!(
+                        "{} ({} edits, {} replacement bytes)",
+                        file.path,
+                        file.edits.len(),
+                        file.edits
+                            .iter()
+                            .map(|edit| edit.replacement.len())
+                            .sum::<usize>()
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Self::WorkspaceSearch(args) => {
+                format!("{} search {} bytes", args.workspace_ref, args.pattern.len())
+            }
+            Self::WorkspaceClose(args) => args.workspace_ref.to_string(),
             Self::TransferStart(args) => match args {
                 StartTransferArgs::Upload {
                     file_session_ref,

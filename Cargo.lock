@@ -7819,6 +7819,7 @@ dependencies = [
  "oxideterm-gpui-terminal",
  "oxideterm-gpui-ui",
  "oxideterm-i18n",
+ "oxideterm-ide-core",
  "oxideterm-ide-fs",
  "oxideterm-launcher",
  "oxideterm-local-files",

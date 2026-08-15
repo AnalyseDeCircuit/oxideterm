@@ -40,10 +40,11 @@ use crate::{
         ResizeTerminalArgs, SavePublicConnectionArgs, StageArtifactArgs, StartCommandArgs,
         StartTransferArgs, StoreCredentialArgs, SubmitTerminalArgs, SyncApplyPlanArgs,
         SyncPublishPreviewArgs, SyncPullPreviewArgs, SyncRestoreArgs, SyncStatusArgs,
-        TerminalHandleArgs, ToolEnvelope, ToolOutcome, TransferHandleArgs,
-        WriteDesktopClipboardArgs,
+        TerminalHandleArgs, ToolEnvelope, ToolOutcome, TransferHandleArgs, WorkspaceApplyEditsArgs,
+        WorkspaceCloseArgs, WorkspaceFileEdits, WorkspaceMountArgs, WorkspaceReadArgs,
+        WorkspaceSearchArgs, WorkspaceTextEdit, WorkspaceTreeArgs, WriteDesktopClipboardArgs,
     },
-    handles::{ApprovalRef, ClientRef, ConnectionRef, NodeRef, TerminalRef},
+    handles::{ApprovalRef, ClientRef, ConnectionRef, NodeRef, TerminalRef, WorkspaceRef},
 };
 
 const TOOL_LIST_CACHE_TTL_MS: u64 = 1_000;
@@ -59,6 +60,11 @@ const FORWARD_REVISION_LIMIT_BYTES: usize = 80;
 const REMOTE_PATH_LIMIT_BYTES: usize = 16 * 1024;
 const FILE_LIST_LIMIT_MAXIMUM: u32 = 500;
 const FILE_READ_LIMIT_MAXIMUM: u32 = 4 * 1024 * 1024;
+const WORKSPACE_EDIT_FILE_LIMIT: usize = 16;
+const WORKSPACE_EDIT_COUNT_LIMIT: usize = 512;
+const WORKSPACE_EDIT_REPLACEMENT_LIMIT_BYTES: usize = 4 * 1024 * 1024;
+const WORKSPACE_SEARCH_PATTERN_LIMIT_BYTES: usize = 8 * 1024;
+const WORKSPACE_SEARCH_RESULT_LIMIT: u32 = 500;
 const TERMINAL_INPUT_LIMIT_BYTES: usize = 256 * 1024;
 const TERMINAL_QUERY_LIMIT_BYTES: usize = 4 * 1024;
 const TERMINAL_LINE_LIMIT_MAXIMUM: u32 = 1_000;
@@ -128,6 +134,29 @@ struct SubmitTerminalSchema {
     bytes_base64: Option<String>,
     #[serde(default)]
     append_enter: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct WorkspaceTextEditSchema {
+    start_byte: u32,
+    end_byte: u32,
+    replacement: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct WorkspaceFileEditsSchema {
+    path: String,
+    expected_revision: String,
+    edits: Vec<WorkspaceTextEditSchema>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct WorkspaceApplyEditsSchema {
+    workspace_ref: WorkspaceRef,
+    files: Vec<WorkspaceFileEditsSchema>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -907,6 +936,59 @@ impl ServerHandler for PublicMcpService {
                 }
                 Err(error) => *error,
             },
+            "workspaces_mount" => match parse_arguments::<WorkspaceMountArgs>(arguments) {
+                Ok(args) if args.root.as_deref().is_none_or(remote_path_is_valid) => {
+                    self.execute_call(&client, PublicToolCall::WorkspaceMount(args))
+                        .await
+                }
+                Ok(_) => tool_error("invalid_arguments", "The workspace root is invalid"),
+                Err(error) => *error,
+            },
+            "workspaces_tree" => match parse_arguments::<WorkspaceTreeArgs>(arguments) {
+                Ok(args) if workspace_tree_args_are_valid(&args) => {
+                    self.execute_call(&client, PublicToolCall::WorkspaceTree(args))
+                        .await
+                }
+                Ok(_) => tool_error("invalid_arguments", "The workspace tree request is invalid"),
+                Err(error) => *error,
+            },
+            "workspaces_read" => match parse_arguments::<WorkspaceReadArgs>(arguments) {
+                Ok(args) if remote_path_is_valid(&args.path) => {
+                    self.execute_call(&client, PublicToolCall::WorkspaceRead(args))
+                        .await
+                }
+                Ok(_) => tool_error("invalid_arguments", "The workspace path is invalid"),
+                Err(error) => *error,
+            },
+            "workspaces_apply_edits" => match parse_workspace_apply_edits(arguments) {
+                Ok(args) if workspace_apply_edits_args_are_valid(&args) => {
+                    self.execute_call(&client, PublicToolCall::WorkspaceApplyEdits(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "The structured workspace edit exceeds the supported bounds",
+                ),
+                Err(error) => *error,
+            },
+            "workspaces_search" => match parse_arguments::<WorkspaceSearchArgs>(arguments) {
+                Ok(args) if workspace_search_args_are_valid(&args) => {
+                    self.execute_call(&client, PublicToolCall::WorkspaceSearch(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "The workspace search request is invalid",
+                ),
+                Err(error) => *error,
+            },
+            "workspaces_close" => match parse_arguments::<WorkspaceCloseArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::WorkspaceClose(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
             "mcp_audit_search" => match parse_arguments::<AuditSearchArgs>(arguments) {
                 Ok(args) if args.limit > 0 && args.limit <= 200 => {
                     self.execute_call(&client, PublicToolCall::AuditSearch(args))
@@ -1517,6 +1599,48 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             false,
             false,
         ),
+        define_tool::<WorkspaceMountArgs>(
+            "workspaces_mount",
+            "Mount a client-scoped remote IDE workspace beneath an authorized SFTP root.",
+            ToolGroup::WorkspaceRead,
+            false,
+            false,
+        ),
+        define_tool::<WorkspaceTreeArgs>(
+            "workspaces_tree",
+            "List one bounded page from a mounted remote IDE workspace tree.",
+            ToolGroup::WorkspaceRead,
+            true,
+            false,
+        ),
+        define_tool::<WorkspaceReadArgs>(
+            "workspaces_read",
+            "Read one bounded editable text file and its conflict-detection revision.",
+            ToolGroup::WorkspaceRead,
+            true,
+            false,
+        ),
+        define_tool::<WorkspaceApplyEditsSchema>(
+            "workspaces_apply_edits",
+            "Apply bounded byte-range text edits after checking every observed file revision.",
+            ToolGroup::WorkspaceEdit,
+            false,
+            true,
+        ),
+        define_tool::<WorkspaceSearchArgs>(
+            "workspaces_search",
+            "Search a mounted workspace through the node agent or bounded remote fallback.",
+            ToolGroup::WorkspaceRead,
+            true,
+            false,
+        ),
+        define_tool::<WorkspaceCloseArgs>(
+            "workspaces_close",
+            "Release one IDE workspace consumer without disconnecting the physical SSH node.",
+            ToolGroup::WorkspaceRead,
+            false,
+            false,
+        ),
         define_tool::<AuditSearchArgs>(
             "mcp_audit_search",
             "Search this client's own redacted Public MCP audit records.",
@@ -1796,6 +1920,32 @@ fn parse_start_command(mut arguments: JsonObject) -> Result<StartCommandArgs, Bo
         node_ref: metadata.node_ref,
         command,
         working_directory: metadata.working_directory.map(Zeroizing::new),
+    })
+}
+
+fn parse_workspace_apply_edits(
+    arguments: JsonObject,
+) -> Result<WorkspaceApplyEditsArgs, Box<CallToolResult>> {
+    let schema = parse_arguments::<WorkspaceApplyEditsSchema>(arguments)?;
+    Ok(WorkspaceApplyEditsArgs {
+        workspace_ref: schema.workspace_ref,
+        files: schema
+            .files
+            .into_iter()
+            .map(|file| WorkspaceFileEdits {
+                path: file.path,
+                expected_revision: file.expected_revision,
+                edits: file
+                    .edits
+                    .into_iter()
+                    .map(|edit| WorkspaceTextEdit {
+                        start_byte: edit.start_byte,
+                        end_byte: edit.end_byte,
+                        replacement: Zeroizing::new(edit.replacement),
+                    })
+                    .collect(),
+            })
+            .collect(),
     })
 }
 
@@ -2127,6 +2277,38 @@ fn files_move_args_are_valid(args: &FilesMoveArgs) -> bool {
 fn files_remove_args_are_valid(args: &FilesRemoveArgs) -> bool {
     remote_path_is_valid(&args.path)
         && optional_revision_is_valid(args.expected_revision.as_deref())
+}
+
+fn workspace_tree_args_are_valid(args: &WorkspaceTreeArgs) -> bool {
+    args.path.as_deref().is_none_or(remote_path_is_valid)
+        && args
+            .limit
+            .is_none_or(|limit| limit > 0 && limit <= FILE_LIST_LIMIT_MAXIMUM)
+}
+
+fn workspace_apply_edits_args_are_valid(args: &WorkspaceApplyEditsArgs) -> bool {
+    !args.files.is_empty()
+        && args.files.len() <= WORKSPACE_EDIT_FILE_LIMIT
+        && args.files.iter().all(|file| {
+            remote_path_is_valid(&file.path)
+                && forward_text_is_valid(&file.expected_revision, FORWARD_REVISION_LIMIT_BYTES)
+                && !file.edits.is_empty()
+                && file.edits.len() <= WORKSPACE_EDIT_COUNT_LIMIT
+                && file.edits.iter().all(|edit| {
+                    edit.start_byte <= edit.end_byte
+                        && edit.replacement.len() <= WORKSPACE_EDIT_REPLACEMENT_LIMIT_BYTES
+                })
+        })
+}
+
+fn workspace_search_args_are_valid(args: &WorkspaceSearchArgs) -> bool {
+    !args.pattern.is_empty()
+        && args.pattern.len() <= WORKSPACE_SEARCH_PATTERN_LIMIT_BYTES
+        && !args.pattern.chars().any(char::is_control)
+        && args.root.as_deref().is_none_or(remote_path_is_valid)
+        && args
+            .maximum_results
+            .is_none_or(|limit| limit > 0 && limit <= WORKSPACE_SEARCH_RESULT_LIMIT)
 }
 
 fn optional_revision_is_valid(revision: Option<&str>) -> bool {

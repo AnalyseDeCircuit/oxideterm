@@ -45,6 +45,7 @@ oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-editor-syntax = { path = "../oxideterm-editor-syntax" }
 oxideterm-environment = { path = "../oxideterm-environment" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-ide-core = { path = "../oxideterm-ide-core" }
 oxideterm-ide-fs = { path = "../oxideterm-ide-fs" }
 oxideterm-launcher = { path = "../oxideterm-launcher" }
 oxideterm-local-files = { path = "../oxideterm-local-files" }

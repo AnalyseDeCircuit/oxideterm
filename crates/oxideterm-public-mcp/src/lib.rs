@@ -50,7 +50,7 @@ pub use calls::{
 pub use handles::{
     AddonRef, ApprovalRef, ArtifactRef, AuditRef, ClientRef, CommandRef, ConnectionRef, DesktopRef,
     FileSessionRef, ForwardRef, HandleParseError, NodeRef, OperationRef, QuickCommandRef,
-    RecordingRef, SyncPlanRef, TerminalRef, TransferRef, UndoRef,
+    RecordingRef, SyncPlanRef, TerminalRef, TransferRef, UndoRef, WorkspaceRef,
 };
 pub use runtime::{PublicMcpHttpServer, start_http_server};
 pub use service::{PublicMcpService, PublicMcpState};

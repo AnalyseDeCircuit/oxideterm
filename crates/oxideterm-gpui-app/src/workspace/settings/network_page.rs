@@ -154,6 +154,12 @@ fn public_mcp_tool_group_label_key(tool_group: oxideterm_public_mcp::ToolGroup) 
         }
         oxideterm_public_mcp::ToolGroup::FileRead => "settings_view.network.mcp_group_file_read",
         oxideterm_public_mcp::ToolGroup::FileWrite => "settings_view.network.mcp_group_file_write",
+        oxideterm_public_mcp::ToolGroup::WorkspaceRead => {
+            "settings_view.network.mcp_group_workspace_read"
+        }
+        oxideterm_public_mcp::ToolGroup::WorkspaceEdit => {
+            "settings_view.network.mcp_group_workspace_edit"
+        }
         oxideterm_public_mcp::ToolGroup::CloudSync => "settings_view.network.mcp_group_cloud_sync",
     }
 }

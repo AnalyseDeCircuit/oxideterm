@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 
 use super::{
     PublicMcpFileSessionRecord, PublicMcpRuntimeHandles, WorkspaceApp, finish_serialized,
-    node_lease_for_client,
+    node_lease_for_client, workspaces,
 };
 
 const FILE_SESSION_CAPACITY: usize = 128;
@@ -190,6 +190,12 @@ impl WorkspaceApp {
             request.finish(ToolEnvelope::failed("The SFTP handle is unavailable"));
             return;
         };
+        for workspace in workspaces::take_file_session_workspaces(
+            &self.public_mcp.runtime_handles,
+            &args.file_session_ref,
+        ) {
+            workspace.revoke();
+        }
         self.cancel_public_mcp_file_session_transfers(&args.file_session_ref);
         if let Some(connection_id) = record.physical_connection_id {
             self.node_router

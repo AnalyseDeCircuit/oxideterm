@@ -16,7 +16,7 @@ use oxideterm_public_mcp::{
     DesktopRef, DomainBroker, DomainMessage, DomainRequest, DomainRequestReceiver, FileSessionRef,
     ForwardRef, NodeRef, PublicMcpHttpServer, PublicMcpState, PublicToolCall, QuickCommandRef,
     RecordingRef, SyncPlanRef, TerminalRef, ToolEnvelope, ToolGroup, ToolOutcome, TransferRef,
-    UndoRef, start_http_server,
+    UndoRef, WorkspaceRef, start_http_server,
 };
 use oxideterm_session_adapter::ssh_config_from_saved_connection;
 use oxideterm_ssh::{ConnectionConsumer, NodeId, NodeRouter, SshTransportError};
@@ -39,6 +39,7 @@ mod quick_commands;
 mod recordings;
 pub(in crate::workspace) mod terminals;
 mod transfers;
+mod workspaces;
 
 const PUBLIC_MCP_CLIENTS_FILE: &str = "public-mcp-clients.json";
 const PUBLIC_MCP_ENDPOINT_FILE: &str = "public-mcp-endpoint.json";
@@ -92,6 +93,7 @@ struct PublicMcpRuntimeHandles {
     forwards: HashMap<ForwardRef, PublicMcpForwardRecord>,
     file_sessions: HashMap<FileSessionRef, PublicMcpFileSessionRecord>,
     transfers: HashMap<TransferRef, PublicMcpTransferRecord>,
+    workspaces: HashMap<WorkspaceRef, PublicMcpWorkspaceRecord>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -155,6 +157,33 @@ struct PublicMcpTransferRecord {
     error_code: Option<&'static str>,
     remote_residue: Option<&'static str>,
     finished_at: Option<Instant>,
+}
+
+/// Keeps one headless IDE owner scoped to an external client and SFTP root.
+#[derive(Clone)]
+struct PublicMcpWorkspaceRecord {
+    client_ref: ClientRef,
+    file_session_ref: FileSessionRef,
+    node_id: NodeId,
+    root: String,
+    owner: oxideterm_ide_fs::NodeAgentIdeFileSystem,
+    revisions: Arc<Mutex<HashMap<String, PublicMcpWorkspaceRevision>>>,
+    cancellation: CancellationToken,
+    edit_cancellation: CancellationToken,
+}
+
+impl PublicMcpWorkspaceRecord {
+    fn revoke(&self) {
+        self.cancellation.cancel();
+        self.edit_cancellation.cancel();
+        self.owner.release_all_ide_consumers();
+    }
+}
+
+#[derive(Clone)]
+struct PublicMcpWorkspaceRevision {
+    public_revision: String,
+    version: oxideterm_ide_core::SavedFileVersion,
 }
 
 #[derive(Clone)]
@@ -732,6 +761,19 @@ impl PublicMcpWorkspaceBridge {
             .trim()
             .to_owned();
         }
+        if let Ok(workspace_ref) = file_target.parse::<WorkspaceRef>()
+            && let Some(record) = self
+                .runtime_handles
+                .lock()
+                .workspaces
+                .get(&workspace_ref)
+                .filter(|record| record.client_ref == *client_ref)
+                .cloned()
+        {
+            return format!("IDE {} {}", record.root, file_action)
+                .trim()
+                .to_owned();
+        }
         let node_target = target.split_whitespace().next().unwrap_or(target);
         if let Ok(node_ref) = node_target.parse::<NodeRef>()
             && let Some(lease) = self.runtime_handles.lock().nodes.get(&node_ref).cloned()
@@ -745,6 +787,16 @@ impl PublicMcpWorkspaceBridge {
 
 impl Drop for PublicMcpWorkspaceBridge {
     fn drop(&mut self) {
+        let workspaces = self
+            .runtime_handles
+            .lock()
+            .workspaces
+            .drain()
+            .map(|(_, record)| record)
+            .collect::<Vec<_>>();
+        for record in workspaces {
+            record.revoke();
+        }
         self.delivery_task.take();
         self.revealed_credential.take();
         self.server.take();
@@ -851,6 +903,9 @@ impl WorkspaceApp {
         if enabled && tool_group == ToolGroup::DesktopObserve {
             self.set_public_mcp_client_desktop_observation(client_ref, true, cx);
         }
+        if enabled && tool_group == ToolGroup::WorkspaceEdit {
+            self.reset_public_mcp_client_workspace_edit_cancellation(client_ref);
+        }
         if !enabled {
             self.public_mcp
                 .state
@@ -888,6 +943,10 @@ impl WorkspaceApp {
                 ToolGroup::ForwardManage => self.revoke_public_mcp_client_forwards(client_ref),
                 ToolGroup::FileRead => self.revoke_public_mcp_client_file_sessions(client_ref),
                 ToolGroup::FileWrite => self.cancel_public_mcp_client_uploads(client_ref),
+                ToolGroup::WorkspaceRead => self.revoke_public_mcp_client_workspaces(client_ref),
+                ToolGroup::WorkspaceEdit => {
+                    self.cancel_public_mcp_client_workspace_edits(client_ref)
+                }
                 ToolGroup::CloudSync => self.public_mcp.revoke_client_sync_handles(client_ref),
                 ToolGroup::Basic
                 | ToolGroup::ConnectionDirectory
@@ -978,6 +1037,7 @@ impl WorkspaceApp {
     }
 
     fn revoke_public_mcp_client_file_sessions(&self, client_ref: &ClientRef) {
+        self.revoke_public_mcp_client_workspaces(client_ref);
         self.revoke_public_mcp_client_transfers(client_ref);
         for record in files::take_client_file_sessions(&self.public_mcp.runtime_handles, client_ref)
         {
@@ -985,6 +1045,40 @@ impl WorkspaceApp {
                 self.node_router
                     .release_consumer(&connection_id, &record.consumer);
             }
+        }
+    }
+
+    fn revoke_public_mcp_client_workspaces(&self, client_ref: &ClientRef) {
+        for record in
+            workspaces::take_client_workspaces(&self.public_mcp.runtime_handles, client_ref)
+        {
+            record.revoke();
+        }
+    }
+
+    fn cancel_public_mcp_client_workspace_edits(&self, client_ref: &ClientRef) {
+        for record in self
+            .public_mcp
+            .runtime_handles
+            .lock()
+            .workspaces
+            .values()
+            .filter(|record| record.client_ref == *client_ref)
+        {
+            record.edit_cancellation.cancel();
+        }
+    }
+
+    fn reset_public_mcp_client_workspace_edit_cancellation(&self, client_ref: &ClientRef) {
+        for record in self
+            .public_mcp
+            .runtime_handles
+            .lock()
+            .workspaces
+            .values_mut()
+            .filter(|record| record.client_ref == *client_ref)
+        {
+            record.edit_cancellation = CancellationToken::new();
         }
     }
 
@@ -1133,6 +1227,16 @@ impl WorkspaceApp {
             PublicToolCall::TransferStart(_) => self.handle_public_mcp_transfer_start(request),
             PublicToolCall::TransferStatus(_) => self.handle_public_mcp_transfer_status(request),
             PublicToolCall::TransferCancel(_) => self.handle_public_mcp_transfer_cancel(request),
+            PublicToolCall::WorkspaceMount(_) => {
+                self.handle_public_mcp_workspace_mount(request, cx)
+            }
+            PublicToolCall::WorkspaceTree(_) => self.handle_public_mcp_workspace_tree(request),
+            PublicToolCall::WorkspaceRead(_) => self.handle_public_mcp_workspace_read(request),
+            PublicToolCall::WorkspaceApplyEdits(_) => {
+                self.handle_public_mcp_workspace_apply_edits(request)
+            }
+            PublicToolCall::WorkspaceSearch(_) => self.handle_public_mcp_workspace_search(request),
+            PublicToolCall::WorkspaceClose(_) => self.handle_public_mcp_workspace_close(request),
         }
     }
 
@@ -1660,12 +1764,17 @@ impl WorkspaceApp {
             transfers::invalidate_for_disconnected_nodes(&mut handles, &disconnected);
         forwards::invalidate_for_disconnected_nodes(&mut handles, &disconnected);
         files::invalidate_for_disconnected_nodes(&mut handles, &disconnected);
+        let disconnected_workspaces =
+            workspaces::take_disconnected_workspaces(&mut handles, &disconnected);
         drop(handles);
         for cancellation in cancellations {
             cancellation.cancel();
         }
         for transfer_id in interrupted_transfers {
             self.sftp_transfer_manager.cancel(&transfer_id);
+        }
+        for record in disconnected_workspaces {
+            record.revoke();
         }
         finish_serialized(
             request,
