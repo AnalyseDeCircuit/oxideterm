@@ -141,6 +141,16 @@ impl WorkspaceApp {
             let _ = workspace.update(cx, move |workspace, _cx| match result {
                 Ok(artifact) => {
                     let artifact_store = workspace.public_mcp.state.artifacts.clone();
+                    let artifact_authorized = workspace
+                        .public_mcp
+                        .clients()
+                        .into_iter()
+                        .find(|client| client.client_ref == client_ref)
+                        .is_some_and(|client| {
+                            client.enabled
+                                && client.tool_groups.contains(&ToolGroup::DesktopObserve)
+                                && client.tool_groups.contains(&ToolGroup::ArtifactTransfer)
+                        });
                     let live =
                         workspace
                             .public_mcp
@@ -151,16 +161,19 @@ impl WorkspaceApp {
                                     && current.tab_id == record.tab_id
                                     && current.observing_frames
                             });
-                    if request.is_cancelled() || live.is_none() {
+                    if request.is_cancelled() || !artifact_authorized || live.is_none() {
                         workspace
                             .public_mcp
                             .state
                             .artifacts
                             .revoke(&client_ref, &artifact.artifact_ref);
                         if !request.is_cancelled() {
-                            request.finish(ToolEnvelope::failed(
-                                "The remote desktop handle is no longer available",
-                            ));
+                            let error = if artifact_authorized {
+                                "The remote desktop handle is no longer available"
+                            } else {
+                                "The remote desktop artifact authorization changed"
+                            };
+                            request.finish(ToolEnvelope::failed(error));
                         }
                         return;
                     }

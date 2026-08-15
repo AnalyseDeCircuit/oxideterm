@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use oxideterm_public_mcp::{
-    ClientRef, DomainRequest, FileSessionRef, PublicToolCall, ToolEnvelope,
+    ClientRef, DomainRequest, FileSessionRef, PublicToolCall, ToolEnvelope, ToolGroup,
 };
 use oxideterm_sftp::{FileInfo, FileType, ListFilter, SortOrder};
 use oxideterm_ssh::{ConnectionConsumer, NodeId, NodeRouter};
@@ -293,6 +293,7 @@ impl WorkspaceApp {
             .maximum_bytes
             .map_or(FILE_READ_DEFAULT_LIMIT, |limit| limit as usize);
         let artifact_store = self.public_mcp.state.artifacts.clone();
+        let clients = self.public_mcp.state.clients.clone();
         let client_ref = request.client_ref.clone();
         self.start_public_mcp_file_job(request, move |record| async move {
             let root = ready_root(&record)?;
@@ -315,12 +316,23 @@ impl WorkspaceApp {
             let byte_count = bytes.len();
             let artifact = artifact_store
                 .stage(
-                    client_ref,
+                    client_ref.clone(),
                     &bytes,
                     "application/octet-stream".to_owned(),
                     safe_artifact_name(&canonical_path),
                 )
                 .map_err(|_| "The remote file artifact could not be retained")?;
+            let artifact_authorized = clients.get(&client_ref).is_some_and(|client| {
+                client.enabled
+                    && client.tool_groups.contains(&ToolGroup::FileRead)
+                    && client.tool_groups.contains(&ToolGroup::ArtifactTransfer)
+            });
+            if !artifact_authorized {
+                // Revocation can race the remote read; the finished bytes must not
+                // recreate a data-plane handle after either required group closes.
+                artifact_store.revoke(&client_ref, &artifact.artifact_ref);
+                return Err("The MCP client authorization changed while reading the file");
+            }
             let next_offset = offset
                 .saturating_add(byte_count as u64)
                 .lt(&total_size)
