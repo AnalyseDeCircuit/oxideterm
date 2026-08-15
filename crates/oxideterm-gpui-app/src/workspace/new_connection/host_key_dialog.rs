@@ -89,6 +89,12 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn cancel_host_key_challenge(&mut self, cx: &mut Context<Self>) {
+        if let Some(intent) = self.connection_flow.read(cx).host_key_challenge_intent() {
+            self.fail_public_mcp_mosh_open_for_intent(
+                &intent,
+                "The host-key confirmation was cancelled",
+            );
+        }
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,

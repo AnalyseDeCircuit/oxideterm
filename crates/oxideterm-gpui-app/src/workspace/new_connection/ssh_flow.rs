@@ -58,6 +58,7 @@ mod conversion;
 mod save;
 
 use conversion::*;
+pub(in crate::workspace) use save::mosh_options_from_profile;
 
 fn x11_forward_policy(options: ConnectionX11ForwardingOptions) -> Option<X11ForwardPolicy> {
     if !options.enabled {
@@ -154,6 +155,8 @@ pub(in crate::workspace) struct MoshConnectionOptions {
     pub(in crate::workspace) ip_family: SavedMoshIpFamily,
     pub(in crate::workspace) prediction: MoshPredictionMode,
     pub(in crate::workspace) locale: Option<String>,
+    // Correlates an asynchronous verified Mosh launch without exposing a GPUI identity.
+    pub(in crate::workspace) public_mcp_open_token: Option<String>,
 }
 
 pub(in crate::workspace) enum SshConnectionWorkerResult {

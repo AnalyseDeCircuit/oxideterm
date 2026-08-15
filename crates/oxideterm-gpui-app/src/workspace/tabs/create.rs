@@ -138,6 +138,18 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
+        let title = format!("Telnet {}", config.endpoint_label());
+        self.create_telnet_terminal_tab_with_title(config, terminal_options, title, window, cx)
+    }
+
+    pub(in crate::workspace) fn create_telnet_terminal_tab_with_title(
+        &mut self,
+        config: TelnetSessionConfig,
+        terminal_options: ConnectionTerminalOptions,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<TerminalSessionId> {
         let tab_id = self.alloc_tab_id(cx);
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
@@ -145,7 +157,6 @@ impl WorkspaceApp {
         let mut preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
         preference_overrides.apply_to(&mut preferences);
-        let title = format!("Telnet {}", config.endpoint_label());
         let pane_config = config;
         let pane = cx.new(|cx| {
             TerminalPane::new_telnet_with_preferences(pane_config, preferences, window, cx)
@@ -184,12 +195,22 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
+        let title = format!("Serial {}", config.port_path);
+        self.create_serial_terminal_tab_with_title(config, title, window, cx)
+    }
+
+    pub(in crate::workspace) fn create_serial_terminal_tab_with_title(
+        &mut self,
+        config: SerialSessionConfig,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<TerminalSessionId> {
         let tab_id = self.alloc_tab_id(cx);
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
         let preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
-        let title = format!("Serial {}", config.port_path);
         let pane_config = config.clone();
         let pane = cx.new(|cx| {
             TerminalPane::new_serial_with_preferences(pane_config, preferences, window, cx)

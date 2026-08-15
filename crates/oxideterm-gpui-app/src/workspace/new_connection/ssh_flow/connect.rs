@@ -271,6 +271,7 @@ impl WorkspaceApp {
                 cx.notify();
             }
             HostKeyStatus::Error { message } => {
+                self.fail_public_mcp_mosh_open_for_intent(&intent, message.clone());
                 let reported_to_form = self.connection_flow.update(cx, |connection_flow, cx| {
                     connection_flow.set_form_feedback(None, Some(message.clone()), cx)
                 });
@@ -1040,6 +1041,13 @@ impl WorkspaceApp {
                 let _ = self.open_or_create_saved_ssh_terminal_tab(id, config, title, window, cx);
             }
             SshConnectionIntent::Mosh(options) => {
+                let public_mcp_open_token = options.public_mcp_open_token.clone();
+                if public_mcp_open_token
+                    .as_deref()
+                    .is_some_and(|token| self.cancel_public_mcp_mosh_open_if_request_ended(token))
+                {
+                    return;
+                }
                 self.connection_flow.update(cx, |connection_flow, cx| {
                     connection_flow.clear_host_key_challenge(cx);
                 });
@@ -1101,16 +1109,27 @@ impl WorkspaceApp {
                     task_runtime: self.workspace_runtime.read(cx).task_runtime(),
                 };
                 match self.create_mosh_terminal_tab(terminal_config, title, window, cx) {
-                    Ok(_) => {
+                    Ok(session_id) => {
                         if let Some(saved_profile_id) = options.saved_profile_id {
                             let _ = self
                                 .connection_store
                                 .mark_mosh_profile_used(&saved_profile_id);
                         }
+                        if let Some(token) = public_mcp_open_token {
+                            self.complete_public_mcp_mosh_terminal_open(token, Ok(session_id), cx);
+                        }
                     }
                     Err(error) => {
+                        let error = error.to_string();
+                        if let Some(token) = public_mcp_open_token {
+                            self.complete_public_mcp_mosh_terminal_open(
+                                token,
+                                Err(error.clone()),
+                                cx,
+                            );
+                        }
                         self.session_manager.update(cx, |session_manager, cx| {
-                            session_manager.set_status(Some(error.to_string()), cx);
+                            session_manager.set_status(Some(error), cx);
                         });
                     }
                 }

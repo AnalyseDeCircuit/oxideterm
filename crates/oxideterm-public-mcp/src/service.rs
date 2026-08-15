@@ -30,11 +30,13 @@ use crate::{
         FilesRemoveArgs, FilesStatArgs, FilesWriteArgs, ForwardHandleArgs, ForwardKind,
         ForwardsChangeArgs, ForwardsDiscoverPortsArgs, ForwardsListArgs, ForwardsOpenArgs,
         ForwardsRemoveArgs, HostToolsCaptureArgs, HostToolsCatalogArgs, HostToolsOperateArgs,
-        InspectNodeArgs, PublicToolCall, QuickCommandsDescribeArgs, QuickCommandsListArgs,
-        QuickCommandsRemoveArgs, QuickCommandsRunArgs, QuickCommandsSaveArgs, ReadArtifactArgs,
-        ReleaseNodeArgs, StageArtifactArgs, StartCommandArgs, ToolEnvelope, ToolOutcome,
+        InspectNodeArgs, OpenTerminalArgs, PublicToolCall, QuickCommandsDescribeArgs,
+        QuickCommandsListArgs, QuickCommandsRemoveArgs, QuickCommandsRunArgs,
+        QuickCommandsSaveArgs, ReadArtifactArgs, ReadTerminalArgs, ReleaseNodeArgs,
+        ResizeTerminalArgs, StageArtifactArgs, StartCommandArgs, SubmitTerminalArgs,
+        TerminalHandleArgs, ToolEnvelope, ToolOutcome,
     },
-    handles::{ApprovalRef, ClientRef, NodeRef},
+    handles::{ApprovalRef, ClientRef, NodeRef, TerminalRef},
 };
 
 const TOOL_LIST_CACHE_TTL_MS: u64 = 1_000;
@@ -50,6 +52,12 @@ const FORWARD_REVISION_LIMIT_BYTES: usize = 80;
 const REMOTE_PATH_LIMIT_BYTES: usize = 16 * 1024;
 const FILE_LIST_LIMIT_MAXIMUM: u32 = 500;
 const FILE_READ_LIMIT_MAXIMUM: u32 = 4 * 1024 * 1024;
+const TERMINAL_INPUT_LIMIT_BYTES: usize = 256 * 1024;
+const TERMINAL_QUERY_LIMIT_BYTES: usize = 4 * 1024;
+const TERMINAL_LINE_LIMIT_MAXIMUM: u32 = 1_000;
+const TERMINAL_MATCH_LIMIT_MAXIMUM: u32 = 500;
+const TERMINAL_DIMENSION_MAXIMUM: u16 = 1_000;
+const TERMINAL_TITLE_LIMIT_BYTES: usize = 256;
 
 #[derive(Clone)]
 pub struct PublicMcpService {
@@ -86,6 +94,29 @@ struct StartCommandMetadata {
     node_ref: NodeRef,
     #[serde(default)]
     working_directory: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[expect(
+    dead_code,
+    reason = "this type exists only to generate the public tool schema"
+)]
+struct SubmitTerminalSchema {
+    terminal_ref: TerminalRef,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    bytes_base64: Option<String>,
+    #[serde(default)]
+    append_enter: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SubmitTerminalMetadata {
+    terminal_ref: TerminalRef,
+    #[serde(default)]
+    append_enter: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -393,6 +424,92 @@ impl ServerHandler for PublicMcpService {
             "nodes_disconnect" => match parse_arguments::<DisconnectNodeArgs>(arguments) {
                 Ok(args) => {
                     self.execute_call(&client, PublicToolCall::DisconnectNode(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "terminals_open" => match parse_arguments::<OpenTerminalArgs>(arguments) {
+                Ok(args)
+                    if terminal_dimensions_are_valid(args.cols, args.rows)
+                        && args.title.as_deref().is_none_or(terminal_title_is_valid) =>
+                {
+                    self.execute_call(&client, PublicToolCall::OpenTerminal(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "Terminal dimensions must be between 2 and 1000 cells",
+                ),
+                Err(error) => *error,
+            },
+            "terminals_state" => match parse_arguments::<TerminalHandleArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::TerminalState(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "terminals_read" => match parse_arguments::<ReadTerminalArgs>(arguments) {
+                Ok(args)
+                    if args.line_limit > 0 && args.line_limit <= TERMINAL_LINE_LIMIT_MAXIMUM =>
+                {
+                    self.execute_call(&client, PublicToolCall::ReadTerminal(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "The terminal line limit must be between 1 and 1000",
+                ),
+                Err(error) => *error,
+            },
+            "terminals_find" => {
+                match parse_arguments::<crate::calls::FindTerminalArgs>(arguments) {
+                    Ok(args)
+                        if !args.query.trim().is_empty()
+                            && args.query.len() <= TERMINAL_QUERY_LIMIT_BYTES
+                            && args.limit > 0
+                            && args.limit <= TERMINAL_MATCH_LIMIT_MAXIMUM =>
+                    {
+                        self.execute_call(&client, PublicToolCall::FindTerminal(args))
+                            .await
+                    }
+                    Ok(_) => tool_error(
+                        "invalid_arguments",
+                        "The terminal query or match limit is invalid",
+                    ),
+                    Err(error) => *error,
+                }
+            }
+            "terminals_submit" => match parse_terminal_submit(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::SubmitTerminal(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "terminals_resize" => match parse_arguments::<ResizeTerminalArgs>(arguments) {
+                Ok(args) if terminal_dimensions_are_valid(args.cols, args.rows) => {
+                    self.execute_call(&client, PublicToolCall::ResizeTerminal(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "Terminal dimensions must be between 2 and 1000 cells",
+                ),
+                Err(error) => *error,
+            },
+            "terminals_control" => {
+                match parse_arguments::<crate::calls::ControlTerminalArgs>(arguments) {
+                    Ok(args) => {
+                        self.execute_call(&client, PublicToolCall::ControlTerminal(args))
+                            .await
+                    }
+                    Err(error) => *error,
+                }
+            }
+            "terminals_close" => match parse_arguments::<TerminalHandleArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::CloseTerminal(args))
                         .await
                 }
                 Err(error) => *error,
@@ -773,6 +890,62 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             false,
             true,
         ),
+        define_tool::<OpenTerminalArgs>(
+            "terminals_open",
+            "Open a real visible SSH, local, Mosh, Telnet, or serial terminal session.",
+            ToolGroup::TerminalSession,
+            false,
+            true,
+        ),
+        define_tool::<TerminalHandleArgs>(
+            "terminals_state",
+            "Read terminal lifecycle, dimensions, transport, and capabilities without content.",
+            ToolGroup::TerminalObserve,
+            true,
+            false,
+        ),
+        define_tool::<ReadTerminalArgs>(
+            "terminals_read",
+            "Read a bounded visible terminal snapshot with a generation cursor.",
+            ToolGroup::TerminalObserve,
+            true,
+            false,
+        ),
+        define_tool::<crate::calls::FindTerminalArgs>(
+            "terminals_find",
+            "Search the real terminal scrollback and return bounded match coordinates.",
+            ToolGroup::TerminalObserve,
+            true,
+            false,
+        ),
+        define_tool::<SubmitTerminalSchema>(
+            "terminals_submit",
+            "Submit exact text or bytes to a live terminal without claiming command completion.",
+            ToolGroup::TerminalInput,
+            false,
+            true,
+        ),
+        define_tool::<ResizeTerminalArgs>(
+            "terminals_resize",
+            "Resize the live terminal grid using its current cell metrics.",
+            ToolGroup::TerminalSession,
+            false,
+            false,
+        ),
+        define_tool::<crate::calls::ControlTerminalArgs>(
+            "terminals_control",
+            "Apply one typed control supported by the terminal's actual transport.",
+            ToolGroup::TerminalInput,
+            false,
+            true,
+        ),
+        define_tool::<TerminalHandleArgs>(
+            "terminals_close",
+            "Close this client-owned terminal without disconnecting a shared physical SSH node.",
+            ToolGroup::TerminalSession,
+            false,
+            false,
+        ),
         define_tool::<StartCommandSchema>(
             "commands_start",
             "Start a command on an acquired SSH node and return a command handle.",
@@ -1095,6 +1268,66 @@ fn parse_start_command(mut arguments: JsonObject) -> Result<StartCommandArgs, Bo
         command,
         working_directory: metadata.working_directory.map(Zeroizing::new),
     })
+}
+
+fn parse_terminal_submit(
+    mut arguments: JsonObject,
+) -> Result<SubmitTerminalArgs, Box<CallToolResult>> {
+    let text = arguments.remove("text");
+    let bytes_base64 = arguments.remove("bytes_base64");
+    let (input, is_text) = match (text, bytes_base64) {
+        (Some(Value::String(text)), None) if text.len() <= TERMINAL_INPUT_LIMIT_BYTES => {
+            (Zeroizing::new(text.into_bytes()), true)
+        }
+        (None, Some(Value::String(encoded))) => {
+            let encoded = Zeroizing::new(encoded);
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(encoded.as_bytes())
+                .map_err(|_| {
+                    Box::new(tool_error(
+                        "invalid_arguments",
+                        "bytes_base64 must contain valid base64",
+                    ))
+                })?;
+            if decoded.len() > TERMINAL_INPUT_LIMIT_BYTES {
+                return Err(Box::new(tool_error(
+                    "input_too_large",
+                    "Terminal input exceeds the 262144-byte limit",
+                )));
+            }
+            (Zeroizing::new(decoded), false)
+        }
+        _ => {
+            return Err(Box::new(tool_error(
+                "invalid_arguments",
+                "Provide exactly one of text or bytes_base64 within the supported limit",
+            )));
+        }
+    };
+    let metadata = parse_arguments::<SubmitTerminalMetadata>(arguments)?;
+    if input.is_empty() && !metadata.append_enter {
+        return Err(Box::new(tool_error(
+            "invalid_arguments",
+            "Terminal input cannot be empty unless append_enter is true",
+        )));
+    }
+    Ok(SubmitTerminalArgs {
+        terminal_ref: metadata.terminal_ref,
+        input,
+        append_enter: metadata.append_enter,
+        is_text,
+    })
+}
+
+fn terminal_dimensions_are_valid(cols: u16, rows: u16) -> bool {
+    (2..=TERMINAL_DIMENSION_MAXIMUM).contains(&cols)
+        && (2..=TERMINAL_DIMENSION_MAXIMUM).contains(&rows)
+}
+
+fn terminal_title_is_valid(title: &str) -> bool {
+    !title.trim().is_empty()
+        && title.len() <= TERMINAL_TITLE_LIMIT_BYTES
+        && !title.chars().any(char::is_control)
 }
 
 fn parse_stage_artifact(

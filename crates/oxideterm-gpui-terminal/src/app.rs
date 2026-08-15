@@ -2886,6 +2886,30 @@ impl TerminalPane {
         .detach();
     }
 
+    pub fn resize_grid(
+        &mut self,
+        cols: usize,
+        rows: usize,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        // Preserve the pane's measured cell size while changing only the requested grid.
+        let (_, _, cell_width_px, cell_height_px) = self.last_pty_resize.unwrap_or_else(|| {
+            (
+                self.snapshot.cols,
+                self.snapshot.rows,
+                self.metrics.cell_width_f32().ceil().max(1.0) as u16,
+                self.metrics.line_height_f32().ceil().max(1.0) as u16,
+            )
+        });
+        let requested = (cols, rows, cell_width_px, cell_height_px);
+        self.pending_pty_resize = Some(requested);
+        self.pty_resize_generation = self.pty_resize_generation.wrapping_add(1);
+        self.flush_pending_pty_resize(self.pty_resize_generation, cx);
+        (self.last_pty_resize == Some(requested))
+            .then_some(())
+            .ok_or_else(|| "The terminal backend rejected the requested grid size.".to_string())
+    }
+
     fn flush_pending_pty_resize(&mut self, generation: u64, cx: &mut Context<Self>) {
         if generation != self.pty_resize_generation {
             return;

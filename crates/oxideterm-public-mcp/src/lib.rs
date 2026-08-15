@@ -29,8 +29,8 @@ pub use auth::{
 };
 pub use broker::{BrokerError, DomainBroker, DomainMessage, DomainRequest, DomainRequestReceiver};
 pub use calls::{
-    ForwardKind, HostToolLogPreset, HostToolOperation, HostToolResource, PublicToolCall,
-    ToolEnvelope, ToolOutcome,
+    ForwardKind, HostToolLogPreset, HostToolOperation, HostToolResource, PublicTelnetControl,
+    PublicToolCall, TerminalControlAction, TerminalOpenSource, ToolEnvelope, ToolOutcome,
 };
 pub use handles::{
     AddonRef, ApprovalRef, ArtifactRef, AuditRef, ClientRef, CommandRef, ConnectionRef,

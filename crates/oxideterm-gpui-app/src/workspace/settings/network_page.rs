@@ -81,6 +81,15 @@ fn public_mcp_tool_group_label_key(tool_group: oxideterm_public_mcp::ToolGroup) 
         oxideterm_public_mcp::ToolGroup::NodeSession => {
             "settings_view.network.mcp_group_node_session"
         }
+        oxideterm_public_mcp::ToolGroup::TerminalSession => {
+            "settings_view.network.mcp_group_terminal_session"
+        }
+        oxideterm_public_mcp::ToolGroup::TerminalObserve => {
+            "settings_view.network.mcp_group_terminal_observe"
+        }
+        oxideterm_public_mcp::ToolGroup::TerminalInput => {
+            "settings_view.network.mcp_group_terminal_input"
+        }
         oxideterm_public_mcp::ToolGroup::CommandObserve => {
             "settings_view.network.mcp_group_command_observe"
         }
@@ -492,6 +501,7 @@ impl WorkspaceApp {
                                 &client_ref_for_group,
                                 tool_group,
                                 !checked,
+                                cx,
                             ) {
                                 this.public_mcp.record_action_error(error);
                             }
@@ -561,6 +571,7 @@ impl WorkspaceApp {
                                             .set_public_mcp_client_approval_mode(
                                                 &client_ref_for_mode,
                                                 next_approval_mode,
+                                                cx,
                                             )
                                         {
                                             this.public_mcp.record_action_error(error);
@@ -577,6 +588,7 @@ impl WorkspaceApp {
                                         if let Err(error) = this.set_public_mcp_client_enabled(
                                             &client_ref_for_toggle,
                                             next_enabled,
+                                            cx,
                                         ) {
                                             this.public_mcp.record_action_error(error);
                                         }
@@ -593,8 +605,8 @@ impl WorkspaceApp {
                                     )),
                                     ToolbarButtonOptions::default(),
                                     cx.listener(move |this, _event, _window, cx| {
-                                        if let Err(error) =
-                                            this.remove_public_mcp_client(&client_ref_for_remove)
+                                        if let Err(error) = this
+                                            .remove_public_mcp_client(&client_ref_for_remove, cx)
                                         {
                                             this.public_mcp.record_action_error(error);
                                         }

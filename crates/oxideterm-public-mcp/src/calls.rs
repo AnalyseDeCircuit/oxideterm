@@ -9,7 +9,7 @@ use crate::{
     auth::ToolGroup,
     handles::{
         AddonRef, ArtifactRef, AuditRef, CommandRef, ConnectionRef, FileSessionRef, ForwardRef,
-        NodeRef, QuickCommandRef,
+        NodeRef, QuickCommandRef, TerminalRef,
     },
 };
 
@@ -44,6 +44,110 @@ pub struct ReleaseNodeArgs {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct DisconnectNodeArgs {
     pub node_ref: NodeRef,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TerminalOpenSource {
+    Node { node_ref: NodeRef },
+    Connection { connection_ref: ConnectionRef },
+    Local,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct OpenTerminalArgs {
+    pub source: TerminalOpenSource,
+    #[serde(default = "default_terminal_cols")]
+    pub cols: u16,
+    #[serde(default = "default_terminal_rows")]
+    pub rows: u16,
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct TerminalHandleArgs {
+    pub terminal_ref: TerminalRef,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ReadTerminalArgs {
+    pub terminal_ref: TerminalRef,
+    #[serde(default)]
+    pub cursor: Option<u64>,
+    #[serde(default = "default_terminal_line_limit")]
+    pub line_limit: u32,
+    #[serde(default)]
+    pub tail: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct FindTerminalArgs {
+    pub terminal_ref: TerminalRef,
+    pub query: String,
+    #[serde(default = "default_terminal_match_limit")]
+    pub limit: u32,
+}
+
+pub struct SubmitTerminalArgs {
+    pub terminal_ref: TerminalRef,
+    pub input: Zeroizing<Vec<u8>>,
+    pub append_enter: bool,
+    pub is_text: bool,
+}
+
+impl fmt::Debug for SubmitTerminalArgs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SubmitTerminalArgs")
+            .field("terminal_ref", &self.terminal_ref)
+            .field(
+                "input",
+                &format_args!("[REDACTED; {} bytes]", self.input.len()),
+            )
+            .field("append_enter", &self.append_enter)
+            .field("is_text", &self.is_text)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ResizeTerminalArgs {
+    pub terminal_ref: TerminalRef,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicTelnetControl {
+    NoOperation,
+    Break,
+    InterruptProcess,
+    AbortOutput,
+    AreYouThere,
+    EraseCharacter,
+    EraseLine,
+    GoAhead,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TerminalControlAction {
+    Interrupt,
+    Terminate,
+    Kill,
+    SerialBreak,
+    SerialReconnect,
+    SerialDataTerminalReady { asserted: bool },
+    SerialRequestToSend { asserted: bool },
+    Telnet { command: PublicTelnetControl },
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ControlTerminalArgs {
+    pub terminal_ref: TerminalRef,
+    pub action: TerminalControlAction,
 }
 
 pub struct StartCommandArgs {
@@ -492,6 +596,14 @@ pub enum PublicToolCall {
     InspectNode(InspectNodeArgs),
     ReleaseNode(ReleaseNodeArgs),
     DisconnectNode(DisconnectNodeArgs),
+    OpenTerminal(OpenTerminalArgs),
+    TerminalState(TerminalHandleArgs),
+    ReadTerminal(ReadTerminalArgs),
+    FindTerminal(FindTerminalArgs),
+    SubmitTerminal(SubmitTerminalArgs),
+    ResizeTerminal(ResizeTerminalArgs),
+    ControlTerminal(ControlTerminalArgs),
+    CloseTerminal(TerminalHandleArgs),
     StartCommand(StartCommandArgs),
     CommandState(CommandStateArgs),
     CommandOutput(CommandOutputArgs),
@@ -539,6 +651,14 @@ impl PublicToolCall {
             Self::InspectNode(_) => "nodes_inspect",
             Self::ReleaseNode(_) => "nodes_release",
             Self::DisconnectNode(_) => "nodes_disconnect",
+            Self::OpenTerminal(_) => "terminals_open",
+            Self::TerminalState(_) => "terminals_state",
+            Self::ReadTerminal(_) => "terminals_read",
+            Self::FindTerminal(_) => "terminals_find",
+            Self::SubmitTerminal(_) => "terminals_submit",
+            Self::ResizeTerminal(_) => "terminals_resize",
+            Self::ControlTerminal(_) => "terminals_control",
+            Self::CloseTerminal(_) => "terminals_close",
             Self::StartCommand(_) => "commands_start",
             Self::CommandState(_) => "commands_state",
             Self::CommandOutput(_) => "commands_output",
@@ -586,6 +706,13 @@ impl PublicToolCall {
             | Self::InspectNode(_)
             | Self::ReleaseNode(_)
             | Self::DisconnectNode(_) => ToolGroup::NodeSession,
+            Self::OpenTerminal(_) | Self::ResizeTerminal(_) | Self::CloseTerminal(_) => {
+                ToolGroup::TerminalSession
+            }
+            Self::TerminalState(_) | Self::ReadTerminal(_) | Self::FindTerminal(_) => {
+                ToolGroup::TerminalObserve
+            }
+            Self::SubmitTerminal(_) | Self::ControlTerminal(_) => ToolGroup::TerminalInput,
             Self::StartCommand(_) | Self::CancelCommand(_) => ToolGroup::CommandExecute,
             Self::CommandState(_) | Self::CommandOutput(_) => ToolGroup::CommandObserve,
             Self::StageArtifact(_) | Self::ReadArtifact(_) => ToolGroup::ArtifactTransfer,
@@ -625,6 +752,9 @@ impl PublicToolCall {
             self,
             Self::ConnectNode(_)
                 | Self::DisconnectNode(_)
+                | Self::OpenTerminal(_)
+                | Self::SubmitTerminal(_)
+                | Self::ControlTerminal(_)
                 | Self::StartCommand(_)
                 | Self::HostToolsOperate(_)
                 | Self::QuickCommandsSave(_)
@@ -652,6 +782,25 @@ impl PublicToolCall {
             Self::InspectNode(args) => args.node_ref.to_string(),
             Self::ReleaseNode(args) => args.node_ref.to_string(),
             Self::DisconnectNode(args) => args.node_ref.to_string(),
+            Self::OpenTerminal(args) => match &args.source {
+                TerminalOpenSource::Node { node_ref } => node_ref.to_string(),
+                TerminalOpenSource::Connection { connection_ref } => connection_ref.to_string(),
+                TerminalOpenSource::Local => "local terminal".to_owned(),
+            },
+            Self::TerminalState(args) | Self::CloseTerminal(args) => args.terminal_ref.to_string(),
+            Self::ReadTerminal(args) => args.terminal_ref.to_string(),
+            Self::FindTerminal(args) => args.terminal_ref.to_string(),
+            Self::SubmitTerminal(args) => format!(
+                "{} {} {} bytes append_enter={}",
+                args.terminal_ref,
+                if args.is_text { "text" } else { "binary" },
+                args.input.len(),
+                args.append_enter
+            ),
+            Self::ResizeTerminal(args) => {
+                format!("{} {}x{}", args.terminal_ref, args.cols, args.rows)
+            }
+            Self::ControlTerminal(args) => format!("{} {:?}", args.terminal_ref, args.action),
             Self::StartCommand(args) => args.node_ref.to_string(),
             Self::CommandState(args) => args.command_ref.to_string(),
             Self::CommandOutput(args) => args.command_ref.to_string(),
@@ -745,6 +894,22 @@ impl PublicToolCall {
             ),
         }
     }
+}
+
+const fn default_terminal_cols() -> u16 {
+    80
+}
+
+const fn default_terminal_rows() -> u16 {
+    24
+}
+
+const fn default_terminal_line_limit() -> u32 {
+    200
+}
+
+const fn default_terminal_match_limit() -> u32 {
+    100
 }
 
 impl fmt::Debug for PublicToolCall {

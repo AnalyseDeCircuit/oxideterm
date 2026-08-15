@@ -22,6 +22,6 @@ pub(super) use form_state::{
 pub(super) use host_key_dialog::HostKeyChallenge;
 pub(super) use kbi_dialog::KeyboardInteractiveChallenge;
 pub(super) use ssh_flow::{
-    NativeSshPromptHandler, SshConnectionIntent, SshConnectionWorkerResult,
-    SshTerminalConnectionOptions,
+    MoshConnectionOptions, NativeSshPromptHandler, SshConnectionIntent, SshConnectionWorkerResult,
+    SshTerminalConnectionOptions, mosh_options_from_profile,
 };

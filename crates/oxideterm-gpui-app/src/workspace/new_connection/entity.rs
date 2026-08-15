@@ -597,6 +597,12 @@ impl ConnectionFlowEntity {
         self.host_key_challenge.is_some()
     }
 
+    pub(in crate::workspace) fn host_key_challenge_intent(&self) -> Option<SshConnectionIntent> {
+        self.host_key_challenge
+            .as_ref()
+            .map(|challenge| challenge.intent.clone())
+    }
+
     pub(in crate::workspace) fn host_key_dialog_snapshot(&self) -> Option<HostKeyDialogSnapshot> {
         let challenge = self.host_key_challenge.as_ref()?;
         Some(HostKeyDialogSnapshot {

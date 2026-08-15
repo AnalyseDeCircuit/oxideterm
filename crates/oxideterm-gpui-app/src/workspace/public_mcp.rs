@@ -14,8 +14,8 @@ use oxideterm_public_mcp::{
     AddonRef, ApprovalRef, ApprovalStatus, AuditQuery, ClientApprovalMode, ClientCredential,
     ClientProjection, ClientRef, ClientRegistry, CommandRef, ConnectionRef, DomainBroker,
     DomainMessage, DomainRequest, DomainRequestReceiver, FileSessionRef, ForwardRef, NodeRef,
-    PublicMcpHttpServer, PublicMcpState, PublicToolCall, QuickCommandRef, ToolEnvelope, ToolGroup,
-    ToolOutcome, start_http_server,
+    PublicMcpHttpServer, PublicMcpState, PublicToolCall, QuickCommandRef, TerminalRef,
+    ToolEnvelope, ToolGroup, ToolOutcome, start_http_server,
 };
 use oxideterm_session_adapter::ssh_config_from_saved_connection;
 use oxideterm_ssh::{ConnectionConsumer, NodeId, NodeRouter, SshTransportError};
@@ -25,13 +25,14 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
-use super::WorkspaceApp;
+use super::{TerminalSessionId, WorkspaceApp};
 
 mod addons;
 mod files;
 mod forwards;
 mod host_tools;
 mod quick_commands;
+pub(in crate::workspace) mod terminals;
 
 const PUBLIC_MCP_CLIENTS_FILE: &str = "public-mcp-clients.json";
 const PUBLIC_MCP_ENDPOINT_FILE: &str = "public-mcp-endpoint.json";
@@ -69,6 +70,8 @@ pub(in crate::workspace) struct PublicMcpWorkspaceBridge {
     quick_command_ids: HashMap<QuickCommandRef, (ClientRef, String)>,
     addon_refs: HashMap<(ClientRef, String), AddonRef>,
     addon_ids: HashMap<AddonRef, (ClientRef, String)>,
+    terminals: HashMap<TerminalRef, PublicMcpTerminalRecord>,
+    pending_terminal_opens: HashMap<String, PublicMcpPendingTerminalOpen>,
     runtime_handles: Arc<Mutex<PublicMcpRuntimeHandles>>,
 }
 
@@ -115,6 +118,24 @@ struct PublicMcpFileSessionRecord {
     session: Option<Arc<tokio::sync::Mutex<oxideterm_sftp::SftpSession>>>,
     physical_connection_id: Option<String>,
     consumer: ConnectionConsumer,
+}
+
+#[derive(Clone)]
+struct PublicMcpTerminalRecord {
+    client_ref: ClientRef,
+    session_id: TerminalSessionId,
+    transport: &'static str,
+    title: String,
+    node_ref: Option<NodeRef>,
+}
+
+struct PublicMcpPendingTerminalOpen {
+    client_ref: ClientRef,
+    terminal_ref: TerminalRef,
+    request: DomainRequest,
+    cols: u16,
+    rows: u16,
+    title: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -225,6 +246,8 @@ impl PublicMcpWorkspaceBridge {
             quick_command_ids: HashMap::new(),
             addon_refs: HashMap::new(),
             addon_ids: HashMap::new(),
+            terminals: HashMap::new(),
+            pending_terminal_opens: HashMap::new(),
             runtime_handles: Arc::default(),
         }
     }
@@ -602,6 +625,18 @@ impl PublicMcpWorkspaceBridge {
                 );
             }
         }
+        if let Ok(terminal_ref) = connection_target.parse::<TerminalRef>()
+            && let Some(record) = self.terminals.get(&terminal_ref)
+            && &record.client_ref == client_ref
+        {
+            let action = target
+                .strip_prefix(connection_target)
+                .unwrap_or_default()
+                .trim();
+            return format!("{} ({}) {}", record.title, record.transport, action)
+                .trim()
+                .to_owned();
+        }
         let (addon_target, addon_action) = target.split_once(' ').unwrap_or((target, ""));
         if let Ok(addon_ref) = addon_target.parse::<AddonRef>()
             && let Some((owner, plugin_id)) = self.addon_ids.get(&addon_ref)
@@ -746,10 +781,11 @@ impl WorkspaceApp {
         &mut self,
         client_ref: &ClientRef,
         enabled: bool,
+        cx: &mut Context<Self>,
     ) -> Result<(), String> {
         self.public_mcp.set_client_enabled(client_ref, enabled)?;
         if !enabled {
-            self.revoke_public_mcp_client_runtime(client_ref);
+            self.revoke_public_mcp_client_runtime(client_ref, cx);
             self.public_mcp.remove_client_connection_refs(client_ref);
             self.public_mcp.remove_client_quick_command_refs(client_ref);
             self.public_mcp.remove_client_addon_refs(client_ref);
@@ -761,11 +797,12 @@ impl WorkspaceApp {
         &mut self,
         client_ref: &ClientRef,
         approval_mode: ClientApprovalMode,
+        cx: &mut Context<Self>,
     ) -> Result<(), String> {
         self.public_mcp
             .set_client_approval_mode(client_ref, approval_mode)?;
         // A mode transition cannot inherit actions or runtime handles from the old policy.
-        self.revoke_public_mcp_client_runtime(client_ref);
+        self.revoke_public_mcp_client_runtime(client_ref, cx);
         Ok(())
     }
 
@@ -774,6 +811,7 @@ impl WorkspaceApp {
         client_ref: &ClientRef,
         tool_group: ToolGroup,
         enabled: bool,
+        cx: &mut Context<Self>,
     ) -> Result<(), String> {
         self.public_mcp
             .set_client_tool_group(client_ref, tool_group, enabled)?;
@@ -783,7 +821,10 @@ impl WorkspaceApp {
                 .approvals
                 .revoke_client_tool_group(client_ref, tool_group);
             match tool_group {
-                ToolGroup::NodeSession => self.revoke_public_mcp_client_runtime(client_ref),
+                ToolGroup::NodeSession => self.revoke_public_mcp_client_runtime(client_ref, cx),
+                ToolGroup::TerminalSession => {
+                    self.revoke_public_mcp_client_terminals(client_ref, cx)
+                }
                 ToolGroup::CommandExecute => self.public_mcp.revoke_client_commands(client_ref),
                 ToolGroup::QuickCommandExecute => self
                     .public_mcp
@@ -796,6 +837,8 @@ impl WorkspaceApp {
                 ToolGroup::Basic
                 | ToolGroup::ConnectionDirectory
                 | ToolGroup::ConnectionRead
+                | ToolGroup::TerminalObserve
+                | ToolGroup::TerminalInput
                 | ToolGroup::CommandObserve
                 | ToolGroup::AuditRead
                 | ToolGroup::HostToolsObserve
@@ -815,9 +858,10 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn remove_public_mcp_client(
         &mut self,
         client_ref: &ClientRef,
+        cx: &mut Context<Self>,
     ) -> Result<(), String> {
         self.public_mcp.remove_client(client_ref)?;
-        self.revoke_public_mcp_client_runtime(client_ref);
+        self.revoke_public_mcp_client_runtime(client_ref, cx);
         self.public_mcp.remove_client_connection_refs(client_ref);
         self.public_mcp.remove_client_quick_command_refs(client_ref);
         self.public_mcp.remove_client_addon_refs(client_ref);
@@ -841,14 +885,15 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn suspend_public_mcp_runtime(&self) {
+    pub(in crate::workspace) fn suspend_public_mcp_runtime(&mut self, cx: &mut Context<Self>) {
         // Locking the workspace invalidates approvals and releases only MCP-owned consumers.
         for client in self.public_mcp.clients() {
-            self.revoke_public_mcp_client_runtime(&client.client_ref);
+            self.revoke_public_mcp_client_runtime(&client.client_ref, cx);
         }
     }
 
-    fn revoke_public_mcp_client_runtime(&self, client_ref: &ClientRef) {
+    fn revoke_public_mcp_client_runtime(&mut self, client_ref: &ClientRef, cx: &mut Context<Self>) {
+        self.revoke_public_mcp_client_terminals(client_ref, cx);
         self.revoke_public_mcp_client_forwards(client_ref);
         self.revoke_public_mcp_client_file_sessions(client_ref);
         self.public_mcp
@@ -903,6 +948,20 @@ impl WorkspaceApp {
             PublicToolCall::DisconnectNode(_) => {
                 self.handle_public_mcp_disconnect_node(request, cx)
             }
+            PublicToolCall::OpenTerminal(_) => self.handle_public_mcp_terminal_open(request, cx),
+            PublicToolCall::TerminalState(_) => self.handle_public_mcp_terminal_state(request, cx),
+            PublicToolCall::ReadTerminal(_) => self.handle_public_mcp_terminal_read(request, cx),
+            PublicToolCall::FindTerminal(_) => self.handle_public_mcp_terminal_find(request, cx),
+            PublicToolCall::SubmitTerminal(_) => {
+                self.handle_public_mcp_terminal_submit(request, cx)
+            }
+            PublicToolCall::ResizeTerminal(_) => {
+                self.handle_public_mcp_terminal_resize(request, cx)
+            }
+            PublicToolCall::ControlTerminal(_) => {
+                self.handle_public_mcp_terminal_control(request, cx)
+            }
+            PublicToolCall::CloseTerminal(_) => self.handle_public_mcp_terminal_close(request, cx),
             PublicToolCall::StartCommand(_) => self.handle_public_mcp_start_command(request),
             PublicToolCall::CommandState(_) => self.handle_public_mcp_command_state(request),
             PublicToolCall::CommandOutput(_) => self.handle_public_mcp_command_output(request),

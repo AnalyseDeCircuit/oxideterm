@@ -137,7 +137,7 @@ fn runtime_mosh_auth_from_saved(
     })
 }
 
-fn mosh_options_from_profile(
+pub(in crate::workspace) fn mosh_options_from_profile(
     profile: &oxideterm_connections::MoshProfile,
 ) -> MoshConnectionOptions {
     MoshConnectionOptions {
@@ -148,6 +148,7 @@ fn mosh_options_from_profile(
         ip_family: profile.ip_family,
         prediction: profile.prediction,
         locale: profile.locale.clone(),
+        public_mcp_open_token: None,
     }
 }
 
@@ -1153,6 +1154,7 @@ impl WorkspaceApp {
                 prediction: form.mosh_prediction,
                 locale: (!form.mosh_locale.trim().is_empty())
                     .then(|| form.mosh_locale.trim().to_string()),
+                public_mcp_open_token: None,
             };
             let ssh_port = ssh_port.expect("validated Mosh SSH port must exist");
 
