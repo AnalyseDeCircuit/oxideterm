@@ -1766,6 +1766,22 @@ impl PublicToolCall {
 
     pub fn additional_required_groups(&self) -> &'static [ToolGroup] {
         match self {
+            Self::RecordingsExport(_)
+            | Self::DesktopFrame(_)
+            | Self::AddonsInstall(_)
+            | Self::FilesRead(_)
+            | Self::FilesCompare(_)
+            | Self::FilesWrite(_) => &[ToolGroup::ArtifactTransfer],
+            Self::ReadDesktopClipboard(args)
+                if matches!(args.kind, DesktopClipboardKind::Image) =>
+            {
+                &[ToolGroup::ArtifactTransfer]
+            }
+            Self::WriteDesktopClipboard(args)
+                if matches!(args.payload, DesktopClipboardPayload::Image { .. }) =>
+            {
+                &[ToolGroup::ArtifactTransfer]
+            }
             Self::TransferStart(StartTransferArgs::Upload { .. }) => &[ToolGroup::FileWrite],
             Self::TransferStart(StartTransferArgs::Download { .. }) => &[ToolGroup::FileRead],
             Self::WorkspaceMount(_) => &[ToolGroup::FileRead],

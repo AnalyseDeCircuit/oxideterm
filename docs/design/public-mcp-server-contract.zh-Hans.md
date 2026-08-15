@@ -113,7 +113,7 @@ MCP `2026-07-28` 请求使用 `server/discover` 做可选发现，并在每次�
   ∩ 当前应用实际可用的功能
 ```
 
-基础目录工具始终可见；其余工具组由用户对具体客户端授予后才出现在 `tools/list`。客户端可调用 `mcp_catalog` 获得全部可选工具组的稳定 ID、启用状态，以及已启用工具的 schema 摘要；隐藏工具的完整 schema 不会提前公开。`tools/list` 按稳定顺序返回，并使用私有 cache scope 与一秒 `ttlMs`；授权变化后，客户端重新拉取目录即可观察变化。
+基础目录工具始终可见；其余工具组由用户对具体客户端授予后才出现在 `tools/list`。客户端可调用 `mcp_catalog` 获得全部可选工具组的稳定 ID、启用状态，以及已启用工具的主工具组、附加工具组和确认要求；隐藏工具的完整 schema 不会提前公开。`tools/list` 按稳定顺序返回，并使用私有 cache scope 与一秒 `ttlMs`；授权变化后，客户端重新拉取目录即可观察变化。
 
 ### 2.3 统一请求和结果信封
 
@@ -270,9 +270,9 @@ NodeRouter / connection registry ── 物理 SSH node
 | `files_close` | 远端文件 / W / 否 | `file_session_ref` | 释放 SFTP/IDE 消费者，不断开 node。 |
 | `files_list` | 远端文件读取 / R / 否 | `file_session_ref`、`path`、`cursor?`、`limit` | 目录项、类型、大小、修改时间、链接信息和分页 cursor。 |
 | `files_stat` | 远端文件读取 / R / 否 | `file_session_ref`、`path` | 精确元数据和可操作能力。 |
-| `files_read` | 远端文件读取 / R / 否 | `file_session_ref`、`path`、`offset?`、`maximum_bytes?` | 将有界范围写入 `artifact_ref`，连同总大小和下一偏移量；大文件不塞入无限制工具结果。 |
-| `files_compare` | 远端文件读取 / R / 否 | `file_session_ref`、`path`、`artifact_ref` | 在大小上限内比较二进制正文与摘要，返回远端 revision；不改变文件。 |
-| `files_write` | 远端文件写入 / X / 必须 | `file_session_ref`、`path`、`artifact_ref`、`overwrite`、`expected_revision?` | 写入或尽可能原子替换；先检查 metadata revision，并准确报告 `atomic_write`。当前没有可靠远端备份，因此不虚构 `undo_ref`。 |
+| `files_read` | 远端文件读取 + 传输数据 / R / 否 | `file_session_ref`、`path`、`offset?`、`maximum_bytes?` | 将有界范围写入 `artifact_ref`，连同总大小和下一偏移量；大文件不塞入无限制工具结果。 |
+| `files_compare` | 远端文件读取 + 传输数据 / R / 否 | `file_session_ref`、`path`、`artifact_ref` | 在大小上限内比较二进制正文与摘要，返回远端 revision；不改变文件。 |
+| `files_write` | 远端文件写入 + 传输数据 / X / 必须 | `file_session_ref`、`path`、`artifact_ref`、`overwrite`、`expected_revision?` | 写入或尽可能原子替换；先检查 metadata revision，并准确报告 `atomic_write`。当前没有可靠远端备份，因此不虚构 `undo_ref`。 |
 | `files_move` | 远端文件写入 / X / 必须 | `file_session_ref`、`source_path`、`destination_path`、`overwrite`、`expected_revision?` | 在同一授权根内重命名/移动。当前不承诺跨服务端实现都可靠的反向撤销。 |
 | `files_remove` | 远端文件删除 / X / 必须 | `file_session_ref`、`path`、`recursive`、`expected_revision?` | 永久删除文件或目录；递归意图进入冻结批准参数，不把永久删除称为回收站，也不返回虚假撤销。 |
 | `artifacts_stage` | 传输数据 / W / 否 | `content` 或 `bytes_base64`、`media_type`、`name?` | 将客户端提供的有界数据写入临时 artifact，返回 `artifact_ref`、大小和 digest；不接受任意本机路径。 |
@@ -311,11 +311,11 @@ Host Tools 的已安装插件扩展不能通过 Public MCP 取得任意调用入
 |---|---|---|---|
 | `desktops_open` | 远程桌面 / X / 必须 | `connection_ref` | 开启保存的真实 RDP/VNC provider 会话，返回 `desktop_ref`、连接状态、协商能力、安全状态和 framebuffer epoch；认证只通过设备受保护槽移交，不接受秘密明文或内部凭据引用。短暂 profile 待凭据交互契约完成后再开放。 |
 | `desktops_state` | 远程桌面观察 / D / 否 | `desktop_ref` | provider、连接状态、尺寸、epoch、加密/证书状态、支持的输入和剪贴板方向；不返回画面。 |
-| `desktops_frame` | 远程桌面观察 / R / 否 | `desktop_ref`、`after_generation?` | 最新完整帧编码为客户端私有 PNG `artifact_ref`，并返回 generation、graphics epoch 和尺寸；generation 未变化时返回 `unchanged`，不在 JSON 中塞入 framebuffer Base64。 |
+| `desktops_frame` | 远程桌面观察 + 传输数据 / R / 否 | `desktop_ref`、`after_generation?` | 最新完整帧编码为客户端私有 PNG `artifact_ref`，并返回 generation、graphics epoch 和尺寸；generation 未变化时返回 `unchanged`，不在 JSON 中塞入 framebuffer Base64。 |
 | `desktops_input` | 远程桌面控制 / X / 必须 | `desktop_ref`、`graphics_epoch`、`event` | 严格联合类型：鼠标移动/按键/滚轮、键按下/松开、文本、释放全部输入。坐标以 server framebuffer 为准；不转发任意 helper 协议消息。 |
 | `desktops_resize` | 远程桌面控制 / W / 否 | `desktop_ref`、`width`、`height` | 请求远端 resize，实际结果以协商能力为准。 |
-| `desktops_clipboard_read` | 远程桌面剪贴板 / R / 否 | `desktop_ref`、`kind` | 在双方都授权且 provider 支持时读取会话实际收到的最新远端文本或图像 artifact；绝不把系统剪贴板当成远端内容，文件剪贴板尚不公开。 |
-| `desktops_clipboard_write` | 远程桌面剪贴板 / X / 必须 | `desktop_ref`、严格 `payload`（文本或图像 `artifact_ref` + 格式） | 写入远端剪贴板；校验 artifact media type 和 16 MiB 限额，不把剪贴板正文写进审计。 |
+| `desktops_clipboard_read` | 远程桌面剪贴板（图像另需传输数据） / R / 否 | `desktop_ref`、`kind` | 在双方都授权且 provider 支持时读取会话实际收到的最新远端文本或图像 artifact；绝不把系统剪贴板当成远端内容，文件剪贴板尚不公开。 |
+| `desktops_clipboard_write` | 远程桌面剪贴板（图像另需传输数据） / X / 必须 | `desktop_ref`、严格 `payload`（文本或图像 `artifact_ref` + 格式） | 写入远端剪贴板；校验 artifact media type 和 16 MiB 限额，不把剪贴板正文写进审计。 |
 | `desktops_reconnect` | 远程桌面 / X / 必须 | `desktop_ref` | 用原配置请求受控重连；继续由会话所有者持有 helper 生命周期与秘密。 |
 | `desktops_close` | 远程桌面 / W / 确认未保存工作提示时 | `desktop_ref` | 关闭 provider/helper 及会话，撤销帧和剪贴板句柄。 |
 
@@ -331,7 +331,7 @@ RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控�
 | `sync_apply_plan` | 云同步 / X / 必须 | `sync_plan_ref` | 应用已预览的 pull 或 publish 计划；再次比较完整本地状态和远端 revision/etag/content hash，失配即拒绝。只有能精确恢复的本地 pull 分区返回 `undo_ref`；publish 不可撤销。 |
 | `sync_restore` | 云同步 / X / 必须 | `undo_ref` | 在本地状态仍等于 apply 后快照时恢复严格 checkpoint；句柄绑定客户端、十五分钟过期且只可消费一次。不把远端写入或无法恢复的密钥删除伪装成可恢复；`mcp_revert` 是保持相同工具组与检查的通用入口。 |
 | `addons_list` | 插件管理 / D / 否 | `include_disabled?` | 插件 ID、版本、来源类别、启用状态、声明能力和公开适配器摘要；不列出任意内部 host function。 |
-| `addons_install` | 插件管理 / X / 必须 | `artifact_ref`、`expected_identity`、`checksum`、`replace_existing?` | 从客户端私有 artifact 安装 ZIP，先核对 SHA-256 与 manifest 身份，再经应用插件 owner 完成安装和运行时 bootstrap；同步返回公开 addon 投影，不返回虚假 operation/undo。不执行客户端提供的任意命令。 |
+| `addons_install` | 插件管理 + 传输数据 / X / 必须 | `artifact_ref`、`expected_identity`、`checksum`、`replace_existing?` | 从客户端私有 artifact 安装 ZIP，先核对 SHA-256 与 manifest 身份，再经应用插件 owner 完成安装和运行时 bootstrap；同步返回公开 addon 投影，不返回虚假 operation/undo。不执行客户端提供的任意命令。 |
 | `addons_set_enabled` | 插件管理 / X / 必须 | `addon_ref`、`enabled` | 启用或禁用，重新核对所需权限并返回状态。 |
 | `addons_remove` | 插件管理 / X / 必须 | `addon_ref`、`retain_settings` | 卸载插件，选择保留或删除其设置；绝不调用插件自定义 RPC。 |
 | `quickcommands_list` | 快速命令 / R / 否 | `query?` | 名称、描述、分类、host pattern、风险分类和整个存储 revision；不返回命令正文。 |
@@ -342,7 +342,7 @@ RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控�
 | `recordings_control` | 录制控制 / X / 仅 `start` 必须 | 严格 tagged action：`start {terminal_ref,title?,capture_input}`，或 `pause/resume/stop {recording_ref}` | 返回 `recording_ref`、状态和时长；当前真实 recorder 为 output-only，拒绝 `capture_input=true`。录制可能包含敏感终端文本，默认不公开。 |
 | `recordings_status` | 录制控制 / D / 否 | `target` 严格为 `{kind:"recording",recording_ref}` 或 `{kind:"terminal",terminal_ref}` | 状态、时长、尺寸、事件数、是否由当前客户端管理、是否可读取正文及截断状态，不含事件正文。 |
 | `recordings_search` | 终端录制 / R / 否 | `recording_ref`、`query`、`limit` | 有界时间点与片段；内容按终端敏感读取策略处理。 |
-| `recordings_export` | 录制内容 / X / 必须 | `recording_ref`、`format:"asciicast_v2"`、`name?` | 将停止后的真实 asciicast 导出到受限 `artifact_ref`；不接受任意路径，确认页明确该记录可能含凭据或业务数据。 |
+| `recordings_export` | 录制内容 + 传输数据 / X / 必须 | `recording_ref`、`format:"asciicast_v2"`、`name?` | 将停止后的真实 asciicast 导出到受限 `artifact_ref`；不接受任意路径，确认页明确该记录可能含凭据或业务数据。 |
 
 ## 5. 授权、确认和审计策略
 

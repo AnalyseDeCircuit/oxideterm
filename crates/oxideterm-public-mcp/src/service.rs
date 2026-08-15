@@ -331,6 +331,7 @@ struct QuickCommandsSaveMetadata {
 struct CatalogEntry {
     name: String,
     tool_group: ToolGroup,
+    additional_tool_groups: &'static [ToolGroup],
     requires_approval: bool,
 }
 
@@ -358,7 +359,7 @@ impl PublicMcpService {
     fn visible_tools(&self, client: &ClientProjection) -> Vec<Tool> {
         tool_definitions()
             .into_iter()
-            .filter(|definition| client.tool_groups.contains(&definition.group))
+            .filter(|definition| definition.is_visible_to(client))
             .map(|definition| definition.tool)
             .collect()
     }
@@ -541,10 +542,11 @@ impl ServerHandler for PublicMcpService {
             "mcp_catalog" => {
                 let tools = tool_definitions()
                     .into_iter()
-                    .filter(|definition| client.tool_groups.contains(&definition.group))
+                    .filter(|definition| definition.is_visible_to(&client))
                     .map(|definition| CatalogEntry {
                         name: definition.tool.name.into_owned(),
                         tool_group: definition.group,
+                        additional_tool_groups: definition.additional_groups,
                         requires_approval: definition.requires_approval
                             && (client.approval_mode == ClientApprovalMode::Standard
                                 || definition.requires_explicit_app_approval),
@@ -1345,8 +1347,24 @@ impl ServerHandler for PublicMcpService {
 struct ToolDefinition {
     tool: Tool,
     group: ToolGroup,
+    additional_groups: &'static [ToolGroup],
     requires_approval: bool,
     requires_explicit_app_approval: bool,
+}
+
+impl ToolDefinition {
+    fn with_additional_groups(mut self, additional_groups: &'static [ToolGroup]) -> Self {
+        self.additional_groups = additional_groups;
+        self
+    }
+
+    fn is_visible_to(&self, client: &ClientProjection) -> bool {
+        client.tool_groups.contains(&self.group)
+            && self
+                .additional_groups
+                .iter()
+                .all(|group| client.tool_groups.contains(group))
+    }
 }
 
 fn tool_definitions() -> Vec<ToolDefinition> {
@@ -1607,7 +1625,8 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             ToolGroup::RecordingContent,
             false,
             true,
-        ),
+        )
+        .with_additional_groups(&[ToolGroup::ArtifactTransfer]),
         define_tool::<OpenDesktopArgs>(
             "desktops_open",
             "Open a real saved RDP or VNC profile in a visible OxideTerm tab.",
@@ -1628,7 +1647,8 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             ToolGroup::DesktopObserve,
             true,
             false,
-        ),
+        )
+        .with_additional_groups(&[ToolGroup::ArtifactTransfer]),
         define_tool::<DesktopInputSchema>(
             "desktops_input",
             "Send one strict mouse, wheel, key, text, or release-all event for the current framebuffer epoch.",
@@ -1645,14 +1665,14 @@ fn tool_definitions() -> Vec<ToolDefinition> {
         ),
         define_tool::<ReadDesktopClipboardArgs>(
             "desktops_clipboard_read",
-            "Read the latest remote text or image clipboard value captured by this session.",
+            "Read the latest remote clipboard value; image content also requires artifact transfer.",
             ToolGroup::DesktopClipboard,
             true,
             false,
         ),
         define_tool::<WriteDesktopClipboardSchema>(
             "desktops_clipboard_write",
-            "Write exact text or a bounded image artifact to the remote clipboard.",
+            "Write exact text or a bounded image artifact; images also require artifact transfer.",
             ToolGroup::DesktopClipboard,
             false,
             true,
@@ -1852,7 +1872,8 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             ToolGroup::AddonManage,
             false,
             true,
-        ),
+        )
+        .with_additional_groups(&[ToolGroup::ArtifactTransfer]),
         define_tool::<AddonsSetEnabledArgs>(
             "addons_set_enabled",
             "Enable or disable an installed addon through OxideTerm's managed lifecycle.",
@@ -1957,21 +1978,24 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             ToolGroup::FileRead,
             true,
             false,
-        ),
+        )
+        .with_additional_groups(&[ToolGroup::ArtifactTransfer]),
         define_tool::<FilesCompareArgs>(
             "files_compare",
             "Compare one bounded remote file with a client-owned artifact without changing it.",
             ToolGroup::FileRead,
             true,
             false,
-        ),
+        )
+        .with_additional_groups(&[ToolGroup::ArtifactTransfer]),
         define_tool::<FilesWriteArgs>(
             "files_write",
             "Write one client-owned artifact to an authorized remote path.",
             ToolGroup::FileWrite,
             false,
             true,
-        ),
+        )
+        .with_additional_groups(&[ToolGroup::ArtifactTransfer]),
         define_tool::<FilesMoveArgs>(
             "files_move",
             "Move one authorized remote path within the same SFTP root.",
@@ -2006,6 +2030,7 @@ fn define_tool<T: JsonSchema>(
     ToolDefinition {
         tool: Tool::new(name, description, schema_object::<T>()).with_annotations(annotations),
         group,
+        additional_groups: &[],
         requires_approval,
         requires_explicit_app_approval: false,
     }
