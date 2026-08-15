@@ -47,7 +47,8 @@ const PUBLIC_MCP_BROKER_CAPACITY: usize = 64;
 const PUBLIC_MCP_COMMAND_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const PUBLIC_MCP_COMMAND_OUTPUT_LIMIT: usize = 1024 * 1024;
 const PUBLIC_MCP_OUTPUT_PAGE_LIMIT: usize = 256 * 1024;
-// Bound retained command output even when an authorized client never releases its node lease.
+const PUBLIC_MCP_COMMAND_RETENTION: Duration = Duration::from_secs(15 * 60);
+// Bound command concurrency and retained output independently of node lease lifetime.
 const PUBLIC_MCP_COMMAND_CAPACITY: usize = 256;
 const PUBLIC_MCP_COMMAND_CAPACITY_PER_CLIENT: usize = 64;
 // Namespace internal profile identifiers so external connection handles remain type-safe.
@@ -1499,6 +1500,10 @@ impl WorkspaceApp {
                     record.cancellation.cancel();
                     record.state = PublicMcpCommandState::Cancelled;
                 }
+                drop(handles);
+                if cancel_requested {
+                    self.schedule_public_mcp_command_expiry(command_ref);
+                }
                 finish_serialized(
                     request,
                     json!({
@@ -2127,7 +2132,7 @@ impl WorkspaceApp {
         {
             drop(handles);
             request.finish(ToolEnvelope::failed(
-                "The retained command limit was reached; release an unused node lease first",
+                "The retained command limit was reached; wait for old results to expire or release an unused node lease",
             ));
             return;
         }
@@ -2180,36 +2185,41 @@ impl WorkspaceApp {
             let Some(result) = result else {
                 return;
             };
-            let mut handles = handles.lock();
-            let Some(record) = handles.commands.get_mut(&command_ref_for_task) else {
-                return;
-            };
-            if record.state != PublicMcpCommandState::Running {
-                return;
-            }
-            match result {
-                Ok(output) => {
-                    record.stdout = output.stdout;
-                    record.stderr = output.stderr;
-                    record.exit_code = output.exit_code;
-                    record.truncated = output.truncated;
-                    if output.exit_code == Some(0) {
-                        record.state = PublicMcpCommandState::Succeeded;
-                    } else {
+            // The retained result never needs the submitted command text.
+            drop(command);
+            {
+                let mut runtime_handles = handles.lock();
+                let Some(record) = runtime_handles.commands.get_mut(&command_ref_for_task) else {
+                    return;
+                };
+                if record.state != PublicMcpCommandState::Running {
+                    return;
+                }
+                match result {
+                    Ok(output) => {
+                        record.stdout = output.stdout;
+                        record.stderr = output.stderr;
+                        record.exit_code = output.exit_code;
+                        record.truncated = output.truncated;
+                        if output.exit_code == Some(0) {
+                            record.state = PublicMcpCommandState::Succeeded;
+                        } else {
+                            record.state = PublicMcpCommandState::Failed;
+                            record.error = Some(match output.exit_code {
+                                Some(exit_code) => {
+                                    format!("Remote command exited with status {exit_code}")
+                                }
+                                None => "Remote command ended without an exit status".to_owned(),
+                            });
+                        }
+                    }
+                    Err(error) => {
+                        record.error = Some(error);
                         record.state = PublicMcpCommandState::Failed;
-                        record.error = Some(match output.exit_code {
-                            Some(exit_code) => {
-                                format!("Remote command exited with status {exit_code}")
-                            }
-                            None => "Remote command ended without an exit status".to_owned(),
-                        });
                     }
                 }
-                Err(error) => {
-                    record.error = Some(error);
-                    record.state = PublicMcpCommandState::Failed;
-                }
             }
+            expire_public_mcp_command_after_retention(handles, command_ref_for_task).await;
         });
         finish_serialized(
             request,
@@ -2287,10 +2297,11 @@ impl WorkspaceApp {
         let PublicToolCall::CancelCommand(args) = &request.call else {
             return;
         };
+        let command_ref = args.command_ref.clone();
         let mut handles = self.public_mcp.runtime_handles.lock();
         let Some(record) = handles
             .commands
-            .get_mut(&args.command_ref)
+            .get_mut(&command_ref)
             .filter(|record| record.client_ref == request.client_ref)
         else {
             request.finish(ToolEnvelope::failed("The command handle is unavailable"));
@@ -2301,7 +2312,20 @@ impl WorkspaceApp {
             record.cancellation.cancel();
             record.state = PublicMcpCommandState::Cancelled;
         }
+        drop(handles);
+        if cancelled {
+            self.schedule_public_mcp_command_expiry(command_ref);
+        }
         finish_serialized(request, json!({ "cancelled": cancelled }));
+    }
+
+    fn schedule_public_mcp_command_expiry(&self, command_ref: CommandRef) {
+        let handles = self.public_mcp.runtime_handles.clone();
+        self.forwarding_runtime
+            .spawn(expire_public_mcp_command_after_retention(
+                handles,
+                command_ref,
+            ));
     }
 
     fn handle_public_mcp_stage_artifact(&self, request: DomainRequest) {
@@ -2466,6 +2490,23 @@ fn remove_command_operations(handles: &mut PublicMcpRuntimeHandles, command_refs
                 if command_refs.contains(command_ref)
         )
     });
+}
+
+async fn expire_public_mcp_command_after_retention(
+    handles: Arc<Mutex<PublicMcpRuntimeHandles>>,
+    command_ref: CommandRef,
+) {
+    tokio::time::sleep(PUBLIC_MCP_COMMAND_RETENTION).await;
+    let mut handles = handles.lock();
+    let is_finished = handles
+        .commands
+        .get(&command_ref)
+        .is_some_and(|record| record.state != PublicMcpCommandState::Running);
+    if !is_finished {
+        return;
+    }
+    remove_command_operations(&mut handles, std::slice::from_ref(&command_ref));
+    handles.commands.remove(&command_ref);
 }
 
 fn remove_transfer_operations(
