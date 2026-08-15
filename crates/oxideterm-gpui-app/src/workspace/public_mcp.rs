@@ -942,7 +942,7 @@ impl WorkspaceApp {
             ToolGroup::DesktopObserve => {
                 self.set_public_mcp_client_desktop_observation(client_ref, true, cx)
             }
-            ToolGroup::WorkspaceEdit => {
+            ToolGroup::FileWrite | ToolGroup::WorkspaceEdit => {
                 self.reset_public_mcp_client_workspace_edit_cancellation(client_ref)
             }
             _ => {}
@@ -986,7 +986,11 @@ impl WorkspaceApp {
             }
             ToolGroup::ForwardManage => self.revoke_public_mcp_client_forwards(client_ref),
             ToolGroup::FileRead => self.revoke_public_mcp_client_file_sessions(client_ref),
-            ToolGroup::FileWrite => self.cancel_public_mcp_client_uploads(client_ref),
+            ToolGroup::FileWrite => {
+                // Uploads and workspace edits both require remote write access.
+                self.cancel_public_mcp_client_uploads(client_ref);
+                self.cancel_public_mcp_client_workspace_edits(client_ref);
+            }
             ToolGroup::WorkspaceRead => self.revoke_public_mcp_client_workspaces(client_ref),
             ToolGroup::WorkspaceEdit => self.cancel_public_mcp_client_workspace_edits(client_ref),
             ToolGroup::CloudSync => self.public_mcp.revoke_client_sync_handles(client_ref),
