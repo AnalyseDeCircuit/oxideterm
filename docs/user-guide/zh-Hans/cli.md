@@ -47,11 +47,14 @@ oxideterm settings diff ./settings-snapshot.json --section appearance
 ```sh
 oxideterm connections list
 oxideterm connections search prod --json
+oxideterm connections open prod
 oxideterm connections create --name prod --host example.internal --user deploy --port 22 --dry-run
 oxideterm connections rename prod production --yes
 oxideterm connections validate --strict
 oxideterm connections export --format raw-safe --json
 ```
+
+`connections open` 会按完整名称或 ID 查找已保存的 SSH 连接，再通过原生应用既有的保存连接流程打开。凭据、代理设置和其他连接选项仍由 GUI 负责读取。
 
 密码或密钥口令输入优先使用 `--password-stdin`、`--password-env`、`--passphrase-stdin` 或 `--passphrase-env`。不要把凭据值直接写进 shell 参数。
 

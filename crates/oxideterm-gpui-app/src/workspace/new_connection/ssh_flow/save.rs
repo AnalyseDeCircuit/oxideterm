@@ -1550,7 +1550,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn open_saved_connection(
+    pub(crate) fn open_saved_connection(
         &mut self,
         id: &str,
         window: &mut Window,

@@ -10,7 +10,7 @@ use super::{JsonArgs, WriteArgs};
     long_about = "Inspect and manage saved SSH connections and groups. Export and diagnostics output omit credential values; write commands default to dry-run unless confirmed with --yes."
 )]
 #[command(
-    after_help = "Examples:\n  oxideterm connections list\n  oxideterm connections search prod --json\n  oxideterm connections create --spec ./connection.json --dry-run\n  oxideterm connections rename prod production --yes\n  oxideterm connections export --format raw-safe --json"
+    after_help = "Examples:\n  oxideterm connections list\n  oxideterm connections search prod --json\n  oxideterm connections open prod\n  oxideterm connections create --spec ./connection.json --dry-run\n  oxideterm connections rename prod production --yes\n  oxideterm connections export --format raw-safe --json"
 )]
 pub struct ConnectionsCommand {
     #[command(subcommand)]
@@ -23,6 +23,8 @@ pub enum ConnectionsAction {
     List(JsonArgs),
     #[command(about = "Show one saved connection by id, name, host, or group")]
     Show(ConnectionShowArgs),
+    #[command(about = "Open a saved SSH connection in the native application")]
+    Open(ConnectionOpenArgs),
     #[command(about = "List connection groups")]
     Groups(JsonArgs),
     #[command(about = "Search saved connections")]
@@ -53,6 +55,14 @@ pub enum ConnectionsAction {
 #[derive(Debug, Args)]
 pub struct ConnectionShowArgs {
     #[arg(help = "Connection query: id, name, host, or group")]
+    pub query: String,
+    #[arg(long, help = "Print machine-readable JSON output")]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ConnectionOpenArgs {
+    #[arg(help = "Saved connection id or name")]
     pub query: String,
     #[arg(long, help = "Print machine-readable JSON output")]
     pub json: bool,

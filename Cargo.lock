@@ -8459,6 +8459,7 @@ name = "oxideterm-ssh-launch"
 version = "2.0.20"
 dependencies = [
  "serde",
+ "serde_json",
  "zeroize",
 ]
 

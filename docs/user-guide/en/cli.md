@@ -47,11 +47,14 @@ oxideterm settings diff ./settings-snapshot.json --section appearance
 ```sh
 oxideterm connections list
 oxideterm connections search prod --json
+oxideterm connections open prod
 oxideterm connections create --name prod --host example.internal --user deploy --port 22 --dry-run
 oxideterm connections rename prod production --yes
 oxideterm connections validate --strict
 oxideterm connections export --format raw-safe --json
 ```
+
+`connections open` resolves an exact saved SSH connection name or id, then opens it through the native application's normal saved-connection flow. The GUI remains responsible for loading credentials, proxy settings, and other connection options.
 
 For password or passphrase input, prefer `--password-stdin`, `--password-env`, `--passphrase-stdin`, or `--passphrase-env`. Do not pass secret values directly as shell arguments.
 

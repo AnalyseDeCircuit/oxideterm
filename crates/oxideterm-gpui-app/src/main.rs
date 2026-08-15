@@ -133,7 +133,7 @@ fn main() {
         eprintln!("failed to create the pre-2.0 migration snapshot: {error:#}");
         std::process::exit(1);
     }
-    let ssh_launch =
+    let native_ssh_launch =
         single_instance::read_ssh_launch_file(ssh_launch_path).unwrap_or_else(|error| {
             eprintln!("failed to read SSH launch request: {error}");
             std::process::exit(2);
@@ -212,7 +212,7 @@ fn main() {
         )));
         let workspace_opened = match open_primary_window(
             cx,
-            ssh_launch,
+            native_ssh_launch,
             desktop_presence_menu,
             Some(single_instance_rx),
             startup_settings.clone(),
@@ -272,7 +272,7 @@ fn default_window_bounds(cx: &mut App) -> Bounds<gpui::Pixels> {
 
 fn open_main_workspace_window(
     cx: &mut App,
-    ssh_launch: Option<oxideterm_ssh_launch::TemporarySshLaunch>,
+    native_ssh_launch: Option<oxideterm_ssh_launch::NativeSshLaunch>,
     desktop_presence_menu: oxideterm_desktop_presence::DesktopPresenceMenu,
     single_instance_rx: Option<single_instance::SingleInstanceReceiver>,
 ) -> anyhow::Result<()> {
@@ -302,12 +302,21 @@ fn open_main_workspace_window(
                 },
             )
         });
-        if let Some(launch) = ssh_launch
+        if let Some(launch) = native_ssh_launch
             && let Err(error) = session.update(cx, |session, cx| {
-                session.open_temporary_ssh_launch(launch, cx)
+                match launch {
+                    oxideterm_ssh_launch::NativeSshLaunch::Temporary(launch) => {
+                        session.open_temporary_ssh_launch(launch, cx)
+                    }
+                    oxideterm_ssh_launch::NativeSshLaunch::SavedConnection(launch) => {
+                        // Startup launches use the same saved-profile owner as in-app actions.
+                        session.open_saved_connection(&launch.saved_connection_id, window, cx);
+                        Ok(())
+                    }
+                }
             })
         {
-            eprintln!("failed to open temporary SSH launch: {error}");
+            eprintln!("failed to open native SSH launch: {error}");
         }
         cx.new(|cx| WorkspaceWindowShell::new(session, window, cx))
     })
@@ -316,7 +325,7 @@ fn open_main_workspace_window(
 
 fn open_primary_window(
     cx: &mut App,
-    ssh_launch: Option<oxideterm_ssh_launch::TemporarySshLaunch>,
+    native_ssh_launch: Option<oxideterm_ssh_launch::NativeSshLaunch>,
     desktop_presence_menu: oxideterm_desktop_presence::DesktopPresenceMenu,
     single_instance_rx: Option<single_instance::SingleInstanceReceiver>,
     settings: oxideterm_settings::PersistedSettings,
@@ -327,14 +336,19 @@ fn open_primary_window(
             cx,
             portable_status,
             settings,
-            ssh_launch,
+            native_ssh_launch,
             desktop_presence_menu,
             single_instance_rx,
         )?;
         return Ok(false);
     }
 
-    open_main_workspace_window(cx, ssh_launch, desktop_presence_menu, single_instance_rx)?;
+    open_main_workspace_window(
+        cx,
+        native_ssh_launch,
+        desktop_presence_menu,
+        single_instance_rx,
+    )?;
     Ok(true)
 }
 

@@ -11,10 +11,10 @@ use std::fs;
 
 use crate::{
     args::{
-        ConnectionCreateArgs, ConnectionEditArgs, ConnectionSearchArgs, ConnectionShowArgs,
-        ConnectionsAction, ConnectionsApplyStrategy, ConnectionsCommand, ConnectionsExportArgs,
-        ConnectionsExportFormat, ConnectionsGroupAction, ConnectionsGroupCommand, JsonArgs,
-        WriteArgs,
+        ConnectionCreateArgs, ConnectionEditArgs, ConnectionOpenArgs, ConnectionSearchArgs,
+        ConnectionShowArgs, ConnectionsAction, ConnectionsApplyStrategy, ConnectionsCommand,
+        ConnectionsExportArgs, ConnectionsExportFormat, ConnectionsGroupAction,
+        ConnectionsGroupCommand, JsonArgs, WriteArgs,
     },
     connections_validate,
     error::{CliError, CliResult, runtime_error},
@@ -51,6 +51,14 @@ struct ConnectionGroupsResponse {
 struct ConnectionShowResponse {
     path: String,
     connection: ConnectionInfo,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectionOpenResponse {
+    launch_requested: bool,
+    connection_id: String,
+    name: String,
 }
 
 #[derive(Serialize)]
@@ -93,6 +101,7 @@ pub fn run(command: ConnectionsCommand) -> CliResult<i32> {
             show_connection(args)?;
             Ok(0)
         }
+        ConnectionsAction::Open(args) => open_connection(args),
         ConnectionsAction::Groups(args) => {
             list_groups(args)?;
             Ok(0)
@@ -116,6 +125,38 @@ pub fn run(command: ConnectionsCommand) -> CliResult<i32> {
         }
         ConnectionsAction::Group(command) => run_group_command(command),
     }
+}
+
+fn open_connection(args: ConnectionOpenArgs) -> CliResult<i32> {
+    if crate::paths::has_cli_path_override() {
+        return Err(CliError::new(
+            "native_connection_profile_unsupported",
+            "connections open targets the native application's active data directory; remove --config-dir and --profile",
+            args.json,
+        ));
+    }
+    let store = load_connection_store(args.json)?;
+    let connection = find_connection_for_open(&store.connection_infos(), &args.query, args.json)?;
+
+    // The native app resolves the stable id again so the handoff never copies
+    // connection options, credential references, or runtime node identities.
+    crate::ssh::launch_saved_connection(connection.id.clone()).map_err(|error| {
+        // Preserve structured output for this command without changing the
+        // existing text-only `oxideterm ssh` launch surface.
+        CliError::new(error.code, error.message, args.json)
+    })?;
+    match output::format_from_flag(args.json) {
+        OutputFormat::Json => output::write_json(&ConnectionOpenResponse {
+            launch_requested: true,
+            connection_id: connection.id,
+            name: connection.name,
+        })?,
+        OutputFormat::Text => output::write_text(format!(
+            "Opening saved connection: {} ({})",
+            connection.name, connection.id
+        )),
+    }
+    Ok(0)
 }
 
 fn create_connection(args: ConnectionCreateArgs) -> CliResult<i32> {
@@ -707,6 +748,34 @@ fn find_connection(connections: &[ConnectionInfo], query: &str) -> Option<Connec
                 .find(|connection| connection.name.to_ascii_lowercase() == lower)
                 .cloned()
         })
+}
+
+fn find_connection_for_open(
+    connections: &[ConnectionInfo],
+    query: &str,
+    json: bool,
+) -> CliResult<ConnectionInfo> {
+    if let Some(connection) = connections.iter().find(|connection| connection.id == query) {
+        return Ok(connection.clone());
+    }
+
+    let matching_names = connections
+        .iter()
+        .filter(|connection| connection.name.eq_ignore_ascii_case(query))
+        .collect::<Vec<_>>();
+    match matching_names.as_slice() {
+        [connection] => Ok((*connection).clone()),
+        [] => Err(CliError::new(
+            "connection_not_found",
+            format!("connection '{query}' was not found"),
+            json,
+        )),
+        _ => Err(CliError::new(
+            "connection_name_ambiguous",
+            format!("multiple saved connections are named '{query}'; use an exact connection id"),
+            json,
+        )),
+    }
 }
 
 fn format_connection_row(connection: &ConnectionInfo) -> String {

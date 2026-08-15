@@ -11,7 +11,9 @@ use std::{
 };
 
 use clap::Args;
-use oxideterm_ssh_launch::{TemporarySshLaunch, parse_user_host_target};
+use oxideterm_ssh_launch::{
+    NativeSshLaunch, SavedConnectionLaunch, TemporarySshLaunch, parse_user_host_target,
+};
 use zeroize::Zeroizing;
 
 use crate::error::{CliError, CliResult};
@@ -34,10 +36,19 @@ pub struct SshLaunchArgs {
 
 pub fn run(args: SshLaunchArgs) -> CliResult<i32> {
     let launch = build_launch(args)?;
-    let request_path = write_launch_request(&launch)?;
+    let title = launch.title();
+    let request_path = write_launch_request(&NativeSshLaunch::Temporary(launch))?;
     launch_native_gui(&request_path)?;
-    println!("Opening temporary SSH terminal: {}", launch.title());
+    println!("Opening temporary SSH terminal: {title}");
     Ok(0)
+}
+
+pub(crate) fn launch_saved_connection(connection_id: String) -> CliResult<()> {
+    let request = NativeSshLaunch::SavedConnection(SavedConnectionLaunch {
+        saved_connection_id: connection_id,
+    });
+    let request_path = write_launch_request(&request)?;
+    launch_native_gui(&request_path)
 }
 
 fn build_launch(args: SshLaunchArgs) -> CliResult<TemporarySshLaunch> {
@@ -81,7 +92,7 @@ fn read_password_from_stdin() -> CliResult<Zeroizing<String>> {
     Ok(password)
 }
 
-fn write_launch_request(launch: &TemporarySshLaunch) -> CliResult<PathBuf> {
+fn write_launch_request(launch: &NativeSshLaunch) -> CliResult<PathBuf> {
     let bytes =
         Zeroizing::new(serde_json::to_vec(launch).map_err(|error| {
             CliError::new("ssh_launch_serialize_failed", error.to_string(), false)

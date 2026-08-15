@@ -36,6 +36,21 @@ fn parses_connections_show_json() {
 }
 
 #[test]
+fn parses_connections_open() {
+    let cli = Cli::parse_from(["oxideterm", "connections", "open", "prod", "--json"]);
+    match cli.command {
+        Command::Connections(command) => match command.action {
+            ConnectionsAction::Open(args) => {
+                assert_eq!(args.query, "prod");
+                assert!(args.json);
+            }
+            _ => panic!("expected open command"),
+        },
+        _ => panic!("expected connections command"),
+    }
+}
+
+#[test]
 fn parses_temporary_ssh_launch() {
     let cli = Cli::parse_from(["oxideterm", "ssh", "alice@example.com", "-p", "2222"]);
     match cli.command {

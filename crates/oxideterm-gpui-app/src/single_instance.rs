@@ -15,7 +15,7 @@ use std::{
 use anyhow::{Context, Result, anyhow};
 use fs2::FileExt;
 use oxideterm_settings::is_prerelease_version;
-use oxideterm_ssh_launch::TemporarySshLaunch;
+use oxideterm_ssh_launch::NativeSshLaunch;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 use uuid::Uuid;
@@ -57,7 +57,7 @@ pub(crate) enum SingleInstanceOutcome {
 #[derive(Debug)]
 pub(crate) enum SingleInstanceEvent {
     ShowMainWindow,
-    OpenTemporarySsh(TemporarySshLaunch),
+    OpenNativeSsh(NativeSshLaunch),
 }
 
 pub(crate) struct SingleInstanceGuard {
@@ -341,7 +341,7 @@ fn events_from_stream(
     let mut events = vec![SingleInstanceEvent::ShowMainWindow];
     if let Some(path) = request.ssh_launch_file {
         match read_ssh_launch_file(Some(path)) {
-            Ok(Some(launch)) => events.push(SingleInstanceEvent::OpenTemporarySsh(launch)),
+            Ok(Some(launch)) => events.push(SingleInstanceEvent::OpenNativeSsh(launch)),
             Ok(None) => {}
             Err(error) => eprintln!("failed to read forwarded SSH launch request: {error}"),
         }
@@ -349,7 +349,7 @@ fn events_from_stream(
     Ok(events)
 }
 
-pub(crate) fn read_ssh_launch_file(path: Option<PathBuf>) -> Result<Option<TemporarySshLaunch>> {
+pub(crate) fn read_ssh_launch_file(path: Option<PathBuf>) -> Result<Option<NativeSshLaunch>> {
     let Some(path) = path else {
         return Ok(None);
     };
@@ -434,16 +434,16 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let application_receiver = Arc::new(Mutex::new(rx));
         let first_workspace_receiver = application_receiver.clone();
-        let ssh_launch = TemporarySshLaunch {
+        let ssh_launch = NativeSshLaunch::Temporary(oxideterm_ssh_launch::TemporarySshLaunch {
             username: "test-user".to_string(),
             host: "example.test".to_string(),
             port: 22,
             password: None,
-        };
+        });
 
         drop(first_workspace_receiver);
         tx.send(SingleInstanceEvent::ShowMainWindow).unwrap();
-        tx.send(SingleInstanceEvent::OpenTemporarySsh(ssh_launch))
+        tx.send(SingleInstanceEvent::OpenNativeSsh(ssh_launch))
             .unwrap();
 
         let receiver = application_receiver.lock().unwrap();
@@ -451,7 +451,8 @@ mod tests {
             receiver.try_recv().unwrap(),
             SingleInstanceEvent::ShowMainWindow
         ));
-        let SingleInstanceEvent::OpenTemporarySsh(received_launch) = receiver.try_recv().unwrap()
+        let SingleInstanceEvent::OpenNativeSsh(NativeSshLaunch::Temporary(received_launch)) =
+            receiver.try_recv().unwrap()
         else {
             panic!("second event should retain the forwarded SSH launch");
         };

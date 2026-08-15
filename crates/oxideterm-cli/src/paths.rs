@@ -88,6 +88,12 @@ pub fn default_backups_dir() -> PathBuf {
     PathBuf::from(cli_paths().backups_dir)
 }
 
+/// Reports when a CLI-only path context cannot be opened by the active native app.
+pub fn has_cli_path_override() -> bool {
+    let context = active_context();
+    context.config_dir.is_some() || context.profile.is_some()
+}
+
 fn active_context() -> CliPathContext {
     let mut context = CLI_PATH_CONTEXT
         .get()

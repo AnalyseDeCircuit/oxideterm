@@ -34,7 +34,7 @@ enum PortableBootstrapAction {
 }
 
 struct PortableBootstrapLaunch {
-    ssh_launch: Option<oxideterm_ssh_launch::TemporarySshLaunch>,
+    native_ssh_launch: Option<oxideterm_ssh_launch::NativeSshLaunch>,
     desktop_presence_menu: oxideterm_desktop_presence::DesktopPresenceMenu,
     single_instance_rx: Option<SingleInstanceReceiver>,
 }
@@ -72,7 +72,7 @@ pub(crate) fn open_portable_bootstrap_window(
     cx: &mut App,
     status: PortableStatusSnapshot,
     settings: PersistedSettings,
-    ssh_launch: Option<oxideterm_ssh_launch::TemporarySshLaunch>,
+    native_ssh_launch: Option<oxideterm_ssh_launch::NativeSshLaunch>,
     desktop_presence_menu: oxideterm_desktop_presence::DesktopPresenceMenu,
     single_instance_rx: Option<SingleInstanceReceiver>,
 ) -> anyhow::Result<()> {
@@ -94,7 +94,7 @@ pub(crate) fn open_portable_bootstrap_window(
                 status,
                 settings,
                 PortableBootstrapLaunch {
-                    ssh_launch,
+                    native_ssh_launch,
                     desktop_presence_menu,
                     single_instance_rx,
                 },
@@ -289,7 +289,7 @@ impl PortableBootstrapWindow {
             };
             match crate::open_main_workspace_window(
                 cx,
-                launch.ssh_launch,
+                launch.native_ssh_launch,
                 launch.desktop_presence_menu,
                 launch.single_instance_rx,
             ) {

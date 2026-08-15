@@ -1,10 +1,10 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Temporary SSH launch requests shared by the native CLI and GPUI app.
+//! SSH launch requests shared by the native CLI and GPUI app.
 //!
 //! This crate intentionally stays small: it owns only the safe, explicit
-//! `oxideterm ssh user@host` launch surface, not a partial OpenSSH parser.
+//! native launch boundary, not a partial OpenSSH parser or session runtime.
 
 use std::fmt;
 
@@ -13,6 +13,20 @@ use zeroize::Zeroizing;
 
 /// Default port used by temporary SSH launch targets.
 pub const DEFAULT_SSH_PORT: u16 = 22;
+
+/// A native application launch request carried by the owner-only handoff file.
+#[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum NativeSshLaunch {
+    SavedConnection(SavedConnectionLaunch),
+    Temporary(TemporarySshLaunch),
+}
+
+/// Selects a saved SSH profile without copying its connection properties or secrets.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SavedConnectionLaunch {
+    pub saved_connection_id: String,
+}
 
 #[derive(Eq, PartialEq, Serialize, Deserialize)]
 pub struct TemporarySshLaunch {
@@ -218,5 +232,27 @@ mod tests {
         ] {
             assert!(parse_explicit_user_host_port_target(target).is_none());
         }
+    }
+
+    #[test]
+    fn native_launch_wire_accepts_legacy_temporary_and_saved_requests() {
+        let temporary: NativeSshLaunch = serde_json::from_value(serde_json::json!({
+            "username": "alice",
+            "host": "example.com",
+            "port": 22
+        }))
+        .unwrap();
+        assert!(matches!(temporary, NativeSshLaunch::Temporary(_)));
+
+        let saved: NativeSshLaunch = serde_json::from_value(serde_json::json!({
+            "saved_connection_id": "connection-1"
+        }))
+        .unwrap();
+        assert_eq!(
+            saved,
+            NativeSshLaunch::SavedConnection(SavedConnectionLaunch {
+                saved_connection_id: "connection-1".to_string(),
+            })
+        );
     }
 }
