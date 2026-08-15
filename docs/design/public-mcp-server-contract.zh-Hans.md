@@ -59,7 +59,7 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 - 设置页可创建、停用和撤销独立外部客户端；一次性 Bearer 凭据只向用户显示一次，设备端只持久化 SHA-256 摘要。
 - 每个客户端独立选择普通模式或完全权限模式，并逐项启用工具组。普通模式保留应用内动作批准；完全权限模式只跳过已勾选工具组的逐动作批准，不会绕过 Bearer 认证、应用锁、秘密硬边界、审计或未授权工具组。
 - `tools/list` 按客户端工具组裁剪；当前实际发布基础、连接目录/详情、节点租约、命令执行/观察、临时 artifact、当前客户端审计、类型化 Host Tools、快速命令、插件生命周期、端口转发和 SFTP 文件工具。
-- `connections_browse` 只返回目录投影，精确主机、端口和用户名由单独授权的 `connections_describe` 返回。
+- `connections_browse` 已覆盖保存的 SSH、串口、Telnet、Mosh、RDP 和 VNC 配置，只返回目录投影；精确端点及协议选项由单独授权的 `connections_describe` 返回，既有凭据只显示存在性。
 - 连接、节点和命令句柄均为随机且绑定客户端的外部引用；首个切片会在应用重启后重新生成连接引用，客户端需要重新浏览目录，不能缓存或构造内部连接身份。
 - `nodes_connect` 使用保存的 SSH 配置和现有受保护凭据，通过 NodeRouter 建立或复用物理节点；代理链也沿用现有节点树展开与连接顺序。
 - `commands_start` 使用当前物理 SSH 连接的独立 exec channel，返回真实退出码、有界输出和可取消 `command_ref`。
@@ -213,7 +213,7 @@ NodeRouter / connection registry ── 物理 SSH node
 
 | 工具 | 权限 | 关键参数 | 关键结果与约束 |
 |---|---|---|---|
-| `connections_browse` | 连接目录 / D / 否 | `transport?`、`cursor?` | `connection_ref`、显示名、传输类型、健康状态、能力标记和 `has_credentials`；端点默认分类而非精确地址。 |
+| `connections_browse` | 连接目录 / D / 否 | `query?`、`connection_types?` | SSH、Mosh、Telnet、串口、RDP/VNC 的 `connection_ref`、显示名、传输类型、分组、标签和最近使用时间；不返回精确端点或凭据。 |
 | `connections_describe` | 连接读取 / R / 否 | `connection_ref` | 经授权的主机/端口、用户名、跳板与代理元数据、保存转发摘要；秘密字段仅以存在标记表示。 |
 | `connections_save` | 连接管理 / W / 确认新建或覆盖 | `connection_ref?`、`profile`、`expected_revision?` | 新建或更新可保存的 SSH、Mosh、Telnet、串口、RDP/VNC 配置；返回新 `connection_ref`、revision 和可用时 `undo_ref`。`profile` 中的秘密字段一律拒绝，必须使用 `credentials_store`；`local` 一律拒绝保存。 |
 | `connections_remove` | 连接管理 / X / 必须 | `connection_ref` | 删除保存配置及其公开映射；受保护凭据要单独选择是否删除，默认保留。 |

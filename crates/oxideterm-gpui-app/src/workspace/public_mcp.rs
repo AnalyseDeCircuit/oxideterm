@@ -42,6 +42,16 @@ const PUBLIC_MCP_OUTPUT_PAGE_LIMIT: usize = 256 * 1024;
 // Bound retained command output even when an authorized client never releases its node lease.
 const PUBLIC_MCP_COMMAND_CAPACITY: usize = 256;
 const PUBLIC_MCP_COMMAND_CAPACITY_PER_CLIENT: usize = 64;
+// Namespace internal profile identifiers so external connection handles remain type-safe.
+const CONNECTION_KEY_SSH_PREFIX: &str = "ssh:";
+const CONNECTION_KEY_SERIAL_PREFIX: &str = "serial:";
+const CONNECTION_KEY_TELNET_PREFIX: &str = "telnet:";
+const CONNECTION_KEY_MOSH_PREFIX: &str = "mosh:";
+const CONNECTION_KEY_DESKTOP_PREFIX: &str = "desktop:";
+const CONNECTION_TYPE_SSH: &str = "ssh";
+const CONNECTION_TYPE_SERIAL: &str = "serial";
+const CONNECTION_TYPE_TELNET: &str = "telnet";
+const CONNECTION_TYPE_MOSH: &str = "mosh";
 
 pub(in crate::workspace) struct PublicMcpWorkspaceBridge {
     endpoint_url: Option<String>,
@@ -132,6 +142,8 @@ struct PublicMcpCommandRecord {
 #[derive(Serialize)]
 struct PublicConnectionProjection {
     connection_ref: ConnectionRef,
+    #[serde(rename = "type")]
+    connection_type: &'static str,
     name: String,
     group: Option<String>,
     host: String,
@@ -346,7 +358,24 @@ impl PublicMcpWorkspaceBridge {
         self.connection_ids
             .get(connection_ref)
             .filter(|(owner, _)| owner == client_ref)
-            .map(|(_, connection_id)| connection_id.clone())
+            .and_then(|(_, connection_key)| {
+                connection_key
+                    .strip_prefix(CONNECTION_KEY_SSH_PREFIX)
+                    .map(ToOwned::to_owned)
+            })
+    }
+
+    fn connection_key(
+        &mut self,
+        client_ref: &ClientRef,
+        connection_ref: &ConnectionRef,
+        store: &ConnectionStore,
+    ) -> Option<String> {
+        self.sync_connection_refs(client_ref, store);
+        self.connection_ids
+            .get(connection_ref)
+            .filter(|(owner, _)| owner == client_ref)
+            .map(|(_, connection_key)| connection_key.clone())
     }
 
     fn connection_projection(
@@ -354,7 +383,8 @@ impl PublicMcpWorkspaceBridge {
         client_ref: &ClientRef,
         info: ConnectionInfo,
     ) -> PublicConnectionProjection {
-        let connection_key = (client_ref.clone(), info.id.clone());
+        let internal_key = format!("{CONNECTION_KEY_SSH_PREFIX}{}", info.id);
+        let connection_key = (client_ref.clone(), internal_key.clone());
         let connection_ref = self
             .connection_refs
             .entry(connection_key)
@@ -362,9 +392,10 @@ impl PublicMcpWorkspaceBridge {
             .clone();
         self.connection_ids
             .entry(connection_ref.clone())
-            .or_insert_with(|| (client_ref.clone(), info.id.clone()));
+            .or_insert_with(|| (client_ref.clone(), internal_key));
         PublicConnectionProjection {
             connection_ref,
+            connection_type: CONNECTION_TYPE_SSH,
             name: info.name,
             group: info.group,
             host: info.host,
@@ -380,7 +411,8 @@ impl PublicMcpWorkspaceBridge {
         client_ref: &ClientRef,
         info: ConnectionInfo,
     ) -> PublicConnectionDirectoryEntry {
-        let connection_key = (client_ref.clone(), info.id.clone());
+        let internal_key = format!("{CONNECTION_KEY_SSH_PREFIX}{}", info.id);
+        let connection_key = (client_ref.clone(), internal_key.clone());
         let connection_ref = self
             .connection_refs
             .entry(connection_key)
@@ -388,29 +420,84 @@ impl PublicMcpWorkspaceBridge {
             .clone();
         self.connection_ids
             .entry(connection_ref.clone())
-            .or_insert((client_ref.clone(), info.id));
+            .or_insert((client_ref.clone(), internal_key));
         PublicConnectionDirectoryEntry {
             connection_ref,
             name: info.name,
             group: info.group,
-            connection_type: "ssh",
+            connection_type: CONNECTION_TYPE_SSH,
             tags: info.tags,
             last_used_at: info.last_used_at,
         }
     }
 
+    fn profile_directory_entry(
+        &mut self,
+        client_ref: &ClientRef,
+        internal_key: String,
+        name: String,
+        group: Option<String>,
+        connection_type: &'static str,
+        last_used_at: Option<String>,
+    ) -> PublicConnectionDirectoryEntry {
+        let connection_ref = self.ensure_connection_ref(client_ref, internal_key);
+        PublicConnectionDirectoryEntry {
+            connection_ref,
+            name,
+            group,
+            connection_type,
+            tags: Vec::new(),
+            last_used_at,
+        }
+    }
+
     fn sync_connection_refs(&mut self, client_ref: &ClientRef, store: &ConnectionStore) {
         for info in store.connection_infos() {
-            let connection_key = (client_ref.clone(), info.id.clone());
-            let connection_ref = self
-                .connection_refs
-                .entry(connection_key)
-                .or_default()
-                .clone();
-            self.connection_ids
-                .entry(connection_ref)
-                .or_insert((client_ref.clone(), info.id));
+            self.ensure_connection_ref(
+                client_ref,
+                format!("{CONNECTION_KEY_SSH_PREFIX}{}", info.id),
+            );
         }
+        for profile in store.serial_profiles() {
+            self.ensure_connection_ref(
+                client_ref,
+                format!("{CONNECTION_KEY_SERIAL_PREFIX}{}", profile.id),
+            );
+        }
+        for profile in store.telnet_profiles() {
+            self.ensure_connection_ref(
+                client_ref,
+                format!("{CONNECTION_KEY_TELNET_PREFIX}{}", profile.id),
+            );
+        }
+        for profile in store.mosh_profiles() {
+            self.ensure_connection_ref(
+                client_ref,
+                format!("{CONNECTION_KEY_MOSH_PREFIX}{}", profile.id),
+            );
+        }
+        for profile in store.remote_desktop_profiles() {
+            self.ensure_connection_ref(
+                client_ref,
+                format!("{CONNECTION_KEY_DESKTOP_PREFIX}{}", profile.id),
+            );
+        }
+    }
+
+    fn ensure_connection_ref(
+        &mut self,
+        client_ref: &ClientRef,
+        internal_key: String,
+    ) -> ConnectionRef {
+        let connection_ref = self
+            .connection_refs
+            .entry((client_ref.clone(), internal_key.clone()))
+            .or_default()
+            .clone();
+        self.connection_ids
+            .entry(connection_ref.clone())
+            .or_insert_with(|| (client_ref.clone(), internal_key));
+        connection_ref
     }
 
     fn remove_client_connection_refs(&mut self, client_ref: &ClientRef) {
@@ -457,15 +544,63 @@ impl PublicMcpWorkspaceBridge {
             // The full saved command is shown only in the local approval UI.
             return format!("{} — {}", command.name, command.command);
         }
-        if let Ok(connection_ref) = target.parse::<ConnectionRef>()
-            && let Some((owner, connection_id)) = self.connection_ids.get(&connection_ref)
+        let connection_target = target.split_whitespace().next().unwrap_or(target);
+        if let Ok(connection_ref) = connection_target.parse::<ConnectionRef>()
+            && let Some((owner, connection_key)) = self.connection_ids.get(&connection_ref)
             && owner == client_ref
-            && let Some(connection) = store.get(connection_id)
         {
-            return format!(
-                "{} ({}@{}:{})",
-                connection.name, connection.username, connection.host, connection.port
-            );
+            if let Some(connection_id) = connection_key.strip_prefix(CONNECTION_KEY_SSH_PREFIX)
+                && let Some(connection) = store.get(connection_id)
+            {
+                return format!(
+                    "{} ({}@{}:{})",
+                    connection.name, connection.username, connection.host, connection.port
+                );
+            }
+            if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_SERIAL_PREFIX)
+                && let Some(profile) = store
+                    .serial_profiles()
+                    .iter()
+                    .find(|profile| profile.id == profile_id)
+            {
+                return format!(
+                    "{} ({} @ {})",
+                    profile.name, profile.port_path, profile.baud_rate
+                );
+            }
+            if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_TELNET_PREFIX)
+                && let Some(profile) = store
+                    .telnet_profiles()
+                    .iter()
+                    .find(|profile| profile.id == profile_id)
+            {
+                return format!("{} ({}:{})", profile.name, profile.host, profile.port);
+            }
+            if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_MOSH_PREFIX)
+                && let Some(profile) = store
+                    .mosh_profiles()
+                    .iter()
+                    .find(|profile| profile.id == profile_id)
+            {
+                return format!(
+                    "{} ({}@{}:{})",
+                    profile.name, profile.username, profile.host, profile.ssh_port
+                );
+            }
+            if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_DESKTOP_PREFIX)
+                && let Some(profile) = store
+                    .remote_desktop_profiles()
+                    .iter()
+                    .find(|profile| profile.id == profile_id)
+            {
+                return format!(
+                    "{} ({}://{}:{})",
+                    profile.name,
+                    profile.protocol.provider_id(),
+                    profile.host,
+                    profile.port
+                );
+            }
         }
         let (addon_target, addon_action) = target.split_once(' ').unwrap_or((target, ""));
         if let Ok(addon_ref) = addon_target.parse::<AddonRef>()
@@ -837,25 +972,109 @@ impl WorkspaceApp {
             .unwrap_or_default()
             .trim()
             .to_lowercase();
-        let allows_ssh = args.connection_types.is_empty()
-            || args
-                .connection_types
-                .iter()
-                .any(|connection_type| connection_type.eq_ignore_ascii_case("ssh"));
-        if !allows_ssh {
-            finish_serialized(request, json!({ "connections": [] }));
-            return;
+        let requested_types = args
+            .connection_types
+            .iter()
+            .map(|connection_type| connection_type.to_ascii_lowercase())
+            .collect::<HashSet<_>>();
+        let includes = |connection_type: &str| {
+            requested_types.is_empty() || requested_types.contains(connection_type)
+        };
+        let mut connections = Vec::new();
+        if includes(CONNECTION_TYPE_SSH) {
+            for connection in self
+                .connection_store
+                .connection_infos()
+                .into_iter()
+                .filter(|connection| connection_directory_matches_query(connection, &query))
+            {
+                connections.push(
+                    self.public_mcp
+                        .connection_directory_entry(&request.client_ref, connection),
+                );
+            }
         }
-        let connections = self
-            .connection_store
-            .connection_infos()
-            .into_iter()
-            .filter(|connection| connection_directory_matches_query(connection, &query))
-            .map(|connection| {
-                self.public_mcp
-                    .connection_directory_entry(&request.client_ref, connection)
-            })
-            .collect::<Vec<_>>();
+        if includes(CONNECTION_TYPE_SERIAL) {
+            for profile in self.connection_store.serial_profiles().to_vec() {
+                if public_profile_matches_query(
+                    &profile.name,
+                    profile.group.as_deref(),
+                    &[&profile.port_path, &profile.baud_rate.to_string()],
+                    &query,
+                ) {
+                    connections.push(self.public_mcp.profile_directory_entry(
+                        &request.client_ref,
+                        format!("{CONNECTION_KEY_SERIAL_PREFIX}{}", profile.id),
+                        profile.name,
+                        profile.group,
+                        CONNECTION_TYPE_SERIAL,
+                        profile.last_used_at.map(|time| time.to_rfc3339()),
+                    ));
+                }
+            }
+        }
+        if includes(CONNECTION_TYPE_TELNET) {
+            for profile in self.connection_store.telnet_profiles().to_vec() {
+                if public_profile_matches_query(
+                    &profile.name,
+                    profile.group.as_deref(),
+                    &[&profile.host, &profile.port.to_string()],
+                    &query,
+                ) {
+                    connections.push(self.public_mcp.profile_directory_entry(
+                        &request.client_ref,
+                        format!("{CONNECTION_KEY_TELNET_PREFIX}{}", profile.id),
+                        profile.name,
+                        profile.group,
+                        CONNECTION_TYPE_TELNET,
+                        profile.last_used_at.map(|time| time.to_rfc3339()),
+                    ));
+                }
+            }
+        }
+        if includes(CONNECTION_TYPE_MOSH) {
+            for profile in self.connection_store.mosh_profiles().to_vec() {
+                if public_profile_matches_query(
+                    &profile.name,
+                    profile.group.as_deref(),
+                    &[
+                        &profile.host,
+                        &profile.username,
+                        &profile.ssh_port.to_string(),
+                    ],
+                    &query,
+                ) {
+                    connections.push(self.public_mcp.profile_directory_entry(
+                        &request.client_ref,
+                        format!("{CONNECTION_KEY_MOSH_PREFIX}{}", profile.id),
+                        profile.name,
+                        profile.group,
+                        CONNECTION_TYPE_MOSH,
+                        profile.last_used_at.map(|time| time.to_rfc3339()),
+                    ));
+                }
+            }
+        }
+        for profile in self.connection_store.remote_desktop_profiles().to_vec() {
+            let connection_type = profile.protocol.provider_id();
+            if includes(connection_type)
+                && public_profile_matches_query(
+                    &profile.name,
+                    profile.group.as_deref(),
+                    &[&profile.host, &profile.port.to_string()],
+                    &query,
+                )
+            {
+                connections.push(self.public_mcp.profile_directory_entry(
+                    &request.client_ref,
+                    format!("{CONNECTION_KEY_DESKTOP_PREFIX}{}", profile.id),
+                    profile.name,
+                    profile.group,
+                    connection_type,
+                    profile.last_used_at.map(|time| time.to_rfc3339()),
+                ));
+            }
+        }
         finish_serialized(request, json!({ "connections": connections }));
     }
 
@@ -863,29 +1082,139 @@ impl WorkspaceApp {
         let PublicToolCall::DescribeConnection(args) = &request.call else {
             return;
         };
-        let Some(connection_id) = self.public_mcp.connection_id(
+        let connection_ref = args.connection_ref.clone();
+        let Some(connection_key) = self.public_mcp.connection_key(
             &request.client_ref,
-            &args.connection_ref,
+            &connection_ref,
             &self.connection_store,
         ) else {
             request.finish(ToolEnvelope::failed("The connection handle is unavailable"));
             return;
         };
-        let Some(info) = self
-            .connection_store
-            .connection_infos()
-            .into_iter()
-            .find(|connection| connection.id == connection_id)
-        else {
-            request.finish(ToolEnvelope::failed(
-                "The saved connection no longer exists",
-            ));
+        if let Some(connection_id) = connection_key.strip_prefix(CONNECTION_KEY_SSH_PREFIX)
+            && let Some(info) = self
+                .connection_store
+                .connection_infos()
+                .into_iter()
+                .find(|connection| connection.id == connection_id)
+        {
+            let projection = self
+                .public_mcp
+                .connection_projection(&request.client_ref, info);
+            finish_serialized(request, json!({ "connection": projection }));
             return;
-        };
-        let projection = self
-            .public_mcp
-            .connection_projection(&request.client_ref, info);
-        finish_serialized(request, json!({ "connection": projection }));
+        }
+        if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_SERIAL_PREFIX)
+            && let Some(profile) = self
+                .connection_store
+                .serial_profiles()
+                .iter()
+                .find(|profile| profile.id == profile_id)
+        {
+            finish_serialized(
+                request,
+                json!({
+                    "connection": {
+                        "connection_ref": connection_ref,
+                        "type": CONNECTION_TYPE_SERIAL,
+                        "name": profile.name,
+                        "group": profile.group,
+                        "port_path": profile.port_path,
+                        "baud_rate": profile.baud_rate,
+                        "data_bits": profile.data_bits,
+                        "stop_bits": profile.stop_bits,
+                        "parity": profile.parity,
+                        "flow_control": profile.flow_control,
+                        "connect_on_open": profile.connect_on_open,
+                    }
+                }),
+            );
+            return;
+        }
+        if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_TELNET_PREFIX)
+            && let Some(profile) = self
+                .connection_store
+                .telnet_profiles()
+                .iter()
+                .find(|profile| profile.id == profile_id)
+        {
+            finish_serialized(
+                request,
+                json!({
+                    "connection": {
+                        "connection_ref": connection_ref,
+                        "type": CONNECTION_TYPE_TELNET,
+                        "name": profile.name,
+                        "group": profile.group,
+                        "host": profile.host,
+                        "port": profile.port,
+                        "terminal": profile.terminal,
+                        "connect_on_open": profile.connect_on_open,
+                    }
+                }),
+            );
+            return;
+        }
+        if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_MOSH_PREFIX)
+            && let Some(profile) = self
+                .connection_store
+                .mosh_profiles()
+                .iter()
+                .find(|profile| profile.id == profile_id)
+        {
+            finish_serialized(
+                request,
+                json!({
+                    "connection": {
+                        "connection_ref": connection_ref,
+                        "type": CONNECTION_TYPE_MOSH,
+                        "name": profile.name,
+                        "group": profile.group,
+                        "host": profile.host,
+                        "ssh_port": profile.ssh_port,
+                        "username": profile.username,
+                        "auth_type": profile.auth.auth_type(),
+                        "server_executable": profile.server_executable,
+                        "udp_host_override": profile.udp_host_override,
+                        "udp_port": profile.udp_port,
+                        "ip_family": profile.ip_family,
+                        "prediction": profile.prediction,
+                        "locale": profile.locale,
+                    }
+                }),
+            );
+            return;
+        }
+        if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_DESKTOP_PREFIX)
+            && let Some(profile) = self
+                .connection_store
+                .remote_desktop_profiles()
+                .iter()
+                .find(|profile| profile.id == profile_id)
+        {
+            finish_serialized(
+                request,
+                json!({
+                    "connection": {
+                        "connection_ref": connection_ref,
+                        "type": profile.protocol.provider_id(),
+                        "name": profile.name,
+                        "group": profile.group,
+                        "host": profile.host,
+                        "port": profile.port,
+                        "username": profile.username,
+                        "domain": profile.domain,
+                        "credential_configured": profile.credential_ref.is_some(),
+                        "read_only": profile.read_only,
+                        "session_options": profile.session_options,
+                    }
+                }),
+            );
+            return;
+        }
+        request.finish(ToolEnvelope::failed(
+            "The saved connection no longer exists",
+        ));
     }
 
     fn handle_public_mcp_connect_node(&mut self, request: DomainRequest, cx: &mut Context<Self>) {
@@ -1517,6 +1846,8 @@ fn node_lease_for_client(
 fn connection_directory_matches_query(connection: &ConnectionInfo, query: &str) -> bool {
     query.is_empty()
         || connection.name.to_lowercase().contains(query)
+        || connection.host.to_lowercase().contains(query)
+        || connection.username.to_lowercase().contains(query)
         || connection
             .group
             .as_deref()
@@ -1525,6 +1856,20 @@ fn connection_directory_matches_query(connection: &ConnectionInfo, query: &str) 
             .tags
             .iter()
             .any(|tag| tag.to_lowercase().contains(query))
+}
+
+fn public_profile_matches_query(
+    name: &str,
+    group: Option<&str>,
+    searchable_fields: &[&str],
+    query: &str,
+) -> bool {
+    query.is_empty()
+        || name.to_lowercase().contains(query)
+        || group.is_some_and(|group| group.to_lowercase().contains(query))
+        || searchable_fields
+            .iter()
+            .any(|value| value.to_lowercase().contains(query))
 }
 
 fn all_tool_groups() -> BTreeSet<ToolGroup> {
