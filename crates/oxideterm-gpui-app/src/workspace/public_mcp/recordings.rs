@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use gpui::Context;
 use oxideterm_public_mcp::{
@@ -17,6 +17,7 @@ const ACTIVE_RECORDINGS_PER_CLIENT: usize = 4;
 const RECORDING_HANDLES_PER_CLIENT: usize = 64;
 const RECORDING_CONTENT_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 const RECORDING_CONTENT_BYTES_PER_CLIENT: usize = 64 * 1024 * 1024;
+const RECORDING_CONTENT_RETENTION: Duration = Duration::from_secs(15 * 60);
 const RECORDING_ARTIFACT_MEDIA_TYPE: &str = "application/x-asciicast";
 const DEFAULT_RECORDING_ARTIFACT_NAME: &str = "terminal-recording.cast";
 
@@ -316,7 +317,8 @@ impl WorkspaceApp {
         record.event_count = status.event_count;
         record.active = false;
         record.truncated = truncated;
-        record.stopped_at = Some(Instant::now());
+        let stopped_at = Instant::now();
+        record.stopped_at = Some(stopped_at);
         let content_enabled = self
             .public_mcp
             .state
@@ -326,6 +328,26 @@ impl WorkspaceApp {
         // Recording control may remain enabled after content access is revoked.
         record.content = content_enabled.then_some(content);
         self.enforce_public_mcp_recording_content_budget(client_ref);
+        let client_ref = client_ref.clone();
+        let recording_ref = recording_ref.clone();
+        cx.spawn(async move |workspace, cx| {
+            gpui::Timer::after(RECORDING_CONTENT_RETENTION).await;
+            let _ = workspace.update(cx, |workspace, _cx| {
+                let Some(record) = workspace
+                    .public_mcp
+                    .recordings
+                    .get_mut(&recording_ref)
+                    .filter(|record| {
+                        record.client_ref == client_ref && record.stopped_at == Some(stopped_at)
+                    })
+                else {
+                    return;
+                };
+                // Stopped terminal output must not remain resident without a bounded lifetime.
+                record.content.take();
+            });
+        })
+        .detach();
         Ok(())
     }
 

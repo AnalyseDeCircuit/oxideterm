@@ -76,7 +76,7 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 - IDE 工作区读取和结构化编辑分别授权。`workspaces_mount` 必须从客户端已有的 `file_session_ref` 派生，并再次规范化项目根；它创建独立的 Node Agent/SFTP IDE owner，不借用可见编辑器标签页，也不暴露 NodeId、TabId 或 GPUI Entity。树、文本读取和搜索都有硬上限；编辑使用编辑器核心校验 UTF-8 字节区间，并将客户端先前观察到的 revision 映射回真实 `SavedFileVersion` 做冲突检测。多文件写入不是服务端原子事务，后续文件失败时会尝试用刚写入的版本回滚前项，并明确报告回滚是否完整，不虚构持久 `undo_ref`。关闭工作区、父文件会话、客户端授权或物理节点只释放该工作区自己的 IDE consumer。
 - `oxideterm mcp bridge` 已提供受管 stdio 入口：它只把逐行 JSON-RPC 转交给正在运行的回环 HTTP 服务，不拥有业务权限。端点默认从应用生成的非秘密 discovery record 取得；Bearer 凭据只从用户指定的环境变量读取，绝不接受命令行明文。bridge 拒绝非回环 URL、代理、重定向、超限消息和未认证响应；应用未运行时，保留的端口记录只用于下次优先复用，连接仍会明确失败。
 - 终端会话、内容观察和输入控制分别授权。`terminals_open` 只创建应用真实持有的可见终端页：SSH 必须使用已取得的 `node_ref`，保存的 Mosh、Telnet 和串口使用 `connection_ref`，本地终端只允许一次性启动且不会进入保存、导出或同步。读取仅返回有界屏幕快照与 generation cursor；搜索复用终端后端；输入正文不进入审计，普通模式批准页只显示输入类型、长度与回车意图。关闭 SSH 终端只关闭自己的 terminal consumer，不等同于物理节点断开。
-- 终端录制控制和录制内容分别授权。`recordings_control` 复用真实 `TerminalPane` recorder，同一终端不会覆盖既有应用录制；当前后端只支持 output-only，因此 `capture_input=true` 会明确拒绝。停止时保留有界 asciicast 正文，搜索只给有界片段，导出只生成客户端私有且会过期的 artifact，不接受任意本机路径。终端关闭或控制授权关闭会先停止活动录制；客户端撤销会零化保留正文并撤销导出 artifact。
+- 终端录制控制和录制内容分别授权。`recordings_control` 复用真实 `TerminalPane` recorder，同一终端不会覆盖既有应用录制；当前后端只支持 output-only，因此 `capture_input=true` 会明确拒绝。停止时保留十五分钟有效的有界 asciicast 正文，搜索只给有界片段，导出只生成客户端私有且会独立过期的 artifact，不接受任意本机路径。终端关闭或控制授权关闭会先停止活动录制；客户端撤销会零化保留正文并撤销导出 artifact。
 - 远程桌面会话、画面观察、键鼠控制和剪贴板分别授权。`desktops_open` 只解析保存的 RDP/VNC `connection_ref`，凭据由设备受保护存储直接移交真实 provider，会话仍由可见标签页和 `RemoteDesktopSessionEntity` 持有。隐藏标签页只有在客户端启用画面观察时才继续消费最新帧；`desktops_frame` 把有界 CPU framebuffer 在后台编码成客户端私有 PNG artifact。输入必须携带当前 graphics epoch，坐标按 server framebuffer 校验；远端剪贴板来自会话内零化缓存，绝不读取系统剪贴板冒充远端内容。关闭或撤权会释放所有输入、关闭 helper，并撤销该桌面的帧和剪贴板 artifact。
 - 云同步按配置范围或调用方显式选择的分区冻结 pull/publish 预览；`sync_plan_ref` 绑定客户端、十分钟过期且只能消费一次。应用前同时比较完整本地状态和远端 revision/etag/content hash，任一变化都会拒绝陈旧计划。pull 只在能精确恢复的分区返回十五分钟有效的 `undo_ref`；SSH、Mosh 和凭据分区仍可保留产品已有的加密本地恢复备份，但不会把它伪装成严格撤销。publish 是远端写入，成功后明确不返回撤销句柄。
 - 连接和命令执行、物理节点断开先冻结原参数并进入应用内批准；批准票据绑定客户端、五分钟过期且只能消费一次。批准界面显示实际客户端、目标和命令，但命令不进入 MCP 批准结果或审计。
@@ -163,7 +163,7 @@ MCP `2026-07-28` 请求使用 `server/discover` 做可选发现，并在每次�
 | `connection_ref` | 已保存连接的安全投影 | 记录删除、权限变更时失效 | 不等于连接记录 UUID；可映射为多个运行时节点。 |
 | `node_ref` | NodeRouter 拥有的 SSH 逻辑节点 | 显式断开、租约释放、节点失败或客户端撤销 | 指向共享物理节点而不是某个终端。 |
 | `terminal_ref` | 一个终端消费者 | 关闭、后端退出、租约释放时失效 | 关闭它只移除消费者，绝不等价于 `node_disconnect`。 |
-| `recording_ref` | 一个客户端拥有的终端录制 | 客户端撤销或有界句柄回收时失效 | 活动录制绑定 `terminal_ref`；停止后正文与终端生命周期分离，内容授权关闭时不可读取。 |
+| `recording_ref` | 一个客户端拥有的终端录制 | 客户端撤销或有界句柄回收时失效 | 活动录制绑定 `terminal_ref`；停止后正文与终端生命周期分离并保留十五分钟，内容授权关闭时立即不可读取。 |
 | `command_ref` | 一次受跟踪的命令执行 | 完成后保留只读状态至审计保留期 | SSH exec 可提供真实退出码；交互终端按 Shell Integration/命令标记报告可靠性。 |
 | `file_session_ref` | 一个 NodeRouter 取得的 SFTP/IDE 消费者 | 节点断开、会话关闭、客户端撤销时失效 | 通过真实 SFTP channel，而不是 shell 兼容路径。 |
 | `workspace_ref` | IDE 工作区视图 | 挂载关闭、来源文件会话失效时失效 | 不是 GPUI 编辑器实体。 |
