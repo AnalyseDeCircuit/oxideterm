@@ -403,6 +403,25 @@ mod tests {
             other => panic!("unexpected auth: {other:?}"),
         }
         assert_eq!(store.get_connection_password("conn-1").unwrap(), "secret");
+
+        store
+            .store_connection_credential(
+                "conn-1",
+                ConnectionCredentialSlot::Primary,
+                &SecretString::from("replacement"),
+            )
+            .unwrap();
+        assert_eq!(
+            store.get_connection_password("conn-1").unwrap(),
+            "replacement"
+        );
+        assert!(store.get("conn-1").unwrap().last_used_at.is_none());
+        assert!(
+            store
+                .forget_connection_credential("conn-1", ConnectionCredentialSlot::Primary)
+                .unwrap()
+        );
+        assert!(store.get_connection_password("conn-1").is_err());
     }
 
     #[test]
@@ -432,6 +451,16 @@ mod tests {
             store.get_saved_auth_password(&profile.auth).unwrap(),
             secret
         );
+        store
+            .store_mosh_profile_credential("mosh-1", &SecretString::from("replacement"))
+            .unwrap();
+        let profile = store.get_mosh_profile("mosh-1").unwrap();
+        assert_eq!(
+            store.get_saved_auth_password(&profile.auth).unwrap(),
+            "replacement"
+        );
+        assert!(profile.last_used_at.is_none());
+        assert!(store.forget_mosh_profile_credential("mosh-1").unwrap());
         let saved = fs::read_to_string(store.path()).unwrap();
         assert!(!saved.contains(secret));
     }
@@ -660,7 +689,7 @@ mod tests {
     }
 
     #[test]
-    fn edit_preserves_tauri_connection_options_and_marks_used() {
+    fn edit_preserves_tauri_connection_options_without_changing_recency() {
         let path = temp_store_path("preserve-options");
         fs::write(
             &path,
@@ -702,7 +731,7 @@ mod tests {
         assert_eq!(conn.options.jump_host.as_deref(), Some("legacy-jump"));
         assert_eq!(conn.options.term_type.as_deref(), Some("vt100"));
         assert!(conn.options.agent_forwarding);
-        assert!(conn.last_used_at.is_some());
+        assert!(conn.last_used_at.is_none());
     }
 
     #[test]

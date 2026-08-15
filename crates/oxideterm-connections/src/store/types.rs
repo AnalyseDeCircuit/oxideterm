@@ -1101,6 +1101,14 @@ pub struct SavedConnectionRuntimeSecrets {
     pub upstream_proxy: Option<SecretString>,
 }
 
+/// Identifies one typed secret-bearing slot without exposing its protected-store key.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConnectionCredentialSlot {
+    Primary,
+    ProxyHop { index: usize },
+    UpstreamProxy,
+}
+
 impl fmt::Debug for SavedConnectionRuntimeSecrets {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter

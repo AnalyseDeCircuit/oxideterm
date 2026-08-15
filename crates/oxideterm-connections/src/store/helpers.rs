@@ -347,6 +347,127 @@ fn collect_keychain_ids_for_upstream_proxy(policy: &SavedUpstreamProxyPolicy) ->
     }
 }
 
+fn auth_with_protected_credential(auth: SavedAuth) -> Result<(SavedAuth, String)> {
+    match auth {
+        SavedAuth::Password { keychain_id, .. } => {
+            let reference = keychain_id.unwrap_or_else(new_password_keychain_id);
+            Ok((
+                SavedAuth::Password {
+                    keychain_id: Some(reference.clone()),
+                    plaintext_password: None,
+                },
+                reference,
+            ))
+        }
+        SavedAuth::Key {
+            key_path,
+            passphrase_keychain_id,
+            ..
+        } => {
+            let reference = passphrase_keychain_id.unwrap_or_else(new_key_passphrase_keychain_id);
+            Ok((
+                SavedAuth::Key {
+                    key_path,
+                    has_passphrase: true,
+                    passphrase_keychain_id: Some(reference.clone()),
+                    plaintext_passphrase: None,
+                },
+                reference,
+            ))
+        }
+        SavedAuth::Certificate {
+            key_path,
+            cert_path,
+            passphrase_keychain_id,
+            ..
+        } => {
+            let reference = passphrase_keychain_id.unwrap_or_else(new_key_passphrase_keychain_id);
+            Ok((
+                SavedAuth::Certificate {
+                    key_path,
+                    cert_path,
+                    has_passphrase: true,
+                    passphrase_keychain_id: Some(reference.clone()),
+                    plaintext_passphrase: None,
+                },
+                reference,
+            ))
+        }
+        SavedAuth::ManagedKey {
+            key_id,
+            passphrase_keychain_id,
+            ..
+        } => {
+            let reference = passphrase_keychain_id.unwrap_or_else(new_key_passphrase_keychain_id);
+            Ok((
+                SavedAuth::ManagedKey {
+                    key_id,
+                    passphrase_keychain_id: Some(reference.clone()),
+                    plaintext_passphrase: None,
+                },
+                reference,
+            ))
+        }
+        SavedAuth::KeyboardInteractive | SavedAuth::Agent => {
+            bail!("The selected authentication method has no stored credential slot")
+        }
+    }
+}
+
+fn auth_without_protected_credential(auth: &SavedAuth) -> (SavedAuth, Option<String>) {
+    match auth {
+        SavedAuth::Password { keychain_id, .. } => (
+            SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: None,
+            },
+            keychain_id.clone(),
+        ),
+        SavedAuth::Key {
+            key_path,
+            passphrase_keychain_id,
+            ..
+        } => (
+            SavedAuth::Key {
+                key_path: key_path.clone(),
+                has_passphrase: false,
+                passphrase_keychain_id: None,
+                plaintext_passphrase: None,
+            },
+            passphrase_keychain_id.clone(),
+        ),
+        SavedAuth::Certificate {
+            key_path,
+            cert_path,
+            passphrase_keychain_id,
+            ..
+        } => (
+            SavedAuth::Certificate {
+                key_path: key_path.clone(),
+                cert_path: cert_path.clone(),
+                has_passphrase: false,
+                passphrase_keychain_id: None,
+                plaintext_passphrase: None,
+            },
+            passphrase_keychain_id.clone(),
+        ),
+        SavedAuth::ManagedKey {
+            key_id,
+            passphrase_keychain_id,
+            ..
+        } => (
+            SavedAuth::ManagedKey {
+                key_id: key_id.clone(),
+                passphrase_keychain_id: None,
+                plaintext_passphrase: None,
+            },
+            passphrase_keychain_id.clone(),
+        ),
+        SavedAuth::KeyboardInteractive => (SavedAuth::KeyboardInteractive, None),
+        SavedAuth::Agent => (SavedAuth::Agent, None),
+    }
+}
+
 fn new_password_keychain_id() -> String {
     format!("oxide_conn_{}", Uuid::new_v4())
 }

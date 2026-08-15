@@ -29,13 +29,21 @@ pub use auth::{
 };
 pub use broker::{BrokerError, DomainBroker, DomainMessage, DomainRequest, DomainRequestReceiver};
 pub use calls::{
-    DesktopButtonState, DesktopClipboardImageFormat, DesktopClipboardKind, DesktopClipboardPayload,
-    DesktopFrameArgs, DesktopHandleArgs, DesktopInputArgs, DesktopInputEvent, ForwardKind,
-    HostToolLogPreset, HostToolOperation, HostToolResource, OpenDesktopArgs,
-    PublicDesktopMouseButton, PublicTelnetControl, PublicToolCall, ReadDesktopClipboardArgs,
-    RecordingExportFormat, RecordingStatusTarget, RecordingsControlArgs, RecordingsExportArgs,
-    RecordingsSearchArgs, RecordingsStatusArgs, ResizeDesktopArgs, TerminalControlAction,
-    TerminalOpenSource, ToolEnvelope, ToolOutcome, WriteDesktopClipboardArgs,
+    CredentialStatusArgs, DesktopButtonState, DesktopClipboardImageFormat, DesktopClipboardKind,
+    DesktopClipboardPayload, DesktopFrameArgs, DesktopHandleArgs, DesktopInputArgs,
+    DesktopInputEvent, ForgetCredentialArgs, ForwardKind, HostToolLogPreset, HostToolOperation,
+    HostToolResource, OpenDesktopArgs, PublicConnectionAuth, PublicCredentialSlot,
+    PublicDesktopMouseButton, PublicMoshIpFamily, PublicMoshPredictionMode,
+    PublicMoshUdpPortSelection, PublicRemoteDesktopOptions, PublicRemoteDesktopProfile,
+    PublicSavedConnectionProfile, PublicSerialFlowControl, PublicSerialParity, PublicTelnetControl,
+    PublicTerminalBackspaceSequence, PublicTerminalDeleteSequence, PublicTerminalEncoding,
+    PublicTerminalOptions, PublicToolCall, PublicUpstreamProxy, PublicUpstreamProxyProtocol,
+    PublicVncCompression, PublicVncImageQuality, PublicVncSecurityPolicy, PublicVncSessionMode,
+    PublicX11ForwardingMode, ReadDesktopClipboardArgs, RecordingExportFormat,
+    RecordingStatusTarget, RecordingsControlArgs, RecordingsExportArgs, RecordingsSearchArgs,
+    RecordingsStatusArgs, RemovePublicConnectionArgs, ResizeDesktopArgs, SavePublicConnectionArgs,
+    StoreCredentialArgs, TerminalControlAction, TerminalOpenSource, ToolEnvelope, ToolOutcome,
+    WriteDesktopClipboardArgs,
 };
 pub use handles::{
     AddonRef, ApprovalRef, ArtifactRef, AuditRef, ClientRef, CommandRef, ConnectionRef, DesktopRef,

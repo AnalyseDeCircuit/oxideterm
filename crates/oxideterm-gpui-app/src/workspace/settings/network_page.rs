@@ -78,6 +78,12 @@ fn public_mcp_tool_group_label_key(tool_group: oxideterm_public_mcp::ToolGroup) 
         oxideterm_public_mcp::ToolGroup::ConnectionRead => {
             "settings_view.network.mcp_group_connection_read"
         }
+        oxideterm_public_mcp::ToolGroup::ConnectionManage => {
+            "settings_view.network.mcp_group_connection_manage"
+        }
+        oxideterm_public_mcp::ToolGroup::CredentialManage => {
+            "settings_view.network.mcp_group_credential_manage"
+        }
         oxideterm_public_mcp::ToolGroup::NodeSession => {
             "settings_view.network.mcp_group_node_session"
         }

@@ -58,8 +58,11 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 
 - 设置页可创建、停用和撤销独立外部客户端；一次性 Bearer 凭据只向用户显示一次，设备端只持久化 SHA-256 摘要。
 - 每个客户端独立选择普通模式或完全权限模式，并逐项启用工具组。普通模式保留应用内动作批准；完全权限模式只跳过已勾选工具组的逐动作批准，不会绕过 Bearer 认证、应用锁、秘密硬边界、审计或未授权工具组。
-- `tools/list` 按客户端工具组裁剪；当前实际发布基础、连接目录/详情、节点租约、真实终端会话/观察/输入/录制、RDP/VNC 会话/画面/键鼠/剪贴板、命令执行/观察、临时 artifact、当前客户端审计、类型化 Host Tools、快速命令、插件生命周期、端口转发和 SFTP 文件工具。
+- `tools/list` 按客户端工具组裁剪；当前实际发布基础、连接目录/详情/管理、凭据管理、节点租约、真实终端会话/观察/输入/录制、RDP/VNC 会话/画面/键鼠/剪贴板、命令执行/观察、临时 artifact、当前客户端审计、类型化 Host Tools、快速命令、插件生命周期、端口转发和 SFTP 文件工具。
 - `connections_browse` 已覆盖保存的 SSH、串口、Telnet、Mosh、RDP 和 VNC 配置，只返回目录投影；精确端点及协议选项由单独授权的 `connections_describe` 返回，既有凭据只显示存在性。
+- `connections_save` 使用严格 tagged profile 写入上述六类真实保存配置，更新必须携带 `connections_describe` 返回的 revision；schema 不包含秘密字段，本地终端没有保存分支。`connections_remove` 遇到受保护凭据时要求显式 `forget_credentials=true`，因此不会静默删除秘密或制造无法管理的孤儿引用。
+- `credentials_status` 只返回槽位、认证类型、可写性和存在标记；`credentials_store` 把新的零化输入直接交给连接受保护存储，`credentials_forget` 删除指定槽位。三者都不返回既有值或内部存储引用，更新凭据也不会污染最近连接顺序。
+- Telnet profile 已作为独立分区进入 `.oxide` 预览/导入/导出和结构化云同步。SSH 上游代理的设备本地受保护存储引用在构造云快照时剥离，应用远端记录时只保留本机目标完全匹配的引用。
 - 连接、节点和命令句柄均为随机且绑定客户端的外部引用；首个切片会在应用重启后重新生成连接引用，客户端需要重新浏览目录，不能缓存或构造内部连接身份。
 - `nodes_connect` 使用保存的 SSH 配置和现有受保护凭据，通过 NodeRouter 建立或复用物理节点；代理链也沿用现有节点树展开与连接顺序。
 - `commands_start` 使用当前物理 SSH 连接的独立 exec channel，返回真实退出码、有界输出和可取消 `command_ref`。
@@ -220,7 +223,7 @@ NodeRouter / connection registry ── 物理 SSH node
 | `connections_browse` | 连接目录 / D / 否 | `query?`、`connection_types?` | SSH、Mosh、Telnet、串口、RDP/VNC 的 `connection_ref`、显示名、传输类型、分组、标签和最近使用时间；不返回精确端点或凭据。 |
 | `connections_describe` | 连接读取 / R / 否 | `connection_ref` | 经授权的主机/端口、用户名、跳板与代理元数据、保存转发摘要；秘密字段仅以存在标记表示。 |
 | `connections_save` | 连接管理 / W / 确认新建或覆盖 | `connection_ref?`、`profile`、`expected_revision?` | 新建或更新可保存的 SSH、Mosh、Telnet、串口、RDP/VNC 配置；返回新 `connection_ref`、revision 和可用时 `undo_ref`。`profile` 中的秘密字段一律拒绝，必须使用 `credentials_store`；`local` 一律拒绝保存。 |
-| `connections_remove` | 连接管理 / X / 必须 | `connection_ref` | 删除保存配置及其公开映射；受保护凭据要单独选择是否删除，默认保留。 |
+| `connections_remove` | 连接管理 / X / 必须 | `connection_ref`、`forget_credentials?` | 删除保存配置及其公开映射；若存在受保护凭据，默认拒绝删除，只有显式设为 `true` 才同时遗忘凭据，避免静默删除或留下孤儿引用。 |
 | `credentials_status` | 凭据管理 / D / 否 | `connection_ref` | 各认证槽是否存在、来源是否为受保护存储、最后更新摘要；不返回值或内部存储键。 |
 | `credentials_store` | 凭据管理 / X / 必须 | `connection_ref`、`slot`、`new_secret` | 将新值直接写入指定受保护存储槽，并尽快归零输入；结果只报告 `stored`。不允许读取或替换为任意内部引用。 |
 | `credentials_forget` | 凭据管理 / X / 必须 | `connection_ref`、`slot` | 删除指定受保护槽；返回影响的配置摘要。 |
@@ -350,7 +353,7 @@ RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控�
 |---|---:|---|---|
 | 基础目录、操作状态 | 开启 | 当前客户端 | 只含服务状态和脱敏目录。 |
 | 连接目录 | 开启 | 当前客户端 | 仅脱敏 metadata；精确端点需要连接读取。 |
-| 连接读取、凭据管理、节点会话 | 关闭 | 客户端 + 指定连接或节点 | 使用已存秘密不等于可读取秘密。 |
+| 连接读取、连接管理、凭据管理、节点会话 | 关闭 | 客户端 + 指定连接或节点 | 配置写入与秘密写入分组授权；使用已存秘密不等于可读取秘密。 |
 | 终端观察、终端输入、录制 | 关闭 | 客户端 + 指定 terminal/transport | 输入和录制分别授权。 |
 | 远端文件读取、写入、IDE、传输 | 关闭 | 客户端 + `connection_ref`/根目录 | 路径范围可由授权页限定。 |
 | Host Tools 观察、Host Tools 操作 | 关闭 | 客户端 + 指定 node | 操作必须来自固定 typed catalog。 |

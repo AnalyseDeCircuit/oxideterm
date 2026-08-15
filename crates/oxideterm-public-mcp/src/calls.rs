@@ -27,6 +27,469 @@ pub struct DescribeConnectionArgs {
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
+pub enum PublicConnectionAuth {
+    Password,
+    Key {
+        key_path: String,
+    },
+    ManagedKey {
+        managed_key_id: String,
+    },
+    Certificate {
+        key_path: String,
+        certificate_path: String,
+    },
+    KeyboardInteractive,
+    Agent,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicTerminalEncoding {
+    #[default]
+    Utf8,
+    Gbk,
+    Gb18030,
+    Big5,
+    ShiftJis,
+    EucJp,
+    EucKr,
+    Windows1252,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicTerminalBackspaceSequence {
+    Delete,
+    ControlH,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicTerminalDeleteSequence {
+    Csi3Tilde,
+    Delete,
+    ControlH,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PublicTerminalOptions {
+    #[serde(default)]
+    pub encoding: Option<PublicTerminalEncoding>,
+    #[serde(default)]
+    pub backspace_sequence: Option<PublicTerminalBackspaceSequence>,
+    #[serde(default)]
+    pub delete_sequence: Option<PublicTerminalDeleteSequence>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicX11ForwardingMode {
+    #[default]
+    Untrusted,
+    Trusted,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PublicX11ForwardingOptions {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub mode: PublicX11ForwardingMode,
+    #[serde(default)]
+    pub untrusted_timeout_seconds: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicUpstreamProxyProtocol {
+    Socks5,
+    HttpConnect,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, tag = "mode", rename_all = "snake_case")]
+pub enum PublicUpstreamProxy {
+    #[default]
+    UseGlobal,
+    Direct,
+    Custom {
+        protocol: PublicUpstreamProxyProtocol,
+        host: String,
+        port: u16,
+        #[serde(default)]
+        username: Option<String>,
+        #[serde(default = "default_true")]
+        remote_dns: bool,
+        #[serde(default)]
+        no_proxy: String,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PublicProxyHopProfile {
+    pub host: String,
+    #[serde(default = "default_ssh_port")]
+    pub port: u16,
+    pub username: String,
+    pub auth: PublicConnectionAuth,
+    #[serde(default)]
+    pub agent_forwarding: bool,
+    #[serde(default)]
+    pub identity_agent: Option<String>,
+    #[serde(default)]
+    pub agent_forwarding_socket: Option<String>,
+    #[serde(default)]
+    pub legacy_ssh_compatibility: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PublicSshProfile {
+    pub name: String,
+    #[serde(default)]
+    pub group: Option<String>,
+    pub host: String,
+    #[serde(default = "default_ssh_port")]
+    pub port: u16,
+    pub username: String,
+    pub auth: PublicConnectionAuth,
+    #[serde(default)]
+    pub proxy_chain: Vec<PublicProxyHopProfile>,
+    #[serde(default)]
+    pub upstream_proxy: PublicUpstreamProxy,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub icon_background_color: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub connect_timeout_seconds: Option<u64>,
+    #[serde(default)]
+    pub agent_forwarding: bool,
+    #[serde(default)]
+    pub identity_agent: Option<String>,
+    #[serde(default)]
+    pub agent_forwarding_socket: Option<String>,
+    #[serde(default)]
+    pub legacy_ssh_compatibility: bool,
+    #[serde(default)]
+    pub dedicated_new_terminal_connection: bool,
+    #[serde(default)]
+    pub x11_forwarding: PublicX11ForwardingOptions,
+    #[serde(default)]
+    pub post_connect_command: Option<String>,
+    #[serde(default)]
+    pub terminal: PublicTerminalOptions,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicSerialParity {
+    None,
+    Odd,
+    Even,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicSerialFlowControl {
+    None,
+    Software,
+    Hardware,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PublicSerialProfile {
+    pub name: String,
+    #[serde(default)]
+    pub group: Option<String>,
+    pub port_path: String,
+    #[serde(default)]
+    pub baud_rate: Option<u32>,
+    #[serde(default)]
+    pub data_bits: Option<u8>,
+    #[serde(default)]
+    pub stop_bits: Option<u8>,
+    #[serde(default)]
+    pub parity: Option<PublicSerialParity>,
+    #[serde(default)]
+    pub flow_control: Option<PublicSerialFlowControl>,
+    #[serde(default)]
+    pub connect_on_open: bool,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub icon_background_color: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PublicTelnetProfile {
+    pub name: String,
+    #[serde(default)]
+    pub group: Option<String>,
+    pub host: String,
+    #[serde(default = "default_telnet_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub terminal: PublicTerminalOptions,
+    #[serde(default)]
+    pub connect_on_open: bool,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub icon_background_color: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicMoshIpFamily {
+    #[default]
+    Auto,
+    Ipv4,
+    Ipv6,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum PublicMoshUdpPortSelection {
+    #[default]
+    Automatic,
+    Fixed {
+        port: u16,
+    },
+    Range {
+        start: u16,
+        end: u16,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicMoshPredictionMode {
+    #[default]
+    Adaptive,
+    Always,
+    Never,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PublicMoshProfile {
+    pub name: String,
+    #[serde(default)]
+    pub group: Option<String>,
+    pub host: String,
+    #[serde(default = "default_ssh_port")]
+    pub ssh_port: u16,
+    pub username: String,
+    pub auth: PublicConnectionAuth,
+    #[serde(default = "default_mosh_server")]
+    pub server_executable: String,
+    #[serde(default)]
+    pub udp_host_override: Option<String>,
+    #[serde(default)]
+    pub udp_port: PublicMoshUdpPortSelection,
+    #[serde(default)]
+    pub ip_family: PublicMoshIpFamily,
+    #[serde(default)]
+    pub prediction: PublicMoshPredictionMode,
+    #[serde(default)]
+    pub locale: Option<String>,
+    #[serde(default)]
+    pub identity_agent: Option<String>,
+    #[serde(default)]
+    pub legacy_ssh_compatibility: bool,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub icon_background_color: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicVncSecurityPolicy {
+    #[default]
+    RequireVerifiedEncryption,
+    AllowUnverifiedEncryption,
+    AllowLegacy,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicVncSessionMode {
+    #[default]
+    Shared,
+    Exclusive,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicVncImageQuality {
+    Performance,
+    #[default]
+    Balanced,
+    BestQuality,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicVncCompression {
+    Low,
+    #[default]
+    Balanced,
+    High,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PublicRemoteDesktopOptions {
+    #[serde(default = "default_true")]
+    pub clipboard_text: bool,
+    #[serde(default = "default_true")]
+    pub clipboard_images: bool,
+    #[serde(default)]
+    pub clipboard_files: bool,
+    #[serde(default = "default_true")]
+    pub audio_playback: bool,
+    #[serde(default)]
+    pub audio_capture: bool,
+    #[serde(default)]
+    pub use_all_monitors: bool,
+    #[serde(default)]
+    pub vnc_security_policy: PublicVncSecurityPolicy,
+    #[serde(default)]
+    pub vnc_session_mode: PublicVncSessionMode,
+    #[serde(default)]
+    pub vnc_image_quality: PublicVncImageQuality,
+    #[serde(default)]
+    pub vnc_compression: PublicVncCompression,
+}
+
+impl Default for PublicRemoteDesktopOptions {
+    fn default() -> Self {
+        Self {
+            clipboard_text: true,
+            clipboard_images: true,
+            clipboard_files: false,
+            audio_playback: true,
+            audio_capture: false,
+            use_all_monitors: false,
+            vnc_security_policy: PublicVncSecurityPolicy::default(),
+            vnc_session_mode: PublicVncSessionMode::default(),
+            vnc_image_quality: PublicVncImageQuality::default(),
+            vnc_compression: PublicVncCompression::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PublicRemoteDesktopProfile {
+    pub name: String,
+    #[serde(default)]
+    pub group: Option<String>,
+    pub host: String,
+    pub port: u16,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub domain: Option<String>,
+    #[serde(default)]
+    pub read_only: bool,
+    #[serde(default)]
+    pub options: PublicRemoteDesktopOptions,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub icon_background_color: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
+pub enum PublicSavedConnectionProfile {
+    Ssh(PublicSshProfile),
+    Serial(PublicSerialProfile),
+    Telnet(PublicTelnetProfile),
+    Mosh(PublicMoshProfile),
+    Rdp(PublicRemoteDesktopProfile),
+    Vnc(PublicRemoteDesktopProfile),
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SavePublicConnectionArgs {
+    #[serde(default)]
+    pub connection_ref: Option<ConnectionRef>,
+    pub profile: PublicSavedConnectionProfile,
+    #[serde(default)]
+    pub expected_revision: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemovePublicConnectionArgs {
+    pub connection_ref: ConnectionRef,
+    #[serde(default)]
+    pub forget_credentials: bool,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PublicCredentialSlot {
+    Primary,
+    ProxyHop { index: u32 },
+    UpstreamProxy,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CredentialStatusArgs {
+    pub connection_ref: ConnectionRef,
+}
+
+pub struct StoreCredentialArgs {
+    pub connection_ref: ConnectionRef,
+    pub slot: PublicCredentialSlot,
+    pub new_secret: Zeroizing<String>,
+}
+
+impl fmt::Debug for StoreCredentialArgs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StoreCredentialArgs")
+            .field("connection_ref", &self.connection_ref)
+            .field("slot", &self.slot)
+            .field("new_secret", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ForgetCredentialArgs {
+    pub connection_ref: ConnectionRef,
+    pub slot: PublicCredentialSlot,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct ConnectNodeArgs {
     pub connection_ref: ConnectionRef,
 }
@@ -826,6 +1289,11 @@ fn default_host_tool_limit() -> u32 {
 pub enum PublicToolCall {
     BrowseConnections(BrowseConnectionsArgs),
     DescribeConnection(DescribeConnectionArgs),
+    SaveConnection(Box<SavePublicConnectionArgs>),
+    RemoveConnection(RemovePublicConnectionArgs),
+    CredentialStatus(CredentialStatusArgs),
+    StoreCredential(StoreCredentialArgs),
+    ForgetCredential(ForgetCredentialArgs),
     ConnectNode(ConnectNodeArgs),
     InspectNode(InspectNodeArgs),
     ReleaseNode(ReleaseNodeArgs),
@@ -894,6 +1362,11 @@ impl PublicToolCall {
         match self {
             Self::BrowseConnections(_) => "connections_browse",
             Self::DescribeConnection(_) => "connections_describe",
+            Self::SaveConnection(_) => "connections_save",
+            Self::RemoveConnection(_) => "connections_remove",
+            Self::CredentialStatus(_) => "credentials_status",
+            Self::StoreCredential(_) => "credentials_store",
+            Self::ForgetCredential(_) => "credentials_forget",
             Self::ConnectNode(_) => "nodes_connect",
             Self::InspectNode(_) => "nodes_inspect",
             Self::ReleaseNode(_) => "nodes_release",
@@ -962,6 +1435,10 @@ impl PublicToolCall {
         match self {
             Self::BrowseConnections(_) => ToolGroup::ConnectionDirectory,
             Self::DescribeConnection(_) => ToolGroup::ConnectionRead,
+            Self::SaveConnection(_) | Self::RemoveConnection(_) => ToolGroup::ConnectionManage,
+            Self::CredentialStatus(_) | Self::StoreCredential(_) | Self::ForgetCredential(_) => {
+                ToolGroup::CredentialManage
+            }
             Self::ConnectNode(_)
             | Self::InspectNode(_)
             | Self::ReleaseNode(_)
@@ -1020,7 +1497,11 @@ impl PublicToolCall {
     pub fn requires_approval(&self) -> bool {
         matches!(
             self,
-            Self::ConnectNode(_)
+            Self::SaveConnection(_)
+                | Self::RemoveConnection(_)
+                | Self::StoreCredential(_)
+                | Self::ForgetCredential(_)
+                | Self::ConnectNode(_)
                 | Self::DisconnectNode(_)
                 | Self::OpenTerminal(_)
                 | Self::SubmitTerminal(_)
@@ -1054,6 +1535,21 @@ impl PublicToolCall {
         match self {
             Self::BrowseConnections(_) => "connection directory".to_owned(),
             Self::DescribeConnection(args) => args.connection_ref.to_string(),
+            Self::SaveConnection(args) => args
+                .connection_ref
+                .as_ref()
+                .map_or_else(|| "new saved connection".to_owned(), ToString::to_string),
+            Self::RemoveConnection(args) => format!(
+                "{} remove forget_credentials={}",
+                args.connection_ref, args.forget_credentials
+            ),
+            Self::CredentialStatus(args) => args.connection_ref.to_string(),
+            Self::StoreCredential(args) => {
+                format!("{} {:?}", args.connection_ref, args.slot)
+            }
+            Self::ForgetCredential(args) => {
+                format!("{} {:?}", args.connection_ref, args.slot)
+            }
             Self::ConnectNode(args) => args.connection_ref.to_string(),
             Self::InspectNode(args) => args.node_ref.to_string(),
             Self::ReleaseNode(args) => args.node_ref.to_string(),
@@ -1211,6 +1707,22 @@ impl PublicToolCall {
 
 const fn default_terminal_cols() -> u16 {
     80
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+const fn default_ssh_port() -> u16 {
+    22
+}
+
+const fn default_telnet_port() -> u16 {
+    23
+}
+
+fn default_mosh_server() -> String {
+    "mosh-server".to_owned()
 }
 
 const fn default_terminal_rows() -> u16 {

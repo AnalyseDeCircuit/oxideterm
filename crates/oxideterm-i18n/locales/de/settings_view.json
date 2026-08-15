@@ -1487,6 +1487,8 @@
       "switch_to_standard_mode": "Require Approval",
       "mcp_group_connection_directory": "Connection directory",
       "mcp_group_connection_read": "Connection details",
+      "mcp_group_connection_manage": "Verbindungsverwaltung",
+      "mcp_group_credential_manage": "Anmeldedatenverwaltung",
       "mcp_group_node_session": "SSH nodes",
       "mcp_group_terminal_session": "Terminal sessions",
       "mcp_group_terminal_observe": "Terminal content",

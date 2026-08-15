@@ -15,6 +15,8 @@ pub enum ToolGroup {
     Basic,
     ConnectionDirectory,
     ConnectionRead,
+    ConnectionManage,
+    CredentialManage,
     NodeSession,
     TerminalSession,
     TerminalObserve,
@@ -48,6 +50,8 @@ impl ToolGroup {
         &[
             Self::ConnectionDirectory,
             Self::ConnectionRead,
+            Self::ConnectionManage,
+            Self::CredentialManage,
             Self::NodeSession,
             Self::TerminalSession,
             Self::TerminalObserve,

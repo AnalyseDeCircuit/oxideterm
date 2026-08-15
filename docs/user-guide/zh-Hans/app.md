@@ -145,11 +145,11 @@ OxideSens 可以从工作区、用户数据目录和已启用的 Native 插件�
 1. 创建普通模式或完全权限模式客户端。普通模式的高风险操作需要在 OxideTerm 内批准；完全权限模式对已勾选工具组跳过逐项批准。
 2. 复制回环 HTTP 端点和只显示一次的客户端凭据。
 3. 在外部 MCP 客户端中把端点配置为 Streamable HTTP URL，并添加 `Authorization: Bearer <凭据>` 请求头。
-4. 让客户端先调用 `connections_browse`，再按需读取连接详情并请求 `nodes_connect`。
+4. 让客户端先调用 `connections_browse`，再按需读取连接详情。连接管理组可创建、修改或删除 SSH、Mosh、Telnet、串口、RDP 和 VNC 配置；凭据管理组只能写入新值、查看存在性或遗忘指定槽位，不能读取既有秘密。
 5. 普通模式下，在 OxideTerm 的“待批准操作”中检查实际客户端、目标和命令；批准后，客户端调用 `mcp_commit_action`。完全权限模式直接执行。
 6. 使用返回的 `command_ref` 查询状态并分段读取标准输出和标准错误。
 
-当前实现实际开放保存的 SSH 连接、NodeRouter 节点租约、SSH exec 命令、有界临时 artifact、当前客户端自己的脱敏 MCP 审计记录，以及类型化 Host Tools 快照和操作。Host Tools 只接受固定资源与动作 schema，不提供 shell 正文或插件调用入口。未接通的终端屏幕、SFTP、转发、远程桌面和同步能力不会出现在工具清单中。释放 MCP 节点租约不会断开仍由其他终端、SFTP 或转发消费者使用的物理 SSH 节点；只有明确批准的 `nodes_disconnect` 才会断开节点。
+当前实现已经开放连接与凭据管理、NodeRouter 节点租约、终端与录制、RDP/VNC、SSH exec、有界临时 artifact、SFTP、转发、快速命令、插件生命周期、当前客户端自己的脱敏 MCP 审计记录，以及类型化 Host Tools 快照和操作。Host Tools 只接受固定资源与动作 schema，不提供自由 shell 或插件调用入口。尚未接通的 IDE、后台传输和云同步工具不会出现在工具清单中。释放 MCP 节点租约不会断开仍由其他终端、SFTP 或转发消费者使用的物理 SSH 节点；只有明确批准的 `nodes_disconnect` 才会断开节点。
 
 客户端凭据在 OxideTerm 侧只保存摘要。停用或撤销客户端会立即取消其命令、待批准操作和节点租约。端点、授权记录和凭据都不会进入普通设置、`.oxide` 导出或云同步。
 

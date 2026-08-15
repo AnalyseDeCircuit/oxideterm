@@ -25,22 +25,23 @@ use crate::{
     calls::{
         AddonsInstallArgs, AddonsListArgs, AddonsRemoveArgs, AddonsSetEnabledArgs, AuditSearchArgs,
         BrowseConnectionsArgs, CancelCommandArgs, CommandOutputArgs, CommandStateArgs,
-        ConnectNodeArgs, DescribeConnectionArgs, DesktopButtonState, DesktopClipboardImageFormat,
-        DesktopClipboardPayload, DesktopFrameArgs, DesktopHandleArgs, DesktopInputArgs,
-        DesktopInputEvent, DisconnectNodeArgs, FilesCloseArgs, FilesCompareArgs, FilesListArgs,
-        FilesMoveArgs, FilesOpenArgs, FilesReadArgs, FilesRemoveArgs, FilesStatArgs,
-        FilesWriteArgs, ForwardHandleArgs, ForwardKind, ForwardsChangeArgs,
+        ConnectNodeArgs, CredentialStatusArgs, DescribeConnectionArgs, DesktopButtonState,
+        DesktopClipboardImageFormat, DesktopClipboardPayload, DesktopFrameArgs, DesktopHandleArgs,
+        DesktopInputArgs, DesktopInputEvent, DisconnectNodeArgs, FilesCloseArgs, FilesCompareArgs,
+        FilesListArgs, FilesMoveArgs, FilesOpenArgs, FilesReadArgs, FilesRemoveArgs, FilesStatArgs,
+        FilesWriteArgs, ForgetCredentialArgs, ForwardHandleArgs, ForwardKind, ForwardsChangeArgs,
         ForwardsDiscoverPortsArgs, ForwardsListArgs, ForwardsOpenArgs, ForwardsRemoveArgs,
         HostToolsCaptureArgs, HostToolsCatalogArgs, HostToolsOperateArgs, InspectNodeArgs,
-        OpenDesktopArgs, OpenTerminalArgs, PublicDesktopMouseButton, PublicToolCall,
-        QuickCommandsDescribeArgs, QuickCommandsListArgs, QuickCommandsRemoveArgs,
+        OpenDesktopArgs, OpenTerminalArgs, PublicCredentialSlot, PublicDesktopMouseButton,
+        PublicToolCall, QuickCommandsDescribeArgs, QuickCommandsListArgs, QuickCommandsRemoveArgs,
         QuickCommandsRunArgs, QuickCommandsSaveArgs, ReadArtifactArgs, ReadDesktopClipboardArgs,
         ReadTerminalArgs, RecordingsControlArgs, RecordingsExportArgs, RecordingsSearchArgs,
-        RecordingsStatusArgs, ReleaseNodeArgs, ResizeDesktopArgs, ResizeTerminalArgs,
-        StageArtifactArgs, StartCommandArgs, SubmitTerminalArgs, TerminalHandleArgs, ToolEnvelope,
-        ToolOutcome, WriteDesktopClipboardArgs,
+        RecordingsStatusArgs, ReleaseNodeArgs, RemovePublicConnectionArgs, ResizeDesktopArgs,
+        ResizeTerminalArgs, SavePublicConnectionArgs, StageArtifactArgs, StartCommandArgs,
+        StoreCredentialArgs, SubmitTerminalArgs, TerminalHandleArgs, ToolEnvelope, ToolOutcome,
+        WriteDesktopClipboardArgs,
     },
-    handles::{ApprovalRef, ClientRef, NodeRef, TerminalRef},
+    handles::{ApprovalRef, ClientRef, ConnectionRef, NodeRef, TerminalRef},
 };
 
 const TOOL_LIST_CACHE_TTL_MS: u64 = 1_000;
@@ -73,6 +74,7 @@ const DESKTOP_KEY_TEXT_LIMIT_BYTES: usize = 4 * 1024;
 const DESKTOP_TEXT_INPUT_LIMIT_BYTES: usize = 256 * 1024;
 const DESKTOP_CLIPBOARD_TEXT_LIMIT_BYTES: usize = 1024 * 1024;
 const DESKTOP_WHEEL_DELTA_LIMIT: f32 = 10_000.0;
+const CREDENTIAL_SECRET_LIMIT_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone)]
 pub struct PublicMcpService {
@@ -132,6 +134,25 @@ struct SubmitTerminalMetadata {
     terminal_ref: TerminalRef,
     #[serde(default)]
     append_enter: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[expect(
+    dead_code,
+    reason = "this type exists only to generate the public tool schema"
+)]
+#[serde(deny_unknown_fields)]
+struct StoreCredentialSchema {
+    connection_ref: ConnectionRef,
+    slot: PublicCredentialSlot,
+    new_secret: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoreCredentialMetadata {
+    connection_ref: ConnectionRef,
+    slot: PublicCredentialSlot,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -493,6 +514,43 @@ impl ServerHandler for PublicMcpService {
             "connections_describe" => match parse_arguments::<DescribeConnectionArgs>(arguments) {
                 Ok(args) => {
                     self.execute_call(&client, PublicToolCall::DescribeConnection(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "connections_save" => match parse_arguments::<SavePublicConnectionArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::SaveConnection(Box::new(args)))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "connections_remove" => {
+                match parse_arguments::<RemovePublicConnectionArgs>(arguments) {
+                    Ok(args) => {
+                        self.execute_call(&client, PublicToolCall::RemoveConnection(args))
+                            .await
+                    }
+                    Err(error) => *error,
+                }
+            }
+            "credentials_status" => match parse_arguments::<CredentialStatusArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::CredentialStatus(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "credentials_store" => match parse_store_credential(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::StoreCredential(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "credentials_forget" => match parse_arguments::<ForgetCredentialArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::ForgetCredential(args))
                         .await
                 }
                 Err(error) => *error,
@@ -1079,6 +1137,41 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             true,
             false,
         ),
+        define_tool::<SavePublicConnectionArgs>(
+            "connections_save",
+            "Create or update a typed saved connection profile without secret values.",
+            ToolGroup::ConnectionManage,
+            false,
+            true,
+        ),
+        define_tool::<RemovePublicConnectionArgs>(
+            "connections_remove",
+            "Remove a saved connection with explicit protected-credential handling.",
+            ToolGroup::ConnectionManage,
+            false,
+            true,
+        ),
+        define_tool::<CredentialStatusArgs>(
+            "credentials_status",
+            "Report configured protected credential slots without returning values or storage references.",
+            ToolGroup::CredentialManage,
+            true,
+            false,
+        ),
+        define_tool::<StoreCredentialSchema>(
+            "credentials_store",
+            "Store a new credential directly in OxideTerm's protected backend without exposing existing values.",
+            ToolGroup::CredentialManage,
+            false,
+            true,
+        ),
+        define_tool::<ForgetCredentialArgs>(
+            "credentials_forget",
+            "Forget one protected credential slot without returning its previous value.",
+            ToolGroup::CredentialManage,
+            false,
+            true,
+        ),
         define_tool::<ConnectNodeArgs>(
             "nodes_connect",
             "Connect or acquire a physical SSH node through OxideTerm's NodeRouter.",
@@ -1575,6 +1668,31 @@ fn parse_start_command(mut arguments: JsonObject) -> Result<StartCommandArgs, Bo
         node_ref: metadata.node_ref,
         command,
         working_directory: metadata.working_directory.map(Zeroizing::new),
+    })
+}
+
+fn parse_store_credential(
+    mut arguments: JsonObject,
+) -> Result<StoreCredentialArgs, Box<CallToolResult>> {
+    // Move the incoming secret into a zeroizing owner before parsing non-secret metadata.
+    let new_secret = match arguments.remove("new_secret") {
+        Some(Value::String(secret))
+            if !secret.is_empty() && secret.len() <= CREDENTIAL_SECRET_LIMIT_BYTES =>
+        {
+            Zeroizing::new(secret)
+        }
+        _ => {
+            return Err(Box::new(tool_error(
+                "invalid_arguments",
+                "The new credential must be non-empty and within the supported size limit",
+            )));
+        }
+    };
+    let metadata = parse_arguments::<StoreCredentialMetadata>(arguments)?;
+    Ok(StoreCredentialArgs {
+        connection_ref: metadata.connection_ref,
+        slot: metadata.slot,
+        new_secret,
     })
 }
 

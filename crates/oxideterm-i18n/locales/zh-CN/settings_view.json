@@ -1487,6 +1487,8 @@
       "switch_to_standard_mode": "改为需要批准",
       "mcp_group_connection_directory": "连接目录",
       "mcp_group_connection_read": "连接详情",
+      "mcp_group_connection_manage": "连接管理",
+      "mcp_group_credential_manage": "凭据管理",
       "mcp_group_node_session": "SSH 节点",
       "mcp_group_terminal_session": "终端会话",
       "mcp_group_terminal_observe": "终端内容读取",

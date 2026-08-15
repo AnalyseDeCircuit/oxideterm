@@ -28,6 +28,7 @@ use zeroize::Zeroizing;
 use super::{TabId, TerminalSessionId, WorkspaceApp};
 
 mod addons;
+mod connections;
 pub(in crate::workspace) mod desktops;
 mod files;
 mod forwards;
@@ -186,20 +187,6 @@ struct PublicMcpCommandRecord {
     truncated: bool,
     error: Option<String>,
     cancellation: CancellationToken,
-}
-
-#[derive(Serialize)]
-struct PublicConnectionProjection {
-    connection_ref: ConnectionRef,
-    #[serde(rename = "type")]
-    connection_type: &'static str,
-    name: String,
-    group: Option<String>,
-    host: String,
-    port: u16,
-    username: String,
-    tags: Vec<String>,
-    last_used_at: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -429,34 +416,6 @@ impl PublicMcpWorkspaceBridge {
             .get(connection_ref)
             .filter(|(owner, _)| owner == client_ref)
             .map(|(_, connection_key)| connection_key.clone())
-    }
-
-    fn connection_projection(
-        &mut self,
-        client_ref: &ClientRef,
-        info: ConnectionInfo,
-    ) -> PublicConnectionProjection {
-        let internal_key = format!("{CONNECTION_KEY_SSH_PREFIX}{}", info.id);
-        let connection_key = (client_ref.clone(), internal_key.clone());
-        let connection_ref = self
-            .connection_refs
-            .entry(connection_key)
-            .or_default()
-            .clone();
-        self.connection_ids
-            .entry(connection_ref.clone())
-            .or_insert_with(|| (client_ref.clone(), internal_key));
-        PublicConnectionProjection {
-            connection_ref,
-            connection_type: CONNECTION_TYPE_SSH,
-            name: info.name,
-            group: info.group,
-            host: info.host,
-            port: info.port,
-            username: info.username,
-            tags: info.tags,
-            last_used_at: info.last_used_at,
-        }
     }
 
     fn connection_directory_entry(
@@ -896,6 +855,8 @@ impl WorkspaceApp {
                 ToolGroup::Basic
                 | ToolGroup::ConnectionDirectory
                 | ToolGroup::ConnectionRead
+                | ToolGroup::ConnectionManage
+                | ToolGroup::CredentialManage
                 | ToolGroup::TerminalObserve
                 | ToolGroup::TerminalInput
                 | ToolGroup::CommandObserve
@@ -1002,6 +963,21 @@ impl WorkspaceApp {
             }
             PublicToolCall::DescribeConnection(_) => {
                 self.handle_public_mcp_describe_connection(request)
+            }
+            PublicToolCall::SaveConnection(_) => {
+                self.handle_public_mcp_save_connection(request, cx)
+            }
+            PublicToolCall::RemoveConnection(_) => {
+                self.handle_public_mcp_remove_connection(request, cx)
+            }
+            PublicToolCall::CredentialStatus(_) => {
+                self.handle_public_mcp_credential_status(request)
+            }
+            PublicToolCall::StoreCredential(_) => {
+                self.handle_public_mcp_store_credential(request, cx)
+            }
+            PublicToolCall::ForgetCredential(_) => {
+                self.handle_public_mcp_forget_credential(request, cx)
             }
             PublicToolCall::ConnectNode(_) => self.handle_public_mcp_connect_node(request, cx),
             PublicToolCall::InspectNode(_) => self.handle_public_mcp_inspect_node(request),
@@ -1239,15 +1215,14 @@ impl WorkspaceApp {
             return;
         };
         if let Some(connection_id) = connection_key.strip_prefix(CONNECTION_KEY_SSH_PREFIX)
-            && let Some(info) = self
-                .connection_store
-                .connection_infos()
-                .into_iter()
-                .find(|connection| connection.id == connection_id)
+            && let Some(connection) = self.connection_store.get(connection_id)
         {
-            let projection = self
-                .public_mcp
-                .connection_projection(&request.client_ref, info);
+            let projection = connections::ssh_connection_projection(
+                &connection_ref,
+                connections::connection_revision(&self.connection_store, &connection_key)
+                    .unwrap_or_else(|| "unavailable".to_owned()),
+                connection,
+            );
             finish_serialized(request, json!({ "connection": projection }));
             return;
         }
@@ -1263,6 +1238,7 @@ impl WorkspaceApp {
                 json!({
                     "connection": {
                         "connection_ref": connection_ref,
+                        "revision": connections::connection_revision(&self.connection_store, &connection_key),
                         "type": CONNECTION_TYPE_SERIAL,
                         "name": profile.name,
                         "group": profile.group,
@@ -1273,6 +1249,10 @@ impl WorkspaceApp {
                         "parity": profile.parity,
                         "flow_control": profile.flow_control,
                         "connect_on_open": profile.connect_on_open,
+                        "color": profile.color,
+                        "icon_background_color": profile.icon_background_color,
+                        "icon": profile.icon,
+                        "last_used_at": profile.last_used_at.map(|time| time.to_rfc3339()),
                     }
                 }),
             );
@@ -1290,13 +1270,18 @@ impl WorkspaceApp {
                 json!({
                     "connection": {
                         "connection_ref": connection_ref,
+                        "revision": connections::connection_revision(&self.connection_store, &connection_key),
                         "type": CONNECTION_TYPE_TELNET,
                         "name": profile.name,
                         "group": profile.group,
                         "host": profile.host,
                         "port": profile.port,
-                        "terminal": profile.terminal,
+                        "terminal": connections::terminal_options_projection(&profile.terminal),
                         "connect_on_open": profile.connect_on_open,
+                        "color": profile.color,
+                        "icon_background_color": profile.icon_background_color,
+                        "icon": profile.icon,
+                        "last_used_at": profile.last_used_at.map(|time| time.to_rfc3339()),
                     }
                 }),
             );
@@ -1314,19 +1299,26 @@ impl WorkspaceApp {
                 json!({
                     "connection": {
                         "connection_ref": connection_ref,
+                        "revision": connections::connection_revision(&self.connection_store, &connection_key),
                         "type": CONNECTION_TYPE_MOSH,
                         "name": profile.name,
                         "group": profile.group,
                         "host": profile.host,
                         "ssh_port": profile.ssh_port,
                         "username": profile.username,
-                        "auth_type": profile.auth.auth_type(),
+                        "auth": connections::auth_projection(&profile.auth),
                         "server_executable": profile.server_executable,
                         "udp_host_override": profile.udp_host_override,
                         "udp_port": profile.udp_port,
                         "ip_family": profile.ip_family,
                         "prediction": profile.prediction,
                         "locale": profile.locale,
+                        "identity_agent": profile.identity_agent,
+                        "legacy_ssh_compatibility": profile.legacy_ssh_compatibility,
+                        "color": profile.color,
+                        "icon_background_color": profile.icon_background_color,
+                        "icon": profile.icon,
+                        "last_used_at": profile.last_used_at.map(|time| time.to_rfc3339()),
                     }
                 }),
             );
@@ -1344,6 +1336,7 @@ impl WorkspaceApp {
                 json!({
                     "connection": {
                         "connection_ref": connection_ref,
+                        "revision": connections::connection_revision(&self.connection_store, &connection_key),
                         "type": profile.protocol.provider_id(),
                         "name": profile.name,
                         "group": profile.group,
@@ -1353,7 +1346,11 @@ impl WorkspaceApp {
                         "domain": profile.domain,
                         "credential_configured": profile.credential_ref.is_some(),
                         "read_only": profile.read_only,
-                        "session_options": profile.session_options,
+                        "options": connections::remote_desktop_options_projection(&profile.session_options),
+                        "color": profile.color,
+                        "icon_background_color": profile.icon_background_color,
+                        "icon": profile.icon,
+                        "last_used_at": profile.last_used_at.map(|time| time.to_rfc3339()),
                     }
                 }),
             );
