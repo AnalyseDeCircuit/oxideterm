@@ -9,7 +9,7 @@ use crate::{
     auth::ToolGroup,
     handles::{
         AddonRef, ArtifactRef, AuditRef, CommandRef, ConnectionRef, DesktopRef, FileSessionRef,
-        ForwardRef, NodeRef, QuickCommandRef, RecordingRef, TerminalRef,
+        ForwardRef, NodeRef, QuickCommandRef, RecordingRef, SyncPlanRef, TerminalRef, UndoRef,
     },
 };
 
@@ -487,6 +487,75 @@ impl fmt::Debug for StoreCredentialArgs {
 pub struct ForgetCredentialArgs {
     pub connection_ref: ConnectionRef,
     pub slot: PublicCredentialSlot,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, JsonSchema, Serialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicSyncSection {
+    Connections,
+    Forwards,
+    QuickCommands,
+    SerialProfiles,
+    TelnetProfiles,
+    MoshProfiles,
+    RemoteDesktopProfiles,
+    SensitiveCredentials,
+    AppSettings,
+    PluginSettings,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicSyncConflictStrategy {
+    #[default]
+    Merge,
+    Replace,
+    Skip,
+    Rename,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SyncStatusArgs {}
+
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SyncSelection {
+    /// Omit this field to use the app's configured Cloud Sync scope.
+    #[serde(default)]
+    pub sections: Option<Vec<PublicSyncSection>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SyncPullPreviewArgs {
+    #[serde(default)]
+    pub selection: SyncSelection,
+    #[serde(default)]
+    pub conflict_strategy: PublicSyncConflictStrategy,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SyncPublishPreviewArgs {
+    #[serde(default)]
+    pub selection: SyncSelection,
+    #[serde(default)]
+    pub force: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SyncApplyPlanArgs {
+    pub sync_plan_ref: SyncPlanRef,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SyncRestoreArgs {
+    pub undo_ref: UndoRef,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -1286,6 +1355,13 @@ fn default_host_tool_limit() -> u32 {
     200
 }
 
+fn sync_selection_summary(selection: &SyncSelection) -> String {
+    selection.sections.as_ref().map_or_else(
+        || "configured".to_owned(),
+        |sections| format!("{} selected", sections.len()),
+    )
+}
+
 pub enum PublicToolCall {
     BrowseConnections(BrowseConnectionsArgs),
     DescribeConnection(DescribeConnectionArgs),
@@ -1294,6 +1370,11 @@ pub enum PublicToolCall {
     CredentialStatus(CredentialStatusArgs),
     StoreCredential(StoreCredentialArgs),
     ForgetCredential(ForgetCredentialArgs),
+    SyncStatus(SyncStatusArgs),
+    SyncPullPreview(SyncPullPreviewArgs),
+    SyncPublishPreview(SyncPublishPreviewArgs),
+    SyncApplyPlan(SyncApplyPlanArgs),
+    SyncRestore(SyncRestoreArgs),
     ConnectNode(ConnectNodeArgs),
     InspectNode(InspectNodeArgs),
     ReleaseNode(ReleaseNodeArgs),
@@ -1367,6 +1448,11 @@ impl PublicToolCall {
             Self::CredentialStatus(_) => "credentials_status",
             Self::StoreCredential(_) => "credentials_store",
             Self::ForgetCredential(_) => "credentials_forget",
+            Self::SyncStatus(_) => "sync_status",
+            Self::SyncPullPreview(_) => "sync_pull_preview",
+            Self::SyncPublishPreview(_) => "sync_publish_preview",
+            Self::SyncApplyPlan(_) => "sync_apply_plan",
+            Self::SyncRestore(_) => "sync_restore",
             Self::ConnectNode(_) => "nodes_connect",
             Self::InspectNode(_) => "nodes_inspect",
             Self::ReleaseNode(_) => "nodes_release",
@@ -1439,6 +1525,11 @@ impl PublicToolCall {
             Self::CredentialStatus(_) | Self::StoreCredential(_) | Self::ForgetCredential(_) => {
                 ToolGroup::CredentialManage
             }
+            Self::SyncStatus(_)
+            | Self::SyncPullPreview(_)
+            | Self::SyncPublishPreview(_)
+            | Self::SyncApplyPlan(_)
+            | Self::SyncRestore(_) => ToolGroup::CloudSync,
             Self::ConnectNode(_)
             | Self::InspectNode(_)
             | Self::ReleaseNode(_)
@@ -1501,6 +1592,8 @@ impl PublicToolCall {
                 | Self::RemoveConnection(_)
                 | Self::StoreCredential(_)
                 | Self::ForgetCredential(_)
+                | Self::SyncApplyPlan(_)
+                | Self::SyncRestore(_)
                 | Self::ConnectNode(_)
                 | Self::DisconnectNode(_)
                 | Self::OpenTerminal(_)
@@ -1550,6 +1643,18 @@ impl PublicToolCall {
             Self::ForgetCredential(args) => {
                 format!("{} {:?}", args.connection_ref, args.slot)
             }
+            Self::SyncStatus(_) => "cloud sync state".to_owned(),
+            Self::SyncPullPreview(args) => format!(
+                "cloud sync pull preview sections={}",
+                sync_selection_summary(&args.selection)
+            ),
+            Self::SyncPublishPreview(args) => format!(
+                "cloud sync publish preview sections={} force={}",
+                sync_selection_summary(&args.selection),
+                args.force
+            ),
+            Self::SyncApplyPlan(args) => args.sync_plan_ref.to_string(),
+            Self::SyncRestore(args) => args.undo_ref.to_string(),
             Self::ConnectNode(args) => args.connection_ref.to_string(),
             Self::InspectNode(args) => args.node_ref.to_string(),
             Self::ReleaseNode(args) => args.node_ref.to_string(),

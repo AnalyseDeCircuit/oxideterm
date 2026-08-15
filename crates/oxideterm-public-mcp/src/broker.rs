@@ -72,6 +72,7 @@ pub enum BrokerError {
 }
 
 const DOMAIN_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+const CLOUD_SYNC_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 impl DomainBroker {
     /// Creates the only typed bridge between protocol tasks and the GPUI domain runtime.
@@ -88,6 +89,18 @@ impl DomainBroker {
         client_ref: ClientRef,
         call: PublicToolCall,
     ) -> Result<ToolEnvelope, BrokerError> {
+        // Network-backed sync plans may legitimately exceed the interactive broker timeout.
+        let timeout = if matches!(
+            &call,
+            PublicToolCall::SyncPullPreview(_)
+                | PublicToolCall::SyncPublishPreview(_)
+                | PublicToolCall::SyncApplyPlan(_)
+                | PublicToolCall::SyncRestore(_)
+        ) {
+            CLOUD_SYNC_REQUEST_TIMEOUT
+        } else {
+            DOMAIN_REQUEST_TIMEOUT
+        };
         let (response, receiver) = oneshot::channel();
         let cancellation = CancellationToken::new();
         let cancellation_guard = cancellation.clone().drop_guard();
@@ -100,7 +113,7 @@ impl DomainBroker {
             })))
             .await
             .map_err(|_| BrokerError::WorkspaceUnavailable)?;
-        let response = tokio::time::timeout(DOMAIN_REQUEST_TIMEOUT, receiver)
+        let response = tokio::time::timeout(timeout, receiver)
             .await
             .map_err(|_| BrokerError::TimedOut)?
             .map_err(|_| BrokerError::ResponseDropped)?;

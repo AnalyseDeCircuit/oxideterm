@@ -15,7 +15,8 @@ use oxideterm_public_mcp::{
     ClientCredential, ClientProjection, ClientRef, ClientRegistry, CommandRef, ConnectionRef,
     DesktopRef, DomainBroker, DomainMessage, DomainRequest, DomainRequestReceiver, FileSessionRef,
     ForwardRef, NodeRef, PublicMcpHttpServer, PublicMcpState, PublicToolCall, QuickCommandRef,
-    RecordingRef, TerminalRef, ToolEnvelope, ToolGroup, ToolOutcome, start_http_server,
+    RecordingRef, SyncPlanRef, TerminalRef, ToolEnvelope, ToolGroup, ToolOutcome, UndoRef,
+    start_http_server,
 };
 use oxideterm_session_adapter::ssh_config_from_saved_connection;
 use oxideterm_ssh::{ConnectionConsumer, NodeId, NodeRouter, SshTransportError};
@@ -28,6 +29,7 @@ use zeroize::Zeroizing;
 use super::{TabId, TerminalSessionId, WorkspaceApp};
 
 mod addons;
+mod cloud_sync;
 mod connections;
 pub(in crate::workspace) mod desktops;
 mod files;
@@ -73,6 +75,8 @@ pub(in crate::workspace) struct PublicMcpWorkspaceBridge {
     quick_command_ids: HashMap<QuickCommandRef, (ClientRef, String)>,
     addon_refs: HashMap<(ClientRef, String), AddonRef>,
     addon_ids: HashMap<AddonRef, (ClientRef, String)>,
+    sync_plans: HashMap<SyncPlanRef, cloud_sync::PublicMcpSyncPlan>,
+    sync_undos: HashMap<UndoRef, cloud_sync::PublicMcpSyncUndo>,
     terminals: HashMap<TerminalRef, PublicMcpTerminalRecord>,
     pending_terminal_opens: HashMap<String, PublicMcpPendingTerminalOpen>,
     recordings: HashMap<RecordingRef, PublicMcpRecordingRecord>,
@@ -261,6 +265,8 @@ impl PublicMcpWorkspaceBridge {
             quick_command_ids: HashMap::new(),
             addon_refs: HashMap::new(),
             addon_ids: HashMap::new(),
+            sync_plans: HashMap::new(),
+            sync_undos: HashMap::new(),
             terminals: HashMap::new(),
             pending_terminal_opens: HashMap::new(),
             recordings: HashMap::new(),
@@ -852,6 +858,7 @@ impl WorkspaceApp {
                 }
                 ToolGroup::ForwardManage => self.revoke_public_mcp_client_forwards(client_ref),
                 ToolGroup::FileRead => self.revoke_public_mcp_client_file_sessions(client_ref),
+                ToolGroup::CloudSync => self.public_mcp.revoke_client_sync_handles(client_ref),
                 ToolGroup::Basic
                 | ToolGroup::ConnectionDirectory
                 | ToolGroup::ConnectionRead
@@ -918,6 +925,7 @@ impl WorkspaceApp {
         self.revoke_public_mcp_client_terminals(client_ref, cx);
         self.revoke_public_mcp_client_forwards(client_ref);
         self.revoke_public_mcp_client_file_sessions(client_ref);
+        self.public_mcp.revoke_client_sync_handles(client_ref);
         self.public_mcp
             .revoke_client_runtime(client_ref, &self.node_router);
     }
@@ -979,6 +987,15 @@ impl WorkspaceApp {
             PublicToolCall::ForgetCredential(_) => {
                 self.handle_public_mcp_forget_credential(request, cx)
             }
+            PublicToolCall::SyncStatus(_) => self.handle_public_mcp_sync_status(request, cx),
+            PublicToolCall::SyncPullPreview(_) => {
+                self.handle_public_mcp_sync_pull_preview(request, cx)
+            }
+            PublicToolCall::SyncPublishPreview(_) => {
+                self.handle_public_mcp_sync_publish_preview(request, cx)
+            }
+            PublicToolCall::SyncApplyPlan(_) => self.handle_public_mcp_sync_apply_plan(request, cx),
+            PublicToolCall::SyncRestore(_) => self.handle_public_mcp_sync_restore(request, cx),
             PublicToolCall::ConnectNode(_) => self.handle_public_mcp_connect_node(request, cx),
             PublicToolCall::InspectNode(_) => self.handle_public_mcp_inspect_node(request),
             PublicToolCall::ReleaseNode(_) => self.handle_public_mcp_release_node(request),

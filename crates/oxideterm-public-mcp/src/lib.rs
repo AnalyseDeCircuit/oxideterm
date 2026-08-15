@@ -35,20 +35,22 @@ pub use calls::{
     HostToolResource, OpenDesktopArgs, PublicConnectionAuth, PublicCredentialSlot,
     PublicDesktopMouseButton, PublicMoshIpFamily, PublicMoshPredictionMode,
     PublicMoshUdpPortSelection, PublicRemoteDesktopOptions, PublicRemoteDesktopProfile,
-    PublicSavedConnectionProfile, PublicSerialFlowControl, PublicSerialParity, PublicTelnetControl,
+    PublicSavedConnectionProfile, PublicSerialFlowControl, PublicSerialParity,
+    PublicSyncConflictStrategy, PublicSyncSection, PublicTelnetControl,
     PublicTerminalBackspaceSequence, PublicTerminalDeleteSequence, PublicTerminalEncoding,
     PublicTerminalOptions, PublicToolCall, PublicUpstreamProxy, PublicUpstreamProxyProtocol,
     PublicVncCompression, PublicVncImageQuality, PublicVncSecurityPolicy, PublicVncSessionMode,
     PublicX11ForwardingMode, ReadDesktopClipboardArgs, RecordingExportFormat,
     RecordingStatusTarget, RecordingsControlArgs, RecordingsExportArgs, RecordingsSearchArgs,
     RecordingsStatusArgs, RemovePublicConnectionArgs, ResizeDesktopArgs, SavePublicConnectionArgs,
-    StoreCredentialArgs, TerminalControlAction, TerminalOpenSource, ToolEnvelope, ToolOutcome,
-    WriteDesktopClipboardArgs,
+    StoreCredentialArgs, SyncApplyPlanArgs, SyncPublishPreviewArgs, SyncPullPreviewArgs,
+    SyncRestoreArgs, SyncSelection, SyncStatusArgs, TerminalControlAction, TerminalOpenSource,
+    ToolEnvelope, ToolOutcome, WriteDesktopClipboardArgs,
 };
 pub use handles::{
     AddonRef, ApprovalRef, ArtifactRef, AuditRef, ClientRef, CommandRef, ConnectionRef, DesktopRef,
     FileSessionRef, ForwardRef, HandleParseError, NodeRef, OperationRef, QuickCommandRef,
-    RecordingRef, TerminalRef,
+    RecordingRef, SyncPlanRef, TerminalRef, UndoRef,
 };
 pub use runtime::{PublicMcpHttpServer, start_http_server};
 pub use service::{PublicMcpService, PublicMcpState};

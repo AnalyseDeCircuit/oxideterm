@@ -38,8 +38,9 @@ use crate::{
         ReadTerminalArgs, RecordingsControlArgs, RecordingsExportArgs, RecordingsSearchArgs,
         RecordingsStatusArgs, ReleaseNodeArgs, RemovePublicConnectionArgs, ResizeDesktopArgs,
         ResizeTerminalArgs, SavePublicConnectionArgs, StageArtifactArgs, StartCommandArgs,
-        StoreCredentialArgs, SubmitTerminalArgs, TerminalHandleArgs, ToolEnvelope, ToolOutcome,
-        WriteDesktopClipboardArgs,
+        StoreCredentialArgs, SubmitTerminalArgs, SyncApplyPlanArgs, SyncPublishPreviewArgs,
+        SyncPullPreviewArgs, SyncRestoreArgs, SyncStatusArgs, TerminalHandleArgs, ToolEnvelope,
+        ToolOutcome, WriteDesktopClipboardArgs,
     },
     handles::{ApprovalRef, ClientRef, ConnectionRef, NodeRef, TerminalRef},
 };
@@ -551,6 +552,41 @@ impl ServerHandler for PublicMcpService {
             "credentials_forget" => match parse_arguments::<ForgetCredentialArgs>(arguments) {
                 Ok(args) => {
                     self.execute_call(&client, PublicToolCall::ForgetCredential(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "sync_status" => match parse_arguments::<SyncStatusArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::SyncStatus(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "sync_pull_preview" => match parse_arguments::<SyncPullPreviewArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::SyncPullPreview(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "sync_publish_preview" => match parse_arguments::<SyncPublishPreviewArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::SyncPublishPreview(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "sync_apply_plan" => match parse_arguments::<SyncApplyPlanArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::SyncApplyPlan(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "sync_restore" => match parse_arguments::<SyncRestoreArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::SyncRestore(args))
                         .await
                 }
                 Err(error) => *error,
@@ -1169,6 +1205,41 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             "credentials_forget",
             "Forget one protected credential slot without returning its previous value.",
             ToolGroup::CredentialManage,
+            false,
+            true,
+        ),
+        define_tool::<SyncStatusArgs>(
+            "sync_status",
+            "Read Cloud Sync state and configured capability without locations, tokens, or protected references.",
+            ToolGroup::CloudSync,
+            true,
+            false,
+        ),
+        define_tool::<SyncPullPreviewArgs>(
+            "sync_pull_preview",
+            "Download and freeze a bounded Cloud Sync pull plan without applying it.",
+            ToolGroup::CloudSync,
+            true,
+            false,
+        ),
+        define_tool::<SyncPublishPreviewArgs>(
+            "sync_publish_preview",
+            "Freeze a bounded Cloud Sync publish plan and check the current remote revision.",
+            ToolGroup::CloudSync,
+            true,
+            false,
+        ),
+        define_tool::<SyncApplyPlanArgs>(
+            "sync_apply_plan",
+            "Apply one frozen pull or publish plan after checking local and remote revisions.",
+            ToolGroup::CloudSync,
+            false,
+            true,
+        ),
+        define_tool::<SyncRestoreArgs>(
+            "sync_restore",
+            "Restore an exact local checkpoint returned by a prior Cloud Sync apply.",
+            ToolGroup::CloudSync,
             false,
             true,
         ),

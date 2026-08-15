@@ -43,6 +43,7 @@ pub enum ToolGroup {
     ForwardManage,
     FileRead,
     FileWrite,
+    CloudSync,
 }
 
 impl ToolGroup {
@@ -78,6 +79,7 @@ impl ToolGroup {
             Self::ForwardManage,
             Self::FileRead,
             Self::FileWrite,
+            Self::CloudSync,
         ]
     }
 }

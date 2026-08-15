@@ -53,7 +53,10 @@ impl WorkspaceApp {
             .update(cx, |cloud_sync, cx| cloud_sync.reschedule_auto_upload(cx));
     }
 
-    pub(super) fn refresh_cloud_sync_local_dirty_state(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn refresh_cloud_sync_local_dirty_state(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
         self.invalidate_cloud_sync_snapshot_caches(cx);
         let persisted_state = self.cloud_sync.read(cx).controller.store.state().clone();
         let Ok(snapshot) = self.cloud_sync_local_snapshot(&persisted_state, cx) else {
@@ -473,7 +476,7 @@ impl WorkspaceApp {
             ));
     }
 
-    pub(super) fn collect_cloud_sync_sensitive_portable_secrets(
+    pub(in crate::workspace) fn collect_cloud_sync_sensitive_portable_secrets(
         &self,
         raw_sync_scope: &RawSyncScope,
         cx: &App,
@@ -1155,7 +1158,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn finish_cloud_sync_check(
+    pub(in crate::workspace) fn finish_cloud_sync_check(
         &mut self,
         metadata: Option<oxideterm_cloud_sync::backend::RemoteMetadata>,
         cx: &mut Context<Self>,
@@ -1203,7 +1206,7 @@ impl WorkspaceApp {
         self.save_cloud_sync_state(cx);
     }
 
-    pub(super) fn finish_cloud_sync_upload(
+    pub(in crate::workspace) fn finish_cloud_sync_upload(
         &mut self,
         outcome: UploadOutcome,
         automatic: bool,
@@ -1387,7 +1390,7 @@ impl WorkspaceApp {
         self.save_cloud_sync_state(cx);
     }
 
-    pub(super) fn finish_cloud_sync_apply_preview(
+    pub(in crate::workspace) fn finish_cloud_sync_apply_preview(
         &mut self,
         ui_outcome: CloudSyncApplyUiOutcome,
         cx: &mut Context<Self>,
@@ -1610,7 +1613,7 @@ impl WorkspaceApp {
         })
     }
 
-    pub(super) fn finish_cloud_sync_error(
+    pub(in crate::workspace) fn finish_cloud_sync_error(
         &mut self,
         action: &str,
         error: String,

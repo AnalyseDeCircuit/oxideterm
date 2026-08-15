@@ -78,3 +78,5 @@ opaque_handle!(QuickCommandRef, "quickcommand_");
 opaque_handle!(AddonRef, "addon_");
 opaque_handle!(ForwardRef, "forward_");
 opaque_handle!(FileSessionRef, "files_");
+opaque_handle!(SyncPlanRef, "syncplan_");
+opaque_handle!(UndoRef, "undo_");

@@ -1515,6 +1515,7 @@
       "mcp_group_forward_manage": "連接埠轉送管理",
       "mcp_group_file_read": "SFTP 檔案讀取",
       "mcp_group_file_write": "SFTP 檔案修改",
+      "mcp_group_cloud_sync": "雲端同步",
       "client_enabled": "已啟用",
       "client_disabled": "已停用",
       "enable_client": "啟用",
