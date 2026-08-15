@@ -24,16 +24,17 @@ use crate::{
     broker::DomainBroker,
     calls::{
         AddonsInstallArgs, AddonsListArgs, AddonsRemoveArgs, AddonsSetEnabledArgs, AuditSearchArgs,
-        BrowseConnectionsArgs, CancelCommandArgs, CommandOutputArgs, CommandStateArgs,
-        ConnectNodeArgs, CredentialStatusArgs, DescribeConnectionArgs, DesktopButtonState,
-        DesktopClipboardImageFormat, DesktopClipboardPayload, DesktopFrameArgs, DesktopHandleArgs,
-        DesktopInputArgs, DesktopInputEvent, DisconnectNodeArgs, FilesCloseArgs, FilesCompareArgs,
-        FilesListArgs, FilesMoveArgs, FilesOpenArgs, FilesReadArgs, FilesRemoveArgs, FilesStatArgs,
-        FilesWriteArgs, ForgetCredentialArgs, ForwardHandleArgs, ForwardKind, ForwardsChangeArgs,
-        ForwardsDiscoverPortsArgs, ForwardsListArgs, ForwardsOpenArgs, ForwardsRemoveArgs,
-        HostToolsCaptureArgs, HostToolsCatalogArgs, HostToolsOperateArgs, InspectNodeArgs,
-        OpenDesktopArgs, OpenTerminalArgs, PublicCredentialSlot, PublicDesktopMouseButton,
-        PublicToolCall, QuickCommandsDescribeArgs, QuickCommandsListArgs, QuickCommandsRemoveArgs,
+        BrowseConnectionsArgs, CancelCommandArgs, CancelOperationArgs, CommandOutputArgs,
+        CommandStateArgs, ConnectNodeArgs, CredentialStatusArgs, DescribeConnectionArgs,
+        DesktopButtonState, DesktopClipboardImageFormat, DesktopClipboardPayload, DesktopFrameArgs,
+        DesktopHandleArgs, DesktopInputArgs, DesktopInputEvent, DisconnectNodeArgs, FilesCloseArgs,
+        FilesCompareArgs, FilesListArgs, FilesMoveArgs, FilesOpenArgs, FilesReadArgs,
+        FilesRemoveArgs, FilesStatArgs, FilesWriteArgs, ForgetCredentialArgs, ForwardHandleArgs,
+        ForwardKind, ForwardsChangeArgs, ForwardsDiscoverPortsArgs, ForwardsListArgs,
+        ForwardsOpenArgs, ForwardsRemoveArgs, HostToolsCaptureArgs, HostToolsCatalogArgs,
+        HostToolsOperateArgs, InspectNodeArgs, OpenDesktopArgs, OpenTerminalArgs,
+        OperationStateArgs, PublicCredentialSlot, PublicDesktopMouseButton, PublicToolCall,
+        QuickCommandsDescribeArgs, QuickCommandsListArgs, QuickCommandsRemoveArgs,
         QuickCommandsRunArgs, QuickCommandsSaveArgs, ReadArtifactArgs, ReadDesktopClipboardArgs,
         ReadTerminalArgs, RecordingsControlArgs, RecordingsExportArgs, RecordingsSearchArgs,
         RecordingsStatusArgs, ReleaseNodeArgs, RemovePublicConnectionArgs, RequestAccessArgs,
@@ -621,6 +622,20 @@ impl ServerHandler for PublicMcpService {
                     "invalid_arguments",
                     "Select one or more non-basic Public MCP tool groups",
                 ),
+                Err(error) => *error,
+            },
+            "mcp_operation" => match parse_arguments::<OperationStateArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::OperationState(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "mcp_cancel_operation" => match parse_arguments::<CancelOperationArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::CancelOperation(args))
+                        .await
+                }
                 Err(error) => *error,
             },
             "mcp_commit_action" => self.commit_action(&client, arguments).await,
@@ -1358,6 +1373,20 @@ fn tool_definitions() -> Vec<ToolDefinition> {
         define_tool::<RevokeAccessArgs>(
             "mcp_revoke_access",
             "Immediately disable selected tool groups for this client and release their capabilities.",
+            ToolGroup::Basic,
+            false,
+            false,
+        ),
+        define_tool::<OperationStateArgs>(
+            "mcp_operation",
+            "Read redacted state and progress for a client-owned background operation.",
+            ToolGroup::Basic,
+            true,
+            false,
+        ),
+        define_tool::<CancelOperationArgs>(
+            "mcp_cancel_operation",
+            "Request cancellation of a client-owned background operation without claiming rollback.",
             ToolGroup::Basic,
             false,
             false,

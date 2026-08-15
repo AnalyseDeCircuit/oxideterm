@@ -215,8 +215,8 @@ NodeRouter / connection registry ── 物理 SSH node
 | `mcp_access_state` | 基础 / D / 否 | 无 | 当前客户端的模式、已授予组、全部可选组，以及自己的授权请求状态。 |
 | `mcp_revoke_access` | 基础 / W / 否 | `groups` | 客户端主动关闭自己的工具组，立即收回该组对应的待批准动作、操作和运行时句柄；基础组不可撤销。 |
 | `mcp_commit_action` | 基础 / X / 已批准票据 | `approval_ref` | 提交一份不可变高风险动作；返回 `operation_ref`、结果或 `undo_ref`。 |
-| `mcp_operation` | 基础 / D / 否 | `operation_ref`、`wait_ms?` | 阶段、进度、可取消性、脱敏错误与产出句柄；`wait_ms` 有上限。 |
-| `mcp_cancel_operation` | 基础 / W / 否 | `operation_ref` | 请求有界取消；返回是否已产生不可逆副作用及可能的 `undo_ref`。 |
+| `mcp_operation` | 基础 / D / 否 | `operation_ref` | 查询后台命令或 SFTP 传输的阶段、进度、可取消性、脱敏错误与产出句柄；仍会重新检查创建该操作的原工具组。 |
+| `mcp_cancel_operation` | 基础 / W / 否 | `operation_ref` | 请求取消后台命令或 SFTP 传输；返回是否可能已产生外部副作用，不把取消伪装成回滚。 |
 | `mcp_revert` | 基础 / X / 应用内确认 | `undo_ref`、`request_key` | 只回滚记录的原始动作；目标 revision 不匹配时返回冲突。 |
 | `mcp_audit_search` | 审计读取 / R / 否 | `time_range`、`tool?`、`target_ref?`、`cursor?` | 客户端自身的审计记录：动作、批准、状态、参数摘要哈希和结果摘要；不返回秘密或原始终端/文件内容。 |
 
@@ -282,7 +282,7 @@ NodeRouter / connection registry ── 物理 SSH node
 | `files_remove` | 远端文件删除 / X / 必须 | `file_session_ref`、`path`、`recursive`、`expected_revision?` | 永久删除文件或目录；递归意图进入冻结批准参数，不把永久删除称为回收站，也不返回虚假撤销。 |
 | `artifacts_stage` | 传输数据 / W / 否 | `content` 或 `bytes_base64`、`media_type`、`name?` | 将客户端提供的有界数据写入临时 artifact，返回 `artifact_ref`、大小和 digest；不接受任意本机路径。 |
 | `artifacts_read` | 传输数据 / R / 否 | `artifact_ref`、`offset?`、`length?` | 有界下载、媒体类型、digest；客户端只可读取自己有权访问的 artifact。 |
-| `transfers_start` | 传输数据 / X / 上传必须 | 严格 tagged `direction`；上传含 `file_session_ref`、`remote_path`、`artifact_ref`、`overwrite`、`resume`，下载不接受本机路径 | 基于真实 SFTP 传输控制器启动客户端私有单文件作业，返回 `transfer_ref`。当前最多 64 MiB 且 `resume` 必须为 `false`；目录传输等待显式清单协议后再开放。 |
+| `transfers_start` | 传输数据 / X / 上传必须 | 严格 tagged `direction`；上传含 `file_session_ref`、`remote_path`、`artifact_ref`、`overwrite`、`resume`，下载不接受本机路径 | 基于真实 SFTP 传输控制器启动客户端私有单文件作业，返回 `transfer_ref` 与通用 `operation_ref`。当前最多 64 MiB 且 `resume` 必须为 `false`；目录传输等待显式清单协议后再开放。 |
 | `transfers_status` | 传输数据 / D / 否 | `transfer_ref` | `pending/running/completed/cancelled/failed`、字节数、速度、脱敏错误码、远端残留标记和完成后的下载 artifact；不返回内部节点或临时路径。 |
 | `transfers_cancel` | 传输数据 / W / 否 | `transfer_ref` | 请求现有传输控制器取消；上传会准确报告可能的远端部分文件，关闭传输不等于断开共享 SSH 节点。 |
 | `workspaces_mount` | IDE 工作区读取 / W / 否 | `file_session_ref`、`root?`；同时要求远端文件读取组 | 在既有 SFTP 授权根下规范化子目录，创建独立 IDE owner，返回 `workspace_ref`、项目名、Git 摘要和真实能力。 |

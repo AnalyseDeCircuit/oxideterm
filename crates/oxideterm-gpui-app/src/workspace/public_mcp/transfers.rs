@@ -5,8 +5,8 @@ use std::{
 };
 
 use oxideterm_public_mcp::{
-    ArtifactStore, ClientRef, DomainRequest, PublicToolCall, StartTransferArgs, ToolEnvelope,
-    TransferRef,
+    ArtifactStore, ClientRef, DomainRequest, OperationRef, PublicToolCall, StartTransferArgs,
+    ToolEnvelope, ToolGroup, TransferRef,
 };
 use oxideterm_sftp::{
     FileType, SftpError, SftpTransferGuard, SftpTransferManager, TransferProgress, TransferState,
@@ -16,8 +16,9 @@ use serde_json::json;
 use tempfile::NamedTempFile;
 
 use super::{
-    PublicMcpFileSessionRecord, PublicMcpRuntimeHandles, PublicMcpTransferRecord,
-    PublicMcpTransferState, WorkspaceApp, files, finish_serialized,
+    PublicMcpFileSessionRecord, PublicMcpOperationRecord, PublicMcpOperationTarget,
+    PublicMcpRuntimeHandles, PublicMcpTransferRecord, PublicMcpTransferState, WorkspaceApp, files,
+    finish_serialized, remove_transfer_operations,
 };
 
 const TRANSFER_CAPACITY: usize = 128;
@@ -42,7 +43,7 @@ struct PublicMcpTransferFailure {
 }
 
 impl PublicMcpTransferState {
-    fn is_finished(self) -> bool {
+    pub(super) fn is_finished(self) -> bool {
         matches!(self, Self::Completed | Self::Cancelled | Self::Failed)
     }
 }
@@ -157,6 +158,7 @@ impl WorkspaceApp {
         };
 
         let transfer_ref = TransferRef::new();
+        let operation_ref = OperationRef::new();
         let internal_id = transfer_ref.to_string();
         {
             let mut handles = self.public_mcp.runtime_handles.lock();
@@ -190,6 +192,14 @@ impl WorkspaceApp {
                     error_code: None,
                     remote_residue: None,
                     finished_at: None,
+                },
+            );
+            handles.operations.insert(
+                operation_ref.clone(),
+                PublicMcpOperationRecord {
+                    client_ref: request.client_ref.clone(),
+                    owner_group: ToolGroup::ArtifactTransfer,
+                    target: PublicMcpOperationTarget::Transfer(transfer_ref.clone()),
                 },
             );
         }
@@ -245,6 +255,7 @@ impl WorkspaceApp {
             request,
             json!({
                 "transfer_ref": transfer_ref,
+                "operation_ref": operation_ref,
                 "state": PublicMcpTransferState::Pending,
                 "direction": direction,
                 "resume_supported": false,
@@ -314,9 +325,17 @@ impl WorkspaceApp {
     pub(super) fn revoke_public_mcp_client_transfers(&self, client_ref: &ClientRef) {
         let transfer_ids = {
             let mut handles = self.public_mcp.runtime_handles.lock();
-            handles
+            let removed = handles
                 .transfers
                 .extract_if(|_, record| &record.client_ref == client_ref)
+                .collect::<Vec<_>>();
+            let transfer_refs = removed
+                .iter()
+                .map(|(transfer_ref, _)| transfer_ref.clone())
+                .collect::<Vec<_>>();
+            remove_transfer_operations(&mut handles, &transfer_refs);
+            removed
+                .into_iter()
                 .map(|(_, record)| record.internal_id)
                 .collect::<Vec<_>>()
         };
@@ -608,14 +627,26 @@ fn upload_protocol_failure(error: SftpError) -> PublicMcpTransferFailure {
     failure
 }
 
-fn expire_transfer_records(handles: &mut PublicMcpRuntimeHandles) {
+pub(super) fn expire_transfer_records(handles: &mut PublicMcpRuntimeHandles) {
     let now = Instant::now();
+    let expired = handles
+        .transfers
+        .iter()
+        .filter_map(|(transfer_ref, record)| {
+            (record.state.is_finished()
+                && record.finished_at.is_none_or(|finished_at| {
+                    now.saturating_duration_since(finished_at) > TRANSFER_RETENTION
+                }))
+            .then_some(transfer_ref.clone())
+        })
+        .collect::<Vec<_>>();
     handles.transfers.retain(|_, record| {
         !record.state.is_finished()
             || record.finished_at.is_some_and(|finished_at| {
                 now.saturating_duration_since(finished_at) <= TRANSFER_RETENTION
             })
     });
+    remove_transfer_operations(handles, &expired);
 }
 
 pub(super) fn invalidate_for_disconnected_nodes(

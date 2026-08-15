@@ -14,9 +14,9 @@ use oxideterm_public_mcp::{
     AddonRef, ApprovalRef, ApprovalStatus, ArtifactRef, AuditQuery, ClientApprovalMode,
     ClientCredential, ClientProjection, ClientRef, ClientRegistry, CommandRef, ConnectionRef,
     DesktopRef, DomainBroker, DomainMessage, DomainRequest, DomainRequestReceiver, FileSessionRef,
-    ForwardRef, NodeRef, PublicMcpHttpServer, PublicMcpState, PublicToolCall, QuickCommandRef,
-    RecordingRef, SyncPlanRef, TerminalRef, ToolEnvelope, ToolGroup, ToolOutcome, TransferRef,
-    UndoRef, WorkspaceRef, start_http_server,
+    ForwardRef, NodeRef, OperationRef, PublicMcpHttpServer, PublicMcpState, PublicToolCall,
+    QuickCommandRef, RecordingRef, SyncPlanRef, TerminalRef, ToolEnvelope, ToolGroup, ToolOutcome,
+    TransferRef, UndoRef, WorkspaceRef, start_http_server,
 };
 use oxideterm_session_adapter::ssh_config_from_saved_connection;
 use oxideterm_ssh::{ConnectionConsumer, NodeId, NodeRouter, SshTransportError};
@@ -90,10 +90,25 @@ pub(in crate::workspace) struct PublicMcpWorkspaceBridge {
 struct PublicMcpRuntimeHandles {
     nodes: HashMap<NodeRef, PublicMcpNodeLease>,
     commands: HashMap<CommandRef, PublicMcpCommandRecord>,
+    operations: HashMap<OperationRef, PublicMcpOperationRecord>,
     forwards: HashMap<ForwardRef, PublicMcpForwardRecord>,
     file_sessions: HashMap<FileSessionRef, PublicMcpFileSessionRecord>,
     transfers: HashMap<TransferRef, PublicMcpTransferRecord>,
     workspaces: HashMap<WorkspaceRef, PublicMcpWorkspaceRecord>,
+}
+
+#[derive(Clone)]
+/// Maps a generic operation handle to a typed domain handle without exposing internal IDs.
+enum PublicMcpOperationTarget {
+    Command(CommandRef),
+    Transfer(TransferRef),
+}
+
+#[derive(Clone)]
+struct PublicMcpOperationRecord {
+    client_ref: ClientRef,
+    owner_group: ToolGroup,
+    target: PublicMcpOperationTarget,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1117,6 +1132,8 @@ impl WorkspaceApp {
         match &request.call {
             PublicToolCall::RequestAccess(_) => self.handle_public_mcp_request_access(request, cx),
             PublicToolCall::RevokeAccess(_) => self.handle_public_mcp_revoke_access(request, cx),
+            PublicToolCall::OperationState(_) => self.handle_public_mcp_operation(request),
+            PublicToolCall::CancelOperation(_) => self.handle_public_mcp_cancel_operation(request),
             PublicToolCall::BrowseConnections(_) => {
                 self.handle_public_mcp_browse_connections(request)
             }
@@ -1343,6 +1360,175 @@ impl WorkspaceApp {
             }),
         );
         cx.notify();
+    }
+
+    fn handle_public_mcp_operation(&self, request: DomainRequest) {
+        let PublicToolCall::OperationState(args) = &request.call else {
+            return;
+        };
+        let operation_ref = args.operation_ref.clone();
+        let mut handles = self.public_mcp.runtime_handles.lock();
+        let Some(operation) = handles
+            .operations
+            .get(&operation_ref)
+            .filter(|operation| operation.client_ref == request.client_ref)
+            .cloned()
+        else {
+            request.finish(ToolEnvelope::failed(
+                "The background operation handle is unavailable",
+            ));
+            return;
+        };
+        if matches!(&operation.target, PublicMcpOperationTarget::Transfer(_)) {
+            transfers::expire_transfer_records(&mut handles);
+        }
+        // A Basic-group operation handle never bypasses the group that created the operation.
+        let group_enabled = self
+            .public_mcp
+            .state
+            .clients
+            .get(&request.client_ref)
+            .is_some_and(|client| client.tool_groups.contains(&operation.owner_group));
+        if !group_enabled {
+            request.finish(ToolEnvelope::failed(
+                "The operation's tool group is disabled",
+            ));
+            return;
+        }
+        let projection = match operation.target {
+            PublicMcpOperationTarget::Command(command_ref) => {
+                handles.commands.get(&command_ref).map(|record| {
+                    let stage = match record.state {
+                        PublicMcpCommandState::Running => "running",
+                        PublicMcpCommandState::Succeeded => "completed",
+                        PublicMcpCommandState::Failed => "failed",
+                        PublicMcpCommandState::Cancelled => "cancelled",
+                    };
+                    json!({
+                        "operation_ref": operation_ref,
+                        "kind": "command",
+                        "stage": stage,
+                        "cancellable": record.state == PublicMcpCommandState::Running,
+                        "command_ref": command_ref,
+                        "exit_code": record.exit_code,
+                        "truncated": record.truncated,
+                        "error": record.error,
+                    })
+                })
+            }
+            PublicMcpOperationTarget::Transfer(transfer_ref) => {
+                handles.transfers.get(&transfer_ref).map(|record| {
+                    json!({
+                        "operation_ref": operation_ref,
+                        "kind": "transfer",
+                        "stage": record.state,
+                        "cancellable": !record.state.is_finished(),
+                        "transfer_ref": transfer_ref,
+                        "progress": {
+                            "completed_bytes": record.transferred_bytes,
+                            "total_bytes": record.total_bytes,
+                            "speed_bytes_per_second": record.speed_bytes_per_second,
+                        },
+                        "artifact": record.artifact,
+                        "error_code": record.error_code,
+                        "remote_residue": record.remote_residue,
+                    })
+                })
+            }
+        };
+        match projection {
+            Some(projection) => finish_serialized(request, projection),
+            None => {
+                handles.operations.remove(&operation_ref);
+                request.finish(ToolEnvelope::failed(
+                    "The background operation result has expired",
+                ));
+            }
+        }
+    }
+
+    fn handle_public_mcp_cancel_operation(&self, request: DomainRequest) {
+        let PublicToolCall::CancelOperation(args) = &request.call else {
+            return;
+        };
+        let operation_ref = args.operation_ref.clone();
+        let mut handles = self.public_mcp.runtime_handles.lock();
+        let Some(operation) = handles
+            .operations
+            .get(&operation_ref)
+            .filter(|operation| operation.client_ref == request.client_ref)
+            .cloned()
+        else {
+            request.finish(ToolEnvelope::failed(
+                "The background operation handle is unavailable",
+            ));
+            return;
+        };
+        if matches!(&operation.target, PublicMcpOperationTarget::Transfer(_)) {
+            transfers::expire_transfer_records(&mut handles);
+        }
+        let group_enabled = self
+            .public_mcp
+            .state
+            .clients
+            .get(&request.client_ref)
+            .is_some_and(|client| client.tool_groups.contains(&operation.owner_group));
+        if !group_enabled {
+            request.finish(ToolEnvelope::failed(
+                "The operation's tool group is disabled",
+            ));
+            return;
+        }
+        match operation.target {
+            PublicMcpOperationTarget::Command(command_ref) => {
+                let Some(record) = handles.commands.get_mut(&command_ref) else {
+                    handles.operations.remove(&operation_ref);
+                    request.finish(ToolEnvelope::failed(
+                        "The background operation result has expired",
+                    ));
+                    return;
+                };
+                let cancel_requested = record.state == PublicMcpCommandState::Running;
+                if cancel_requested {
+                    record.cancellation.cancel();
+                    record.state = PublicMcpCommandState::Cancelled;
+                }
+                finish_serialized(
+                    request,
+                    json!({
+                        "operation_ref": operation_ref,
+                        "cancel_requested": cancel_requested,
+                        "side_effects_may_remain": cancel_requested,
+                        "undo_ref": null,
+                    }),
+                );
+            }
+            PublicMcpOperationTarget::Transfer(transfer_ref) => {
+                let Some(record) = handles.transfers.get(&transfer_ref) else {
+                    handles.operations.remove(&operation_ref);
+                    request.finish(ToolEnvelope::failed(
+                        "The background operation result has expired",
+                    ));
+                    return;
+                };
+                let internal_id = (!record.state.is_finished()).then(|| record.internal_id.clone());
+                let side_effects_may_remain =
+                    record.direction == "upload" && record.transferred_bytes > 0;
+                drop(handles);
+                let cancel_requested = internal_id
+                    .as_deref()
+                    .is_some_and(|internal_id| self.sftp_transfer_manager.cancel(internal_id));
+                finish_serialized(
+                    request,
+                    json!({
+                        "operation_ref": operation_ref,
+                        "cancel_requested": cancel_requested,
+                        "side_effects_may_remain": side_effects_may_remain,
+                        "undo_ref": null,
+                    }),
+                );
+            }
+        }
     }
 
     fn handle_public_mcp_browse_connections(&mut self, request: DomainRequest) {
@@ -1799,6 +1985,7 @@ impl WorkspaceApp {
                         .then_some(command_ref.clone())
                 })
                 .collect::<Vec<_>>();
+            remove_command_operations(&mut handles, &command_refs);
             let cancellations = command_refs
                 .into_iter()
                 .filter_map(|command_ref| handles.commands.remove(&command_ref))
@@ -1860,6 +2047,7 @@ impl WorkspaceApp {
                     .then_some(command_ref.clone())
             })
             .collect::<Vec<_>>();
+        remove_command_operations(&mut handles, &command_refs);
         let cancellations = command_refs
             .into_iter()
             .filter_map(|command_ref| handles.commands.remove(&command_ref))
@@ -1920,6 +2108,7 @@ impl WorkspaceApp {
             return;
         };
         let command_ref = CommandRef::new();
+        let operation_ref = OperationRef::new();
         let cancellation = CancellationToken::new();
         let mut handles = self.public_mcp.runtime_handles.lock();
         let client_command_count = handles
@@ -1949,6 +2138,14 @@ impl WorkspaceApp {
                 truncated: false,
                 error: None,
                 cancellation: cancellation.clone(),
+            },
+        );
+        handles.operations.insert(
+            operation_ref.clone(),
+            PublicMcpOperationRecord {
+                client_ref: request.client_ref.clone(),
+                owner_group,
+                target: PublicMcpOperationTarget::Command(command_ref.clone()),
             },
         );
         drop(handles);
@@ -2010,7 +2207,11 @@ impl WorkspaceApp {
         });
         finish_serialized(
             request,
-            json!({ "command_ref": command_ref, "state": "running" }),
+            json!({
+                "command_ref": command_ref,
+                "operation_ref": operation_ref,
+                "state": "running",
+            }),
         );
     }
 
@@ -2170,6 +2371,7 @@ impl PublicMcpWorkspaceBridge {
                     (&record.client_ref == client_ref).then_some(command_ref.clone())
                 })
                 .collect::<Vec<_>>();
+            remove_command_operations(&mut handles, &command_refs);
             command_refs
                 .into_iter()
                 .filter_map(|command_ref| handles.commands.remove(&command_ref))
@@ -2192,6 +2394,7 @@ impl PublicMcpWorkspaceBridge {
                         .then_some(command_ref.clone())
                 })
                 .collect::<Vec<_>>();
+            remove_command_operations(&mut handles, &command_refs);
             command_refs
                 .into_iter()
                 .filter_map(|command_ref| handles.commands.remove(&command_ref))
@@ -2226,11 +2429,15 @@ impl PublicMcpWorkspaceBridge {
                     (&record.client_ref == client_ref).then_some(command_ref.clone())
                 })
                 .collect::<Vec<_>>();
+            remove_command_operations(&mut handles, &command_refs);
             let cancellations = command_refs
                 .into_iter()
                 .filter_map(|command_ref| handles.commands.remove(&command_ref))
                 .map(|record| record.cancellation)
                 .collect::<Vec<_>>();
+            handles
+                .operations
+                .retain(|_, operation| &operation.client_ref != client_ref);
             (leases, cancellations)
         };
         for cancellation in cancellations {
@@ -2242,6 +2449,31 @@ impl PublicMcpWorkspaceBridge {
             }
         }
     }
+}
+
+fn remove_command_operations(handles: &mut PublicMcpRuntimeHandles, command_refs: &[CommandRef]) {
+    // Generic handles cannot outlive their typed command records.
+    handles.operations.retain(|_, operation| {
+        !matches!(
+            &operation.target,
+            PublicMcpOperationTarget::Command(command_ref)
+                if command_refs.contains(command_ref)
+        )
+    });
+}
+
+fn remove_transfer_operations(
+    handles: &mut PublicMcpRuntimeHandles,
+    transfer_refs: &[TransferRef],
+) {
+    // Generic handles cannot outlive their typed transfer records.
+    handles.operations.retain(|_, operation| {
+        !matches!(
+            &operation.target,
+            PublicMcpOperationTarget::Transfer(transfer_ref)
+                if transfer_refs.contains(transfer_ref)
+        )
+    });
 }
 
 fn node_lease_for_client(

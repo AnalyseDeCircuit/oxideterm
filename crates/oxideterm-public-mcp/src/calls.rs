@@ -9,8 +9,8 @@ use crate::{
     auth::ToolGroup,
     handles::{
         AddonRef, ArtifactRef, AuditRef, CommandRef, ConnectionRef, DesktopRef, FileSessionRef,
-        ForwardRef, NodeRef, QuickCommandRef, RecordingRef, SyncPlanRef, TerminalRef, TransferRef,
-        UndoRef, WorkspaceRef,
+        ForwardRef, NodeRef, OperationRef, QuickCommandRef, RecordingRef, SyncPlanRef, TerminalRef,
+        TransferRef, UndoRef, WorkspaceRef,
     },
 };
 
@@ -26,6 +26,20 @@ pub struct RequestAccessArgs {
 /// Lets a client reduce only its own Public MCP capabilities.
 pub struct RevokeAccessArgs {
     pub groups: Vec<ToolGroup>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// Reads a redacted status projection for a client-owned background operation.
+pub struct OperationStateArgs {
+    pub operation_ref: OperationRef,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// Requests cancellation without claiming that external side effects were reversed.
+pub struct CancelOperationArgs {
+    pub operation_ref: OperationRef,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
@@ -1481,6 +1495,8 @@ fn sync_selection_summary(selection: &SyncSelection) -> String {
 pub enum PublicToolCall {
     RequestAccess(RequestAccessArgs),
     RevokeAccess(RevokeAccessArgs),
+    OperationState(OperationStateArgs),
+    CancelOperation(CancelOperationArgs),
     BrowseConnections(BrowseConnectionsArgs),
     DescribeConnection(DescribeConnectionArgs),
     SaveConnection(Box<SavePublicConnectionArgs>),
@@ -1570,6 +1586,8 @@ impl PublicToolCall {
         match self {
             Self::RequestAccess(_) => "mcp_request_access",
             Self::RevokeAccess(_) => "mcp_revoke_access",
+            Self::OperationState(_) => "mcp_operation",
+            Self::CancelOperation(_) => "mcp_cancel_operation",
             Self::BrowseConnections(_) => "connections_browse",
             Self::DescribeConnection(_) => "connections_describe",
             Self::SaveConnection(_) => "connections_save",
@@ -1657,7 +1675,10 @@ impl PublicToolCall {
 
     pub fn required_group(&self) -> ToolGroup {
         match self {
-            Self::RequestAccess(_) | Self::RevokeAccess(_) => ToolGroup::Basic,
+            Self::RequestAccess(_)
+            | Self::RevokeAccess(_)
+            | Self::OperationState(_)
+            | Self::CancelOperation(_) => ToolGroup::Basic,
             Self::BrowseConnections(_) => ToolGroup::ConnectionDirectory,
             Self::DescribeConnection(_) => ToolGroup::ConnectionRead,
             Self::SaveConnection(_) | Self::RemoveConnection(_) => ToolGroup::ConnectionManage,
@@ -1808,6 +1829,8 @@ impl PublicToolCall {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
+            Self::OperationState(args) => args.operation_ref.to_string(),
+            Self::CancelOperation(args) => args.operation_ref.to_string(),
             Self::BrowseConnections(_) => "connection directory".to_owned(),
             Self::DescribeConnection(args) => args.connection_ref.to_string(),
             Self::SaveConnection(args) => args
