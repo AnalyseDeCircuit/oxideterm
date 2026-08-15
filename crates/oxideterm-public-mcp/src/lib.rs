@@ -16,10 +16,10 @@ pub mod service;
 pub use approval::{
     ApprovalError, ApprovalProjection, ApprovalReview, ApprovalStatus, ApprovalStore,
 };
-pub use audit::{AuditRecord, AuditStore};
+pub use audit::{AuditAuthorization, AuditRecord, AuditStore};
 pub use auth::{
-    ClientCredential, ClientProjection, ClientRegistry, ClientRegistryError, RegisteredClient,
-    ToolGroup,
+    ClientApprovalMode, ClientCredential, ClientProjection, ClientRegistry, ClientRegistryError,
+    RegisteredClient, ToolGroup,
 };
 pub use broker::{BrokerError, DomainBroker, DomainMessage, DomainRequest, DomainRequestReceiver};
 pub use calls::{PublicToolCall, ToolEnvelope, ToolOutcome};

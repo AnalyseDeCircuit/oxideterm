@@ -484,7 +484,13 @@ impl WorkspaceApp {
                     .read(cx)
                     .network_proxy_layout_flags()
                     .hash(&mut hasher);
-                self.public_mcp.clients().len().hash(&mut hasher);
+                for client in self.public_mcp.clients() {
+                    client.client_ref.as_str().hash(&mut hasher);
+                    client.label.hash(&mut hasher);
+                    client.enabled.hash(&mut hasher);
+                    client.approval_mode.hash(&mut hasher);
+                    client.tool_groups.hash(&mut hasher);
+                }
                 for approval in self.public_mcp.approvals().iter().filter(|approval| {
                     approval.status == oxideterm_public_mcp::ApprovalStatus::Pending
                 }) {

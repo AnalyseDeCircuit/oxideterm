@@ -142,16 +142,18 @@ OxideSens can discover bounded `SKILL.md` workflows from the workspace, user dat
 
 External editors, command-line AI tools, and other MCP clients can use saved SSH connections through OxideTerm when diagnosing a server. Open **Settings → Network & Proxy → External MCP Control**, then:
 
-1. Create a full-access client.
+1. Create a standard or full-access client. Standard mode requires in-app approval for high-risk actions; full-access mode skips per-action approval only for enabled tool groups.
 2. Copy the loopback HTTP endpoint and the client credential, which is shown only once.
 3. Configure the endpoint as a Streamable HTTP URL in the external MCP client and add an `Authorization: Bearer <credential>` request header.
 4. Have the client call `connections_browse`, then inspect the selected connection and request `nodes_connect`.
-5. Review the actual client, target, and command under **Pending Actions** in OxideTerm. After approval, the client calls `mcp_commit_action`.
+5. In standard mode, review the actual client, target, and command under **Pending Actions** in OxideTerm, then have the client call `mcp_commit_action`. Full-access mode executes directly.
 6. Use the returned `command_ref` to query state and read bounded stdout and stderr ranges.
 
 The current implementation exposes saved SSH connections, NodeRouter node leases, and SSH exec commands. Terminal-screen, SFTP, Host Tools, forwarding, remote-desktop, and sync tools are not listed until their real domain brokers are connected. Releasing an MCP node lease does not disconnect a physical SSH node still used by terminal, SFTP, or forwarding consumers; only an explicitly approved `nodes_disconnect` does that.
 
 OxideTerm stores only a digest of each client credential. Disabling or revoking a client immediately cancels its commands, pending actions, and node leases. The endpoint, authorization records, and credential are excluded from ordinary settings, `.oxide` exports, and cloud sync.
+
+Full-access mode does not enable every tool. Each client still needs explicit connection-directory, connection-detail, SSH-node, command-output, and command-execution grants. Disabled tools are neither advertised nor callable. Bearer authentication, app lock, secret non-disclosure, and audit remain active in both modes.
 
 ## Settings
 

@@ -17,8 +17,8 @@ use zeroize::Zeroizing;
 
 use crate::{
     approval::ApprovalStore,
-    audit::AuditStore,
-    auth::{ClientProjection, ClientRegistry, ToolGroup},
+    audit::{AuditAuthorization, AuditStore},
+    auth::{ClientApprovalMode, ClientProjection, ClientRegistry, ToolGroup},
     broker::DomainBroker,
     calls::{
         BrowseConnectionsArgs, CancelCommandArgs, CommandOutputArgs, CommandStateArgs,
@@ -116,7 +116,7 @@ impl PublicMcpService {
             );
         }
 
-        if call.requires_approval() {
+        if call.requires_approval() && client.approval_mode == ClientApprovalMode::Standard {
             let tool_name = call.tool_name();
             let target = call.target_summary();
             let approval = match self.state.approvals.stage(client.client_ref.clone(), call) {
@@ -127,6 +127,7 @@ impl PublicMcpService {
                 client.client_ref.clone(),
                 tool_name,
                 &target,
+                AuditAuthorization::AppApproval,
                 ToolOutcome::Accepted,
             );
             self.state.broker.notify_state_changed();
@@ -136,7 +137,12 @@ impl PublicMcpService {
             }));
         }
 
-        self.execute_approved_call(client.client_ref.clone(), call)
+        let authorization = if call.requires_approval() {
+            AuditAuthorization::Unattended
+        } else {
+            AuditAuthorization::NotRequired
+        };
+        self.execute_approved_call(client.client_ref.clone(), call, authorization)
             .await
     }
 
@@ -144,6 +150,7 @@ impl PublicMcpService {
         &self,
         client_ref: ClientRef,
         call: PublicToolCall,
+        authorization: AuditAuthorization,
     ) -> CallToolResult {
         let tool_name = call.tool_name().to_owned();
         let target = call.target_summary();
@@ -154,14 +161,19 @@ impl PublicMcpService {
                     client_ref,
                     tool_name,
                     &target,
+                    authorization,
                     envelope.outcome.clone(),
                 );
                 envelope_result(envelope)
             }
             Err(error) => {
-                self.state
-                    .audit
-                    .record_fields(client_ref, tool_name, &target, ToolOutcome::Failed);
+                self.state.audit.record_fields(
+                    client_ref,
+                    tool_name,
+                    &target,
+                    authorization,
+                    ToolOutcome::Failed,
+                );
                 tool_error("workspace_unavailable", error.to_string())
             }
         }
@@ -190,8 +202,12 @@ impl PublicMcpService {
                 "The required tool group was disabled before commit",
             );
         }
-        self.execute_approved_call(client.client_ref.clone(), call)
-            .await
+        self.execute_approved_call(
+            client.client_ref.clone(),
+            call,
+            AuditAuthorization::AppApproval,
+        )
+        .await
     }
 }
 
@@ -235,11 +251,18 @@ impl ServerHandler for PublicMcpService {
         let client = self.resolve_client(&context)?;
         let arguments = request.arguments.unwrap_or_default();
         let result = match request.name.as_ref() {
-            "mcp_overview" => CallToolResult::structured(json!({
-                "server": "OxideTerm Public MCP",
-                "protocol": ProtocolVersion::V_2026_07_28.to_string(),
-                "security": "per-client tool groups with in-app approval for high-risk actions",
-            })),
+            "mcp_overview" => {
+                let approval_policy = match client.approval_mode {
+                    ClientApprovalMode::Standard => "in_app_approval",
+                    ClientApprovalMode::Unattended => "unattended_for_enabled_groups",
+                };
+                CallToolResult::structured(json!({
+                    "server": "OxideTerm Public MCP",
+                    "protocol": ProtocolVersion::V_2026_07_28.to_string(),
+                    "approval_policy": approval_policy,
+                    "security": "Bearer authentication, per-client tool groups, app-lock enforcement, secret hard boundaries, and audit remain active in every mode",
+                }))
+            }
             "mcp_catalog" => {
                 let catalog = tool_definitions()
                     .into_iter()
@@ -247,7 +270,8 @@ impl ServerHandler for PublicMcpService {
                     .map(|definition| CatalogEntry {
                         name: definition.tool.name.into_owned(),
                         tool_group: definition.group,
-                        requires_approval: definition.requires_approval,
+                        requires_approval: definition.requires_approval
+                            && client.approval_mode == ClientApprovalMode::Standard,
                     })
                     .collect::<Vec<_>>();
                 CallToolResult::structured(json!({ "tools": catalog }))

@@ -178,13 +178,17 @@ mod tests {
     use zeroize::Zeroizing;
 
     use super::*;
-    use crate::{ApprovalStore, AuditStore, DomainBroker, ToolGroup};
+    use crate::{ApprovalStore, AuditStore, ClientApprovalMode, DomainBroker, ToolGroup};
 
     #[tokio::test]
     async fn loopback_endpoint_rejects_missing_credentials_and_accepts_registered_client() {
         let clients = Arc::new(ClientRegistry::default());
         let registered = clients
-            .register("HTTP boundary", [ToolGroup::Basic])
+            .register(
+                "HTTP boundary",
+                ClientApprovalMode::Standard,
+                [ToolGroup::Basic],
+            )
             .expect("register client");
         let (broker, _receiver) = DomainBroker::channel(1);
         let state = Arc::new(PublicMcpState {

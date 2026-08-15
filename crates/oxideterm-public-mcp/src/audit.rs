@@ -9,12 +9,21 @@ use crate::{
     handles::{AuditRef, ClientRef},
 };
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditAuthorization {
+    NotRequired,
+    AppApproval,
+    Unattended,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct AuditRecord {
     pub audit_ref: AuditRef,
     pub client_ref: ClientRef,
     pub tool_name: String,
     pub target_digest: String,
+    pub authorization: AuditAuthorization,
     pub outcome: ToolOutcome,
     pub created_at_ms: u128,
 }
@@ -37,12 +46,14 @@ impl AuditStore {
         &self,
         client_ref: ClientRef,
         call: &PublicToolCall,
+        authorization: AuditAuthorization,
         outcome: ToolOutcome,
     ) -> AuditRecord {
         self.record_fields(
             client_ref,
             call.tool_name(),
             &call.target_summary(),
+            authorization,
             outcome,
         )
     }
@@ -52,6 +63,7 @@ impl AuditStore {
         client_ref: ClientRef,
         tool_name: impl Into<String>,
         target: &str,
+        authorization: AuditAuthorization,
         outcome: ToolOutcome,
     ) -> AuditRecord {
         let target_digest = hex_digest(target.as_bytes());
@@ -60,6 +72,7 @@ impl AuditStore {
             client_ref,
             tool_name: tool_name.into(),
             target_digest,
+            authorization,
             outcome,
             created_at_ms: unix_time_ms(),
         };

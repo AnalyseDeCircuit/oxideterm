@@ -69,6 +69,27 @@ pub(in crate::workspace) fn network_application_proxy_mode_label(
     }
 }
 
+fn public_mcp_tool_group_label_key(tool_group: oxideterm_public_mcp::ToolGroup) -> &'static str {
+    match tool_group {
+        oxideterm_public_mcp::ToolGroup::Basic => "settings_view.network.public_mcp",
+        oxideterm_public_mcp::ToolGroup::ConnectionDirectory => {
+            "settings_view.network.mcp_group_connection_directory"
+        }
+        oxideterm_public_mcp::ToolGroup::ConnectionRead => {
+            "settings_view.network.mcp_group_connection_read"
+        }
+        oxideterm_public_mcp::ToolGroup::NodeSession => {
+            "settings_view.network.mcp_group_node_session"
+        }
+        oxideterm_public_mcp::ToolGroup::CommandObserve => {
+            "settings_view.network.mcp_group_command_observe"
+        }
+        oxideterm_public_mcp::ToolGroup::CommandExecute => {
+            "settings_view.network.mcp_group_command_execute"
+        }
+    }
+}
+
 fn schedule_settings_network_proxy_test(
     runtime: &tokio::runtime::Runtime,
     host: String,
@@ -384,7 +405,16 @@ impl WorkspaceApp {
             for client in clients {
                 let client_ref_for_toggle = client.client_ref.clone();
                 let client_ref_for_remove = client.client_ref.clone();
+                let client_ref_for_mode = client.client_ref.clone();
                 let next_enabled = !client.enabled;
+                let next_approval_mode = match client.approval_mode {
+                    oxideterm_public_mcp::ClientApprovalMode::Standard => {
+                        oxideterm_public_mcp::ClientApprovalMode::Unattended
+                    }
+                    oxideterm_public_mcp::ClientApprovalMode::Unattended => {
+                        oxideterm_public_mcp::ClientApprovalMode::Standard
+                    }
+                };
                 let status_key = if client.enabled {
                     "settings_view.network.client_enabled"
                 } else {
@@ -395,101 +425,211 @@ impl WorkspaceApp {
                 } else {
                     "settings_view.network.enable_client"
                 };
+                let mode_key = match client.approval_mode {
+                    oxideterm_public_mcp::ClientApprovalMode::Standard => {
+                        "settings_view.network.client_mode_standard"
+                    }
+                    oxideterm_public_mcp::ClientApprovalMode::Unattended => {
+                        "settings_view.network.client_mode_full"
+                    }
+                };
+                let mode_toggle_key = match client.approval_mode {
+                    oxideterm_public_mcp::ClientApprovalMode::Standard => {
+                        "settings_view.network.switch_to_full_mode"
+                    }
+                    oxideterm_public_mcp::ClientApprovalMode::Unattended => {
+                        "settings_view.network.switch_to_standard_mode"
+                    }
+                };
+                let mut group_controls = div()
+                    .w_full()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(SETTINGS_PUBLIC_MCP_ROW_GAP));
+                for &tool_group in oxideterm_public_mcp::ToolGroup::selectable() {
+                    let label_key = public_mcp_tool_group_label_key(tool_group);
+                    let checked = client.tool_groups.contains(&tool_group);
+                    let client_ref_for_group = client.client_ref.clone();
+                    let control = checkbox(&self.tokens, String::new(), checked).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            if let Err(error) = this.set_public_mcp_client_tool_group(
+                                &client_ref_for_group,
+                                tool_group,
+                                !checked,
+                            ) {
+                                this.public_mcp.record_action_error(error);
+                            }
+                            cx.notify();
+                            cx.stop_propagation();
+                        }),
+                    );
+                    group_controls = group_controls.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(SETTINGS_PUBLIC_MCP_STATUS_GAP))
+                            .child(control)
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .child(self.i18n.t(label_key)),
+                            ),
+                    );
+                }
                 content = content.child(
                     div()
                         .w_full()
                         .min_w(px(0.0))
                         .flex()
-                        .flex_wrap()
-                        .items_center()
-                        .gap(px(SETTINGS_PUBLIC_MCP_ROW_GAP))
+                        .flex_col()
+                        .gap(px(SETTINGS_PUBLIC_MCP_DETAIL_GAP))
                         .child(
                             div()
+                                .w_full()
                                 .min_w(px(0.0))
-                                .flex_1()
                                 .flex()
-                                .flex_col()
-                                .gap(px(SETTINGS_PUBLIC_MCP_STATUS_GAP))
+                                .flex_wrap()
+                                .items_center()
+                                .gap(px(SETTINGS_PUBLIC_MCP_ROW_GAP))
                                 .child(
                                     div()
-                                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                                        .text_color(rgb(self.tokens.ui.text))
-                                        .child(client.label),
+                                        .min_w(px(0.0))
+                                        .flex_1()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(SETTINGS_PUBLIC_MCP_STATUS_GAP))
+                                        .child(
+                                            div()
+                                                .text_size(px(self.tokens.metrics.ui_text_sm))
+                                                .text_color(rgb(self.tokens.ui.text))
+                                                .child(client.label),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                                .text_color(rgb(self.tokens.ui.text_muted))
+                                                .child(format!(
+                                                    "{} · {}",
+                                                    self.i18n.t(status_key),
+                                                    self.i18n.t(mode_key)
+                                                )),
+                                        ),
                                 )
-                                .child(
-                                    div()
-                                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                                        .text_color(rgb(self.tokens.ui.text_muted))
-                                        .child(self.i18n.t(status_key)),
-                                ),
+                                .child(self.workspace_toolbar_action_button(
+                                    self.i18n.t(mode_toggle_key),
+                                    None,
+                                    ToolbarButtonOptions::default(),
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        if let Err(error) = this
+                                            .set_public_mcp_client_approval_mode(
+                                                &client_ref_for_mode,
+                                                next_approval_mode,
+                                            )
+                                        {
+                                            this.public_mcp.record_action_error(error);
+                                        }
+                                        cx.notify();
+                                        cx.stop_propagation();
+                                    }),
+                                ))
+                                .child(self.workspace_toolbar_action_button(
+                                    self.i18n.t(toggle_key),
+                                    None,
+                                    ToolbarButtonOptions::default(),
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        if let Err(error) = this.set_public_mcp_client_enabled(
+                                            &client_ref_for_toggle,
+                                            next_enabled,
+                                        ) {
+                                            this.public_mcp.record_action_error(error);
+                                        }
+                                        cx.notify();
+                                        cx.stop_propagation();
+                                    }),
+                                ))
+                                .child(self.workspace_toolbar_action_button(
+                                    self.i18n.t("settings_view.network.revoke_client"),
+                                    Some(Self::render_lucide_icon(
+                                        LucideIcon::Trash2,
+                                        SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
+                                        rgb(self.tokens.ui.text),
+                                    )),
+                                    ToolbarButtonOptions::default(),
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        if let Err(error) =
+                                            this.remove_public_mcp_client(&client_ref_for_remove)
+                                        {
+                                            this.public_mcp.record_action_error(error);
+                                        }
+                                        cx.notify();
+                                        cx.stop_propagation();
+                                    }),
+                                )),
                         )
-                        .child(self.workspace_toolbar_action_button(
-                            self.i18n.t(toggle_key),
-                            None,
-                            ToolbarButtonOptions::default(),
-                            cx.listener(move |this, _event, _window, cx| {
-                                if let Err(error) = this.set_public_mcp_client_enabled(
-                                    &client_ref_for_toggle,
-                                    next_enabled,
-                                ) {
-                                    this.public_mcp.record_action_error(error);
-                                }
-                                cx.notify();
-                                cx.stop_propagation();
-                            }),
-                        ))
-                        .child(self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.network.revoke_client"),
-                            Some(Self::render_lucide_icon(
-                                LucideIcon::Trash2,
-                                SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
-                                rgb(self.tokens.ui.text),
-                            )),
-                            ToolbarButtonOptions::default(),
-                            cx.listener(move |this, _event, _window, cx| {
-                                if let Err(error) =
-                                    this.remove_public_mcp_client(&client_ref_for_remove)
-                                {
-                                    this.public_mcp.record_action_error(error);
-                                }
-                                cx.notify();
-                                cx.stop_propagation();
-                            }),
-                        )),
+                        .child(group_controls),
                 );
             }
         }
 
         let next_client_number = self.public_mcp.clients().len() + 1;
         content = content.child(
-            self.workspace_toolbar_action_button(
-                self.i18n
-                    .t("settings_view.network.create_full_access_client"),
-                Some(Self::render_lucide_icon(
-                    LucideIcon::Plus,
-                    SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
-                    rgb(self.tokens.ui.bg),
-                )),
-                ToolbarButtonOptions {
-                    button: ButtonOptions {
-                        variant: ButtonVariant::Default,
-                        ..ButtonOptions::default()
+            div()
+                .flex()
+                .flex_wrap()
+                .gap(px(SETTINGS_PUBLIC_MCP_ROW_GAP))
+                .child(self.workspace_toolbar_action_button(
+                    self.i18n.t("settings_view.network.create_standard_client"),
+                    Some(Self::render_lucide_icon(
+                        LucideIcon::Plus,
+                        SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.bg),
+                    )),
+                    ToolbarButtonOptions {
+                        button: ButtonOptions {
+                            variant: ButtonVariant::Default,
+                            ..ButtonOptions::default()
+                        },
+                        ..ToolbarButtonOptions::default()
                     },
-                    ..ToolbarButtonOptions::default()
-                },
-                cx.listener(move |this, _event, _window, cx| {
-                    let label = format!(
-                        "{} {}",
-                        this.i18n.t("settings_view.network.external_client_name"),
-                        next_client_number
-                    );
-                    if let Err(error) = this.public_mcp.create_full_access_client(label) {
-                        this.public_mcp.record_action_error(error);
-                    }
-                    cx.notify();
-                    cx.stop_propagation();
-                }),
-            ),
+                    cx.listener(move |this, _event, _window, cx| {
+                        let label = format!(
+                            "{} {}",
+                            this.i18n.t("settings_view.network.external_client_name"),
+                            next_client_number
+                        );
+                        if let Err(error) = this.public_mcp.create_client(
+                            label,
+                            oxideterm_public_mcp::ClientApprovalMode::Standard,
+                        ) {
+                            this.public_mcp.record_action_error(error);
+                        }
+                        cx.notify();
+                        cx.stop_propagation();
+                    }),
+                ))
+                .child(self.workspace_toolbar_action_button(
+                    self.i18n.t("settings_view.network.create_full_client"),
+                    None,
+                    ToolbarButtonOptions::default(),
+                    cx.listener(move |this, _event, _window, cx| {
+                        let label = format!(
+                            "{} {}",
+                            this.i18n.t("settings_view.network.external_client_name"),
+                            next_client_number
+                        );
+                        if let Err(error) = this.public_mcp.create_client(
+                            label,
+                            oxideterm_public_mcp::ClientApprovalMode::Unattended,
+                        ) {
+                            this.public_mcp.record_action_error(error);
+                        }
+                        cx.notify();
+                        cx.stop_propagation();
+                    }),
+                )),
         );
 
         content = content

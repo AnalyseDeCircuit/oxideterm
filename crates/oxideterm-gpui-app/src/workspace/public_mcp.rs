@@ -9,10 +9,10 @@ use gpui::{App, Context, Task};
 use oxideterm_connections::{ConnectionInfo, ConnectionStore};
 use oxideterm_gpui_terminal::{TerminalNotice, TerminalNoticeVariant};
 use oxideterm_public_mcp::{
-    ApprovalRef, ApprovalStatus, ClientCredential, ClientProjection, ClientRef, ClientRegistry,
-    CommandRef, ConnectionRef, DomainBroker, DomainMessage, DomainRequest, DomainRequestReceiver,
-    NodeRef, PublicMcpHttpServer, PublicMcpState, PublicToolCall, ToolEnvelope, ToolGroup,
-    ToolOutcome, start_http_server,
+    ApprovalRef, ApprovalStatus, ClientApprovalMode, ClientCredential, ClientProjection, ClientRef,
+    ClientRegistry, CommandRef, ConnectionRef, DomainBroker, DomainMessage, DomainRequest,
+    DomainRequestReceiver, NodeRef, PublicMcpHttpServer, PublicMcpState, PublicToolCall,
+    ToolEnvelope, ToolGroup, ToolOutcome, start_http_server,
 };
 use oxideterm_session_adapter::ssh_config_from_saved_connection;
 use oxideterm_ssh::{ConnectionConsumer, NodeId, NodeRouter, SshTransportError};
@@ -197,14 +197,15 @@ impl PublicMcpWorkspaceBridge {
             .map(ClientCredential::expose)
     }
 
-    pub(in crate::workspace) fn create_full_access_client(
+    pub(in crate::workspace) fn create_client(
         &mut self,
         label: String,
+        approval_mode: ClientApprovalMode,
     ) -> Result<(), String> {
         let registered = self
             .state
             .clients
-            .register(label, all_tool_groups())
+            .register(label, approval_mode, all_tool_groups())
             .map_err(|error| error.to_string())?;
         self.revealed_credential = Some(registered.credential);
         self.startup_error = None;
@@ -223,6 +224,38 @@ impl PublicMcpWorkspaceBridge {
         self.state
             .clients
             .set_enabled(client_ref, enabled)
+            .map_err(|error| error.to_string())
+    }
+
+    pub(in crate::workspace) fn set_client_approval_mode(
+        &self,
+        client_ref: &ClientRef,
+        approval_mode: ClientApprovalMode,
+    ) -> Result<(), String> {
+        self.state
+            .clients
+            .set_approval_mode(client_ref, approval_mode)
+            .map_err(|error| error.to_string())
+    }
+
+    pub(in crate::workspace) fn set_client_tool_group(
+        &self,
+        client_ref: &ClientRef,
+        tool_group: ToolGroup,
+        enabled: bool,
+    ) -> Result<(), String> {
+        let Some(client) = self.state.clients.get(client_ref) else {
+            return Err("The external MCP client no longer exists".to_owned());
+        };
+        let mut tool_groups = client.tool_groups;
+        if enabled {
+            tool_groups.insert(tool_group);
+        } else if tool_group != ToolGroup::Basic {
+            tool_groups.remove(&tool_group);
+        }
+        self.state
+            .clients
+            .set_groups(client_ref, tool_groups)
             .map_err(|error| error.to_string())
     }
 
@@ -448,6 +481,46 @@ impl WorkspaceApp {
             self.public_mcp
                 .revoke_client_runtime(client_ref, &self.node_router);
             self.public_mcp.remove_client_connection_refs(client_ref);
+        }
+        Ok(())
+    }
+
+    pub(in crate::workspace) fn set_public_mcp_client_approval_mode(
+        &mut self,
+        client_ref: &ClientRef,
+        approval_mode: ClientApprovalMode,
+    ) -> Result<(), String> {
+        self.public_mcp
+            .set_client_approval_mode(client_ref, approval_mode)?;
+        // A mode transition cannot inherit actions or runtime handles from the old policy.
+        self.public_mcp
+            .revoke_client_runtime(client_ref, &self.node_router);
+        Ok(())
+    }
+
+    pub(in crate::workspace) fn set_public_mcp_client_tool_group(
+        &mut self,
+        client_ref: &ClientRef,
+        tool_group: ToolGroup,
+        enabled: bool,
+    ) -> Result<(), String> {
+        self.public_mcp
+            .set_client_tool_group(client_ref, tool_group, enabled)?;
+        if !enabled {
+            self.public_mcp
+                .state
+                .approvals
+                .revoke_client_tool_group(client_ref, tool_group);
+            match tool_group {
+                ToolGroup::NodeSession => self
+                    .public_mcp
+                    .revoke_client_runtime(client_ref, &self.node_router),
+                ToolGroup::CommandExecute => self.public_mcp.revoke_client_commands(client_ref),
+                ToolGroup::Basic
+                | ToolGroup::ConnectionDirectory
+                | ToolGroup::ConnectionRead
+                | ToolGroup::CommandObserve => {}
+            }
         }
         Ok(())
     }
@@ -1022,6 +1095,27 @@ impl WorkspaceApp {
 }
 
 impl PublicMcpWorkspaceBridge {
+    fn revoke_client_commands(&self, client_ref: &ClientRef) {
+        let cancellations = {
+            let mut handles = self.runtime_handles.lock();
+            let command_refs = handles
+                .commands
+                .iter()
+                .filter_map(|(command_ref, record)| {
+                    (&record.client_ref == client_ref).then_some(command_ref.clone())
+                })
+                .collect::<Vec<_>>();
+            command_refs
+                .into_iter()
+                .filter_map(|command_ref| handles.commands.remove(&command_ref))
+                .map(|record| record.cancellation)
+                .collect::<Vec<_>>()
+        };
+        for cancellation in cancellations {
+            cancellation.cancel();
+        }
+    }
+
     fn revoke_client_runtime(&self, client_ref: &ClientRef, node_router: &NodeRouter) {
         self.state.approvals.revoke_client(client_ref);
         let (leases, cancellations) = {

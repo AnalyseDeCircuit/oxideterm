@@ -8,6 +8,7 @@ use serde::Serialize;
 use zeroize::Zeroizing;
 
 use crate::{
+    auth::ToolGroup,
     calls::PublicToolCall,
     handles::{ApprovalRef, ClientRef},
 };
@@ -176,6 +177,29 @@ impl ApprovalStore {
         let mut revoked = 0;
         for entry in entries.values_mut() {
             if &entry.projection.client_ref == client_ref
+                && matches!(
+                    entry.projection.status,
+                    ApprovalStatus::Pending | ApprovalStatus::Approved
+                )
+            {
+                entry.projection.status = ApprovalStatus::Rejected;
+                entry.call.take();
+                revoked += 1;
+            }
+        }
+        revoked
+    }
+
+    pub fn revoke_client_tool_group(&self, client_ref: &ClientRef, tool_group: ToolGroup) -> usize {
+        let mut entries = self.entries.lock();
+        let mut revoked = 0;
+        for entry in entries.values_mut() {
+            let matches_group = entry
+                .call
+                .as_ref()
+                .is_some_and(|call| call.required_group() == tool_group);
+            if &entry.projection.client_ref == client_ref
+                && matches_group
                 && matches!(
                     entry.projection.status,
                     ApprovalStatus::Pending | ApprovalStatus::Approved

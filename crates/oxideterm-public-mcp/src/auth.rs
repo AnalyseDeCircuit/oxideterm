@@ -9,7 +9,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::handles::ClientRef;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolGroup {
     Basic,
@@ -20,11 +20,32 @@ pub enum ToolGroup {
     CommandExecute,
 }
 
+impl ToolGroup {
+    pub const fn selectable() -> &'static [Self] {
+        &[
+            Self::ConnectionDirectory,
+            Self::ConnectionRead,
+            Self::NodeSession,
+            Self::CommandObserve,
+            Self::CommandExecute,
+        ]
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClientApprovalMode {
+    #[default]
+    Standard,
+    Unattended,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ClientProjection {
     pub client_ref: ClientRef,
     pub label: String,
     pub enabled: bool,
+    pub approval_mode: ClientApprovalMode,
     pub tool_groups: BTreeSet<ToolGroup>,
 }
 
@@ -91,6 +112,8 @@ struct PersistedClientRecord {
     client_ref: ClientRef,
     label: String,
     enabled: bool,
+    #[serde(default)]
+    approval_mode: ClientApprovalMode,
     tool_groups: BTreeSet<ToolGroup>,
     credential_digest: String,
 }
@@ -114,7 +137,7 @@ impl ClientRegistry {
             let bytes = fs::read(&path).map_err(ClientRegistryError::Read)?;
             let persisted: PersistedClientRegistry =
                 serde_json::from_slice(&bytes).map_err(ClientRegistryError::Decode)?;
-            if persisted.version != 1 {
+            if !matches!(persisted.version, 1 | 2) {
                 return Err(ClientRegistryError::UnsupportedVersion(persisted.version));
             }
             persisted
@@ -128,6 +151,7 @@ impl ClientRegistry {
                             client_ref: record.client_ref,
                             label: record.label,
                             enabled: record.enabled,
+                            approval_mode: record.approval_mode,
                             tool_groups,
                         },
                         credential_digest: decode_digest(&record.credential_digest)?,
@@ -146,6 +170,7 @@ impl ClientRegistry {
     pub fn register(
         &self,
         label: impl Into<String>,
+        approval_mode: ClientApprovalMode,
         tool_groups: impl IntoIterator<Item = ToolGroup>,
     ) -> Result<RegisteredClient, ClientRegistryError> {
         let mut credential_text = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
@@ -159,6 +184,7 @@ impl ClientRegistry {
             client_ref: ClientRef::new(),
             label: label.into(),
             enabled: true,
+            approval_mode,
             tool_groups,
         };
         let mut state = self.state.write();
@@ -229,6 +255,31 @@ impl ClientRegistry {
                 .find(|record| &record.projection.client_ref == client_ref)
                 .expect("client was found before persistence");
             record.projection.tool_groups = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub fn set_approval_mode(
+        &self,
+        client_ref: &ClientRef,
+        approval_mode: ClientApprovalMode,
+    ) -> Result<(), ClientRegistryError> {
+        let mut state = self.state.write();
+        let record = state
+            .clients
+            .iter_mut()
+            .find(|record| &record.projection.client_ref == client_ref)
+            .ok_or(ClientRegistryError::NotFound)?;
+        let previous = record.projection.approval_mode;
+        record.projection.approval_mode = approval_mode;
+        if let Err(error) = self.persist(&state) {
+            let record = state
+                .clients
+                .iter_mut()
+                .find(|record| &record.projection.client_ref == client_ref)
+                .expect("client was found before persistence");
+            record.projection.approval_mode = previous;
             return Err(error);
         }
         Ok(())
@@ -310,7 +361,7 @@ impl ClientRegistry {
             return Ok(());
         };
         let persisted = PersistedClientRegistry {
-            version: 1,
+            version: 2,
             clients: state
                 .clients
                 .iter()
@@ -318,6 +369,7 @@ impl ClientRegistry {
                     client_ref: record.projection.client_ref.clone(),
                     label: record.projection.label.clone(),
                     enabled: record.projection.enabled,
+                    approval_mode: record.projection.approval_mode,
                     tool_groups: record.projection.tool_groups.clone(),
                     credential_digest: encode_digest(&record.credential_digest),
                 })
@@ -361,10 +413,17 @@ mod tests {
         ));
         let registry = ClientRegistry::open(&registry_path).expect("open empty registry");
         let registered = registry
-            .register("integration client", [ToolGroup::Basic])
+            .register(
+                "integration client",
+                ClientApprovalMode::Standard,
+                [ToolGroup::Basic],
+            )
             .expect("register client");
         let credential = Zeroizing::new(registered.credential.expose().to_owned());
         let persisted = fs::read(&registry_path).expect("read persisted registry");
+        let persisted_json: serde_json::Value =
+            serde_json::from_slice(&persisted).expect("decode persisted registry");
+        assert_eq!(persisted_json["version"], 2);
         assert!(
             !persisted
                 .windows(credential.len())
@@ -377,6 +436,39 @@ mod tests {
             .authenticate_bearer(&authorization)
             .expect("authenticate persisted digest");
         assert_eq!(authenticated.client_ref, registered.projection.client_ref);
+
+        let legacy_client_ref = ClientRef::new();
+        let legacy_token = Zeroizing::new("legacy-high-entropy-test-token".to_owned());
+        let legacy_registry = serde_json::json!({
+            "version": 1,
+            "clients": [{
+                "client_ref": legacy_client_ref,
+                "label": "legacy client",
+                "enabled": true,
+                "tool_groups": ["basic"],
+                "credential_digest": encode_digest(&credential_digest(&legacy_token)),
+            }],
+        });
+        fs::write(
+            &registry_path,
+            serde_json::to_vec_pretty(&legacy_registry).expect("encode legacy registry"),
+        )
+        .expect("write legacy registry");
+        let migrated = ClientRegistry::open(&registry_path).expect("open legacy registry");
+        let legacy_projection = migrated
+            .get(&legacy_client_ref)
+            .expect("load legacy client");
+        assert_eq!(
+            legacy_projection.approval_mode,
+            ClientApprovalMode::Standard
+        );
+        migrated
+            .set_enabled(&legacy_client_ref, false)
+            .expect("persist migrated registry");
+        let migrated_json: serde_json::Value =
+            serde_json::from_slice(&fs::read(&registry_path).expect("read migrated registry"))
+                .expect("decode migrated registry");
+        assert_eq!(migrated_json["version"], 2);
 
         let _ = fs::remove_file(registry_path);
     }
