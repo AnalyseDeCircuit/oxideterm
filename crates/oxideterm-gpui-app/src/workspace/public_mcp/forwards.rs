@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use gpui::Context;
 use oxideterm_forwarding::{ForwardRule, ForwardStatus, ForwardType, ForwardUpdate};
 use oxideterm_public_mcp::{
     ClientRef, DomainRequest, ForwardKind, ForwardRef, NodeRef, PublicToolCall, ToolEnvelope,
@@ -14,6 +15,7 @@ use super::{
     PublicMcpForwardRecord, PublicMcpRuntimeHandles, WorkspaceApp, finish_serialized,
     node_lease_for_client,
 };
+use crate::workspace::forwards::PublicMcpForwardMutation;
 
 const PUBLIC_MCP_FORWARD_CAPACITY: usize = 512;
 const PUBLIC_MCP_FORWARD_CAPACITY_PER_CLIENT: usize = 128;
@@ -78,7 +80,11 @@ impl WorkspaceApp {
         finish_serialized(request, json!({ "forwards": forwards }));
     }
 
-    pub(super) fn handle_public_mcp_forwards_open(&self, request: DomainRequest) {
+    pub(super) fn handle_public_mcp_forwards_open(
+        &mut self,
+        request: DomainRequest,
+        cx: &mut Context<Self>,
+    ) {
         let PublicToolCall::ForwardsOpen(args) = &request.call else {
             return;
         };
@@ -126,54 +132,81 @@ impl WorkspaceApp {
         }
 
         let service = self.forwarding_service.clone();
-        let handles = self.public_mcp.runtime_handles.clone();
         let owner_connection_id = lease.saved_connection_id.clone();
         let check_health = args.check_health.unwrap_or(true);
         let persist = args.persist;
         let node_id = lease.node_id;
-        self.forwarding_runtime.spawn(async move {
-            let result = service
+        let worker_node_id = node_id.clone();
+        let worker = self.forwarding_runtime.spawn(async move {
+            service
                 .public_mcp_open_forward(
-                    &node_id,
+                    &worker_node_id,
                     owner_connection_id.as_deref(),
                     rule,
                     check_health,
                     persist,
                 )
-                .await;
-            match result {
-                Ok(mutation) => {
-                    let projection = {
-                        let mut handles = handles.lock();
-                        handles.forwards.get_mut(&forward_ref).map(|record| {
-                            record.persisted = mutation.persisted;
-                            public_forward_projection(forward_ref, record, &mutation.rule)
-                        })
-                    };
-                    if let Some(projection) = projection {
-                        finish_serialized(request, json!({ "forward": projection }));
-                    } else {
-                        service
-                            .public_mcp_revoke_forward(
-                                &node_id,
-                                &mutation.rule.id,
-                                mutation.persisted,
-                            )
-                            .await;
-                        request.finish(ToolEnvelope::failed(
-                            "The forward grant was revoked while opening",
-                        ));
-                    }
-                }
-                Err(_) => {
-                    handles.lock().forwards.remove(&forward_ref);
-                    request.finish(ToolEnvelope::failed("The forward could not be opened"));
-                }
-            }
+                .await
         });
+        cx.spawn(async move |workspace, cx| {
+            let result = worker.await;
+            let _ = workspace.update(cx, |workspace, cx| {
+                workspace.finish_public_mcp_forward_open(request, forward_ref, node_id, result, cx);
+            });
+        })
+        .detach();
     }
 
-    pub(super) fn handle_public_mcp_forwards_change(&self, request: DomainRequest) {
+    fn finish_public_mcp_forward_open(
+        &mut self,
+        request: DomainRequest,
+        forward_ref: ForwardRef,
+        node_id: NodeId,
+        result: Result<Result<PublicMcpForwardMutation, String>, tokio::task::JoinError>,
+        cx: &mut Context<Self>,
+    ) {
+        let Ok(Ok(mutation)) = result else {
+            self.public_mcp
+                .runtime_handles
+                .lock()
+                .forwards
+                .remove(&forward_ref);
+            request.finish(ToolEnvelope::failed("The forward could not be opened"));
+            return;
+        };
+        if mutation.persisted {
+            // Saved forwards are part of both .oxide export and Cloud Sync snapshots.
+            self.queue_cloud_sync_dirty_refresh(cx);
+        }
+        let projection = {
+            let mut handles = self.public_mcp.runtime_handles.lock();
+            handles.forwards.get_mut(&forward_ref).map(|record| {
+                record.persisted = mutation.persisted;
+                public_forward_projection(forward_ref.clone(), record, &mutation.rule)
+            })
+        };
+        let Some(projection) = projection else {
+            let service = self.forwarding_service.clone();
+            let forward_id = mutation.rule.id;
+            let persisted = mutation.persisted;
+            self.forwarding_runtime.spawn(async move {
+                service
+                    .public_mcp_revoke_forward(&node_id, &forward_id, persisted)
+                    .await;
+            });
+            request.finish(ToolEnvelope::failed(
+                "The forward grant was revoked while opening",
+            ));
+            return;
+        };
+        finish_serialized(request, json!({ "forward": projection }));
+    }
+
+    pub(super) fn handle_public_mcp_forwards_change(
+        &mut self,
+        request: DomainRequest,
+        cx: &mut Context<Self>,
+    ) {
         let PublicToolCall::ForwardsChange(args) = &request.call else {
             return;
         };
@@ -206,11 +239,10 @@ impl WorkspaceApp {
         }
 
         let service = self.forwarding_service.clone();
-        let handles = self.public_mcp.runtime_handles.clone();
         let forward_ref = args.forward_ref.clone();
         let owner_connection_id = record.owner_connection_id.clone();
-        self.forwarding_runtime.spawn(async move {
-            let result = service
+        let worker = self.forwarding_runtime.spawn(async move {
+            service
                 .public_mcp_change_forward(
                     &record.node_id,
                     owner_connection_id.as_deref(),
@@ -219,29 +251,50 @@ impl WorkspaceApp {
                     update,
                     record.persisted,
                 )
-                .await;
-            match result {
-                Ok(mutation) => {
-                    let projection = {
-                        let mut handles = handles.lock();
-                        let Some(live) = handles
-                            .forwards
-                            .get_mut(&forward_ref)
-                            .filter(|live| live.client_ref == request.client_ref)
-                        else {
-                            request.finish(ToolEnvelope::failed(
-                                "The forward grant was revoked while changing",
-                            ));
-                            return;
-                        };
-                        live.persisted |= mutation.persisted;
-                        public_forward_projection(forward_ref, live, &mutation.rule)
-                    };
-                    finish_serialized(request, json!({ "forward": projection }));
-                }
-                Err(_) => request.finish(ToolEnvelope::failed("The forward could not be changed")),
-            }
+                .await
         });
+        cx.spawn(async move |workspace, cx| {
+            let result = worker.await;
+            let _ = workspace.update(cx, |workspace, cx| {
+                workspace.finish_public_mcp_forward_change(request, forward_ref, result, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn finish_public_mcp_forward_change(
+        &mut self,
+        request: DomainRequest,
+        forward_ref: ForwardRef,
+        result: Result<Result<PublicMcpForwardMutation, String>, tokio::task::JoinError>,
+        cx: &mut Context<Self>,
+    ) {
+        let Ok(Ok(mutation)) = result else {
+            request.finish(ToolEnvelope::failed("The forward could not be changed"));
+            return;
+        };
+        if mutation.persisted {
+            // Persisted rule edits must invalidate the structured sync snapshot after completion.
+            self.queue_cloud_sync_dirty_refresh(cx);
+        }
+        let projection = {
+            let mut handles = self.public_mcp.runtime_handles.lock();
+            handles
+                .forwards
+                .get_mut(&forward_ref)
+                .filter(|live| live.client_ref == request.client_ref)
+                .map(|live| {
+                    live.persisted |= mutation.persisted;
+                    public_forward_projection(forward_ref, live, &mutation.rule)
+                })
+        };
+        let Some(projection) = projection else {
+            request.finish(ToolEnvelope::failed(
+                "The forward grant was revoked while changing",
+            ));
+            return;
+        };
+        finish_serialized(request, json!({ "forward": projection }));
     }
 
     pub(super) fn handle_public_mcp_forwards_stop(&self, request: DomainRequest) {
@@ -249,23 +302,79 @@ impl WorkspaceApp {
             return;
         };
         let forward_ref = args.forward_ref.clone();
-        self.start_public_mcp_forward_state_change(request, forward_ref, false);
+        self.start_public_mcp_forward_stop(request, forward_ref);
     }
 
-    pub(super) fn handle_public_mcp_forwards_restart(&self, request: DomainRequest) {
+    pub(super) fn handle_public_mcp_forwards_restart(
+        &mut self,
+        request: DomainRequest,
+        cx: &mut Context<Self>,
+    ) {
         let PublicToolCall::ForwardsRestart(args) = &request.call else {
             return;
         };
         let forward_ref = args.forward_ref.clone();
-        self.start_public_mcp_forward_state_change(request, forward_ref, true);
+        let Some(record) = forward_record_for_client(
+            &self.public_mcp.runtime_handles,
+            &request.client_ref,
+            &forward_ref,
+        ) else {
+            request.finish(ToolEnvelope::failed("The forward handle is unavailable"));
+            return;
+        };
+        let service = self.forwarding_service.clone();
+        let owner_connection_id = record.owner_connection_id.clone();
+        let worker = self.forwarding_runtime.spawn(async move {
+            service
+                .public_mcp_restart_forward(
+                    &record.node_id,
+                    owner_connection_id.as_deref(),
+                    &record.forward_id,
+                    record.persisted,
+                )
+                .await
+        });
+        cx.spawn(async move |workspace, cx| {
+            let result = worker.await;
+            let _ = workspace.update(cx, |workspace, cx| {
+                workspace.finish_public_mcp_forward_restart(request, forward_ref, result, cx);
+            });
+        })
+        .detach();
     }
 
-    fn start_public_mcp_forward_state_change(
-        &self,
+    fn finish_public_mcp_forward_restart(
+        &mut self,
         request: DomainRequest,
         forward_ref: ForwardRef,
-        restart: bool,
+        result: Result<Result<PublicMcpForwardMutation, String>, tokio::task::JoinError>,
+        cx: &mut Context<Self>,
     ) {
+        let Ok(Ok(mutation)) = result else {
+            request.finish(ToolEnvelope::failed("The forward could not be restarted"));
+            return;
+        };
+        if mutation.persisted {
+            // Restart updates the saved auto-start projection for persisted forwards.
+            self.queue_cloud_sync_dirty_refresh(cx);
+        }
+        let handles = self.public_mcp.runtime_handles.lock();
+        let Some(live) = handles
+            .forwards
+            .get(&forward_ref)
+            .filter(|live| live.client_ref == request.client_ref)
+        else {
+            request.finish(ToolEnvelope::failed(
+                "The forward grant was revoked during the operation",
+            ));
+            return;
+        };
+        let projection = public_forward_projection(forward_ref, live, &mutation.rule);
+        drop(handles);
+        finish_serialized(request, json!({ "forward": projection }));
+    }
+
+    fn start_public_mcp_forward_stop(&self, request: DomainRequest, forward_ref: ForwardRef) {
         let Some(record) = forward_record_for_client(
             &self.public_mcp.runtime_handles,
             &request.client_ref,
@@ -278,25 +387,13 @@ impl WorkspaceApp {
         let handles = self.public_mcp.runtime_handles.clone();
         let owner_connection_id = record.owner_connection_id.clone();
         self.forwarding_runtime.spawn(async move {
-            let result = if restart {
-                service
-                    .public_mcp_restart_forward(
-                        &record.node_id,
-                        owner_connection_id.as_deref(),
-                        &record.forward_id,
-                        record.persisted,
-                    )
-                    .await
-                    .map(|mutation| mutation.rule)
-            } else {
-                service
-                    .public_mcp_stop_forward(
-                        &record.node_id,
-                        owner_connection_id.as_deref(),
-                        &record.forward_id,
-                    )
-                    .await
-            };
+            let result = service
+                .public_mcp_stop_forward(
+                    &record.node_id,
+                    owner_connection_id.as_deref(),
+                    &record.forward_id,
+                )
+                .await;
             match result {
                 Ok(rule) => {
                     let handles = handles.lock();
@@ -314,16 +411,16 @@ impl WorkspaceApp {
                     drop(handles);
                     finish_serialized(request, json!({ "forward": projection }));
                 }
-                Err(_) => request.finish(ToolEnvelope::failed(if restart {
-                    "The forward could not be restarted"
-                } else {
-                    "The forward could not be stopped"
-                })),
+                Err(_) => request.finish(ToolEnvelope::failed("The forward could not be stopped")),
             }
         });
     }
 
-    pub(super) fn handle_public_mcp_forwards_remove(&self, request: DomainRequest) {
+    pub(super) fn handle_public_mcp_forwards_remove(
+        &mut self,
+        request: DomainRequest,
+        cx: &mut Context<Self>,
+    ) {
         let PublicToolCall::ForwardsRemove(args) = &request.call else {
             return;
         };
@@ -339,26 +436,37 @@ impl WorkspaceApp {
         let handles = self.public_mcp.runtime_handles.clone();
         let owner_connection_id = record.owner_connection_id.clone();
         let remove_saved = args.remove_saved;
-        self.forwarding_runtime.spawn(async move {
-            match service
+        let node_id = record.node_id.clone();
+        let forward_id = record.forward_id.clone();
+        let worker = self.forwarding_runtime.spawn(async move {
+            service
                 .public_mcp_remove_forward(
-                    &record.node_id,
+                    &node_id,
                     owner_connection_id.as_deref(),
-                    &record.forward_id,
+                    &forward_id,
                     remove_saved,
                 )
                 .await
-            {
-                Ok(saved_removed) => {
-                    invalidate_forward_records(&handles, &record.node_id, &record.forward_id);
-                    finish_serialized(
-                        request,
-                        json!({ "removed": true, "saved_definition_removed": saved_removed }),
-                    );
-                }
-                Err(_) => request.finish(ToolEnvelope::failed("The forward could not be removed")),
-            }
         });
+        cx.spawn(async move |workspace, cx| {
+            let result = worker.await;
+            let _ = workspace.update(cx, |workspace, cx| {
+                let Ok(Ok(saved_removed)) = result else {
+                    request.finish(ToolEnvelope::failed("The forward could not be removed"));
+                    return;
+                };
+                invalidate_forward_records(&handles, &record.node_id, &record.forward_id);
+                if saved_removed {
+                    // Removing a persisted rule changes both export and Cloud Sync contents.
+                    workspace.queue_cloud_sync_dirty_refresh(cx);
+                }
+                finish_serialized(
+                    request,
+                    json!({ "removed": true, "saved_definition_removed": saved_removed }),
+                );
+            });
+        })
+        .detach();
     }
 
     pub(super) fn handle_public_mcp_forwards_metrics(&self, request: DomainRequest) {

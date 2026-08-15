@@ -1277,11 +1277,17 @@ impl WorkspaceApp {
             }
             PublicToolCall::AddonsRemove(_) => self.handle_public_mcp_addons_remove(request, cx),
             PublicToolCall::ForwardsList(_) => self.handle_public_mcp_forwards_list(request),
-            PublicToolCall::ForwardsOpen(_) => self.handle_public_mcp_forwards_open(request),
-            PublicToolCall::ForwardsChange(_) => self.handle_public_mcp_forwards_change(request),
+            PublicToolCall::ForwardsOpen(_) => self.handle_public_mcp_forwards_open(request, cx),
+            PublicToolCall::ForwardsChange(_) => {
+                self.handle_public_mcp_forwards_change(request, cx)
+            }
             PublicToolCall::ForwardsStop(_) => self.handle_public_mcp_forwards_stop(request),
-            PublicToolCall::ForwardsRestart(_) => self.handle_public_mcp_forwards_restart(request),
-            PublicToolCall::ForwardsRemove(_) => self.handle_public_mcp_forwards_remove(request),
+            PublicToolCall::ForwardsRestart(_) => {
+                self.handle_public_mcp_forwards_restart(request, cx)
+            }
+            PublicToolCall::ForwardsRemove(_) => {
+                self.handle_public_mcp_forwards_remove(request, cx)
+            }
             PublicToolCall::ForwardsMetrics(_) => self.handle_public_mcp_forwards_metrics(request),
             PublicToolCall::ForwardsDiscoverPorts(_) => {
                 self.handle_public_mcp_forwards_discover_ports(request)
