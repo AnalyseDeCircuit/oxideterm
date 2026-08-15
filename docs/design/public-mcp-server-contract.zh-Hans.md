@@ -74,6 +74,7 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 - SFTP 文件读取和修改分别授权。`files_open` 为规范化远端根目录登记独立 SFTP 消费者，后续列表、元数据、分段读取、比较、写入、移动和删除都重新校验规范化路径边界。正文只经客户端自己的有界 artifact 传递；重连时先取得当前连接的消费者再释放旧消费者，`files_close` 不断开共享 SSH 节点。
 - `transfers_start` 在同一授权根内启动真实后台 SFTP 单文件上传或下载，除传输数据组外，上传还要求远端文件写入组，下载还要求远端文件读取组。进度和取消复用应用的传输控制器。上传源与下载产物都只能是客户端私有 artifact，本机临时路径不会进入结果；客户端撤销、工具组关闭、文件会话关闭或物理节点断开会取消仍在运行的传输。当前 artifact 数据面上限为 64 MiB，尚未保留可跨请求重启的部分文件，因此 `resume=true` 会明确拒绝；上传失败或取消时会如实报告可能存在远端部分文件。
 - IDE 工作区读取和结构化编辑分别授权。`workspaces_mount` 必须从客户端已有的 `file_session_ref` 派生，并再次规范化项目根；它创建独立的 Node Agent/SFTP IDE owner，不借用可见编辑器标签页，也不暴露 NodeId、TabId 或 GPUI Entity。树、文本读取和搜索都有硬上限；编辑使用编辑器核心校验 UTF-8 字节区间，并将客户端先前观察到的 revision 映射回真实 `SavedFileVersion` 做冲突检测。多文件写入不是服务端原子事务，后续文件失败时会尝试用刚写入的版本回滚前项，并明确报告回滚是否完整，不虚构持久 `undo_ref`。关闭工作区、父文件会话、客户端授权或物理节点只释放该工作区自己的 IDE consumer。
+- `oxideterm mcp bridge` 已提供受管 stdio 入口：它只把逐行 JSON-RPC 转交给正在运行的回环 HTTP 服务，不拥有业务权限。端点默认从应用生成的非秘密 discovery record 取得；Bearer 凭据只从用户指定的环境变量读取，绝不接受命令行明文。bridge 拒绝非回环 URL、代理、重定向、超限消息和未认证响应；应用未运行时，保留的端口记录只用于下次优先复用，连接仍会明确失败。
 - 终端会话、内容观察和输入控制分别授权。`terminals_open` 只创建应用真实持有的可见终端页：SSH 必须使用已取得的 `node_ref`，保存的 Mosh、Telnet 和串口使用 `connection_ref`，本地终端只允许一次性启动且不会进入保存、导出或同步。读取仅返回有界屏幕快照与 generation cursor；搜索复用终端后端；输入正文不进入审计，普通模式批准页只显示输入类型、长度与回车意图。关闭 SSH 终端只关闭自己的 terminal consumer，不等同于物理节点断开。
 - 终端录制控制和录制内容分别授权。`recordings_control` 复用真实 `TerminalPane` recorder，同一终端不会覆盖既有应用录制；当前后端只支持 output-only，因此 `capture_input=true` 会明确拒绝。停止时保留有界 asciicast 正文，搜索只给有界片段，导出只生成客户端私有且会过期的 artifact，不接受任意本机路径。终端关闭或控制授权关闭会先停止活动录制；客户端撤销会零化保留正文并撤销导出 artifact。
 - 远程桌面会话、画面观察、键鼠控制和剪贴板分别授权。`desktops_open` 只解析保存的 RDP/VNC `connection_ref`，凭据由设备受保护存储直接移交真实 provider，会话仍由可见标签页和 `RemoteDesktopSessionEntity` 持有。隐藏标签页只有在客户端启用画面观察时才继续消费最新帧；`desktops_frame` 把有界 CPU framebuffer 在后台编码成客户端私有 PNG artifact。输入必须携带当前 graphics epoch，坐标按 server framebuffer 校验；远端剪贴板来自会话内零化缓存，绝不读取系统剪贴板冒充远端内容。关闭或撤权会释放所有输入、关闭 helper，并撤销该桌面的帧和剪贴板 artifact。
@@ -82,7 +83,7 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 - 停用或撤销客户端会撤销待批准动作、取消命令并释放其 Public MCP 消费者；`nodes_release` 不会把其他终端、SFTP 或转发消费者仍在使用的物理节点断开。
 - 应用锁定时会拒绝新的 MCP 领域请求、撤销待批准动作、取消 MCP 命令并释放 MCP 节点消费者；解锁后客户端凭据仍有效，但必须重新取得运行时句柄。
 
-stdio bridge 仍按后续阶段实施。已接入领域尚未支持的目标或动作会明确拒绝；其余领域在真实 broker 和生命周期接通前不会出现在 `tools/list`，也不会用空壳结果冒充支持。
+已接入领域尚未支持的目标或动作会明确拒绝；其余领域在真实 broker 和生命周期接通前不会出现在 `tools/list`，也不会用空壳结果冒充支持。
 
 ## 2. 服务形态与协议
 
@@ -92,7 +93,7 @@ stdio bridge 仍按后续阶段实施。已接入领域尚未支持的目标或�
 
 | 入口 | 使用情形 | 约束 |
 |---|---|---|
-| 受管 stdio bridge | MCP 客户端只能启动子进程 | bridge 从受保护的本地发现记录取得一次性连接材料，随后把 stdio 转给应用；它不持有业务权限。 |
+| 受管 stdio bridge | MCP 客户端只能启动子进程 | `oxideterm mcp bridge` 从本地 discovery record 取得回环端点，从 `OXIDETERM_MCP_TOKEN`（或 `--token-env` 指定变量）取得一次性显示的客户端 Bearer；随后只转交 stdio JSON-RPC，不持有或扩大业务权限。 |
 | 回环 Streamable HTTP | 长驻客户端或原生 MCP 配置 | 仅绑定 `127.0.0.1`、`::1` 或受当前用户保护的本地 socket；每个客户端配置有独立连接材料。 |
 
 启用 Public MCP 后，应用为每个已批准客户端生成独立的 `client_ref` 和不可导出的连接凭据。凭据只写入应用生成的客户端配置、受保护发现记录或 OS 凭据存储；不会出现在工具结果、审计、日志、终端或同步对象里。停用客户端、轮换凭据、退出应用或撤销客户端会立即使相关会话失效。

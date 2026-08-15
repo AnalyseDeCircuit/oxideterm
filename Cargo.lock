@@ -7606,6 +7606,7 @@ dependencies = [
  "oxideterm-settings",
  "oxideterm-ssh",
  "oxideterm-ssh-launch",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",

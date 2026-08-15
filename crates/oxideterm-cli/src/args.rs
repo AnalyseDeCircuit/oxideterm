@@ -12,6 +12,7 @@ mod common;
 mod connections;
 mod diagnostics;
 mod forwards;
+mod mcp;
 mod oxide;
 mod plugins;
 mod portable;
@@ -29,6 +30,7 @@ pub use common::*;
 pub use connections::*;
 pub use diagnostics::*;
 pub use forwards::*;
+pub use mcp::*;
 pub use oxide::*;
 pub use plugins::*;
 pub use portable::*;
@@ -245,6 +247,8 @@ pub enum Command {
     #[command(name = "cloud-sync")]
     #[command(about = "Inspect, configure, and operate cloud sync")]
     CloudSync(CloudSyncCommand),
+    #[command(about = "Connect external MCP clients to the running native app")]
+    Mcp(McpCommand),
     #[command(about = "Print resolved OxideTerm config and data paths")]
     Paths(OutputArgs),
     #[command(about = "Print a read-only diagnostics snapshot")]

@@ -79,6 +79,16 @@ oxideterm cloud-sync secrets status --json
 
 Secret commands must only print hints or status. Use stdin or environment variables for secret writes.
 
+## External MCP stdio bridge
+
+When an external client supports stdio MCP only, first create a client under **Settings → Network & Proxy → External MCP Control** and copy its one-time credential. Configure the client command as:
+
+```sh
+OXIDETERM_MCP_TOKEN='<client credential>' oxideterm mcp bridge
+```
+
+The bridge discovers the running loopback endpoint from the active configuration directory. Add the same `--profile` or `--config-dir` used by the app when applicable. Set `OXIDETERM_MCP_ENDPOINT` or `--endpoint` only when automatic discovery is unavailable; the override must still be an HTTP `/mcp` URL on `localhost`, `127.0.0.1`, or `::1`. Store the credential in the external client's secret environment settings, never in command arguments, logs, or project files.
+
 ## Batch Plans
 
 Batch plans combine several changes into one reviewed operation:

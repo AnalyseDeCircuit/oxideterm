@@ -18,6 +18,7 @@ mod error;
 mod errors;
 mod forwards;
 mod json_query;
+mod mcp;
 mod output;
 mod oxide;
 mod paths;
@@ -74,6 +75,7 @@ fn run(cli: Cli) -> CliResult<i32> {
             cloud_sync::run(command)?;
             Ok(0)
         }
+        Command::Mcp(command) => mcp::run(command),
         Command::Paths(args) => {
             diagnose::show_paths(args)?;
             Ok(0)

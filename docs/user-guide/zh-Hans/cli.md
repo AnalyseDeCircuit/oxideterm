@@ -79,6 +79,16 @@ oxideterm cloud-sync secrets status --json
 
 凭据命令只能输出提示或状态。写入凭据时使用标准输入或环境变量。
 
+## 外部 MCP stdio bridge
+
+外部客户端只支持 stdio MCP 时，先在 OxideTerm 的“设置 → 网络与代理 → 外部 MCP 控制”创建客户端并复制只显示一次的凭据，再把客户端命令配置为：
+
+```sh
+OXIDETERM_MCP_TOKEN='<客户端凭据>' oxideterm mcp bridge
+```
+
+bridge 会从当前配置目录发现正在运行的回环端点。使用命名 profile 时，客户端命令也要带相同的 `--profile`；自定义配置目录则带 `--config-dir`。只有自动发现不可用时才设置 `OXIDETERM_MCP_ENDPOINT` 或 `--endpoint`，且它必须是 `http://localhost.../mcp`、`127.0.0.1` 或 `::1`。凭据只能放在外部客户端的秘密环境设置中，不要放进命令参数、日志或项目文件。
+
 ## Batch Plans
 
 batch plan 可以把多个变更合并成一次可审查操作：

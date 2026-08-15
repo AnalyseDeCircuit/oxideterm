@@ -21,7 +21,8 @@ oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-ssh-launch = { path = "../oxideterm-ssh-launch" }
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["io-std"] }
 zeroize.workspace = true

@@ -269,10 +269,7 @@ impl PublicMcpWorkspaceBridge {
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join(PUBLIC_MCP_CLIENTS_FILE);
-        let endpoint_state_path = settings_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join(PUBLIC_MCP_ENDPOINT_FILE);
+        let endpoint_state_path = public_mcp_endpoint_state_path(settings_path);
         let (clients, registry_error) = match ClientRegistry::open(clients_path) {
             Ok(clients) => (Arc::new(clients), None),
             Err(error) => (Arc::new(ClientRegistry::default()), Some(error.to_string())),
@@ -2263,6 +2260,13 @@ fn read_endpoint_port(path: &Path) -> Option<u16> {
     let bytes = std::fs::read(path).ok()?;
     let state: PublicMcpEndpointState = serde_json::from_slice(&bytes).ok()?;
     (state.version == 1 && state.port != 0).then_some(state.port)
+}
+
+fn public_mcp_endpoint_state_path(settings_path: &Path) -> PathBuf {
+    settings_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(PUBLIC_MCP_ENDPOINT_FILE)
 }
 
 fn persist_endpoint_port(path: &Path, port: u16) -> std::io::Result<()> {
