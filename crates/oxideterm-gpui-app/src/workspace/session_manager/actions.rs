@@ -756,6 +756,10 @@ impl WorkspaceApp {
             }
             session_manager.set_status(Some(status), cx)
         });
+        if deleted {
+            // Telnet profiles participate in the same Cloud Sync snapshot as other saved sessions.
+            self.queue_cloud_sync_dirty_refresh(cx);
+        }
     }
 
     pub(super) fn delete_mosh_profile(&mut self, id: &str, cx: &mut Context<Self>) {

@@ -90,6 +90,8 @@ impl WorkspaceApp {
             .ensure_connection_ref(&request.client_ref, saved_key.clone());
         let revision = connection_revision(&self.connection_store, &saved_key)
             .unwrap_or_else(|| "unavailable".to_owned());
+        // Public MCP mutations share the same Cloud Sync invalidation boundary as UI edits.
+        self.queue_cloud_sync_dirty_refresh(cx);
         cx.notify();
         finish_serialized(
             request,
@@ -138,6 +140,8 @@ impl WorkspaceApp {
                 &args.connection_ref,
                 &connection_key,
             );
+            // Removing saved metadata does not disconnect an already leased physical node.
+            self.queue_cloud_sync_dirty_refresh(cx);
             cx.notify();
         }
         finish_serialized(request, json!({ "removed": removed }));
@@ -195,7 +199,11 @@ impl WorkspaceApp {
                     return;
                 }
             };
-        cx.notify();
+        if stored {
+            // Credential metadata is syncable even though the protected value never leaves storage.
+            self.queue_cloud_sync_dirty_refresh(cx);
+            cx.notify();
+        }
         finish_serialized(
             request,
             json!({
@@ -232,7 +240,11 @@ impl WorkspaceApp {
                 return;
             }
         };
-        cx.notify();
+        if forgotten {
+            // Forgetting a protected value also changes the syncable credential projection.
+            self.queue_cloud_sync_dirty_refresh(cx);
+            cx.notify();
+        }
         finish_serialized(
             request,
             json!({
