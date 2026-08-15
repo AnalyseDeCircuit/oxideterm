@@ -18,6 +18,8 @@ pub enum ToolGroup {
     NodeSession,
     CommandObserve,
     CommandExecute,
+    AuditRead,
+    ArtifactTransfer,
 }
 
 impl ToolGroup {
@@ -28,6 +30,8 @@ impl ToolGroup {
             Self::NodeSession,
             Self::CommandObserve,
             Self::CommandExecute,
+            Self::AuditRead,
+            Self::ArtifactTransfer,
         ]
     }
 }

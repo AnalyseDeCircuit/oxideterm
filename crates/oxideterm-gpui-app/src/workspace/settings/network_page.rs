@@ -87,6 +87,10 @@ fn public_mcp_tool_group_label_key(tool_group: oxideterm_public_mcp::ToolGroup) 
         oxideterm_public_mcp::ToolGroup::CommandExecute => {
             "settings_view.network.mcp_group_command_execute"
         }
+        oxideterm_public_mcp::ToolGroup::AuditRead => "settings_view.network.mcp_group_audit_read",
+        oxideterm_public_mcp::ToolGroup::ArtifactTransfer => {
+            "settings_view.network.mcp_group_artifact_transfer"
+        }
     }
 }
 

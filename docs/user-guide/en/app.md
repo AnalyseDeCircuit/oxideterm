@@ -149,11 +149,11 @@ External editors, command-line AI tools, and other MCP clients can use saved SSH
 5. In standard mode, review the actual client, target, and command under **Pending Actions** in OxideTerm, then have the client call `mcp_commit_action`. Full-access mode executes directly.
 6. Use the returned `command_ref` to query state and read bounded stdout and stderr ranges.
 
-The current implementation exposes saved SSH connections, NodeRouter node leases, and SSH exec commands. Terminal-screen, SFTP, Host Tools, forwarding, remote-desktop, and sync tools are not listed until their real domain brokers are connected. Releasing an MCP node lease does not disconnect a physical SSH node still used by terminal, SFTP, or forwarding consumers; only an explicitly approved `nodes_disconnect` does that.
+The current implementation exposes saved SSH connections, NodeRouter node leases, SSH exec commands, bounded temporary artifacts, and the current client's redacted MCP audit records. Terminal-screen, SFTP, Host Tools, forwarding, remote-desktop, and sync tools are not listed until their real domain brokers are connected. Releasing an MCP node lease does not disconnect a physical SSH node still used by terminal, SFTP, or forwarding consumers; only an explicitly approved `nodes_disconnect` does that.
 
 OxideTerm stores only a digest of each client credential. Disabling or revoking a client immediately cancels its commands, pending actions, and node leases. The endpoint, authorization records, and credential are excluded from ordinary settings, `.oxide` exports, and cloud sync.
 
-Full-access mode does not enable every tool. Each client still needs explicit connection-directory, connection-detail, SSH-node, command-output, and command-execution grants. Disabled tools are neither advertised nor callable. Bearer authentication, app lock, secret non-disclosure, and audit remain active in both modes.
+Full-access mode does not enable every tool. Each client still needs explicit grants for connection, node, command, audit, and temporary-content groups. Disabled tools are neither advertised nor callable. Bearer authentication, app lock, secret non-disclosure, and audit remain active in both modes.
 
 ## Settings
 

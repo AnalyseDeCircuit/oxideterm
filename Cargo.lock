@@ -8251,6 +8251,7 @@ dependencies = [
 name = "oxideterm-public-mcp"
 version = "2.0.20"
 dependencies = [
+ "base64 0.22.1",
  "bytes",
  "http",
  "http-body-util",
@@ -8264,6 +8265,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "subtle",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",

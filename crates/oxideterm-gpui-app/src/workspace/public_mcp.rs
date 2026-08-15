@@ -5,14 +5,15 @@ use std::{
     time::Duration,
 };
 
+use base64::Engine;
 use gpui::{App, Context, Task};
 use oxideterm_connections::{ConnectionInfo, ConnectionStore};
 use oxideterm_gpui_terminal::{TerminalNotice, TerminalNoticeVariant};
 use oxideterm_public_mcp::{
-    ApprovalRef, ApprovalStatus, ClientApprovalMode, ClientCredential, ClientProjection, ClientRef,
-    ClientRegistry, CommandRef, ConnectionRef, DomainBroker, DomainMessage, DomainRequest,
-    DomainRequestReceiver, NodeRef, PublicMcpHttpServer, PublicMcpState, PublicToolCall,
-    ToolEnvelope, ToolGroup, ToolOutcome, start_http_server,
+    ApprovalRef, ApprovalStatus, AuditQuery, ClientApprovalMode, ClientCredential,
+    ClientProjection, ClientRef, ClientRegistry, CommandRef, ConnectionRef, DomainBroker,
+    DomainMessage, DomainRequest, DomainRequestReceiver, NodeRef, PublicMcpHttpServer,
+    PublicMcpState, PublicToolCall, ToolEnvelope, ToolGroup, ToolOutcome, start_http_server,
 };
 use oxideterm_session_adapter::ssh_config_from_saved_connection;
 use oxideterm_ssh::{ConnectionConsumer, NodeId, NodeRouter, SshTransportError};
@@ -133,6 +134,7 @@ impl PublicMcpWorkspaceBridge {
             clients,
             approvals: Arc::default(),
             audit: Arc::new(oxideterm_public_mcp::AuditStore::new(2_048)),
+            artifacts: Arc::default(),
             broker,
         });
         let preferred_port = read_endpoint_port(&endpoint_state_path).unwrap_or(0);
@@ -516,10 +518,14 @@ impl WorkspaceApp {
                     .public_mcp
                     .revoke_client_runtime(client_ref, &self.node_router),
                 ToolGroup::CommandExecute => self.public_mcp.revoke_client_commands(client_ref),
+                ToolGroup::ArtifactTransfer => {
+                    self.public_mcp.state.artifacts.revoke_client(client_ref)
+                }
                 ToolGroup::Basic
                 | ToolGroup::ConnectionDirectory
                 | ToolGroup::ConnectionRead
-                | ToolGroup::CommandObserve => {}
+                | ToolGroup::CommandObserve
+                | ToolGroup::AuditRead => {}
             }
         }
         Ok(())
@@ -582,6 +588,9 @@ impl WorkspaceApp {
             PublicToolCall::CommandState(_) => self.handle_public_mcp_command_state(request),
             PublicToolCall::CommandOutput(_) => self.handle_public_mcp_command_output(request),
             PublicToolCall::CancelCommand(_) => self.handle_public_mcp_cancel_command(request),
+            PublicToolCall::StageArtifact(_) => self.handle_public_mcp_stage_artifact(request),
+            PublicToolCall::ReadArtifact(_) => self.handle_public_mcp_read_artifact(request),
+            PublicToolCall::AuditSearch(_) => self.handle_public_mcp_audit_search(request),
         }
     }
 
@@ -1092,6 +1101,67 @@ impl WorkspaceApp {
         }
         finish_serialized(request, json!({ "cancelled": cancelled }));
     }
+
+    fn handle_public_mcp_stage_artifact(&self, request: DomainRequest) {
+        let PublicToolCall::StageArtifact(args) = &request.call else {
+            return;
+        };
+        match self.public_mcp.state.artifacts.stage(
+            request.client_ref.clone(),
+            &args.bytes,
+            args.media_type.clone(),
+            args.name.clone(),
+        ) {
+            Ok(artifact) => finish_serialized(request, json!({ "artifact": artifact })),
+            Err(error) => request.finish(ToolEnvelope::failed(error.to_string())),
+        }
+    }
+
+    fn handle_public_mcp_read_artifact(&self, request: DomainRequest) {
+        let PublicToolCall::ReadArtifact(args) = &request.call else {
+            return;
+        };
+        match self.public_mcp.state.artifacts.read(
+            &request.client_ref,
+            &args.artifact_ref,
+            args.offset,
+            args.length,
+        ) {
+            Ok(page) => {
+                // Only the requested bounded page crosses the protocol boundary.
+                let bytes_base64 =
+                    base64::engine::general_purpose::STANDARD.encode(page.bytes.as_slice());
+                finish_serialized(
+                    request,
+                    json!({
+                        "artifact": page.projection,
+                        "offset": page.offset,
+                        "bytes_base64": bytes_base64,
+                        "next_offset": page.next_offset,
+                    }),
+                );
+            }
+            Err(error) => request.finish(ToolEnvelope::failed(error.to_string())),
+        }
+    }
+
+    fn handle_public_mcp_audit_search(&self, request: DomainRequest) {
+        let PublicToolCall::AuditSearch(args) = &request.call else {
+            return;
+        };
+        let page = self.public_mcp.state.audit.search(
+            &request.client_ref,
+            AuditQuery {
+                after_ms: args.after_ms,
+                before_ms: args.before_ms,
+                tool_name: args.tool.as_deref(),
+                target: args.target_ref.as_deref(),
+                cursor: args.cursor.as_ref(),
+                limit: args.limit as usize,
+            },
+        );
+        finish_serialized(request, json!(page));
+    }
 }
 
 impl PublicMcpWorkspaceBridge {
@@ -1118,6 +1188,7 @@ impl PublicMcpWorkspaceBridge {
 
     fn revoke_client_runtime(&self, client_ref: &ClientRef, node_router: &NodeRouter) {
         self.state.approvals.revoke_client(client_ref);
+        self.state.artifacts.revoke_client(client_ref);
         let (leases, cancellations) = {
             let mut handles = self.runtime_handles.lock();
             let node_refs = handles
@@ -1190,6 +1261,8 @@ fn all_tool_groups() -> BTreeSet<ToolGroup> {
         ToolGroup::NodeSession,
         ToolGroup::CommandObserve,
         ToolGroup::CommandExecute,
+        ToolGroup::AuditRead,
+        ToolGroup::ArtifactTransfer,
     ])
 }
 

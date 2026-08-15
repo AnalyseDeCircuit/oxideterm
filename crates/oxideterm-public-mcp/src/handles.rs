@@ -71,3 +71,4 @@ opaque_handle!(CommandRef, "command_");
 opaque_handle!(OperationRef, "operation_");
 opaque_handle!(ApprovalRef, "approval_");
 opaque_handle!(AuditRef, "audit_");
+opaque_handle!(ArtifactRef, "artifact_");

@@ -7,7 +7,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     auth::ToolGroup,
-    handles::{CommandRef, ConnectionRef, NodeRef},
+    handles::{ArtifactRef, AuditRef, CommandRef, ConnectionRef, NodeRef},
 };
 
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
@@ -82,8 +82,61 @@ pub struct CancelCommandArgs {
     pub command_ref: CommandRef,
 }
 
+pub struct StageArtifactArgs {
+    pub bytes: Zeroizing<Vec<u8>>,
+    pub media_type: String,
+    pub name: Option<String>,
+}
+
+impl fmt::Debug for StageArtifactArgs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StageArtifactArgs")
+            .field(
+                "bytes",
+                &format_args!("[REDACTED; {} bytes]", self.bytes.len()),
+            )
+            .field("media_type", &self.media_type)
+            .field("name", &self.name)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ReadArtifactArgs {
+    pub artifact_ref: ArtifactRef,
+    #[serde(default)]
+    pub offset: u64,
+    #[serde(default = "default_artifact_read_length")]
+    pub length: u32,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct AuditSearchArgs {
+    #[serde(default)]
+    pub after_ms: Option<u128>,
+    #[serde(default)]
+    pub before_ms: Option<u128>,
+    #[serde(default)]
+    pub tool: Option<String>,
+    #[serde(default)]
+    pub target_ref: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<AuditRef>,
+    #[serde(default = "default_audit_limit")]
+    pub limit: u32,
+}
+
 fn default_output_limit() -> u32 {
     64 * 1024
+}
+
+fn default_artifact_read_length() -> u32 {
+    256 * 1024
+}
+
+fn default_audit_limit() -> u32 {
+    50
 }
 
 pub enum PublicToolCall {
@@ -97,6 +150,9 @@ pub enum PublicToolCall {
     CommandState(CommandStateArgs),
     CommandOutput(CommandOutputArgs),
     CancelCommand(CancelCommandArgs),
+    StageArtifact(StageArtifactArgs),
+    ReadArtifact(ReadArtifactArgs),
+    AuditSearch(AuditSearchArgs),
 }
 
 impl PublicToolCall {
@@ -112,6 +168,9 @@ impl PublicToolCall {
             Self::CommandState(_) => "commands_state",
             Self::CommandOutput(_) => "commands_output",
             Self::CancelCommand(_) => "commands_cancel",
+            Self::StageArtifact(_) => "artifacts_stage",
+            Self::ReadArtifact(_) => "artifacts_read",
+            Self::AuditSearch(_) => "mcp_audit_search",
         }
     }
 
@@ -125,6 +184,8 @@ impl PublicToolCall {
             | Self::DisconnectNode(_) => ToolGroup::NodeSession,
             Self::StartCommand(_) | Self::CancelCommand(_) => ToolGroup::CommandExecute,
             Self::CommandState(_) | Self::CommandOutput(_) => ToolGroup::CommandObserve,
+            Self::StageArtifact(_) | Self::ReadArtifact(_) => ToolGroup::ArtifactTransfer,
+            Self::AuditSearch(_) => ToolGroup::AuditRead,
         }
     }
 
@@ -147,6 +208,9 @@ impl PublicToolCall {
             Self::CommandState(args) => args.command_ref.to_string(),
             Self::CommandOutput(args) => args.command_ref.to_string(),
             Self::CancelCommand(args) => args.command_ref.to_string(),
+            Self::StageArtifact(_) => "artifact staging".to_owned(),
+            Self::ReadArtifact(args) => args.artifact_ref.to_string(),
+            Self::AuditSearch(_) => "audit log".to_owned(),
         }
     }
 }

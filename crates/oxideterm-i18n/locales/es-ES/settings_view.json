@@ -1490,6 +1490,8 @@
       "mcp_group_node_session": "SSH nodes",
       "mcp_group_command_observe": "Command output",
       "mcp_group_command_execute": "Command execution",
+      "mcp_group_audit_read": "MCP audit records",
+      "mcp_group_artifact_transfer": "Temporary content transfer",
       "client_enabled": "Enabled",
       "client_disabled": "Disabled",
       "enable_client": "Enable",

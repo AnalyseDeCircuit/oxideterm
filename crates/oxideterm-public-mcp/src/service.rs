@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use base64::Engine;
 use http::{header::AUTHORIZATION, request::Parts};
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
@@ -17,13 +18,15 @@ use zeroize::Zeroizing;
 
 use crate::{
     approval::ApprovalStore,
+    artifact::ArtifactStore,
     audit::{AuditAuthorization, AuditStore},
     auth::{ClientApprovalMode, ClientProjection, ClientRegistry, ToolGroup},
     broker::DomainBroker,
     calls::{
-        BrowseConnectionsArgs, CancelCommandArgs, CommandOutputArgs, CommandStateArgs,
-        ConnectNodeArgs, DescribeConnectionArgs, DisconnectNodeArgs, InspectNodeArgs,
-        PublicToolCall, ReleaseNodeArgs, StartCommandArgs, ToolEnvelope, ToolOutcome,
+        AuditSearchArgs, BrowseConnectionsArgs, CancelCommandArgs, CommandOutputArgs,
+        CommandStateArgs, ConnectNodeArgs, DescribeConnectionArgs, DisconnectNodeArgs,
+        InspectNodeArgs, PublicToolCall, ReadArtifactArgs, ReleaseNodeArgs, StageArtifactArgs,
+        StartCommandArgs, ToolEnvelope, ToolOutcome,
     },
     handles::{ApprovalRef, ClientRef, NodeRef},
 };
@@ -31,6 +34,7 @@ use crate::{
 const TOOL_LIST_CACHE_TTL_MS: u64 = 1_000;
 const COMMAND_TEXT_LIMIT_BYTES: usize = 64 * 1024;
 const WORKING_DIRECTORY_LIMIT_BYTES: usize = 16 * 1024;
+const ARTIFACT_STAGE_LIMIT_BYTES: usize = 512 * 1024;
 
 #[derive(Clone)]
 pub struct PublicMcpService {
@@ -41,6 +45,7 @@ pub struct PublicMcpState {
     pub clients: Arc<ClientRegistry>,
     pub approvals: Arc<ApprovalStore>,
     pub audit: Arc<AuditStore>,
+    pub artifacts: Arc<ArtifactStore>,
     pub broker: Arc<DomainBroker>,
 }
 
@@ -66,6 +71,31 @@ struct StartCommandMetadata {
     node_ref: NodeRef,
     #[serde(default)]
     working_directory: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[expect(
+    dead_code,
+    reason = "this type exists only to generate the public tool schema"
+)]
+struct StageArtifactSchema {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    bytes_base64: Option<String>,
+    #[serde(default)]
+    media_type: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StageArtifactMetadata {
+    #[serde(default)]
+    media_type: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -348,6 +378,35 @@ impl ServerHandler for PublicMcpService {
                 }
                 Err(error) => *error,
             },
+            "artifacts_stage" => match parse_stage_artifact(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::StageArtifact(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "artifacts_read" => match parse_arguments::<ReadArtifactArgs>(arguments) {
+                Ok(args) if args.length > 0 && args.length <= 256 * 1024 => {
+                    self.execute_call(&client, PublicToolCall::ReadArtifact(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "The artifact read length must be between 1 and 262144 bytes",
+                ),
+                Err(error) => *error,
+            },
+            "mcp_audit_search" => match parse_arguments::<AuditSearchArgs>(arguments) {
+                Ok(args) if args.limit > 0 && args.limit <= 200 => {
+                    self.execute_call(&client, PublicToolCall::AuditSearch(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "The audit result limit must be between 1 and 200",
+                ),
+                Err(error) => *error,
+            },
             _ => tool_error("unknown_tool", "The requested tool is not implemented"),
         };
         Ok(result.into())
@@ -460,6 +519,27 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             false,
             false,
         ),
+        define_tool::<StageArtifactSchema>(
+            "artifacts_stage",
+            "Stage bounded content in OxideTerm's client-scoped temporary artifact store.",
+            ToolGroup::ArtifactTransfer,
+            false,
+            false,
+        ),
+        define_tool::<ReadArtifactArgs>(
+            "artifacts_read",
+            "Read a bounded range from a temporary artifact owned by this client.",
+            ToolGroup::ArtifactTransfer,
+            true,
+            false,
+        ),
+        define_tool::<AuditSearchArgs>(
+            "mcp_audit_search",
+            "Search this client's own redacted Public MCP audit records.",
+            ToolGroup::AuditRead,
+            true,
+            false,
+        ),
     ]
 }
 
@@ -529,6 +609,51 @@ fn parse_start_command(mut arguments: JsonObject) -> Result<StartCommandArgs, Bo
         node_ref: metadata.node_ref,
         command,
         working_directory: metadata.working_directory.map(Zeroizing::new),
+    })
+}
+
+fn parse_stage_artifact(
+    mut arguments: JsonObject,
+) -> Result<StageArtifactArgs, Box<CallToolResult>> {
+    let content = arguments.remove("content");
+    let bytes_base64 = arguments.remove("bytes_base64");
+    let (bytes, default_media_type) = match (content, bytes_base64) {
+        (Some(Value::String(content)), None) if content.len() <= ARTIFACT_STAGE_LIMIT_BYTES => (
+            Zeroizing::new(content.into_bytes()),
+            "text/plain; charset=utf-8",
+        ),
+        (None, Some(Value::String(encoded))) => {
+            let encoded = Zeroizing::new(encoded);
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(encoded.as_bytes())
+                .map_err(|_| {
+                    Box::new(tool_error(
+                        "invalid_arguments",
+                        "bytes_base64 must contain valid standard Base64",
+                    ))
+                })?;
+            if decoded.len() > ARTIFACT_STAGE_LIMIT_BYTES {
+                return Err(Box::new(tool_error(
+                    "invalid_arguments",
+                    "The decoded artifact exceeds the supported staging limit",
+                )));
+            }
+            (Zeroizing::new(decoded), "application/octet-stream")
+        }
+        _ => {
+            return Err(Box::new(tool_error(
+                "invalid_arguments",
+                "Provide exactly one bounded content or bytes_base64 value",
+            )));
+        }
+    };
+    let metadata = parse_arguments::<StageArtifactMetadata>(arguments)?;
+    Ok(StageArtifactArgs {
+        bytes,
+        media_type: metadata
+            .media_type
+            .unwrap_or_else(|| default_media_type.to_owned()),
+        name: metadata.name,
     })
 }
 

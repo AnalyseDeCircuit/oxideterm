@@ -1490,6 +1490,8 @@
       "mcp_group_node_session": "SSH 节点",
       "mcp_group_command_observe": "命令输出",
       "mcp_group_command_execute": "命令执行",
+      "mcp_group_audit_read": "MCP 审计记录",
+      "mcp_group_artifact_transfer": "临时内容传输",
       "client_enabled": "已启用",
       "client_disabled": "已停用",
       "enable_client": "启用",

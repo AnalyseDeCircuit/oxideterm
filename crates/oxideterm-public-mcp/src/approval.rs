@@ -147,6 +147,11 @@ impl ApprovalStore {
         entries
     }
 
+    /// Drops frozen action payloads when their approval lifetime ends, even while idle.
+    pub fn expire(&self) {
+        expire_entries(&mut self.entries.lock());
+    }
+
     pub fn set_status(
         &self,
         approval_ref: &ApprovalRef,

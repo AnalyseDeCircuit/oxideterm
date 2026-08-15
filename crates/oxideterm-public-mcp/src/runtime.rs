@@ -89,9 +89,19 @@ pub fn start_http_server(
             ]),
     );
     let clients = state.clients.clone();
+    let approvals = state.approvals.clone();
+    let artifacts = state.artifacts.clone();
     let worker_cancellation = cancellation.clone();
     let worker = runtime.spawn(async move {
-        serve_loopback(listener, service, clients, worker_cancellation).await;
+        serve_loopback(
+            listener,
+            service,
+            clients,
+            approvals,
+            artifacts,
+            worker_cancellation,
+        )
+        .await;
     });
 
     Ok(PublicMcpHttpServer {
@@ -105,13 +115,22 @@ async fn serve_loopback(
     listener: tokio::net::TcpListener,
     service: StreamableHttpService<PublicMcpService, NeverSessionManager>,
     clients: Arc<ClientRegistry>,
+    approvals: Arc<crate::ApprovalStore>,
+    artifacts: Arc<crate::ArtifactStore>,
     cancellation: CancellationToken,
 ) {
     let connection_slots = Arc::new(Semaphore::new(MCP_CONNECTION_LIMIT));
     let mut connections = JoinSet::new();
+    let mut expiry_tick = tokio::time::interval(std::time::Duration::from_secs(30));
+    expiry_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             _ = cancellation.cancelled() => break,
+            _ = expiry_tick.tick() => {
+                // Frozen actions and sensitive artifact data must expire without new traffic.
+                approvals.expire();
+                artifacts.expire();
+            }
             _ = connections.join_next(), if !connections.is_empty() => {}
             accepted = listener.accept() => {
                 let Ok((stream, peer)) = accepted else {
@@ -195,6 +214,7 @@ mod tests {
             clients,
             approvals: Arc::new(ApprovalStore::default()),
             audit: Arc::new(AuditStore::new(8)),
+            artifacts: Arc::default(),
             broker,
         });
         let server = start_http_server(&tokio::runtime::Handle::current(), state, 0)
