@@ -258,6 +258,18 @@ impl WorkspaceApp {
             request.finish(ToolEnvelope::failed("The terminal handle is unavailable"));
             return;
         };
+        let session_kind = pane.read(cx).session_kind();
+        if matches!(
+            action,
+            TerminalControlAction::Terminate | TerminalControlAction::Kill
+        ) && session_kind != TerminalSessionKind::LocalPty
+        {
+            // Remote transports can send an interrupt byte but cannot deliver local OS signals.
+            request.finish(ToolEnvelope::failed(
+                "Process terminate and kill signals are available only for local terminals",
+            ));
+            return;
+        }
         let result = pane.update(cx, |pane, cx| match action {
             TerminalControlAction::Interrupt => pane
                 .send_command_sender_raw_bytes(&[0x03], cx)
@@ -818,7 +830,7 @@ impl WorkspaceApp {
                 "resize": true,
                 "serial_control": session_kind == TerminalSessionKind::Serial,
                 "telnet_control": session_kind == TerminalSessionKind::Telnet,
-                "process_signals": matches!(session_kind, TerminalSessionKind::LocalPty | TerminalSessionKind::SshPty),
+                "process_signals": session_kind == TerminalSessionKind::LocalPty,
                 "node_backed": session_kind == TerminalSessionKind::SshPty,
             }
         }))

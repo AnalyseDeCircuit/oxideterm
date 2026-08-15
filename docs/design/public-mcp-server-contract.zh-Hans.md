@@ -247,7 +247,7 @@ NodeRouter / connection registry ── 物理 SSH node
 | `commands_cancel` | 命令执行 / W / 否 | `command_ref` | 取消该客户端拥有的 SSH exec channel；已经发生的远端副作用不会被称为回滚。交互终端 interrupt 必须显式调用 `terminals_control`。 |
 | `terminals_submit` | 终端输入 / X / 必须 | `terminal_ref`、`text` 或 `bytes_base64`、`append_enter` | 向真实 PTY/SSH/Mosh/Telnet/串口写入精确输入；不宣称 shell 执行、退出码或命令回滚。确认页只展示输入类型、长度和回车意图。 |
 | `terminals_resize` | 终端会话 / W / 否 | `terminal_ref`、`cols`、`rows` | 调整真实终端；返回最终尺寸。 |
-| `terminals_control` | 终端输入 / X / 必须 | `terminal_ref`、`action` | `interrupt`、`terminate`、`kill`、`serial_break`、`serial_line`、`telnet_control` 等只在真实支持时可用。 |
+| `terminals_control` | 终端输入 / X / 必须 | `terminal_ref`、`action` | `interrupt` 对交互 transport 发送控制字节；`terminate`/`kill` 只用于真实本地 PTY 进程信号；`serial_break`、`serial_line`、`telnet_control` 只在对应后端可用。 |
 | `terminals_close` | 终端会话 / W / 确认有活动任务时 | `terminal_ref` | 关闭终端消费者/后端；SSH node 是否继续存活只由节点 owner 和其他消费者决定。 |
 
 能力矩阵必须由运行时返回，不由工具名暗示：
