@@ -15,8 +15,8 @@ use oxideterm_public_mcp::{
     ClientCredential, ClientProjection, ClientRef, ClientRegistry, CommandRef, ConnectionRef,
     DesktopRef, DomainBroker, DomainMessage, DomainRequest, DomainRequestReceiver, FileSessionRef,
     ForwardRef, NodeRef, OperationRef, PublicMcpHttpServer, PublicMcpState, PublicToolCall,
-    QuickCommandRef, RecordingRef, SyncPlanRef, TerminalRef, ToolEnvelope, ToolGroup, ToolOutcome,
-    TransferRef, UndoRef, WorkspaceRef, start_http_server,
+    QuickCommandRef, RecordingRef, SyncPlanRef, SyncRestoreArgs, TerminalRef, ToolEnvelope,
+    ToolGroup, ToolOutcome, TransferRef, UndoRef, WorkspaceRef, start_http_server,
 };
 use oxideterm_session_adapter::ssh_config_from_saved_connection;
 use oxideterm_ssh::{ConnectionConsumer, NodeId, NodeRouter, SshTransportError};
@@ -1134,6 +1134,12 @@ impl WorkspaceApp {
             PublicToolCall::RevokeAccess(_) => self.handle_public_mcp_revoke_access(request, cx),
             PublicToolCall::OperationState(_) => self.handle_public_mcp_operation(request),
             PublicToolCall::CancelOperation(_) => self.handle_public_mcp_cancel_operation(request),
+            PublicToolCall::Revert(args) => {
+                let call = PublicToolCall::SyncRestore(SyncRestoreArgs {
+                    undo_ref: args.undo_ref.clone(),
+                });
+                self.handle_public_mcp_sync_restore(request.with_call(call), cx)
+            }
             PublicToolCall::BrowseConnections(_) => {
                 self.handle_public_mcp_browse_connections(request)
             }

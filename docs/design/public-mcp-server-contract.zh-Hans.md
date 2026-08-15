@@ -217,7 +217,7 @@ NodeRouter / connection registry ── 物理 SSH node
 | `mcp_commit_action` | 基础 / X / 已批准票据 | `approval_ref` | 提交一份不可变高风险动作；返回 `operation_ref`、结果或 `undo_ref`。 |
 | `mcp_operation` | 基础 / D / 否 | `operation_ref` | 查询后台命令或 SFTP 传输的阶段、进度、可取消性、脱敏错误与产出句柄；仍会重新检查创建该操作的原工具组。 |
 | `mcp_cancel_operation` | 基础 / W / 否 | `operation_ref` | 请求取消后台命令或 SFTP 传输；返回是否可能已产生外部副作用，不把取消伪装成回滚。 |
-| `mcp_revert` | 基础 / X / 应用内确认 | `undo_ref`、`request_key` | 只回滚记录的原始动作；目标 revision 不匹配时返回冲突。 |
+| `mcp_revert` | 基础 + 原工具组 / X / 必须 | `undo_ref` | 复用当前真实可撤销领域的精确反向操作；现阶段只接受云同步本地 apply 返回的 `undo_ref`，并再次要求云同步组。目标 revision 不匹配时返回冲突。 |
 | `mcp_audit_search` | 审计读取 / R / 否 | `time_range`、`tool?`、`target_ref?`、`cursor?` | 客户端自身的审计记录：动作、批准、状态、参数摘要哈希和结果摘要；不返回秘密或原始终端/文件内容。 |
 
 ### 4.2 连接、凭据和 SSH 节点
@@ -334,7 +334,7 @@ RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控�
 | `sync_pull_preview` | 云同步 / R / 否 | `selection.sections?`、`conflict_strategy` | 下载并构造结构化预览，返回客户端私有、十分钟有效且只可消费一次的 `sync_plan_ref`、分区和冲突摘要；凭据引用在预览前剥离。 |
 | `sync_publish_preview` | 云同步 / R / 否 | `selection.sections?`、`force?` | 生成本地上传预检、脏分区、冲突和预期远端 revision；返回与 pull 相同生命周期的 `sync_plan_ref`。 |
 | `sync_apply_plan` | 云同步 / X / 必须 | `sync_plan_ref` | 应用已预览的 pull 或 publish 计划；再次比较完整本地状态和远端 revision/etag/content hash，失配即拒绝。只有能精确恢复的本地 pull 分区返回 `undo_ref`；publish 不可撤销。 |
-| `sync_restore` | 云同步 / X / 必须 | `undo_ref` | 在本地状态仍等于 apply 后快照时恢复严格 checkpoint；句柄绑定客户端、十五分钟过期且只可消费一次。不把远端写入或无法恢复的密钥删除伪装成可恢复。 |
+| `sync_restore` | 云同步 / X / 必须 | `undo_ref` | 在本地状态仍等于 apply 后快照时恢复严格 checkpoint；句柄绑定客户端、十五分钟过期且只可消费一次。不把远端写入或无法恢复的密钥删除伪装成可恢复；`mcp_revert` 是保持相同工具组与检查的通用入口。 |
 | `addons_list` | 插件管理 / D / 否 | `include_disabled?` | 插件 ID、版本、来源类别、启用状态、声明能力和公开适配器摘要；不列出任意内部 host function。 |
 | `addons_install` | 插件管理 / X / 必须 | `artifact_ref` 或受管 `source`、`expected_identity` | 经现有签名/完整性/权限审核安装插件；返回 `operation_ref` 和可用时 `undo_ref`。不执行客户端提供的任意二进制命令。 |
 | `addons_set_enabled` | 插件管理 / X / 必须 | `addon_ref`、`enabled` | 启用或禁用，重新核对所需权限并返回状态。 |

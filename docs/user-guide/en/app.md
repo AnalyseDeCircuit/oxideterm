@@ -154,6 +154,8 @@ The current implementation exposes connection and credential management, NodeRou
 
 Background commands and SFTP transfers return an `operation_ref` in addition to their domain handle. `mcp_operation` reads a unified redacted status and progress projection, while `mcp_cancel_operation` requests cancellation. Cancelling a command or upload does not claim that remote side effects were reversed.
 
+An action is reversible only when its result explicitly contains an `undo_ref`. `mcp_revert` currently reuses the strict local Cloud Sync restore path, including the Cloud Sync tool-group and revision checks. Remote publishes, commands, uploads, and permanent deletion never receive a fabricated undo handle.
+
 OxideTerm stores only a digest of each client credential. Disabling or revoking a client immediately cancels its commands, pending actions, and node leases. The endpoint, authorization records, and credential are excluded from ordinary settings, `.oxide` exports, and cloud sync. The external client process is responsible for protecting the stdio bridge environment variable; OxideTerm does not write it back to configuration files.
 
 Full-access mode does not enable every tool. Each client still needs explicit grants for connection, node, command, audit, and temporary-content groups. A client may request additional groups with `mcp_request_access`, but that request always needs approval in the app even in full-access mode. `mcp_revoke_access` immediately disables the client's selected groups and releases their capabilities. Disabled tools are neither advertised nor callable. Bearer authentication, app lock, secret non-disclosure, and audit remain active in both modes.

@@ -38,13 +38,13 @@ use crate::{
         QuickCommandsRunArgs, QuickCommandsSaveArgs, ReadArtifactArgs, ReadDesktopClipboardArgs,
         ReadTerminalArgs, RecordingsControlArgs, RecordingsExportArgs, RecordingsSearchArgs,
         RecordingsStatusArgs, ReleaseNodeArgs, RemovePublicConnectionArgs, RequestAccessArgs,
-        ResizeDesktopArgs, ResizeTerminalArgs, RevokeAccessArgs, SavePublicConnectionArgs,
-        StageArtifactArgs, StartCommandArgs, StartTransferArgs, StoreCredentialArgs,
-        SubmitTerminalArgs, SyncApplyPlanArgs, SyncPublishPreviewArgs, SyncPullPreviewArgs,
-        SyncRestoreArgs, SyncStatusArgs, TerminalHandleArgs, ToolEnvelope, ToolOutcome,
-        TransferHandleArgs, WorkspaceApplyEditsArgs, WorkspaceCloseArgs, WorkspaceFileEdits,
-        WorkspaceMountArgs, WorkspaceReadArgs, WorkspaceSearchArgs, WorkspaceTextEdit,
-        WorkspaceTreeArgs, WriteDesktopClipboardArgs,
+        ResizeDesktopArgs, ResizeTerminalArgs, RevertArgs, RevokeAccessArgs,
+        SavePublicConnectionArgs, StageArtifactArgs, StartCommandArgs, StartTransferArgs,
+        StoreCredentialArgs, SubmitTerminalArgs, SyncApplyPlanArgs, SyncPublishPreviewArgs,
+        SyncPullPreviewArgs, SyncRestoreArgs, SyncStatusArgs, TerminalHandleArgs, ToolEnvelope,
+        ToolOutcome, TransferHandleArgs, WorkspaceApplyEditsArgs, WorkspaceCloseArgs,
+        WorkspaceFileEdits, WorkspaceMountArgs, WorkspaceReadArgs, WorkspaceSearchArgs,
+        WorkspaceTextEdit, WorkspaceTreeArgs, WriteDesktopClipboardArgs,
     },
     handles::{ApprovalRef, ClientRef, ConnectionRef, NodeRef, TerminalRef, WorkspaceRef},
 };
@@ -634,6 +634,13 @@ impl ServerHandler for PublicMcpService {
             "mcp_cancel_operation" => match parse_arguments::<CancelOperationArgs>(arguments) {
                 Ok(args) => {
                     self.execute_call(&client, PublicToolCall::CancelOperation(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "mcp_revert" => match parse_arguments::<RevertArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::Revert(args))
                         .await
                 }
                 Err(error) => *error,
@@ -1390,6 +1397,13 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             ToolGroup::Basic,
             false,
             false,
+        ),
+        define_tool::<RevertArgs>(
+            "mcp_revert",
+            "Apply the exact inverse retained for a client-owned Cloud Sync undo handle.",
+            ToolGroup::Basic,
+            false,
+            true,
         ),
         define_tool::<CommitActionArgs>(
             "mcp_commit_action",

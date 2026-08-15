@@ -42,6 +42,13 @@ pub struct CancelOperationArgs {
     pub operation_ref: OperationRef,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// Replays only the exact inverse operation retained behind an opaque undo handle.
+pub struct RevertArgs {
+    pub undo_ref: UndoRef,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct BrowseConnectionsArgs {
     #[serde(default)]
@@ -1497,6 +1504,7 @@ pub enum PublicToolCall {
     RevokeAccess(RevokeAccessArgs),
     OperationState(OperationStateArgs),
     CancelOperation(CancelOperationArgs),
+    Revert(RevertArgs),
     BrowseConnections(BrowseConnectionsArgs),
     DescribeConnection(DescribeConnectionArgs),
     SaveConnection(Box<SavePublicConnectionArgs>),
@@ -1588,6 +1596,7 @@ impl PublicToolCall {
             Self::RevokeAccess(_) => "mcp_revoke_access",
             Self::OperationState(_) => "mcp_operation",
             Self::CancelOperation(_) => "mcp_cancel_operation",
+            Self::Revert(_) => "mcp_revert",
             Self::BrowseConnections(_) => "connections_browse",
             Self::DescribeConnection(_) => "connections_describe",
             Self::SaveConnection(_) => "connections_save",
@@ -1678,7 +1687,8 @@ impl PublicToolCall {
             Self::RequestAccess(_)
             | Self::RevokeAccess(_)
             | Self::OperationState(_)
-            | Self::CancelOperation(_) => ToolGroup::Basic,
+            | Self::CancelOperation(_)
+            | Self::Revert(_) => ToolGroup::Basic,
             Self::BrowseConnections(_) => ToolGroup::ConnectionDirectory,
             Self::DescribeConnection(_) => ToolGroup::ConnectionRead,
             Self::SaveConnection(_) | Self::RemoveConnection(_) => ToolGroup::ConnectionManage,
@@ -1760,6 +1770,7 @@ impl PublicToolCall {
             Self::TransferStart(StartTransferArgs::Download { .. }) => &[ToolGroup::FileRead],
             Self::WorkspaceMount(_) => &[ToolGroup::FileRead],
             Self::WorkspaceApplyEdits(_) => &[ToolGroup::FileWrite],
+            Self::Revert(_) => &[ToolGroup::CloudSync],
             _ => &[],
         }
     }
@@ -1768,6 +1779,7 @@ impl PublicToolCall {
         matches!(
             self,
             Self::RequestAccess(_)
+                | Self::Revert(_)
                 | Self::SaveConnection(_)
                 | Self::RemoveConnection(_)
                 | Self::StoreCredential(_)
@@ -1831,6 +1843,7 @@ impl PublicToolCall {
             ),
             Self::OperationState(args) => args.operation_ref.to_string(),
             Self::CancelOperation(args) => args.operation_ref.to_string(),
+            Self::Revert(args) => args.undo_ref.to_string(),
             Self::BrowseConnections(_) => "connection directory".to_owned(),
             Self::DescribeConnection(args) => args.connection_ref.to_string(),
             Self::SaveConnection(args) => args

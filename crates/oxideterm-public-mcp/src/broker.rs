@@ -49,6 +49,12 @@ impl DomainRequest {
     pub fn cancellation_token(&self) -> CancellationToken {
         self.cancellation.clone()
     }
+
+    /// Retargets a protocol-level alias while preserving the original response and cancellation.
+    pub fn with_call(mut self, call: PublicToolCall) -> Self {
+        self.call = call;
+        self
+    }
 }
 
 pub struct DomainRequestReceiver {
