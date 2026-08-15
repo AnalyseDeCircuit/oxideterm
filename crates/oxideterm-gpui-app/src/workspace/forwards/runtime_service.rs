@@ -465,6 +465,74 @@ impl ForwardingRuntimeService {
         }
     }
 
+    pub(in crate::workspace) async fn public_mcp_restore_forward_after_revocation(
+        &self,
+        node_id: &NodeId,
+        owner_connection_id: Option<&str>,
+        original_rule: &ForwardRule,
+        revoked_rule: &ForwardRule,
+        created_by_client: bool,
+        persisted: bool,
+    ) -> bool {
+        let Some(manager) = self.manager_for_node(node_id) else {
+            return false;
+        };
+        let Some(current_rule) = manager
+            .list_forwards()
+            .into_iter()
+            .find(|rule| rule.id == original_rule.id)
+        else {
+            return false;
+        };
+        if created_by_client {
+            // Client-owned revocation may already have stopped the late rule.
+            let mut current_definition = current_rule.clone();
+            current_definition.status = revoked_rule.status.clone();
+            if current_definition != *revoked_rule {
+                return false;
+            }
+        } else if current_rule != *revoked_rule {
+            // Do not overwrite a newer UI or client edit that followed the revoked operation.
+            return false;
+        }
+        if created_by_client && !persisted {
+            return manager.delete_forward(&current_rule.id).await.is_ok();
+        }
+
+        if current_rule.status == ForwardStatus::Active
+            && manager.stop_forward(&current_rule.id).await.is_err()
+        {
+            return false;
+        }
+        let Ok(restored_stopped) =
+            manager.update_forward(&original_rule.id, forward_update_from_rule(original_rule))
+        else {
+            return false;
+        };
+        let restored_rule = if !created_by_client && original_rule.status == ForwardStatus::Active {
+            let Ok(restored_active) = manager.restart_forward(&original_rule.id).await else {
+                return false;
+            };
+            restored_active
+        } else {
+            restored_stopped
+        };
+
+        if persisted {
+            let restored_forward_id = restored_rule.id.clone();
+            return self
+                .registry
+                .sync_persisted_forward_rule(
+                    &restored_forward_id,
+                    &Self::session_id_for_node(node_id),
+                    owner_connection_id.map(ToOwned::to_owned),
+                    restored_rule,
+                )
+                .is_ok();
+        }
+        true
+    }
+
     async fn public_mcp_manager_for_node(
         &self,
         node_id: &NodeId,

@@ -240,6 +240,8 @@ impl WorkspaceApp {
 
         let service = self.forwarding_service.clone();
         let forward_ref = args.forward_ref.clone();
+        let compensation_record = record.clone();
+        let original_rule = current.clone();
         let owner_connection_id = record.owner_connection_id.clone();
         let worker = self.forwarding_runtime.spawn(async move {
             service
@@ -256,7 +258,14 @@ impl WorkspaceApp {
         cx.spawn(async move |workspace, cx| {
             let result = worker.await;
             let _ = workspace.update(cx, |workspace, cx| {
-                workspace.finish_public_mcp_forward_change(request, forward_ref, result, cx);
+                workspace.finish_public_mcp_forward_change(
+                    request,
+                    forward_ref,
+                    compensation_record,
+                    original_rule,
+                    result,
+                    cx,
+                );
             });
         })
         .detach();
@@ -266,6 +275,8 @@ impl WorkspaceApp {
         &mut self,
         request: DomainRequest,
         forward_ref: ForwardRef,
+        record: PublicMcpForwardRecord,
+        original_rule: ForwardRule,
         result: Result<Result<PublicMcpForwardMutation, String>, tokio::task::JoinError>,
         cx: &mut Context<Self>,
     ) {
@@ -289,6 +300,8 @@ impl WorkspaceApp {
                 })
         };
         let Some(projection) = projection else {
+            // A revoked grant must not leave a late edit on an existing UI-owned forward.
+            self.compensate_revoked_forward_mutation(record, original_rule, mutation.rule, cx);
             request.finish(ToolEnvelope::failed(
                 "The forward grant was revoked while changing",
             ));
@@ -322,7 +335,12 @@ impl WorkspaceApp {
             request.finish(ToolEnvelope::failed("The forward handle is unavailable"));
             return;
         };
+        let Some(original_rule) = current_forward_rule(&self.forwarding_service, &record) else {
+            request.finish(ToolEnvelope::failed("The forward no longer exists"));
+            return;
+        };
         let service = self.forwarding_service.clone();
+        let compensation_record = record.clone();
         let owner_connection_id = record.owner_connection_id.clone();
         let worker = self.forwarding_runtime.spawn(async move {
             service
@@ -337,7 +355,14 @@ impl WorkspaceApp {
         cx.spawn(async move |workspace, cx| {
             let result = worker.await;
             let _ = workspace.update(cx, |workspace, cx| {
-                workspace.finish_public_mcp_forward_restart(request, forward_ref, result, cx);
+                workspace.finish_public_mcp_forward_restart(
+                    request,
+                    forward_ref,
+                    compensation_record,
+                    original_rule,
+                    result,
+                    cx,
+                );
             });
         })
         .detach();
@@ -347,6 +372,8 @@ impl WorkspaceApp {
         &mut self,
         request: DomainRequest,
         forward_ref: ForwardRef,
+        record: PublicMcpForwardRecord,
+        original_rule: ForwardRule,
         result: Result<Result<PublicMcpForwardMutation, String>, tokio::task::JoinError>,
         cx: &mut Context<Self>,
     ) {
@@ -364,6 +391,9 @@ impl WorkspaceApp {
             .get(&forward_ref)
             .filter(|live| live.client_ref == request.client_ref)
         else {
+            drop(handles);
+            // Restart begins from a stopped rule, so compensation restores that exact state.
+            self.compensate_revoked_forward_mutation(record, original_rule, mutation.rule, cx);
             request.finish(ToolEnvelope::failed(
                 "The forward grant was revoked during the operation",
             ));
@@ -372,6 +402,39 @@ impl WorkspaceApp {
         let projection = public_forward_projection(forward_ref, live, &mutation.rule);
         drop(handles);
         finish_serialized(request, json!({ "forward": projection }));
+    }
+
+    fn compensate_revoked_forward_mutation(
+        &mut self,
+        record: PublicMcpForwardRecord,
+        original_rule: ForwardRule,
+        revoked_rule: ForwardRule,
+        cx: &mut Context<Self>,
+    ) {
+        let service = self.forwarding_service.clone();
+        let persisted = record.persisted;
+        let worker = self.forwarding_runtime.spawn(async move {
+            service
+                .public_mcp_restore_forward_after_revocation(
+                    &record.node_id,
+                    record.owner_connection_id.as_deref(),
+                    &original_rule,
+                    &revoked_rule,
+                    record.created_by_client,
+                    persisted,
+                )
+                .await
+        });
+        cx.spawn(async move |workspace, cx| {
+            let restored = worker.await.is_ok_and(|result| result);
+            if restored && persisted {
+                let _ = workspace.update(cx, |workspace, cx| {
+                    // Compensation changes the same saved definition a second time.
+                    workspace.queue_cloud_sync_dirty_refresh(cx);
+                });
+            }
+        })
+        .detach();
     }
 
     fn start_public_mcp_forward_stop(&self, request: DomainRequest, forward_ref: ForwardRef) {
