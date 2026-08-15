@@ -35,7 +35,8 @@ use crate::{
         OpenDesktopArgs, OpenTerminalArgs, PublicDesktopMouseButton, PublicToolCall,
         QuickCommandsDescribeArgs, QuickCommandsListArgs, QuickCommandsRemoveArgs,
         QuickCommandsRunArgs, QuickCommandsSaveArgs, ReadArtifactArgs, ReadDesktopClipboardArgs,
-        ReadTerminalArgs, ReleaseNodeArgs, ResizeDesktopArgs, ResizeTerminalArgs,
+        ReadTerminalArgs, RecordingsControlArgs, RecordingsExportArgs, RecordingsSearchArgs,
+        RecordingsStatusArgs, ReleaseNodeArgs, ResizeDesktopArgs, ResizeTerminalArgs,
         StageArtifactArgs, StartCommandArgs, SubmitTerminalArgs, TerminalHandleArgs, ToolEnvelope,
         ToolOutcome, WriteDesktopClipboardArgs,
     },
@@ -61,6 +62,9 @@ const TERMINAL_LINE_LIMIT_MAXIMUM: u32 = 1_000;
 const TERMINAL_MATCH_LIMIT_MAXIMUM: u32 = 500;
 const TERMINAL_DIMENSION_MAXIMUM: u16 = 1_000;
 const TERMINAL_TITLE_LIMIT_BYTES: usize = 256;
+const RECORDING_TITLE_LIMIT_BYTES: usize = 256;
+const RECORDING_QUERY_LIMIT_BYTES: usize = 4 * 1024;
+const RECORDING_SEARCH_LIMIT_MAXIMUM: u32 = 50;
 const DESKTOP_MIN_WIDTH: u32 = 200;
 const DESKTOP_MIN_HEIGHT: u32 = 120;
 const DESKTOP_MAX_DIMENSION: u32 = 8_192;
@@ -607,6 +611,47 @@ impl ServerHandler for PublicMcpService {
                 }
                 Err(error) => *error,
             },
+            "recordings_control" => match parse_arguments::<RecordingsControlArgs>(arguments) {
+                Ok(args) if recording_control_is_valid(&args) => {
+                    self.execute_call(&client, PublicToolCall::RecordingsControl(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "Terminal recording input capture is unavailable or the title is invalid",
+                ),
+                Err(error) => *error,
+            },
+            "recordings_status" => match parse_arguments::<RecordingsStatusArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::RecordingsStatus(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "recordings_search" => match parse_arguments::<RecordingsSearchArgs>(arguments) {
+                Ok(args)
+                    if !args.query.trim().is_empty()
+                        && args.query.len() <= RECORDING_QUERY_LIMIT_BYTES
+                        && args.limit > 0
+                        && args.limit <= RECORDING_SEARCH_LIMIT_MAXIMUM =>
+                {
+                    self.execute_call(&client, PublicToolCall::RecordingsSearch(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "The recording query or result limit is invalid",
+                ),
+                Err(error) => *error,
+            },
+            "recordings_export" => match parse_arguments::<RecordingsExportArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::RecordingsExport(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
             "desktops_open" => match parse_arguments::<OpenDesktopArgs>(arguments) {
                 Ok(args) => {
                     self.execute_call(&client, PublicToolCall::OpenDesktop(args))
@@ -1118,6 +1163,34 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             false,
             false,
         ),
+        define_tool::<RecordingsControlArgs>(
+            "recordings_control",
+            "Start, pause, resume, or stop an output-only recording on a client-owned terminal.",
+            ToolGroup::RecordingControl,
+            false,
+            true,
+        ),
+        define_tool::<RecordingsStatusArgs>(
+            "recordings_status",
+            "Read recording state and bounded metadata without returning terminal content.",
+            ToolGroup::RecordingControl,
+            true,
+            false,
+        ),
+        define_tool::<RecordingsSearchArgs>(
+            "recordings_search",
+            "Search bounded snippets in one stopped client-owned terminal recording.",
+            ToolGroup::RecordingContent,
+            true,
+            false,
+        ),
+        define_tool::<RecordingsExportArgs>(
+            "recordings_export",
+            "Export one stopped terminal recording to a client-scoped temporary artifact.",
+            ToolGroup::RecordingContent,
+            false,
+            true,
+        ),
         define_tool::<OpenDesktopArgs>(
             "desktops_open",
             "Open a real saved RDP or VNC profile in a visible OxideTerm tab.",
@@ -1563,6 +1636,26 @@ fn terminal_title_is_valid(title: &str) -> bool {
     !title.trim().is_empty()
         && title.len() <= TERMINAL_TITLE_LIMIT_BYTES
         && !title.chars().any(char::is_control)
+}
+
+fn recording_control_is_valid(args: &RecordingsControlArgs) -> bool {
+    match args {
+        RecordingsControlArgs::Start {
+            title,
+            capture_input,
+            ..
+        } => {
+            !capture_input
+                && title.as_deref().is_none_or(|title| {
+                    !title.trim().is_empty()
+                        && title.len() <= RECORDING_TITLE_LIMIT_BYTES
+                        && !title.chars().any(char::is_control)
+                })
+        }
+        RecordingsControlArgs::Pause { .. }
+        | RecordingsControlArgs::Resume { .. }
+        | RecordingsControlArgs::Stop { .. } => true,
+    }
 }
 
 fn desktop_dimensions_are_valid(width: u32, height: u32) -> bool {

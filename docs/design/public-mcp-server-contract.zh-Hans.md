@@ -58,7 +58,7 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 
 - 设置页可创建、停用和撤销独立外部客户端；一次性 Bearer 凭据只向用户显示一次，设备端只持久化 SHA-256 摘要。
 - 每个客户端独立选择普通模式或完全权限模式，并逐项启用工具组。普通模式保留应用内动作批准；完全权限模式只跳过已勾选工具组的逐动作批准，不会绕过 Bearer 认证、应用锁、秘密硬边界、审计或未授权工具组。
-- `tools/list` 按客户端工具组裁剪；当前实际发布基础、连接目录/详情、节点租约、真实终端会话/观察/输入、RDP/VNC 会话/画面/键鼠/剪贴板、命令执行/观察、临时 artifact、当前客户端审计、类型化 Host Tools、快速命令、插件生命周期、端口转发和 SFTP 文件工具。
+- `tools/list` 按客户端工具组裁剪；当前实际发布基础、连接目录/详情、节点租约、真实终端会话/观察/输入/录制、RDP/VNC 会话/画面/键鼠/剪贴板、命令执行/观察、临时 artifact、当前客户端审计、类型化 Host Tools、快速命令、插件生命周期、端口转发和 SFTP 文件工具。
 - `connections_browse` 已覆盖保存的 SSH、串口、Telnet、Mosh、RDP 和 VNC 配置，只返回目录投影；精确端点及协议选项由单独授权的 `connections_describe` 返回，既有凭据只显示存在性。
 - 连接、节点和命令句柄均为随机且绑定客户端的外部引用；首个切片会在应用重启后重新生成连接引用，客户端需要重新浏览目录，不能缓存或构造内部连接身份。
 - `nodes_connect` 使用保存的 SSH 配置和现有受保护凭据，通过 NodeRouter 建立或复用物理节点；代理链也沿用现有节点树展开与连接顺序。
@@ -70,12 +70,13 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 - 端口转发读取和管理分别授权。`forwards_*` 复用应用唯一的 `ForwardingRuntimeService` 和独立 `PortForward` 消费者，支持类型化创建、带 revision 的受控修改、停止、重启、删除、统计和单次端口发现。关闭终端或释放 Public MCP 节点租约不会停止转发；显式物理节点断开、客户端撤销或关闭转发管理授权才按所有权清理。外部只看到客户端作用域的 `forward_ref`。
 - SFTP 文件读取和修改分别授权。`files_open` 为规范化远端根目录登记独立 SFTP 消费者，后续列表、元数据、分段读取、比较、写入、移动和删除都重新校验规范化路径边界。正文只经客户端自己的有界 artifact 传递；重连时先取得当前连接的消费者再释放旧消费者，`files_close` 不断开共享 SSH 节点。
 - 终端会话、内容观察和输入控制分别授权。`terminals_open` 只创建应用真实持有的可见终端页：SSH 必须使用已取得的 `node_ref`，保存的 Mosh、Telnet 和串口使用 `connection_ref`，本地终端只允许一次性启动且不会进入保存、导出或同步。读取仅返回有界屏幕快照与 generation cursor；搜索复用终端后端；输入正文不进入审计，普通模式批准页只显示输入类型、长度与回车意图。关闭 SSH 终端只关闭自己的 terminal consumer，不等同于物理节点断开。
+- 终端录制控制和录制内容分别授权。`recordings_control` 复用真实 `TerminalPane` recorder，同一终端不会覆盖既有应用录制；当前后端只支持 output-only，因此 `capture_input=true` 会明确拒绝。停止时保留有界 asciicast 正文，搜索只给有界片段，导出只生成客户端私有且会过期的 artifact，不接受任意本机路径。终端关闭或控制授权关闭会先停止活动录制；客户端撤销会零化保留正文并撤销导出 artifact。
 - 远程桌面会话、画面观察、键鼠控制和剪贴板分别授权。`desktops_open` 只解析保存的 RDP/VNC `connection_ref`，凭据由设备受保护存储直接移交真实 provider，会话仍由可见标签页和 `RemoteDesktopSessionEntity` 持有。隐藏标签页只有在客户端启用画面观察时才继续消费最新帧；`desktops_frame` 把有界 CPU framebuffer 在后台编码成客户端私有 PNG artifact。输入必须携带当前 graphics epoch，坐标按 server framebuffer 校验；远端剪贴板来自会话内零化缓存，绝不读取系统剪贴板冒充远端内容。关闭或撤权会释放所有输入、关闭 helper，并撤销该桌面的帧和剪贴板 artifact。
 - 连接和命令执行、物理节点断开先冻结原参数并进入应用内批准；批准票据绑定客户端、五分钟过期且只能消费一次。批准界面显示实际客户端、目标和命令，但命令不进入 MCP 批准结果或审计。
 - 停用或撤销客户端会撤销待批准动作、取消命令并释放其 Public MCP 消费者；`nodes_release` 不会把其他终端、SFTP 或转发消费者仍在使用的物理节点断开。
 - 应用锁定时会拒绝新的 MCP 领域请求、撤销待批准动作、取消 MCP 命令并释放 MCP 节点消费者；解锁后客户端凭据仍有效，但必须重新取得运行时句柄。
 
-stdio bridge、IDE 工作区、后台传输、云同步和录制仍按后续阶段实施。已接入领域尚未支持的目标或动作会明确拒绝；其余领域在真实 broker 和生命周期接通前不会出现在 `tools/list`，也不会用空壳结果冒充支持。
+stdio bridge、IDE 工作区、后台传输和云同步仍按后续阶段实施。已接入领域尚未支持的目标或动作会明确拒绝；其余领域在真实 broker 和生命周期接通前不会出现在 `tools/list`，也不会用空壳结果冒充支持。
 
 ## 2. 服务形态与协议
 
@@ -160,6 +161,7 @@ MCP `2026-07-28` 请求使用 `server/discover` 做可选发现，并在每次�
 | `connection_ref` | 已保存连接的安全投影 | 记录删除、权限变更时失效 | 不等于连接记录 UUID；可映射为多个运行时节点。 |
 | `node_ref` | NodeRouter 拥有的 SSH 逻辑节点 | 显式断开、租约释放、节点失败或客户端撤销 | 指向共享物理节点而不是某个终端。 |
 | `terminal_ref` | 一个终端消费者 | 关闭、后端退出、租约释放时失效 | 关闭它只移除消费者，绝不等价于 `node_disconnect`。 |
+| `recording_ref` | 一个客户端拥有的终端录制 | 客户端撤销或有界句柄回收时失效 | 活动录制绑定 `terminal_ref`；停止后正文与终端生命周期分离，内容授权关闭时不可读取。 |
 | `command_ref` | 一次受跟踪的命令执行 | 完成后保留只读状态至审计保留期 | SSH exec 可提供真实退出码；交互终端按 Shell Integration/命令标记报告可靠性。 |
 | `file_session_ref` | 一个 NodeRouter 取得的 SFTP/IDE 消费者 | 节点断开、会话关闭、客户端撤销时失效 | 通过真实 SFTP channel，而不是 shell 兼容路径。 |
 | `workspace_ref` | IDE 工作区视图 | 挂载关闭、来源文件会话失效时失效 | 不是 GPUI 编辑器实体。 |
@@ -335,10 +337,10 @@ RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控�
 | `quickcommands_save` | 快速命令 / X / 必须 | `quickcommand_ref?`、`definition`、`expected_revision?` | 新建或更新保存的固定模板，返回 revision/undo。此工具不执行模板。 |
 | `quickcommands_remove` | 快速命令 / X / 必须 | `quickcommand_ref` | 删除保存模板，可在保留快照时返回 `undo_ref`。 |
 | `quickcommands_run` | 快速命令 / X / 必须 | `quickcommand_ref`、`terminal_ref` 或 `node_ref`、`arguments` | 只渲染已保存模板的声明参数后投递给真实终端；确认页展示目标和最终渲染摘要。不能借此执行未保存的任意插件函数。 |
-| `recordings_control` | 终端录制 / X / 必须开始或导出 | `terminal_ref`、`action`、`options?` | `start`、`pause`、`resume`、`stop`；返回 `recording_ref`、状态和时长。录制可能包含敏感终端文本，默认不公开。 |
-| `recordings_status` | 终端录制 / D / 否 | `recording_ref` 或 `terminal_ref` | 状态、时长、尺寸、事件数和内容可用性，不含事件正文。 |
+| `recordings_control` | 录制控制 / X / 仅 `start` 必须 | 严格 tagged action：`start {terminal_ref,title?,capture_input}`，或 `pause/resume/stop {recording_ref}` | 返回 `recording_ref`、状态和时长；当前真实 recorder 为 output-only，拒绝 `capture_input=true`。录制可能包含敏感终端文本，默认不公开。 |
+| `recordings_status` | 录制控制 / D / 否 | `target` 严格为 `{kind:"recording",recording_ref}` 或 `{kind:"terminal",terminal_ref}` | 状态、时长、尺寸、事件数、是否由当前客户端管理、是否可读取正文及截断状态，不含事件正文。 |
 | `recordings_search` | 终端录制 / R / 否 | `recording_ref`、`query`、`limit` | 有界时间点与片段；内容按终端敏感读取策略处理。 |
-| `recordings_export` | 终端录制 / X / 必须 | `recording_ref`、`format`、`redaction?` | 导出 asciicast 或受支持格式到 `artifact_ref`；确认页明确该记录可能含凭据/业务数据。 |
+| `recordings_export` | 录制内容 / X / 必须 | `recording_ref`、`format:"asciicast_v2"`、`name?` | 将停止后的真实 asciicast 导出到受限 `artifact_ref`；不接受任意路径，确认页明确该记录可能含凭据或业务数据。 |
 
 ## 5. 授权、确认和审计策略
 

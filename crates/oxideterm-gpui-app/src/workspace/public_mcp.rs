@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use base64::Engine;
@@ -15,7 +15,7 @@ use oxideterm_public_mcp::{
     ClientCredential, ClientProjection, ClientRef, ClientRegistry, CommandRef, ConnectionRef,
     DesktopRef, DomainBroker, DomainMessage, DomainRequest, DomainRequestReceiver, FileSessionRef,
     ForwardRef, NodeRef, PublicMcpHttpServer, PublicMcpState, PublicToolCall, QuickCommandRef,
-    TerminalRef, ToolEnvelope, ToolGroup, ToolOutcome, start_http_server,
+    RecordingRef, TerminalRef, ToolEnvelope, ToolGroup, ToolOutcome, start_http_server,
 };
 use oxideterm_session_adapter::ssh_config_from_saved_connection;
 use oxideterm_ssh::{ConnectionConsumer, NodeId, NodeRouter, SshTransportError};
@@ -33,6 +33,7 @@ mod files;
 mod forwards;
 mod host_tools;
 mod quick_commands;
+mod recordings;
 pub(in crate::workspace) mod terminals;
 
 const PUBLIC_MCP_CLIENTS_FILE: &str = "public-mcp-clients.json";
@@ -73,6 +74,7 @@ pub(in crate::workspace) struct PublicMcpWorkspaceBridge {
     addon_ids: HashMap<AddonRef, (ClientRef, String)>,
     terminals: HashMap<TerminalRef, PublicMcpTerminalRecord>,
     pending_terminal_opens: HashMap<String, PublicMcpPendingTerminalOpen>,
+    recordings: HashMap<RecordingRef, PublicMcpRecordingRecord>,
     desktops: HashMap<DesktopRef, PublicMcpDesktopRecord>,
     runtime_handles: Arc<Mutex<PublicMcpRuntimeHandles>>,
 }
@@ -138,6 +140,20 @@ struct PublicMcpPendingTerminalOpen {
     cols: u16,
     rows: u16,
     title: String,
+}
+
+struct PublicMcpRecordingRecord {
+    client_ref: ClientRef,
+    terminal_ref: TerminalRef,
+    cols: usize,
+    rows: usize,
+    elapsed_ms: u64,
+    event_count: usize,
+    active: bool,
+    truncated: bool,
+    stopped_at: Option<Instant>,
+    content: Option<Zeroizing<String>>,
+    artifact_refs: HashSet<ArtifactRef>,
 }
 
 #[derive(Clone)]
@@ -260,6 +276,7 @@ impl PublicMcpWorkspaceBridge {
             addon_ids: HashMap::new(),
             terminals: HashMap::new(),
             pending_terminal_opens: HashMap::new(),
+            recordings: HashMap::new(),
             desktops: HashMap::new(),
             runtime_handles: Arc::default(),
         }
@@ -851,6 +868,12 @@ impl WorkspaceApp {
                 ToolGroup::TerminalSession => {
                     self.revoke_public_mcp_client_terminals(client_ref, cx)
                 }
+                ToolGroup::RecordingControl => {
+                    self.stop_public_mcp_client_recordings(client_ref, cx)
+                }
+                ToolGroup::RecordingContent => {
+                    self.revoke_public_mcp_client_recording_artifacts(client_ref)
+                }
                 ToolGroup::DesktopSession => self.revoke_public_mcp_client_desktops(client_ref, cx),
                 ToolGroup::DesktopObserve => {
                     self.set_public_mcp_client_desktop_observation(client_ref, false, cx)
@@ -929,6 +952,7 @@ impl WorkspaceApp {
     }
 
     fn revoke_public_mcp_client_runtime(&mut self, client_ref: &ClientRef, cx: &mut Context<Self>) {
+        self.revoke_public_mcp_client_recordings(client_ref, cx);
         self.revoke_public_mcp_client_desktops(client_ref, cx);
         self.revoke_public_mcp_client_terminals(client_ref, cx);
         self.revoke_public_mcp_client_forwards(client_ref);
@@ -999,6 +1023,18 @@ impl WorkspaceApp {
                 self.handle_public_mcp_terminal_control(request, cx)
             }
             PublicToolCall::CloseTerminal(_) => self.handle_public_mcp_terminal_close(request, cx),
+            PublicToolCall::RecordingsControl(_) => {
+                self.handle_public_mcp_recordings_control(request, cx)
+            }
+            PublicToolCall::RecordingsStatus(_) => {
+                self.handle_public_mcp_recordings_status(request, cx)
+            }
+            PublicToolCall::RecordingsSearch(_) => {
+                self.handle_public_mcp_recordings_search(request)
+            }
+            PublicToolCall::RecordingsExport(_) => {
+                self.handle_public_mcp_recordings_export(request)
+            }
             PublicToolCall::OpenDesktop(_) => self.handle_public_mcp_desktop_open(request, cx),
             PublicToolCall::DesktopState(_) => self.handle_public_mcp_desktop_state(request, cx),
             PublicToolCall::DesktopFrame(_) => self.handle_public_mcp_desktop_frame(request, cx),

@@ -619,6 +619,7 @@ impl WorkspaceApp {
             request.finish(ToolEnvelope::failed("The terminal handle is unavailable"));
             return;
         }
+        self.stop_public_mcp_recordings_for_terminal(&request.client_ref, &terminal_ref, cx);
         self.public_mcp.terminals.remove(&terminal_ref);
         self.close_terminal_session(record.session_id, window, cx);
         finish_serialized(
@@ -738,6 +739,9 @@ impl WorkspaceApp {
                 (&record.client_ref == client_ref).then_some(terminal_ref.clone())
             })
             .collect::<Vec<_>>();
+        for terminal_ref in &terminal_refs {
+            self.stop_public_mcp_recordings_for_terminal(client_ref, terminal_ref, cx);
+        }
         let session_ids = terminal_refs
             .into_iter()
             .filter_map(|terminal_ref| self.public_mcp.terminals.remove(&terminal_ref))
@@ -820,7 +824,7 @@ impl WorkspaceApp {
         }))
     }
 
-    fn public_mcp_terminal_pane(
+    pub(super) fn public_mcp_terminal_pane(
         &self,
         client_ref: &oxideterm_public_mcp::ClientRef,
         terminal_ref: &TerminalRef,

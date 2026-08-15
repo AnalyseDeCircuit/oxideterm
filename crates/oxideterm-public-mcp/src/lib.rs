@@ -33,13 +33,14 @@ pub use calls::{
     DesktopFrameArgs, DesktopHandleArgs, DesktopInputArgs, DesktopInputEvent, ForwardKind,
     HostToolLogPreset, HostToolOperation, HostToolResource, OpenDesktopArgs,
     PublicDesktopMouseButton, PublicTelnetControl, PublicToolCall, ReadDesktopClipboardArgs,
-    ResizeDesktopArgs, TerminalControlAction, TerminalOpenSource, ToolEnvelope, ToolOutcome,
-    WriteDesktopClipboardArgs,
+    RecordingExportFormat, RecordingStatusTarget, RecordingsControlArgs, RecordingsExportArgs,
+    RecordingsSearchArgs, RecordingsStatusArgs, ResizeDesktopArgs, TerminalControlAction,
+    TerminalOpenSource, ToolEnvelope, ToolOutcome, WriteDesktopClipboardArgs,
 };
 pub use handles::{
     AddonRef, ApprovalRef, ArtifactRef, AuditRef, ClientRef, CommandRef, ConnectionRef, DesktopRef,
     FileSessionRef, ForwardRef, HandleParseError, NodeRef, OperationRef, QuickCommandRef,
-    TerminalRef,
+    RecordingRef, TerminalRef,
 };
 pub use runtime::{PublicMcpHttpServer, start_http_server};
 pub use service::{PublicMcpService, PublicMcpState};

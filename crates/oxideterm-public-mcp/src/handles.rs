@@ -67,6 +67,7 @@ opaque_handle!(ClientRef, "client_");
 opaque_handle!(ConnectionRef, "connection_");
 opaque_handle!(NodeRef, "node_");
 opaque_handle!(TerminalRef, "terminal_");
+opaque_handle!(RecordingRef, "recording_");
 opaque_handle!(DesktopRef, "desktop_");
 opaque_handle!(CommandRef, "command_");
 opaque_handle!(OperationRef, "operation_");

@@ -1491,6 +1491,8 @@
       "mcp_group_terminal_session": "Terminal sessions",
       "mcp_group_terminal_observe": "Terminal content",
       "mcp_group_terminal_input": "Terminal input and control",
+      "mcp_group_recording_control": "Terminal recording control",
+      "mcp_group_recording_content": "Terminal recording content",
       "mcp_group_desktop_session": "Remote desktop sessions",
       "mcp_group_desktop_observe": "Remote desktop frames",
       "mcp_group_desktop_input": "Remote desktop input",

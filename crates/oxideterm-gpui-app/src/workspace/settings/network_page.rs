@@ -90,6 +90,12 @@ fn public_mcp_tool_group_label_key(tool_group: oxideterm_public_mcp::ToolGroup) 
         oxideterm_public_mcp::ToolGroup::TerminalInput => {
             "settings_view.network.mcp_group_terminal_input"
         }
+        oxideterm_public_mcp::ToolGroup::RecordingControl => {
+            "settings_view.network.mcp_group_recording_control"
+        }
+        oxideterm_public_mcp::ToolGroup::RecordingContent => {
+            "settings_view.network.mcp_group_recording_content"
+        }
         oxideterm_public_mcp::ToolGroup::DesktopSession => {
             "settings_view.network.mcp_group_desktop_session"
         }

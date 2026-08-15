@@ -9,7 +9,7 @@ use crate::{
     auth::ToolGroup,
     handles::{
         AddonRef, ArtifactRef, AuditRef, CommandRef, ConnectionRef, DesktopRef, FileSessionRef,
-        ForwardRef, NodeRef, QuickCommandRef, TerminalRef,
+        ForwardRef, NodeRef, QuickCommandRef, RecordingRef, TerminalRef,
     },
 };
 
@@ -148,6 +148,64 @@ pub enum TerminalControlAction {
 pub struct ControlTerminalArgs {
     pub terminal_ref: TerminalRef,
     pub action: TerminalControlAction,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, tag = "action", rename_all = "snake_case")]
+pub enum RecordingsControlArgs {
+    Start {
+        terminal_ref: TerminalRef,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        capture_input: bool,
+    },
+    Pause {
+        recording_ref: RecordingRef,
+    },
+    Resume {
+        recording_ref: RecordingRef,
+    },
+    Stop {
+        recording_ref: RecordingRef,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
+pub enum RecordingStatusTarget {
+    Recording { recording_ref: RecordingRef },
+    Terminal { terminal_ref: TerminalRef },
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RecordingsStatusArgs {
+    pub target: RecordingStatusTarget,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RecordingsSearchArgs {
+    pub recording_ref: RecordingRef,
+    pub query: String,
+    #[serde(default = "default_recording_search_limit")]
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordingExportFormat {
+    AsciicastV2,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RecordingsExportArgs {
+    pub recording_ref: RecordingRef,
+    pub format: RecordingExportFormat,
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -780,6 +838,10 @@ pub enum PublicToolCall {
     ResizeTerminal(ResizeTerminalArgs),
     ControlTerminal(ControlTerminalArgs),
     CloseTerminal(TerminalHandleArgs),
+    RecordingsControl(RecordingsControlArgs),
+    RecordingsStatus(RecordingsStatusArgs),
+    RecordingsSearch(RecordingsSearchArgs),
+    RecordingsExport(RecordingsExportArgs),
     OpenDesktop(OpenDesktopArgs),
     DesktopState(DesktopHandleArgs),
     DesktopFrame(DesktopFrameArgs),
@@ -844,6 +906,10 @@ impl PublicToolCall {
             Self::ResizeTerminal(_) => "terminals_resize",
             Self::ControlTerminal(_) => "terminals_control",
             Self::CloseTerminal(_) => "terminals_close",
+            Self::RecordingsControl(_) => "recordings_control",
+            Self::RecordingsStatus(_) => "recordings_status",
+            Self::RecordingsSearch(_) => "recordings_search",
+            Self::RecordingsExport(_) => "recordings_export",
             Self::OpenDesktop(_) => "desktops_open",
             Self::DesktopState(_) => "desktops_state",
             Self::DesktopFrame(_) => "desktops_frame",
@@ -907,6 +973,8 @@ impl PublicToolCall {
                 ToolGroup::TerminalObserve
             }
             Self::SubmitTerminal(_) | Self::ControlTerminal(_) => ToolGroup::TerminalInput,
+            Self::RecordingsControl(_) | Self::RecordingsStatus(_) => ToolGroup::RecordingControl,
+            Self::RecordingsSearch(_) | Self::RecordingsExport(_) => ToolGroup::RecordingContent,
             Self::OpenDesktop(_) | Self::ReconnectDesktop(_) | Self::CloseDesktop(_) => {
                 ToolGroup::DesktopSession
             }
@@ -957,6 +1025,8 @@ impl PublicToolCall {
                 | Self::OpenTerminal(_)
                 | Self::SubmitTerminal(_)
                 | Self::ControlTerminal(_)
+                | Self::RecordingsControl(RecordingsControlArgs::Start { .. })
+                | Self::RecordingsExport(_)
                 | Self::OpenDesktop(_)
                 | Self::DesktopInput(_)
                 | Self::WriteDesktopClipboard(_)
@@ -1007,6 +1077,26 @@ impl PublicToolCall {
                 format!("{} {}x{}", args.terminal_ref, args.cols, args.rows)
             }
             Self::ControlTerminal(args) => format!("{} {:?}", args.terminal_ref, args.action),
+            Self::RecordingsControl(args) => match args {
+                RecordingsControlArgs::Start { terminal_ref, .. } => {
+                    format!("{terminal_ref} start recording")
+                }
+                RecordingsControlArgs::Pause { recording_ref } => {
+                    format!("{recording_ref} pause")
+                }
+                RecordingsControlArgs::Resume { recording_ref } => {
+                    format!("{recording_ref} resume")
+                }
+                RecordingsControlArgs::Stop { recording_ref } => {
+                    format!("{recording_ref} stop")
+                }
+            },
+            Self::RecordingsStatus(args) => match &args.target {
+                RecordingStatusTarget::Recording { recording_ref } => recording_ref.to_string(),
+                RecordingStatusTarget::Terminal { terminal_ref } => terminal_ref.to_string(),
+            },
+            Self::RecordingsSearch(args) => args.recording_ref.to_string(),
+            Self::RecordingsExport(args) => args.recording_ref.to_string(),
             Self::OpenDesktop(args) => args.connection_ref.to_string(),
             Self::DesktopState(args) | Self::ReconnectDesktop(args) | Self::CloseDesktop(args) => {
                 args.desktop_ref.to_string()
@@ -1133,6 +1223,10 @@ const fn default_terminal_line_limit() -> u32 {
 
 const fn default_terminal_match_limit() -> u32 {
     100
+}
+
+const fn default_recording_search_limit() -> u32 {
+    50
 }
 
 const fn default_desktop_clipboard_kind() -> DesktopClipboardKind {
