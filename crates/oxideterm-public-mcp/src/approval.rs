@@ -199,10 +199,10 @@ impl ApprovalStore {
         let mut entries = self.entries.lock();
         let mut revoked = 0;
         for entry in entries.values_mut() {
-            let matches_group = entry
-                .call
-                .as_ref()
-                .is_some_and(|call| call.required_group() == tool_group);
+            let matches_group = entry.call.as_ref().is_some_and(|call| {
+                call.required_group() == tool_group
+                    || call.additional_required_groups().contains(&tool_group)
+            });
             if &entry.projection.client_ref == client_ref
                 && matches_group
                 && matches!(
