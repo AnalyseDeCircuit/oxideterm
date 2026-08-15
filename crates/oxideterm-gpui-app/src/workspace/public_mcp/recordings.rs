@@ -3,7 +3,7 @@ use std::time::Instant;
 use gpui::Context;
 use oxideterm_public_mcp::{
     ClientRef, DomainRequest, PublicToolCall, RecordingExportFormat, RecordingRef,
-    RecordingStatusTarget, RecordingsControlArgs, TerminalRef, ToolEnvelope,
+    RecordingStatusTarget, RecordingsControlArgs, TerminalRef, ToolEnvelope, ToolGroup,
 };
 use oxideterm_terminal_recording::{
     AsciicastRecording, TerminalRecordingPlayback, TerminalRecordingState,
@@ -313,7 +313,14 @@ impl WorkspaceApp {
         record.active = false;
         record.truncated = truncated;
         record.stopped_at = Some(Instant::now());
-        record.content = Some(content);
+        let content_enabled = self
+            .public_mcp
+            .state
+            .clients
+            .get(client_ref)
+            .is_some_and(|client| client.tool_groups.contains(&ToolGroup::RecordingContent));
+        // Recording control may remain enabled after content access is revoked.
+        record.content = content_enabled.then_some(content);
         self.enforce_public_mcp_recording_content_budget(client_ref);
         Ok(())
     }
@@ -437,13 +444,15 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn revoke_public_mcp_client_recording_artifacts(&mut self, client_ref: &ClientRef) {
+    pub(super) fn revoke_public_mcp_client_recording_content(&mut self, client_ref: &ClientRef) {
         for record in self
             .public_mcp
             .recordings
             .values_mut()
             .filter(|record| record.client_ref == *client_ref)
         {
+            // Dropping Zeroizing content makes the read revocation irreversible.
+            record.content.take();
             for artifact_ref in record.artifact_refs.drain() {
                 self.public_mcp
                     .state
@@ -459,7 +468,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.stop_public_mcp_client_recordings(client_ref, cx);
-        self.revoke_public_mcp_client_recording_artifacts(client_ref);
+        self.revoke_public_mcp_client_recording_content(client_ref);
         self.public_mcp
             .recordings
             .retain(|_, record| record.client_ref != *client_ref);

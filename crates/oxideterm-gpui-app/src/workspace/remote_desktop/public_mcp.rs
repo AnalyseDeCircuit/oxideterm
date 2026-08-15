@@ -209,6 +209,11 @@ impl RemoteDesktopSessionEntity {
         }
     }
 
+    pub(in crate::workspace) fn clear_public_mcp_clipboard(&mut self) {
+        // The platform clipboard remains owned by the desktop UI; this only revokes MCP content.
+        self.public_mcp_clipboard = None;
+    }
+
     pub(in crate::workspace) fn write_public_mcp_clipboard_text(
         &mut self,
         text: &str,

@@ -500,22 +500,32 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn revoke_public_mcp_client_desktop_clipboard_artifacts(
+    pub(super) fn revoke_public_mcp_client_desktop_clipboard_content(
         &mut self,
         client_ref: &oxideterm_public_mcp::ClientRef,
+        cx: &mut Context<Self>,
     ) {
-        let artifacts = self
+        let mut tab_ids = Vec::new();
+        let mut artifacts = Vec::new();
+        for record in self
             .public_mcp
             .desktops
             .values_mut()
             .filter(|record| &record.client_ref == client_ref)
-            .flat_map(|record| record.clipboard_artifacts.drain())
-            .collect::<Vec<_>>();
+        {
+            tab_ids.push(record.tab_id);
+            artifacts.extend(record.clipboard_artifacts.drain());
+        }
         for artifact_ref in artifacts {
             self.public_mcp
                 .state
                 .artifacts
                 .revoke(client_ref, &artifact_ref);
+        }
+        for tab_id in tab_ids {
+            if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
+                session.update(cx, |session, _cx| session.clear_public_mcp_clipboard());
+            }
         }
     }
 

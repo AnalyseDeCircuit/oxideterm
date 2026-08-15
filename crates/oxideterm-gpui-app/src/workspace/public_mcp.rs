@@ -964,7 +964,7 @@ impl WorkspaceApp {
             ToolGroup::TerminalSession => self.revoke_public_mcp_client_terminals(client_ref, cx),
             ToolGroup::RecordingControl => self.stop_public_mcp_client_recordings(client_ref, cx),
             ToolGroup::RecordingContent => {
-                self.revoke_public_mcp_client_recording_artifacts(client_ref)
+                self.revoke_public_mcp_client_recording_content(client_ref)
             }
             ToolGroup::DesktopSession => self.revoke_public_mcp_client_desktops(client_ref, cx),
             ToolGroup::DesktopObserve => {
@@ -974,7 +974,7 @@ impl WorkspaceApp {
                 self.release_public_mcp_client_desktop_inputs(client_ref, cx)
             }
             ToolGroup::DesktopClipboard => {
-                self.revoke_public_mcp_client_desktop_clipboard_artifacts(client_ref)
+                self.revoke_public_mcp_client_desktop_clipboard_content(client_ref, cx)
             }
             ToolGroup::CommandExecute => self.public_mcp.revoke_client_commands(client_ref),
             ToolGroup::QuickCommandExecute => self
