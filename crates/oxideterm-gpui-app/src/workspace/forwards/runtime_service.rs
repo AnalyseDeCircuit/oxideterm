@@ -64,6 +64,11 @@ pub(super) struct ForwardingRuntimeSnapshot {
     pub(super) stats_by_forward_id: HashMap<String, ForwardStats>,
 }
 
+pub(in crate::workspace) struct PublicMcpForwardMutation {
+    pub(in crate::workspace) rule: ForwardRule,
+    pub(in crate::workspace) persisted: bool,
+}
+
 #[derive(Default)]
 struct ForwardingBindingState {
     consumers: HashMap<String, (String, ConnectionConsumer)>,
@@ -239,6 +244,238 @@ impl ForwardingRuntimeService {
         node_id: &NodeId,
     ) -> Option<Arc<ForwardingManager>> {
         self.registry.get(&Self::session_id_for_node(node_id))
+    }
+
+    pub(in crate::workspace) fn public_mcp_rules_for_node(
+        &self,
+        node_id: &NodeId,
+    ) -> Vec<ForwardRule> {
+        self.manager_for_node(node_id)
+            .map_or_else(Vec::new, |manager| manager.list_forwards())
+    }
+
+    pub(in crate::workspace) fn public_mcp_forward_is_persisted(&self, forward_id: &str) -> bool {
+        self.registry
+            .list_all_saved_forwards()
+            .iter()
+            .any(|forward| forward.id == forward_id)
+    }
+
+    pub(in crate::workspace) fn public_mcp_forward_owner_connection_id(
+        &self,
+        forward_id: &str,
+    ) -> Option<String> {
+        self.registry
+            .list_all_saved_forwards()
+            .into_iter()
+            .find(|forward| forward.id == forward_id)
+            .and_then(|forward| forward.owner_connection_id)
+    }
+
+    pub(in crate::workspace) async fn public_mcp_open_forward(
+        &self,
+        node_id: &NodeId,
+        owner_connection_id: Option<&str>,
+        rule: ForwardRule,
+        check_health: bool,
+        persist: bool,
+    ) -> Result<PublicMcpForwardMutation, String> {
+        let manager = self
+            .public_mcp_manager_for_node(node_id, owner_connection_id)
+            .await?;
+        let rule = manager
+            .create_forward_with_health_check(rule, check_health)
+            .await
+            .map_err(|error| error.to_string())?;
+        let persisted = persist
+            && self
+                .registry
+                .sync_persisted_forward_rule(
+                    &rule.id,
+                    &Self::session_id_for_node(node_id),
+                    owner_connection_id.map(ToOwned::to_owned),
+                    rule.clone(),
+                )
+                .is_ok_and(|saved| saved.is_some());
+        Ok(PublicMcpForwardMutation { rule, persisted })
+    }
+
+    pub(in crate::workspace) async fn public_mcp_change_forward(
+        &self,
+        node_id: &NodeId,
+        owner_connection_id: Option<&str>,
+        forward_id: &str,
+        expected_rule: &ForwardRule,
+        update: ForwardUpdate,
+        persist: bool,
+    ) -> Result<PublicMcpForwardMutation, String> {
+        let manager = self
+            .public_mcp_manager_for_node(node_id, owner_connection_id)
+            .await?;
+        let original = manager
+            .list_forwards()
+            .into_iter()
+            .find(|rule| rule.id == forward_id)
+            .ok_or_else(|| "The forward no longer exists".to_owned())?;
+        if &original != expected_rule {
+            return Err("The forward changed after the expected revision".to_owned());
+        }
+        let restart = match original.status {
+            ForwardStatus::Active => true,
+            ForwardStatus::Stopped => false,
+            _ => return Err("The forward is not ready to be changed".to_owned()),
+        };
+        if restart {
+            manager
+                .stop_forward(forward_id)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        let updated = match manager.update_forward(forward_id, update) {
+            Ok(updated) => updated,
+            Err(error) => {
+                if restart {
+                    let _ = manager.restart_forward(forward_id).await;
+                }
+                return Err(error.to_string());
+            }
+        };
+        let rule = if restart {
+            match manager.restart_forward(forward_id).await {
+                Ok(rule) => rule,
+                Err(error) => {
+                    let _ = manager.update_forward(forward_id, forward_update_from_rule(&original));
+                    let _ = manager.restart_forward(forward_id).await;
+                    return Err(error.to_string());
+                }
+            }
+        } else {
+            updated
+        };
+        let persisted = persist
+            && self
+                .registry
+                .sync_persisted_forward_rule(
+                    &rule.id,
+                    &Self::session_id_for_node(node_id),
+                    owner_connection_id.map(ToOwned::to_owned),
+                    rule.clone(),
+                )
+                .is_ok_and(|saved| saved.is_some());
+        Ok(PublicMcpForwardMutation { rule, persisted })
+    }
+
+    pub(in crate::workspace) async fn public_mcp_stop_forward(
+        &self,
+        node_id: &NodeId,
+        owner_connection_id: Option<&str>,
+        forward_id: &str,
+    ) -> Result<ForwardRule, String> {
+        self.public_mcp_manager_for_node(node_id, owner_connection_id)
+            .await?
+            .stop_forward(forward_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub(in crate::workspace) async fn public_mcp_restart_forward(
+        &self,
+        node_id: &NodeId,
+        owner_connection_id: Option<&str>,
+        forward_id: &str,
+        persist: bool,
+    ) -> Result<PublicMcpForwardMutation, String> {
+        let manager = self
+            .public_mcp_manager_for_node(node_id, owner_connection_id)
+            .await?;
+        let rule = manager
+            .restart_forward(forward_id)
+            .await
+            .map_err(|error| error.to_string())?;
+        let persisted = persist
+            && self
+                .registry
+                .sync_persisted_forward_rule(
+                    &rule.id,
+                    &Self::session_id_for_node(node_id),
+                    owner_connection_id.map(ToOwned::to_owned),
+                    rule.clone(),
+                )
+                .is_ok_and(|saved| saved.is_some());
+        Ok(PublicMcpForwardMutation { rule, persisted })
+    }
+
+    pub(in crate::workspace) async fn public_mcp_remove_forward(
+        &self,
+        node_id: &NodeId,
+        owner_connection_id: Option<&str>,
+        forward_id: &str,
+        remove_saved: bool,
+    ) -> Result<bool, String> {
+        self.public_mcp_manager_for_node(node_id, owner_connection_id)
+            .await?
+            .delete_forward(forward_id)
+            .await
+            .map_err(|error| error.to_string())?;
+        if !remove_saved {
+            return Ok(false);
+        }
+        Ok(self.registry.delete_persisted_forward(forward_id).is_ok())
+    }
+
+    pub(in crate::workspace) fn public_mcp_forward_stats(
+        &self,
+        node_id: &NodeId,
+        forward_id: &str,
+    ) -> Result<ForwardStats, String> {
+        self.manager_for_node(node_id)
+            .ok_or_else(|| "The forward manager is unavailable".to_owned())?
+            .get_stats(forward_id)
+            .map_err(|error| error.to_string())
+    }
+
+    pub(in crate::workspace) async fn public_mcp_discover_ports(
+        &self,
+        node_id: &NodeId,
+        owner_connection_id: Option<&str>,
+    ) -> Result<PortDetectionSnapshot, String> {
+        self.public_mcp_manager_for_node(node_id, owner_connection_id)
+            .await?
+            .scan_remote_ports()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub(in crate::workspace) async fn public_mcp_revoke_forward(
+        &self,
+        node_id: &NodeId,
+        forward_id: &str,
+        persisted: bool,
+    ) {
+        if persisted {
+            let _ = self.registry.update_auto_start(forward_id, false);
+        }
+        let Some(manager) = self.manager_for_node(node_id) else {
+            return;
+        };
+        if persisted {
+            let _ = manager.stop_forward(forward_id).await;
+        } else {
+            let _ = manager.delete_forward(forward_id).await;
+        }
+    }
+
+    async fn public_mcp_manager_for_node(
+        &self,
+        node_id: &NodeId,
+        owner_connection_id: Option<&str>,
+    ) -> Result<Arc<ForwardingManager>, String> {
+        let (manager, binding) = self
+            .manager_for_node_async(node_id, owner_connection_id)
+            .await?;
+        // ForwardingRuntimeService remains the PortForward consumer owner.
+        self.remember_binding(binding, false);
+        Ok(manager)
     }
 
     pub(super) fn snapshot_for_node(&self, node_id: &NodeId) -> ForwardingRuntimeSnapshot {
@@ -783,6 +1020,17 @@ impl ForwardingRuntimeService {
         self.bindings
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+fn forward_update_from_rule(rule: &ForwardRule) -> ForwardUpdate {
+    ForwardUpdate {
+        forward_type: Some(rule.forward_type),
+        bind_address: Some(rule.bind_address.clone()),
+        bind_port: Some(rule.bind_port),
+        target_host: Some(rule.target_host.clone()),
+        target_port: Some(rule.target_port),
+        description: Some(rule.description.clone()),
     }
 }
 

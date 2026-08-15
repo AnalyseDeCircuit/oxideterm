@@ -15,7 +15,7 @@ pub struct DomainBroker {
 
 #[derive(Debug)]
 pub enum DomainMessage {
-    Request(DomainRequest),
+    Request(Box<DomainRequest>),
     StateChanged,
 }
 
@@ -92,12 +92,12 @@ impl DomainBroker {
         let cancellation = CancellationToken::new();
         let cancellation_guard = cancellation.clone().drop_guard();
         self.sender
-            .send(DomainMessage::Request(DomainRequest {
+            .send(DomainMessage::Request(Box::new(DomainRequest {
                 client_ref,
                 call,
                 response,
                 cancellation,
-            }))
+            })))
             .await
             .map_err(|_| BrokerError::WorkspaceUnavailable)?;
         let response = tokio::time::timeout(DOMAIN_REQUEST_TIMEOUT, receiver)

@@ -29,11 +29,11 @@ pub use auth::{
 };
 pub use broker::{BrokerError, DomainBroker, DomainMessage, DomainRequest, DomainRequestReceiver};
 pub use calls::{
-    HostToolLogPreset, HostToolOperation, HostToolResource, PublicToolCall, ToolEnvelope,
-    ToolOutcome,
+    ForwardKind, HostToolLogPreset, HostToolOperation, HostToolResource, PublicToolCall,
+    ToolEnvelope, ToolOutcome,
 };
 pub use handles::{
-    AddonRef, ApprovalRef, ArtifactRef, AuditRef, ClientRef, CommandRef, ConnectionRef,
+    AddonRef, ApprovalRef, ArtifactRef, AuditRef, ClientRef, CommandRef, ConnectionRef, ForwardRef,
     HandleParseError, NodeRef, OperationRef, QuickCommandRef, TerminalRef,
 };
 pub use runtime::{PublicMcpHttpServer, start_http_server};

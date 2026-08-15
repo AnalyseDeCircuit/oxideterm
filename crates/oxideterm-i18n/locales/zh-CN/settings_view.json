@@ -1500,6 +1500,8 @@
       "mcp_group_quick_command_execute": "快速命令执行",
       "mcp_group_addon_read": "插件目录",
       "mcp_group_addon_manage": "插件管理",
+      "mcp_group_forward_read": "端口转发状态",
+      "mcp_group_forward_manage": "端口转发管理",
       "client_enabled": "已启用",
       "client_disabled": "已停用",
       "enable_client": "启用",

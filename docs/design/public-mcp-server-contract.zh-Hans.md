@@ -67,11 +67,12 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 - `hosttools_catalog`/`hosttools_capture`/`hosttools_operate` 只接产品已有的类型化资源与固定动作，不暴露自由 shell 或插件调用。
 - 快速命令目录和正文分别授权；保存和删除采用存储 revision 冲突检查并刷新应用内状态。执行只读取已保存的精确命令，并再次校验 revision、节点所有权和 `host_pattern`。当前模型没有参数 schema，因此 `arguments` 必须为空；当前执行目标仅支持 `node_ref`，终端目标随终端句柄阶段接入。
 - 插件目录和插件管理分别授权。插件安装只接受客户端自己的临时 artifact、必填 SHA-256 和预期插件身份，在 staging 阶段核对身份后才替换安装目录；启停和卸载复用应用已有注册表及运行时停用路径。返回值只含 manifest 公开身份、状态、权限请求和声明式贡献数量，绝不返回安装路径、配置路径、任意 `api.invoke`、运行时命令或 Host Monitor 命令正文。
+- 端口转发读取和管理分别授权。`forwards_*` 复用应用唯一的 `ForwardingRuntimeService` 和独立 `PortForward` 消费者，支持类型化创建、带 revision 的受控修改、停止、重启、删除、统计和单次端口发现。关闭终端或释放 Public MCP 节点租约不会停止转发；显式物理节点断开、客户端撤销或关闭转发管理授权才按所有权清理。外部只看到客户端作用域的 `forward_ref`。
 - 连接和命令执行、物理节点断开先冻结原参数并进入应用内批准；批准票据绑定客户端、五分钟过期且只能消费一次。批准界面显示实际客户端、目标和命令，但命令不进入 MCP 批准结果或审计。
 - 停用或撤销客户端会撤销待批准动作、取消命令并释放其 Public MCP 消费者；`nodes_release` 不会把其他终端、SFTP 或转发消费者仍在使用的物理节点断开。
 - 应用锁定时会拒绝新的 MCP 领域请求、撤销待批准动作、取消 MCP 命令并释放 MCP 节点消费者；解锁后客户端凭据仍有效，但必须重新取得运行时句柄。
 
-stdio bridge、终端屏幕读取、SFTP/IDE、传输、转发、RDP/VNC、云同步和录制仍按后续阶段实施。已接入领域尚未支持的目标或动作会明确拒绝；其余领域在真实 broker 和生命周期接通前不会出现在 `tools/list`，也不会用空壳结果冒充支持。
+stdio bridge、终端屏幕读取、SFTP/IDE、传输、RDP/VNC、云同步和录制仍按后续阶段实施。已接入领域尚未支持的目标或动作会明确拒绝；其余领域在真实 broker 和生命周期接通前不会出现在 `tools/list`，也不会用空壳结果冒充支持。
 
 ## 2. 服务形态与协议
 
@@ -288,9 +289,9 @@ NodeRouter / connection registry ── 物理 SSH node
 | `hosttools_operate` | Host Tools 操作 / X / 必须 | `node_ref`、`resource`、`action`、`typed_target` | 如服务 start/stop/restart、进程 signal、容器 action、计划任务 action。只允许 catalog 中的类型化操作，绝无自由 shell 字符串。 |
 | `forwards_list` | 转发 / R / 否 | `node_ref?`、`include_stopped?` | 外部 `forward_ref`、类型、绑定/目标、状态、保存状态和统计摘要。 |
 | `forwards_open` | 转发 / X / 必须 | `node_ref`、`kind`、`bind`、`target?`、`persist?` | 创建 local、remote 或 dynamic forward，返回 `forward_ref`。listener/bridge 由转发 owner 持有，终端关闭不停止它。公开绑定与持久化需要更高风险提示。 |
-| `forwards_change` | 转发 / X / 必须 | `forward_ref`、`patch`、`expected_revision?` | 更新已停止规则或受控重启活动规则；返回新 revision 与可用时的 `undo_ref`。 |
-| `forwards_stop` | 转发 / W / 否 | `forward_ref` | 停止 listener 和 bridge；保存规则可随后重启。 |
-| `forwards_restart` | 转发 / W / 否 | `forward_ref` | 重新建立原规则，返回实际状态。 |
+| `forwards_change` | 转发 / X / 必须 | `forward_ref`、`patch`、`expected_revision` | 更新已停止规则或受控重启活动规则；返回新 revision。当前没有跨监听器副作用的可靠撤销，因此不虚构 `undo_ref`。 |
+| `forwards_stop` | 转发 / W / 必须 | `forward_ref` | 停止 listener 和 bridge；保存规则可随后重启。 |
+| `forwards_restart` | 转发 / W / 必须 | `forward_ref` | 重新建立原规则，返回实际状态。 |
 | `forwards_remove` | 转发 / X / 必须 | `forward_ref`、`remove_saved` | 删除运行时规则，可选删除保存定义。 |
 | `forwards_metrics` | 转发 / R / 否 | `forward_ref` | 连接数、活跃数、收发字节和状态。 |
 | `forwards_discover_ports` | 转发 / R / 否 | `node_ref` | Host Tools 端口发现快照；不创建转发。 |
@@ -370,7 +371,7 @@ RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控�
 - 创建/编辑/运行/删除快速命令；
 - 开始含内容的录制与导出。
 
-低风险、已授权且不改变状态的读取可直接运行。普通生命周期动作如关闭一个已由同客户端创建的空闲终端、停止自身创建的转发可不逐次确认，但仍需工具组授权、审计和明确目标句柄。
+低风险、已授权且不改变状态的读取可直接运行。当前转发停止和重启也按状态改变处理：普通模式逐次确认，完全权限模式只在已勾选转发管理组内跳过确认；两种模式都要求审计和明确目标句柄。
 
 ### 5.3 审计记录
 

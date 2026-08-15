@@ -13,7 +13,7 @@ use oxideterm_plugin_registry as plugin_host;
 use oxideterm_public_mcp::{
     AddonRef, ApprovalRef, ApprovalStatus, AuditQuery, ClientApprovalMode, ClientCredential,
     ClientProjection, ClientRef, ClientRegistry, CommandRef, ConnectionRef, DomainBroker,
-    DomainMessage, DomainRequest, DomainRequestReceiver, NodeRef, PublicMcpHttpServer,
+    DomainMessage, DomainRequest, DomainRequestReceiver, ForwardRef, NodeRef, PublicMcpHttpServer,
     PublicMcpState, PublicToolCall, QuickCommandRef, ToolEnvelope, ToolGroup, ToolOutcome,
     start_http_server,
 };
@@ -28,6 +28,7 @@ use zeroize::Zeroizing;
 use super::WorkspaceApp;
 
 mod addons;
+mod forwards;
 mod host_tools;
 mod quick_commands;
 
@@ -64,6 +65,7 @@ pub(in crate::workspace) struct PublicMcpWorkspaceBridge {
 struct PublicMcpRuntimeHandles {
     nodes: HashMap<NodeRef, PublicMcpNodeLease>,
     commands: HashMap<CommandRef, PublicMcpCommandRecord>,
+    forwards: HashMap<ForwardRef, PublicMcpForwardRecord>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -76,8 +78,20 @@ struct PublicMcpEndpointState {
 struct PublicMcpNodeLease {
     client_ref: ClientRef,
     node_id: NodeId,
-    connection_id: Option<String>,
+    saved_connection_id: Option<String>,
+    physical_connection_id: Option<String>,
     consumer: ConnectionConsumer,
+}
+
+#[derive(Clone)]
+struct PublicMcpForwardRecord {
+    client_ref: ClientRef,
+    node_ref: NodeRef,
+    node_id: NodeId,
+    owner_connection_id: Option<String>,
+    forward_id: String,
+    created_by_client: bool,
+    persisted: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -413,6 +427,7 @@ impl PublicMcpWorkspaceBridge {
         store: &ConnectionStore,
         node_router: &NodeRouter,
         plugin_registry: &plugin_host::NativePluginRegistry,
+        forwarding_service: &super::forwards::ForwardingRuntimeService,
     ) -> String {
         if let Some(quickcommand_ref) = target
             .split_whitespace()
@@ -455,7 +470,36 @@ impl PublicMcpWorkspaceBridge {
             .trim()
             .to_owned();
         }
-        if let Ok(node_ref) = target.parse::<NodeRef>()
+        let (forward_target, forward_action) = target.split_once(' ').unwrap_or((target, ""));
+        if let Ok(forward_ref) = forward_target.parse::<ForwardRef>()
+            && let Some(record) = self
+                .runtime_handles
+                .lock()
+                .forwards
+                .get(&forward_ref)
+                .filter(|record| record.client_ref == *client_ref)
+                .cloned()
+            && let Some(rule) = forwarding_service
+                .public_mcp_rules_for_node(&record.node_id)
+                .into_iter()
+                .find(|rule| rule.id == record.forward_id)
+        {
+            let destination = match rule.forward_type {
+                oxideterm_forwarding::ForwardType::Dynamic => "SOCKS".to_owned(),
+                oxideterm_forwarding::ForwardType::Local
+                | oxideterm_forwarding::ForwardType::Remote => {
+                    format!("{}:{}", rule.target_host, rule.target_port)
+                }
+            };
+            return format!(
+                "{}:{} → {} {}",
+                rule.bind_address, rule.bind_port, destination, forward_action
+            )
+            .trim()
+            .to_owned();
+        }
+        let node_target = target.split_whitespace().next().unwrap_or(target);
+        if let Ok(node_ref) = node_target.parse::<NodeRef>()
             && let Some(lease) = self.runtime_handles.lock().nodes.get(&node_ref).cloned()
             && let Some(metadata) = node_router.node_metadata(&lease.node_id)
         {
@@ -483,7 +527,7 @@ impl WorkspaceApp {
                 if workspace
                     .update(cx, |workspace, cx| match message {
                         DomainMessage::Request(request) => {
-                            workspace.handle_public_mcp_request(request, cx)
+                            workspace.handle_public_mcp_request(*request, cx)
                         }
                         DomainMessage::StateChanged => {
                             workspace.notify_public_mcp_approval(cx);
@@ -539,8 +583,7 @@ impl WorkspaceApp {
     ) -> Result<(), String> {
         self.public_mcp.set_client_enabled(client_ref, enabled)?;
         if !enabled {
-            self.public_mcp
-                .revoke_client_runtime(client_ref, &self.node_router);
+            self.revoke_public_mcp_client_runtime(client_ref);
             self.public_mcp.remove_client_connection_refs(client_ref);
             self.public_mcp.remove_client_quick_command_refs(client_ref);
             self.public_mcp.remove_client_addon_refs(client_ref);
@@ -556,8 +599,7 @@ impl WorkspaceApp {
         self.public_mcp
             .set_client_approval_mode(client_ref, approval_mode)?;
         // A mode transition cannot inherit actions or runtime handles from the old policy.
-        self.public_mcp
-            .revoke_client_runtime(client_ref, &self.node_router);
+        self.revoke_public_mcp_client_runtime(client_ref);
         Ok(())
     }
 
@@ -575,9 +617,7 @@ impl WorkspaceApp {
                 .approvals
                 .revoke_client_tool_group(client_ref, tool_group);
             match tool_group {
-                ToolGroup::NodeSession => self
-                    .public_mcp
-                    .revoke_client_runtime(client_ref, &self.node_router),
+                ToolGroup::NodeSession => self.revoke_public_mcp_client_runtime(client_ref),
                 ToolGroup::CommandExecute => self.public_mcp.revoke_client_commands(client_ref),
                 ToolGroup::QuickCommandExecute => self
                     .public_mcp
@@ -585,6 +625,7 @@ impl WorkspaceApp {
                 ToolGroup::ArtifactTransfer => {
                     self.public_mcp.state.artifacts.revoke_client(client_ref)
                 }
+                ToolGroup::ForwardManage => self.revoke_public_mcp_client_forwards(client_ref),
                 ToolGroup::Basic
                 | ToolGroup::ConnectionDirectory
                 | ToolGroup::ConnectionRead
@@ -596,7 +637,8 @@ impl WorkspaceApp {
                 | ToolGroup::QuickCommandContentRead
                 | ToolGroup::QuickCommandManage
                 | ToolGroup::AddonRead
-                | ToolGroup::AddonManage => {}
+                | ToolGroup::AddonManage
+                | ToolGroup::ForwardRead => {}
             }
         }
         Ok(())
@@ -607,8 +649,7 @@ impl WorkspaceApp {
         client_ref: &ClientRef,
     ) -> Result<(), String> {
         self.public_mcp.remove_client(client_ref)?;
-        self.public_mcp
-            .revoke_client_runtime(client_ref, &self.node_router);
+        self.revoke_public_mcp_client_runtime(client_ref);
         self.public_mcp.remove_client_connection_refs(client_ref);
         self.public_mcp.remove_client_quick_command_refs(client_ref);
         self.public_mcp.remove_client_addon_refs(client_ref);
@@ -628,14 +669,37 @@ impl WorkspaceApp {
             &self.connection_store,
             &self.node_router,
             &plugin_registry,
+            &self.forwarding_service,
         )
     }
 
     pub(in crate::workspace) fn suspend_public_mcp_runtime(&self) {
         // Locking the workspace invalidates approvals and releases only MCP-owned consumers.
         for client in self.public_mcp.clients() {
-            self.public_mcp
-                .revoke_client_runtime(&client.client_ref, &self.node_router);
+            self.revoke_public_mcp_client_runtime(&client.client_ref);
+        }
+    }
+
+    fn revoke_public_mcp_client_runtime(&self, client_ref: &ClientRef) {
+        self.revoke_public_mcp_client_forwards(client_ref);
+        self.public_mcp
+            .revoke_client_runtime(client_ref, &self.node_router);
+    }
+
+    fn revoke_public_mcp_client_forwards(&self, client_ref: &ClientRef) {
+        let records =
+            forwards::revoke_client_forwards(&self.public_mcp.runtime_handles, client_ref);
+        for record in records {
+            let service = self.forwarding_service.clone();
+            self.forwarding_runtime.spawn(async move {
+                service
+                    .public_mcp_revoke_forward(
+                        &record.node_id,
+                        &record.forward_id,
+                        record.persisted,
+                    )
+                    .await;
+            });
         }
     }
 
@@ -697,6 +761,16 @@ impl WorkspaceApp {
                 self.handle_public_mcp_addons_set_enabled(request, cx)
             }
             PublicToolCall::AddonsRemove(_) => self.handle_public_mcp_addons_remove(request, cx),
+            PublicToolCall::ForwardsList(_) => self.handle_public_mcp_forwards_list(request),
+            PublicToolCall::ForwardsOpen(_) => self.handle_public_mcp_forwards_open(request),
+            PublicToolCall::ForwardsChange(_) => self.handle_public_mcp_forwards_change(request),
+            PublicToolCall::ForwardsStop(_) => self.handle_public_mcp_forwards_stop(request),
+            PublicToolCall::ForwardsRestart(_) => self.handle_public_mcp_forwards_restart(request),
+            PublicToolCall::ForwardsRemove(_) => self.handle_public_mcp_forwards_remove(request),
+            PublicToolCall::ForwardsMetrics(_) => self.handle_public_mcp_forwards_metrics(request),
+            PublicToolCall::ForwardsDiscoverPorts(_) => {
+                self.handle_public_mcp_forwards_discover_ports(request)
+            }
         }
     }
 
@@ -807,7 +881,11 @@ impl WorkspaceApp {
                 }
             }
         } else {
-            self.materialize_ssh_root_node(config, connection.name.clone(), Some(connection_id))
+            self.materialize_ssh_root_node(
+                config,
+                connection.name.clone(),
+                Some(connection_id.clone()),
+            )
         };
         if !self.ensure_node_connection_started(&node_id, cx) {
             request.finish(ToolEnvelope::failed(
@@ -821,7 +899,8 @@ impl WorkspaceApp {
         let lease = PublicMcpNodeLease {
             client_ref: request.client_ref.clone(),
             node_id: node_id.clone(),
-            connection_id: None,
+            saved_connection_id: Some(connection_id),
+            physical_connection_id: None,
             consumer: consumer.clone(),
         };
         self.public_mcp
@@ -853,7 +932,7 @@ impl WorkspaceApp {
                         return;
                     }
                     let retained = if let Some(lease) = handles.lock().nodes.get_mut(&node_ref) {
-                        lease.connection_id = Some(connection_id.clone());
+                        lease.physical_connection_id = Some(connection_id.clone());
                         true
                     } else {
                         false
@@ -944,7 +1023,7 @@ impl WorkspaceApp {
         for cancellation in cancellations {
             cancellation.cancel();
         }
-        if let Some(connection_id) = lease.connection_id {
+        if let Some(connection_id) = lease.physical_connection_id {
             self.node_router
                 .release_consumer(&connection_id, &lease.consumer);
         }
@@ -1000,6 +1079,7 @@ impl WorkspaceApp {
             .filter_map(|command_ref| handles.commands.remove(&command_ref))
             .map(|record| record.cancellation)
             .collect::<Vec<_>>();
+        forwards::invalidate_for_disconnected_nodes(&mut handles, &disconnected);
         drop(handles);
         for cancellation in cancellations {
             cancellation.cancel();
@@ -1360,7 +1440,7 @@ impl PublicMcpWorkspaceBridge {
             cancellation.cancel();
         }
         for lease in leases {
-            if let Some(connection_id) = lease.connection_id {
+            if let Some(connection_id) = lease.physical_connection_id {
                 node_router.release_consumer(&connection_id, &lease.consumer);
             }
         }

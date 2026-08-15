@@ -1500,6 +1500,8 @@
       "mcp_group_quick_command_execute": "快速命令執行",
       "mcp_group_addon_read": "外掛目錄",
       "mcp_group_addon_manage": "外掛管理",
+      "mcp_group_forward_read": "連接埠轉送狀態",
+      "mcp_group_forward_manage": "連接埠轉送管理",
       "client_enabled": "已啟用",
       "client_disabled": "已停用",
       "enable_client": "啟用",

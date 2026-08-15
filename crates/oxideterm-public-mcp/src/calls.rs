@@ -8,7 +8,8 @@ use zeroize::Zeroizing;
 use crate::{
     auth::ToolGroup,
     handles::{
-        AddonRef, ArtifactRef, AuditRef, CommandRef, ConnectionRef, NodeRef, QuickCommandRef,
+        AddonRef, ArtifactRef, AuditRef, CommandRef, ConnectionRef, ForwardRef, NodeRef,
+        QuickCommandRef,
     },
 };
 
@@ -311,6 +312,80 @@ pub struct AddonsRemoveArgs {
     pub retain_settings: Option<bool>,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ForwardKind {
+    Local,
+    Remote,
+    Dynamic,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct ForwardsListArgs {
+    #[serde(default)]
+    pub node_ref: Option<NodeRef>,
+    #[serde(default)]
+    pub include_stopped: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ForwardsOpenArgs {
+    pub node_ref: NodeRef,
+    pub kind: ForwardKind,
+    pub bind_address: String,
+    pub bind_port: u16,
+    #[serde(default)]
+    pub target_host: Option<String>,
+    #[serde(default)]
+    pub target_port: Option<u16>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub persist: bool,
+    #[serde(default)]
+    pub check_health: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct ForwardPatch {
+    #[serde(default)]
+    pub kind: Option<ForwardKind>,
+    #[serde(default)]
+    pub bind_address: Option<String>,
+    #[serde(default)]
+    pub bind_port: Option<u16>,
+    #[serde(default)]
+    pub target_host: Option<String>,
+    #[serde(default)]
+    pub target_port: Option<u16>,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ForwardsChangeArgs {
+    pub forward_ref: ForwardRef,
+    pub patch: ForwardPatch,
+    pub expected_revision: String,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ForwardHandleArgs {
+    pub forward_ref: ForwardRef,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ForwardsRemoveArgs {
+    pub forward_ref: ForwardRef,
+    #[serde(default)]
+    pub remove_saved: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ForwardsDiscoverPortsArgs {
+    pub node_ref: NodeRef,
+}
+
 fn default_output_limit() -> u32 {
     64 * 1024
 }
@@ -353,6 +428,14 @@ pub enum PublicToolCall {
     AddonsInstall(AddonsInstallArgs),
     AddonsSetEnabled(AddonsSetEnabledArgs),
     AddonsRemove(AddonsRemoveArgs),
+    ForwardsList(ForwardsListArgs),
+    ForwardsOpen(ForwardsOpenArgs),
+    ForwardsChange(ForwardsChangeArgs),
+    ForwardsStop(ForwardHandleArgs),
+    ForwardsRestart(ForwardHandleArgs),
+    ForwardsRemove(ForwardsRemoveArgs),
+    ForwardsMetrics(ForwardHandleArgs),
+    ForwardsDiscoverPorts(ForwardsDiscoverPortsArgs),
 }
 
 impl PublicToolCall {
@@ -383,6 +466,14 @@ impl PublicToolCall {
             Self::AddonsInstall(_) => "addons_install",
             Self::AddonsSetEnabled(_) => "addons_set_enabled",
             Self::AddonsRemove(_) => "addons_remove",
+            Self::ForwardsList(_) => "forwards_list",
+            Self::ForwardsOpen(_) => "forwards_open",
+            Self::ForwardsChange(_) => "forwards_change",
+            Self::ForwardsStop(_) => "forwards_stop",
+            Self::ForwardsRestart(_) => "forwards_restart",
+            Self::ForwardsRemove(_) => "forwards_remove",
+            Self::ForwardsMetrics(_) => "forwards_metrics",
+            Self::ForwardsDiscoverPorts(_) => "forwards_discover_ports",
         }
     }
 
@@ -410,6 +501,14 @@ impl PublicToolCall {
             Self::AddonsInstall(_) | Self::AddonsSetEnabled(_) | Self::AddonsRemove(_) => {
                 ToolGroup::AddonManage
             }
+            Self::ForwardsList(_) | Self::ForwardsMetrics(_) | Self::ForwardsDiscoverPorts(_) => {
+                ToolGroup::ForwardRead
+            }
+            Self::ForwardsOpen(_)
+            | Self::ForwardsChange(_)
+            | Self::ForwardsStop(_)
+            | Self::ForwardsRestart(_)
+            | Self::ForwardsRemove(_) => ToolGroup::ForwardManage,
         }
     }
 
@@ -426,6 +525,11 @@ impl PublicToolCall {
                 | Self::AddonsInstall(_)
                 | Self::AddonsSetEnabled(_)
                 | Self::AddonsRemove(_)
+                | Self::ForwardsOpen(_)
+                | Self::ForwardsChange(_)
+                | Self::ForwardsStop(_)
+                | Self::ForwardsRestart(_)
+                | Self::ForwardsRemove(_)
         )
     }
 
@@ -480,6 +584,28 @@ impl PublicToolCall {
                 args.addon_ref,
                 args.retain_settings.unwrap_or(true)
             ),
+            Self::ForwardsList(args) => args
+                .node_ref
+                .as_ref()
+                .map_or_else(|| "forward catalog".to_owned(), ToString::to_string),
+            Self::ForwardsOpen(args) => format!(
+                "{} {:?} {}:{} -> {}:{} persist={}",
+                args.node_ref,
+                args.kind,
+                args.bind_address,
+                args.bind_port,
+                args.target_host.as_deref().unwrap_or("dynamic"),
+                args.target_port.unwrap_or(0),
+                args.persist
+            ),
+            Self::ForwardsChange(args) => args.forward_ref.to_string(),
+            Self::ForwardsStop(args)
+            | Self::ForwardsRestart(args)
+            | Self::ForwardsMetrics(args) => args.forward_ref.to_string(),
+            Self::ForwardsRemove(args) => {
+                format!("{} remove_saved={}", args.forward_ref, args.remove_saved)
+            }
+            Self::ForwardsDiscoverPorts(args) => args.node_ref.to_string(),
         }
     }
 }

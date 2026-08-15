@@ -25,11 +25,13 @@ use crate::{
     calls::{
         AddonsInstallArgs, AddonsListArgs, AddonsRemoveArgs, AddonsSetEnabledArgs, AuditSearchArgs,
         BrowseConnectionsArgs, CancelCommandArgs, CommandOutputArgs, CommandStateArgs,
-        ConnectNodeArgs, DescribeConnectionArgs, DisconnectNodeArgs, HostToolsCaptureArgs,
-        HostToolsCatalogArgs, HostToolsOperateArgs, InspectNodeArgs, PublicToolCall,
-        QuickCommandsDescribeArgs, QuickCommandsListArgs, QuickCommandsRemoveArgs,
-        QuickCommandsRunArgs, QuickCommandsSaveArgs, ReadArtifactArgs, ReleaseNodeArgs,
-        StageArtifactArgs, StartCommandArgs, ToolEnvelope, ToolOutcome,
+        ConnectNodeArgs, DescribeConnectionArgs, DisconnectNodeArgs, ForwardHandleArgs,
+        ForwardKind, ForwardsChangeArgs, ForwardsDiscoverPortsArgs, ForwardsListArgs,
+        ForwardsOpenArgs, ForwardsRemoveArgs, HostToolsCaptureArgs, HostToolsCatalogArgs,
+        HostToolsOperateArgs, InspectNodeArgs, PublicToolCall, QuickCommandsDescribeArgs,
+        QuickCommandsListArgs, QuickCommandsRemoveArgs, QuickCommandsRunArgs,
+        QuickCommandsSaveArgs, ReadArtifactArgs, ReleaseNodeArgs, StageArtifactArgs,
+        StartCommandArgs, ToolEnvelope, ToolOutcome,
     },
     handles::{ApprovalRef, ClientRef, NodeRef},
 };
@@ -40,6 +42,10 @@ const WORKING_DIRECTORY_LIMIT_BYTES: usize = 16 * 1024;
 const ARTIFACT_STAGE_LIMIT_BYTES: usize = 512 * 1024;
 const QUICK_COMMAND_NAME_LIMIT_BYTES: usize = 160;
 const QUICK_COMMAND_BODY_LIMIT_BYTES: usize = 4 * 1024;
+const ADDON_ID_LIMIT_BYTES: usize = 255;
+const FORWARD_ENDPOINT_LIMIT_BYTES: usize = 255;
+const FORWARD_DESCRIPTION_LIMIT_BYTES: usize = 512;
+const FORWARD_REVISION_LIMIT_BYTES: usize = 80;
 
 #[derive(Clone)]
 pub struct PublicMcpService {
@@ -542,6 +548,72 @@ impl ServerHandler for PublicMcpService {
                 }
                 Err(error) => *error,
             },
+            "forwards_list" => match parse_arguments::<ForwardsListArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::ForwardsList(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "forwards_open" => match parse_arguments::<ForwardsOpenArgs>(arguments) {
+                Ok(args) if forwards_open_args_are_valid(&args) => {
+                    self.execute_call(&client, PublicToolCall::ForwardsOpen(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "The forward bind and target definition is invalid",
+                ),
+                Err(error) => *error,
+            },
+            "forwards_change" => match parse_arguments::<ForwardsChangeArgs>(arguments) {
+                Ok(args) if forward_patch_is_valid(&args) => {
+                    self.execute_call(&client, PublicToolCall::ForwardsChange(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "The forward patch and expected revision are required",
+                ),
+                Err(error) => *error,
+            },
+            "forwards_stop" => match parse_arguments::<ForwardHandleArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::ForwardsStop(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "forwards_restart" => match parse_arguments::<ForwardHandleArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::ForwardsRestart(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "forwards_remove" => match parse_arguments::<ForwardsRemoveArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::ForwardsRemove(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "forwards_metrics" => match parse_arguments::<ForwardHandleArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::ForwardsMetrics(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "forwards_discover_ports" => {
+                match parse_arguments::<ForwardsDiscoverPortsArgs>(arguments) {
+                    Ok(args) => {
+                        self.execute_call(&client, PublicToolCall::ForwardsDiscoverPorts(args))
+                            .await
+                    }
+                    Err(error) => *error,
+                }
+            }
             _ => tool_error("unknown_tool", "The requested tool is not implemented"),
         };
         Ok(result.into())
@@ -759,6 +831,62 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             false,
             true,
         ),
+        define_tool::<ForwardsListArgs>(
+            "forwards_list",
+            "List bounded port-forward projections without exposing internal rule identities.",
+            ToolGroup::ForwardRead,
+            true,
+            false,
+        ),
+        define_tool::<ForwardsOpenArgs>(
+            "forwards_open",
+            "Open one typed local, remote, or dynamic forward on an acquired SSH node.",
+            ToolGroup::ForwardManage,
+            false,
+            true,
+        ),
+        define_tool::<ForwardsChangeArgs>(
+            "forwards_change",
+            "Change one owned or explicitly listed forward at an expected revision.",
+            ToolGroup::ForwardManage,
+            false,
+            true,
+        ),
+        define_tool::<ForwardHandleArgs>(
+            "forwards_stop",
+            "Stop one forward without releasing the MCP node or other forward consumers.",
+            ToolGroup::ForwardManage,
+            false,
+            true,
+        ),
+        define_tool::<ForwardHandleArgs>(
+            "forwards_restart",
+            "Restart one stopped forward using its existing typed definition.",
+            ToolGroup::ForwardManage,
+            false,
+            true,
+        ),
+        define_tool::<ForwardsRemoveArgs>(
+            "forwards_remove",
+            "Remove one runtime forward and optionally its saved definition.",
+            ToolGroup::ForwardManage,
+            false,
+            true,
+        ),
+        define_tool::<ForwardHandleArgs>(
+            "forwards_metrics",
+            "Read connection and byte counters for one forward.",
+            ToolGroup::ForwardRead,
+            true,
+            false,
+        ),
+        define_tool::<ForwardsDiscoverPortsArgs>(
+            "forwards_discover_ports",
+            "Run one bounded typed remote listening-port scan without starting a profiler.",
+            ToolGroup::ForwardRead,
+            true,
+            false,
+        ),
     ]
 }
 
@@ -917,10 +1045,64 @@ fn managed_addon_install_args_are_valid(args: &AddonsInstallArgs) -> bool {
         .strip_prefix("sha256:")
         .unwrap_or(&args.checksum);
     !expected_identity.is_empty()
-        && expected_identity.len() <= 255
+        && expected_identity.len() <= ADDON_ID_LIMIT_BYTES
         && !expected_identity.chars().any(char::is_control)
         && checksum.len() == 64
         && checksum.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn forwards_open_args_are_valid(args: &ForwardsOpenArgs) -> bool {
+    if !forward_text_is_valid(&args.bind_address, FORWARD_ENDPOINT_LIMIT_BYTES)
+        || args
+            .description
+            .as_deref()
+            .is_some_and(|description| !forward_description_is_valid(description))
+    {
+        return false;
+    }
+    match args.kind {
+        ForwardKind::Local | ForwardKind::Remote => {
+            args.target_host
+                .as_deref()
+                .is_some_and(|host| forward_text_is_valid(host, FORWARD_ENDPOINT_LIMIT_BYTES))
+                && args.target_port.is_some_and(|port| port > 0)
+        }
+        ForwardKind::Dynamic => {
+            args.target_host.as_deref().is_none_or(str::is_empty)
+                && args.target_port.is_none_or(|port| port == 0)
+        }
+    }
+}
+
+fn forward_patch_is_valid(args: &ForwardsChangeArgs) -> bool {
+    let patch = &args.patch;
+    forward_text_is_valid(&args.expected_revision, FORWARD_REVISION_LIMIT_BYTES)
+        && (patch.kind.is_some()
+            || patch.bind_address.is_some()
+            || patch.bind_port.is_some()
+            || patch.target_host.is_some()
+            || patch.target_port.is_some()
+            || patch.description.is_some())
+        && patch
+            .bind_address
+            .as_deref()
+            .is_none_or(|address| forward_text_is_valid(address, FORWARD_ENDPOINT_LIMIT_BYTES))
+        && patch
+            .target_host
+            .as_deref()
+            .is_none_or(|host| forward_text_is_valid(host, FORWARD_ENDPOINT_LIMIT_BYTES))
+        && patch
+            .description
+            .as_deref()
+            .is_none_or(forward_description_is_valid)
+}
+
+fn forward_text_is_valid(value: &str, maximum_bytes: usize) -> bool {
+    !value.trim().is_empty() && value.len() <= maximum_bytes && !value.chars().any(char::is_control)
+}
+
+fn forward_description_is_valid(value: &str) -> bool {
+    value.len() <= FORWARD_DESCRIPTION_LIMIT_BYTES && !value.chars().any(char::is_control)
 }
 
 fn envelope_result(envelope: ToolEnvelope) -> CallToolResult {

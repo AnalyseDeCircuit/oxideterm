@@ -74,3 +74,4 @@ opaque_handle!(AuditRef, "audit_");
 opaque_handle!(ArtifactRef, "artifact_");
 opaque_handle!(QuickCommandRef, "quickcommand_");
 opaque_handle!(AddonRef, "addon_");
+opaque_handle!(ForwardRef, "forward_");

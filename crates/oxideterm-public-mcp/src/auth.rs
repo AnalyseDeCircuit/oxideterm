@@ -28,6 +28,8 @@ pub enum ToolGroup {
     QuickCommandExecute,
     AddonRead,
     AddonManage,
+    ForwardRead,
+    ForwardManage,
 }
 
 impl ToolGroup {
@@ -48,6 +50,8 @@ impl ToolGroup {
             Self::QuickCommandExecute,
             Self::AddonRead,
             Self::AddonManage,
+            Self::ForwardRead,
+            Self::ForwardManage,
         ]
     }
 }
