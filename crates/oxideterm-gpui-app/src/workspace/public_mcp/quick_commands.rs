@@ -173,6 +173,8 @@ impl WorkspaceApp {
             .public_mcp
             .quick_command_ref(&request.client_ref, &command_id);
         self.reload_quick_commands_surface(cx);
+        // Quick Commands are a structured Cloud Sync section, so invalidate its local snapshot.
+        self.queue_cloud_sync_dirty_refresh(cx);
         finish_serialized(
             request,
             json!({
@@ -227,6 +229,8 @@ impl WorkspaceApp {
         self.public_mcp
             .remove_quick_command_ref(&request.client_ref, &args.quickcommand_ref);
         self.reload_quick_commands_surface(cx);
+        // Keep Cloud Sync preview and dirty state aligned with the persisted command store.
+        self.queue_cloud_sync_dirty_refresh(cx);
         finish_serialized(
             request,
             json!({ "removed": true, "revision": snapshot.updated_at }),
