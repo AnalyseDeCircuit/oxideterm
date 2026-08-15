@@ -57,6 +57,7 @@ oxideterm-plugin-registry = { path = "../oxideterm-plugin-registry" }
 oxideterm-plugin-runtime-install = { path = "../oxideterm-plugin-runtime-install" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-preview = { path = "../oxideterm-preview" }
+oxideterm-public-mcp = { path = "../oxideterm-public-mcp" }
 oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
 oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
@@ -81,6 +82,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true

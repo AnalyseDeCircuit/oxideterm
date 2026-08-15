@@ -1,0 +1,26 @@
+[package]
+name = "oxideterm-public-mcp"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+bytes.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
+parking_lot.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tower-service.workspace = true
+uuid.workspace = true
+zeroize.workspace = true

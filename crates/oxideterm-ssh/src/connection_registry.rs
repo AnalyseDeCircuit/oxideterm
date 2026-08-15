@@ -67,6 +67,7 @@ pub enum ConnectionConsumer {
     X11Forward(String),
     Ide(String),
     NodeRouter(String),
+    PublicMcp(String),
     MoshBootstrap(String),
 }
 
@@ -1591,6 +1592,7 @@ fn topology_consumer_summary(
             }
             ConnectionConsumer::Ide(_) => summary.ide += 1,
             ConnectionConsumer::NodeRouter(_) => summary.node_router += 1,
+            ConnectionConsumer::PublicMcp(_) => summary.public_mcp += 1,
             // Mosh only borrows an isolated SSH transport long enough to
             // start mosh-server, so it is not a persistent topology capability.
             ConnectionConsumer::MoshBootstrap(_) => {}
@@ -1829,6 +1831,7 @@ impl From<&ConnectionConsumer> for ConnectionMonitorConsumerKind {
             }
             ConnectionConsumer::Ide(_)
             | ConnectionConsumer::NodeRouter(_)
+            | ConnectionConsumer::PublicMcp(_)
             | ConnectionConsumer::MoshBootstrap(_) => Self::Other,
         }
     }

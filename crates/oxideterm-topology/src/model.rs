@@ -26,6 +26,8 @@ pub struct ConnectionTopologyConsumerSummary {
     pub port_forwards: usize,
     pub ide: usize,
     pub node_router: usize,
+    #[serde(default)]
+    pub public_mcp: usize,
     pub other: usize,
 }
 
@@ -36,6 +38,7 @@ impl ConnectionTopologyConsumerSummary {
             .saturating_add(self.port_forwards)
             .saturating_add(self.ide)
             .saturating_add(self.node_router)
+            .saturating_add(self.public_mcp)
             .saturating_add(self.other)
     }
 }

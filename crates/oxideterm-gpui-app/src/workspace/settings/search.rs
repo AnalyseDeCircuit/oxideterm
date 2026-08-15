@@ -405,6 +405,12 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             &["settings_view.network.routing_hint"],
         ),
         settings_search_entry(
+            SettingsTab::Network,
+            2,
+            "settings_view.network.public_mcp",
+            &["settings_view.network.public_mcp_hint"],
+        ),
+        settings_search_entry(
             SettingsTab::Sftp,
             0,
             "settings_view.sftp.protocol",

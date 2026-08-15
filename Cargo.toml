@@ -31,6 +31,7 @@ members = [
   "crates/oxideterm-skills",
   "crates/oxideterm-acp-adapter",
   "crates/oxideterm-acp-host-tools",
+  "crates/oxideterm-public-mcp",
   "crates/oxideterm-editor-core",
   "crates/oxideterm-editor-syntax",
   "crates/oxideterm-gpui-editor",
@@ -198,6 +199,7 @@ rand10 = { package = "rand", version = "0.10" }
 # `system-proxy` lets the updater's explicit System proxy mode read OS proxy
 # settings instead of only inheriting environment variables.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "socks", "stream", "system-proxy"] }
+rmcp = { version = "3.1.2", default-features = false, features = ["server", "transport-streamable-http-server"] }
 rmp-serde = "1"
 scap = { version = "0.0.8-zed", package = "zed-scap", default-features = false }
 scheduler = { path = "crates/gpui-ce/gpui_scheduler", version = "0.2.2", package = "gpui_scheduler" }
@@ -221,6 +223,8 @@ syn = { version = "2.0.101", features = ["full", "extra-traits", "visit-mut"] }
 sysinfo = { version = "0.33", default-features = false, features = ["disk", "system"] }
 thiserror = "2.0"
 tokio = { version = "1.52", features = ["rt-multi-thread", "sync", "time", "io-util", "net", "fs", "process", "macros"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tower-service = "0.3"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

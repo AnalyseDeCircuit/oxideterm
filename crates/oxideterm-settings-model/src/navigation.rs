@@ -208,7 +208,7 @@ pub fn settings_tab_section_count(
         // Reconnect controls share one card and therefore one virtual section.
         SettingsTab::Connections => 6,
         SettingsTab::Privilege => 1,
-        SettingsTab::Network => 2,
+        SettingsTab::Network => 3,
         SettingsTab::Sftp => 3,
         SettingsTab::Ide => 5,
         SettingsTab::Ai => ai_settings_section_count(dynamic.ai_page),
@@ -357,7 +357,7 @@ mod tests {
         for (tab, section_count) in [
             (SettingsTab::General, expected),
             (SettingsTab::Connections, 6),
-            (SettingsTab::Network, 2),
+            (SettingsTab::Network, 3),
             (SettingsTab::Help, 6),
         ] {
             assert_eq!(

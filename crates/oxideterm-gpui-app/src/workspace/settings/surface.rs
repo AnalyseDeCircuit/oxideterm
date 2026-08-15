@@ -484,6 +484,18 @@ impl WorkspaceApp {
                     .read(cx)
                     .network_proxy_layout_flags()
                     .hash(&mut hasher);
+                self.public_mcp.clients().len().hash(&mut hasher);
+                for approval in self.public_mcp.approvals().iter().filter(|approval| {
+                    approval.status == oxideterm_public_mcp::ApprovalStatus::Pending
+                }) {
+                    // A different frozen action can have a different wrapped command height.
+                    approval.approval_ref.as_str().hash(&mut hasher);
+                }
+                self.public_mcp
+                    .revealed_credential()
+                    .is_some()
+                    .hash(&mut hasher);
+                self.public_mcp.startup_error().is_some().hash(&mut hasher);
             }
             SettingsTab::Help => {
                 settings.general.update_channel.hash(&mut hasher);

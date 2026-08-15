@@ -261,6 +261,10 @@ impl WorkspaceApp {
                 workspace.enqueue_runtime_window_effect(*event, cx);
             },
         );
+        let public_mcp = public_mcp::PublicMcpWorkspaceBridge::start(
+            settings_store.path(),
+            forwarding_runtime.handle(),
+        );
         let (forwarding_worker_tx, forwarding_worker_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(forwarding_delivery_wake);
         let forwarding = cx.new(|cx| {
@@ -748,6 +752,7 @@ impl WorkspaceApp {
             _connection_flow_subscription: connection_flow_subscription,
             workspace_runtime,
             _workspace_runtime_subscription: workspace_runtime_subscription,
+            public_mcp,
             ssh_registry,
             forwarding_service,
             forwarding_runtime,
@@ -838,6 +843,7 @@ impl WorkspaceApp {
             workspace.refresh_cli_companion_status(cx);
         }
         workspace.bootstrap_cloud_sync_controller(cx);
+        workspace.start_public_mcp_delivery(cx);
         workspace.sync_ssh_config_sync_service();
         workspace.restore_session_tree_snapshot();
         workspace.sync_terminal_command_sender_appearance(cx);

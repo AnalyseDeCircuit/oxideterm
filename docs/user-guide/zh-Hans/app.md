@@ -138,6 +138,21 @@ AI 侧边栏会结合当前应用上下文工作。启用工具调用后，它�
 
 OxideSens 可以从工作区、用户数据目录和已启用的 Native 插件中发现受限的 `SKILL.md` 工作流。在“设置 → OxideSens → 工具 → Agent Skills”中查看已发现的技能、启用或禁用单个技能，并刷新目录。加载技能只会提供说明，不会授予终端、文件、凭据或网络权限；后续动作仍必须经过现有工具策略和批准模式。发现顺序与资源限制见 [Agent Skills 参考](../../agent-skills.md)。
 
+## 外部 MCP 客户端
+
+外部编辑器、命令行 AI 或其他 MCP 客户端可以通过 OxideTerm 使用已保存的 SSH 连接排查服务器问题。打开“设置 → 网络与代理 → 外部 MCP 控制”，然后：
+
+1. 创建一个全权限客户端。
+2. 复制回环 HTTP 端点和只显示一次的客户端凭据。
+3. 在外部 MCP 客户端中把端点配置为 Streamable HTTP URL，并添加 `Authorization: Bearer <凭据>` 请求头。
+4. 让客户端先调用 `connections_browse`，再按需读取连接详情并请求 `nodes_connect`。
+5. 在 OxideTerm 的“待批准操作”中检查实际客户端、目标和命令；批准后，客户端调用 `mcp_commit_action`。
+6. 使用返回的 `command_ref` 查询状态并分段读取标准输出和标准错误。
+
+当前实现实际开放保存的 SSH 连接、NodeRouter 节点租约和 SSH exec 命令；未接通的终端屏幕、SFTP、Host Tools、转发、远程桌面和同步能力不会出现在工具清单中。释放 MCP 节点租约不会断开仍由其他终端、SFTP 或转发消费者使用的物理 SSH 节点；只有明确批准的 `nodes_disconnect` 才会断开节点。
+
+客户端凭据在 OxideTerm 侧只保存摘要。停用或撤销客户端会立即取消其命令、待批准操作和节点租约。端点、授权记录和凭据都不会进入普通设置、`.oxide` 导出或云同步。
+
 ## 设置
 
 交互式配置优先使用设置页面：

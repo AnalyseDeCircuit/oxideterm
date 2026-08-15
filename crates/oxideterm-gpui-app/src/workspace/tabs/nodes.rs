@@ -1650,7 +1650,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn ensure_single_node_connection_started_with_trace(
+    pub(in crate::workspace) fn ensure_single_node_connection_started_with_trace(
         &mut self,
         node_id: &NodeId,
         trace_plan: Option<&ConnectionTracePlan>,
