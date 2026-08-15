@@ -539,6 +539,37 @@ impl WorkspaceApp {
         }
     }
 
+    pub(in crate::workspace) fn release_public_mcp_desktop_for_closed_tab(
+        &mut self,
+        tab_id: TabId,
+    ) {
+        let desktop_refs = self
+            .public_mcp
+            .desktops
+            .iter()
+            .filter_map(|(desktop_ref, record)| {
+                (record.tab_id == tab_id).then_some(desktop_ref.clone())
+            })
+            .collect::<Vec<_>>();
+        for desktop_ref in desktop_refs {
+            let Some(record) = self.public_mcp.desktops.remove(&desktop_ref) else {
+                continue;
+            };
+            // The visible tab owns this helper session, so a UI close also revokes
+            // its public artifacts and handle without exposing the internal TabId.
+            for artifact_ref in record
+                .frame_artifacts
+                .iter()
+                .chain(record.clipboard_artifacts.iter())
+            {
+                self.public_mcp
+                    .state
+                    .artifacts
+                    .revoke(&record.client_ref, artifact_ref);
+            }
+        }
+    }
+
     fn apply_public_mcp_desktop_open(
         &mut self,
         request: DomainRequest,

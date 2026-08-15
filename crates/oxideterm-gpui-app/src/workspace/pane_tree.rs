@@ -410,6 +410,7 @@ impl WorkspaceApp {
         }
 
         if let Some(session_id) = session_id {
+            self.release_public_mcp_terminal_for_closed_session(session_id, cx);
             self.serial_terminal_configs.remove(&session_id);
             self.unregister_ssh_terminal_session(session_id, cx);
         }
@@ -458,6 +459,7 @@ impl WorkspaceApp {
             .into_iter()
             .filter(|session_id| *session_id != active_session_id)
         {
+            self.release_public_mcp_terminal_for_closed_session(session_id, cx);
             self.serial_terminal_configs.remove(&session_id);
             self.unregister_ssh_terminal_session(session_id, cx);
         }

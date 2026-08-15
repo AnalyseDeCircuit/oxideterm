@@ -829,6 +829,53 @@ impl WorkspaceApp {
         }
     }
 
+    pub(in crate::workspace) fn release_public_mcp_terminal_for_closed_session(
+        &mut self,
+        session_id: TerminalSessionId,
+        cx: &mut Context<Self>,
+    ) {
+        let terminal_refs = self
+            .public_mcp
+            .terminals
+            .iter()
+            .filter_map(|(terminal_ref, record)| {
+                (record.session_id == session_id)
+                    .then_some((terminal_ref.clone(), record.client_ref.clone()))
+            })
+            .collect::<Vec<_>>();
+        for (terminal_ref, client_ref) in terminal_refs {
+            // A UI-owned pane close revokes only its public handle; an SSH node
+            // remains owned by NodeRouter and any other registered consumers.
+            self.stop_public_mcp_recordings_for_terminal(&client_ref, &terminal_ref, cx);
+            self.public_mcp.terminals.remove(&terminal_ref);
+        }
+    }
+
+    pub(in crate::workspace) fn remount_public_mcp_terminal_session(
+        &mut self,
+        old_session_id: TerminalSessionId,
+        new_session_id: TerminalSessionId,
+        cx: &mut Context<Self>,
+    ) {
+        let terminal_refs = self
+            .public_mcp
+            .terminals
+            .iter()
+            .filter_map(|(terminal_ref, record)| {
+                (record.session_id == old_session_id)
+                    .then_some((terminal_ref.clone(), record.client_ref.clone()))
+            })
+            .collect::<Vec<_>>();
+        for (terminal_ref, client_ref) in terminal_refs {
+            // Recorders belong to the old pane, while the public terminal handle
+            // follows the replacement session created for the same NodeRouter node.
+            self.stop_public_mcp_recordings_for_terminal(&client_ref, &terminal_ref, cx);
+            if let Some(record) = self.public_mcp.terminals.get_mut(&terminal_ref) {
+                record.session_id = new_session_id;
+            }
+        }
+    }
+
     fn public_mcp_terminal_projection(
         &self,
         client_ref: &oxideterm_public_mcp::ClientRef,

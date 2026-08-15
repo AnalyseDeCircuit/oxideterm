@@ -965,6 +965,7 @@ impl WorkspaceApp {
             root_pane.collect_session_ids(&mut session_ids);
         }
         for session_id in session_ids {
+            self.release_public_mcp_terminal_for_closed_session(session_id, cx);
             self.serial_terminal_configs.remove(&session_id);
             self.unregister_ssh_terminal_session(session_id, cx);
         }

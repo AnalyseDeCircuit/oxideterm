@@ -1036,6 +1036,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.release_public_mcp_desktop_for_closed_tab(tab_id);
         if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
             session.update(cx, |session, cx| session.shutdown(window, cx));
         }

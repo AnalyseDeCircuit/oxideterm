@@ -948,6 +948,7 @@ impl WorkspaceApp {
                 )
             });
             if let Some(replaced_pane_id) = replaced {
+                self.remount_public_mcp_terminal_session(old_session_id, new_session_id, cx);
                 if let Some(pane) = self.remove_terminal_pane(&replaced_pane_id, cx) {
                     let _ = pane.update(cx, |pane, _cx| pane.shutdown());
                 }
