@@ -71,7 +71,7 @@ pub(in crate::workspace) fn network_application_proxy_mode_label(
 
 fn public_mcp_tool_group_label_key(tool_group: oxideterm_public_mcp::ToolGroup) -> &'static str {
     match tool_group {
-        oxideterm_public_mcp::ToolGroup::Basic => "settings_view.network.public_mcp",
+        oxideterm_public_mcp::ToolGroup::Basic => "settings_view.network.mcp_group_basic",
         oxideterm_public_mcp::ToolGroup::ConnectionDirectory => {
             "settings_view.network.mcp_group_connection_directory"
         }
@@ -521,25 +521,47 @@ impl WorkspaceApp {
                     .flex()
                     .flex_wrap()
                     .gap(px(SETTINGS_PUBLIC_MCP_ROW_GAP));
-                for &tool_group in oxideterm_public_mcp::ToolGroup::selectable() {
+                let visible_tool_groups = std::iter::once(oxideterm_public_mcp::ToolGroup::Basic)
+                    .chain(
+                        oxideterm_public_mcp::ToolGroup::selectable()
+                            .iter()
+                            .copied(),
+                    );
+                for tool_group in visible_tool_groups {
                     let label_key = public_mcp_tool_group_label_key(tool_group);
                     let checked = client.tool_groups.contains(&tool_group);
                     let client_ref_for_group = client.client_ref.clone();
-                    let control = checkbox(&self.tokens, String::new(), checked).on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            if let Err(error) = this.set_public_mcp_client_tool_group(
-                                &client_ref_for_group,
-                                tool_group,
-                                !checked,
-                                cx,
-                            ) {
-                                this.public_mcp.record_action_error(error);
-                            }
-                            cx.notify();
-                            cx.stop_propagation();
-                        }),
+                    let required_group = tool_group == oxideterm_public_mcp::ToolGroup::Basic;
+                    let mut control = checkbox_with_state(
+                        &self.tokens,
+                        String::new(),
+                        if checked {
+                            CheckboxState::Checked
+                        } else {
+                            CheckboxState::Unchecked
+                        },
+                        CheckboxOptions {
+                            disabled: required_group,
+                            ..CheckboxOptions::default()
+                        },
                     );
+                    if !required_group {
+                        control = control.on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                if let Err(error) = this.set_public_mcp_client_tool_group(
+                                    &client_ref_for_group,
+                                    tool_group,
+                                    !checked,
+                                    cx,
+                                ) {
+                                    this.public_mcp.record_action_error(error);
+                                }
+                                cx.notify();
+                                cx.stop_propagation();
+                            }),
+                        );
+                    }
                     group_controls = group_controls.child(
                         div()
                             .flex()
