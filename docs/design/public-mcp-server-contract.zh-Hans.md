@@ -66,6 +66,7 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 - 连接、节点和命令句柄均为随机且绑定客户端的外部引用；首个切片会在应用重启后重新生成连接引用，客户端需要重新浏览目录，不能缓存或构造内部连接身份。
 - `nodes_connect` 使用保存的 SSH 配置和现有受保护凭据，通过 NodeRouter 建立或复用物理节点；代理链也沿用现有节点树展开与连接顺序。
 - `commands_start` 使用当前物理 SSH 连接的独立 exec channel，返回真实退出码、有界输出和可取消 `command_ref`。
+- `nodes_connect` 的租约包含等待连接和已就绪节点，最多全局 128 个、每客户端 32 个；`nodes_disconnect` 复用应用完整的节点断开路径，关闭对应可见 tab、转发 owner、后台任务和运行时子树，而不是只修改 NodeRouter 状态。
 - `artifacts_stage`/`artifacts_read` 使用客户端隔离、容量受限且会过期的临时文件，不接受任意本机路径；`mcp_audit_search` 只能读取调用客户端自身的脱敏记录。
 - `hosttools_catalog`/`hosttools_capture`/`hosttools_operate` 只接产品已有的类型化资源与固定动作，不暴露自由 shell 或插件调用。
 - 快速命令目录和正文分别授权；保存和删除采用存储 revision 冲突检查并刷新应用内状态。执行只读取已保存的精确命令，并再次校验 revision、节点所有权和 `host_pattern`。当前模型没有参数 schema，因此 `arguments` 必须为空；当前执行目标仅支持 `node_ref`，在交互终端拥有可靠命令完成标记前不宣称支持 terminal exec。
@@ -229,7 +230,7 @@ NodeRouter / connection registry ── 物理 SSH node
 | `nodes_connect` | 节点会话 / X / 必须 | `connection_ref` | 仅从已保存的 SSH 配置经 NodeRouter 建立或复用物理 node，等待至多 30 秒并返回 `node_ref` 与真实 ready 状态。短暂 profile 在凭据交互与幂等契约完成前不开放。 |
 | `nodes_inspect` | 节点会话 / R / 否 | `node_ref` | 返回 readiness 与当前主机、端口、用户名投影；不返回 NodeId、pool key、transport 或内部拓扑身份。 |
 | `nodes_release` | 节点会话 / W / 否 | `node_ref` | 释放该客户端的节点租约；其他消费者仍可保留节点。 |
-| `nodes_disconnect` | 节点会话 / X / 必须 | `node_ref` | 显式断开该节点的真实运行时子树并撤销依赖句柄；不是关闭某个终端的别名。级联范围由 NodeRouter 的真实父子关系决定，不接受客户端自定义内部节点范围。 |
+| `nodes_disconnect` | 节点会话 / X / 必须 | `node_ref` | 显式断开该节点的真实运行时子树并撤销依赖句柄、可见 tab、转发 owner 与后台任务；不是关闭某个终端的别名。级联范围由 NodeRouter 的真实父子关系决定，不接受客户端自定义内部节点范围。 |
 
 `credentials_store` 接受新的秘密是为了让用户已授权的自动化能够完成配置和连接；它绝不提供相反方向的读取工具。连接时优先让应用经受保护 broker 使用已有秘密。若需要键盘交互认证，结果进入 `waiting_for_user_auth`，由应用拥有的认证界面完成，不将旧秘密回传给 MCP 客户端。
 

@@ -51,6 +51,9 @@ const PUBLIC_MCP_COMMAND_RETENTION: Duration = Duration::from_secs(15 * 60);
 // Bound command concurrency and retained output independently of node lease lifetime.
 const PUBLIC_MCP_COMMAND_CAPACITY: usize = 256;
 const PUBLIC_MCP_COMMAND_CAPACITY_PER_CLIENT: usize = 64;
+// Node leases include both ready and in-flight connection attempts.
+const PUBLIC_MCP_NODE_CAPACITY: usize = 128;
+const PUBLIC_MCP_NODE_CAPACITY_PER_CLIENT: usize = 32;
 // Namespace internal profile identifiers so external connection handles remain type-safe.
 const CONNECTION_KEY_SSH_PREFIX: &str = "ssh:";
 const CONNECTION_KEY_SERIAL_PREFIX: &str = "serial:";
@@ -85,6 +88,19 @@ pub(in crate::workspace) struct PublicMcpWorkspaceBridge {
     recordings: HashMap<RecordingRef, PublicMcpRecordingRecord>,
     desktops: HashMap<DesktopRef, PublicMcpDesktopRecord>,
     runtime_handles: Arc<Mutex<PublicMcpRuntimeHandles>>,
+}
+
+pub(in crate::workspace) enum PublicMcpNodeWindowEffect {
+    Disconnect(DomainRequest),
+}
+
+impl PublicMcpNodeWindowEffect {
+    pub(in crate::workspace) fn finish_without_window(self) {
+        let Self::Disconnect(request) = self;
+        request.finish(ToolEnvelope::failed(
+            "A live OxideTerm window is required to disconnect a node",
+        ));
+    }
 }
 
 #[derive(Default)]
@@ -551,35 +567,36 @@ impl PublicMcpWorkspaceBridge {
     }
 
     fn sync_connection_refs(&mut self, client_ref: &ClientRef, store: &ConnectionStore) {
+        let mut valid_internal_keys = HashSet::new();
         for info in store.connection_infos() {
-            self.ensure_connection_ref(
-                client_ref,
-                format!("{CONNECTION_KEY_SSH_PREFIX}{}", info.id),
-            );
+            valid_internal_keys.insert(format!("{CONNECTION_KEY_SSH_PREFIX}{}", info.id));
         }
         for profile in store.serial_profiles() {
-            self.ensure_connection_ref(
-                client_ref,
-                format!("{CONNECTION_KEY_SERIAL_PREFIX}{}", profile.id),
-            );
+            valid_internal_keys.insert(format!("{CONNECTION_KEY_SERIAL_PREFIX}{}", profile.id));
         }
         for profile in store.telnet_profiles() {
-            self.ensure_connection_ref(
-                client_ref,
-                format!("{CONNECTION_KEY_TELNET_PREFIX}{}", profile.id),
-            );
+            valid_internal_keys.insert(format!("{CONNECTION_KEY_TELNET_PREFIX}{}", profile.id));
         }
         for profile in store.mosh_profiles() {
-            self.ensure_connection_ref(
-                client_ref,
-                format!("{CONNECTION_KEY_MOSH_PREFIX}{}", profile.id),
-            );
+            valid_internal_keys.insert(format!("{CONNECTION_KEY_MOSH_PREFIX}{}", profile.id));
         }
         for profile in store.remote_desktop_profiles() {
-            self.ensure_connection_ref(
-                client_ref,
-                format!("{CONNECTION_KEY_DESKTOP_PREFIX}{}", profile.id),
-            );
+            valid_internal_keys.insert(format!("{CONNECTION_KEY_DESKTOP_PREFIX}{}", profile.id));
+        }
+
+        // Keep stable refs for live profiles while dropping handles whose saved
+        // records were removed through the UI, import, sync, or another client.
+        let stale_refs = self
+            .connection_refs
+            .extract_if(|(owner, internal_key), _| {
+                owner == client_ref && !valid_internal_keys.contains(internal_key)
+            })
+            .map(|(_, connection_ref)| connection_ref)
+            .collect::<HashSet<_>>();
+        self.connection_ids
+            .retain(|connection_ref, _| !stale_refs.contains(connection_ref));
+        for internal_key in valid_internal_keys {
+            self.ensure_connection_ref(client_ref, internal_key);
         }
     }
 
@@ -1564,6 +1581,8 @@ impl WorkspaceApp {
         let includes = |connection_type: &str| {
             requested_types.is_empty() || requested_types.contains(connection_type)
         };
+        self.public_mcp
+            .sync_connection_refs(&request.client_ref, &self.connection_store);
         let mut connections = Vec::new();
         if includes(CONNECTION_TYPE_SSH) {
             for connection in self
@@ -1834,6 +1853,25 @@ impl WorkspaceApp {
             request.finish(ToolEnvelope::failed("The connection handle is unavailable"));
             return;
         };
+        let (retained_total, retained_for_client) = {
+            let handles = self.public_mcp.runtime_handles.lock();
+            (
+                handles.nodes.len(),
+                handles
+                    .nodes
+                    .values()
+                    .filter(|lease| lease.client_ref == request.client_ref)
+                    .count(),
+            )
+        };
+        if retained_total >= PUBLIC_MCP_NODE_CAPACITY
+            || retained_for_client >= PUBLIC_MCP_NODE_CAPACITY_PER_CLIENT
+        {
+            request.finish(ToolEnvelope::failed(
+                "The retained SSH node lease limit has been reached",
+            ));
+            return;
+        }
         let Some(connection) = self.connection_store.get(&connection_id).cloned() else {
             request.finish(ToolEnvelope::failed(
                 "The saved connection no longer exists",
@@ -2026,6 +2064,37 @@ impl WorkspaceApp {
         request: DomainRequest,
         cx: &mut Context<Self>,
     ) {
+        if request.is_cancelled() {
+            return;
+        }
+        self.enqueue_public_mcp_node_window_effect(
+            PublicMcpNodeWindowEffect::Disconnect(request),
+            cx,
+        );
+    }
+
+    pub(in crate::workspace) fn apply_public_mcp_node_window_effect(
+        &mut self,
+        effect: PublicMcpNodeWindowEffect,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        match effect {
+            PublicMcpNodeWindowEffect::Disconnect(request) => {
+                self.apply_public_mcp_disconnect_node(request, window, cx)
+            }
+        }
+    }
+
+    fn apply_public_mcp_disconnect_node(
+        &mut self,
+        request: DomainRequest,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        if request.is_cancelled() {
+            return;
+        }
         let PublicToolCall::DisconnectNode(args) = &request.call else {
             return;
         };
@@ -2037,9 +2106,13 @@ impl WorkspaceApp {
             request.finish(ToolEnvelope::failed("The node handle is unavailable"));
             return;
         };
-        let disconnected = self.workspace_runtime.update(cx, |runtime, cx| {
-            runtime.disconnect_node_runtime_subtree(&lease.node_id, cx)
-        });
+        let mut disconnected = self.node_router.subtree_postorder(&lease.node_id);
+        if disconnected.is_empty() {
+            disconnected.push(lease.node_id.clone());
+        }
+        // Reuse the product disconnect path so visible tabs, forwarding owners,
+        // runtime tasks, and the physical NodeRouter subtree close together.
+        self.disconnect_ssh_node(&lease.node_id, window, cx);
         let mut handles = self.public_mcp.runtime_handles.lock();
         let disconnected_node_refs = handles
             .nodes
