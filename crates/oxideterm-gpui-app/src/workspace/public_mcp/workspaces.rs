@@ -7,6 +7,7 @@ use oxideterm_ide_core::{
 };
 use oxideterm_public_mcp::{
     ClientRef, DomainRequest, FileSessionRef, PublicToolCall, ToolEnvelope, WorkspaceRef,
+    calls::WorkspaceFileEdits,
 };
 use oxideterm_sftp::FileType;
 use oxideterm_ssh::NodeId;
@@ -47,6 +48,34 @@ struct AppliedWorkspaceWrite {
     path: String,
     original_text: String,
     written_version: SavedFileVersion,
+}
+
+#[derive(Clone)]
+struct PublicMcpWorkspaceJobCancellation {
+    request: tokio_util::sync::CancellationToken,
+    workspace: tokio_util::sync::CancellationToken,
+    edit: Option<tokio_util::sync::CancellationToken>,
+}
+
+impl PublicMcpWorkspaceJobCancellation {
+    fn is_cancelled(&self) -> bool {
+        self.request.is_cancelled()
+            || self.workspace.is_cancelled()
+            || self.edit.as_ref().is_some_and(|token| token.is_cancelled())
+    }
+
+    async fn cancelled(&self) {
+        tokio::select! {
+            _ = self.request.cancelled() => {}
+            _ = self.workspace.cancelled() => {}
+            _ = async {
+                match &self.edit {
+                    Some(token) => token.cancelled().await,
+                    None => std::future::pending::<()>().await,
+                }
+            } => {}
+        }
+    }
 }
 
 impl WorkspaceApp {
@@ -224,7 +253,7 @@ impl WorkspaceApp {
         let limit = args
             .limit
             .map_or(WORKSPACE_TREE_DEFAULT_LIMIT, |limit| limit as usize);
-        self.start_public_mcp_workspace_job(request, move |record, file_record| async move {
+        self.start_public_mcp_workspace_job(request, move |record, file_record, _| async move {
             let canonical =
                 canonical_workspace_path(&record, &file_record, &requested_path).await?;
             let entries = record
@@ -276,7 +305,7 @@ impl WorkspaceApp {
             return;
         };
         let requested_path = args.path.clone();
-        self.start_public_mcp_workspace_job(request, move |record, file_record| async move {
+        self.start_public_mcp_workspace_job(request, move |record, file_record, _| async move {
             let canonical =
                 canonical_workspace_path(&record, &file_record, &requested_path).await?;
             require_editable_file(&record, &canonical).await?;
@@ -307,115 +336,13 @@ impl WorkspaceApp {
             return;
         };
         let file_edits = args.files.clone();
-        self.start_public_mcp_workspace_job(request, move |record, file_record| async move {
-            // Preflight every file before the first remote write so stale revisions
-            // and invalid UTF-8 byte ranges cannot create avoidable partial edits.
-            let mut prepared = Vec::with_capacity(file_edits.len());
-            let mut distinct_paths = HashSet::with_capacity(file_edits.len());
-            for file in file_edits {
-                let canonical = canonical_workspace_path(&record, &file_record, &file.path).await?;
-                if !distinct_paths.insert(canonical.clone()) {
-                    return Err("A workspace edit may target each file only once".to_owned());
-                }
-                require_editable_file(&record, &canonical).await?;
-                let observed = record
-                    .revisions
-                    .lock()
-                    .get(&canonical)
-                    .cloned()
-                    .ok_or_else(|| "Read the remote IDE file before applying edits".to_owned())?;
-                if observed.public_revision != file.expected_revision {
-                    return Err("The expected IDE file revision is stale".to_owned());
-                }
-                let location = IdeLocation::remote(record.node_id.0.clone(), canonical.clone());
-                let current = record
-                    .owner
-                    .read_file(&location)
+        self.start_public_mcp_workspace_job(
+            request,
+            move |record, file_record, cancellation| async move {
+                apply_public_mcp_workspace_edits(record, file_record, cancellation, file_edits)
                     .await
-                    .map_err(|_| "The remote IDE file could not be read before editing".to_owned())?;
-                if observed.version != current.version
-                    || workspace_revision(&canonical, &current.version) != file.expected_revision
-                {
-                    return Err("The remote IDE file changed before editing".to_owned());
-                }
-                let mut buffer = TextBuffer::new(current.text.clone());
-                let edits = file
-                    .edits
-                    .into_iter()
-                    .map(|mut edit| {
-                        let replacement = std::mem::take(&mut *edit.replacement);
-                        TextEdit::new(
-                            TextRange::new(
-                                BufferOffset(edit.start_byte as usize),
-                                BufferOffset(edit.end_byte as usize),
-                            ),
-                            replacement,
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                buffer
-                    .apply_transaction(EditTransaction::new(edits))
-                    .map_err(|_| "A workspace edit contains an invalid or overlapping range".to_owned())?;
-                let updated_text = buffer.text();
-                if updated_text.len() as u64 > WORKSPACE_TEXT_LIMIT_BYTES {
-                    return Err("The edited IDE file exceeds the supported text limit".to_owned());
-                }
-                prepared.push(PreparedWorkspaceWrite {
-                    path: canonical,
-                    original_text: current.text,
-                    updated_text,
-                    original_version: current.version,
-                });
-            }
-
-            let mut applied = Vec::with_capacity(prepared.len());
-            for write in prepared {
-                let location = IdeLocation::remote(record.node_id.0.clone(), write.path.clone());
-                let written_version = match record
-                    .owner
-                    .write_file(
-                        &location,
-                        &write.updated_text,
-                        Some(&write.original_version),
-                        WriteMode::AtomicReplace,
-                    )
-                    .await
-                {
-                    Ok(version) => version,
-                    Err(_) => {
-                        // Remote servers do not provide a multi-file transaction. Compensate
-                        // earlier writes only when their just-written versions still match.
-                        let rollback_complete = rollback_workspace_writes(&record, &applied).await;
-                        return Err(if rollback_complete {
-                            "The remote IDE edit conflicted; earlier writes were restored".to_owned()
-                        } else {
-                            "The remote IDE edit failed and one or more earlier files may remain changed"
-                                .to_owned()
-                        });
-                    }
-                };
-                applied.push(AppliedWorkspaceWrite {
-                    path: write.path,
-                    original_text: write.original_text,
-                    written_version,
-                });
-            }
-            let files = applied
-                .into_iter()
-                .map(|write| {
-                    let revision = remember_workspace_revision(
-                        &record,
-                        &write.path,
-                        write.written_version,
-                    );
-                    json!({
-                        "path": workspace_relative_path(&record.root, &write.path),
-                        "revision": revision,
-                    })
-                })
-                .collect::<Vec<_>>();
-            Ok(json!({ "applied": true, "files": files, "atomic_across_files": false }))
-        });
+            },
+        );
     }
 
     pub(super) fn handle_public_mcp_workspace_search(&self, request: DomainRequest) {
@@ -428,7 +355,7 @@ impl WorkspaceApp {
         let maximum_results = args
             .maximum_results
             .unwrap_or(WORKSPACE_SEARCH_DEFAULT_LIMIT);
-        self.start_public_mcp_workspace_job(request, move |record, file_record| async move {
+        self.start_public_mcp_workspace_job(request, move |record, file_record, _| async move {
             let search_root = canonical_workspace_path(&record, &file_record, &requested_root).await?;
             let matches = record
                 .owner
@@ -496,7 +423,13 @@ impl WorkspaceApp {
 
     fn start_public_mcp_workspace_job<F, Fut>(&self, request: DomainRequest, operation: F)
     where
-        F: FnOnce(PublicMcpWorkspaceRecord, PublicMcpFileSessionRecord) -> Fut + Send + 'static,
+        F: FnOnce(
+                PublicMcpWorkspaceRecord,
+                PublicMcpFileSessionRecord,
+                PublicMcpWorkspaceJobCancellation,
+            ) -> Fut
+            + Send
+            + 'static,
         Fut: std::future::Future<Output = Result<Value, String>> + Send + 'static,
     {
         let workspace_ref = match &request.call {
@@ -523,10 +456,12 @@ impl WorkspaceApp {
         let router = self.node_router.clone();
         let handles = self.public_mcp.runtime_handles.clone();
         let client_ref = request.client_ref.clone();
-        let request_cancellation = request.cancellation_token();
-        let workspace_cancellation = record.cancellation.clone();
-        let edit_cancellation = matches!(&request.call, PublicToolCall::WorkspaceApplyEdits(_))
-            .then(|| record.edit_cancellation.clone());
+        let is_structured_edit = matches!(&request.call, PublicToolCall::WorkspaceApplyEdits(_));
+        let cancellation = PublicMcpWorkspaceJobCancellation {
+            request: request.cancellation_token(),
+            workspace: record.cancellation.clone(),
+            edit: is_structured_edit.then(|| record.edit_cancellation.clone()),
+        };
         self.forwarding_runtime.spawn(async move {
             let file_record = match files::refresh_file_session(
                 &router,
@@ -545,18 +480,16 @@ impl WorkspaceApp {
             if request.is_cancelled() {
                 return;
             }
-            // Revocation must prevent a cloned job from reacquiring its IDE consumer.
-            let result = tokio::select! {
-                biased;
-                _ = workspace_cancellation.cancelled() => return,
-                _ = async {
-                    match edit_cancellation {
-                        Some(cancellation) => cancellation.cancelled().await,
-                        None => std::future::pending::<()>().await,
-                    }
-                } => return,
-                _ = request_cancellation.cancelled() => return,
-                result = operation(record, file_record) => result,
+            // Structured edits own cancellation compensation. Dropping their future after
+            // the first write could leave an avoidable partial multi-file update.
+            let result = if is_structured_edit {
+                operation(record, file_record, cancellation).await
+            } else {
+                tokio::select! {
+                    biased;
+                    _ = cancellation.cancelled() => return,
+                    result = operation(record, file_record, cancellation.clone()) => result,
+                }
             };
             match result {
                 Ok(value) => finish_serialized(request, value),
@@ -564,6 +497,120 @@ impl WorkspaceApp {
             }
         });
     }
+}
+
+async fn apply_public_mcp_workspace_edits(
+    record: PublicMcpWorkspaceRecord,
+    file_record: PublicMcpFileSessionRecord,
+    cancellation: PublicMcpWorkspaceJobCancellation,
+    file_edits: Vec<WorkspaceFileEdits>,
+) -> Result<Value, String> {
+    // Preflight every file before the first remote write so stale revisions
+    // and invalid UTF-8 byte ranges cannot create avoidable partial edits.
+    let mut prepared = Vec::with_capacity(file_edits.len());
+    let mut distinct_paths = HashSet::with_capacity(file_edits.len());
+    for file in file_edits {
+        ensure_workspace_edit_not_cancelled(&record, &cancellation, &[]).await?;
+        let canonical = canonical_workspace_path(&record, &file_record, &file.path).await?;
+        if !distinct_paths.insert(canonical.clone()) {
+            return Err("A workspace edit may target each file only once".to_owned());
+        }
+        require_editable_file(&record, &canonical).await?;
+        let observed = record
+            .revisions
+            .lock()
+            .get(&canonical)
+            .cloned()
+            .ok_or_else(|| "Read the remote IDE file before applying edits".to_owned())?;
+        if observed.public_revision != file.expected_revision {
+            return Err("The expected IDE file revision is stale".to_owned());
+        }
+        let location = IdeLocation::remote(record.node_id.0.clone(), canonical.clone());
+        let current = record
+            .owner
+            .read_file(&location)
+            .await
+            .map_err(|_| "The remote IDE file could not be read before editing".to_owned())?;
+        if observed.version != current.version
+            || workspace_revision(&canonical, &current.version) != file.expected_revision
+        {
+            return Err("The remote IDE file changed before editing".to_owned());
+        }
+        let mut buffer = TextBuffer::new(current.text.clone());
+        let edits = file
+            .edits
+            .into_iter()
+            .map(|mut edit| {
+                let replacement = std::mem::take(&mut *edit.replacement);
+                TextEdit::new(
+                    TextRange::new(
+                        BufferOffset(edit.start_byte as usize),
+                        BufferOffset(edit.end_byte as usize),
+                    ),
+                    replacement,
+                )
+            })
+            .collect::<Vec<_>>();
+        buffer
+            .apply_transaction(EditTransaction::new(edits))
+            .map_err(|_| "A workspace edit contains an invalid or overlapping range".to_owned())?;
+        let updated_text = buffer.text();
+        if updated_text.len() as u64 > WORKSPACE_TEXT_LIMIT_BYTES {
+            return Err("The edited IDE file exceeds the supported text limit".to_owned());
+        }
+        prepared.push(PreparedWorkspaceWrite {
+            path: canonical,
+            original_text: current.text,
+            updated_text,
+            original_version: current.version,
+        });
+    }
+
+    let mut applied = Vec::with_capacity(prepared.len());
+    for write in prepared {
+        ensure_workspace_edit_not_cancelled(&record, &cancellation, &applied).await?;
+        let location = IdeLocation::remote(record.node_id.0.clone(), write.path.clone());
+        let written_version = match record
+            .owner
+            .write_file(
+                &location,
+                &write.updated_text,
+                Some(&write.original_version),
+                WriteMode::AtomicReplace,
+            )
+            .await
+        {
+            Ok(version) => version,
+            Err(_) => {
+                // Remote servers do not provide a multi-file transaction. Compensate
+                // earlier writes only when their just-written versions still match.
+                let rollback_complete = rollback_workspace_writes(&record, &applied).await;
+                return Err(if rollback_complete {
+                    "The remote IDE edit conflicted; earlier writes were restored".to_owned()
+                } else {
+                    "The remote IDE edit failed and one or more earlier files may remain changed"
+                        .to_owned()
+                });
+            }
+        };
+        applied.push(AppliedWorkspaceWrite {
+            path: write.path,
+            original_text: write.original_text,
+            written_version,
+        });
+        ensure_workspace_edit_not_cancelled(&record, &cancellation, &applied).await?;
+    }
+    let files = applied
+        .into_iter()
+        .map(|write| {
+            let revision = remember_workspace_revision(&record, &write.path, write.written_version);
+            json!({
+                "path": workspace_relative_path(&record.root, &write.path),
+                "revision": revision,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(json!({ "applied": true, "files": files, "atomic_across_files": false }))
 }
 
 async fn canonical_workspace_path(
@@ -629,6 +676,22 @@ async fn rollback_workspace_writes(
         }
     }
     complete
+}
+
+async fn ensure_workspace_edit_not_cancelled(
+    workspace: &PublicMcpWorkspaceRecord,
+    cancellation: &PublicMcpWorkspaceJobCancellation,
+    applied: &[AppliedWorkspaceWrite],
+) -> Result<(), String> {
+    if !cancellation.is_cancelled() {
+        return Ok(());
+    }
+    let rollback_complete = rollback_workspace_writes(workspace, applied).await;
+    Err(if rollback_complete {
+        "The remote IDE edit was cancelled; completed writes were restored".to_owned()
+    } else {
+        "The remote IDE edit was cancelled and one or more files may remain changed".to_owned()
+    })
 }
 
 fn remember_workspace_revision(
