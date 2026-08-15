@@ -90,6 +90,18 @@ fn public_mcp_tool_group_label_key(tool_group: oxideterm_public_mcp::ToolGroup) 
         oxideterm_public_mcp::ToolGroup::TerminalInput => {
             "settings_view.network.mcp_group_terminal_input"
         }
+        oxideterm_public_mcp::ToolGroup::DesktopSession => {
+            "settings_view.network.mcp_group_desktop_session"
+        }
+        oxideterm_public_mcp::ToolGroup::DesktopObserve => {
+            "settings_view.network.mcp_group_desktop_observe"
+        }
+        oxideterm_public_mcp::ToolGroup::DesktopInput => {
+            "settings_view.network.mcp_group_desktop_input"
+        }
+        oxideterm_public_mcp::ToolGroup::DesktopClipboard => {
+            "settings_view.network.mcp_group_desktop_clipboard"
+        }
         oxideterm_public_mcp::ToolGroup::CommandObserve => {
             "settings_view.network.mcp_group_command_observe"
         }

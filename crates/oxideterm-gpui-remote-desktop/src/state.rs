@@ -52,6 +52,16 @@ pub struct RemoteDesktopViewSnapshot {
     pub read_only: bool,
     pub pending_resize: Option<RemoteDesktopSize>,
     pub negotiated_capabilities: Option<NegotiatedCapabilities>,
+    pub graphics_epoch: Option<u64>,
+    pub frame_generation: Option<u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteDesktopFrameSnapshot {
+    pub size: RemoteDesktopSize,
+    pub graphics_epoch: u64,
+    pub generation: u64,
+    pub bgra_bytes: Vec<u8>,
 }
 
 #[derive(Clone, Debug)]
@@ -66,6 +76,7 @@ pub struct RemoteDesktopViewState {
     active_graphics_epoch: Option<u64>,
     awaiting_graphics_epoch: Option<u64>,
     texture_generation: u64,
+    frame_generation: u64,
     corrupted_frame: Option<CorruptedRemoteDesktopFrame>,
     cursor: RemoteDesktopCursorState,
     cursor_image: Option<Arc<RenderImage>>,
@@ -85,6 +96,7 @@ impl PartialEq for RemoteDesktopViewState {
             && self.message == other.message
             && self.error_category == other.error_category
             && self.texture_generation == other.texture_generation
+            && self.frame_generation == other.frame_generation
             && self.frame_image.as_ref().map(|frame| frame.size)
                 == other.frame_image.as_ref().map(|frame| frame.size)
             && self.active_graphics_epoch == other.active_graphics_epoch
@@ -435,6 +447,7 @@ impl RemoteDesktopViewState {
             active_graphics_epoch: None,
             awaiting_graphics_epoch: None,
             texture_generation: 0,
+            frame_generation: 0,
             corrupted_frame: None,
             cursor: RemoteDesktopCursorState::default(),
             cursor_image: None,
@@ -519,6 +532,9 @@ impl RemoteDesktopViewState {
                 self.message = None;
                 self.error_category = None;
                 self.pending_resize = None;
+                if self.frame_image.is_some() {
+                    self.advance_frame_generation();
+                }
             }
             RemoteDesktopHelperEvent::FrameUpdate { update } => {
                 if self.can_apply_frame_update(update.graphics_epoch)
@@ -532,6 +548,7 @@ impl RemoteDesktopViewState {
                     self.error_category = None;
                     self.corrupted_frame = None;
                     self.pending_resize = None;
+                    self.advance_frame_generation();
                 } else if self.can_accept_full_update(update.graphics_epoch)
                     && let Some(frame) = frame_from_full_update(&update)
                 {
@@ -700,6 +717,7 @@ impl RemoteDesktopViewState {
             self.error_category = None;
             self.corrupted_frame = None;
             self.pending_resize = None;
+            self.advance_frame_generation();
         } else if self.can_accept_full_update(update.graphics_epoch)
             && let Some(frame) = frame_from_full_update(&update)
         {
@@ -775,7 +793,21 @@ impl RemoteDesktopViewState {
             read_only: self.read_only,
             pending_resize: self.pending_resize,
             negotiated_capabilities: self.negotiated_capabilities.clone(),
+            graphics_epoch: self.active_graphics_epoch,
+            frame_generation: self.frame_image.as_ref().map(|_| self.frame_generation),
         }
+    }
+
+    pub fn frame_snapshot(&self) -> Option<RemoteDesktopFrameSnapshot> {
+        let frame = self.frame_image.as_ref()?;
+        let graphics_epoch = self.active_graphics_epoch?;
+        let bgra_bytes = frame.bytes.lock().ok()?.clone();
+        Some(RemoteDesktopFrameSnapshot {
+            size: frame.size,
+            graphics_epoch,
+            generation: self.frame_generation,
+            bgra_bytes,
+        })
     }
 
     pub fn frame_size(&self) -> Option<RemoteDesktopSize> {
@@ -838,6 +870,13 @@ impl RemoteDesktopViewState {
         // so wrapping would make stale and current surfaces indistinguishable.
         self.texture_generation = self.texture_generation.saturating_add(1);
         self.texture_generation
+    }
+
+    fn advance_frame_generation(&mut self) -> u64 {
+        // Frame generations are monotonic cursors for external observers and
+        // advance for both complete frames and accepted dirty updates.
+        self.frame_generation = self.frame_generation.saturating_add(1);
+        self.frame_generation
     }
 }
 
@@ -1427,6 +1466,10 @@ mod tests {
             frame_bgra_bytes(&state),
             [1, 1, 1, 1, 9, 9, 9, 9].as_slice()
         );
+        let public_snapshot = state.frame_snapshot().expect("frame should be cached");
+        assert_eq!(public_snapshot.generation, 2);
+        assert_eq!(public_snapshot.graphics_epoch, 0);
+        assert_eq!(public_snapshot.bgra_bytes, vec![1, 1, 1, 1, 9, 9, 9, 9]);
     }
 
     #[test]

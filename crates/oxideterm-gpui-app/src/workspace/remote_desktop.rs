@@ -40,6 +40,7 @@ use oxideterm_remote_desktop::{
 };
 use oxideterm_workspace::{Tab, TabKind, TabTitleSource};
 use tokio::sync::Notify;
+use zeroize::Zeroizing;
 
 use super::*;
 
@@ -47,9 +48,12 @@ mod certificate;
 mod clipboard;
 mod input;
 mod interaction;
+mod public_mcp;
 mod session;
 mod view;
 mod worker;
+
+pub(in crate::workspace) use public_mcp::RemoteDesktopPublicClipboardSnapshot;
 
 use certificate::*;
 use clipboard::*;
@@ -441,6 +445,14 @@ impl Drop for RemoteDesktopWorkerOwner {
     }
 }
 
+enum RemoteDesktopPublicClipboard {
+    Text(Zeroizing<String>),
+    Image {
+        format: RemoteDesktopClipboardFormat,
+        bytes: Zeroizing<Vec<u8>>,
+    },
+}
+
 pub(in crate::workspace) struct RemoteDesktopSessionEntity {
     tab_id: TabId,
     profile: RemoteDesktopConnectionProfile,
@@ -452,6 +464,9 @@ pub(in crate::workspace) struct RemoteDesktopSessionEntity {
     state: RemoteDesktopViewState,
     geometry: SharedRemoteDesktopGeometry,
     frame_slot: RemoteDesktopFrameDeliverySlot,
+    ui_frame_visible: bool,
+    public_mcp_frame_observers: usize,
+    public_mcp_clipboard: Option<RemoteDesktopPublicClipboard>,
     delivery_tx: mpsc::Sender<RemoteDesktopWorkerDelivery>,
     delivery_rx: mpsc::Receiver<RemoteDesktopWorkerDelivery>,
     worker: Option<RemoteDesktopWorkerOwner>,
@@ -527,6 +542,9 @@ impl RemoteDesktopSessionEntity {
             state,
             geometry: SharedRemoteDesktopGeometry::default(),
             frame_slot,
+            ui_frame_visible: false,
+            public_mcp_frame_observers: 0,
+            public_mcp_clipboard: None,
             // Each tab owns its delivery mailbox. A wake for one detached window
             // must never drain another tab's lifecycle events or frame notices.
             delivery_tx,

@@ -345,6 +345,7 @@ pub(in crate::workspace) enum WorkspaceWindowEffect {
     Ai(AiWindowEffect),
     Plugin(PluginWindowEffect),
     PublicMcpTerminal(public_mcp::terminals::PublicMcpTerminalWindowEffect),
+    PublicMcpDesktop(public_mcp::desktops::PublicMcpDesktopWindowEffect),
     TabHost(tabs::WorkspaceTabHostEvent),
     Graphics,
 }
@@ -412,6 +413,7 @@ impl WorkspaceWindowEffect {
             })),
             Self::Plugin(effect) => Some(WorkspaceWindowEffectKey::Plugin(*effect)),
             Self::PublicMcpTerminal(_) => None,
+            Self::PublicMcpDesktop(_) => None,
             Self::TabHost(tabs::WorkspaceTabHostEvent::CloseProcessCheckReady) => {
                 Some(WorkspaceWindowEffectKey::TabCloseProcessCheck)
             }
@@ -444,7 +446,7 @@ impl WorkspaceWindowEffect {
                 window_handle,
                 ..
             }) => WindowTargetHint::Prefer(window_handle.window_id()),
-            Self::PublicMcpTerminal(_) => WindowTargetHint::MainOrAny,
+            Self::PublicMcpTerminal(_) | Self::PublicMcpDesktop(_) => WindowTargetHint::MainOrAny,
             _ => WindowTargetHint::MainOrAny,
         }
     }
@@ -557,6 +559,19 @@ impl WorkspaceApp {
             return false;
         }
         self.enqueue_window_effect(WorkspaceWindowEffect::PublicMcpTerminal(effect), cx);
+        true
+    }
+
+    pub(in crate::workspace) fn enqueue_public_mcp_desktop_window_effect(
+        &mut self,
+        effect: public_mcp::desktops::PublicMcpDesktopWindowEffect,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.window_registry.windows.is_empty() {
+            effect.finish_without_window();
+            return false;
+        }
+        self.enqueue_window_effect(WorkspaceWindowEffect::PublicMcpDesktop(effect), cx);
         true
     }
 
@@ -673,6 +688,9 @@ impl WorkspaceApp {
             }
             WorkspaceWindowEffect::PublicMcpTerminal(event) => {
                 self.apply_public_mcp_terminal_window_effect(event, window, cx);
+            }
+            WorkspaceWindowEffect::PublicMcpDesktop(event) => {
+                self.apply_public_mcp_desktop_window_effect(event, window, cx);
             }
             WorkspaceWindowEffect::TabHost(event) => {
                 self.handle_tab_host_event(&event, window_handle, cx);

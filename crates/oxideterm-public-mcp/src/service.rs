@@ -25,16 +25,19 @@ use crate::{
     calls::{
         AddonsInstallArgs, AddonsListArgs, AddonsRemoveArgs, AddonsSetEnabledArgs, AuditSearchArgs,
         BrowseConnectionsArgs, CancelCommandArgs, CommandOutputArgs, CommandStateArgs,
-        ConnectNodeArgs, DescribeConnectionArgs, DisconnectNodeArgs, FilesCloseArgs,
-        FilesCompareArgs, FilesListArgs, FilesMoveArgs, FilesOpenArgs, FilesReadArgs,
-        FilesRemoveArgs, FilesStatArgs, FilesWriteArgs, ForwardHandleArgs, ForwardKind,
-        ForwardsChangeArgs, ForwardsDiscoverPortsArgs, ForwardsListArgs, ForwardsOpenArgs,
-        ForwardsRemoveArgs, HostToolsCaptureArgs, HostToolsCatalogArgs, HostToolsOperateArgs,
-        InspectNodeArgs, OpenTerminalArgs, PublicToolCall, QuickCommandsDescribeArgs,
-        QuickCommandsListArgs, QuickCommandsRemoveArgs, QuickCommandsRunArgs,
-        QuickCommandsSaveArgs, ReadArtifactArgs, ReadTerminalArgs, ReleaseNodeArgs,
-        ResizeTerminalArgs, StageArtifactArgs, StartCommandArgs, SubmitTerminalArgs,
-        TerminalHandleArgs, ToolEnvelope, ToolOutcome,
+        ConnectNodeArgs, DescribeConnectionArgs, DesktopButtonState, DesktopClipboardImageFormat,
+        DesktopClipboardPayload, DesktopFrameArgs, DesktopHandleArgs, DesktopInputArgs,
+        DesktopInputEvent, DisconnectNodeArgs, FilesCloseArgs, FilesCompareArgs, FilesListArgs,
+        FilesMoveArgs, FilesOpenArgs, FilesReadArgs, FilesRemoveArgs, FilesStatArgs,
+        FilesWriteArgs, ForwardHandleArgs, ForwardKind, ForwardsChangeArgs,
+        ForwardsDiscoverPortsArgs, ForwardsListArgs, ForwardsOpenArgs, ForwardsRemoveArgs,
+        HostToolsCaptureArgs, HostToolsCatalogArgs, HostToolsOperateArgs, InspectNodeArgs,
+        OpenDesktopArgs, OpenTerminalArgs, PublicDesktopMouseButton, PublicToolCall,
+        QuickCommandsDescribeArgs, QuickCommandsListArgs, QuickCommandsRemoveArgs,
+        QuickCommandsRunArgs, QuickCommandsSaveArgs, ReadArtifactArgs, ReadDesktopClipboardArgs,
+        ReadTerminalArgs, ReleaseNodeArgs, ResizeDesktopArgs, ResizeTerminalArgs,
+        StageArtifactArgs, StartCommandArgs, SubmitTerminalArgs, TerminalHandleArgs, ToolEnvelope,
+        ToolOutcome, WriteDesktopClipboardArgs,
     },
     handles::{ApprovalRef, ClientRef, NodeRef, TerminalRef},
 };
@@ -58,6 +61,14 @@ const TERMINAL_LINE_LIMIT_MAXIMUM: u32 = 1_000;
 const TERMINAL_MATCH_LIMIT_MAXIMUM: u32 = 500;
 const TERMINAL_DIMENSION_MAXIMUM: u16 = 1_000;
 const TERMINAL_TITLE_LIMIT_BYTES: usize = 256;
+const DESKTOP_MIN_WIDTH: u32 = 200;
+const DESKTOP_MIN_HEIGHT: u32 = 120;
+const DESKTOP_MAX_DIMENSION: u32 = 8_192;
+const DESKTOP_KEY_CODE_LIMIT_BYTES: usize = 128;
+const DESKTOP_KEY_TEXT_LIMIT_BYTES: usize = 4 * 1024;
+const DESKTOP_TEXT_INPUT_LIMIT_BYTES: usize = 256 * 1024;
+const DESKTOP_CLIPBOARD_TEXT_LIMIT_BYTES: usize = 1024 * 1024;
+const DESKTOP_WHEEL_DELTA_LIMIT: f32 = 10_000.0;
 
 #[derive(Clone)]
 pub struct PublicMcpService {
@@ -117,6 +128,88 @@ struct SubmitTerminalMetadata {
     terminal_ref: TerminalRef,
     #[serde(default)]
     append_enter: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[expect(
+    dead_code,
+    reason = "this type exists only to generate the public tool schema"
+)]
+#[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
+enum DesktopInputEventSchema {
+    MouseMove {
+        x: u32,
+        y: u32,
+    },
+    MouseButton {
+        x: u32,
+        y: u32,
+        button: PublicDesktopMouseButton,
+        state: DesktopButtonState,
+    },
+    Wheel {
+        x: u32,
+        y: u32,
+        delta_x: f32,
+        delta_y: f32,
+    },
+    Key {
+        code: String,
+        #[serde(default)]
+        text: Option<String>,
+        #[serde(default)]
+        alt: bool,
+        #[serde(default)]
+        ctrl: bool,
+        #[serde(default)]
+        shift: bool,
+        #[serde(default)]
+        meta: bool,
+        state: DesktopButtonState,
+    },
+    Text {
+        text: String,
+    },
+    ReleaseAll,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[expect(
+    dead_code,
+    reason = "this type exists only to generate the public tool schema"
+)]
+#[serde(deny_unknown_fields)]
+struct DesktopInputSchema {
+    desktop_ref: crate::DesktopRef,
+    graphics_epoch: u64,
+    event: DesktopInputEventSchema,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[expect(
+    dead_code,
+    reason = "this type exists only to generate the public tool schema"
+)]
+#[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
+enum DesktopClipboardPayloadSchema {
+    Text {
+        text: String,
+    },
+    Image {
+        artifact_ref: crate::ArtifactRef,
+        format: DesktopClipboardImageFormat,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[expect(
+    dead_code,
+    reason = "this type exists only to generate the public tool schema"
+)]
+#[serde(deny_unknown_fields)]
+struct WriteDesktopClipboardSchema {
+    desktop_ref: crate::DesktopRef,
+    payload: DesktopClipboardPayloadSchema,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -510,6 +603,85 @@ impl ServerHandler for PublicMcpService {
             "terminals_close" => match parse_arguments::<TerminalHandleArgs>(arguments) {
                 Ok(args) => {
                     self.execute_call(&client, PublicToolCall::CloseTerminal(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "desktops_open" => match parse_arguments::<OpenDesktopArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::OpenDesktop(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "desktops_state" => match parse_arguments::<DesktopHandleArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::DesktopState(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "desktops_frame" => match parse_arguments::<DesktopFrameArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::DesktopFrame(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "desktops_input" => match parse_arguments::<DesktopInputArgs>(arguments) {
+                Ok(args) if desktop_input_is_valid(&args.event) => {
+                    self.execute_call(&client, PublicToolCall::DesktopInput(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "The remote desktop input event exceeds the supported bounds",
+                ),
+                Err(error) => *error,
+            },
+            "desktops_resize" => match parse_arguments::<ResizeDesktopArgs>(arguments) {
+                Ok(args) if desktop_dimensions_are_valid(args.width, args.height) => {
+                    self.execute_call(&client, PublicToolCall::ResizeDesktop(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "The remote desktop dimensions are outside the supported range",
+                ),
+                Err(error) => *error,
+            },
+            "desktops_clipboard_read" => {
+                match parse_arguments::<ReadDesktopClipboardArgs>(arguments) {
+                    Ok(args) => {
+                        self.execute_call(&client, PublicToolCall::ReadDesktopClipboard(args))
+                            .await
+                    }
+                    Err(error) => *error,
+                }
+            }
+            "desktops_clipboard_write" => {
+                match parse_arguments::<WriteDesktopClipboardArgs>(arguments) {
+                    Ok(args) if desktop_clipboard_payload_is_valid(&args.payload) => {
+                        self.execute_call(&client, PublicToolCall::WriteDesktopClipboard(args))
+                            .await
+                    }
+                    Ok(_) => tool_error(
+                        "invalid_arguments",
+                        "The remote desktop clipboard payload exceeds the supported bounds",
+                    ),
+                    Err(error) => *error,
+                }
+            }
+            "desktops_reconnect" => match parse_arguments::<DesktopHandleArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::ReconnectDesktop(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "desktops_close" => match parse_arguments::<DesktopHandleArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::CloseDesktop(args))
                         .await
                 }
                 Err(error) => *error,
@@ -946,6 +1118,69 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             false,
             false,
         ),
+        define_tool::<OpenDesktopArgs>(
+            "desktops_open",
+            "Open a real saved RDP or VNC profile in a visible OxideTerm tab.",
+            ToolGroup::DesktopSession,
+            false,
+            true,
+        ),
+        define_tool::<DesktopHandleArgs>(
+            "desktops_state",
+            "Read the session, security, framebuffer, input, and clipboard capability state.",
+            ToolGroup::DesktopObserve,
+            true,
+            false,
+        ),
+        define_tool::<DesktopFrameArgs>(
+            "desktops_frame",
+            "Encode the latest bounded framebuffer as a client-scoped PNG artifact.",
+            ToolGroup::DesktopObserve,
+            true,
+            false,
+        ),
+        define_tool::<DesktopInputSchema>(
+            "desktops_input",
+            "Send one strict mouse, wheel, key, text, or release-all event for the current framebuffer epoch.",
+            ToolGroup::DesktopInput,
+            false,
+            true,
+        ),
+        define_tool::<ResizeDesktopArgs>(
+            "desktops_resize",
+            "Request a bounded remote framebuffer resize when the provider supports it.",
+            ToolGroup::DesktopInput,
+            false,
+            false,
+        ),
+        define_tool::<ReadDesktopClipboardArgs>(
+            "desktops_clipboard_read",
+            "Read the latest remote text or image clipboard value captured by this session.",
+            ToolGroup::DesktopClipboard,
+            true,
+            false,
+        ),
+        define_tool::<WriteDesktopClipboardSchema>(
+            "desktops_clipboard_write",
+            "Write exact text or a bounded image artifact to the remote clipboard.",
+            ToolGroup::DesktopClipboard,
+            false,
+            true,
+        ),
+        define_tool::<DesktopHandleArgs>(
+            "desktops_reconnect",
+            "Reconnect the existing client-owned remote desktop session using its retained profile.",
+            ToolGroup::DesktopSession,
+            false,
+            true,
+        ),
+        define_tool::<DesktopHandleArgs>(
+            "desktops_close",
+            "Release all remote inputs and close the client-owned desktop helper and tab.",
+            ToolGroup::DesktopSession,
+            false,
+            false,
+        ),
         define_tool::<StartCommandSchema>(
             "commands_start",
             "Start a command on an acquired SSH node and return a command handle.",
@@ -1328,6 +1563,47 @@ fn terminal_title_is_valid(title: &str) -> bool {
     !title.trim().is_empty()
         && title.len() <= TERMINAL_TITLE_LIMIT_BYTES
         && !title.chars().any(char::is_control)
+}
+
+fn desktop_dimensions_are_valid(width: u32, height: u32) -> bool {
+    (DESKTOP_MIN_WIDTH..=DESKTOP_MAX_DIMENSION).contains(&width)
+        && (DESKTOP_MIN_HEIGHT..=DESKTOP_MAX_DIMENSION).contains(&height)
+}
+
+fn desktop_input_is_valid(event: &DesktopInputEvent) -> bool {
+    match event {
+        DesktopInputEvent::MouseMove { .. } | DesktopInputEvent::MouseButton { .. } => true,
+        DesktopInputEvent::Wheel {
+            delta_x, delta_y, ..
+        } => {
+            delta_x.is_finite()
+                && delta_y.is_finite()
+                && delta_x.abs() <= DESKTOP_WHEEL_DELTA_LIMIT
+                && delta_y.abs() <= DESKTOP_WHEEL_DELTA_LIMIT
+                && (delta_x.abs() > f32::EPSILON || delta_y.abs() > f32::EPSILON)
+        }
+        DesktopInputEvent::Key { code, text, .. } => {
+            !code.trim().is_empty()
+                && code.len() <= DESKTOP_KEY_CODE_LIMIT_BYTES
+                && !code.chars().any(char::is_control)
+                && text
+                    .as_deref()
+                    .is_none_or(|text| text.len() <= DESKTOP_KEY_TEXT_LIMIT_BYTES)
+        }
+        DesktopInputEvent::Text { text } => {
+            !text.is_empty() && text.len() <= DESKTOP_TEXT_INPUT_LIMIT_BYTES
+        }
+        DesktopInputEvent::ReleaseAll => true,
+    }
+}
+
+fn desktop_clipboard_payload_is_valid(payload: &DesktopClipboardPayload) -> bool {
+    match payload {
+        DesktopClipboardPayload::Text { text } => {
+            !text.is_empty() && text.len() <= DESKTOP_CLIPBOARD_TEXT_LIMIT_BYTES
+        }
+        DesktopClipboardPayload::Image { .. } => true,
+    }
 }
 
 fn parse_stage_artifact(

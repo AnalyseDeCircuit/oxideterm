@@ -8,8 +8,8 @@ use zeroize::Zeroizing;
 use crate::{
     auth::ToolGroup,
     handles::{
-        AddonRef, ArtifactRef, AuditRef, CommandRef, ConnectionRef, FileSessionRef, ForwardRef,
-        NodeRef, QuickCommandRef, TerminalRef,
+        AddonRef, ArtifactRef, AuditRef, CommandRef, ConnectionRef, DesktopRef, FileSessionRef,
+        ForwardRef, NodeRef, QuickCommandRef, TerminalRef,
     },
 };
 
@@ -148,6 +148,182 @@ pub enum TerminalControlAction {
 pub struct ControlTerminalArgs {
     pub terminal_ref: TerminalRef,
     pub action: TerminalControlAction,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OpenDesktopArgs {
+    pub connection_ref: ConnectionRef,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DesktopHandleArgs {
+    pub desktop_ref: DesktopRef,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DesktopFrameArgs {
+    pub desktop_ref: DesktopRef,
+    #[serde(default)]
+    pub after_generation: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicDesktopMouseButton {
+    Left,
+    Middle,
+    Right,
+    Back,
+    Forward,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DesktopButtonState {
+    Pressed,
+    Released,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
+pub enum DesktopInputEvent {
+    MouseMove {
+        x: u32,
+        y: u32,
+    },
+    MouseButton {
+        x: u32,
+        y: u32,
+        button: PublicDesktopMouseButton,
+        state: DesktopButtonState,
+    },
+    Wheel {
+        x: u32,
+        y: u32,
+        delta_x: f32,
+        delta_y: f32,
+    },
+    Key {
+        code: String,
+        #[serde(default)]
+        text: Option<Zeroizing<String>>,
+        #[serde(default)]
+        alt: bool,
+        #[serde(default)]
+        ctrl: bool,
+        #[serde(default)]
+        shift: bool,
+        #[serde(default)]
+        meta: bool,
+        state: DesktopButtonState,
+    },
+    Text {
+        text: Zeroizing<String>,
+    },
+    ReleaseAll,
+}
+
+impl fmt::Debug for DesktopInputEvent {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = match self {
+            Self::MouseMove { .. } => "mouse_move",
+            Self::MouseButton { .. } => "mouse_button",
+            Self::Wheel { .. } => "wheel",
+            Self::Key { .. } => "key",
+            Self::Text { .. } => "text",
+            Self::ReleaseAll => "release_all",
+        };
+        formatter
+            .debug_struct("DesktopInputEvent")
+            .field("kind", &kind)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DesktopInputArgs {
+    pub desktop_ref: DesktopRef,
+    pub graphics_epoch: u64,
+    pub event: DesktopInputEvent,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResizeDesktopArgs {
+    pub desktop_ref: DesktopRef,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DesktopClipboardKind {
+    Text,
+    Image,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReadDesktopClipboardArgs {
+    pub desktop_ref: DesktopRef,
+    #[serde(default = "default_desktop_clipboard_kind")]
+    pub kind: DesktopClipboardKind,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DesktopClipboardImageFormat {
+    Png,
+    Jpeg,
+    Webp,
+    Gif,
+    Svg,
+    Bmp,
+    Tiff,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
+pub enum DesktopClipboardPayload {
+    Text {
+        text: Zeroizing<String>,
+    },
+    Image {
+        artifact_ref: ArtifactRef,
+        format: DesktopClipboardImageFormat,
+    },
+}
+
+impl fmt::Debug for DesktopClipboardPayload {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Text { text } => formatter
+                .debug_struct("DesktopClipboardPayload")
+                .field("kind", &"text")
+                .field("bytes", &text.len())
+                .finish(),
+            Self::Image {
+                artifact_ref,
+                format,
+            } => formatter
+                .debug_struct("DesktopClipboardPayload")
+                .field("kind", &"image")
+                .field("artifact_ref", artifact_ref)
+                .field("format", format)
+                .finish(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WriteDesktopClipboardArgs {
+    pub desktop_ref: DesktopRef,
+    pub payload: DesktopClipboardPayload,
 }
 
 pub struct StartCommandArgs {
@@ -604,6 +780,15 @@ pub enum PublicToolCall {
     ResizeTerminal(ResizeTerminalArgs),
     ControlTerminal(ControlTerminalArgs),
     CloseTerminal(TerminalHandleArgs),
+    OpenDesktop(OpenDesktopArgs),
+    DesktopState(DesktopHandleArgs),
+    DesktopFrame(DesktopFrameArgs),
+    DesktopInput(DesktopInputArgs),
+    ResizeDesktop(ResizeDesktopArgs),
+    ReadDesktopClipboard(ReadDesktopClipboardArgs),
+    WriteDesktopClipboard(WriteDesktopClipboardArgs),
+    ReconnectDesktop(DesktopHandleArgs),
+    CloseDesktop(DesktopHandleArgs),
     StartCommand(StartCommandArgs),
     CommandState(CommandStateArgs),
     CommandOutput(CommandOutputArgs),
@@ -659,6 +844,15 @@ impl PublicToolCall {
             Self::ResizeTerminal(_) => "terminals_resize",
             Self::ControlTerminal(_) => "terminals_control",
             Self::CloseTerminal(_) => "terminals_close",
+            Self::OpenDesktop(_) => "desktops_open",
+            Self::DesktopState(_) => "desktops_state",
+            Self::DesktopFrame(_) => "desktops_frame",
+            Self::DesktopInput(_) => "desktops_input",
+            Self::ResizeDesktop(_) => "desktops_resize",
+            Self::ReadDesktopClipboard(_) => "desktops_clipboard_read",
+            Self::WriteDesktopClipboard(_) => "desktops_clipboard_write",
+            Self::ReconnectDesktop(_) => "desktops_reconnect",
+            Self::CloseDesktop(_) => "desktops_close",
             Self::StartCommand(_) => "commands_start",
             Self::CommandState(_) => "commands_state",
             Self::CommandOutput(_) => "commands_output",
@@ -713,6 +907,14 @@ impl PublicToolCall {
                 ToolGroup::TerminalObserve
             }
             Self::SubmitTerminal(_) | Self::ControlTerminal(_) => ToolGroup::TerminalInput,
+            Self::OpenDesktop(_) | Self::ReconnectDesktop(_) | Self::CloseDesktop(_) => {
+                ToolGroup::DesktopSession
+            }
+            Self::DesktopState(_) | Self::DesktopFrame(_) => ToolGroup::DesktopObserve,
+            Self::DesktopInput(_) | Self::ResizeDesktop(_) => ToolGroup::DesktopInput,
+            Self::ReadDesktopClipboard(_) | Self::WriteDesktopClipboard(_) => {
+                ToolGroup::DesktopClipboard
+            }
             Self::StartCommand(_) | Self::CancelCommand(_) => ToolGroup::CommandExecute,
             Self::CommandState(_) | Self::CommandOutput(_) => ToolGroup::CommandObserve,
             Self::StageArtifact(_) | Self::ReadArtifact(_) => ToolGroup::ArtifactTransfer,
@@ -755,6 +957,10 @@ impl PublicToolCall {
                 | Self::OpenTerminal(_)
                 | Self::SubmitTerminal(_)
                 | Self::ControlTerminal(_)
+                | Self::OpenDesktop(_)
+                | Self::DesktopInput(_)
+                | Self::WriteDesktopClipboard(_)
+                | Self::ReconnectDesktop(_)
                 | Self::StartCommand(_)
                 | Self::HostToolsOperate(_)
                 | Self::QuickCommandsSave(_)
@@ -801,6 +1007,23 @@ impl PublicToolCall {
                 format!("{} {}x{}", args.terminal_ref, args.cols, args.rows)
             }
             Self::ControlTerminal(args) => format!("{} {:?}", args.terminal_ref, args.action),
+            Self::OpenDesktop(args) => args.connection_ref.to_string(),
+            Self::DesktopState(args) | Self::ReconnectDesktop(args) | Self::CloseDesktop(args) => {
+                args.desktop_ref.to_string()
+            }
+            Self::DesktopFrame(args) => args.desktop_ref.to_string(),
+            Self::DesktopInput(args) => {
+                format!("{} {:?}", args.desktop_ref, args.event)
+            }
+            Self::ResizeDesktop(args) => {
+                format!("{} {}x{}", args.desktop_ref, args.width, args.height)
+            }
+            Self::ReadDesktopClipboard(args) => {
+                format!("{} {:?}", args.desktop_ref, args.kind)
+            }
+            Self::WriteDesktopClipboard(args) => {
+                format!("{} {:?}", args.desktop_ref, args.payload)
+            }
             Self::StartCommand(args) => args.node_ref.to_string(),
             Self::CommandState(args) => args.command_ref.to_string(),
             Self::CommandOutput(args) => args.command_ref.to_string(),
@@ -910,6 +1133,10 @@ const fn default_terminal_line_limit() -> u32 {
 
 const fn default_terminal_match_limit() -> u32 {
     100
+}
+
+const fn default_desktop_clipboard_kind() -> DesktopClipboardKind {
+    DesktopClipboardKind::Text
 }
 
 impl fmt::Debug for PublicToolCall {

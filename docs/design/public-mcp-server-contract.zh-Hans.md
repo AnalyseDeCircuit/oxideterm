@@ -58,7 +58,7 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 
 - 设置页可创建、停用和撤销独立外部客户端；一次性 Bearer 凭据只向用户显示一次，设备端只持久化 SHA-256 摘要。
 - 每个客户端独立选择普通模式或完全权限模式，并逐项启用工具组。普通模式保留应用内动作批准；完全权限模式只跳过已勾选工具组的逐动作批准，不会绕过 Bearer 认证、应用锁、秘密硬边界、审计或未授权工具组。
-- `tools/list` 按客户端工具组裁剪；当前实际发布基础、连接目录/详情、节点租约、真实终端会话/观察/输入、命令执行/观察、临时 artifact、当前客户端审计、类型化 Host Tools、快速命令、插件生命周期、端口转发和 SFTP 文件工具。
+- `tools/list` 按客户端工具组裁剪；当前实际发布基础、连接目录/详情、节点租约、真实终端会话/观察/输入、RDP/VNC 会话/画面/键鼠/剪贴板、命令执行/观察、临时 artifact、当前客户端审计、类型化 Host Tools、快速命令、插件生命周期、端口转发和 SFTP 文件工具。
 - `connections_browse` 已覆盖保存的 SSH、串口、Telnet、Mosh、RDP 和 VNC 配置，只返回目录投影；精确端点及协议选项由单独授权的 `connections_describe` 返回，既有凭据只显示存在性。
 - 连接、节点和命令句柄均为随机且绑定客户端的外部引用；首个切片会在应用重启后重新生成连接引用，客户端需要重新浏览目录，不能缓存或构造内部连接身份。
 - `nodes_connect` 使用保存的 SSH 配置和现有受保护凭据，通过 NodeRouter 建立或复用物理节点；代理链也沿用现有节点树展开与连接顺序。
@@ -70,11 +70,12 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 - 端口转发读取和管理分别授权。`forwards_*` 复用应用唯一的 `ForwardingRuntimeService` 和独立 `PortForward` 消费者，支持类型化创建、带 revision 的受控修改、停止、重启、删除、统计和单次端口发现。关闭终端或释放 Public MCP 节点租约不会停止转发；显式物理节点断开、客户端撤销或关闭转发管理授权才按所有权清理。外部只看到客户端作用域的 `forward_ref`。
 - SFTP 文件读取和修改分别授权。`files_open` 为规范化远端根目录登记独立 SFTP 消费者，后续列表、元数据、分段读取、比较、写入、移动和删除都重新校验规范化路径边界。正文只经客户端自己的有界 artifact 传递；重连时先取得当前连接的消费者再释放旧消费者，`files_close` 不断开共享 SSH 节点。
 - 终端会话、内容观察和输入控制分别授权。`terminals_open` 只创建应用真实持有的可见终端页：SSH 必须使用已取得的 `node_ref`，保存的 Mosh、Telnet 和串口使用 `connection_ref`，本地终端只允许一次性启动且不会进入保存、导出或同步。读取仅返回有界屏幕快照与 generation cursor；搜索复用终端后端；输入正文不进入审计，普通模式批准页只显示输入类型、长度与回车意图。关闭 SSH 终端只关闭自己的 terminal consumer，不等同于物理节点断开。
+- 远程桌面会话、画面观察、键鼠控制和剪贴板分别授权。`desktops_open` 只解析保存的 RDP/VNC `connection_ref`，凭据由设备受保护存储直接移交真实 provider，会话仍由可见标签页和 `RemoteDesktopSessionEntity` 持有。隐藏标签页只有在客户端启用画面观察时才继续消费最新帧；`desktops_frame` 把有界 CPU framebuffer 在后台编码成客户端私有 PNG artifact。输入必须携带当前 graphics epoch，坐标按 server framebuffer 校验；远端剪贴板来自会话内零化缓存，绝不读取系统剪贴板冒充远端内容。关闭或撤权会释放所有输入、关闭 helper，并撤销该桌面的帧和剪贴板 artifact。
 - 连接和命令执行、物理节点断开先冻结原参数并进入应用内批准；批准票据绑定客户端、五分钟过期且只能消费一次。批准界面显示实际客户端、目标和命令，但命令不进入 MCP 批准结果或审计。
 - 停用或撤销客户端会撤销待批准动作、取消命令并释放其 Public MCP 消费者；`nodes_release` 不会把其他终端、SFTP 或转发消费者仍在使用的物理节点断开。
 - 应用锁定时会拒绝新的 MCP 领域请求、撤销待批准动作、取消 MCP 命令并释放 MCP 节点消费者；解锁后客户端凭据仍有效，但必须重新取得运行时句柄。
 
-stdio bridge、IDE 工作区、后台传输、RDP/VNC、云同步和录制仍按后续阶段实施。已接入领域尚未支持的目标或动作会明确拒绝；其余领域在真实 broker 和生命周期接通前不会出现在 `tools/list`，也不会用空壳结果冒充支持。
+stdio bridge、IDE 工作区、后台传输、云同步和录制仍按后续阶段实施。已接入领域尚未支持的目标或动作会明确拒绝；其余领域在真实 broker 和生命周期接通前不会出现在 `tools/list`，也不会用空壳结果冒充支持。
 
 ## 2. 服务形态与协议
 
@@ -304,13 +305,13 @@ Host Tools 的已安装插件扩展不能通过 Public MCP 取得任意调用入
 
 | 工具 | 权限 | 关键参数 | 关键结果与约束 |
 |---|---|---|---|
-| `desktops_open` | 远程桌面 / X / 必须 | `connection_ref` 或短暂 `profile`、`display_options`、`request_key` | 开启真实 RDP/VNC provider 会话，返回 `desktop_ref`、连接状态、协商能力、安全状态和 framebuffer epoch；认证只通过已保存的受保护槽或应用拥有的交互完成，短暂 profile 不自动保存。 |
+| `desktops_open` | 远程桌面 / X / 必须 | `connection_ref` | 开启保存的真实 RDP/VNC provider 会话，返回 `desktop_ref`、连接状态、协商能力、安全状态和 framebuffer epoch；认证只通过设备受保护槽移交，不接受秘密明文或内部凭据引用。短暂 profile 待凭据交互契约完成后再开放。 |
 | `desktops_state` | 远程桌面观察 / D / 否 | `desktop_ref` | provider、连接状态、尺寸、epoch、加密/证书状态、支持的输入和剪贴板方向；不返回画面。 |
-| `desktops_frame` | 远程桌面观察 / R / 否 | `desktop_ref`、`after_epoch?`、`format?` | 最新完整帧或有界更新，作为 MCP image content 或 `artifact_ref`，并返回 epoch/尺寸/脏矩形；过期 epoch 必须重取完整帧。 |
-| `desktops_input` | 远程桌面控制 / X / 必须 | `desktop_ref`、`epoch`、`event` | 严格联合类型：鼠标移动/按键/滚轮、键按下/松开、文本。坐标以 server framebuffer 为准；不转发任意 helper 协议消息。 |
+| `desktops_frame` | 远程桌面观察 / R / 否 | `desktop_ref`、`after_generation?` | 最新完整帧编码为客户端私有 PNG `artifact_ref`，并返回 generation、graphics epoch 和尺寸；generation 未变化时返回 `unchanged`，不在 JSON 中塞入 framebuffer Base64。 |
+| `desktops_input` | 远程桌面控制 / X / 必须 | `desktop_ref`、`graphics_epoch`、`event` | 严格联合类型：鼠标移动/按键/滚轮、键按下/松开、文本、释放全部输入。坐标以 server framebuffer 为准；不转发任意 helper 协议消息。 |
 | `desktops_resize` | 远程桌面控制 / W / 否 | `desktop_ref`、`width`、`height` | 请求远端 resize，实际结果以协商能力为准。 |
-| `desktops_clipboard_read` | 远程桌面剪贴板 / R / 否 | `desktop_ref`、`format?` | 在双方都授权且 provider 支持时读取文本/图像 artifact；文件剪贴板另需传输授权。 |
-| `desktops_clipboard_write` | 远程桌面剪贴板 / X / 必须 | `desktop_ref`、`text` 或 `artifact_ref`、`format` | 写入远端剪贴板；不把剪贴板写进审计正文。 |
+| `desktops_clipboard_read` | 远程桌面剪贴板 / R / 否 | `desktop_ref`、`kind` | 在双方都授权且 provider 支持时读取会话实际收到的最新远端文本或图像 artifact；绝不把系统剪贴板当成远端内容，文件剪贴板尚不公开。 |
+| `desktops_clipboard_write` | 远程桌面剪贴板 / X / 必须 | `desktop_ref`、严格 `payload`（文本或图像 `artifact_ref` + 格式） | 写入远端剪贴板；校验 artifact media type 和 16 MiB 限额，不把剪贴板正文写进审计。 |
 | `desktops_reconnect` | 远程桌面 / X / 必须 | `desktop_ref` | 用原配置请求受控重连；继续由会话所有者持有 helper 生命周期与秘密。 |
 | `desktops_close` | 远程桌面 / W / 确认未保存工作提示时 | `desktop_ref` | 关闭 provider/helper 及会话，撤销帧和剪贴板句柄。 |
 

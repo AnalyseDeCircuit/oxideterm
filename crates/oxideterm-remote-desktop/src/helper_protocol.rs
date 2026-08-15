@@ -308,7 +308,21 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
                 .finish(),
             Self::Key { key, state } => formatter
                 .debug_struct("Key")
-                .field("key", key)
+                // Key text may contain credentials typed into a remote prompt.
+                .field(
+                    "code",
+                    &format_args!("<redacted:{}>", key.code.chars().count()),
+                )
+                .field(
+                    "text",
+                    &key.text
+                        .as_ref()
+                        .map(|text| format!("<redacted:{}>", text.chars().count())),
+                )
+                .field("alt", &key.alt)
+                .field("ctrl", &key.ctrl)
+                .field("shift", &key.shift)
+                .field("meta", &key.meta)
                 .field("state", state)
                 .finish(),
             Self::Text { text } => formatter

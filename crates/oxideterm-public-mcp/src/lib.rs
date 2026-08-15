@@ -29,11 +29,15 @@ pub use auth::{
 };
 pub use broker::{BrokerError, DomainBroker, DomainMessage, DomainRequest, DomainRequestReceiver};
 pub use calls::{
-    ForwardKind, HostToolLogPreset, HostToolOperation, HostToolResource, PublicTelnetControl,
-    PublicToolCall, TerminalControlAction, TerminalOpenSource, ToolEnvelope, ToolOutcome,
+    DesktopButtonState, DesktopClipboardImageFormat, DesktopClipboardKind, DesktopClipboardPayload,
+    DesktopFrameArgs, DesktopHandleArgs, DesktopInputArgs, DesktopInputEvent, ForwardKind,
+    HostToolLogPreset, HostToolOperation, HostToolResource, OpenDesktopArgs,
+    PublicDesktopMouseButton, PublicTelnetControl, PublicToolCall, ReadDesktopClipboardArgs,
+    ResizeDesktopArgs, TerminalControlAction, TerminalOpenSource, ToolEnvelope, ToolOutcome,
+    WriteDesktopClipboardArgs,
 };
 pub use handles::{
-    AddonRef, ApprovalRef, ArtifactRef, AuditRef, ClientRef, CommandRef, ConnectionRef,
+    AddonRef, ApprovalRef, ArtifactRef, AuditRef, ClientRef, CommandRef, ConnectionRef, DesktopRef,
     FileSessionRef, ForwardRef, HandleParseError, NodeRef, OperationRef, QuickCommandRef,
     TerminalRef,
 };

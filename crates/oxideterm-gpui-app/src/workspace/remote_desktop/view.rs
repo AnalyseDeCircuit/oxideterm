@@ -66,7 +66,7 @@ impl WorkspaceApp {
         password: Option<RemoteDesktopSecret>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> TabId {
         let tab_id = self.alloc_tab_id(cx);
         let frame_slot = RemoteDesktopFrameDeliverySlot::new();
         let certificate_store_path =
@@ -131,6 +131,7 @@ impl WorkspaceApp {
             });
         }
         cx.notify();
+        tab_id
     }
 
     pub(in crate::workspace) fn render_remote_desktop_surface(

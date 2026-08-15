@@ -11,11 +11,11 @@ use oxideterm_connections::{ConnectionInfo, ConnectionStore};
 use oxideterm_gpui_terminal::{TerminalNotice, TerminalNoticeVariant};
 use oxideterm_plugin_registry as plugin_host;
 use oxideterm_public_mcp::{
-    AddonRef, ApprovalRef, ApprovalStatus, AuditQuery, ClientApprovalMode, ClientCredential,
-    ClientProjection, ClientRef, ClientRegistry, CommandRef, ConnectionRef, DomainBroker,
-    DomainMessage, DomainRequest, DomainRequestReceiver, FileSessionRef, ForwardRef, NodeRef,
-    PublicMcpHttpServer, PublicMcpState, PublicToolCall, QuickCommandRef, TerminalRef,
-    ToolEnvelope, ToolGroup, ToolOutcome, start_http_server,
+    AddonRef, ApprovalRef, ApprovalStatus, ArtifactRef, AuditQuery, ClientApprovalMode,
+    ClientCredential, ClientProjection, ClientRef, ClientRegistry, CommandRef, ConnectionRef,
+    DesktopRef, DomainBroker, DomainMessage, DomainRequest, DomainRequestReceiver, FileSessionRef,
+    ForwardRef, NodeRef, PublicMcpHttpServer, PublicMcpState, PublicToolCall, QuickCommandRef,
+    TerminalRef, ToolEnvelope, ToolGroup, ToolOutcome, start_http_server,
 };
 use oxideterm_session_adapter::ssh_config_from_saved_connection;
 use oxideterm_ssh::{ConnectionConsumer, NodeId, NodeRouter, SshTransportError};
@@ -25,9 +25,10 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
-use super::{TerminalSessionId, WorkspaceApp};
+use super::{TabId, TerminalSessionId, WorkspaceApp};
 
 mod addons;
+pub(in crate::workspace) mod desktops;
 mod files;
 mod forwards;
 mod host_tools;
@@ -72,6 +73,7 @@ pub(in crate::workspace) struct PublicMcpWorkspaceBridge {
     addon_ids: HashMap<AddonRef, (ClientRef, String)>,
     terminals: HashMap<TerminalRef, PublicMcpTerminalRecord>,
     pending_terminal_opens: HashMap<String, PublicMcpPendingTerminalOpen>,
+    desktops: HashMap<DesktopRef, PublicMcpDesktopRecord>,
     runtime_handles: Arc<Mutex<PublicMcpRuntimeHandles>>,
 }
 
@@ -136,6 +138,16 @@ struct PublicMcpPendingTerminalOpen {
     cols: u16,
     rows: u16,
     title: String,
+}
+
+#[derive(Clone)]
+struct PublicMcpDesktopRecord {
+    client_ref: ClientRef,
+    tab_id: TabId,
+    title: String,
+    observing_frames: bool,
+    frame_artifacts: HashSet<ArtifactRef>,
+    clipboard_artifacts: HashSet<ArtifactRef>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -248,6 +260,7 @@ impl PublicMcpWorkspaceBridge {
             addon_ids: HashMap::new(),
             terminals: HashMap::new(),
             pending_terminal_opens: HashMap::new(),
+            desktops: HashMap::new(),
             runtime_handles: Arc::default(),
         }
     }
@@ -637,6 +650,16 @@ impl PublicMcpWorkspaceBridge {
                 .trim()
                 .to_owned();
         }
+        if let Ok(desktop_ref) = connection_target.parse::<DesktopRef>()
+            && let Some(record) = self.desktops.get(&desktop_ref)
+            && &record.client_ref == client_ref
+        {
+            let action = target
+                .strip_prefix(connection_target)
+                .unwrap_or_default()
+                .trim();
+            return format!("{} {}", record.title, action).trim().to_owned();
+        }
         let (addon_target, addon_action) = target.split_once(' ').unwrap_or((target, ""));
         if let Ok(addon_ref) = addon_target.parse::<AddonRef>()
             && let Some((owner, plugin_id)) = self.addon_ids.get(&addon_ref)
@@ -815,6 +838,9 @@ impl WorkspaceApp {
     ) -> Result<(), String> {
         self.public_mcp
             .set_client_tool_group(client_ref, tool_group, enabled)?;
+        if enabled && tool_group == ToolGroup::DesktopObserve {
+            self.set_public_mcp_client_desktop_observation(client_ref, true, cx);
+        }
         if !enabled {
             self.public_mcp
                 .state
@@ -824,6 +850,16 @@ impl WorkspaceApp {
                 ToolGroup::NodeSession => self.revoke_public_mcp_client_runtime(client_ref, cx),
                 ToolGroup::TerminalSession => {
                     self.revoke_public_mcp_client_terminals(client_ref, cx)
+                }
+                ToolGroup::DesktopSession => self.revoke_public_mcp_client_desktops(client_ref, cx),
+                ToolGroup::DesktopObserve => {
+                    self.set_public_mcp_client_desktop_observation(client_ref, false, cx)
+                }
+                ToolGroup::DesktopInput => {
+                    self.release_public_mcp_client_desktop_inputs(client_ref, cx)
+                }
+                ToolGroup::DesktopClipboard => {
+                    self.revoke_public_mcp_client_desktop_clipboard_artifacts(client_ref)
                 }
                 ToolGroup::CommandExecute => self.public_mcp.revoke_client_commands(client_ref),
                 ToolGroup::QuickCommandExecute => self
@@ -893,6 +929,7 @@ impl WorkspaceApp {
     }
 
     fn revoke_public_mcp_client_runtime(&mut self, client_ref: &ClientRef, cx: &mut Context<Self>) {
+        self.revoke_public_mcp_client_desktops(client_ref, cx);
         self.revoke_public_mcp_client_terminals(client_ref, cx);
         self.revoke_public_mcp_client_forwards(client_ref);
         self.revoke_public_mcp_client_file_sessions(client_ref);
@@ -962,6 +999,21 @@ impl WorkspaceApp {
                 self.handle_public_mcp_terminal_control(request, cx)
             }
             PublicToolCall::CloseTerminal(_) => self.handle_public_mcp_terminal_close(request, cx),
+            PublicToolCall::OpenDesktop(_) => self.handle_public_mcp_desktop_open(request, cx),
+            PublicToolCall::DesktopState(_) => self.handle_public_mcp_desktop_state(request, cx),
+            PublicToolCall::DesktopFrame(_) => self.handle_public_mcp_desktop_frame(request, cx),
+            PublicToolCall::DesktopInput(_) => self.handle_public_mcp_desktop_input(request, cx),
+            PublicToolCall::ResizeDesktop(_) => self.handle_public_mcp_desktop_resize(request, cx),
+            PublicToolCall::ReadDesktopClipboard(_) => {
+                self.handle_public_mcp_desktop_clipboard_read(request, cx)
+            }
+            PublicToolCall::WriteDesktopClipboard(_) => {
+                self.handle_public_mcp_desktop_clipboard_write(request, cx)
+            }
+            PublicToolCall::ReconnectDesktop(_) => {
+                self.handle_public_mcp_desktop_reconnect(request, cx)
+            }
+            PublicToolCall::CloseDesktop(_) => self.handle_public_mcp_desktop_close(request, cx),
             PublicToolCall::StartCommand(_) => self.handle_public_mcp_start_command(request),
             PublicToolCall::CommandState(_) => self.handle_public_mcp_command_state(request),
             PublicToolCall::CommandOutput(_) => self.handle_public_mcp_command_output(request),

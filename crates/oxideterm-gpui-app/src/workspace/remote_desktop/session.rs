@@ -66,6 +66,7 @@ impl RemoteDesktopSessionEntity {
             worker_wake.stop();
         }
         self.shutdown_worker();
+        self.public_mcp_clipboard = None;
         let replacement_frame_slot = RemoteDesktopFrameDeliverySlot::new();
         // Freeze the last presented frame and sever queued deltas from the
         // failed worker before the replacement graphics epoch starts.
@@ -116,6 +117,7 @@ impl RemoteDesktopSessionEntity {
             worker_wake.stop();
         }
         self.shutdown_worker();
+        self.public_mcp_clipboard = None;
         drop(self.password.take());
         let images = self.state.take_all_images();
         let textures = self.state.take_all_textures();
@@ -125,6 +127,7 @@ impl RemoteDesktopSessionEntity {
 
     fn disconnect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.cancel_automatic_reconnect();
+        self.public_mcp_clipboard = None;
         if let Some(worker) = self.worker.as_ref() {
             worker.send(RemoteDesktopHelperRequest::Close);
             return;
@@ -140,6 +143,7 @@ impl RemoteDesktopSessionEntity {
 
     fn force_recover(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.cancel_automatic_reconnect();
+        self.public_mcp_clipboard = None;
         self.release_inputs();
         if self.worker.is_some() {
             self.send_request(RemoteDesktopHelperRequest::RequestFrame);
@@ -149,6 +153,7 @@ impl RemoteDesktopSessionEntity {
 
     fn reconnect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.cancel_automatic_reconnect();
+        self.public_mcp_clipboard = None;
         match remote_desktop_reconnect_mode(self.state.snapshot().status) {
             Some(RemoteDesktopReconnectMode::ProtocolRequest) => {
                 self.release_inputs();
@@ -208,14 +213,21 @@ impl RemoteDesktopSessionEntity {
                         RemoteDesktopHelperEvent::ClipboardText { text }
                             if self.profile.session_options.clipboard.text =>
                         {
-                            // Move clipboard content directly to the platform
-                            // boundary instead of cloning it through workspace state.
+                            // Keep a session-scoped zeroizing copy for explicitly authorized
+                            // Public MCP reads; the platform clipboard remains the UI boundary.
+                            self.public_mcp_clipboard = Some(RemoteDesktopPublicClipboard::Text(
+                                Zeroizing::new(text.clone()),
+                            ));
                             cx.write_to_clipboard(ClipboardItem::new_string(text));
                             changed = true;
                         }
                         RemoteDesktopHelperEvent::ClipboardData { data }
                             if self.profile.session_options.clipboard.images =>
                         {
+                            self.public_mcp_clipboard = Some(RemoteDesktopPublicClipboard::Image {
+                                format: data.format,
+                                bytes: Zeroizing::new(data.bytes.clone()),
+                            });
                             if let Some(item) = remote_desktop_clipboard_item_from_data(data) {
                                 cx.write_to_clipboard(item);
                             }
@@ -909,8 +921,14 @@ impl RemoteDesktopSessionEntity {
     }
 
     fn set_frame_visibility(&mut self, visible: bool, cx: &mut Context<Self>) {
-        let visibility_changed = self.frame_slot.is_visible() != visible;
-        let recovery_required = self.frame_slot.set_visible(visible);
+        self.ui_frame_visible = visible;
+        self.apply_frame_visibility(cx);
+    }
+
+    pub(super) fn apply_frame_visibility(&mut self, cx: &mut Context<Self>) {
+        let effective_visible = self.ui_frame_visible || self.public_mcp_frame_observers > 0;
+        let visibility_changed = self.frame_slot.is_visible() != effective_visible;
+        let recovery_required = self.frame_slot.set_visible(effective_visible);
         if recovery_required
             && let Some(request_tx) = self
                 .worker
@@ -921,7 +939,7 @@ impl RemoteDesktopSessionEntity {
             // sparse deltas do not become an unbounded off-screen history.
             let _ = request_tx.send(RemoteDesktopHelperRequest::RequestFrame);
         }
-        if visible && visibility_changed && self.frame_slot.has_queued_frame_events() {
+        if effective_visible && visibility_changed && self.frame_slot.has_queued_frame_events() {
             self.schedule_frame_apply(self.worker_generation, Duration::ZERO, cx);
         }
     }

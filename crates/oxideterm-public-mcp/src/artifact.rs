@@ -234,6 +234,25 @@ impl ArtifactStore {
         remove_records(&mut state, removed);
     }
 
+    pub fn revoke(&self, client_ref: &ClientRef, artifact_ref: &ArtifactRef) -> bool {
+        let mut state = self.state.lock();
+        let Some(record) = state
+            .records
+            .get(artifact_ref)
+            .filter(|record| &record.client_ref == client_ref)
+        else {
+            return false;
+        };
+        let private_ref = record.projection.artifact_ref.clone();
+        let Some(record) = state.records.remove(&private_ref) else {
+            return false;
+        };
+        // Individual revocation is used by resource-scoped handles such as
+        // remote desktop frames without invalidating unrelated client artifacts.
+        remove_records(&mut state, vec![record]);
+        true
+    }
+
     /// Removes expired content independently of client traffic.
     pub fn expire(&self) {
         cleanup_expired(&mut self.state.lock());
