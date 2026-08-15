@@ -38,9 +38,10 @@ use crate::{
         ReadTerminalArgs, RecordingsControlArgs, RecordingsExportArgs, RecordingsSearchArgs,
         RecordingsStatusArgs, ReleaseNodeArgs, RemovePublicConnectionArgs, ResizeDesktopArgs,
         ResizeTerminalArgs, SavePublicConnectionArgs, StageArtifactArgs, StartCommandArgs,
-        StoreCredentialArgs, SubmitTerminalArgs, SyncApplyPlanArgs, SyncPublishPreviewArgs,
-        SyncPullPreviewArgs, SyncRestoreArgs, SyncStatusArgs, TerminalHandleArgs, ToolEnvelope,
-        ToolOutcome, WriteDesktopClipboardArgs,
+        StartTransferArgs, StoreCredentialArgs, SubmitTerminalArgs, SyncApplyPlanArgs,
+        SyncPublishPreviewArgs, SyncPullPreviewArgs, SyncRestoreArgs, SyncStatusArgs,
+        TerminalHandleArgs, ToolEnvelope, ToolOutcome, TransferHandleArgs,
+        WriteDesktopClipboardArgs,
     },
     handles::{ApprovalRef, ClientRef, ConnectionRef, NodeRef, TerminalRef},
 };
@@ -336,7 +337,12 @@ impl PublicMcpService {
         client: &ClientProjection,
         call: PublicToolCall,
     ) -> CallToolResult {
-        if !client.tool_groups.contains(&call.required_group()) {
+        if !client.tool_groups.contains(&call.required_group())
+            || call
+                .additional_required_groups()
+                .iter()
+                .any(|group| !client.tool_groups.contains(group))
+        {
             return tool_error(
                 "tool_group_disabled",
                 "This tool group is disabled for the client",
@@ -423,7 +429,12 @@ impl PublicMcpService {
             Ok(call) => call,
             Err(error) => return tool_error("approval_unavailable", error.to_string()),
         };
-        if !client.tool_groups.contains(&call.required_group()) {
+        if !client.tool_groups.contains(&call.required_group())
+            || call
+                .additional_required_groups()
+                .iter()
+                .any(|group| !client.tool_groups.contains(group))
+        {
             return tool_error(
                 "tool_group_disabled",
                 "The required tool group was disabled before commit",
@@ -869,6 +880,31 @@ impl ServerHandler for PublicMcpService {
                     "invalid_arguments",
                     "The artifact read length must be between 1 and 262144 bytes",
                 ),
+                Err(error) => *error,
+            },
+            "transfers_start" => match parse_arguments::<StartTransferArgs>(arguments) {
+                Ok(args) if remote_path_is_valid(args.remote_path()) => {
+                    self.execute_call(&client, PublicToolCall::TransferStart(args))
+                        .await
+                }
+                Ok(_) => tool_error(
+                    "invalid_arguments",
+                    "The remote transfer path exceeds the supported bounds",
+                ),
+                Err(error) => *error,
+            },
+            "transfers_status" => match parse_arguments::<TransferHandleArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::TransferStatus(args))
+                        .await
+                }
+                Err(error) => *error,
+            },
+            "transfers_cancel" => match parse_arguments::<TransferHandleArgs>(arguments) {
+                Ok(args) => {
+                    self.execute_call(&client, PublicToolCall::TransferCancel(args))
+                        .await
+                }
                 Err(error) => *error,
             },
             "mcp_audit_search" => match parse_arguments::<AuditSearchArgs>(arguments) {
@@ -1458,6 +1494,27 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             "Read a bounded range from a temporary artifact owned by this client.",
             ToolGroup::ArtifactTransfer,
             true,
+            false,
+        ),
+        define_tool::<StartTransferArgs>(
+            "transfers_start",
+            "Start one bounded background SFTP upload or download between an authorized remote path and client-owned artifact storage.",
+            ToolGroup::ArtifactTransfer,
+            false,
+            true,
+        ),
+        define_tool::<TransferHandleArgs>(
+            "transfers_status",
+            "Read bounded progress and the completed artifact for one client-owned transfer.",
+            ToolGroup::ArtifactTransfer,
+            true,
+            false,
+        ),
+        define_tool::<TransferHandleArgs>(
+            "transfers_cancel",
+            "Cancel one client-owned background transfer without disconnecting its SSH node.",
+            ToolGroup::ArtifactTransfer,
+            false,
             false,
         ),
         define_tool::<AuditSearchArgs>(

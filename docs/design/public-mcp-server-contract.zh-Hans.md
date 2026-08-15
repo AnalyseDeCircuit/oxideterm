@@ -58,7 +58,7 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 
 - 设置页可创建、停用和撤销独立外部客户端；一次性 Bearer 凭据只向用户显示一次，设备端只持久化 SHA-256 摘要。
 - 每个客户端独立选择普通模式或完全权限模式，并逐项启用工具组。普通模式保留应用内动作批准；完全权限模式只跳过已勾选工具组的逐动作批准，不会绕过 Bearer 认证、应用锁、秘密硬边界、审计或未授权工具组。
-- `tools/list` 按客户端工具组裁剪；当前实际发布基础、连接目录/详情/管理、凭据管理、节点租约、真实终端会话/观察/输入/录制、RDP/VNC 会话/画面/键鼠/剪贴板、命令执行/观察、临时 artifact、当前客户端审计、类型化 Host Tools、快速命令、插件生命周期、端口转发、SFTP 文件和云同步工具。
+- `tools/list` 按客户端工具组裁剪；当前实际发布基础、连接目录/详情/管理、凭据管理、节点租约、真实终端会话/观察/输入/录制、RDP/VNC 会话/画面/键鼠/剪贴板、命令执行/观察、临时 artifact、后台 SFTP 传输、当前客户端审计、类型化 Host Tools、快速命令、插件生命周期、端口转发、SFTP 文件和云同步工具。
 - `connections_browse` 已覆盖保存的 SSH、串口、Telnet、Mosh、RDP 和 VNC 配置，只返回目录投影；精确端点及协议选项由单独授权的 `connections_describe` 返回，既有凭据只显示存在性。
 - `connections_save` 使用严格 tagged profile 写入上述六类真实保存配置，更新必须携带 `connections_describe` 返回的 revision；schema 不包含秘密字段，本地终端没有保存分支。`connections_remove` 遇到受保护凭据时要求显式 `forget_credentials=true`，因此不会静默删除秘密或制造无法管理的孤儿引用。
 - `credentials_status` 只返回槽位、认证类型、可写性和存在标记；`credentials_store` 把新的零化输入直接交给连接受保护存储，`credentials_forget` 删除指定槽位。三者都不返回既有值或内部存储引用，更新凭据也不会污染最近连接顺序。
@@ -72,6 +72,7 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 - 插件目录和插件管理分别授权。插件安装只接受客户端自己的临时 artifact、必填 SHA-256 和预期插件身份，在 staging 阶段核对身份后才替换安装目录；启停和卸载复用应用已有注册表及运行时停用路径。返回值只含 manifest 公开身份、状态、权限请求和声明式贡献数量，绝不返回安装路径、配置路径、任意 `api.invoke`、运行时命令或 Host Monitor 命令正文。
 - 端口转发读取和管理分别授权。`forwards_*` 复用应用唯一的 `ForwardingRuntimeService` 和独立 `PortForward` 消费者，支持类型化创建、带 revision 的受控修改、停止、重启、删除、统计和单次端口发现。关闭终端或释放 Public MCP 节点租约不会停止转发；显式物理节点断开、客户端撤销或关闭转发管理授权才按所有权清理。外部只看到客户端作用域的 `forward_ref`。
 - SFTP 文件读取和修改分别授权。`files_open` 为规范化远端根目录登记独立 SFTP 消费者，后续列表、元数据、分段读取、比较、写入、移动和删除都重新校验规范化路径边界。正文只经客户端自己的有界 artifact 传递；重连时先取得当前连接的消费者再释放旧消费者，`files_close` 不断开共享 SSH 节点。
+- `transfers_start` 在同一授权根内启动真实后台 SFTP 单文件上传或下载，除传输数据组外，上传还要求远端文件写入组，下载还要求远端文件读取组。进度和取消复用应用的传输控制器。上传源与下载产物都只能是客户端私有 artifact，本机临时路径不会进入结果；客户端撤销、工具组关闭、文件会话关闭或物理节点断开会取消仍在运行的传输。当前 artifact 数据面上限为 64 MiB，尚未保留可跨请求重启的部分文件，因此 `resume=true` 会明确拒绝；上传失败或取消时会如实报告可能存在远端部分文件。
 - 终端会话、内容观察和输入控制分别授权。`terminals_open` 只创建应用真实持有的可见终端页：SSH 必须使用已取得的 `node_ref`，保存的 Mosh、Telnet 和串口使用 `connection_ref`，本地终端只允许一次性启动且不会进入保存、导出或同步。读取仅返回有界屏幕快照与 generation cursor；搜索复用终端后端；输入正文不进入审计，普通模式批准页只显示输入类型、长度与回车意图。关闭 SSH 终端只关闭自己的 terminal consumer，不等同于物理节点断开。
 - 终端录制控制和录制内容分别授权。`recordings_control` 复用真实 `TerminalPane` recorder，同一终端不会覆盖既有应用录制；当前后端只支持 output-only，因此 `capture_input=true` 会明确拒绝。停止时保留有界 asciicast 正文，搜索只给有界片段，导出只生成客户端私有且会过期的 artifact，不接受任意本机路径。终端关闭或控制授权关闭会先停止活动录制；客户端撤销会零化保留正文并撤销导出 artifact。
 - 远程桌面会话、画面观察、键鼠控制和剪贴板分别授权。`desktops_open` 只解析保存的 RDP/VNC `connection_ref`，凭据由设备受保护存储直接移交真实 provider，会话仍由可见标签页和 `RemoteDesktopSessionEntity` 持有。隐藏标签页只有在客户端启用画面观察时才继续消费最新帧；`desktops_frame` 把有界 CPU framebuffer 在后台编码成客户端私有 PNG artifact。输入必须携带当前 graphics epoch，坐标按 server framebuffer 校验；远端剪贴板来自会话内零化缓存，绝不读取系统剪贴板冒充远端内容。关闭或撤权会释放所有输入、关闭 helper，并撤销该桌面的帧和剪贴板 artifact。
@@ -80,7 +81,7 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 - 停用或撤销客户端会撤销待批准动作、取消命令并释放其 Public MCP 消费者；`nodes_release` 不会把其他终端、SFTP 或转发消费者仍在使用的物理节点断开。
 - 应用锁定时会拒绝新的 MCP 领域请求、撤销待批准动作、取消 MCP 命令并释放 MCP 节点消费者；解锁后客户端凭据仍有效，但必须重新取得运行时句柄。
 
-stdio bridge、IDE 工作区和后台传输仍按后续阶段实施。已接入领域尚未支持的目标或动作会明确拒绝；其余领域在真实 broker 和生命周期接通前不会出现在 `tools/list`，也不会用空壳结果冒充支持。
+stdio bridge 和 IDE 工作区仍按后续阶段实施。已接入领域尚未支持的目标或动作会明确拒绝；其余领域在真实 broker 和生命周期接通前不会出现在 `tools/list`，也不会用空壳结果冒充支持。
 
 ## 2. 服务形态与协议
 
@@ -279,9 +280,9 @@ NodeRouter / connection registry ── 物理 SSH node
 | `files_remove` | 远端文件删除 / X / 必须 | `file_session_ref`、`path`、`recursive`、`expected_revision?` | 永久删除文件或目录；递归意图进入冻结批准参数，不把永久删除称为回收站，也不返回虚假撤销。 |
 | `artifacts_stage` | 传输数据 / W / 否 | `content` 或 `bytes_base64`、`media_type`、`name?` | 将客户端提供的有界数据写入临时 artifact，返回 `artifact_ref`、大小和 digest；不接受任意本机路径。 |
 | `artifacts_read` | 传输数据 / R / 否 | `artifact_ref`、`offset?`、`length?` | 有界下载、媒体类型、digest；客户端只可读取自己有权访问的 artifact。 |
-| `transfers_start` | 传输数据 / X / 必须覆盖时 | `direction`、`file_session_ref`、`remote_path`、`artifact_ref`、`overwrite`、`resume` | 基于真实 SFTP/传输管理器启动上传或下载，返回 `transfer_ref`；目录传输使用显式清单 artifact。 |
-| `transfers_status` | 传输数据 / D / 否 | `transfer_ref` | 阶段、字节数、速度、冲突、重试和产物 artifact。 |
-| `transfers_cancel` | 传输数据 / W / 否 | `transfer_ref` | 请求取消；返回远端残留和是否可恢复。 |
+| `transfers_start` | 传输数据 / X / 上传必须 | 严格 tagged `direction`；上传含 `file_session_ref`、`remote_path`、`artifact_ref`、`overwrite`、`resume`，下载不接受本机路径 | 基于真实 SFTP 传输控制器启动客户端私有单文件作业，返回 `transfer_ref`。当前最多 64 MiB 且 `resume` 必须为 `false`；目录传输等待显式清单协议后再开放。 |
+| `transfers_status` | 传输数据 / D / 否 | `transfer_ref` | `pending/running/completed/cancelled/failed`、字节数、速度、脱敏错误码、远端残留标记和完成后的下载 artifact；不返回内部节点或临时路径。 |
+| `transfers_cancel` | 传输数据 / W / 否 | `transfer_ref` | 请求现有传输控制器取消；上传会准确报告可能的远端部分文件，关闭传输不等于断开共享 SSH 节点。 |
 | `workspaces_mount` | IDE / W / 否 | `file_session_ref`、`root_path` | 创建远端 IDE 工作区投影，返回 `workspace_ref`。 |
 | `workspaces_tree` | IDE / R / 否 | `workspace_ref`、`path?`、`cursor?` | 项目树和增量版本，不泄露 UI 实体。 |
 | `workspaces_read` | IDE / R / 否 | `workspace_ref`、`path`、`range?` | 文本、版本和语言提示；二进制返回 artifact。 |

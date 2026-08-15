@@ -43,14 +43,14 @@ pub use calls::{
     PublicX11ForwardingMode, ReadDesktopClipboardArgs, RecordingExportFormat,
     RecordingStatusTarget, RecordingsControlArgs, RecordingsExportArgs, RecordingsSearchArgs,
     RecordingsStatusArgs, RemovePublicConnectionArgs, ResizeDesktopArgs, SavePublicConnectionArgs,
-    StoreCredentialArgs, SyncApplyPlanArgs, SyncPublishPreviewArgs, SyncPullPreviewArgs,
-    SyncRestoreArgs, SyncSelection, SyncStatusArgs, TerminalControlAction, TerminalOpenSource,
-    ToolEnvelope, ToolOutcome, WriteDesktopClipboardArgs,
+    StartTransferArgs, StoreCredentialArgs, SyncApplyPlanArgs, SyncPublishPreviewArgs,
+    SyncPullPreviewArgs, SyncRestoreArgs, SyncSelection, SyncStatusArgs, TerminalControlAction,
+    TerminalOpenSource, ToolEnvelope, ToolOutcome, TransferHandleArgs, WriteDesktopClipboardArgs,
 };
 pub use handles::{
     AddonRef, ApprovalRef, ArtifactRef, AuditRef, ClientRef, CommandRef, ConnectionRef, DesktopRef,
     FileSessionRef, ForwardRef, HandleParseError, NodeRef, OperationRef, QuickCommandRef,
-    RecordingRef, SyncPlanRef, TerminalRef, UndoRef,
+    RecordingRef, SyncPlanRef, TerminalRef, TransferRef, UndoRef,
 };
 pub use runtime::{PublicMcpHttpServer, start_http_server};
 pub use service::{PublicMcpService, PublicMcpState};

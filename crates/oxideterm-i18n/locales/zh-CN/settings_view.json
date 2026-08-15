@@ -1502,7 +1502,7 @@
       "mcp_group_command_observe": "命令输出",
       "mcp_group_command_execute": "命令执行",
       "mcp_group_audit_read": "MCP 审计记录",
-      "mcp_group_artifact_transfer": "临时内容传输",
+      "mcp_group_artifact_transfer": "临时内容与文件传输",
       "mcp_group_host_tools_observe": "Host Tools 快照",
       "mcp_group_host_tools_operate": "Host Tools 操作",
       "mcp_group_quick_command_read": "快速命令目录",

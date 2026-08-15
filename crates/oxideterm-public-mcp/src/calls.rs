@@ -9,7 +9,8 @@ use crate::{
     auth::ToolGroup,
     handles::{
         AddonRef, ArtifactRef, AuditRef, CommandRef, ConnectionRef, DesktopRef, FileSessionRef,
-        ForwardRef, NodeRef, QuickCommandRef, RecordingRef, SyncPlanRef, TerminalRef, UndoRef,
+        ForwardRef, NodeRef, QuickCommandRef, RecordingRef, SyncPlanRef, TerminalRef, TransferRef,
+        UndoRef,
     },
 };
 
@@ -1339,6 +1340,40 @@ pub struct FilesRemoveArgs {
     pub expected_revision: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, tag = "direction", rename_all = "snake_case")]
+pub enum StartTransferArgs {
+    Upload {
+        file_session_ref: FileSessionRef,
+        remote_path: String,
+        artifact_ref: ArtifactRef,
+        #[serde(default)]
+        overwrite: bool,
+        #[serde(default)]
+        resume: bool,
+    },
+    Download {
+        file_session_ref: FileSessionRef,
+        remote_path: String,
+        #[serde(default)]
+        resume: bool,
+    },
+}
+
+impl StartTransferArgs {
+    pub fn remote_path(&self) -> &str {
+        match self {
+            Self::Upload { remote_path, .. } | Self::Download { remote_path, .. } => remote_path,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TransferHandleArgs {
+    pub transfer_ref: TransferRef,
+}
+
 fn default_output_limit() -> u32 {
     64 * 1024
 }
@@ -1436,6 +1471,9 @@ pub enum PublicToolCall {
     FilesWrite(FilesWriteArgs),
     FilesMove(FilesMoveArgs),
     FilesRemove(FilesRemoveArgs),
+    TransferStart(StartTransferArgs),
+    TransferStatus(TransferHandleArgs),
+    TransferCancel(TransferHandleArgs),
 }
 
 impl PublicToolCall {
@@ -1514,6 +1552,9 @@ impl PublicToolCall {
             Self::FilesWrite(_) => "files_write",
             Self::FilesMove(_) => "files_move",
             Self::FilesRemove(_) => "files_remove",
+            Self::TransferStart(_) => "transfers_start",
+            Self::TransferStatus(_) => "transfers_status",
+            Self::TransferCancel(_) => "transfers_cancel",
         }
     }
 
@@ -1582,6 +1623,17 @@ impl PublicToolCall {
             | Self::FilesRead(_)
             | Self::FilesCompare(_) => ToolGroup::FileRead,
             Self::FilesWrite(_) | Self::FilesMove(_) | Self::FilesRemove(_) => ToolGroup::FileWrite,
+            Self::TransferStart(_) | Self::TransferStatus(_) | Self::TransferCancel(_) => {
+                ToolGroup::ArtifactTransfer
+            }
+        }
+    }
+
+    pub fn additional_required_groups(&self) -> &'static [ToolGroup] {
+        match self {
+            Self::TransferStart(StartTransferArgs::Upload { .. }) => &[ToolGroup::FileWrite],
+            Self::TransferStart(StartTransferArgs::Download { .. }) => &[ToolGroup::FileRead],
+            _ => &[],
         }
     }
 
@@ -1621,6 +1673,7 @@ impl PublicToolCall {
                 | Self::FilesWrite(_)
                 | Self::FilesMove(_)
                 | Self::FilesRemove(_)
+                | Self::TransferStart(StartTransferArgs::Upload { .. })
         )
     }
 
@@ -1806,6 +1859,25 @@ impl PublicToolCall {
                 "{} {} recursive={}",
                 args.file_session_ref, args.path, args.recursive
             ),
+            Self::TransferStart(args) => match args {
+                StartTransferArgs::Upload {
+                    file_session_ref,
+                    remote_path,
+                    artifact_ref,
+                    overwrite,
+                    resume,
+                } => format!(
+                    "{file_session_ref} upload {artifact_ref} to {remote_path} overwrite={overwrite} resume={resume}"
+                ),
+                StartTransferArgs::Download {
+                    file_session_ref,
+                    remote_path,
+                    resume,
+                } => format!("{file_session_ref} download {remote_path} resume={resume}"),
+            },
+            Self::TransferStatus(args) | Self::TransferCancel(args) => {
+                args.transfer_ref.to_string()
+            }
         }
     }
 }

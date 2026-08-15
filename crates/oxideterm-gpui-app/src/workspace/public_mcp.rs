@@ -15,8 +15,8 @@ use oxideterm_public_mcp::{
     ClientCredential, ClientProjection, ClientRef, ClientRegistry, CommandRef, ConnectionRef,
     DesktopRef, DomainBroker, DomainMessage, DomainRequest, DomainRequestReceiver, FileSessionRef,
     ForwardRef, NodeRef, PublicMcpHttpServer, PublicMcpState, PublicToolCall, QuickCommandRef,
-    RecordingRef, SyncPlanRef, TerminalRef, ToolEnvelope, ToolGroup, ToolOutcome, UndoRef,
-    start_http_server,
+    RecordingRef, SyncPlanRef, TerminalRef, ToolEnvelope, ToolGroup, ToolOutcome, TransferRef,
+    UndoRef, start_http_server,
 };
 use oxideterm_session_adapter::ssh_config_from_saved_connection;
 use oxideterm_ssh::{ConnectionConsumer, NodeId, NodeRouter, SshTransportError};
@@ -38,6 +38,7 @@ mod host_tools;
 mod quick_commands;
 mod recordings;
 pub(in crate::workspace) mod terminals;
+mod transfers;
 
 const PUBLIC_MCP_CLIENTS_FILE: &str = "public-mcp-clients.json";
 const PUBLIC_MCP_ENDPOINT_FILE: &str = "public-mcp-endpoint.json";
@@ -90,6 +91,7 @@ struct PublicMcpRuntimeHandles {
     commands: HashMap<CommandRef, PublicMcpCommandRecord>,
     forwards: HashMap<ForwardRef, PublicMcpForwardRecord>,
     file_sessions: HashMap<FileSessionRef, PublicMcpFileSessionRecord>,
+    transfers: HashMap<TransferRef, PublicMcpTransferRecord>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -127,6 +129,32 @@ struct PublicMcpFileSessionRecord {
     session: Option<Arc<tokio::sync::Mutex<oxideterm_sftp::SftpSession>>>,
     physical_connection_id: Option<String>,
     consumer: ConnectionConsumer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum PublicMcpTransferState {
+    Pending,
+    Running,
+    Completed,
+    Cancelled,
+    Failed,
+}
+
+struct PublicMcpTransferRecord {
+    client_ref: ClientRef,
+    file_session_ref: FileSessionRef,
+    internal_id: String,
+    direction: &'static str,
+    remote_path: String,
+    state: PublicMcpTransferState,
+    total_bytes: u64,
+    transferred_bytes: u64,
+    speed_bytes_per_second: u64,
+    artifact: Option<oxideterm_public_mcp::ArtifactProjection>,
+    error_code: Option<&'static str>,
+    remote_residue: Option<&'static str>,
+    finished_at: Option<Instant>,
 }
 
 #[derive(Clone)]
@@ -854,10 +882,12 @@ impl WorkspaceApp {
                     .public_mcp
                     .revoke_client_commands_for_group(client_ref, ToolGroup::QuickCommandExecute),
                 ToolGroup::ArtifactTransfer => {
+                    self.revoke_public_mcp_client_transfers(client_ref);
                     self.public_mcp.state.artifacts.revoke_client(client_ref)
                 }
                 ToolGroup::ForwardManage => self.revoke_public_mcp_client_forwards(client_ref),
                 ToolGroup::FileRead => self.revoke_public_mcp_client_file_sessions(client_ref),
+                ToolGroup::FileWrite => self.cancel_public_mcp_client_uploads(client_ref),
                 ToolGroup::CloudSync => self.public_mcp.revoke_client_sync_handles(client_ref),
                 ToolGroup::Basic
                 | ToolGroup::ConnectionDirectory
@@ -875,8 +905,7 @@ impl WorkspaceApp {
                 | ToolGroup::QuickCommandManage
                 | ToolGroup::AddonRead
                 | ToolGroup::AddonManage
-                | ToolGroup::ForwardRead
-                | ToolGroup::FileWrite => {}
+                | ToolGroup::ForwardRead => {}
             }
         }
         Ok(())
@@ -924,6 +953,7 @@ impl WorkspaceApp {
         self.revoke_public_mcp_client_desktops(client_ref, cx);
         self.revoke_public_mcp_client_terminals(client_ref, cx);
         self.revoke_public_mcp_client_forwards(client_ref);
+        self.revoke_public_mcp_client_transfers(client_ref);
         self.revoke_public_mcp_client_file_sessions(client_ref);
         self.public_mcp.revoke_client_sync_handles(client_ref);
         self.public_mcp
@@ -948,6 +978,7 @@ impl WorkspaceApp {
     }
 
     fn revoke_public_mcp_client_file_sessions(&self, client_ref: &ClientRef) {
+        self.revoke_public_mcp_client_transfers(client_ref);
         for record in files::take_client_file_sessions(&self.public_mcp.runtime_handles, client_ref)
         {
             if let Some(connection_id) = record.physical_connection_id {
@@ -1099,6 +1130,9 @@ impl WorkspaceApp {
             PublicToolCall::FilesWrite(_) => self.handle_public_mcp_files_write(request),
             PublicToolCall::FilesMove(_) => self.handle_public_mcp_files_move(request),
             PublicToolCall::FilesRemove(_) => self.handle_public_mcp_files_remove(request),
+            PublicToolCall::TransferStart(_) => self.handle_public_mcp_transfer_start(request),
+            PublicToolCall::TransferStatus(_) => self.handle_public_mcp_transfer_status(request),
+            PublicToolCall::TransferCancel(_) => self.handle_public_mcp_transfer_cancel(request),
         }
     }
 
@@ -1622,11 +1656,16 @@ impl WorkspaceApp {
             .filter_map(|command_ref| handles.commands.remove(&command_ref))
             .map(|record| record.cancellation)
             .collect::<Vec<_>>();
+        let interrupted_transfers =
+            transfers::invalidate_for_disconnected_nodes(&mut handles, &disconnected);
         forwards::invalidate_for_disconnected_nodes(&mut handles, &disconnected);
         files::invalidate_for_disconnected_nodes(&mut handles, &disconnected);
         drop(handles);
         for cancellation in cancellations {
             cancellation.cancel();
+        }
+        for transfer_id in interrupted_transfers {
+            self.sftp_transfer_manager.cancel(&transfer_id);
         }
         finish_serialized(
             request,

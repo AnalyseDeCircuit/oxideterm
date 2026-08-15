@@ -190,6 +190,7 @@ impl WorkspaceApp {
             request.finish(ToolEnvelope::failed("The SFTP handle is unavailable"));
             return;
         };
+        self.cancel_public_mcp_file_session_transfers(&args.file_session_ref);
         if let Some(connection_id) = record.physical_connection_id {
             self.node_router
                 .release_consumer(&connection_id, &record.consumer);
@@ -577,7 +578,7 @@ pub(super) fn invalidate_for_disconnected_nodes(
         .retain(|_, record| !disconnected.contains(&record.node_id));
 }
 
-async fn refresh_file_session(
+pub(super) async fn refresh_file_session(
     router: &NodeRouter,
     handles: &Arc<parking_lot::Mutex<PublicMcpRuntimeHandles>>,
     client_ref: &ClientRef,
@@ -654,14 +655,14 @@ fn remove_file_session_reservation(
     }
 }
 
-fn ready_root(record: &PublicMcpFileSessionRecord) -> Result<&str, &'static str> {
+pub(super) fn ready_root(record: &PublicMcpFileSessionRecord) -> Result<&str, &'static str> {
     record
         .root
         .as_deref()
         .ok_or("The SFTP handle is still opening")
 }
 
-fn path_from_root(root: &str, path: &str) -> String {
+pub(super) fn path_from_root(root: &str, path: &str) -> String {
     if path.starts_with('/') || path == "~" || path.starts_with("~/") {
         return path.to_owned();
     }
@@ -683,13 +684,13 @@ fn remote_path_is_within(root: &str, path: &str) -> bool {
             .is_some_and(|remainder| remainder.starts_with('/'))
 }
 
-fn require_path_within_root(root: &str, path: &str) -> Result<(), &'static str> {
+pub(super) fn require_path_within_root(root: &str, path: &str) -> Result<(), &'static str> {
     remote_path_is_within(root, path)
         .then_some(())
         .ok_or("The remote path is outside the authorized SFTP root")
 }
 
-fn require_mutable_path_within_root(root: &str, path: &str) -> Result<(), &'static str> {
+pub(super) fn require_mutable_path_within_root(root: &str, path: &str) -> Result<(), &'static str> {
     require_path_within_root(root, path)?;
     if path == root {
         return Err("The authorized SFTP root cannot be modified");
@@ -747,7 +748,7 @@ fn hex_digest(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
-fn safe_artifact_name(path: &str) -> Option<String> {
+pub(super) fn safe_artifact_name(path: &str) -> Option<String> {
     let name = path.rsplit('/').next()?;
     (!name.is_empty()
         && name.len() <= ARTIFACT_NAME_MAXIMUM_BYTES

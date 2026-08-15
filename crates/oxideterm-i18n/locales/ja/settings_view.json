@@ -1502,7 +1502,7 @@
       "mcp_group_command_observe": "Command output",
       "mcp_group_command_execute": "Command execution",
       "mcp_group_audit_read": "MCP audit records",
-      "mcp_group_artifact_transfer": "Temporary content transfer",
+      "mcp_group_artifact_transfer": "Artifacts and file transfers",
       "mcp_group_host_tools_observe": "Host Tools snapshots",
       "mcp_group_host_tools_operate": "Host Tools actions",
       "mcp_group_quick_command_read": "Quick Command catalog",
