@@ -78,6 +78,7 @@ enum PaletteAction {
     OpenRemoteDesktopPreview(RemoteDesktopProtocol),
     OpenRemoteDesktopConnection(RemoteDesktopConnectionProfile),
     Sidebar(SidebarSection),
+    OpenSftp,
     OpenSavedConnections,
     OpenSessionManager,
     OpenRuntime(ConnectionRuntimeSection),
@@ -475,6 +476,19 @@ impl WorkspaceApp {
                 self.open_remote_desktop_connection_tab(profile, None, window, cx);
             }
             PaletteAction::Sidebar(section) => self.set_sidebar_section(section, cx),
+            PaletteAction::OpenSftp => {
+                // SFTP follows the configured presentation preference; it is
+                // no longer represented by an independent sidebar section.
+                if let Some(node_id) = self
+                    .embedded_sftp_node_id
+                    .clone()
+                    .or_else(|| self.active_ssh_node_id.clone())
+                {
+                    self.open_sftp_tab(node_id, window, cx);
+                } else {
+                    self.set_sidebar_section(SidebarSection::Sessions, cx);
+                }
+            }
             PaletteAction::OpenSavedConnections => self.open_session_manager_tab(window, cx),
             PaletteAction::OpenSessionManager => self.open_session_manager_tab(window, cx),
             PaletteAction::OpenRuntime(section) => {
@@ -2403,7 +2417,7 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             label_key: "command_palette.cmd_sidebar_sftp".into(),
             icon: LucideIcon::HardDrive,
             shortcut_action: None,
-            action: PaletteAction::Sidebar(SidebarSection::Sftp),
+            action: PaletteAction::OpenSftp,
         },
         CommandSpec {
             id: "cmd:sidebar_forwards",

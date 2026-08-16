@@ -250,6 +250,7 @@ impl WorkspaceApp {
             snapshot.remote.path.clone()
         };
         let open_node_id = node_id.clone();
+        let close_node_id = node_id.clone();
 
         let mut root = div()
             .flex_1()
@@ -333,6 +334,17 @@ impl WorkspaceApp {
                                         Some(current_path),
                                         cx,
                                     );
+                                    cx.stop_propagation();
+                                }),
+                                cx.entity(),
+                            ))
+                            // Dismissing the embedded surface leaves the node
+                            // and its other consumers connected.
+                            .child(self.render_sftp_icon_button(
+                                LucideIcon::X,
+                                self.i18n.t("sftp.preview.close"),
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.close_embedded_sftp_for_node(&close_node_id, cx);
                                     cx.stop_propagation();
                                 }),
                                 cx.entity(),

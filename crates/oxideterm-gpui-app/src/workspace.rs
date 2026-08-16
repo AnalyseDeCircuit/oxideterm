@@ -45,6 +45,7 @@ mod root {
     pub(super) mod state;
     #[cfg(test)]
     pub(super) mod tests;
+    pub(super) mod window_state;
 }
 mod selectable_text;
 mod selection_motion;
@@ -759,6 +760,7 @@ pub(crate) struct WorkspaceApp {
     _plugin_entity_subscription: Subscription,
     split_drag: Option<SplitDrag>,
     sidebar_resizing: bool,
+    embedded_sftp_sidebar_resizing: bool,
     sidebar_resize_hotzone_hovered: bool,
     sidebar_collapsed: bool,
     sidebar_rendered: bool,
@@ -878,6 +880,8 @@ pub(crate) struct WorkspaceApp {
     vibrancy_support: VibrancySupport,
     app_lock: app_lock::AppLockState,
     settings_store: SettingsStore,
+    pending_window_ui_state: Option<oxideterm_settings::WindowUiState>,
+    window_state_save_task: Option<Task<()>>,
     connection_store: ConnectionStore,
     // The connection-layer worker owns SSH config parsing and persistence.
     ssh_config_sync_service: Option<SshConfigSyncService>,

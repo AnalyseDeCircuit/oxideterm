@@ -648,6 +648,7 @@ impl WorkspaceApp {
             _plugin_entity_subscription: plugin_entity_subscription,
             split_drag: None,
             sidebar_resizing: false,
+            embedded_sftp_sidebar_resizing: false,
             sidebar_resize_hotzone_hovered: false,
             sidebar_collapsed: settings.sidebar_ui.collapsed,
             sidebar_rendered: !settings.sidebar_ui.collapsed,
@@ -809,6 +810,8 @@ impl WorkspaceApp {
             vibrancy_support: VibrancySupport::Supported,
             app_lock,
             settings_store,
+            pending_window_ui_state: None,
+            window_state_save_task: None,
             connection_store,
             ssh_config_sync_service: None,
             session_manager,
@@ -827,6 +830,7 @@ impl WorkspaceApp {
         let workspace_window_bounds = cx.observe_window_bounds(window, |this, window, cx| {
             this.clamp_sidebar_widths_to_viewport(current_window_size(window).0, cx);
             this.update_ai_sidebar_overlay_for_window_bounds(window, cx);
+            this.capture_main_window_state(window, cx);
         });
         let ai_knowledge_activation = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
@@ -854,6 +858,7 @@ impl WorkspaceApp {
         workspace.sync_active_privilege_prompt_inline_hint(cx);
         workspace.schedule_automatic_native_update_check(cx);
         cx.on_release(|workspace, cx| {
+            workspace.flush_main_window_state(cx);
             // Shutdown ordering is security-sensitive: late broker callbacks
             // fail before user-decision waiters and owner projections disappear.
             workspace.ai_runtime_context.update(cx, |runtime, _cx| {

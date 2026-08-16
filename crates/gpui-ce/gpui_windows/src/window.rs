@@ -664,6 +664,10 @@ impl PlatformWindow for WindowsWindow {
         self.state.is_maximized()
     }
 
+    fn is_minimized(&self) -> bool {
+        unsafe { IsIconic(self.0.hwnd).as_bool() }
+    }
+
     fn window_bounds(&self) -> WindowBounds {
         self.state.window_bounds()
     }

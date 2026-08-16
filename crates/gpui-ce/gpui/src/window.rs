@@ -2118,6 +2118,11 @@ impl Window {
         self.platform_window.is_maximized()
     }
 
+    /// Returns whether the native window is currently minimized.
+    pub fn is_minimized(&self) -> bool {
+        self.platform_window.is_minimized()
+    }
+
     /// request a certain window decoration (Wayland)
     pub fn request_decorations(&self, decorations: WindowDecorations) {
         self.platform_window.request_decorations(decorations);

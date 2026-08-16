@@ -183,6 +183,9 @@ impl WorkspaceApp {
         if self.sidebar_collapsed {
             self.set_sidebar_collapsed_with_motion(false, cx);
         }
+        if section == SidebarSection::Sessions {
+            self.activate_embedded_sftp_sidebar_if_visible(cx);
+        }
         self.persist_sidebar_settings(cx);
         cx.notify();
     }
@@ -288,6 +291,71 @@ impl WorkspaceApp {
             self.persist_sidebar_settings(cx);
             cx.notify();
         }
+    }
+
+    pub(in crate::workspace) fn start_embedded_sftp_sidebar_resize(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.embedded_sftp_sidebar_resizing = true;
+        self.set_embedded_sftp_sidebar_fraction(event.position.y, window, cx);
+    }
+
+    pub(in crate::workspace) fn update_embedded_sftp_sidebar_resize(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.embedded_sftp_sidebar_resizing {
+            return;
+        }
+        if !event.dragging() {
+            // End capture when the platform no longer reports a pressed mouse
+            // button, even if the splitter missed the corresponding mouse-up.
+            self.finish_embedded_sftp_sidebar_resize(cx);
+            return;
+        }
+        self.set_embedded_sftp_sidebar_fraction(event.position.y, window, cx);
+    }
+
+    pub(in crate::workspace) fn finish_embedded_sftp_sidebar_resize(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.embedded_sftp_sidebar_resizing {
+            return;
+        }
+        self.embedded_sftp_sidebar_resizing = false;
+        self.persist_sidebar_settings_store(cx);
+        cx.notify();
+    }
+
+    fn set_embedded_sftp_sidebar_fraction(
+        &mut self,
+        cursor_y: Pixels,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        // The split lives below the native/custom titlebar and the fixed
+        // primary-sidebar header, so convert the window cursor into that body.
+        let body_top = self.window_titlebar_height(window) + self.tokens.metrics.tabbar_height;
+        let body_height = (f32::from(window.viewport_size().height) - body_top).max(1.0);
+        let fraction = ((f32::from(cursor_y) - body_top) / body_height).clamp(
+            EMBEDDED_SFTP_MIN_SESSION_FRACTION,
+            EMBEDDED_SFTP_MAX_SESSION_FRACTION,
+        );
+        let current = self.settings_store.settings().sftp.sidebar_session_fraction;
+        if (current - fraction).abs() < f32::EPSILON {
+            return;
+        }
+        self.settings_store
+            .settings_mut()
+            .sftp
+            .sidebar_session_fraction = fraction;
+        cx.notify();
     }
 
     pub(in crate::workspace) fn sidebar_width_from_cursor(
@@ -531,7 +599,7 @@ mod tests {
         assert!(!should_collapse_primary_sidebar_section(
             false,
             SidebarSection::Sessions,
-            SidebarSection::Sftp,
+            SidebarSection::Forwards,
         ));
     }
 

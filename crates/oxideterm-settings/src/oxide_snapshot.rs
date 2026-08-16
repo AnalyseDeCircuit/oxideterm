@@ -471,6 +471,7 @@ mod tests {
             json!(DEFAULT_WINDOW_OPACITY)
         );
         assert!(parsed["settings"].get("network").is_some());
+        assert!(parsed["settings"].get("windowUI").is_none());
         assert!(parsed["settings"]["sftp"].get("speedLimitKBps").is_some());
         assert!(parsed["settings"]["sftp"].get("speedLimitKbps").is_none());
     }

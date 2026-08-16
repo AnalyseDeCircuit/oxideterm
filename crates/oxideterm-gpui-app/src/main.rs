@@ -12,21 +12,18 @@ mod migration_snapshot;
 mod platform;
 mod portable_bootstrap;
 mod single_instance;
+mod window_placement;
 mod workspace;
 
 use std::path::PathBuf;
 
-use gpui::{App, AppContext, Bounds, actions, px, size};
+use gpui::{App, AppContext, actions};
 use oxideterm_i18n::I18n;
-use oxideterm_settings::SettingsStore;
+use oxideterm_settings::{SettingsStore, WindowUiState};
 
 use crate::assets::NativeAssets;
+use crate::window_placement::{default_window_bounds, initial_window_bounds};
 use crate::workspace::{WorkspaceApp, WorkspaceWindowShell, locale_from_settings};
-
-// Tauri's `tauri.conf.json` opens the main window at 1200x800. Keeping the
-// native default the same preserves first-launch sidebar proportions.
-const TAURI_DEFAULT_WINDOW_WIDTH: f32 = 1200.0;
-const TAURI_DEFAULT_WINDOW_HEIGHT: f32 = 800.0;
 
 actions!(
     oxideterm,
@@ -259,28 +256,22 @@ fn confirm_update_after_initial_workspace() -> std::io::Result<()> {
     Ok(())
 }
 
-fn default_window_bounds(cx: &mut App) -> Bounds<gpui::Pixels> {
-    Bounds::centered(
-        None,
-        size(
-            px(TAURI_DEFAULT_WINDOW_WIDTH),
-            px(TAURI_DEFAULT_WINDOW_HEIGHT),
-        ),
-        cx,
-    )
-}
-
 fn open_main_workspace_window(
     cx: &mut App,
     native_ssh_launch: Option<oxideterm_ssh_launch::NativeSshLaunch>,
     desktop_presence_menu: oxideterm_desktop_presence::DesktopPresenceMenu,
     single_instance_rx: Option<single_instance::SingleInstanceReceiver>,
+    window_ui: WindowUiState,
 ) -> anyhow::Result<()> {
-    let bounds = default_window_bounds(cx);
-    cx.open_window(platform::window_options(bounds), |window, cx| {
-        let desktop_presence_rx =
-            match oxideterm_desktop_presence::install_for_window(window, cx, desktop_presence_menu)
-            {
+    let window_bounds = initial_window_bounds(cx, &window_ui);
+    cx.open_window(
+        platform::window_options_with_bounds(window_bounds),
+        |window, cx| {
+            let desktop_presence_rx = match oxideterm_desktop_presence::install_for_window(
+                window,
+                cx,
+                desktop_presence_menu,
+            ) {
                 Ok(rx) => rx,
                 Err(error) => {
                     eprintln!(
@@ -290,36 +281,36 @@ fn open_main_workspace_window(
                 }
             };
 
-        let session = cx.new(|cx| {
-            WorkspaceApp::new(window, cx, desktop_presence_rx, single_instance_rx).unwrap_or_else(
-                |err| {
-                    panic!(
-                        "failed to initialize OxideTerm workspace: {err:#}\n\
+            let session = cx.new(|cx| {
+                WorkspaceApp::new(window, cx, desktop_presence_rx, single_instance_rx)
+                    .unwrap_or_else(|err| {
+                        panic!(
+                            "failed to initialize OxideTerm workspace: {err:#}\n\
                      OxideTerm native uses GPUI's GPU-backed renderer. \
                      To retry with lightweight visual effects, launch with \
                      OXIDETERM_RENDER_PROFILE=compatibility."
-                    )
-                },
-            )
-        });
-        if let Some(launch) = native_ssh_launch
-            && let Err(error) = session.update(cx, |session, cx| {
-                match launch {
-                    oxideterm_ssh_launch::NativeSshLaunch::Temporary(launch) => {
-                        session.open_temporary_ssh_launch(launch, cx)
+                        )
+                    })
+            });
+            if let Some(launch) = native_ssh_launch
+                && let Err(error) = session.update(cx, |session, cx| {
+                    match launch {
+                        oxideterm_ssh_launch::NativeSshLaunch::Temporary(launch) => {
+                            session.open_temporary_ssh_launch(launch, cx)
+                        }
+                        oxideterm_ssh_launch::NativeSshLaunch::SavedConnection(launch) => {
+                            // Startup launches use the same saved-profile owner as in-app actions.
+                            session.open_saved_connection(&launch.saved_connection_id, window, cx);
+                            Ok(())
+                        }
                     }
-                    oxideterm_ssh_launch::NativeSshLaunch::SavedConnection(launch) => {
-                        // Startup launches use the same saved-profile owner as in-app actions.
-                        session.open_saved_connection(&launch.saved_connection_id, window, cx);
-                        Ok(())
-                    }
-                }
-            })
-        {
-            eprintln!("failed to open native SSH launch: {error}");
-        }
-        cx.new(|cx| WorkspaceWindowShell::new(session, window, cx))
-    })
+                })
+            {
+                eprintln!("failed to open native SSH launch: {error}");
+            }
+            cx.new(|cx| WorkspaceWindowShell::new(session, window, cx))
+        },
+    )
     .map(|_| ())
 }
 
@@ -348,6 +339,7 @@ fn open_primary_window(
         native_ssh_launch,
         desktop_presence_menu,
         single_instance_rx,
+        settings.window_ui,
     )?;
     Ok(true)
 }

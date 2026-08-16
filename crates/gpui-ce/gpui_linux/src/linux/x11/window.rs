@@ -1340,6 +1340,10 @@ impl PlatformWindow for X11Window {
         !state.hidden && state.maximized_vertical && state.maximized_horizontal
     }
 
+    fn is_minimized(&self) -> bool {
+        self.0.state.borrow().hidden
+    }
+
     fn window_bounds(&self) -> WindowBounds {
         let state = self.0.state.borrow();
         if self.is_maximized() {

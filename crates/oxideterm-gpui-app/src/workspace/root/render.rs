@@ -101,7 +101,8 @@ impl WorkspaceApp {
         }
         if *tab_kind != TabKind::Sftp
             && !self.sidebar_collapsed
-            && self.effective_sidebar_panel_section() == SidebarSection::Sftp
+            && self.effective_sidebar_panel_section() == SidebarSection::Sessions
+            && self.embedded_sftp_node_id.is_some()
             && self.sftp_view.read(cx).current_surface_id == Some(sftp::SftpSurfaceId::Sidebar)
             && let Some(dialog) = self.sftp_view.read(cx).dialog()
         {
@@ -269,6 +270,7 @@ impl WorkspaceApp {
             && self.sidebar_resize_hotzone_hovered)
             || self.sidebar_resizing
             || self.ai_entity.read(cx).chat_ui().sidebar_resizing;
+        let embedded_sftp_resize_cursor_active = self.embedded_sftp_sidebar_resizing;
         self.update_main_window_tabbar_drop_bounds(window, titlebar_visible, zen_mode, cx);
 
         div()
@@ -288,6 +290,9 @@ impl WorkspaceApp {
             ))
             .when(sidebar_resize_cursor_active, |root| {
                 root.cursor(CursorStyle::ResizeColumn)
+            })
+            .when(embedded_sftp_resize_cursor_active, |root| {
+                root.cursor(CursorStyle::ResizeRow)
             })
             .track_focus(&self.focus_handle)
             .key_context("Workspace")
@@ -531,6 +536,7 @@ impl WorkspaceApp {
             ))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 this.update_sidebar_resize(event, window, cx);
+                this.update_embedded_sftp_sidebar_resize(event, window, cx);
                 this.update_ai_sidebar_resize(event, window, cx);
                 this.update_sftp_pane_resize(event, window, cx);
                 this.update_sftp_queue_resize(event, window, cx);
@@ -910,6 +916,19 @@ impl WorkspaceApp {
                     .absolute(),
                 )
             })
+            .when(embedded_sftp_resize_cursor_active, |root| {
+                root.child(
+                    canvas(
+                        |_, _, _| (),
+                        |_, _, window, _| {
+                            // Keep the row-resize cursor stable while the
+                            // pointer crosses either virtualized sidebar list.
+                            window.set_window_cursor_style(CursorStyle::ResizeRow);
+                        },
+                    )
+                    .absolute(),
+                )
+            })
             .when(
                 self.browser_pointer_capture_owner(cx)
                     .is_some_and(browser_behavior::pointer_capture_needs_workspace_overlay),
@@ -1178,7 +1197,8 @@ impl WorkspaceApp {
                 CursorStyle::ClosedHand
             }
             Some(
-                browser_behavior::BrowserPointerCaptureOwner::SftpQueueResize
+                browser_behavior::BrowserPointerCaptureOwner::EmbeddedSftpSidebarResize
+                | browser_behavior::BrowserPointerCaptureOwner::SftpQueueResize
                 | browser_behavior::BrowserPointerCaptureOwner::TerminalCommandSenderResize,
             ) => CursorStyle::ResizeRow,
             _ => CursorStyle::ResizeColumn,
@@ -1197,6 +1217,7 @@ impl WorkspaceApp {
             .bg(rgba(0x00000000))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 this.update_sidebar_resize(event, window, cx);
+                this.update_embedded_sftp_sidebar_resize(event, window, cx);
                 this.update_ai_sidebar_resize(event, window, cx);
                 this.update_sftp_pane_resize(event, window, cx);
                 this.update_sftp_queue_resize(event, window, cx);
@@ -1223,6 +1244,7 @@ impl WorkspaceApp {
         let capture_owner = self.browser_pointer_capture_owner(cx);
         let was_read_only_dragging = self.read_only_selection_drag_active();
         self.finish_sidebar_resize(cx);
+        self.finish_embedded_sftp_sidebar_resize(cx);
         self.finish_ai_sidebar_resize(cx);
         self.finish_sftp_pane_resize(cx);
         self.finish_sftp_queue_resize(cx);

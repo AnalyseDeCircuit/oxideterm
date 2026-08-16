@@ -1153,6 +1153,12 @@ impl PlatformWindow for WaylandWindow {
         self.borrow().maximized
     }
 
+    fn is_minimized(&self) -> bool {
+        // xdg-shell lets clients request minimization but does not report the
+        // compositor-owned minimized state back to the client.
+        false
+    }
+
     fn window_bounds(&self) -> WindowBounds {
         let state = self.borrow();
         if state.fullscreen {

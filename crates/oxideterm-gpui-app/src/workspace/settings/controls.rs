@@ -1258,9 +1258,9 @@ impl WorkspaceApp {
                                 cx,
                             );
                             if preference != oxideterm_settings::SftpPresentationPreference::Sidebar
-                                && this.effective_sidebar_panel_section() == SidebarSection::Sftp
+                                && let Some(node_id) = this.embedded_sftp_node_id.clone()
                             {
-                                this.set_sidebar_section(SidebarSection::Sessions, cx);
+                                this.close_embedded_sftp_for_node(&node_id, cx);
                             }
                             cx.stop_propagation();
                         }),

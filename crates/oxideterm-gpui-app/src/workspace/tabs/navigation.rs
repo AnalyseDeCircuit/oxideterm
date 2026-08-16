@@ -251,26 +251,7 @@ impl WorkspaceApp {
             self.active_ssh_node_id = Some(node_id.clone());
             self.expanded_ssh_nodes.insert(node_id.clone());
         }
-        if !self.sidebar_collapsed
-            && self.effective_sidebar_panel_section() == SidebarSection::Sftp
-            && self
-                .active_tab(cx)
-                .is_none_or(|tab| tab.kind != TabKind::Sftp)
-            && let Some(node_id) = self.embedded_sftp_node_id.clone()
-        {
-            let already_active = {
-                let sftp = self.sftp_view.read(cx);
-                sftp.current_surface_id == Some(sftp::SftpSurfaceId::Sidebar)
-                    && sftp.current_node_id.as_ref() == Some(&node_id)
-            };
-            if !already_active {
-                self.sftp_view.update(cx, |sftp, cx| {
-                    sftp.activate_view(sftp::SftpSurfaceId::Sidebar, node_id);
-                    cx.notify();
-                });
-                self.maybe_start_sftp_remote_load(cx);
-            }
-        }
+        self.activate_embedded_sftp_sidebar_if_visible(cx);
     }
 
     pub(in crate::workspace) fn focus_active_pane(&mut self, window: &mut Window, cx: &mut App) {

@@ -1,5 +1,5 @@
 use gpui::{KeyBinding, Menu, MenuItem, SystemMenuType};
-pub use oxideterm_gpui_platform::window_options;
+pub use oxideterm_gpui_platform::{window_options, window_options_with_bounds};
 use oxideterm_i18n::I18n;
 use oxideterm_settings::PersistedSettings;
 

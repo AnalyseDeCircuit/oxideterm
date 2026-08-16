@@ -435,6 +435,7 @@ pub(crate) fn modal_footer_key_moves_forward(key: &str, shift: bool) -> bool {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum BrowserPointerCaptureOwner {
     SidebarResize,
+    EmbeddedSftpSidebarResize,
     AiSidebarResize,
     SftpPaneResize,
     SftpQueueResize,
@@ -457,6 +458,7 @@ pub(crate) struct BrowserOverlayPlacement {
 #[derive(Clone, Copy, Debug, Default)]
 struct BrowserPointerCaptureState {
     sidebar_resizing: bool,
+    embedded_sftp_sidebar_resizing: bool,
     ai_sidebar_resizing: bool,
     sftp_pane_resizing: bool,
     sftp_queue_resizing: bool,
@@ -514,6 +516,7 @@ pub(crate) fn pointer_capture_needs_workspace_overlay(owner: BrowserPointerCaptu
     matches!(
         owner,
         BrowserPointerCaptureOwner::SidebarResize
+            | BrowserPointerCaptureOwner::EmbeddedSftpSidebarResize
             | BrowserPointerCaptureOwner::AiSidebarResize
             | BrowserPointerCaptureOwner::SftpPaneResize
             | BrowserPointerCaptureOwner::SftpQueueResize
@@ -531,6 +534,7 @@ impl WorkspaceApp {
         let sftp = self.sftp_view.read(cx);
         resolve_browser_pointer_capture_owner(BrowserPointerCaptureState {
             sidebar_resizing: self.sidebar_resizing,
+            embedded_sftp_sidebar_resizing: self.embedded_sftp_sidebar_resizing,
             ai_sidebar_resizing: self.ai_entity.read(cx).chat_ui().sidebar_resizing,
             sftp_pane_resizing: sftp.pane_resize_active(),
             sftp_queue_resizing: sftp.queue_resize_active(),
@@ -554,6 +558,8 @@ fn resolve_browser_pointer_capture_owner(
     // keep winning even when the cursor crosses selectable text or list rows.
     if state.sidebar_resizing {
         Some(BrowserPointerCaptureOwner::SidebarResize)
+    } else if state.embedded_sftp_sidebar_resizing {
+        Some(BrowserPointerCaptureOwner::EmbeddedSftpSidebarResize)
     } else if state.ai_sidebar_resizing {
         Some(BrowserPointerCaptureOwner::AiSidebarResize)
     } else if state.sftp_pane_resizing {
@@ -660,6 +666,9 @@ mod tests {
     fn pointer_capture_overlay_covers_structural_and_scrollbar_drags() {
         assert!(pointer_capture_needs_workspace_overlay(
             BrowserPointerCaptureOwner::SidebarResize
+        ));
+        assert!(pointer_capture_needs_workspace_overlay(
+            BrowserPointerCaptureOwner::EmbeddedSftpSidebarResize
         ));
         assert!(pointer_capture_needs_workspace_overlay(
             BrowserPointerCaptureOwner::AiSidebarResize

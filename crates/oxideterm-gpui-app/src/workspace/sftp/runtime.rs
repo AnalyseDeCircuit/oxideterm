@@ -729,16 +729,16 @@ impl WorkspaceApp {
         self.embedded_sftp_node_id = Some(node_id.clone());
         self.active_ssh_node_id = Some(node_id.clone());
         self.expanded_ssh_nodes.insert(node_id.clone());
-        self.set_sidebar_section(SidebarSection::Sftp, cx);
         self.sftp_view.update(cx, |sftp, cx| {
             sftp.activate_view(SftpSurfaceId::Sidebar, node_id);
             cx.notify();
         });
         if let Some(path) = remote_path.filter(|path| !path.trim().is_empty()) {
             self.set_sftp_path(SftpPane::Remote, path, cx);
-        } else {
-            self.request_sftp_remote_load(cx);
         }
+        // Showing Active Sessions is the visibility boundary that starts the
+        // pending node-backed directory request exactly once.
+        self.set_sidebar_section(SidebarSection::Sessions, cx);
         // The sidebar is a consumer of the node-owned SFTP channel. Hiding it
         // never releases or disconnects the physical SSH node.
         cx.notify();
@@ -754,6 +754,7 @@ impl WorkspaceApp {
         }
 
         self.embedded_sftp_node_id = None;
+        self.embedded_sftp_sidebar_resizing = false;
         if self
             .sftp_presentation_request
             .as_ref()
@@ -767,15 +768,42 @@ impl WorkspaceApp {
         if deactivated {
             self.ime_marked_text = None;
         }
-        if self.effective_sidebar_panel_section() == SidebarSection::Sftp {
-            self.active_sidebar_section = SidebarSection::Sessions;
-            self.persist_sidebar_settings(cx);
-        }
         // Removing the embedded view releases only its presentation identity.
         // NodeRouter and any transfers, forwards, or sibling terminals retain
         // their independent ownership until their own lifecycle ends.
         cx.notify();
         true
+    }
+
+    pub(in crate::workspace) fn activate_embedded_sftp_sidebar_if_visible(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if self.sidebar_collapsed
+            || self.effective_sidebar_panel_section() != SidebarSection::Sessions
+            || self
+                .active_tab(cx)
+                .is_some_and(|tab| tab.kind == TabKind::Sftp)
+        {
+            return;
+        }
+        let Some(node_id) = self.embedded_sftp_node_id.clone() else {
+            return;
+        };
+        let already_active = {
+            let sftp = self.sftp_view.read(cx);
+            sftp.current_surface_id == Some(SftpSurfaceId::Sidebar)
+                && sftp.current_node_id.as_ref() == Some(&node_id)
+        };
+        if !already_active {
+            self.sftp_view.update(cx, |sftp, cx| {
+                sftp.activate_view(SftpSurfaceId::Sidebar, node_id);
+                cx.notify();
+            });
+        }
+        // Hidden views may already be active while retaining a queued load;
+        // every visibility transition must wake that pending request.
+        self.maybe_start_sftp_remote_load(cx);
     }
 
     pub(in crate::workspace) fn activate_sftp_view_for_node(
@@ -982,7 +1010,7 @@ impl WorkspaceApp {
             }
             SftpSurfaceId::Sidebar => {
                 !self.sidebar_collapsed
-                    && self.effective_sidebar_panel_section() == SidebarSection::Sftp
+                    && self.effective_sidebar_panel_section() == SidebarSection::Sessions
                     && self.embedded_sftp_node_id.as_ref() == Some(node_id)
             }
         }

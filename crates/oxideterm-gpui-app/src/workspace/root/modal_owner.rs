@@ -687,7 +687,8 @@ impl WorkspaceApp {
     fn active_tab_window_modal_owner(&self, cx: &App) -> Option<ActiveTabWindowModalSnapshot> {
         let visible = oxideterm_gpui_ui::motion::ExitPhase::Visible;
         if !self.sidebar_collapsed
-            && self.effective_sidebar_panel_section() == SidebarSection::Sftp
+            && self.effective_sidebar_panel_section() == SidebarSection::Sessions
+            && self.embedded_sftp_node_id.is_some()
             && self.sftp_view.read(cx).current_surface_id == Some(sftp::SftpSurfaceId::Sidebar)
             && let Some(dialog) = self.sftp_view.read(cx).dialog()
         {

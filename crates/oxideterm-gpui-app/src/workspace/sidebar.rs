@@ -40,12 +40,13 @@ const SESSION_FOCUS_EMERALD: u32 = 0x10b981;
 const EVENT_LOG_SIDEBAR_ROW_HEIGHT: f32 = 24.0;
 const EVENT_LOG_SIDEBAR_VIRTUAL_OVERSCAN: usize = 20;
 const EVENT_LOG_STICKY_BOTTOM_THRESHOLD_PX: f32 = 30.0;
+const EMBEDDED_SFTP_MIN_SESSION_FRACTION: f32 = 0.2;
+const EMBEDDED_SFTP_MAX_SESSION_FRACTION: f32 = 0.75;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SidebarSection {
     Sessions,
     Connections,
-    Sftp,
     Forwards,
     Runtime,
     Terminal,
@@ -110,7 +111,10 @@ impl SidebarSection {
             // The retired saved-connections sidebar now restores the active
             // session navigator while the full manager remains a workspace tab.
             "connections" | "saved" => Self::Sessions,
-            "sftp" => Self::Sftp,
+            // Embedded SFTP now shares the active-sessions panel. Preserve the
+            // old persisted key as a migration path instead of reopening a
+            // retired standalone sidebar.
+            "sftp" => Self::Sessions,
             "forwards" => Self::Forwards,
             "runtime" => Self::Runtime,
             "connection_pool" | "terminal" => Self::Terminal,
@@ -137,7 +141,6 @@ impl SidebarSection {
             // Keep the activity identity stable; persistence stores the
             // effective Sessions panel instead of this tab-only entry.
             Self::Connections => "saved",
-            Self::Sftp => "sftp",
             Self::Forwards => "forwards",
             Self::Runtime => "runtime",
             Self::Terminal => "connection_pool",
@@ -160,7 +163,6 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn effective_sidebar_panel_section(&self) -> SidebarSection {
         match self.active_sidebar_section {
             SidebarSection::Sessions
-            | SidebarSection::Sftp
             | SidebarSection::Forwards
             | SidebarSection::Extensions
             | SidebarSection::CloudSync => self.active_sidebar_section,
@@ -210,7 +212,6 @@ mod sidebar_persistence_tests {
     fn sidebar_sections_roundtrip_persisted_settings_keys() {
         let sections = [
             SidebarSection::Sessions,
-            SidebarSection::Sftp,
             SidebarSection::Forwards,
             SidebarSection::Runtime,
             SidebarSection::Terminal,
@@ -236,14 +237,12 @@ mod sidebar_persistence_tests {
     }
 
     #[test]
-    fn retired_saved_connection_sidebar_restores_active_sessions() {
-        assert_eq!(
-            SidebarSection::from_settings_key("connections"),
-            SidebarSection::Sessions
-        );
-        assert_eq!(
-            SidebarSection::from_settings_key("saved"),
-            SidebarSection::Sessions
-        );
+    fn retired_sidebar_keys_restore_active_sessions() {
+        for key in ["connections", "saved", "sftp"] {
+            assert_eq!(
+                SidebarSection::from_settings_key(key),
+                SidebarSection::Sessions
+            );
+        }
     }
 }
