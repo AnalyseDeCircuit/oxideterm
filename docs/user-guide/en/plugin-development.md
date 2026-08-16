@@ -263,7 +263,7 @@ This example demonstrates the important contract:
 - Runtime UI is not React. It is a declarative schema registered through a `sidebar-panel` or `tab` contribution.
 - A returnable host call is sent as an outbound `callHostApi` frame; the host writes the response back on stdin.
 
-For a complete repository example that registers both a tab and a left activity-bar panel, discovers an active node, and runs a manifest-declared custom Host Tools monitor, see [Host Tools Dashboard](../../../examples/plugins/host-tools-dashboard/README.md).
+For a complete repository example that registers both a tab and a left activity-bar panel, discovers an active node, and runs a manifest-declared custom Host Tools monitor, see [Host Tools Dashboard](https://github.com/AnalyseDeCircuit/oxideterm-plugins/tree/main/plugins/host-tools-dashboard).
 
 ## Runtime Conversation
 

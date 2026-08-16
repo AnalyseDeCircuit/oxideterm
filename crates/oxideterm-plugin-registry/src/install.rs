@@ -149,6 +149,27 @@ pub(crate) fn extract_native_plugin_zip(package_bytes: &[u8], dest: &Path) -> Re
             .map_err(|error| format!("Failed to create file {:?}: {error}", out_path))?;
         std::io::copy(&mut file, &mut out_file)
             .map_err(|error| format!("Failed to write file {:?}: {error}", out_path))?;
+        #[cfg(unix)]
+        if let Some(archive_mode) = file.unix_mode() {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            // Preserve only executable bits from the archive. Read and write
+            // permissions remain controlled by the application's umask.
+            let executable_bits = archive_mode & 0o111;
+            if executable_bits != 0 {
+                let mut permissions = out_file
+                    .metadata()
+                    .map_err(|error| format!("Failed to inspect file {:?}: {error}", out_path))?
+                    .permissions();
+                permissions.set_mode(permissions.mode() | executable_bits);
+                fs::set_permissions(&out_path, permissions).map_err(|error| {
+                    format!(
+                        "Failed to mark plugin entry executable {:?}: {error}",
+                        out_path
+                    )
+                })?;
+            }
+        }
     }
     Ok(())
 }

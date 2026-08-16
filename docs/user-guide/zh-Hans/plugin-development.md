@@ -263,7 +263,7 @@ readline.createInterface({
 - 运行时界面不是 React，而是通过 `sidebar-panel` 或 `tab` 注册的声明式结构。
 - 需要返回值的宿主调用用出站 `callHostApi` 帧发送；宿主会把结果写回插件的 stdin。
 
-如果需要完整的仓库示例，可参考 [Host Tools Dashboard](../../../examples/plugins/host-tools-dashboard/README.md)。它会同时注册标签页和左侧活动栏面板，自动发现活动节点，并运行清单中声明的自定义 Host Tools 监控。
+如果需要完整的仓库示例，可参考 [Host Tools Dashboard](https://github.com/AnalyseDeCircuit/oxideterm-plugins/tree/main/plugins/host-tools-dashboard)。它会同时注册标签页和左侧活动栏面板，自动发现活动节点，并运行清单中声明的自定义 Host Tools 监控。
 
 ## 运行时通信过程
 

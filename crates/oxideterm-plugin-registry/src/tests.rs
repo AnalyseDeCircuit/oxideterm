@@ -43,6 +43,35 @@ fn plugin_package(entries: &[(&str, String)]) -> Vec<u8> {
     zip.finish().unwrap().into_inner()
 }
 
+#[cfg(unix)]
+fn executable_plugin_package() -> Vec<u8> {
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    zip.start_file("plugin.json", SimpleFileOptions::default())
+        .unwrap();
+    zip.write_all(
+        serde_json::json!({
+            "id": "com.example.executable",
+            "name": "Executable Demo",
+            "version": "1.0.0",
+            "runtime": {
+                "kind": "process",
+                "entry": "bin/plugin"
+            }
+        })
+        .to_string()
+        .as_bytes(),
+    )
+    .unwrap();
+    zip.start_file(
+        "bin/plugin",
+        SimpleFileOptions::default().unix_permissions(0o755),
+    )
+    .unwrap();
+    zip.write_all(b"#!/bin/sh\n").unwrap();
+    zip.finish().unwrap().into_inner()
+}
+
 fn manifest_json(id: &str, version: &str) -> String {
     serde_json::json!({
         "id": id,
@@ -221,19 +250,6 @@ fn activity_bar_manifest_rejects_duplicate_ids_and_invalid_positions() {
 }
 
 #[test]
-fn repository_host_tools_dashboard_example_is_a_valid_native_plugin() {
-    let plugin_dir =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plugins/host-tools-dashboard");
-    let manifest_bytes = fs::read(plugin_dir.join(PLUGIN_MANIFEST_FILENAME)).unwrap();
-    let manifest: NativePluginManifest = serde_json::from_slice(&manifest_bytes).unwrap();
-
-    validate_native_plugin_manifest(&manifest).unwrap();
-    let runtime_plan = native_runtime_plan_for_manifest(&manifest).unwrap();
-    validate_runtime_entry_exists(&plugin_dir, &runtime_plan).unwrap();
-    assert_eq!(manifest.id, "com.oxideterm.examples.host-tools-dashboard");
-}
-
-#[test]
 fn permission_capabilities_normalize_order_and_whitespace() {
     let capabilities = vec![
         " terminal.input.send ".to_string(),
@@ -395,6 +411,27 @@ fn plugin_package_install_supports_flat_nested_conflict_and_updates() {
 
     let registry = NativePluginRegistry::discover(&settings_path);
     assert_eq!(registry.plugins()[0].manifest.version, "1.1.0");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let executable_package = executable_plugin_package();
+        NativePluginRegistry::install_plugin_package_from_bytes(
+            &settings_path,
+            &executable_package,
+            None,
+            false,
+        )
+        .unwrap();
+        let installed_entry =
+            native_plugins_dir(&settings_path).join("com.example.executable/bin/plugin");
+        assert_ne!(
+            fs::metadata(installed_entry).unwrap().permissions().mode() & 0o111,
+            0
+        );
+    }
+
     let updates = NativePluginRegistry::check_plugin_updates(
         NativePluginRegistryIndex {
             version: 1,
