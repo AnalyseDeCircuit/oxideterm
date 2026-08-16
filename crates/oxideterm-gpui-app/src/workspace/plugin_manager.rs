@@ -682,16 +682,7 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(16.0))
-            .min_h(px(260.0))
-            .child(
-                div()
-                    .w_full()
-                    .h(px(1.0))
-                    .bg(plugin_manager_theme_border_half(
-                        theme.border,
-                        has_background,
-                    )),
-            );
+            .min_h(px(260.0));
 
         if plugin_rows.is_empty() && diagnostics.is_empty() {
             return card
