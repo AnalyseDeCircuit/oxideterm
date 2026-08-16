@@ -210,7 +210,7 @@ Los archivos remotos forman parte del mismo node espacio de trabajo, no de una f
 
 La rama native mantiene extensiones y superficies de soporte dentro de límites Rust-native:
 
-- Los plugins admiten rutas manifest-only, WASM y procesos normales. WASM usa Wasmtime/WASI o un sidecar con llamadas de host controladas; los plugins de proceso son procesos locales sin sandbox del sistema operativo.
+- Los plugins admiten rutas manifest-only, WASM y procesos normales. WASM usa el runtime Wasmtime/WASI integrado; los plugins de proceso son procesos locales sin sandbox del sistema operativo.
 - La CLI enlaza directamente crates de dominio para doctor, settings, connections, reenvíos, bundles portables, backups y reports
 - Los diagnósticos priorizan conteos, rutas, marcas de función e indicios redactados antes que cargas crudas con secretos
 - Los flujos CLI que mutan estado usan dry-run plans, `--yes` guards y rollback backups cuando aplica

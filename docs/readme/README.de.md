@@ -210,7 +210,7 @@ Remote-Dateien sind Teil desselben Node-Workspace und keine getrennte Nebenfunkt
 
 Erweiterungen und Support-Flächen folgen klaren Rust-eigenen Grenzen:
 
-- Plugins unterstützen Manifest-only-, WASM- und normale Prozesspfade. WASM nutzt Wasmtime/WASI oder einen Sidecar mit kontrollierten Host-Aufrufen; Prozess-Plugins sind lokale Prozesse ohne Betriebssystem-Sandbox.
+- Plugins unterstützen Manifest-only-, WASM- und normale Prozesspfade. WASM nutzt die integrierte Wasmtime/WASI-Laufzeit; Prozess-Plugins sind lokale Prozesse ohne Betriebssystem-Sandbox.
 - Die CLI linkt direkt gegen Domain Crates für doctor, settings, connections, forwards, portable bundles, backups und reports
 - Diagnosen bevorzugen Zähler, Pfade, Feature-Flags und redigierte Hinweise statt roher payloads mit Geheimnisse
 - Mutierende CLI-Flows nutzen dry-run plans, `--yes` guards und rollback backups, wo anwendbar

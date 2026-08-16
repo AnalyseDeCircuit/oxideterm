@@ -386,7 +386,7 @@ fn wat_data_string(value: &str) -> String {
 
 #[cfg(not(feature = "wasm-runtime"))]
 #[tokio::test]
-async fn wasm_runtime_activation_reports_optional_runtime_missing() {
+async fn wasm_runtime_activation_reports_build_support_unavailable() {
     let mut host = NativePluginRuntimeHost::default();
     let error = host
         .activate_wasm_plugin(
@@ -399,8 +399,8 @@ async fn wasm_runtime_activation_reports_optional_runtime_missing() {
         .await
         .unwrap_err();
 
-    assert_eq!(error.code, "wasm_runtime_not_installed");
-    assert!(error.message.contains("standard build"));
+    assert_eq!(error.code, WASM_RUNTIME_UNAVAILABLE_CODE);
+    assert!(error.message.contains("not available"));
 }
 
 #[cfg(unix)]
@@ -452,7 +452,6 @@ printf '%s\n' '{"protocolVersion":1,"requestId":"activate-test","payload":{"requ
     );
     runtime.kill().await.unwrap();
 }
-
 #[cfg(unix)]
 #[tokio::test]
 async fn process_runtime_collects_activate_time_outbound_frames() {

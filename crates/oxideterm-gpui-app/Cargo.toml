@@ -55,7 +55,6 @@ oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 oxideterm-plugin-host-api = { path = "../oxideterm-plugin-host-api" }
 oxideterm-plugin-protocol = { path = "../oxideterm-plugin-protocol" }
 oxideterm-plugin-registry = { path = "../oxideterm-plugin-registry" }
-oxideterm-plugin-runtime-install = { path = "../oxideterm-plugin-runtime-install" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-preview = { path = "../oxideterm-preview" }
 oxideterm-public-mcp = { path = "../oxideterm-public-mcp" }

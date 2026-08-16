@@ -1843,7 +1843,7 @@ flowchart LR
 | 设置和提权凭据 | `oxideterm-settings`, `oxideterm-settings-model`, `oxideterm-gpui-settings-view`, 应用凭据感知边界 |
 | AI、RAG、MCP、推理和工具策略 | `oxideterm-ai`, `oxideterm-ai-tasks`, `oxideterm-skills`, 应用 AI 侧边栏 |
 | ACP agent session 和主机工具 | `oxideterm-acp-adapter`, `oxideterm-acp-host-tools`, `workspace/acp_workspace.rs` |
-| 插件 | `oxideterm-plugin-manifest`, `oxideterm-plugin-registry`, `oxideterm-plugin-host-api`, `oxideterm-plugin-wasm-runtime`, `oxideterm-plugin-runtime-install`, 应用插件 Entity |
+| 插件 | `oxideterm-plugin-manifest`, `oxideterm-plugin-registry`, `oxideterm-plugin-host-api`, `oxideterm-plugin-wasm-runtime`, 应用插件 Entity |
 | 云同步和便携运行时 | `oxideterm-cloud-sync`, `oxideterm-gpui-cloud-sync`, `oxideterm-portable-runtime` |
 | 通知、启动器、更新 | `oxideterm-notification-center`, `oxideterm-launcher`, `oxideterm-update` |
 | CLI 伴侣工具 | `oxideterm-cli` |

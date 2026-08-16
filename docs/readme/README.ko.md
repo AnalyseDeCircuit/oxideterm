@@ -206,7 +206,7 @@ UI는 GPUI로 직접 그려지며 DOM/CSS/JavaScript rendering pipeline이 없�
 
 확장 기능과 지원 기능은 Rust가 소유하는 명확한 경계 안에서 동작합니다.
 
-- 플러그인은 manifest-only, WASM, 일반 프로세스 경로를 지원합니다. WASM은 Wasmtime/WASI 또는 제어된 호스트 호출을 가진 sidecar를 사용하며, 프로세스 플러그인은 운영 체제 샌드박스가 없는 로컬 프로세스입니다.
+- 플러그인은 manifest-only, WASM, 일반 프로세스 경로를 지원합니다. WASM은 내장된 Wasmtime/WASI 런타임을 사용하며, 프로세스 플러그인은 운영 체제 샌드박스가 없는 로컬 프로세스입니다.
 - CLI는 도메인 crate에 직접 링크되어 doctor, settings, connections, 포워딩, 휴대용 번들, 백업, 보고서를 다룹니다
 - 진단은 비밀이 포함된 원시 페이로드보다 개수, 경로, 기능 플래그, 마스킹된 힌트를 우선합니다
 - 상태를 변경하는 CLI 흐름은 dry-run 계획, `--yes` 보호, 롤백 백업을 사용합니다
@@ -289,7 +289,7 @@ cargo run -p oxideterm-cli -- completion install zsh --force
 | `.oxide` | ChaCha20-Poly1305 + Argon2id |
 | CLI writes | dry-run 계획, `--yes` 보호, 롤백 백업 |
 | 호스트 키 | `~/.ssh/known_hosts`를 사용하는 TOFU, 예기치 않은 변경 거부 |
-| Plugins | Wasmtime/WASI, sidecar WASM 및 프로세스 | 제어된 WASM 호스트 호출과 OS 샌드박스가 없는 신뢰 기반 로컬 프로세스 |
+| Plugins | Wasmtime/WASI 및 프로세스 | 제어된 WASM 호스트 호출과 OS 샌드박스가 없는 신뢰 기반 로컬 프로세스 |
 
 ## 적법한 사용 안내
 

@@ -8,7 +8,6 @@ use oxideterm_gpui_ui::{
         text_input_with_content_align,
     },
 };
-use oxideterm_plugin_runtime_install as runtime_install;
 use std::process::Command;
 use zeroize::Zeroizing;
 
@@ -93,7 +92,6 @@ pub(in crate::workspace) enum NativePluginManagerDelivery {
     },
     LoadMarketplace(Option<plugin_host::NativePluginRegistryIndex>),
     CheckUpdates(Option<Vec<plugin_host::NativePluginRegistryEntry>>),
-    InstallWasmRuntime(Option<runtime_install::WasmRuntimeInstallResult>),
 }
 
 pub(in crate::workspace) enum NativePluginInstallOutcome {
@@ -122,12 +120,6 @@ pub(super) enum NativePluginMarketplaceLoadState {
     Loading,
     Loaded,
     Failed,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum NativePluginManagerActionButtonTone {
-    Accent,
-    Muted,
 }
 
 /// Owns the native plugin management and plugin-sidebar UI state.
@@ -463,18 +455,8 @@ impl WorkspaceApp {
                             .items_center()
                             .gap(px(8.0))
                             .child(self.render_native_plugin_action_button(
-                                LucideIcon::Plus,
-                                self.i18n.t("plugin.create_plugin"),
-                                NativePluginManagerActionButtonTone::Accent,
-                                false,
-                                |_event, _window, cx| {
-                                    cx.stop_propagation();
-                                },
-                            ))
-                            .child(self.render_native_plugin_action_button(
                                 LucideIcon::FolderOpen,
                                 self.i18n.t("plugin.open_plugins_dir"),
-                                NativePluginManagerActionButtonTone::Muted,
                                 false,
                                 cx.listener(|this, _event, _window, cx| {
                                     if let Err(error) = open_native_plugins_dir(
@@ -490,22 +472,9 @@ impl WorkspaceApp {
                                     cx.notify();
                                 }),
                             ))
-                            .when(cfg!(not(feature = "plugin-wasm-runtime")), |actions| {
-                                actions.child(self.render_native_plugin_action_button(
-                                    LucideIcon::Download,
-                                    self.i18n.t("plugin.wasm_runtime_download"),
-                                    NativePluginManagerActionButtonTone::Muted,
-                                    false,
-                                    cx.listener(|this, _event, _window, cx| {
-                                        this.start_wasm_runtime_sidecar_install(cx);
-                                        cx.stop_propagation();
-                                    }),
-                                ))
-                            })
                             .child(self.render_native_plugin_action_button(
                                 LucideIcon::RefreshCw,
                                 self.i18n.t("plugin.refresh"),
-                                NativePluginManagerActionButtonTone::Muted,
                                 false,
                                 cx.listener(|this, _event, _window, cx| {
                                     let registry = plugin_host::NativePluginRegistry::discover(
@@ -713,7 +682,16 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(16.0))
-            .min_h(px(260.0));
+            .min_h(px(260.0))
+            .child(
+                div()
+                    .w_full()
+                    .h(px(1.0))
+                    .bg(plugin_manager_theme_border_half(
+                        theme.border,
+                        has_background,
+                    )),
+            );
 
         if plugin_rows.is_empty() && diagnostics.is_empty() {
             return card
@@ -865,7 +843,6 @@ impl WorkspaceApp {
                             .child(self.render_native_plugin_action_button(
                                 LucideIcon::ExternalLink,
                                 self.i18n.t("plugin.marketplace_repository"),
-                                NativePluginManagerActionButtonTone::Muted,
                                 false,
                                 |_event, _window, cx| {
                                     cx.open_url(OFFICIAL_PLUGIN_MARKETPLACE_HOME);
@@ -874,7 +851,6 @@ impl WorkspaceApp {
                             .child(self.render_native_plugin_action_button(
                                 LucideIcon::RefreshCw,
                                 self.i18n.t("plugin.refresh"),
-                                NativePluginManagerActionButtonTone::Muted,
                                 busy,
                                 cx.listener(|this, _event, _window, cx| {
                                     this.start_native_plugin_marketplace_load(cx);
@@ -1418,18 +1394,12 @@ impl WorkspaceApp {
         &self,
         icon: LucideIcon,
         label: String,
-        tone: NativePluginManagerActionButtonTone,
         disabled: bool,
         listener: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let (text_color, hover_bg) = match tone {
-            NativePluginManagerActionButtonTone::Accent => (
-                theme.accent,
-                plugin_manager_theme_alpha(theme.accent, PLUGIN_MANAGER_TW_ALPHA_10),
-            ),
-            NativePluginManagerActionButtonTone::Muted => (theme.text_muted, rgb(theme.bg_panel)),
-        };
+        let text_color = theme.text_muted;
+        let hover_bg = rgb(theme.bg_panel);
         div()
             .rounded(px(self.tokens.radii.md))
             .border_1()
@@ -1905,27 +1875,6 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn start_wasm_runtime_sidecar_install(&mut self, cx: &mut Context<Self>) {
-        if self.plugin_entity.read(cx).manager_operation_in_flight() {
-            let message = self.i18n.t("plugin.installing");
-            self.update_plugin_manager_state(cx, |manager| {
-                manager.operation_status = NativePluginManagerOperationStatus::Busy(message);
-            });
-            cx.notify();
-            return;
-        }
-
-        let settings_path = self.settings_store.path().to_path_buf();
-        let message = self.i18n.t("plugin.wasm_runtime_installing");
-        self.update_plugin_manager_state(cx, |manager| {
-            manager.operation_status = NativePluginManagerOperationStatus::Busy(message);
-        });
-        let started = self.plugin_entity.update(cx, |plugins, _cx| {
-            plugins.start_wasm_runtime_install(settings_path)
-        });
-        debug_assert!(started, "manager operation gate changed before start");
-    }
-
     pub(in crate::workspace) fn handle_plugin_workspace_event(
         &mut self,
         event: &plugin_entity::PluginWorkspaceEvent,
@@ -2037,7 +1986,6 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let (state_label, state_tone) = native_plugin_status_badge(&self.i18n, plugin);
         let error_message = native_plugin_visible_error(&self.i18n, plugin);
-        let wasm_runtime_missing = native_plugin_is_wasm_runtime_missing(plugin);
         let is_expanded = self
             .plugin_manager_state(cx)
             .expanded_plugin_ids
@@ -2306,18 +2254,6 @@ impl WorkspaceApp {
                             .whitespace_normal()
                             .child(error_message),
                     )
-                    .when(wasm_runtime_missing, |error_row| {
-                        error_row.child(self.render_native_plugin_action_button(
-                            LucideIcon::Download,
-                            self.i18n.t("plugin.wasm_runtime_download"),
-                            NativePluginManagerActionButtonTone::Muted,
-                            false,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.start_wasm_runtime_sidecar_install(cx);
-                                cx.stop_propagation();
-                            }),
-                        ))
-                    })
                     .child(self.render_native_plugin_row_icon_button(
                         LucideIcon::Copy,
                         theme.error,
@@ -2778,9 +2714,9 @@ fn native_plugin_visible_error(
     };
     if plugin_host::native_plugin_error_has_code(
         error,
-        plugin_runtime::WASM_RUNTIME_NOT_INSTALLED_CODE,
+        plugin_runtime::WASM_RUNTIME_UNAVAILABLE_CODE,
     ) {
-        return Some(i18n.t("plugin.wasm_runtime_missing"));
+        return Some(i18n.t("plugin.wasm_runtime_unavailable"));
     }
     if error == plugin_entity::NATIVE_PLUGIN_RUNTIME_FAILURE_DIAGNOSTIC {
         return Some(i18n.t("plugin.runtime_failure"));
@@ -2791,23 +2727,14 @@ fn native_plugin_visible_error(
 fn native_plugin_diagnostic_message(i18n: &I18n, message: &str) -> String {
     if plugin_host::native_plugin_error_has_code(
         message,
-        plugin_runtime::WASM_RUNTIME_NOT_INSTALLED_CODE,
+        plugin_runtime::WASM_RUNTIME_UNAVAILABLE_CODE,
     ) {
-        return i18n.t("plugin.wasm_runtime_missing");
+        return i18n.t("plugin.wasm_runtime_unavailable");
     }
     if message == plugin_entity::NATIVE_PLUGIN_RUNTIME_FAILURE_DIAGNOSTIC {
         return i18n.t("plugin.runtime_failure");
     }
     message.to_string()
-}
-
-fn native_plugin_is_wasm_runtime_missing(plugin: &plugin_host::NativePluginInfo) -> bool {
-    plugin.config.last_error.as_deref().is_some_and(|error| {
-        plugin_host::native_plugin_error_has_code(
-            error,
-            plugin_runtime::WASM_RUNTIME_NOT_INSTALLED_CODE,
-        )
-    })
 }
 
 fn native_plugin_diagnostic_is_visible(

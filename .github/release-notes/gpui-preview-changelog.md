@@ -61,9 +61,6 @@ This preview focuses on diagnostics, terminal workflow polish, settings cleanup,
 This preview focuses on native plugin runtime reliability, packaging cleanup, and tightening GPUI workflow polish before the 2.0 line becomes the default app.
 
 - Wasm plugin execution is bundled again in standard GPUI preview packages so Wasm plugins work without a separate runtime download.
-- The optional `oxideterm-wasm-runtime` sidecar path remains available for future lightweight or externally managed builds.
-- The Wasm runtime compatibility model now checks the host update channel, host version, plugin protocol, Wasm guest ABI, WASI profile, platform target, and asset checksum for sidecar installs.
-- Native plugin runtime ownership was narrowed so the in-process host API, bundled Wasm executor, and optional sidecar process bridge stay separate.
 - Quick Commands, settings, and narrow-width GPUI forms received layout and overflow fixes across the native preview UI.
 - SSH authentication selection was simplified into password, key, Agent, and two-factor groups while keeping existing saved connection formats unchanged.
 - Session icons, legal notices, onboarding, and plugin manager surfaces received additional polish and localization coverage.

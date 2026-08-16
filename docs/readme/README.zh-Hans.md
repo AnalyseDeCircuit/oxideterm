@@ -210,7 +210,7 @@ OxideSens 采用 BYOK 模式，并在进程内构建上下文：
 
 原生分支把扩展和支持功能保持在 Rust 原生边界内：
 
-- 插件支持 manifest-only、WASM 和普通进程三种路径。WASM 使用 Wasmtime/WASI 或带受控宿主调用的 sidecar；进程插件是没有操作系统级沙箱的本地进程，需要单独判断信任边界。
+- 插件支持 manifest-only、WASM 和普通进程三种路径。WASM 使用内置的 Wasmtime/WASI 运行时；进程插件是没有操作系统级沙箱的本地进程，需要单独判断信任边界。
 - CLI 直接链接领域 crate，覆盖 doctor、settings、connections、forwards、便携包、备份和报告
 - 诊断优先输出计数、路径、功能标志与脱敏提示，避免暴露带秘密的原始 payload
 - 会修改状态的 CLI 流程使用 dry-run 计划、`--yes` guards 和回滚备份

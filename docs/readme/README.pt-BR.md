@@ -210,7 +210,7 @@ Arquivos remotos fazem parte do mesmo node espaço de trabalho, não de uma fun�
 
 Extensões e superfícies de suporte seguem limites explícitos definidos em Rust:
 
-- Plugins suportam caminhos manifest-only, WASM e processos comuns. WASM usa Wasmtime/WASI ou um sidecar com chamadas de host controladas; plugins de processo são processos locais sem sandbox do sistema operacional.
+- Plugins suportam caminhos manifest-only, WASM e processos comuns. WASM usa o runtime Wasmtime/WASI integrado; plugins de processo são processos locais sem sandbox do sistema operacional.
 - A CLI linka diretamente crates de domínio para doctor, settings, connections, encaminhamentos, portable bundles, backups e reports
 - Diagnósticos priorizam contagens, caminhos, flags de recurso e dicas redigidas em vez de cargas brutas com segredos
 - Fluxos CLI que alteram estado usam dry-run plans, `--yes` guards e rollback backups quando aplicável

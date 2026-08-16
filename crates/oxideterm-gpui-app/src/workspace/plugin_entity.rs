@@ -110,7 +110,7 @@ fn native_plugin_runtime_failure_message(error: plugin_runtime::PluginError) -> 
     // Runtime text is plugin-controlled and may echo request data. Keep only
     // known host codes and erase the raw text at the delivery boundary.
     let _sensitive_message = Zeroizing::new(message);
-    if code == plugin_runtime::WASM_RUNTIME_NOT_INSTALLED_CODE {
+    if code == plugin_runtime::WASM_RUNTIME_UNAVAILABLE_CODE {
         code
     } else {
         NATIVE_PLUGIN_RUNTIME_FAILURE_DIAGNOSTIC.to_string()
@@ -403,7 +403,6 @@ impl PluginWorkspaceEntity {
     pub(in crate::workspace) fn start_runtime_bootstrap(
         &mut self,
         host_api_resolver: plugin_runtime::NativeHostApiResolver,
-        wasm_sidecar_path: Option<PathBuf>,
     ) -> bool {
         if self.release_shutdown_started {
             return false;
@@ -425,7 +424,6 @@ impl PluginWorkspaceEntity {
         let delivery_tx = self.runtime_delivery_tx.clone();
         self.spawn_owned_task(async move {
             let mut host = host.lock().await;
-            host.set_wasm_sidecar_path(wasm_sidecar_path);
             host.set_host_api_resolver(host_api_resolver);
             // Preserve deterministic activation order across process and WASM runtimes.
             for plan in process_plans {
@@ -806,26 +804,6 @@ impl PluginWorkspaceEntity {
         true
     }
 
-    pub(in crate::workspace) fn start_wasm_runtime_install(
-        &mut self,
-        settings_path: PathBuf,
-    ) -> bool {
-        if self.manager_operation_in_flight || self.release_shutdown_started {
-            return false;
-        }
-        self.manager_operation_in_flight = true;
-        let delivery_tx = self.manager_delivery_tx.clone();
-        self.spawn_owned_task(async move {
-            let result =
-                oxideterm_plugin_runtime_install::install_wasm_runtime_sidecar(&settings_path)
-                    .await;
-            let result = result.map_err(Zeroizing::new).ok();
-            let _ = delivery_tx
-                .send(plugin_manager::NativePluginManagerDelivery::InstallWasmRuntime(result));
-        });
-        true
-    }
-
     pub(in crate::workspace) fn apply_manager_deliveries(
         &mut self,
         settings_path: &std::path::Path,
@@ -949,24 +927,6 @@ impl PluginWorkspaceEntity {
                 }
                 false
             }
-            plugin_manager::NativePluginManagerDelivery::InstallWasmRuntime(result) => match result
-            {
-                Some(result) => {
-                    self.manager_state.operation_status =
-                        plugin_manager::NativePluginManagerOperationStatus::Success(
-                            i18n.t("plugin.wasm_runtime_install_success")
-                                .replace("{{version}}", &result.version),
-                        );
-                    true
-                }
-                None => {
-                    self.manager_state.operation_status =
-                        plugin_manager::NativePluginManagerOperationStatus::Error(
-                            i18n.t("plugin.install_error"),
-                        );
-                    false
-                }
-            },
         }
     }
 

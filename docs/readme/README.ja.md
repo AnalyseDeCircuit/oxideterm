@@ -205,7 +205,7 @@ UI は GPUI で直接描画され、DOM/CSS/JavaScript rendering pipeline はあ
 
 拡張機能とサポート機能は、Rust が所有する明確な境界内で動作します。
 
-- Plugins は manifest-only、WASM、通常のプロセスの実行経路をサポートします。WASM は Wasmtime/WASI または制御された host 呼び出しを持つ sidecar を使い、プロセス型は OS サンドボックスのないローカルプロセスです。
+- Plugins は manifest-only、WASM、通常のプロセスの実行経路をサポートします。WASM は組み込みの Wasmtime/WASI ランタイムを使い、プロセス型は OS サンドボックスのないローカルプロセスです。
 - CLI はドメイン crate に直接リンクし、doctor、settings、connections、転送、ポータブルバンドル、バックアップ、レポートを扱います
 - 診断は秘密を含む生ペイロードではなく、件数、パス、機能フラグ、マスク済みヒントを優先します
 - 状態を変更する CLI 処理はドライラン計画、`--yes` 保護、ロールバック用バックアップを使います

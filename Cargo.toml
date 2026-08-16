@@ -24,7 +24,6 @@ members = [
   "crates/oxideterm-plugin-manifest",
   "crates/oxideterm-plugin-protocol",
   "crates/oxideterm-plugin-registry",
-  "crates/oxideterm-plugin-runtime-install",
   "crates/oxideterm-plugin-wasm-runtime",
   "crates/oxideterm-ai",
   "crates/oxideterm-ai-tasks",

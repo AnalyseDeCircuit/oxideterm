@@ -7830,7 +7830,6 @@ dependencies = [
  "oxideterm-plugin-host-api",
  "oxideterm-plugin-protocol",
  "oxideterm-plugin-registry",
- "oxideterm-plugin-runtime-install",
  "oxideterm-portable-runtime",
  "oxideterm-preview",
  "oxideterm-public-mcp",
@@ -8181,22 +8180,6 @@ dependencies = [
  "semver",
  "serde_json",
  "sha2 0.10.9",
- "zip",
-]
-
-[[package]]
-name = "oxideterm-plugin-runtime-install"
-version = "2.0.20"
-dependencies = [
- "flate2",
- "futures-util",
- "oxideterm-network-proxy",
- "oxideterm-plugin-protocol",
- "reqwest",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tar",
  "zip",
 ]
 

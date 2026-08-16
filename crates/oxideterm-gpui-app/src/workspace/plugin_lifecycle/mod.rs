@@ -1223,11 +1223,8 @@ impl WorkspaceApp {
 
     pub(super) fn bootstrap_native_plugin_runtime(&mut self, cx: &mut Context<Self>) {
         let host_api_resolver = self.native_plugin_host_api_resolver(cx);
-        let wasm_sidecar_path =
-            plugin_runtime::installed_wasm_sidecar_binary_path(self.settings_store.path());
-        let wasm_sidecar_path = wasm_sidecar_path.is_file().then_some(wasm_sidecar_path);
         let _started = self.plugin_entity.update(cx, |plugins, _cx| {
-            plugins.start_runtime_bootstrap(host_api_resolver, wasm_sidecar_path)
+            plugins.start_runtime_bootstrap(host_api_resolver)
         });
         cx.notify();
     }

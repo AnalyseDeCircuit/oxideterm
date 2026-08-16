@@ -210,7 +210,7 @@ Tệp từ xa là một phần của cùng không gian làm việc của nút, k
 
 Nhánh gốc giữ phần mở rộng và bề mặt hỗ trợ trong ranh giới Rust gốc:
 
-- Plugin hỗ trợ đường chạy manifest-only, WASM và process thông thường. WASM dùng Wasmtime/WASI hoặc sidecar với lời gọi host được kiểm soát; process plugin là tiến trình cục bộ không có sandbox cấp hệ điều hành.
+- Plugin hỗ trợ đường chạy manifest-only, WASM và process thông thường. WASM dùng runtime Wasmtime/WASI tích hợp; process plugin là tiến trình cục bộ không có sandbox cấp hệ điều hành.
 - CLI link trực tiếp crate miền cho doctor, settings, connections, forwards, gói di động, backups và reports
 - Chẩn đoán ưu tiên số đếm, đường dẫn, cờ tính năng và gợi ý đã che thay vì payload thô có bí mật
 - CLI flows có thay đổi state dùng dry-run plans, `--yes` guards và rollback backups khi phù hợp
