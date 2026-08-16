@@ -1313,6 +1313,10 @@ impl WorkspaceApp {
             SettingsInput::NativePluginRegistryUrl => {
                 self.plugin_manager_state(cx).registry_url_draft.clone()
             }
+            SettingsInput::NativePluginMarketplaceSearch => self
+                .plugin_manager_state(cx)
+                .marketplace_search_draft
+                .clone(),
             SettingsInput::PortableCurrentPassword
             | SettingsInput::PortableNewPassword
             | SettingsInput::PortableConfirmPassword => String::new(),
@@ -1415,6 +1419,13 @@ impl WorkspaceApp {
                 let draft = self.settings_input_draft.trim().to_string();
                 self.update_plugin_manager_state(cx, |manager| {
                     manager.registry_url_draft = draft;
+                });
+                cx.notify();
+            }
+            SettingsInput::NativePluginMarketplaceSearch => {
+                let draft = self.settings_input_draft.trim().to_string();
+                self.update_plugin_manager_state(cx, |manager| {
+                    manager.marketplace_search_draft = draft;
                 });
                 cx.notify();
             }

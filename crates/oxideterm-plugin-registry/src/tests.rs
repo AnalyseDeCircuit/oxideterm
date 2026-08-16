@@ -416,6 +416,7 @@ fn plugin_package_install_supports_flat_nested_conflict_and_updates() {
                     ]),
                     homepage: None,
                     updated_at: None,
+                    packages: Vec::new(),
                 },
                 NativePluginRegistryEntry {
                     id: "com.example.other".to_string(),
@@ -431,6 +432,7 @@ fn plugin_package_install_supports_flat_nested_conflict_and_updates() {
                     capabilities_summary: None,
                     homepage: None,
                     updated_at: None,
+                    packages: Vec::new(),
                 },
             ],
         },

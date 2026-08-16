@@ -235,6 +235,15 @@ pub(crate) fn native_plugin_staging_dir_name(prefix: &str) -> String {
 
 #[allow(dead_code)]
 pub(crate) fn native_plugin_version_is_newer(new_version: &str, old_version: &str) -> bool {
+    if let (Ok(new_version), Ok(old_version)) = (
+        semver::Version::parse(new_version),
+        semver::Version::parse(old_version),
+    ) {
+        return new_version > old_version;
+    }
+
+    // Preserve comparison for legacy manifests that predate semantic-version
+    // validation while official marketplace entries use strict SemVer.
     let new_parts = native_plugin_version_parts(new_version);
     let old_parts = native_plugin_version_parts(old_version);
     for index in 0..new_parts.len().max(old_parts.len()) {

@@ -258,6 +258,7 @@ impl WorkspaceApp {
             let accepted = self.plugin_entity.update(cx, |plugins, _cx| {
                 plugins.start_package_install(
                     settings_path,
+                    None,
                     zeroize::Zeroizing::new(package_url.to_string()),
                     checksum,
                     overwrite,

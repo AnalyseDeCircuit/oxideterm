@@ -5,6 +5,14 @@
 
 use super::*;
 
+/// Official catalog endpoint shipped with OxideTerm builds.
+pub const OFFICIAL_NATIVE_PLUGIN_REGISTRY_URL: &str = "https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm-plugins/main/registry/v1/index.json";
+const NATIVE_PLUGIN_REGISTRY_VERSION: u32 = 1;
+// The catalog is metadata, not a package transport. Keep malformed endpoints
+// from allocating package-sized responses on the application runtime.
+const NATIVE_PLUGIN_REGISTRY_MAX_BYTES: u64 = 2 * 1024 * 1024;
+const PORTABLE_PLUGIN_PACKAGE_TARGET: &str = "any";
+
 #[derive(Clone, Debug, Default)]
 pub struct NativePluginRegistry {
     plugins: Vec<NativePluginInfo>,
@@ -172,12 +180,93 @@ impl NativePluginRegistry {
                 response.status().as_u16()
             ));
         }
+        if let Some(content_length) = response.content_length()
+            && content_length > NATIVE_PLUGIN_REGISTRY_MAX_BYTES
+        {
+            return Err(format!(
+                "Plugin registry too large: {content_length} bytes (max {NATIVE_PLUGIN_REGISTRY_MAX_BYTES} bytes)"
+            ));
+        }
         let body = response
-            .text()
+            .bytes()
             .await
             .map_err(|error| format!("Failed to read registry response: {error}"))?;
-        serde_json::from_str(&body)
-            .map_err(|error| format!("Failed to parse registry index: {error}"))
+        if body.len() as u64 > NATIVE_PLUGIN_REGISTRY_MAX_BYTES {
+            return Err(format!(
+                "Plugin registry too large: {} bytes (max {NATIVE_PLUGIN_REGISTRY_MAX_BYTES} bytes)",
+                body.len()
+            ));
+        }
+        let registry = serde_json::from_slice(&body)
+            .map_err(|error| format!("Failed to parse registry index: {error}"))?;
+        validate_native_plugin_registry(&registry)?;
+        Ok(registry)
+    }
+
+    pub async fn fetch_official_plugin_registry() -> Result<NativePluginRegistryIndex, String> {
+        Self::fetch_plugin_registry(OFFICIAL_NATIVE_PLUGIN_REGISTRY_URL).await
+    }
+
+    /// Resolves one immutable package without exposing platform selection to the UI.
+    pub fn resolve_registry_package(
+        entry: &NativePluginRegistryEntry,
+    ) -> Result<NativePluginRegistryPackage, String> {
+        let host_target = native_plugin_host_target().ok_or_else(|| {
+            format!(
+                "Plugin packages are not available for {}/{}",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            )
+        })?;
+        if let Some(package) = entry
+            .packages
+            .iter()
+            .find(|package| package.target == host_target)
+            .or_else(|| {
+                entry
+                    .packages
+                    .iter()
+                    .find(|package| package.target == PORTABLE_PLUGIN_PACKAGE_TARGET)
+            })
+        {
+            return Ok(package.clone());
+        }
+
+        // Version 1 clients still accept the original single-package shape for
+        // custom registries created before platform packages were introduced.
+        if !entry.download_url.trim().is_empty() {
+            return Ok(NativePluginRegistryPackage {
+                target: PORTABLE_PLUGIN_PACKAGE_TARGET.to_string(),
+                download_url: entry.download_url.clone(),
+                checksum: entry.checksum.clone().unwrap_or_default(),
+                size: entry.size,
+            });
+        }
+        Err(format!(
+            "Plugin \"{}\" has no package for {host_target}",
+            entry.id
+        ))
+    }
+
+    pub fn registry_entry_supports_current_host(entry: &NativePluginRegistryEntry) -> bool {
+        Self::resolve_registry_package(entry).is_ok()
+    }
+
+    pub fn registry_entry_supports_current_version(entry: &NativePluginRegistryEntry) -> bool {
+        let Some(required) = entry.min_oxideterm_version.as_deref() else {
+            return true;
+        };
+        let Ok(required) = semver::Version::parse(required) else {
+            return false;
+        };
+        semver::Version::parse(env!("CARGO_PKG_VERSION")).is_ok_and(|current| current >= required)
+    }
+
+    pub fn registry_entry_is_update(
+        entry: &NativePluginRegistryEntry,
+        installed_version: &str,
+    ) -> bool {
+        native_plugin_version_is_newer(&entry.version, installed_version)
     }
 
     #[allow(dead_code)]
@@ -187,36 +276,30 @@ impl NativePluginRegistry {
         checksum: Option<&str>,
         overwrite: bool,
     ) -> Result<NativePluginUrlInstallResult, String> {
-        validate_native_plugin_package_url(download_url)?;
-        let client = oxideterm_network_proxy::application_http_client_builder()
-            .map_err(|error| format!("Failed to apply application proxy: {error}"))?
-            .timeout(std::time::Duration::from_secs(120))
-            .build()
-            .map_err(|error| format!("Failed to create HTTP client: {error}"))?;
-        let response = client
-            .get(download_url)
-            .send()
-            .await
-            .map_err(|error| format!("Failed to download plugin: {error}"))?;
-        if !response.status().is_success() {
-            return Err(format!(
-                "Download returned HTTP {}",
-                response.status().as_u16()
-            ));
-        }
-        if let Some(content_length) = response.content_length()
-            && content_length > PLUGIN_PACKAGE_MAX_BYTES
-        {
-            return Err(format!(
-                "Plugin package too large: {} bytes (max {} bytes)",
-                content_length, PLUGIN_PACKAGE_MAX_BYTES
-            ));
-        }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| format!("Failed to read download body: {error}"))?;
+        let bytes = download_native_plugin_package(download_url).await?;
         install_native_plugin_package_bytes(settings_path, &bytes, checksum, overwrite, None)
+    }
+
+    /// Installs a marketplace package only after its catalog identity and
+    /// required digest have been checked against the package manifest.
+    pub async fn install_managed_plugin_package_from_url(
+        settings_path: &Path,
+        expected_id: &str,
+        download_url: &str,
+        checksum: &str,
+        overwrite: bool,
+    ) -> Result<NativePluginUrlInstallResult, String> {
+        if checksum.trim().is_empty() {
+            return Err("Marketplace plugin package is missing SHA-256".to_string());
+        }
+        let bytes = download_native_plugin_package(download_url).await?;
+        install_native_plugin_package_bytes(
+            settings_path,
+            &bytes,
+            Some(checksum),
+            overwrite,
+            Some(expected_id),
+        )
     }
 
     #[allow(dead_code)]
@@ -232,9 +315,11 @@ impl NativePluginRegistry {
             .plugins
             .into_iter()
             .filter(|entry| {
-                installed_versions
-                    .get(entry.id.as_str())
-                    .is_some_and(|version| native_plugin_version_is_newer(&entry.version, version))
+                Self::registry_entry_supports_current_host(entry)
+                    && Self::registry_entry_supports_current_version(entry)
+                    && installed_versions
+                        .get(entry.id.as_str())
+                        .is_some_and(|version| Self::registry_entry_is_update(entry, version))
             })
             .collect()
     }
@@ -622,5 +707,128 @@ impl NativePluginRegistry {
                 break;
             }
         }
+    }
+}
+
+async fn download_native_plugin_package(download_url: &str) -> Result<Vec<u8>, String> {
+    validate_native_plugin_package_url(download_url)?;
+    let client = oxideterm_network_proxy::application_http_client_builder()
+        .map_err(|error| format!("Failed to apply application proxy: {error}"))?
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|error| format!("Failed to create HTTP client: {error}"))?;
+    let response = client
+        .get(download_url)
+        .send()
+        .await
+        .map_err(|error| format!("Failed to download plugin: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Download returned HTTP {}",
+            response.status().as_u16()
+        ));
+    }
+    if let Some(content_length) = response.content_length()
+        && content_length > PLUGIN_PACKAGE_MAX_BYTES
+    {
+        return Err(format!(
+            "Plugin package too large: {} bytes (max {} bytes)",
+            content_length, PLUGIN_PACKAGE_MAX_BYTES
+        ));
+    }
+    response
+        .bytes()
+        .await
+        .map(|bytes| bytes.to_vec())
+        .map_err(|error| format!("Failed to read download body: {error}"))
+}
+
+fn validate_native_plugin_registry(registry: &NativePluginRegistryIndex) -> Result<(), String> {
+    if registry.version != NATIVE_PLUGIN_REGISTRY_VERSION {
+        return Err(format!(
+            "Unsupported plugin registry version {}",
+            registry.version
+        ));
+    }
+    let mut plugin_ids = std::collections::HashSet::new();
+    for entry in &registry.plugins {
+        validate_native_plugin_id(&entry.id)
+            .map_err(|error| format!("Invalid registry plugin id: {error}"))?;
+        if !plugin_ids.insert(entry.id.as_str()) {
+            return Err(format!("Duplicate plugin registry id \"{}\"", entry.id));
+        }
+        if entry.name.trim().is_empty() {
+            return Err(format!(
+                "Plugin registry entry \"{}\" has no name",
+                entry.id
+            ));
+        }
+        semver::Version::parse(&entry.version).map_err(|error| {
+            format!(
+                "Plugin registry entry \"{}\" has invalid version: {error}",
+                entry.id
+            )
+        })?;
+        if let Some(required) = entry.min_oxideterm_version.as_deref() {
+            semver::Version::parse(required).map_err(|error| {
+                format!(
+                    "Plugin registry entry \"{}\" has invalid minimum OxideTerm version: {error}",
+                    entry.id
+                )
+            })?;
+        }
+        let mut package_targets = std::collections::HashSet::new();
+        for package in &entry.packages {
+            if !package_targets.insert(package.target.as_str()) {
+                return Err(format!(
+                    "Plugin registry entry \"{}\" has duplicate target \"{}\"",
+                    entry.id, package.target
+                ));
+            }
+            let package_url = reqwest::Url::parse(&package.download_url).map_err(|error| {
+                format!(
+                    "Plugin registry entry \"{}\" has invalid package URL: {error}",
+                    entry.id
+                )
+            })?;
+            if package_url.scheme() != "https" {
+                return Err(format!(
+                    "Plugin registry entry \"{}\" package URL must use HTTPS",
+                    entry.id
+                ));
+            }
+            let checksum = package
+                .checksum
+                .strip_prefix("sha256:")
+                .unwrap_or(&package.checksum);
+            if checksum.len() != 64 || !checksum.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err(format!(
+                    "Plugin registry entry \"{}\" has invalid SHA-256",
+                    entry.id
+                ));
+            }
+            if package
+                .size
+                .is_some_and(|size| size > PLUGIN_PACKAGE_MAX_BYTES)
+            {
+                return Err(format!(
+                    "Plugin registry entry \"{}\" package exceeds the size limit",
+                    entry.id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn native_plugin_host_target() -> Option<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", "aarch64") => Some("aarch64-apple-darwin"),
+        ("macos", "x86_64") => Some("x86_64-apple-darwin"),
+        ("linux", "aarch64") => Some("aarch64-unknown-linux-gnu"),
+        ("linux", "x86_64") => Some("x86_64-unknown-linux-gnu"),
+        ("windows", "aarch64") => Some("aarch64-pc-windows-msvc"),
+        ("windows", "x86_64") => Some("x86_64-pc-windows-msvc"),
+        _ => None,
     }
 }

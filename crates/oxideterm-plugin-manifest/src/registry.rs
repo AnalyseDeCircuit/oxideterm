@@ -49,6 +49,7 @@ pub struct NativePluginRegistryEntry {
     pub version: String,
     #[serde(default)]
     pub min_oxideterm_version: Option<String>,
+    #[serde(default)]
     pub download_url: String,
     #[serde(default)]
     pub checksum: Option<String>,
@@ -62,6 +63,21 @@ pub struct NativePluginRegistryEntry {
     pub homepage: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
+    /// Immutable release packages available for specific host targets.
+    #[serde(default)]
+    pub packages: Vec<NativePluginRegistryPackage>,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginRegistryPackage {
+    /// Rust-style target triple, or `any` for portable packages.
+    pub target: String,
+    pub download_url: String,
+    pub checksum: String,
+    #[serde(default)]
+    pub size: Option<u64>,
 }
 
 #[allow(dead_code)]

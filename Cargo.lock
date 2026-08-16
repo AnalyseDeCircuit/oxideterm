@@ -8178,6 +8178,7 @@ dependencies = [
  "oxideterm-plugin-manifest",
  "oxideterm-plugin-protocol",
  "reqwest",
+ "semver",
  "serde_json",
  "sha2 0.10.9",
  "zip",

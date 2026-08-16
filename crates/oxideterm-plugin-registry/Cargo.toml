@@ -10,6 +10,7 @@ oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 oxideterm-plugin-manifest = { path = "../oxideterm-plugin-manifest" }
 oxideterm-plugin-protocol = { path = "../oxideterm-plugin-protocol" }
 reqwest.workspace = true
+semver.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 zip.workspace = true

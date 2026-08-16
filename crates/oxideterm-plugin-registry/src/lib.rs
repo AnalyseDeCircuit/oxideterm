@@ -29,15 +29,16 @@ pub use oxideterm_plugin_manifest::{
     NativePluginHostMonitorOutputDef, NativePluginHostMonitorOutputFormat, NativePluginInfo,
     NativePluginInstalledInfo, NativePluginManifest, NativePluginPermissions,
     NativePluginProcessActivationPlan, NativePluginRegistryEntry, NativePluginRegistryIndex,
-    NativePluginRuntime, NativePluginRuntimeActivityBarItemContribution,
-    NativePluginRuntimeCommandContribution, NativePluginRuntimeContextMenuContribution,
-    NativePluginRuntimeContextMenuItem, NativePluginRuntimeEventSubscriptionContribution,
-    NativePluginRuntimeKeybindingContribution, NativePluginRuntimeKind, NativePluginRuntimePlan,
-    NativePluginRuntimeSidebarPanelContribution, NativePluginRuntimeStatusItemContribution,
-    NativePluginRuntimeTabViewContribution, NativePluginRuntimeTerminalHookContribution,
-    NativePluginSettingContribution, NativePluginSettingDef, NativePluginSettingOption,
-    NativePluginShortcutContribution, NativePluginShortcutDef, NativePluginSidebarContribution,
-    NativePluginSidebarDef, NativePluginState, NativePluginTabContribution, NativePluginTabDef,
+    NativePluginRegistryPackage, NativePluginRuntime,
+    NativePluginRuntimeActivityBarItemContribution, NativePluginRuntimeCommandContribution,
+    NativePluginRuntimeContextMenuContribution, NativePluginRuntimeContextMenuItem,
+    NativePluginRuntimeEventSubscriptionContribution, NativePluginRuntimeKeybindingContribution,
+    NativePluginRuntimeKind, NativePluginRuntimePlan, NativePluginRuntimeSidebarPanelContribution,
+    NativePluginRuntimeStatusItemContribution, NativePluginRuntimeTabViewContribution,
+    NativePluginRuntimeTerminalHookContribution, NativePluginSettingContribution,
+    NativePluginSettingDef, NativePluginSettingOption, NativePluginShortcutContribution,
+    NativePluginShortcutDef, NativePluginSidebarContribution, NativePluginSidebarDef,
+    NativePluginState, NativePluginTabContribution, NativePluginTabDef,
     NativePluginTerminalHooksDef, NativePluginTransportContribution, NativePluginUrlInstallResult,
     NativePluginWasmActivationPlan,
 };
@@ -81,7 +82,7 @@ pub use permissions::{
     native_plugin_capability_approval_matches, native_plugin_requested_capabilities,
     native_plugin_requires_permission_review, normalize_native_plugin_capabilities,
 };
-pub use registry::NativePluginRegistry;
+pub use registry::{NativePluginRegistry, OFFICIAL_NATIVE_PLUGIN_REGISTRY_URL};
 pub use state_semantics::{
     PLUGIN_ID_CONFLICT_ERROR_PREFIX, native_plugin_conflict_id, native_plugin_error_has_code,
     native_plugin_state_is_active_like, native_plugin_state_is_error_like,
