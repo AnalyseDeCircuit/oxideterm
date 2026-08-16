@@ -4,17 +4,24 @@
 //! Claude Code process launch and stream-json protocol handling.
 
 use super::*;
+use std::io::Write;
 
 pub(super) async fn stream_claude_code_provider(
     config: &AdapterConfig,
     active_runs: &ActiveRuns,
     session_id: SessionId,
-    cwd: PathBuf,
-    previous_session_id: Option<String>,
-    selected_model: Option<String>,
+    session: SessionState,
     prompt: String,
     connection: ConnectionTo<Client>,
 ) -> Result<ProviderOutcome, agent_client_protocol::Error> {
+    let SessionState {
+        cwd,
+        mcp_servers,
+        claude_session_id: previous_session_id,
+        selected_model,
+        ..
+    } = session;
+    let mcp_config_file = claude_mcp_config_file(&mcp_servers)?;
     let mut command = Command::new(config.command.trim());
     command.current_dir(cwd);
     command.args([
@@ -24,6 +31,14 @@ pub(super) async fn stream_claude_code_provider(
         "--verbose",
         "--include-partial-messages",
     ]);
+    if let Some(config_file) = mcp_config_file.as_ref() {
+        command.arg("--allowedTools");
+        command.args(claude_mcp_allowed_tools(&mcp_servers));
+        // The file keeps authentication headers out of process arguments.
+        command.arg("--strict-mcp-config");
+        command.arg("--mcp-config");
+        command.arg(config_file.path());
+    }
     if let Some(previous_session_id) = previous_session_id {
         command.args(["--resume", previous_session_id.as_str()]);
     }
@@ -77,6 +92,90 @@ pub(super) async fn stream_claude_code_provider(
     .await;
     cleanup_active_run(active_runs, &session_id, run_id);
     outcome
+}
+
+fn claude_mcp_allowed_tools(servers: &[McpServer]) -> Vec<String> {
+    // OxideTerm applies its own immutable tool-call policy after the provider
+    // reaches this bridge, so Claude must not add a second interactive gate.
+    servers
+        .iter()
+        .enumerate()
+        .map(|(index, server)| format!("mcp__{}__*", provider_mcp_server_id(server, index)))
+        .collect()
+}
+
+fn claude_mcp_config_file(
+    servers: &[McpServer],
+) -> Result<Option<tempfile::NamedTempFile>, agent_client_protocol::Error> {
+    if servers.is_empty() {
+        return Ok(None);
+    }
+    let mut config = claude_mcp_config_value(servers)?;
+    let mut file = tempfile::NamedTempFile::new()
+        .map_err(agent_client_protocol::Error::into_internal_error)?;
+    let write_result = serde_json::to_writer(file.as_file_mut(), &config);
+    zeroize_json_strings(&mut config);
+    write_result.map_err(agent_client_protocol::Error::into_internal_error)?;
+    file.as_file_mut()
+        .flush()
+        .map_err(agent_client_protocol::Error::into_internal_error)?;
+    Ok(Some(file))
+}
+
+fn zeroize_json_strings(value: &mut Value) {
+    match value {
+        Value::String(value) => value.zeroize(),
+        Value::Array(values) => values.iter_mut().for_each(zeroize_json_strings),
+        Value::Object(values) => values.values_mut().for_each(zeroize_json_strings),
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+fn claude_mcp_config_value(servers: &[McpServer]) -> Result<Value, agent_client_protocol::Error> {
+    let mut configured = serde_json::Map::new();
+    for (server_index, server) in servers.iter().enumerate() {
+        let server_id = provider_mcp_server_id(server, server_index);
+        let value = match server {
+            McpServer::Http(server) => json!({
+                "type": "http",
+                "url": server.url,
+                "headers": server.headers.iter().map(|header| {
+                    (header.name.clone(), Value::String(header.value.clone()))
+                }).collect::<serde_json::Map<_, _>>(),
+            }),
+            McpServer::Sse(server) => json!({
+                "type": "sse",
+                "url": server.url,
+                "headers": server.headers.iter().map(|header| {
+                    (header.name.clone(), Value::String(header.value.clone()))
+                }).collect::<serde_json::Map<_, _>>(),
+            }),
+            McpServer::Stdio(server) => {
+                let Some(command) = server.command.to_str() else {
+                    configured.values_mut().for_each(zeroize_json_strings);
+                    return Err(agent_client_protocol::util::internal_error(
+                        "ACP MCP stdio command is not valid UTF-8",
+                    ));
+                };
+                json!({
+                    "type": "stdio",
+                    "command": command,
+                    "args": server.args,
+                    "env": server.env.iter().map(|variable| {
+                        (variable.name.clone(), Value::String(variable.value.clone()))
+                    }).collect::<serde_json::Map<_, _>>(),
+                })
+            }
+            _ => {
+                configured.values_mut().for_each(zeroize_json_strings);
+                return Err(agent_client_protocol::util::internal_error(
+                    "Claude ACP adapter received an unsupported MCP transport",
+                ));
+            }
+        };
+        configured.insert(server_id, value);
+    }
+    Ok(json!({ "mcpServers": configured }))
 }
 
 async fn read_claude_stream_json_stdout(
@@ -343,6 +442,7 @@ fn claude_tool_kind(name: &str) -> ToolKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_client_protocol::schema::v1::{HttpHeader, McpServerHttp};
 
     #[test]
     fn system_init_reports_the_resolved_claude_model() {
@@ -361,6 +461,38 @@ mod tests {
                 "model": "claude-sonnet-4-6",
             })),
             None
+        );
+    }
+
+    #[test]
+    fn claude_mcp_config_preserves_http_endpoint_and_authentication() {
+        const MCP_URL: &str = "http://127.0.0.1:43127/mcp";
+        const AUTHORIZATION: &str = "Bearer session-token";
+        let server = McpServer::Http(
+            McpServerHttp::new("OxideTerm Application Tools", MCP_URL)
+                .headers(vec![HttpHeader::new("Authorization", AUTHORIZATION)]),
+        );
+
+        let config = claude_mcp_config_value(std::slice::from_ref(&server))
+            .expect("Claude MCP configuration");
+        let configured = config
+            .get("mcpServers")
+            .and_then(Value::as_object)
+            .and_then(|servers| servers.values().next())
+            .expect("configured MCP server");
+
+        assert_eq!(configured.get("type").and_then(Value::as_str), Some("http"));
+        assert_eq!(configured.get("url").and_then(Value::as_str), Some(MCP_URL));
+        assert_eq!(
+            configured
+                .get("headers")
+                .and_then(|headers| headers.get("Authorization"))
+                .and_then(Value::as_str),
+            Some(AUTHORIZATION)
+        );
+        assert_eq!(
+            claude_mcp_allowed_tools(&[server]),
+            vec!["mcp__oxideterm_oxideterm_application_tools_1__*"]
         );
     }
 }

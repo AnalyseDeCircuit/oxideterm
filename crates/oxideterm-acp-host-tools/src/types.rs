@@ -9,6 +9,7 @@ pub struct AcpHostToolDefinition {
     pub name: String,
     pub description: String,
     pub input_schema: Value,
+    pub(crate) execution_name: String,
 }
 
 impl AcpHostToolDefinition {
@@ -17,8 +18,25 @@ impl AcpHostToolDefinition {
         description: impl Into<String>,
         input_schema: Value,
     ) -> Self {
+        let name = name.into();
+        Self {
+            execution_name: name.clone(),
+            name,
+            description: description.into(),
+            input_schema,
+        }
+    }
+
+    /// Builds a protocol-safe alias that executes a different application tool name.
+    pub fn with_execution_name(
+        name: impl Into<String>,
+        execution_name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: Value,
+    ) -> Self {
         Self {
             name: name.into(),
+            execution_name: execution_name.into(),
             description: description.into(),
             input_schema,
         }

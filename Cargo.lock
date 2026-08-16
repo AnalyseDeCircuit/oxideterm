@@ -7479,8 +7479,10 @@ dependencies = [
  "agent-client-protocol",
  "clap",
  "serde_json",
+ "tempfile",
  "tokio",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

@@ -76,8 +76,18 @@ impl WorkspaceApp {
                                 cx,
                             ))
                             .child(self.ai_acp_agent_add_button(
+                                AcpAgentPreset::GeminiCli.display_name().to_string(),
+                                Some(AcpAgentPreset::GeminiCli),
+                                cx,
+                            ))
+                            .child(self.ai_acp_agent_add_button(
                                 AcpAgentPreset::GithubCopilot.display_name().to_string(),
                                 Some(AcpAgentPreset::GithubCopilot),
+                                cx,
+                            ))
+                            .child(self.ai_acp_agent_add_button(
+                                AcpAgentPreset::OpenCode.display_name().to_string(),
+                                Some(AcpAgentPreset::OpenCode),
                                 cx,
                             )),
                     ),

@@ -216,15 +216,27 @@ pub(super) async fn stream_codex_app_server_provider(
     config: &AdapterConfig,
     active_runs: &ActiveRuns,
     session_id: SessionId,
-    cwd: PathBuf,
-    previous_thread_id: Option<String>,
-    selected_model: Option<String>,
+    session: SessionState,
     prompt: String,
     connection: ConnectionTo<Client>,
 ) -> Result<ProviderOutcome, agent_client_protocol::Error> {
+    let SessionState {
+        cwd,
+        mcp_servers,
+        codex_thread_id: previous_thread_id,
+        selected_model,
+        ..
+    } = session;
+    let mcp_launch = codex_mcp_launch_config(&mcp_servers)?;
     let mut command = Command::new(config.command.trim());
     command.current_dir(&cwd);
     command.args(["app-server", "--stdio"]);
+    for (name, value) in &mcp_launch.environment {
+        command.env(name, value);
+    }
+    for config_override in &mcp_launch.config_overrides {
+        command.args(["--config", config_override]);
+    }
     command.args(&config.extra_args);
     command.kill_on_drop(true);
     command.stdin(ProcessStdio::piped());
@@ -234,6 +246,10 @@ pub(super) async fn stream_codex_app_server_provider(
     let mut child = command
         .spawn()
         .map_err(agent_client_protocol::Error::into_internal_error)?;
+    // The child has inherited its launch environment; release and zeroize the
+    // adapter-owned authorization copies before the model turn starts.
+    drop(command);
+    drop(mcp_launch);
     if let Some(stderr) = child.stderr.take() {
         tokio::spawn(async move {
             let mut stderr = stderr;
@@ -280,6 +296,138 @@ pub(super) async fn stream_codex_app_server_provider(
     .await;
     cleanup_active_run(active_runs, &session_id, run_id);
     outcome
+}
+
+struct CodexMcpLaunchConfig {
+    config_overrides: Vec<String>,
+    environment: Vec<(String, String)>,
+}
+
+impl Drop for CodexMcpLaunchConfig {
+    fn drop(&mut self) {
+        // Provider process setup copies these values into operating-system
+        // launch structures; clear the adapter-owned copies immediately after.
+        self.config_overrides.zeroize();
+        for (name, value) in &mut self.environment {
+            name.zeroize();
+            value.zeroize();
+        }
+    }
+}
+
+fn codex_mcp_launch_config(
+    servers: &[McpServer],
+) -> Result<CodexMcpLaunchConfig, agent_client_protocol::Error> {
+    let mut launch = CodexMcpLaunchConfig {
+        config_overrides: Vec::new(),
+        environment: Vec::new(),
+    };
+    let mut environment_indices = HashMap::<String, usize>::new();
+
+    for (server_index, server) in servers.iter().enumerate() {
+        let server_id = provider_mcp_server_id(server, server_index);
+        let config_root = format!("mcp_servers.{server_id}");
+        match server {
+            McpServer::Http(server) => {
+                launch
+                    .config_overrides
+                    .push(format!("{config_root}.url={}", toml_string(&server.url)?));
+                launch
+                    .config_overrides
+                    .push(format!("{config_root}.required=true"));
+                launch.config_overrides.push(format!(
+                    "{config_root}.default_tools_approval_mode=\"approve\""
+                ));
+                for (header_index, header) in server.headers.iter().enumerate() {
+                    let environment_name = format!(
+                        "OXIDETERM_ACP_MCP_{}_HEADER_{}",
+                        server_index + 1,
+                        header_index + 1
+                    );
+                    launch
+                        .environment
+                        .push((environment_name.clone(), header.value.clone()));
+                    environment_indices
+                        .insert(environment_name.clone(), launch.environment.len() - 1);
+                    launch.config_overrides.push(format!(
+                        "{config_root}.env_http_headers.{}={}",
+                        toml_key(&header.name)?,
+                        toml_string(&environment_name)?
+                    ));
+                }
+            }
+            McpServer::Stdio(server) => {
+                let command = server.command.to_str().ok_or_else(|| {
+                    agent_client_protocol::util::internal_error(
+                        "ACP MCP stdio command is not valid UTF-8",
+                    )
+                })?;
+                launch
+                    .config_overrides
+                    .push(format!("{config_root}.command={}", toml_string(command)?));
+                launch.config_overrides.push(format!(
+                    "{config_root}.args={}",
+                    serde_json::to_string(&server.args)
+                        .map_err(agent_client_protocol::Error::into_internal_error)?
+                ));
+                launch
+                    .config_overrides
+                    .push(format!("{config_root}.required=true"));
+                launch.config_overrides.push(format!(
+                    "{config_root}.default_tools_approval_mode=\"approve\""
+                ));
+                let mut inherited_names = Vec::with_capacity(server.env.len());
+                for variable in &server.env {
+                    if let Some(existing_index) = environment_indices.get(&variable.name) {
+                        if launch.environment[*existing_index].1 != variable.value {
+                            return Err(agent_client_protocol::util::internal_error(
+                                "ACP MCP stdio servers define conflicting environment values",
+                            ));
+                        }
+                    } else {
+                        let environment_index = launch.environment.len();
+                        launch
+                            .environment
+                            .push((variable.name.clone(), variable.value.clone()));
+                        environment_indices.insert(variable.name.clone(), environment_index);
+                    }
+                    inherited_names.push(variable.name.clone());
+                }
+                if !inherited_names.is_empty() {
+                    launch.config_overrides.push(format!(
+                        "{config_root}.env_vars={}",
+                        serde_json::to_string(&inherited_names)
+                            .map_err(agent_client_protocol::Error::into_internal_error)?
+                    ));
+                }
+            }
+            McpServer::Sse(_) => {
+                return Err(agent_client_protocol::util::internal_error(
+                    "Codex ACP adapter does not advertise legacy SSE MCP transport",
+                ));
+            }
+            _ => {
+                return Err(agent_client_protocol::util::internal_error(
+                    "Codex ACP adapter received an unsupported MCP transport",
+                ));
+            }
+        }
+    }
+
+    Ok(launch)
+}
+
+fn toml_string(value: &str) -> Result<String, agent_client_protocol::Error> {
+    serde_json::to_string(value).map_err(agent_client_protocol::Error::into_internal_error)
+}
+
+fn toml_key(value: &str) -> Result<String, agent_client_protocol::Error> {
+    if value.trim().is_empty() {
+        return Err(agent_client_protocol::util::internal_error(
+            "ACP MCP HTTP header name is empty",
+        ));
+    }
+    toml_string(value)
 }
 
 struct CodexAppServerClient {
@@ -891,6 +1039,7 @@ fn codex_visible_item_tool_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_client_protocol::schema::v1::{HttpHeader, McpServerHttp};
 
     #[test]
     fn model_catalog_prefers_configured_model_and_preserves_custom_model() {
@@ -986,6 +1135,30 @@ mod tests {
 
             assert!(codex_visible_item_tool_metadata(item_type, &item).is_none());
         }
+    }
+
+    #[test]
+    fn codex_mcp_launch_keeps_http_credentials_out_of_arguments() {
+        const MCP_URL: &str = "http://127.0.0.1:43127/mcp";
+        const AUTHORIZATION: &str = "Bearer session-token";
+        let server = McpServer::Http(
+            McpServerHttp::new("OxideTerm Application Tools", MCP_URL)
+                .headers(vec![HttpHeader::new("Authorization", AUTHORIZATION)]),
+        );
+
+        let launch = codex_mcp_launch_config(&[server]).expect("Codex MCP launch configuration");
+        let arguments = launch.config_overrides.join("\n");
+
+        assert!(arguments.contains(MCP_URL));
+        assert!(arguments.contains("env_http_headers"));
+        assert!(arguments.contains("default_tools_approval_mode=\"approve\""));
+        assert!(!arguments.contains(AUTHORIZATION));
+        assert!(
+            launch
+                .environment
+                .iter()
+                .any(|(_, value)| value == AUTHORIZATION)
+        );
     }
 }
 

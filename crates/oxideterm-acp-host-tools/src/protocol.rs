@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::RwLock};
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -11,10 +11,27 @@ pub(crate) const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 pub(crate) const MCP_REQUEST_BODY_LIMIT: usize = 1024 * 1024;
 
 pub(crate) struct AcpHostToolsProtocol {
-    definitions: Arc<Vec<AcpHostToolDefinition>>,
-    definitions_by_name: Arc<HashMap<String, AcpHostToolDefinition>>,
+    catalog: RwLock<AcpHostToolCatalog>,
     call_tx: mpsc::Sender<AcpHostToolCall>,
     authorization_digest: [u8; 32],
+}
+
+struct AcpHostToolCatalog {
+    definitions: Vec<AcpHostToolDefinition>,
+    execution_names: HashMap<String, String>,
+}
+
+impl AcpHostToolCatalog {
+    fn new(definitions: Vec<AcpHostToolDefinition>) -> Self {
+        let execution_names = definitions
+            .iter()
+            .map(|definition| (definition.name.clone(), definition.execution_name.clone()))
+            .collect();
+        Self {
+            definitions,
+            execution_names,
+        }
+    }
 }
 
 impl AcpHostToolsProtocol {
@@ -23,17 +40,18 @@ impl AcpHostToolsProtocol {
         call_tx: mpsc::Sender<AcpHostToolCall>,
         authorization_header: &str,
     ) -> Self {
-        let definitions_by_name = definitions
-            .iter()
-            .cloned()
-            .map(|definition| (definition.name.clone(), definition))
-            .collect();
         Self {
-            definitions: Arc::new(definitions),
-            definitions_by_name: Arc::new(definitions_by_name),
+            catalog: RwLock::new(AcpHostToolCatalog::new(definitions)),
             call_tx,
             authorization_digest: authorization_digest(authorization_header.as_bytes()),
         }
+    }
+
+    pub(crate) fn replace_definitions(&self, definitions: Vec<AcpHostToolDefinition>) {
+        // The provider reconnects to this conversation-scoped server for each
+        // turn, so the next tools/list observes current policy and MCP state.
+        *self.catalog.write().expect("ACP tool catalog write lock") =
+            AcpHostToolCatalog::new(definitions);
     }
 
     pub(crate) fn authorized(&self, authorization_header: Option<&[u8]>) -> bool {
@@ -83,7 +101,8 @@ impl AcpHostToolsProtocol {
             )),
             "ping" => ProtocolResponse::json(json_rpc_result(id, json!({}))),
             "tools/list" => {
-                let tools = self
+                let catalog = self.catalog.read().expect("ACP tool catalog read lock");
+                let tools = catalog
                     .definitions
                     .iter()
                     .map(|definition| {
@@ -105,13 +124,20 @@ impl AcpHostToolsProtocol {
         let Some(name) = request.pointer("/params/name").and_then(Value::as_str) else {
             return ProtocolResponse::json(json_rpc_error(id, -32602, "Tool name is required."));
         };
-        if !self.definitions_by_name.contains_key(name) {
+        let execution_name = self
+            .catalog
+            .read()
+            .expect("ACP tool catalog read lock")
+            .execution_names
+            .get(name)
+            .cloned();
+        let Some(execution_name) = execution_name else {
             return ProtocolResponse::json(json_rpc_error(
                 id,
                 -32602,
                 "Tool is not exposed by OxideTerm.",
             ));
-        }
+        };
         let arguments = request
             .pointer("/params/arguments")
             .cloned()
@@ -126,7 +152,7 @@ impl AcpHostToolsProtocol {
         let (response_tx, response_rx) = oneshot::channel();
         let call = AcpHostToolCall::new(
             uuid::Uuid::new_v4().to_string(),
-            name.to_string(),
+            execution_name,
             arguments,
             response_tx,
         );
@@ -191,6 +217,7 @@ impl ProtocolResponse {
 mod tests {
     use super::*;
     use crate::AcpHostToolDefinition;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn full_executor_queue_rejects_additional_tool_calls() {

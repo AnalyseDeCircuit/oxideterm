@@ -74,6 +74,7 @@ pub(in crate::workspace) struct AcpThreadStart {
     pub(in crate::workspace) route: AcpTurnRoute,
     pub(in crate::workspace) launch_config: oxideterm_ai::AcpLaunchConfig,
     pub(in crate::workspace) host_policy: oxideterm_ai::AcpHostCapabilityPolicy,
+    pub(in crate::workspace) application_tool_definitions: Vec<oxideterm_ai::AiToolDefinition>,
     pub(in crate::workspace) application_tool_turn: super::sidebar::AcpApplicationToolTurn,
     pub(in crate::workspace) request: oxideterm_ai::AcpManagedPromptRequest,
 }
@@ -147,18 +148,50 @@ pub(in crate::workspace) struct AcpVisibleTerminal {
 
 impl EventEmitter<AcpWorkspaceEvent> for AcpWorkspaceEntity {}
 
-fn acp_application_tool_definitions() -> Vec<oxideterm_acp_host_tools::AcpHostToolDefinition> {
-    // ACP receives the canonical provider catalog instead of maintaining a second schema list.
-    oxideterm_ai::orchestrator_tool_definitions()
-        .into_iter()
-        .map(|definition| {
-            oxideterm_acp_host_tools::AcpHostToolDefinition::new(
-                definition.name,
-                definition.description,
-                definition.parameters,
+const ACP_EXTERNAL_MCP_TOOL_PREFIX: &str = "external_mcp";
+const ACP_PROXY_TOOL_STEM_MAX_CHARS: usize = 96;
+
+fn acp_application_tool_definitions(
+    definitions: &[oxideterm_ai::AiToolDefinition],
+) -> Vec<oxideterm_acp_host_tools::AcpHostToolDefinition> {
+    // ACP receives the current provider catalog instead of maintaining a
+    // second schema list or receiving external MCP credentials.
+    definitions
+        .iter()
+        .enumerate()
+        .map(|(index, definition)| {
+            let exposed_name = acp_exposed_tool_name(&definition.name, index);
+            oxideterm_acp_host_tools::AcpHostToolDefinition::with_execution_name(
+                exposed_name,
+                definition.name.clone(),
+                definition.description.clone(),
+                definition.parameters.clone(),
             )
         })
         .collect()
+}
+
+fn acp_exposed_tool_name(name: &str, index: usize) -> String {
+    if !oxideterm_ai::is_mcp_tool_name(name) {
+        return name.to_string();
+    }
+    // OxideTerm's internal MCP routing name contains colons, while MCP-facing
+    // tool names use the portable letters, digits, underscore, dash and dot set.
+    let mut stem = String::with_capacity(name.len().min(ACP_PROXY_TOOL_STEM_MAX_CHARS));
+    let mut previous_was_separator = false;
+    for character in name.chars().take(ACP_PROXY_TOOL_STEM_MAX_CHARS) {
+        if character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.') {
+            stem.push(character);
+            previous_was_separator = false;
+        } else if !previous_was_separator && !stem.is_empty() {
+            stem.push('_');
+            previous_was_separator = true;
+        }
+    }
+    while stem.ends_with('_') {
+        stem.pop();
+    }
+    format!("{ACP_EXTERNAL_MCP_TOOL_PREFIX}_{stem}_{}", index + 1)
 }
 
 impl AcpWorkspaceEntity {
@@ -257,7 +290,7 @@ impl AcpWorkspaceEntity {
         if !self.application_tool_bridges.contains_key(&conversation_id) {
             let Ok((server, mut calls)) = oxideterm_acp_host_tools::start_acp_host_tools_server(
                 self.task_runtime.handle(),
-                acp_application_tool_definitions(),
+                Vec::new(),
             ) else {
                 return false;
             };
@@ -282,6 +315,11 @@ impl AcpWorkspaceEntity {
             .application_tool_bridges
             .get(&conversation_id)
             .expect("ACP application tool bridge was created above");
+        bridge
+            .server
+            .replace_definitions(acp_application_tool_definitions(
+                &start.application_tool_definitions,
+            ));
         if let Some(previous_turn) = bridge
             .active_turn
             .write()
@@ -1072,7 +1110,7 @@ mod tests {
     #[test]
     fn acp_application_tools_match_the_provider_catalog() {
         let provider_tools = oxideterm_ai::orchestrator_tool_definitions();
-        let acp_tools = acp_application_tool_definitions();
+        let acp_tools = acp_application_tool_definitions(&provider_tools);
 
         assert_eq!(provider_tools.len(), acp_tools.len());
         for (provider, acp) in provider_tools.iter().zip(&acp_tools) {
@@ -1080,6 +1118,27 @@ mod tests {
             assert_eq!(provider.description, acp.description);
             assert_eq!(provider.parameters, acp.input_schema);
         }
+    }
+
+    #[test]
+    fn external_mcp_tools_receive_protocol_safe_proxy_names() {
+        let provider_tools = vec![oxideterm_ai::AiToolDefinition {
+            name: "mcp::demo::ping".to_string(),
+            description: "Ping the demo MCP server.".to_string(),
+            parameters: serde_json::json!({ "type": "object" }),
+        }];
+
+        let acp_tools = acp_application_tool_definitions(&provider_tools);
+
+        assert_eq!(acp_tools.len(), 1);
+        assert_ne!(acp_tools[0].name, provider_tools[0].name);
+        assert!(
+            acp_tools[0]
+                .name
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric()
+                    || matches!(character, '_' | '-' | '.'))
+        );
     }
 
     #[test]

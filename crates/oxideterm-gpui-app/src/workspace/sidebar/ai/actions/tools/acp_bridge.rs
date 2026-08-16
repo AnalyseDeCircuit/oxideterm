@@ -40,14 +40,14 @@ pub(in crate::workspace) async fn handle_acp_application_tool_call(
         return;
     }
     let canonical_arguments =
-        match oxideterm_ai::canonicalize_orchestrator_tool_arguments(&call.name, call.arguments.clone()) {
+        match canonicalize_acp_tool_arguments(&call.name, &call.arguments) {
             Ok(arguments) => arguments,
             Err(_) => {
                 let rejected = pre_execution_rejected_ai_tool_result(
                     call.id.clone(),
                     call.name.clone(),
                     "invalid_tool_arguments",
-                    "The application tool arguments do not match the v2 contract.",
+                    "The application tool arguments do not match the exposed contract.",
                 );
                 respond_to_acp_tool(
                     call,
@@ -278,6 +278,21 @@ pub(in crate::workspace) async fn handle_acp_application_tool_call(
         Some(executed_summary(&executed)),
     );
     respond_to_acp_tool(call, executed);
+}
+
+fn canonicalize_acp_tool_arguments(
+    tool_name: &str,
+    arguments: &serde_json::Value,
+) -> Result<serde_json::Value, oxideterm_ai::OrchestratorArgumentError> {
+    if oxideterm_ai::is_mcp_tool_name(tool_name)
+        || matches!(tool_name, "list_mcp_resources" | "read_mcp_resource")
+    {
+        return arguments
+            .is_object()
+            .then(|| arguments.clone())
+            .ok_or(oxideterm_ai::OrchestratorArgumentError::InvalidArguments);
+    }
+    oxideterm_ai::canonicalize_orchestrator_tool_arguments(tool_name, arguments.clone())
 }
 
 fn respond_to_cancelled_acp_tool(call: oxideterm_acp_host_tools::AcpHostToolCall) {

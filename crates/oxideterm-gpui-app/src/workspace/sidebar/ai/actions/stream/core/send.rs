@@ -230,6 +230,7 @@ impl WorkspaceApp {
                 },
                 launch_config: launch.launch_config,
                 host_policy: launch.host_policy,
+                application_tool_definitions: config.tools.clone(),
                 application_tool_turn: AcpApplicationToolTurn {
                     services: application_tool_services,
                     tool_policy: config.tool_policy.clone(),

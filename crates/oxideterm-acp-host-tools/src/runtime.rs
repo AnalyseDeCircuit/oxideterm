@@ -29,6 +29,7 @@ const MCP_CONNECTION_LIMIT: usize = 32;
 pub struct AcpHostToolsServer {
     endpoint_url: String,
     authorization_header: Zeroizing<String>,
+    protocol: Arc<AcpHostToolsProtocol>,
     shutdown_tx: Option<oneshot::Sender<()>>,
     worker: tokio::task::JoinHandle<()>,
 }
@@ -44,6 +45,11 @@ impl AcpHostToolsServer {
                 )],
             ),
         )
+    }
+
+    /// Replaces the catalog served by subsequent tools/list and tools/call requests.
+    pub fn replace_definitions(&self, definitions: Vec<AcpHostToolDefinition>) {
+        self.protocol.replace_definitions(definitions);
     }
 
     /// Stops accepting requests and awaits every connection worker.
@@ -93,6 +99,7 @@ pub fn start_acp_host_tools_server(
         call_tx,
         authorization_header.as_str(),
     ));
+    let server_protocol = protocol.clone();
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
     let worker = runtime.spawn(async move {
         let mut connections = JoinSet::new();
@@ -131,6 +138,7 @@ pub fn start_acp_host_tools_server(
         AcpHostToolsServer {
             endpoint_url: format!("http://{address}{MCP_ENDPOINT_PATH}"),
             authorization_header,
+            protocol: server_protocol,
             shutdown_tx: Some(shutdown_tx),
             worker,
         },

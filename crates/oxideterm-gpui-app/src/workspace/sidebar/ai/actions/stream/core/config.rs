@@ -239,6 +239,12 @@ impl WorkspaceApp {
                 .unwrap_or_else(|| self.ai_acp_agent_model_fallback_label(&acp_agent_id, cx));
             let (memory_context, memory_entry_ids) =
                 self.ai_scoped_memory_context(self.ai_memory_character_budget(None, &model_label), cx);
+            let tools = ai_stream_tool_definitions(
+                tool_policy.enabled,
+                settings.ai.skills.enabled,
+                &tool_policy,
+                self.ai_entity.read(cx).mcp_registry(),
+            );
             return Ok(AiChatStreamConfig {
                 execution_backend: AiExecutionBackend::Acp,
                 provider_id: None,
@@ -260,7 +266,7 @@ impl WorkspaceApp {
                 memory_context,
                 memory_entry_ids,
                 tool_policy,
-                tools: Vec::new(),
+                tools,
                 tool_choice: oxideterm_ai::AiToolChoice::Auto,
             });
         }

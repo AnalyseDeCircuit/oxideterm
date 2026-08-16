@@ -132,7 +132,9 @@ pub struct AiModelContextWindowRow {
 pub enum AcpAgentPreset {
     ClaudeCode,
     Codex,
+    GeminiCli,
     GithubCopilot,
+    OpenCode,
 }
 
 struct AcpAgentPresetTemplate {
@@ -165,12 +167,26 @@ impl AcpAgentPreset {
                 command: "oxideterm-native",
                 args: &["--acp-adapter", "codex"],
             },
+            Self::GeminiCli => AcpAgentPresetTemplate {
+                base_id: "gemini-cli",
+                display_name: "Gemini CLI",
+                command: "gemini",
+                // Gemini CLI exposes its native ACP server over stdio.
+                args: &["--acp"],
+            },
             Self::GithubCopilot => AcpAgentPresetTemplate {
                 base_id: "github-copilot",
                 display_name: "GitHub Copilot",
                 command: "copilot",
                 // GitHub Copilot CLI exposes a native ACP stdio server.
                 args: &["--acp", "--stdio"],
+            },
+            Self::OpenCode => AcpAgentPresetTemplate {
+                base_id: "opencode",
+                display_name: "OpenCode",
+                command: "opencode",
+                // OpenCode exposes its native ACP server over stdio.
+                args: &["acp"],
             },
         }
     }
@@ -1002,7 +1018,9 @@ mod tests {
 
         ai_add_acp_agent_preset(&mut settings, AcpAgentPreset::ClaudeCode);
         ai_add_acp_agent_preset(&mut settings, AcpAgentPreset::Codex);
+        ai_add_acp_agent_preset(&mut settings, AcpAgentPreset::GeminiCli);
         ai_add_acp_agent_preset(&mut settings, AcpAgentPreset::GithubCopilot);
+        ai_add_acp_agent_preset(&mut settings, AcpAgentPreset::OpenCode);
         ai_add_acp_agent_preset(&mut settings, AcpAgentPreset::Codex);
 
         let claude = &settings.ai.acp_agents[0];
@@ -1022,7 +1040,14 @@ mod tests {
             vec!["--acp-adapter".to_string(), "codex".to_string()]
         );
 
-        let copilot = &settings.ai.acp_agents[2];
+        let gemini = &settings.ai.acp_agents[2];
+        assert_eq!(gemini.id, "gemini-cli");
+        assert_eq!(gemini.display_name, "Gemini CLI");
+        assert_eq!(gemini.command, "gemini");
+        assert_eq!(gemini.args, vec!["--acp".to_string()]);
+        assert!(gemini.env.is_empty());
+
+        let copilot = &settings.ai.acp_agents[3];
         assert_eq!(copilot.id, "github-copilot");
         assert_eq!(copilot.command, "copilot");
         assert_eq!(
@@ -1030,7 +1055,14 @@ mod tests {
             vec!["--acp".to_string(), "--stdio".to_string()]
         );
 
-        assert_eq!(settings.ai.acp_agents[3].id, "codex-2");
+        let opencode = &settings.ai.acp_agents[4];
+        assert_eq!(opencode.id, "opencode");
+        assert_eq!(opencode.display_name, "OpenCode");
+        assert_eq!(opencode.command, "opencode");
+        assert_eq!(opencode.args, vec!["acp".to_string()]);
+        assert!(opencode.env.is_empty());
+
+        assert_eq!(settings.ai.acp_agents[5].id, "codex-2");
     }
 }
 

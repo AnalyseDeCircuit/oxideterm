@@ -8,5 +8,7 @@ version.workspace = true
 agent-client-protocol.workspace = true
 clap.workspace = true
 serde_json.workspace = true
+tempfile = "3.23"
 tokio.workspace = true
 uuid.workspace = true
+zeroize.workspace = true

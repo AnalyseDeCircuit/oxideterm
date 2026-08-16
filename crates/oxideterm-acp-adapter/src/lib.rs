@@ -19,12 +19,12 @@ use agent_client_protocol::{
             AgentCapabilities, CancelNotification, CloseSessionRequest, CloseSessionResponse,
             ConfigOptionUpdate, ContentBlock, ContentChunk, DeleteSessionRequest,
             DeleteSessionResponse, Implementation, InitializeRequest, InitializeResponse,
-            NewSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionKind,
-            PromptRequest, PromptResponse, RequestPermissionOutcome, RequestPermissionRequest,
-            SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption, SessionId,
-            SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
-            SetSessionConfigOptionResponse, StopReason, ToolCall, ToolCallStatus, ToolCallUpdate,
-            ToolCallUpdateFields, ToolKind,
+            McpCapabilities, McpServer, NewSessionRequest, NewSessionResponse, PermissionOption,
+            PermissionOptionKind, PromptRequest, PromptResponse, RequestPermissionOutcome,
+            RequestPermissionRequest, SessionConfigOption, SessionConfigOptionCategory,
+            SessionConfigSelectOption, SessionId, SessionNotification, SessionUpdate,
+            SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StopReason, ToolCall,
+            ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
         },
     },
 };
@@ -37,6 +37,7 @@ use tokio::{
     time::{Duration, timeout},
 };
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 pub const ACP_ADAPTER_ARG: &str = "--acp-adapter";
 
@@ -73,15 +74,65 @@ struct AdapterConfig {
     extra_args: Vec<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct SessionState {
     cwd: PathBuf,
+    mcp_servers: SessionMcpServers,
     claude_session_id: Option<String>,
     codex_thread_id: Option<String>,
     models: Vec<AdapterModel>,
     selected_model: Option<String>,
     observed_model: Option<String>,
     accepts_unlisted_models: bool,
+}
+
+#[derive(Clone, Default)]
+struct SessionMcpServers(Vec<McpServer>);
+
+impl From<Vec<McpServer>> for SessionMcpServers {
+    fn from(servers: Vec<McpServer>) -> Self {
+        Self(servers)
+    }
+}
+
+impl std::ops::Deref for SessionMcpServers {
+    type Target = [McpServer];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for SessionMcpServers {
+    fn drop(&mut self) {
+        // ACP transport declarations can contain bearer headers and process
+        // environment values, so the session owns and clears every copy.
+        for server in &mut self.0 {
+            match server {
+                McpServer::Http(server) => {
+                    server.url.zeroize();
+                    for header in &mut server.headers {
+                        header.value.zeroize();
+                    }
+                }
+                McpServer::Sse(server) => {
+                    server.url.zeroize();
+                    for header in &mut server.headers {
+                        header.value.zeroize();
+                    }
+                }
+                McpServer::Stdio(server) => {
+                    for argument in &mut server.args {
+                        argument.zeroize();
+                    }
+                    for variable in &mut server.env {
+                        variable.value.zeroize();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -98,6 +149,7 @@ struct CodexModelCatalog {
 }
 
 const ACP_MODEL_CONFIG_ID: &str = "model";
+const ACP_MCP_SERVER_ID_PREFIX: &str = "oxideterm";
 
 type Sessions = Arc<Mutex<HashMap<SessionId, SessionState>>>;
 type ActiveRuns = Arc<Mutex<HashMap<SessionId, ActiveRun>>>;
@@ -158,7 +210,7 @@ async fn run_adapter(cli: Cli) -> agent_client_protocol::Result<()> {
                     let protocol_version = supported_protocol_version(initialize.protocol_version);
                     responder.respond(
                         InitializeResponse::new(protocol_version)
-                            .agent_capabilities(AgentCapabilities::new())
+                            .agent_capabilities(adapter_agent_capabilities())
                             .agent_info(Implementation::new(
                                 config.provider.agent_name(),
                                 env!("CARGO_PKG_VERSION"),
@@ -190,6 +242,7 @@ async fn run_adapter(cli: Cli) -> agent_client_protocol::Result<()> {
                     // Keep model choice beside the session so it never becomes global CLI state.
                     let state = SessionState {
                         cwd: request.cwd,
+                        mcp_servers: request.mcp_servers.into(),
                         claude_session_id: None,
                         codex_thread_id: None,
                         models: catalog.models,
@@ -289,6 +342,39 @@ async fn run_adapter(cli: Cli) -> agent_client_protocol::Result<()> {
         )
         .connect_to(Stdio::new())
         .await
+}
+
+fn adapter_agent_capabilities() -> AgentCapabilities {
+    // Both bundled providers can consume ACP MCP declarations once the adapter
+    // translates them into the provider's native launch format.
+    AgentCapabilities::new().mcp_capabilities(McpCapabilities::new().http(true))
+}
+
+fn provider_mcp_server_id(server: &McpServer, index: usize) -> String {
+    let name = match server {
+        McpServer::Http(server) => server.name.as_str(),
+        McpServer::Sse(server) => server.name.as_str(),
+        McpServer::Stdio(server) => server.name.as_str(),
+        _ => "mcp",
+    };
+    let mut normalized = String::with_capacity(name.len().min(48));
+    let mut previous_was_separator = false;
+    for character in name.chars().take(48) {
+        if character.is_ascii_alphanumeric() {
+            normalized.push(character.to_ascii_lowercase());
+            previous_was_separator = false;
+        } else if !previous_was_separator && !normalized.is_empty() {
+            normalized.push('_');
+            previous_was_separator = true;
+        }
+    }
+    while normalized.ends_with('_') {
+        normalized.pop();
+    }
+    if normalized.is_empty() {
+        normalized.push_str("mcp");
+    }
+    format!("{ACP_MCP_SERVER_ID_PREFIX}_{normalized}_{}", index + 1)
 }
 
 fn cancel_active_run(active_runs: &ActiveRuns, session_id: &SessionId) {
@@ -511,9 +597,7 @@ async fn stream_provider(
                 config,
                 active_runs,
                 session_id,
-                session.cwd,
-                session.claude_session_id,
-                session.selected_model,
+                session,
                 prompt,
                 connection,
             )
@@ -524,9 +608,7 @@ async fn stream_provider(
                 config,
                 active_runs,
                 session_id,
-                session.cwd,
-                session.codex_thread_id,
-                session.selected_model,
+                session,
                 prompt,
                 connection,
             )
@@ -586,6 +668,7 @@ mod tests {
             session_id.clone(),
             SessionState {
                 cwd: PathBuf::from("/workspace"),
+                mcp_servers: SessionMcpServers::default(),
                 claude_session_id: None,
                 codex_thread_id: None,
                 models: vec![
@@ -642,6 +725,7 @@ mod tests {
             session_id.clone(),
             SessionState {
                 cwd: PathBuf::from("/workspace"),
+                mcp_servers: SessionMcpServers::default(),
                 claude_session_id: None,
                 codex_thread_id: None,
                 models: Vec::new(),
@@ -670,5 +754,12 @@ mod tests {
                 .and_then(|state| state.selected_model.as_deref()),
             Some("claude-sonnet-4-6")
         );
+    }
+
+    #[test]
+    fn adapter_advertises_http_mcp_forwarding() {
+        let capabilities = adapter_agent_capabilities();
+
+        assert!(capabilities.mcp_capabilities.http);
     }
 }
