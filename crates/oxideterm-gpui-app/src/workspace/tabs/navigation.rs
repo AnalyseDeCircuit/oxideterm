@@ -251,6 +251,26 @@ impl WorkspaceApp {
             self.active_ssh_node_id = Some(node_id.clone());
             self.expanded_ssh_nodes.insert(node_id.clone());
         }
+        if !self.sidebar_collapsed
+            && self.effective_sidebar_panel_section() == SidebarSection::Sftp
+            && self
+                .active_tab(cx)
+                .is_none_or(|tab| tab.kind != TabKind::Sftp)
+            && let Some(node_id) = self.embedded_sftp_node_id.clone()
+        {
+            let already_active = {
+                let sftp = self.sftp_view.read(cx);
+                sftp.current_surface_id == Some(sftp::SftpSurfaceId::Sidebar)
+                    && sftp.current_node_id.as_ref() == Some(&node_id)
+            };
+            if !already_active {
+                self.sftp_view.update(cx, |sftp, cx| {
+                    sftp.activate_view(sftp::SftpSurfaceId::Sidebar, node_id);
+                    cx.notify();
+                });
+                self.maybe_start_sftp_remote_load(cx);
+            }
+        }
     }
 
     pub(in crate::workspace) fn focus_active_pane(&mut self, window: &mut Window, cx: &mut App) {
@@ -320,7 +340,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn unregister_ssh_terminal_session(
         &mut self,
         session_id: TerminalSessionId,
-        cx: &mut App,
+        cx: &mut Context<Self>,
     ) {
         // This method is also the shared terminal-session close path for local
         // panes. Revoke only this session; NodeRouter remains the SSH owner.
@@ -357,6 +377,15 @@ impl WorkspaceApp {
         }
         if projection_changed {
             self.persist_session_tree_snapshot();
+        }
+        if let Some(node_id) = node_id
+            && self
+                .workspace_runtime
+                .read(cx)
+                .ssh_terminal_session_ids_for_node(&node_id)
+                .is_empty()
+        {
+            self.close_embedded_sftp_for_node(&node_id, cx);
         }
     }
 
@@ -500,6 +529,7 @@ impl WorkspaceApp {
                 "Connection closed".to_string(),
                 cx,
             );
+            self.close_embedded_sftp_for_node(affected_node_id, cx);
         }
         for affected_node_id in &nodes_to_disconnect {
             self.forwarding.update(cx, |forwarding, _cx| {

@@ -99,6 +99,16 @@ impl WorkspaceApp {
             }
             _ => {}
         }
+        if *tab_kind != TabKind::Sftp
+            && !self.sidebar_collapsed
+            && self.effective_sidebar_panel_section() == SidebarSection::Sftp
+            && self.sftp_view.read(cx).current_surface_id == Some(sftp::SftpSurfaceId::Sidebar)
+            && let Some(dialog) = self.sftp_view.read(cx).dialog()
+        {
+            // Sidebar-owned dialogs stay at the window root so previews and
+            // confirmations are never clipped by the narrow sidebar region.
+            modals.push(self.render_sftp_dialog(dialog, false, cx));
+        }
         modals
     }
 }
@@ -410,6 +420,13 @@ impl WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_ai_inline_panel_key(event, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.sftp_presentation_request.is_some() {
+                    if event.keystroke.key.eq_ignore_ascii_case("escape") {
+                        this.sftp_presentation_request = None;
+                        cx.notify();
+                    }
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_transient_workspace_overlay_escape(event, window, cx) {
@@ -831,7 +848,7 @@ impl WorkspaceApp {
                         layout.child(self.render_activity_bar(cx))
                     })
                     .when(!zen_mode && self.sidebar_rendered, |layout| {
-                        layout.child(self.render_animated_sidebar_region(cx))
+                        layout.child(self.render_animated_sidebar_region(window, cx))
                     })
                     .child(
                         div()
@@ -900,6 +917,9 @@ impl WorkspaceApp {
             )
             .when(self.connection_form_state(cx).form.is_some(), |root| {
                 root.child(self.render_new_connection_modal(window, cx))
+            })
+            .when_some(self.render_sftp_presentation_dialog(cx), |root, dialog| {
+                root.child(dialog)
             })
             .when(self.local_shell_launcher_open, |root| {
                 root.child(self.render_local_shell_launcher(window, cx))

@@ -852,6 +852,8 @@ pub(crate) struct WorkspaceApp {
     _file_manager_observation: Subscription,
     _file_manager_subscription: Subscription,
     sftp_tab_nodes: HashMap<TabId, NodeId>,
+    embedded_sftp_node_id: Option<NodeId>,
+    sftp_presentation_request: Option<sftp::SftpPresentationRequest>,
     ide_workspace: Entity<ide::IdeWorkspaceEntity>,
     _ide_workspace_subscription: Subscription,
     sftp_view: Entity<sftp::SftpWorkspaceEntity>,

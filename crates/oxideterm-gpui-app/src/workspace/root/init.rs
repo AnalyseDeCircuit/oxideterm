@@ -346,12 +346,12 @@ impl WorkspaceApp {
                         }
                     }
                     sftp::SftpWorkspaceEvent::RemoteLoadReady {
-                        tab_id,
+                        surface_id,
                         node_id,
                         delivery,
                     } => {
                         workspace.request_visible_sftp_remote_load(
-                            *tab_id,
+                            *surface_id,
                             node_id.clone(),
                             delivery.clone(),
                             cx,
@@ -781,6 +781,8 @@ impl WorkspaceApp {
             _file_manager_observation: file_manager_observation,
             _file_manager_subscription: file_manager_subscription,
             sftp_tab_nodes: HashMap::new(),
+            embedded_sftp_node_id: None,
+            sftp_presentation_request: None,
             ide_workspace,
             _ide_workspace_subscription: ide_workspace_subscription,
             sftp_view,

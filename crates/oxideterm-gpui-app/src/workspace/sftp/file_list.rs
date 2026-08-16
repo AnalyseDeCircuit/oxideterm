@@ -62,6 +62,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let compact = self.sftp_view.read(cx).current_surface_id == Some(SftpSurfaceId::Sidebar);
         let drag_over = self.sftp_view.read(cx).drag_over_pane == Some(pane);
         let list = div()
             .id(("sftp-file-list-scroll", pane as u64))
@@ -312,22 +313,26 @@ impl WorkspaceApp {
                                     // root selectable-text adapter here.
                                     .child(div().truncate().child(display_name)),
                             )
-                            .child(
-                                div()
-                                    .w(px(SFTP_SIZE_COL))
-                                    .flex_none()
-                                    .text_align(gpui::TextAlign::Right)
-                                    .text_color(rgb(theme.text_muted))
-                                    .child(size_text),
-                            )
-                            .child(
-                                div()
-                                    .w(px(SFTP_MODIFIED_COL))
-                                    .flex_none()
-                                    .text_align(gpui::TextAlign::Right)
-                                    .text_color(rgb(theme.text_muted))
-                                    .child(modified_text),
-                            )
+                            .when(!compact, |row| {
+                                row.child(
+                                    div()
+                                        .w(px(SFTP_SIZE_COL))
+                                        .flex_none()
+                                        .text_align(gpui::TextAlign::Right)
+                                        .text_color(rgb(theme.text_muted))
+                                        .child(size_text),
+                                )
+                            })
+                            .when(!compact, |row| {
+                                row.child(
+                                    div()
+                                        .w(px(SFTP_MODIFIED_COL))
+                                        .flex_none()
+                                        .text_align(gpui::TextAlign::Right)
+                                        .text_color(rgb(theme.text_muted))
+                                        .child(modified_text),
+                                )
+                            })
                             .on_mouse_down(MouseButton::Left, {
                                 let sftp_view = sftp_view.clone();
                                 move |event: &MouseDownEvent, _window, cx| {
@@ -351,6 +356,19 @@ impl WorkspaceApp {
                                 let sftp_view = sftp_view.clone();
                                 move |event: &MouseDownEvent, _window, cx| {
                                     sftp_view.update(cx, |sftp, cx| {
+                                        let selected = match pane {
+                                            SftpPane::Local => &sftp.local_selected,
+                                            SftpPane::Remote => &sftp.remote_selected,
+                                        };
+                                        if !selected.contains(&context_file.name) {
+                                            // Right-clicking an unselected row makes that row the
+                                            // operation target before the shared menu is rendered.
+                                            sftp.select_file(
+                                                pane,
+                                                context_file.name.clone(),
+                                                event.modifiers,
+                                            );
+                                        }
                                         sftp.open_context_menu(
                                             pane,
                                             Some(context_file.clone()),

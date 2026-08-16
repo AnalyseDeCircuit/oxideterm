@@ -1029,6 +1029,11 @@
     "sftp": {
       "title": "Trasferimento file",
       "description": "Configura comportamento e prestazioni del trasferimento file.",
+      "presentation": "Apri SFTP in",
+      "presentation_hint": "Apri SFTP in una scheda dell’area di lavoro o in un browser remoto compatto nella barra laterale principale.",
+      "presentation_ask": "Chiedi la prossima volta",
+      "presentation_tab": "Scheda dell’area di lavoro",
+      "presentation_sidebar": "Barra laterale principale",
       "protocol": "Protocollo di trasferimento predefinito",
       "protocol_hint": "La modalità automatica preferisce SFTP e usa SCP legacy solo quando il sottosistema SFTP non è disponibile.",
       "protocol_auto": "Automatico (preferisci SFTP)",

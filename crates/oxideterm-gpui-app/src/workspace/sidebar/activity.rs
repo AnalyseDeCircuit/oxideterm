@@ -11,11 +11,16 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let top_items_before_plugins = [
-            (SidebarSection::Sessions, LucideIcon::Link2),
+        let mut top_items_before_plugins = vec![(SidebarSection::Sessions, LucideIcon::Link2)];
+        if self.settings_store.settings().sftp.presentation
+            == oxideterm_settings::SftpPresentationPreference::Sidebar
+        {
+            top_items_before_plugins.push((SidebarSection::Sftp, LucideIcon::FolderOpen));
+        }
+        top_items_before_plugins.extend([
             (SidebarSection::Connections, LucideIcon::LayoutList),
             (SidebarSection::Runtime, LucideIcon::Gauge),
-        ];
+        ]);
         let top_items_after_plugins = [
             (SidebarSection::CloudSync, LucideIcon::Cloud),
             (SidebarSection::Assistant, LucideIcon::Sparkles),
@@ -400,6 +405,22 @@ impl WorkspaceApp {
                         this.open_cloud_sync_tab(window, cx);
                     } else if section == SidebarSection::Extensions {
                         this.open_plugin_manager_tab(window, cx);
+                    } else if section == SidebarSection::Sftp {
+                        if this.sidebar_collapsed
+                            || this.effective_sidebar_panel_section() != SidebarSection::Sftp
+                        {
+                            if let Some(node_id) = this
+                                .embedded_sftp_node_id
+                                .clone()
+                                .or_else(|| this.active_ssh_node_id.clone())
+                            {
+                                this.open_sftp_sidebar_surface(node_id, None, cx);
+                            } else {
+                                this.set_sidebar_section(SidebarSection::Sftp, cx);
+                            }
+                        } else {
+                            this.toggle_sidebar(cx);
+                        }
                     } else {
                         this.active_surface = ActiveSurface::Terminal;
                         this.toggle_sidebar_section(section, cx);

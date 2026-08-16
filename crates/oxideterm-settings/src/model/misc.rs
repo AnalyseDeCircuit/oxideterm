@@ -32,6 +32,9 @@ impl Default for LocalTerminalSettings {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SftpSettings {
+    // The default keeps existing installations neutral until the user chooses a surface.
+    #[serde(default)]
+    pub presentation: SftpPresentationPreference,
     #[serde(default)]
     pub transfer_protocol: FileTransferProtocolPreference,
     pub max_concurrent_transfers: i64,
@@ -47,6 +50,7 @@ pub struct SftpSettings {
 impl Default for SftpSettings {
     fn default() -> Self {
         Self {
+            presentation: SftpPresentationPreference::Ask,
             transfer_protocol: FileTransferProtocolPreference::Auto,
             max_concurrent_transfers: 3,
             directory_parallelism: 4,
@@ -56,6 +60,15 @@ impl Default for SftpSettings {
             extra: ExtraFields::new(),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SftpPresentationPreference {
+    #[default]
+    Ask,
+    Tab,
+    Sidebar,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

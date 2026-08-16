@@ -1029,6 +1029,11 @@
     "sftp": {
       "title": "ファイル転送",
       "description": "ファイル転送の動作とパフォーマンスを設定します。",
+      "presentation": "SFTP の表示先",
+      "presentation_hint": "ワークスペースのタブ、またはプライマリサイドバーのコンパクトなリモートブラウザーで SFTP を開きます。",
+      "presentation_ask": "次回確認",
+      "presentation_tab": "ワークスペースタブ",
+      "presentation_sidebar": "プライマリサイドバー",
       "protocol": "既定の転送プロトコル",
       "protocol_hint": "自動では SFTP を優先し、SFTP サブシステムが利用できない場合のみ旧式 SCP を使用します。",
       "protocol_auto": "自動（SFTP 優先）",

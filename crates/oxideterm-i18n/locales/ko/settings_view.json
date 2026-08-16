@@ -1029,6 +1029,11 @@
     "sftp": {
       "title": "파일 전송",
       "description": "파일 전송 동작 및 성능을 구성합니다.",
+      "presentation": "SFTP 열기 위치",
+      "presentation_hint": "SFTP를 작업 영역 탭 또는 기본 사이드바의 간결한 원격 브라우저로 엽니다.",
+      "presentation_ask": "다음에 묻기",
+      "presentation_tab": "작업 영역 탭",
+      "presentation_sidebar": "기본 사이드바",
       "protocol": "기본 전송 프로토콜",
       "protocol_hint": "자동 모드는 SFTP를 우선 사용하며 SFTP 하위 시스템을 사용할 수 없을 때만 레거시 SCP를 사용합니다.",
       "protocol_auto": "자동(SFTP 우선)",

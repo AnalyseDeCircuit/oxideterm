@@ -346,16 +346,7 @@ impl WorkspaceApp {
         file: SftpFileEntry,
         cx: &mut Context<Self>,
     ) {
-        let Some(tab_id) = self.active_tab_id(cx) else {
-            self.push_sftp_toast(
-                self.i18n.t("sftp.toast.extract_failed"),
-                None,
-                TerminalNoticeVariant::Error,
-                cx,
-            );
-            return;
-        };
-        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+        let Some(node_id) = self.visible_sftp_node_id(cx) else {
             self.push_sftp_toast(
                 self.i18n.t("sftp.toast.extract_failed"),
                 None,
@@ -441,10 +432,7 @@ impl WorkspaceApp {
         selected_names: Vec<String>,
         cx: &mut Context<Self>,
     ) {
-        let Some(tab_id) = self.active_tab_id(cx) else {
-            return;
-        };
-        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+        let Some(node_id) = self.visible_sftp_node_id(cx) else {
             return;
         };
         if selected_names.is_empty() {
@@ -489,12 +477,18 @@ impl WorkspaceApp {
         paths: &[std::path::PathBuf],
         cx: &mut Context<Self>,
     ) {
-        let Some(tab_id) = self.active_tab_id(cx) else {
+        let Some(node_id) = self.visible_sftp_node_id(cx) else {
             return;
         };
-        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
-            return;
-        };
+        self.queue_sftp_external_upload_paths_for_node(node_id, paths, cx);
+    }
+
+    pub(in crate::workspace::sftp) fn queue_sftp_external_upload_paths_for_node(
+        &mut self,
+        node_id: NodeId,
+        paths: &[std::path::PathBuf],
+        cx: &mut Context<Self>,
+    ) {
         let pending_transfers = paths
             .iter()
             .filter_map(|path| {
@@ -606,11 +600,7 @@ impl WorkspaceApp {
         resolution: SftpConflictResolution,
         cx: &mut Context<Self>,
     ) {
-        let Some(tab_id) = self.active_tab_id(cx) else {
-            self.cancel_sftp_transfer_conflicts(cx);
-            return;
-        };
-        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+        let Some(node_id) = self.visible_sftp_node_id(cx) else {
             self.cancel_sftp_transfer_conflicts(cx);
             return;
         };

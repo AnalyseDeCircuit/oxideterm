@@ -74,6 +74,9 @@ const SFTP_BREADCRUMB_CONTENT_GAP: f32 = 2.0;
 const SFTP_TRANSFER_QUEUE_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const SFTP_TRANSFER_QUEUE_LIST_ESTIMATED_HEIGHT: f32 = 56.0;
 const SFTP_TRANSFER_QUEUE_LIST_OVERSCAN: usize = 6;
+// The embedded browser keeps enough room for files while exposing the most
+// relevant transfers owned by its current node.
+const SFTP_SIDEBAR_TRANSFER_MAX_ROWS: usize = 3;
 const SFTP_INCOMPLETE_TRANSFER_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const SFTP_INCOMPLETE_TRANSFER_LIST_ESTIMATED_HEIGHT: f32 = 52.0;
 const SFTP_INCOMPLETE_TRANSFER_LIST_OVERSCAN: usize = 4;
@@ -240,14 +243,27 @@ pub(super) struct SftpMutationToast {
     error_title: String,
 }
 
+// Surface identity prevents a hidden tab completion from replacing sidebar state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SftpSurfaceId {
+    Tab(TabId),
+    Sidebar,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct SftpPresentationRequest {
+    node_id: NodeId,
+    remote_path: Option<String>,
+}
+
 #[derive(Debug)]
 pub(super) enum SftpWorkerResult {
     StartRemoteLoad {
-        tab_id: TabId,
+        surface_id: SftpSurfaceId,
         node_id: NodeId,
     },
     RemoteList {
-        tab_id: TabId,
+        surface_id: SftpSurfaceId,
         node_id: NodeId,
         view_generation: u64,
         session_id: String,
@@ -337,11 +353,11 @@ pub(in crate::workspace::sftp) enum SftpWorkspaceEffect {
         node_id: NodeId,
     },
     RemoteLoadPending {
-        tab_id: TabId,
+        surface_id: SftpSurfaceId,
         node_id: NodeId,
     },
     StartRemoteLoad {
-        tab_id: TabId,
+        surface_id: SftpSurfaceId,
         node_id: NodeId,
         path: String,
         view_generation: u64,
@@ -407,7 +423,7 @@ pub(super) enum SftpWorkspaceEvent {
         id: String,
     },
     RemoteLoadReady {
-        tab_id: TabId,
+        surface_id: SftpSurfaceId,
         node_id: NodeId,
         delivery: delivery::ActiveDeliverySender<SftpWorkerResult>,
     },
@@ -787,8 +803,8 @@ pub(super) struct SftpWorkspaceEntity {
     remote_load_inflight: bool,
     remote_load_retry_count: u8,
     remote_load_retry_task: Option<Task<()>>,
-    current_tab_id: Option<TabId>,
-    current_node_id: Option<NodeId>,
+    pub(in crate::workspace) current_surface_id: Option<SftpSurfaceId>,
+    pub(in crate::workspace) current_node_id: Option<NodeId>,
     local_path_by_node: HashMap<NodeId, String>,
     remote_path_by_node: HashMap<NodeId, String>,
     remote_home_by_node: HashMap<NodeId, String>,
@@ -906,7 +922,7 @@ impl Default for SftpWorkspaceEntity {
             remote_load_inflight: false,
             remote_load_retry_count: 0,
             remote_load_retry_task: None,
-            current_tab_id: None,
+            current_surface_id: None,
             current_node_id: None,
             local_path_by_node: HashMap::new(),
             remote_path_by_node: HashMap::new(),
@@ -1458,7 +1474,7 @@ mod entity_delivery_tests {
     fn stale_remote_list_result_does_not_emit_effect(cx: &mut TestAppContext) {
         let entity = cx.new(SftpWorkspaceEntity::new);
         entity.update(cx, |sftp, _cx| {
-            sftp.current_tab_id = Some(TabId(1));
+            sftp.current_surface_id = Some(SftpSurfaceId::Tab(TabId(1)));
             sftp.current_node_id = Some(NodeId::new("current-node"));
             sftp.view_generation = 2;
             sftp.remote_load_inflight = true;
@@ -1476,7 +1492,7 @@ mod entity_delivery_tests {
 
         sender
             .send(SftpWorkerResult::RemoteList {
-                tab_id: TabId(1),
+                surface_id: SftpSurfaceId::Tab(TabId(1)),
                 node_id: NodeId::new("current-node"),
                 view_generation: 1,
                 session_id: "stale-session".to_string(),
@@ -1498,7 +1514,7 @@ mod entity_delivery_tests {
         let entity = cx.new(SftpWorkspaceEntity::new);
         entity.update(cx, |sftp, _cx| {
             // Opening SFTP queues the terminal cwd after the remembered directory starts loading.
-            sftp.current_tab_id = Some(TabId(1));
+            sftp.current_surface_id = Some(SftpSurfaceId::Tab(TabId(1)));
             sftp.current_node_id = Some(NodeId::new("current-node"));
             sftp.view_generation = 1;
             sftp.remote_path = "/root/.oxideterm".to_string();
@@ -1511,7 +1527,7 @@ mod entity_delivery_tests {
 
         sender
             .send(SftpWorkerResult::RemoteList {
-                tab_id: TabId(1),
+                surface_id: SftpSurfaceId::Tab(TabId(1)),
                 node_id: NodeId::new("current-node"),
                 view_generation: 1,
                 session_id: "current-session".to_string(),

@@ -1029,6 +1029,11 @@
     "sftp": {
       "title": "Truyền tệp",
       "description": "Cấu hình hành vi và hiệu suất truyền file.",
+      "presentation": "Mở SFTP trong",
+      "presentation_hint": "Mở SFTP trong thẻ không gian làm việc hoặc trình duyệt từ xa thu gọn ở thanh bên chính.",
+      "presentation_ask": "Hỏi vào lần tới",
+      "presentation_tab": "Thẻ không gian làm việc",
+      "presentation_sidebar": "Thanh bên chính",
       "protocol": "Giao thức truyền mặc định",
       "protocol_hint": "Chế độ tự động ưu tiên SFTP và chỉ dùng SCP cũ khi hệ thống con SFTP không khả dụng.",
       "protocol_auto": "Tự động (ưu tiên SFTP)",

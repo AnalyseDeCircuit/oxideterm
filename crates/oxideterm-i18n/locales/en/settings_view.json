@@ -1029,6 +1029,11 @@
     "sftp": {
       "title": "File Transfer",
       "description": "Configure file transfer behavior and performance.",
+      "presentation": "Open SFTP in",
+      "presentation_hint": "Choose whether SFTP opens as a workspace tab or as a compact remote browser in the primary sidebar.",
+      "presentation_ask": "Ask next time",
+      "presentation_tab": "Workspace tab",
+      "presentation_sidebar": "Primary sidebar",
       "protocol": "Default Transfer Protocol",
       "protocol_hint": "Auto prefers SFTP and uses legacy SCP only when the SFTP subsystem is unavailable.",
       "protocol_auto": "Auto (prefer SFTP)",

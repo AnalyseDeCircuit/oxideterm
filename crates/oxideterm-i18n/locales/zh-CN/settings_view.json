@@ -1029,6 +1029,11 @@
     "sftp": {
       "title": "文件传输",
       "description": "配置文件传输行为和性能。",
+      "presentation": "SFTP 打开位置",
+      "presentation_hint": "选择在工作区标签页中打开，或在主侧栏中显示紧凑的远端文件浏览器。",
+      "presentation_ask": "下次询问",
+      "presentation_tab": "工作区标签页",
+      "presentation_sidebar": "主侧栏",
       "protocol": "默认传输协议",
       "protocol_hint": "自动模式优先使用 SFTP，仅在服务器没有 SFTP 子系统时使用旧版 SCP。",
       "protocol_auto": "自动（优先 SFTP）",

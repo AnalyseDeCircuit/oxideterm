@@ -62,6 +62,7 @@ pub(in crate::workspace) fn sidebar_resize_hotzone_origin(seam: f32) -> f32 {
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_animated_sidebar_region(
         &mut self,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let expanded_width = self.sidebar_panel_width();
@@ -70,7 +71,7 @@ impl WorkspaceApp {
             .flex_none()
             .w(px(expanded_width))
             .h_full()
-            .child(self.render_sidebar_region(cx));
+            .child(self.render_sidebar_region(window, cx));
         oxideterm_gpui_ui::motion::horizontal_reveal(
             &self.tokens,
             "workspace-left-sidebar-motion",
@@ -102,13 +103,14 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn render_sidebar_region(
         &mut self,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
             .relative()
             .w(px(self.sidebar_panel_width()))
             .h_full()
-            .child(self.render_sidebar(cx))
+            .child(self.render_sidebar(window, cx))
             .into_any_element()
     }
 
@@ -355,7 +357,11 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn render_sidebar(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::workspace) fn render_sidebar(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
             .w_full()
@@ -375,7 +381,7 @@ impl WorkspaceApp {
                     // Keep the body on the lighter sidebar tint while the
                     // fixed header independently matches workspace chrome.
                     .bg(self.workspace_sidebar_background(theme.bg_panel))
-                    .child(self.render_sidebar_content(cx)),
+                    .child(self.render_sidebar_content(window, cx)),
             )
             .into_any_element()
     }
@@ -524,6 +530,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn render_sidebar_content(
         &mut self,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let panel_section = self.effective_sidebar_panel_section();
@@ -536,10 +543,10 @@ impl WorkspaceApp {
         if panel_section == SidebarSection::CloudSync {
             return self.render_cloud_sync_sidebar_content(cx);
         }
-        if matches!(
-            panel_section,
-            SidebarSection::Sftp | SidebarSection::Forwards
-        ) {
+        if panel_section == SidebarSection::Sftp {
+            return self.render_sftp_sidebar_surface(window, cx);
+        }
+        if panel_section == SidebarSection::Forwards {
             // Tauri only persists these command-palette section keys here; it
             // does not reuse the Sessions empty state for their sidebar body.
             return self.render_blank_sidebar_content();

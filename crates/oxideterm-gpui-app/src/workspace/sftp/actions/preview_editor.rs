@@ -268,10 +268,7 @@ impl WorkspaceApp {
         name: &str,
         cx: &mut Context<Self>,
     ) {
-        let Some(tab_id) = self.active_tab_id(cx) else {
-            return;
-        };
-        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+        let Some(node_id) = self.visible_sftp_node_id(cx) else {
             return;
         };
         let Some((remote_path, local_path, size)) = ({
@@ -413,10 +410,7 @@ impl WorkspaceApp {
     }
 
     fn spawn_remote_sftp_preview(&self, path: String, generation: u64, cx: &App) {
-        let Some(tab_id) = self.active_tab_id(cx) else {
-            return;
-        };
-        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+        let Some(node_id) = self.visible_sftp_node_id(cx) else {
             return;
         };
         let router = self.node_router.clone();
@@ -462,10 +456,7 @@ impl WorkspaceApp {
     }
 
     fn spawn_remote_sftp_preview_hex(&self, path: String, offset: u64, generation: u64, cx: &App) {
-        let Some(tab_id) = self.active_tab_id(cx) else {
-            return;
-        };
-        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+        let Some(node_id) = self.visible_sftp_node_id(cx) else {
             return;
         };
         let router = self.node_router.clone();
@@ -493,10 +484,7 @@ impl WorkspaceApp {
         tx: delivery::ActiveDeliverySender<SftpWorkerResult>,
         cx: &App,
     ) -> bool {
-        let Some(tab_id) = self.active_tab_id(cx) else {
-            return false;
-        };
-        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+        let Some(node_id) = self.visible_sftp_node_id(cx) else {
             return false;
         };
         let router = self.node_router.clone();

@@ -160,6 +160,7 @@ impl WorkspaceApp {
         for node_id in &nodes_to_remove {
             // A failed node can still own stale tabs, reconnect jobs, forwards,
             // or transfer records. Clear those owners before dropping the tree.
+            self.close_embedded_sftp_for_node(node_id, cx);
             self.close_tabs_for_node(node_id, window, cx);
             let _ = self.interrupt_sftp_transfers_by_node(
                 node_id,

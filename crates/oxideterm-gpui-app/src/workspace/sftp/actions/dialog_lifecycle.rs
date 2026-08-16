@@ -14,10 +14,7 @@ impl WorkspaceApp {
             > + Send
             + 'static,
     {
-        let Some(tab_id) = self.active_tab_id(cx) else {
-            return;
-        };
-        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+        let Some(node_id) = self.visible_sftp_node_id(cx) else {
             return;
         };
         let router = self.node_router.clone();
@@ -289,11 +286,7 @@ impl WorkspaceApp {
                                     .map(|file| file.path.clone())
                             })
                             .collect::<Vec<_>>();
-                        let Some(tab_id) = self.active_tab_id(cx) else {
-                            self.close_sftp_dialog(cx);
-                            return;
-                        };
-                        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+                        let Some(node_id) = self.visible_sftp_node_id(cx) else {
                             self.close_sftp_dialog(cx);
                             return;
                         };

@@ -1029,6 +1029,11 @@
     "sftp": {
       "title": "Dateiübertragung",
       "description": "Dateiübertragungsverhalten und Leistung konfigurieren.",
+      "presentation": "SFTP öffnen in",
+      "presentation_hint": "SFTP als Arbeitsbereich-Tab oder als kompakten Remote-Browser in der primären Seitenleiste öffnen.",
+      "presentation_ask": "Beim nächsten Mal fragen",
+      "presentation_tab": "Arbeitsbereich-Tab",
+      "presentation_sidebar": "Primäre Seitenleiste",
       "protocol": "Standard-Übertragungsprotokoll",
       "protocol_hint": "Automatisch bevorzugt SFTP und verwendet das ältere SCP nur, wenn das SFTP-Subsystem nicht verfügbar ist.",
       "protocol_auto": "Automatisch (SFTP bevorzugen)",

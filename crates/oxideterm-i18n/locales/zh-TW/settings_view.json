@@ -1029,6 +1029,11 @@
     "sftp": {
       "title": "檔案傳輸",
       "description": "設定檔案傳輸行為和效能。",
+      "presentation": "SFTP 開啟位置",
+      "presentation_hint": "選擇在工作區分頁中開啟，或在主側欄中顯示精簡的遠端檔案瀏覽器。",
+      "presentation_ask": "下次詢問",
+      "presentation_tab": "工作區分頁",
+      "presentation_sidebar": "主側欄",
       "protocol": "預設傳輸協定",
       "protocol_hint": "自動模式優先使用 SFTP，僅在伺服器沒有 SFTP 子系統時使用舊版 SCP。",
       "protocol_auto": "自動（優先 SFTP）",

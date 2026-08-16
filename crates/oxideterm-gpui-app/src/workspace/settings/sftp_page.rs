@@ -14,6 +14,16 @@ impl WorkspaceApp {
             return self.sftp_settings_card(
                 vec![
                     self.sftp_settings_row(
+                        "settings_view.sftp.presentation",
+                        Some("settings_view.sftp.presentation_hint"),
+                        self.sftp_select_control(
+                            SettingsSelect::SftpPresentation,
+                            sftp_presentation_label(settings.sftp.presentation, &self.i18n),
+                            cx,
+                        ),
+                    ),
+                    self.card_separator(),
+                    self.sftp_settings_row(
                         "settings_view.sftp.protocol",
                         Some("settings_view.sftp.protocol_hint"),
                         self.sftp_select_control(
@@ -202,4 +212,22 @@ impl WorkspaceApp {
             cx,
         )
     }
+}
+
+pub(in crate::workspace) fn sftp_presentation_label(
+    preference: oxideterm_settings::SftpPresentationPreference,
+    i18n: &I18n,
+) -> String {
+    let key = match preference {
+        oxideterm_settings::SftpPresentationPreference::Ask => {
+            "settings_view.sftp.presentation_ask"
+        }
+        oxideterm_settings::SftpPresentationPreference::Tab => {
+            "settings_view.sftp.presentation_tab"
+        }
+        oxideterm_settings::SftpPresentationPreference::Sidebar => {
+            "settings_view.sftp.presentation_sidebar"
+        }
+    };
+    i18n.t(key)
 }

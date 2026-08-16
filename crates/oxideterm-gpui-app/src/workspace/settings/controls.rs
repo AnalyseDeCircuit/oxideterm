@@ -1236,6 +1236,38 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Sftp, SettingsSelect::SftpPresentation) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for preference in [
+                    oxideterm_settings::SftpPresentationPreference::Ask,
+                    oxideterm_settings::SftpPresentationPreference::Tab,
+                    oxideterm_settings::SftpPresentationPreference::Sidebar,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            sftp_page::sftp_presentation_label(preference, &self.i18n),
+                            preference == settings.sftp.presentation,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_settings_select();
+                            this.edit_settings(
+                                |settings| settings.sftp.presentation = preference,
+                                cx,
+                            );
+                            if preference != oxideterm_settings::SftpPresentationPreference::Sidebar
+                                && this.effective_sidebar_panel_section() == SidebarSection::Sftp
+                            {
+                                this.set_sidebar_section(SidebarSection::Sessions, cx);
+                            }
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
             (SettingsTab::Sftp, SettingsSelect::SftpProtocol) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for protocol in [

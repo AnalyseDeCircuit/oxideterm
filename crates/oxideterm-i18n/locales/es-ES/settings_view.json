@@ -1029,6 +1029,11 @@
     "sftp": {
       "title": "Transferencia de archivos",
       "description": "Configura el comportamiento y rendimiento de transferencias de archivos.",
+      "presentation": "Abrir SFTP en",
+      "presentation_hint": "Abre SFTP como pestaña del espacio de trabajo o como explorador remoto compacto en la barra lateral principal.",
+      "presentation_ask": "Preguntar la próxima vez",
+      "presentation_tab": "Pestaña del espacio de trabajo",
+      "presentation_sidebar": "Barra lateral principal",
       "protocol": "Protocolo de transferencia predeterminado",
       "protocol_hint": "El modo automático prefiere SFTP y usa SCP heredado solo si el subsistema SFTP no está disponible.",
       "protocol_auto": "Automático (preferir SFTP)",

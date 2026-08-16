@@ -128,6 +128,7 @@ const AI_KEYS: &[&str] = &[
     "agentRoles",
 ];
 const SFTP_KEYS: &[&str] = &[
+    "presentation",
     "maxConcurrentTransfers",
     "directoryParallelism",
     "speedLimitEnabled",

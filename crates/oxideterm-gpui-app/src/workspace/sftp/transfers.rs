@@ -170,6 +170,197 @@ impl SftpTransferRowRenderer {
             .into_any_element()
     }
 
+    fn render_transfer_actions(&self, transfer: &SftpTransferItem) -> AnyElement {
+        let transfer_id = transfer.id;
+        let status_color = match transfer.state {
+            SftpTransferState::Error => SFTP_RED,
+            SftpTransferState::Cancelled => SFTP_YELLOW,
+            _ => self.theme.text_muted,
+        };
+
+        div()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .child(match transfer.state {
+                SftpTransferState::Completed => {
+                    WorkspaceApp::render_lucide_icon(LucideIcon::Check, 16.0, rgb(SFTP_GREEN))
+                }
+                SftpTransferState::Cancelled | SftpTransferState::Error => {
+                    WorkspaceApp::render_lucide_icon(
+                        LucideIcon::AlertCircle,
+                        16.0,
+                        rgb(status_color),
+                    )
+                }
+                _ => div().w(px(0.0)).into_any_element(),
+            })
+            .when(
+                matches!(
+                    transfer.state,
+                    SftpTransferState::Active | SftpTransferState::Pending
+                ),
+                |actions| {
+                    actions.child(self.action_button(
+                        format!("sftp-transfer-pause-{transfer_id}"),
+                        LucideIcon::Pause,
+                        self.labels.pause_tooltip.clone(),
+                        SftpTransferRowAction::SetState {
+                            id: transfer_id,
+                            state: SftpTransferState::Paused,
+                        },
+                    ))
+                },
+            )
+            .when(transfer.state == SftpTransferState::Paused, |actions| {
+                actions.child(self.action_button(
+                    format!("sftp-transfer-resume-{transfer_id}"),
+                    LucideIcon::Play,
+                    self.labels.resume_tooltip.clone(),
+                    SftpTransferRowAction::SetState {
+                        id: transfer_id,
+                        state: SftpTransferState::Pending,
+                    },
+                ))
+            })
+            .when(
+                transfer.state == SftpTransferState::Completed
+                    && transfer.direction == SftpTransferDirection::Download,
+                |actions| {
+                    actions.child(self.action_button(
+                        format!("sftp-transfer-reveal-{transfer_id}"),
+                        LucideIcon::FolderOpen,
+                        self.labels.reveal_tooltip.clone(),
+                        SftpTransferRowAction::RevealLocalPath {
+                            path: transfer.local_path.clone(),
+                        },
+                    ))
+                },
+            )
+            .child(self.action_button(
+                format!("sftp-transfer-dismiss-{transfer_id}"),
+                LucideIcon::X,
+                if matches!(
+                    transfer.state,
+                    SftpTransferState::Active
+                        | SftpTransferState::Pending
+                        | SftpTransferState::Paused
+                ) {
+                    self.labels.cancel_tooltip.clone()
+                } else {
+                    self.labels.remove_tooltip.clone()
+                },
+                SftpTransferRowAction::CancelOrRemove { id: transfer_id },
+            ))
+            .into_any_element()
+    }
+
+    fn render_compact_queue_item(&self, transfer: SftpTransferItem) -> AnyElement {
+        let progress = if transfer.size == 0 {
+            0.0
+        } else {
+            (transfer.transferred as f32 / transfer.size as f32).clamp(0.0, 1.0)
+        };
+        let indeterminate =
+            transfer.size == 0 && matches!(transfer.state, SftpTransferState::Active);
+        let status_color = match transfer.state {
+            SftpTransferState::Error => SFTP_RED,
+            SftpTransferState::Cancelled => SFTP_YELLOW,
+            _ => self.theme.text_muted,
+        };
+        let status_text = self.status_text(&transfer);
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .px_2()
+            .py_1()
+            .border_t_1()
+            .border_color(rgb(self.theme.border))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        div()
+                            .w(px(14.0))
+                            .flex_none()
+                            .text_center()
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .text_color(rgb(self.theme.text_muted))
+                            .child(match transfer.direction {
+                                SftpTransferDirection::Upload => "↑",
+                                SftpTransferDirection::Download => "↓",
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(SFTP_TEXT_XS))
+                            .text_color(rgb(self.theme.text))
+                            .child(transfer.name.clone()),
+                    )
+                    .child(
+                        div()
+                            .max_w(px(96.0))
+                            .truncate()
+                            .text_size(px(SFTP_TEXT_10))
+                            .font_family(self.mono_font.clone())
+                            .text_color(rgb(status_color))
+                            .child(status_text),
+                    )
+                    .child(self.render_transfer_actions(&transfer)),
+            )
+            .child(
+                div()
+                    .ml(px(18.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .h(px(4.0))
+                            .w_full()
+                            .overflow_hidden()
+                            .rounded_full()
+                            .bg(rgb(self.theme.bg_panel))
+                            .child(
+                                div()
+                                    .h_full()
+                                    .w(relative(if indeterminate { 0.35 } else { progress }))
+                                    .bg(rgba(
+                                        (self.theme.accent << 8)
+                                            | if indeterminate { 0x80 } else { 0xff },
+                                    )),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .text_size(px(SFTP_TEXT_10))
+                            .text_color(rgb(self.theme.text_muted))
+                            .child(if indeterminate {
+                                format_file_size(transfer.transferred)
+                            } else {
+                                format!(
+                                    "{} / {}",
+                                    format_file_size(transfer.transferred),
+                                    format_file_size(transfer.size)
+                                )
+                            })
+                            .when(!indeterminate, |row| {
+                                row.child(format!("{}%", (progress * 100.0).round() as u32))
+                            }),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn render_queue_item(
         &self,
         transfer: SftpTransferItem,
@@ -191,7 +382,6 @@ impl SftpTransferRowRenderer {
             _ => theme.text_muted,
         };
         let status_text = self.status_text(&transfer);
-        let transfer_id = transfer.id;
         let destination_path = match transfer.direction {
             SftpTransferDirection::Upload => transfer.remote_path.clone(),
             SftpTransferDirection::Download => transfer.local_path.clone(),
@@ -321,84 +511,7 @@ impl SftpTransferRowRenderer {
                             .text_color(rgb(status_color))
                             .child(status_text),
                     )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(4.0))
-                            .child(match transfer.state {
-                                SftpTransferState::Completed => WorkspaceApp::render_lucide_icon(
-                                    LucideIcon::Check,
-                                    16.0,
-                                    rgb(SFTP_GREEN),
-                                ),
-                                SftpTransferState::Cancelled | SftpTransferState::Error => {
-                                    WorkspaceApp::render_lucide_icon(
-                                        LucideIcon::AlertCircle,
-                                        16.0,
-                                        rgb(status_color),
-                                    )
-                                }
-                                _ => div().w(px(0.0)).into_any_element(),
-                            })
-                            .when(
-                                matches!(
-                                    transfer.state,
-                                    SftpTransferState::Active | SftpTransferState::Pending
-                                ),
-                                |actions| {
-                                    actions.child(self.action_button(
-                                        format!("sftp-transfer-pause-{transfer_id}"),
-                                        LucideIcon::Pause,
-                                        self.labels.pause_tooltip.clone(),
-                                        SftpTransferRowAction::SetState {
-                                            id: transfer_id,
-                                            state: SftpTransferState::Paused,
-                                        },
-                                    ))
-                                },
-                            )
-                            .when(transfer.state == SftpTransferState::Paused, |actions| {
-                                actions.child(self.action_button(
-                                    format!("sftp-transfer-resume-{transfer_id}"),
-                                    LucideIcon::Play,
-                                    self.labels.resume_tooltip.clone(),
-                                    SftpTransferRowAction::SetState {
-                                        id: transfer_id,
-                                        state: SftpTransferState::Pending,
-                                    },
-                                ))
-                            })
-                            .when(
-                                transfer.state == SftpTransferState::Completed
-                                    && transfer.direction == SftpTransferDirection::Download,
-                                |actions| {
-                                    actions.child(self.action_button(
-                                        format!("sftp-transfer-reveal-{transfer_id}"),
-                                        LucideIcon::FolderOpen,
-                                        self.labels.reveal_tooltip.clone(),
-                                        SftpTransferRowAction::RevealLocalPath {
-                                            path: transfer.local_path.clone(),
-                                        },
-                                    ))
-                                },
-                            )
-                            .child(self.action_button(
-                                format!("sftp-transfer-dismiss-{transfer_id}"),
-                                LucideIcon::X,
-                                if matches!(
-                                    transfer.state,
-                                    SftpTransferState::Active
-                                        | SftpTransferState::Pending
-                                        | SftpTransferState::Paused
-                                ) {
-                                    self.labels.cancel_tooltip.clone()
-                                } else {
-                                    self.labels.remove_tooltip.clone()
-                                },
-                                SftpTransferRowAction::CancelOrRemove { id: transfer_id },
-                            )),
-                    ),
+                    .child(self.render_transfer_actions(&transfer)),
             )
             .into_any_element()
     }
@@ -566,6 +679,89 @@ impl WorkspaceApp {
                 loading: self.i18n.t("sftp.queue.loading"),
             },
         }
+    }
+
+    pub(in crate::workspace::sftp) fn render_sftp_sidebar_transfer_queue(
+        &self,
+        node_id: &NodeId,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let (transfer_count, active_count, mut transfers) = {
+            let sftp = self.sftp_view.read(cx);
+            let mut transfers = sftp
+                .transfers
+                .iter()
+                .rev()
+                .filter(|transfer| &transfer.node_id == node_id)
+                .cloned()
+                .collect::<Vec<_>>();
+            let transfer_count = transfers.len();
+            let active_count = transfers
+                .iter()
+                .filter(|transfer| {
+                    matches!(
+                        transfer.state,
+                        SftpTransferState::Active | SftpTransferState::Pending
+                    )
+                })
+                .count();
+            // Stable sorting keeps the newest item first within each state group.
+            transfers.sort_by_key(|transfer| match transfer.state {
+                SftpTransferState::Active => 0,
+                SftpTransferState::Pending => 1,
+                SftpTransferState::Paused => 2,
+                SftpTransferState::Error => 3,
+                SftpTransferState::Completed => 4,
+                SftpTransferState::Cancelled => 5,
+            });
+            (transfer_count, active_count, transfers)
+        };
+        if transfer_count == 0 {
+            return None;
+        }
+        transfers.truncate(SFTP_SIDEBAR_TRANSFER_MAX_ROWS);
+
+        let theme = self.tokens.ui;
+        let renderer = self.sftp_transfer_row_renderer(cx);
+        Some(
+            div()
+                .flex_none()
+                .w_full()
+                .flex()
+                .flex_col()
+                .border_t_1()
+                .border_color(rgb(theme.border))
+                .bg(rgb(theme.bg))
+                .child(
+                    div()
+                        .h(px(29.0))
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .px_2()
+                        .text_size(px(SFTP_TEXT_XS))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(theme.text_muted))
+                        .child(self.queue_title(active_count))
+                        .child(
+                            div()
+                                .rounded_full()
+                                .bg(rgb(theme.bg_panel))
+                                .px_2()
+                                .text_size(px(SFTP_TEXT_10))
+                                .font_weight(gpui::FontWeight::NORMAL)
+                                .child(transfer_count.to_string()),
+                        ),
+                )
+                // This is a projection of the shared transfer entity. Hiding the
+                // sidebar never cancels or takes ownership of a transfer task.
+                .children(
+                    transfers
+                        .into_iter()
+                        .map(|transfer| renderer.render_compact_queue_item(transfer)),
+                )
+                .into_any_element(),
+        )
     }
 
     pub(in crate::workspace::sftp) fn render_sftp_transfer_queue(
