@@ -1136,6 +1136,27 @@ mod tests {
         HttpResponseSnapshot::new(status, headers, serde_json::to_vec(&body).unwrap())
     }
 
+    fn onedrive_test_config() -> CloudSyncSettings {
+        CloudSyncSettings {
+            backend_type: BackendType::OneDrive,
+            ..CloudSyncSettings::default()
+        }
+    }
+
+    fn onedrive_test_secrets() -> CloudSyncSecrets {
+        CloudSyncSecrets {
+            token: Some(Zeroizing::new("onedrive-test-token".to_string())),
+            ..CloudSyncSecrets::default()
+        }
+    }
+
+    fn request_json_body(request: &HttpRequestSpec) -> Value {
+        match &request.body {
+            HttpRequestBody::Bytes(bytes) => serde_json::from_slice(bytes.as_slice()).unwrap(),
+            _ => panic!("request must contain a JSON byte body"),
+        }
+    }
+
     #[test]
     fn retry_after_parser_accepts_seconds_and_caps_delay() {
         assert_eq!(parse_retry_after("2"), Some(Duration::from_secs(2)));
@@ -1333,5 +1354,217 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].method, Method::PUT);
         assert!(requests[0].url.path().ends_with("/metadata"));
+    }
+
+    #[tokio::test]
+    async fn onedrive_write_initializes_app_root_and_creates_nested_parents_by_id() {
+        let executor = Arc::new(FakeHttpExecutor::new([
+            response(
+                StatusCode::OK,
+                HeaderMap::new(),
+                json!({ "id": "app-root!id", "folder": {} }),
+            ),
+            response(
+                StatusCode::NOT_FOUND,
+                HeaderMap::new(),
+                json!({ "error": { "code": "itemNotFound" } }),
+            ),
+            response(
+                StatusCode::CREATED,
+                HeaderMap::new(),
+                json!({ "id": "sections!id", "folder": {} }),
+            ),
+            response(
+                StatusCode::NOT_FOUND,
+                HeaderMap::new(),
+                json!({ "error": { "code": "itemNotFound" } }),
+            ),
+            response(
+                StatusCode::CREATED,
+                HeaderMap::new(),
+                json!({ "id": "connections!id", "folder": {} }),
+            ),
+            response(
+                StatusCode::CREATED,
+                HeaderMap::new(),
+                json!({ "eTag": "object-etag" }),
+            ),
+        ]));
+        let backend = CloudSyncBackend::with_http_executor(executor.clone());
+
+        let result = backend
+            .write_remote_object(
+                &onedrive_test_config(),
+                &onedrive_test_secrets(),
+                "sections/connections/item.oxide",
+                b"encrypted-object".to_vec(),
+                Some(OXIDE_CONTENT_TYPE),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.etag.as_deref(), Some("object-etag"));
+        let requests = executor.requests();
+        assert_eq!(requests.len(), 6);
+        assert_eq!(requests[0].method, Method::GET);
+        assert_eq!(requests[0].url.path(), "/v1.0/me/drive/special/approot");
+        assert_eq!(
+            requests[1].url.path(),
+            "/v1.0/me/drive/special/approot:/sections"
+        );
+        assert_eq!(requests[2].method, Method::POST);
+        assert_eq!(
+            requests[2].url.path(),
+            "/v1.0/me/drive/items/app-root%21id/children"
+        );
+        assert!(requests[2].url.query().is_none());
+        assert_eq!(
+            request_json_body(&requests[2]),
+            json!({ "name": "sections", "folder": {} })
+        );
+        assert_eq!(
+            requests[3].url.path(),
+            "/v1.0/me/drive/special/approot:/sections/connections"
+        );
+        assert_eq!(requests[4].method, Method::POST);
+        assert_eq!(
+            requests[4].url.path(),
+            "/v1.0/me/drive/items/sections%21id/children"
+        );
+        assert!(requests[4].url.query().is_none());
+        assert_eq!(
+            request_json_body(&requests[4]),
+            json!({ "name": "connections", "folder": {} })
+        );
+        assert_eq!(requests[5].method, Method::PUT);
+        assert_eq!(
+            requests[5].url.path(),
+            "/v1.0/me/drive/special/approot:/sections/connections/item.oxide:/content"
+        );
+        for request in &requests {
+            assert!(request.headers.get(AUTHORIZATION).unwrap().is_sensitive());
+            assert!(!format!("{request:?} {:?}", request.headers).contains("onedrive-test-token"));
+        }
+    }
+
+    #[tokio::test]
+    async fn onedrive_write_reuses_existing_parent_without_posting() {
+        let executor = Arc::new(FakeHttpExecutor::new([
+            response(
+                StatusCode::OK,
+                HeaderMap::new(),
+                json!({ "id": "app-root-id", "folder": {} }),
+            ),
+            response(
+                StatusCode::OK,
+                HeaderMap::new(),
+                json!({ "id": "objects-id", "folder": {} }),
+            ),
+            response(
+                StatusCode::CREATED,
+                HeaderMap::new(),
+                json!({ "eTag": "object-etag" }),
+            ),
+        ]));
+        let backend = CloudSyncBackend::with_http_executor(executor.clone());
+
+        backend
+            .write_remote_object(
+                &onedrive_test_config(),
+                &onedrive_test_secrets(),
+                "objects/item.oxide",
+                b"encrypted-object".to_vec(),
+                Some(OXIDE_CONTENT_TYPE),
+            )
+            .await
+            .unwrap();
+
+        let requests = executor.requests();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[0].method, Method::GET);
+        assert_eq!(requests[1].method, Method::GET);
+        assert_eq!(requests[2].method, Method::PUT);
+    }
+
+    #[tokio::test]
+    async fn onedrive_write_resolves_parent_created_during_lookup_race() {
+        let executor = Arc::new(FakeHttpExecutor::new([
+            response(
+                StatusCode::OK,
+                HeaderMap::new(),
+                json!({ "id": "app-root-id", "folder": {} }),
+            ),
+            response(
+                StatusCode::NOT_FOUND,
+                HeaderMap::new(),
+                json!({ "error": { "code": "itemNotFound" } }),
+            ),
+            response(
+                StatusCode::CONFLICT,
+                HeaderMap::new(),
+                json!({ "error": { "code": "nameAlreadyExists" } }),
+            ),
+            response(
+                StatusCode::OK,
+                HeaderMap::new(),
+                json!({ "id": "objects-id", "folder": {} }),
+            ),
+            response(
+                StatusCode::CREATED,
+                HeaderMap::new(),
+                json!({ "eTag": "object-etag" }),
+            ),
+        ]));
+        let backend = CloudSyncBackend::with_http_executor(executor.clone());
+
+        backend
+            .write_remote_object(
+                &onedrive_test_config(),
+                &onedrive_test_secrets(),
+                "objects/item.oxide",
+                b"encrypted-object".to_vec(),
+                Some(OXIDE_CONTENT_TYPE),
+            )
+            .await
+            .unwrap();
+
+        let requests = executor.requests();
+        assert_eq!(requests.len(), 5);
+        assert_eq!(requests[2].method, Method::POST);
+        assert_eq!(requests[3].method, Method::GET);
+        assert_eq!(requests[1].url, requests[3].url);
+        assert_eq!(requests[4].method, Method::PUT);
+    }
+
+    #[tokio::test]
+    async fn onedrive_app_root_failure_keeps_safe_graph_diagnostics() {
+        let mut headers = HeaderMap::new();
+        headers.insert("request-id", HeaderValue::from_static("approot-request-id"));
+        let executor = Arc::new(FakeHttpExecutor::new([response(
+            StatusCode::BAD_REQUEST,
+            headers,
+            json!({ "error": { "code": "invalidRequest", "message": "Invalid request" } }),
+        )]));
+        let backend = CloudSyncBackend::with_http_executor(executor.clone());
+
+        let error = backend
+            .write_remote_object(
+                &onedrive_test_config(),
+                &onedrive_test_secrets(),
+                "objects/item.oxide",
+                b"encrypted-object".to_vec(),
+                Some(OXIDE_CONTENT_TYPE),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.starts_with("onedrive_bad_request: Invalid request"));
+        assert!(error.contains("operation=onedrive_approot"));
+        assert!(error.contains("status=400"));
+        assert!(error.contains("graph_code=invalidRequest"));
+        assert!(error.contains("request_id=approot-request-id"));
+        assert!(!error.contains("onedrive-test-token"));
+        assert_eq!(executor.requests().len(), 1);
     }
 }

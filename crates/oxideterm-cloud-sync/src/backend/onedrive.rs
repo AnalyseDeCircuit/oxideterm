@@ -271,7 +271,7 @@ impl CloudSyncBackend {
 
     async fn ensure_onedrive_parent(
         &self,
-        _config: &CloudSyncSettings,
+        config: &CloudSyncSettings,
         secrets: &CloudSyncSecrets,
         relative_path: &str,
     ) -> Result<()> {
@@ -280,15 +280,25 @@ impl CloudSyncBackend {
             .split('/')
             .filter(|part| !part.is_empty())
             .collect::<Vec<_>>();
-        if parts.len() <= 1 {
+        if parts.is_empty() {
             return Ok(());
         }
+        // Resolve App Root first so Graph provisions the special folder before
+        // any child lookup or upload targets it.
+        let mut parent_id = self.onedrive_app_root_id(secrets).await?;
         let mut parent = Vec::<String>::new();
         for segment in parts.iter().take(parts.len() - 1) {
-            let children_url = onedrive_folder_children_url(&parent)?;
+            parent.push((*segment).to_string());
+            if let Some(folder_id) = self
+                .find_onedrive_folder_id(config, secrets, &parent)
+                .await?
+            {
+                parent_id = folder_id;
+                continue;
+            }
             let response = execute_cloud_request(
                 self.client
-                    .post(children_url)
+                    .post(onedrive_folder_children_url(&parent_id))
                     .headers(onedrive_headers(secrets)?)
                     .header(CONTENT_TYPE, "application/json")
                     .body(serde_json::to_vec(&json!({
@@ -300,21 +310,87 @@ impl CloudSyncBackend {
             let status = response.status();
             let request_id = onedrive_response_request_id(response.headers());
             let value = response.json::<Value>().await.unwrap_or(Value::Null);
-            if !status.is_success()
-                && !(status == StatusCode::CONFLICT
-                    && onedrive_error_code(&value).as_deref() == Some("nameAlreadyExists"))
+            if status.is_success() {
+                parent_id = onedrive_folder_id(&value, "created OneDrive folder")?;
+                continue;
+            }
+            if status == StatusCode::CONFLICT
+                && onedrive_error_code(&value).as_deref() == Some("nameAlreadyExists")
             {
+                // Another client can create the same parent between lookup and
+                // creation. Resolve its ID and continue with the shared folder.
+                parent_id = self
+                    .find_onedrive_folder_id(config, secrets, &parent)
+                    .await?
+                    .context(
+                        "onedrive_bad_request: OneDrive reported an existing folder but did not return it",
+                    )?;
+            } else {
                 return Err(onedrive_value_error(
                     status,
                     &value,
-                    "onedrive_folder",
+                    "onedrive_folder_create",
                     "Failed to create OneDrive folder",
                     request_id.as_deref(),
                 ));
             }
-            parent.push((*segment).to_string());
         }
         Ok(())
+    }
+
+    async fn onedrive_app_root_id(&self, secrets: &CloudSyncSecrets) -> Result<String> {
+        let response = execute_cloud_request(
+            self.client
+                .get(onedrive_app_root_url())
+                .headers(onedrive_headers(secrets)?),
+        )
+        .await?;
+        let status = response.status();
+        let request_id = onedrive_response_request_id(response.headers());
+        let value = response.json::<Value>().await.unwrap_or(Value::Null);
+        if !status.is_success() {
+            return Err(onedrive_value_error(
+                status,
+                &value,
+                "onedrive_approot",
+                "Failed to initialize the OneDrive app folder",
+                request_id.as_deref(),
+            ));
+        }
+        onedrive_folder_id(&value, "OneDrive app folder")
+    }
+
+    async fn find_onedrive_folder_id(
+        &self,
+        config: &CloudSyncSettings,
+        secrets: &CloudSyncSecrets,
+        path: &[String],
+    ) -> Result<Option<String>> {
+        let response = execute_cloud_request(
+            self.client
+                .get(onedrive_item_url(config, &path.join("/")))
+                .headers(onedrive_headers(secrets)?),
+        )
+        .await?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let status = response.status();
+        let request_id = onedrive_response_request_id(response.headers());
+        let value = response.json::<Value>().await.unwrap_or(Value::Null);
+        if !status.is_success() {
+            return Err(onedrive_value_error(
+                status,
+                &value,
+                "onedrive_folder_lookup",
+                "Failed to look up a OneDrive folder",
+                request_id.as_deref(),
+            ));
+        }
+        Ok(Some(onedrive_folder_id(
+            &value,
+            "existing OneDrive folder",
+        )?))
     }
 
     pub(super) async fn write_onedrive_metadata(
@@ -403,24 +479,28 @@ fn onedrive_upload_url(
     Ok(url)
 }
 
-fn onedrive_folder_children_url(parent: &[String]) -> Result<Url> {
-    let children_url = if parent.is_empty() {
-        format!("{MICROSOFT_GRAPH_BASE}/me/drive/special/approot/children")
-    } else {
-        format!(
-            "{MICROSOFT_GRAPH_BASE}/me/drive/special/approot:/{}:/children",
-            encode_path_segments(&parent.join("/"))
-        )
-    };
-    let mut url =
-        Url::parse(&children_url).context("failed to construct OneDrive folder creation URL")?;
-    // Graph defines conflictBehavior as a URL instance annotation. Keeping it
-    // out of the DriveItem JSON avoids invalidRequest responses on creation.
-    url.query_pairs_mut().append_pair(
-        MICROSOFT_GRAPH_CONFLICT_BEHAVIOR,
-        ONEDRIVE_CREATE_CONFLICT_BEHAVIOR,
-    );
-    Ok(url)
+fn onedrive_app_root_url() -> String {
+    format!("{MICROSOFT_GRAPH_BASE}/me/drive/special/approot")
+}
+
+fn onedrive_folder_children_url(parent_id: &str) -> String {
+    format!(
+        "{MICROSOFT_GRAPH_BASE}/me/drive/items/{}/children",
+        encode_component(parent_id)
+    )
+}
+
+fn onedrive_folder_id(value: &Value, description: &str) -> Result<String> {
+    if !value.get("folder").is_some_and(Value::is_object) {
+        bail!("onedrive_bad_request: {description} is not a folder");
+    }
+    value
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .with_context(|| format!("onedrive_bad_request: {description} has no item ID"))
 }
 
 fn onedrive_children_url(config: &CloudSyncSettings, relative_path: &str) -> String {
@@ -603,25 +683,11 @@ mod tests {
     }
 
     #[test]
-    fn onedrive_folder_create_uses_url_conflict_behavior() {
-        let cases = [
-            (Vec::new(), "/v1.0/me/drive/special/approot/children"),
-            (
-                vec!["objects".to_string()],
-                "/v1.0/me/drive/special/approot:/objects:/children",
-            ),
-        ];
-
-        for (parent, expected_path) in cases {
-            let url = onedrive_folder_children_url(&parent).unwrap();
-            assert_eq!(url.path(), expected_path);
-            assert_eq!(
-                url.query_pairs()
-                    .find(|(key, _)| key == MICROSOFT_GRAPH_CONFLICT_BEHAVIOR)
-                    .map(|(_, value)| value.into_owned()),
-                Some(ONEDRIVE_CREATE_CONFLICT_BEHAVIOR.to_string())
-            );
-        }
+    fn onedrive_folder_create_uses_parent_item_id() {
+        assert_eq!(
+            onedrive_folder_children_url("folder!123"),
+            "https://graph.microsoft.com/v1.0/me/drive/items/folder%21123/children"
+        );
     }
 
     #[test]
