@@ -3,6 +3,29 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.0.21
+
+OxideTerm 2.0.21 adds controlled external MCP access, expands ACP and plugin interoperability, and improves SFTP, remote-desktop, Cloud Sync, and native window workflows.
+
+### ✨ Highlights
+
+- Added authenticated External MCP Control for editors, command-line agents, and other clients, with loopback HTTP and stdio access to explicitly granted connection, terminal, SFTP, transfer, forwarding, remote-desktop, recording, IDE workspace, Quick Command, addon, Cloud Sync, and Host Tools workflows.
+- Added ACP presets for Gemini CLI and OpenCode, and allowed the built-in Codex and Claude Code adapters to consume session-scoped HTTP MCP servers without placing authorization values in process arguments.
+- Added a searchable native plugin marketplace with compatibility, platform, checksum, installation, and update checks, and moved the complete Host Tools Dashboard example into the official plugin catalog.
+- Added an embedded SFTP sidebar browser with a remembered sidebar, tab, or ask-each-time presentation preference while keeping transfers and shared SSH connections owned independently from the visible surface.
+- Added SSH jump and proxy-chain support to saved RDP and VNC connections, direct CLI opening of saved SSH connections, and complete Telnet profile coverage in `.oxide` import, export, and Cloud Sync.
+
+### 🛠️ Fixes
+
+- Restored the main window's normal bounds, maximized state, and full-screen state across launches, retained valid secondary-display placement, and recentered windows that would otherwise reopen off screen.
+- Initialized the OneDrive application folder before creating nested Cloud Sync objects, reused existing parents, and recovered cleanly when another client created the same folder concurrently.
+- Preserved every saved connection profile type during structured synchronization and kept background MCP mutations, cancellations, revocations, and dependent refreshes aligned with their committed application state.
+- Removed the unintended divider above installed plugins and retired the obsolete downloadable Wasm runtime installer from builds that do not include Wasm plugin support.
+
+### 🔒 Security
+
+- Kept external MCP credentials digest-only and device-local, required explicit tool-group grants, retained in-app approval for elevated access requests, and cancelled active work and released capabilities immediately when access is revoked.
+
 ## 2.0.20
 
 OxideTerm 2.0.20 adds native Mosh and local-terminal workflows, refreshes session and start-page management, improves remote-desktop and Cloud Sync reliability, and expands terminal feedback and SSH controls.
