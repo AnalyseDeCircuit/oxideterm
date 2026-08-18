@@ -673,6 +673,7 @@ fn terminal_options(options: &PublicTerminalOptions) -> ConnectionTerminalOption
             PublicTerminalDeleteSequence::ControlH => ConnectionTerminalDeleteSequence::ControlH,
         }),
         semantic_scheme: None,
+        highlight_rule_set: None,
     }
 }
 

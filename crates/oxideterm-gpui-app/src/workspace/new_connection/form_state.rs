@@ -162,6 +162,7 @@ pub(in crate::workspace) enum NewConnectionSelect {
     TerminalBackspaceSequence,
     TerminalDeleteSequence,
     TerminalSemanticScheme,
+    TerminalHighlightRuleSet,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

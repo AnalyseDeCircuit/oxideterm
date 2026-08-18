@@ -608,11 +608,13 @@ impl WorkspaceApp {
             tab_host,
             _tab_host_subscription: tab_host_subscription,
             search: SearchBarState::default(),
+            terminal_highlight_popover_open: false,
             terminal_command_sender,
             _terminal_command_sender_observation: terminal_command_sender_observation,
             detached_local_terminals: HashMap::new(),
             detached_local_terminal_order: Vec::new(),
             serial_terminal_configs: HashMap::new(),
+            telnet_terminal_profile_ids: HashMap::new(),
             detached_local_terminals_popover_open: false,
             command_palette,
             _command_palette_observation: command_palette_observation,
@@ -1224,40 +1226,7 @@ impl WorkspaceApp {
                     let _ = tx.send(notice);
                 })
             }),
-            highlight_rules: Arc::from(
-                terminal
-                    .highlight_rules
-                    .iter()
-                    .map(|rule| UiHighlightRule {
-                        id: rule.id.clone(),
-                        pattern: rule.pattern.clone(),
-                        is_regex: rule.is_regex,
-                        case_sensitive: rule.case_sensitive,
-                        foreground: rule.foreground.clone(),
-                        background: rule.background.clone(),
-                        render_mode: match rule.render_mode {
-                            HighlightRuleRenderMode::Background => {
-                                TerminalHighlightRenderMode::Background
-                            }
-                            HighlightRuleRenderMode::Underline => {
-                                TerminalHighlightRenderMode::Underline
-                            }
-                            HighlightRuleRenderMode::Outline => {
-                                TerminalHighlightRenderMode::Outline
-                            }
-                        },
-                        match_scope: match rule.match_scope {
-                            HighlightRuleMatchScope::Match => TerminalHighlightMatchScope::Match,
-                            HighlightRuleMatchScope::LogicalLine => {
-                                TerminalHighlightMatchScope::LogicalLine
-                            }
-                        },
-                        preserve_background: rule.preserve_background,
-                        enabled: rule.enabled,
-                        priority: rule.priority,
-                    })
-                    .collect::<Vec<_>>(),
-            ),
+            highlight_rules: terminal_highlight_rules(terminal.effective_highlight_rules()),
             trzsz_policy,
             theme: TerminalUiTheme::from_tokens(self.tokens),
         }
@@ -1368,6 +1337,13 @@ pub(in crate::workspace) fn terminal_preference_overrides(
                 )
             }),
     });
+    let highlight_rule_set = options
+        .highlight_rule_set
+        .as_deref()
+        .and_then(|id| terminal_settings.highlight_rule_set(id));
+    let highlight_rule_set_id = highlight_rule_set.map(|rule_set| rule_set.id.clone());
+    let highlight_rules =
+        highlight_rule_set.map(|rule_set| terminal_highlight_rules(&rule_set.rules));
     TerminalUiPreferenceOverrides {
         terminal_encoding: options.encoding.map(terminal_encoding_from_connection),
         backspace_sequence: options
@@ -1378,9 +1354,43 @@ pub(in crate::workspace) fn terminal_preference_overrides(
             .map(terminal_delete_sequence_from_connection),
         semantic_scheme,
         semantic_scheme_id,
+        highlight_rules,
+        highlight_rule_set_id,
         semantic_shell: None,
         local_shell_id: None,
     }
+}
+
+pub(in crate::workspace) fn terminal_highlight_rules(
+    rules: &[HighlightRule],
+) -> Arc<[UiHighlightRule]> {
+    Arc::from(
+        rules
+            .iter()
+            .map(|rule| UiHighlightRule {
+                id: rule.id.clone(),
+                pattern: rule.pattern.clone(),
+                is_regex: rule.is_regex,
+                case_sensitive: rule.case_sensitive,
+                foreground: rule.foreground.clone(),
+                background: rule.background.clone(),
+                render_mode: match rule.render_mode {
+                    HighlightRuleRenderMode::Background => TerminalHighlightRenderMode::Background,
+                    HighlightRuleRenderMode::Underline => TerminalHighlightRenderMode::Underline,
+                    HighlightRuleRenderMode::Outline => TerminalHighlightRenderMode::Outline,
+                },
+                match_scope: match rule.match_scope {
+                    HighlightRuleMatchScope::Match => TerminalHighlightMatchScope::Match,
+                    HighlightRuleMatchScope::LogicalLine => {
+                        TerminalHighlightMatchScope::LogicalLine
+                    }
+                },
+                preserve_background: rule.preserve_background,
+                enabled: rule.enabled,
+                priority: rule.priority,
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 fn semantic_shell_dialect(shell_id: &str) -> SemanticShellDialect {
@@ -1414,6 +1424,43 @@ mod semantic_scheme_tests {
         assert_eq!(
             semantic_shell_dialect("custom-shell"),
             SemanticShellDialect::Auto
+        );
+    }
+
+    #[test]
+    fn connection_highlight_rule_set_resolves_to_terminal_override() {
+        let mut terminal = oxideterm_settings::TerminalSettings::default();
+        terminal
+            .highlight_rule_sets
+            .push(oxideterm_settings::HighlightRuleSet {
+                id: "operations".to_string(),
+                name: "Operations".to_string(),
+                rules: vec![HighlightRule {
+                    id: "error".to_string(),
+                    pattern: "ERROR".to_string(),
+                    ..HighlightRule::default()
+                }],
+            });
+
+        let overrides = terminal_preference_overrides(
+            ConnectionTerminalOptions {
+                highlight_rule_set: Some("operations".to_string()),
+                ..ConnectionTerminalOptions::default()
+            },
+            &terminal,
+        );
+
+        assert_eq!(
+            overrides.highlight_rule_set_id.as_deref(),
+            Some("operations")
+        );
+        assert_eq!(
+            overrides
+                .highlight_rules
+                .as_deref()
+                .and_then(|rules| rules.first())
+                .map(|rule| rule.pattern.as_str()),
+            Some("ERROR")
         );
     }
 }

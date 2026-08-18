@@ -84,6 +84,20 @@
       "search_no_results": "No results",
       "player_empty": "No playback output yet"
     },
+    "highlight_override": {
+      "title": "키워드 및 정규식 강조",
+      "source_global_base": "전역 기본 규칙 사용 중",
+      "source_session": "세션 재정의: {{name}}",
+      "source_connection": "연결 재정의: {{name}}",
+      "source_global": "전역 설정: {{name}}",
+      "override_hint": "여기서 선택한 항목은 이 세션의 기본 설정을 재정의합니다.",
+      "use_inherited": "상속된 설정 사용",
+      "use_global_for_session": "이 세션에서 전역 설정 사용: {{name}}",
+      "save_to_connection": "현재 선택을 이 연결에 저장",
+      "saved_to_connection": "강조 재정의를 연결에 저장했습니다",
+      "reset_connection": "이 연결을 상속으로 재설정",
+      "manage_rule_sets": "기본 규칙 및 규칙 세트 관리…"
+    },
     "trzsz": {
       "select_upload_directory_title": "업로드할 폴더 선택",
       "select_upload_directory_description": "trzsz를 통해 전송할 로컬 디렉터리를 선택하세요.",

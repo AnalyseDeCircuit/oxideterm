@@ -102,6 +102,7 @@ pub enum SelectAnchorId {
     SettingsTerminalSemanticScheme,
     SettingsSemanticSchemeRuleClass(usize),
     SettingsSemanticSchemeRuleContext(usize),
+    SettingsHighlightRuleSet,
     SettingsHighlightPreset,
     SettingsHighlightRenderMode(usize),
     SettingsHighlightMatchScope(usize),
@@ -134,6 +135,7 @@ pub enum SelectAnchorId {
     NewConnectionTerminalBackspaceSequence,
     NewConnectionTerminalDeleteSequence,
     NewConnectionTerminalSemanticScheme,
+    NewConnectionTerminalHighlightRuleSet,
     SettingsConnectionImportSource,
     SettingsConnectionImportDuplicateStrategy,
     CloudSyncBackend,
@@ -141,6 +143,7 @@ pub enum SelectAnchorId {
     CloudSyncConflictStrategy,
     IdeAgentStatus,
     TerminalBroadcastMenu,
+    TerminalHighlightRuleSet,
     TerminalCommandBar,
     TerminalCwdMenu,
     TerminalGitBranchMenu,
@@ -205,6 +208,7 @@ impl SelectAnchorId {
                 | Self::SettingsTerminalSemanticScheme
                 | Self::SettingsSemanticSchemeRuleClass(_)
                 | Self::SettingsSemanticSchemeRuleContext(_)
+                | Self::SettingsHighlightRuleSet
                 | Self::SettingsHighlightPreset
                 | Self::SettingsHighlightRenderMode(_)
                 | Self::SettingsHighlightMatchScope(_)
@@ -238,6 +242,7 @@ impl SelectAnchorId {
                 | Self::NewConnectionTerminalBackspaceSequence
                 | Self::NewConnectionTerminalDeleteSequence
                 | Self::NewConnectionTerminalSemanticScheme
+                | Self::NewConnectionTerminalHighlightRuleSet
         )
     }
 

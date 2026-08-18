@@ -84,6 +84,20 @@
       "search_no_results": "No results",
       "player_empty": "No playback output yet"
     },
+    "highlight_override": {
+      "title": "キーワード・正規表現ハイライト",
+      "source_global_base": "グローバル基本ルールを使用中",
+      "source_session": "セッション上書き：{{name}}",
+      "source_connection": "接続上書き：{{name}}",
+      "source_global": "グローバル設定：{{name}}",
+      "override_hint": "ここでの選択は、このセッションの基本設定を上書きします。",
+      "use_inherited": "継承設定を使用",
+      "use_global_for_session": "このセッションでグローバル設定を使用：{{name}}",
+      "save_to_connection": "現在の選択をこの接続に保存",
+      "saved_to_connection": "ハイライト上書きを接続に保存しました",
+      "reset_connection": "この接続を継承へ戻す",
+      "manage_rule_sets": "基本ルールとルールセットを管理…"
+    },
     "trzsz": {
       "select_upload_directory_title": "アップロードするフォルダーを選択",
       "select_upload_directory_description": "この trzsz 転送で送信するローカルディレクトリを選択してください。",

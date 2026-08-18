@@ -84,6 +84,20 @@
       "search_no_results": "No results",
       "player_empty": "No playback output yet"
     },
+    "highlight_override": {
+      "title": "Evidenziazione di parole chiave e regex",
+      "source_global_base": "Uso delle regole di base globali",
+      "source_session": "Override sessione: {{name}}",
+      "source_connection": "Override connessione: {{name}}",
+      "source_global": "Impostazione globale: {{name}}",
+      "override_hint": "La selezione sostituisce l'impostazione di base per questa sessione.",
+      "use_inherited": "Usa impostazione ereditata",
+      "use_global_for_session": "Usa impostazione globale per questa sessione: {{name}}",
+      "save_to_connection": "Salva la scelta in questa connessione",
+      "saved_to_connection": "Override salvato nella connessione",
+      "reset_connection": "Ripristina ereditarietà per la connessione",
+      "manage_rule_sets": "Gestisci regole di base e set…"
+    },
     "trzsz": {
       "select_upload_directory_title": "Seleziona una cartella da caricare",
       "select_upload_directory_description": "Scegli la directory locale da inviare tramite trzsz.",

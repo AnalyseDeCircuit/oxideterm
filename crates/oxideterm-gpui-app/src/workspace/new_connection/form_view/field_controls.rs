@@ -434,6 +434,9 @@ impl WorkspaceApp {
             NewConnectionSelect::TerminalSemanticScheme => {
                 SelectAnchorId::NewConnectionTerminalSemanticScheme
             }
+            NewConnectionSelect::TerminalHighlightRuleSet => {
+                SelectAnchorId::NewConnectionTerminalHighlightRuleSet
+            }
         }
     }
 
@@ -1097,7 +1100,8 @@ impl WorkspaceApp {
                     | NewConnectionSelect::TerminalEncoding
                     | NewConnectionSelect::TerminalBackspaceSequence
                     | NewConnectionSelect::TerminalDeleteSequence
-                    | NewConnectionSelect::TerminalSemanticScheme => return,
+                    | NewConnectionSelect::TerminalSemanticScheme
+                    | NewConnectionSelect::TerminalHighlightRuleSet => return,
                 }
                 form.field_focused = false;
                 form.selected_field = None;
@@ -3355,6 +3359,19 @@ impl WorkspaceApp {
                     .unwrap_or_else(|| custom_id.to_string()),
             })
             .unwrap_or_else(|| inherited_label(&default_scheme));
+        let default_highlight_rule_set = application_defaults
+            .default_highlight_rule_set_name()
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                self.i18n
+                    .t("settings_view.terminal.highlight_rules.rule_set_global_base")
+            });
+        let highlight_rule_set_label = terminal
+            .highlight_rule_set
+            .as_deref()
+            .and_then(|id| application_defaults.highlight_rule_set(id))
+            .map(|rule_set| rule_set.name.clone())
+            .unwrap_or_else(|| inherited_label(&default_highlight_rule_set));
 
         div()
             .flex()
@@ -3425,6 +3442,23 @@ impl WorkspaceApp {
                                 self.render_new_connection_select_control(
                                     NewConnectionSelect::TerminalSemanticScheme,
                                     scheme_label,
+                                    false,
+                                    false,
+                                    cx,
+                                ),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(CONNECTION_TERMINAL_CONTROL_MIN_WIDTH))
+                            .child(form_field(
+                                &self.tokens,
+                                self.i18n
+                                    .t("settings_view.terminal.highlight_rules.rule_set"),
+                                self.render_new_connection_select_control(
+                                    NewConnectionSelect::TerminalHighlightRuleSet,
+                                    highlight_rule_set_label,
                                     false,
                                     false,
                                     cx,
@@ -3682,6 +3716,23 @@ impl WorkspaceApp {
         self.update_connection_form_state(cx, |state| {
             if let Some(form) = state.form.as_mut() {
                 form.terminal.semantic_scheme = scheme_id;
+                form.field_focused = false;
+                clear_connection_selection(form);
+                form.error = None;
+            }
+        });
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    pub(super) fn set_new_connection_terminal_highlight_rule_set(
+        &mut self,
+        rule_set_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_connection_form_state(cx, |state| {
+            if let Some(form) = state.form.as_mut() {
+                form.terminal.highlight_rule_set = rule_set_id;
                 form.field_focused = false;
                 clear_connection_selection(form);
                 form.error = None;

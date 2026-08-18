@@ -154,6 +154,20 @@
       "search_no_results": "没有结果",
       "player_empty": "暂无回放输出"
     },
+    "highlight_override": {
+      "title": "关键词与正则高亮",
+      "source_global_base": "正在使用全局基础规则",
+      "source_session": "当前会话覆盖：{{name}}",
+      "source_connection": "连接覆盖：{{name}}",
+      "source_global": "全局设置：{{name}}",
+      "override_hint": "这里的选择会覆盖当前会话的基础设置。",
+      "use_inherited": "使用继承设置",
+      "use_global_for_session": "本会话使用全局设置：{{name}}",
+      "save_to_connection": "将当前选择保存到此连接",
+      "saved_to_connection": "高亮覆盖已保存到连接",
+      "reset_connection": "将此连接恢复为继承",
+      "manage_rule_sets": "管理基础规则和规则集…"
+    },
     "trzsz": {
       "select_upload_directory_title": "选择要上传的文件夹",
       "select_upload_directory_description": "选择要通过 trzsz 发送的本地目录。",

@@ -92,6 +92,7 @@ impl WorkspaceApp {
         let recording_status = self.active_terminal_recording_status(cx);
         let recording_active = recording_status.state != TerminalRecordingState::Idle;
         let timestamps_active = self.active_terminal_timestamps_enabled(cx);
+        let highlight_override_active = self.active_terminal_highlight_override(cx);
         let timestamps_tooltip_title = if timestamps_active {
             self.i18n.t("terminal.recording.hide_timestamps")
         } else {
@@ -118,6 +119,9 @@ impl WorkspaceApp {
                 // through the root backdrop makes the existing bottom/right
                 // placement resolve against the wrong box.
                 bar.child(self.render_terminal_quick_commands_popover(cx))
+            })
+            .when(self.terminal_highlight_popover_open, |bar| {
+                bar.child(self.render_terminal_highlight_popover(cx))
             })
             .when(self.terminal.read(cx).git_panel_open(), |bar| {
                 bar.child(self.render_terminal_git_branch_picker(cx))
@@ -381,6 +385,7 @@ impl WorkspaceApp {
                                             this.close_terminal_cwd_picker(cx);
                                             this.close_terminal_git_branch_picker(cx);
                                             this.close_terminal_project_panel(cx);
+                                            this.terminal_highlight_popover_open = false;
                                             cx.stop_propagation();
                                             cx.notify();
                                         },
@@ -406,9 +411,43 @@ impl WorkspaceApp {
                                     "terminal-command-broadcast",
                                     self.i18n.t("terminal.broadcast.select_targets"),
                                     |this, _event, _window, cx| {
+                                        this.terminal_highlight_popover_open = false;
                                         this.toggle_terminal_broadcast_menu(cx);
                                         cx.stop_propagation();
                                         cx.notify();
+                                    },
+                                    cx,
+                                )
+                                .relative(),
+                                {
+                                    let workspace = workspace.clone();
+                                    move |anchor, _window, cx| {
+                                        let _ = workspace.update(cx, |this, cx| {
+                                            this.update_select_anchor(anchor, cx);
+                                        });
+                                    }
+                                },
+                            ))
+                            .child(select_anchor_probe(
+                                SelectAnchorId::TerminalHighlightRuleSet,
+                                self.terminal_command_action_button(
+                                    LucideIcon::Hash,
+                                    if highlight_override_active {
+                                        rgb(theme.accent)
+                                    } else {
+                                        rgb(theme.text_muted)
+                                    },
+                                    false,
+                                    Some(if highlight_override_active {
+                                        rgba((theme.accent << 8) | 0x26)
+                                    } else {
+                                        rgba(0x00000000)
+                                    }),
+                                    "terminal-command-highlight-rules",
+                                    self.i18n.t("terminal.highlight_override.title"),
+                                    |this, _event, _window, cx| {
+                                        this.toggle_terminal_highlight_popover(cx);
+                                        cx.stop_propagation();
                                     },
                                     cx,
                                 )

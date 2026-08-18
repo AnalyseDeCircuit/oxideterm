@@ -88,6 +88,7 @@ mod tests {
                 backspace_sequence: Some(ConnectionTerminalBackspaceSequence::ControlH),
                 delete_sequence: Some(ConnectionTerminalDeleteSequence::Delete),
                 semantic_scheme: Some("conservative".to_string()),
+                highlight_rule_set: Some("network-devices".to_string()),
             },
             ..ConnectionOptions::default()
         };
@@ -96,6 +97,10 @@ mod tests {
         assert_eq!(serialized["terminal"]["backspaceSequence"], "controlH");
         assert_eq!(serialized["terminal"]["deleteSequence"], "delete");
         assert_eq!(serialized["terminal"]["semanticScheme"], "conservative");
+        assert_eq!(
+            serialized["terminal"]["highlightRuleSet"],
+            "network-devices"
+        );
         assert_eq!(serialized["dedicated_new_terminal_connection"], true);
         assert_eq!(
             serde_json::to_value(ConnectionTerminalEncoding::EucJp).unwrap(),
@@ -127,6 +132,39 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(custom_timeout.effective_connect_timeout_seconds(), 120);
+    }
+
+    #[test]
+    fn terminal_highlight_rule_set_update_persists_without_touching_connection_identity() {
+        let path = temp_store_path("highlight-rule-set");
+        let mut store = ConnectionStore::load(&path).unwrap();
+        store
+            .upsert(request("conn-1", SavedAuth::Agent))
+            .expect("connection saved");
+
+        assert!(
+            store
+                .set_terminal_highlight_rule_set(
+                    "conn-1",
+                    Some(" network-devices ".to_string())
+                )
+                .unwrap()
+        );
+        assert_eq!(
+            store
+                .get("conn-1")
+                .and_then(|connection| connection.options.terminal.highlight_rule_set.as_deref()),
+            Some("network-devices")
+        );
+
+        let reloaded = ConnectionStore::load(&path).unwrap();
+        assert_eq!(
+            reloaded
+                .get("conn-1")
+                .and_then(|connection| connection.options.terminal.highlight_rule_set.as_deref()),
+            Some("network-devices")
+        );
+        let _ = fs::remove_file(path);
     }
 
     #[test]
@@ -2211,6 +2249,7 @@ mod tests {
                 backspace_sequence: None,
                 delete_sequence: Some(ConnectionTerminalDeleteSequence::ControlH),
                 semantic_scheme: None,
+                highlight_rule_set: None,
             },
             connect_on_open: true,
             created_at: now,

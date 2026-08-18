@@ -84,6 +84,20 @@
       "search_no_results": "No results",
       "player_empty": "No playback output yet"
     },
+    "highlight_override": {
+      "title": "Tô sáng từ khóa và biểu thức chính quy",
+      "source_global_base": "Đang dùng quy tắc cơ sở toàn cục",
+      "source_session": "Ghi đè phiên: {{name}}",
+      "source_connection": "Ghi đè kết nối: {{name}}",
+      "source_global": "Cài đặt toàn cục: {{name}}",
+      "override_hint": "Lựa chọn tại đây ghi đè cài đặt cơ sở của phiên này.",
+      "use_inherited": "Dùng cài đặt kế thừa",
+      "use_global_for_session": "Dùng cài đặt toàn cục cho phiên này: {{name}}",
+      "save_to_connection": "Lưu lựa chọn vào kết nối này",
+      "saved_to_connection": "Đã lưu ghi đè vào kết nối",
+      "reset_connection": "Đặt kết nối về kế thừa",
+      "manage_rule_sets": "Quản lý quy tắc cơ sở và bộ quy tắc…"
+    },
     "trzsz": {
       "select_upload_directory_title": "Chọn thư mục để tải lên",
       "select_upload_directory_description": "Chọn thư mục cục bộ sẽ được gửi qua trzsz.",

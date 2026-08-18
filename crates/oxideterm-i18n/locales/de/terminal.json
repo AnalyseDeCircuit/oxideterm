@@ -84,6 +84,20 @@
       "search_no_results": "No results",
       "player_empty": "No playback output yet"
     },
+    "highlight_override": {
+      "title": "Schlüsselwort- und Regex-Hervorhebung",
+      "source_global_base": "Globale Basisregeln werden verwendet",
+      "source_session": "Sitzungsüberschreibung: {{name}}",
+      "source_connection": "Verbindungsüberschreibung: {{name}}",
+      "source_global": "Globale Einstellung: {{name}}",
+      "override_hint": "Die Auswahl hier überschreibt die Basiseinstellung dieser Sitzung.",
+      "use_inherited": "Geerbte Einstellung verwenden",
+      "use_global_for_session": "Globale Einstellung für diese Sitzung: {{name}}",
+      "save_to_connection": "Aktuelle Auswahl für diese Verbindung speichern",
+      "saved_to_connection": "Hervorhebung für Verbindung gespeichert",
+      "reset_connection": "Verbindung auf Vererbung zurücksetzen",
+      "manage_rule_sets": "Basisregeln und Regelsätze verwalten…"
+    },
     "trzsz": {
       "select_upload_directory_title": "Ordner zum Hochladen auswählen",
       "select_upload_directory_description": "Lokales Verzeichnis auswählen, das über trzsz gesendet werden soll.",

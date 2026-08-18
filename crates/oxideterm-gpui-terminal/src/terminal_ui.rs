@@ -117,6 +117,8 @@ pub struct TerminalUiPreferenceOverrides {
     pub delete_sequence: Option<TerminalDeleteSequence>,
     pub semantic_scheme: Option<Arc<CompiledSemanticScheme>>,
     pub semantic_scheme_id: Option<String>,
+    pub highlight_rules: Option<Arc<[TerminalHighlightRule]>>,
+    pub highlight_rule_set_id: Option<String>,
     pub semantic_shell: Option<SemanticShellDialect>,
     // Retain the local shell identity so settings refreshes can resolve its Scheme again.
     pub local_shell_id: Option<String>,
@@ -138,6 +140,9 @@ impl TerminalUiPreferenceOverrides {
         }
         if let Some(semantic_scheme) = &self.semantic_scheme {
             preferences.semantic_scheme = semantic_scheme.clone();
+        }
+        if let Some(highlight_rules) = &self.highlight_rules {
+            preferences.highlight_rules = highlight_rules.clone();
         }
         if let Some(semantic_shell) = self.semantic_shell {
             preferences.semantic_shell = semantic_shell;
@@ -574,6 +579,12 @@ pub struct TerminalHighlightRule {
     pub preserve_background: bool,
     pub enabled: bool,
     pub priority: i64,
+}
+
+#[derive(Clone)]
+pub struct TerminalHighlightRuleSetOverride {
+    pub id: String,
+    pub rules: Arc<[TerminalHighlightRule]>,
 }
 
 #[derive(Clone, Debug)]

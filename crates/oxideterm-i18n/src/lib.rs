@@ -470,6 +470,7 @@ mod tests {
             "terminal.recording.discard",
             "terminal.recording.show_timestamps",
             "terminal.recording.hide_timestamps",
+            "terminal.highlight_override.title",
         ];
         let english = I18n::new(Locale::En);
 

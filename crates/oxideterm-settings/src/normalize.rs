@@ -609,6 +609,36 @@ fn sanitize_custom_semantic_schemes(root: &mut Value, warnings: &mut Vec<String>
     }
 }
 
+fn sanitize_highlight_rule_sets(root: &mut Value, warnings: &mut Vec<String>) {
+    let Some(terminal) = root.get_mut("terminal").and_then(Value::as_object_mut) else {
+        return;
+    };
+    let Some(value) = terminal.get_mut("highlightRuleSets") else {
+        return;
+    };
+    let original_count = value.as_array().map(Vec::len).unwrap_or_default();
+    *value = sanitize_highlight_rule_sets_value(value);
+    let valid_ids = value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|rule_set| rule_set.get("id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect::<std::collections::HashSet<_>>();
+    if original_count > MAX_HIGHLIGHT_RULE_SETS {
+        warnings.push(format!(
+            "Highlight rule sets limited to {MAX_HIGHLIGHT_RULE_SETS}"
+        ));
+    }
+    let default_is_valid = terminal
+        .get("defaultHighlightRuleSet")
+        .and_then(Value::as_str)
+        .is_some_and(|id| valid_ids.contains(id));
+    if !default_is_valid {
+        terminal.insert("defaultHighlightRuleSet".to_string(), Value::Null);
+    }
+}
+
 fn derive_backend_hot_lines(scrollback: i64) -> i64 {
     clamp_backend_hot_lines(clamp_terminal_scrollback(scrollback) * 2)
 }
@@ -907,6 +937,7 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     if let Some(value) = get_path_mut(&mut settings, &["terminal", "highlightRules"]) {
         *value = sanitize_highlight_rules_value(value);
     }
+    sanitize_highlight_rule_sets(&mut settings, &mut validation_warnings);
     sanitize_custom_semantic_schemes(&mut settings, &mut validation_warnings);
 
     let settings =
@@ -954,6 +985,30 @@ mod tests {
         );
         assert!(sanitized.settings.terminal.semantic_custom_scheme.is_none());
         assert!(!sanitized.validation_warnings.is_empty());
+    }
+
+    #[test]
+    fn missing_default_highlight_rule_set_falls_back_to_global_base() {
+        let sanitized = sanitize_settings_value(json!({
+            "terminal": {
+                "defaultHighlightRuleSet": "missing",
+                "highlightRuleSets": [{
+                    "id": "operations",
+                    "name": "Operations",
+                    "rules": []
+                }]
+            }
+        }))
+        .expect("sanitize settings");
+
+        assert!(
+            sanitized
+                .settings
+                .terminal
+                .default_highlight_rule_set
+                .is_none()
+        );
+        assert_eq!(sanitized.settings.terminal.highlight_rule_sets.len(), 1);
     }
 
     #[test]

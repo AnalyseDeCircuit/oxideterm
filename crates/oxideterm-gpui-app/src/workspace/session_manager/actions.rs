@@ -906,7 +906,9 @@ impl WorkspaceApp {
             port: profile.port,
         };
         match self.create_telnet_terminal_tab(config, profile.terminal, window, cx) {
-            Ok(_) => {
+            Ok(session_id) => {
+                self.telnet_terminal_profile_ids
+                    .insert(session_id, profile.id.clone());
                 let _ = self.connection_store.mark_telnet_profile_used(id);
             }
             Err(error) => {

@@ -338,6 +338,10 @@ pub struct TerminalSettings {
     #[serde(default)]
     pub custom_semantic_schemes: Vec<SemanticSchemeDocument>,
     pub highlight_rules: Vec<HighlightRule>,
+    #[serde(default)]
+    pub highlight_rule_sets: Vec<HighlightRuleSet>,
+    #[serde(default)]
+    pub default_highlight_rule_set: Option<String>,
     pub in_band_transfer: InBandTransferSettings,
     pub graphics: TerminalGraphicsSettings,
     pub unicode: TerminalUnicodeSettings,
@@ -356,6 +360,40 @@ impl TerminalSettings {
         self.custom_semantic_schemes
             .iter()
             .find(|scheme| scheme.id == active_id)
+    }
+
+    pub fn highlight_rule_set(&self, id: &str) -> Option<&HighlightRuleSet> {
+        self.highlight_rule_sets
+            .iter()
+            .find(|rule_set| rule_set.id == id)
+    }
+
+    pub fn effective_highlight_rules(&self) -> &[HighlightRule] {
+        self.default_highlight_rule_set
+            .as_deref()
+            .and_then(|id| self.highlight_rule_set(id))
+            .map(|rule_set| rule_set.rules.as_slice())
+            .unwrap_or(&self.highlight_rules)
+    }
+
+    pub fn effective_highlight_rules_mut(&mut self) -> &mut Vec<HighlightRule> {
+        let selected = self.default_highlight_rule_set.clone();
+        if let Some(id) = selected
+            && let Some(index) = self
+                .highlight_rule_sets
+                .iter()
+                .position(|rule_set| rule_set.id == id)
+        {
+            return &mut self.highlight_rule_sets[index].rules;
+        }
+        &mut self.highlight_rules
+    }
+
+    pub fn default_highlight_rule_set_name(&self) -> Option<&str> {
+        self.default_highlight_rule_set
+            .as_deref()
+            .and_then(|id| self.highlight_rule_set(id))
+            .map(|rule_set| rule_set.name.as_str())
     }
 }
 
@@ -408,6 +446,8 @@ impl Default for TerminalSettings {
             semantic_custom_scheme: None,
             custom_semantic_schemes: Vec::new(),
             highlight_rules: Vec::new(),
+            highlight_rule_sets: Vec::new(),
+            default_highlight_rule_set: None,
             in_band_transfer: InBandTransferSettings::default(),
             graphics: TerminalGraphicsSettings::default(),
             unicode: TerminalUnicodeSettings::default(),
@@ -501,6 +541,29 @@ mod tests {
         let decoded: TerminalSettings = serde_json::from_value(value).unwrap();
 
         assert_eq!(decoded.active_custom_semantic_scheme(), Some(&scheme));
+    }
+
+    #[test]
+    fn selected_highlight_rule_set_replaces_global_base_rules() {
+        let mut settings = TerminalSettings::default();
+        settings.highlight_rules.push(HighlightRule {
+            id: "base".to_string(),
+            ..HighlightRule::default()
+        });
+        settings.highlight_rule_sets.push(HighlightRuleSet {
+            id: "operations".to_string(),
+            name: "Operations".to_string(),
+            rules: vec![HighlightRule {
+                id: "override".to_string(),
+                ..HighlightRule::default()
+            }],
+        });
+
+        assert_eq!(settings.effective_highlight_rules()[0].id, "base");
+        settings.default_highlight_rule_set = Some("operations".to_string());
+        assert_eq!(settings.effective_highlight_rules()[0].id, "override");
+        settings.effective_highlight_rules_mut()[0].label = "edited".to_string();
+        assert_eq!(settings.highlight_rule_sets[0].rules[0].label, "edited");
     }
 
     #[test]

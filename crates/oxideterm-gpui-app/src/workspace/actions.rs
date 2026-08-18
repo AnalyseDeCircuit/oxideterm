@@ -451,6 +451,10 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.dismiss_terminal_highlight_popover() {
+            cx.notify();
+            return true;
+        }
         if self.dismiss_terminal_broadcast_menu(cx) {
             cx.notify();
             return true;
@@ -516,6 +520,7 @@ impl WorkspaceApp {
         let should_open = !self.terminal.read(cx).broadcast_menu_open();
         self.dismiss_terminal_broadcast_menu(cx);
         if should_open {
+            self.dismiss_terminal_highlight_popover();
             self.close_terminal_quick_commands_popover(cx);
             self.close_terminal_cwd_picker(cx);
             self.close_terminal_git_branch_picker(cx);

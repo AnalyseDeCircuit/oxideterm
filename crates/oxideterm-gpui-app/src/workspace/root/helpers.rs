@@ -1040,6 +1040,9 @@ impl WorkspaceApp {
         if self.dismiss_terminal_broadcast_menu(cx) {
             changed = true;
         }
+        if self.dismiss_terminal_highlight_popover() {
+            changed = true;
+        }
         if self.remote_desktop_resize_menu_tab_id.take().is_some() {
             changed = true;
         }

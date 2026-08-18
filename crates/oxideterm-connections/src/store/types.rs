@@ -146,6 +146,8 @@ pub struct ConnectionTerminalOptions {
     pub delete_sequence: Option<ConnectionTerminalDeleteSequence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub semantic_scheme: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub highlight_rule_set: Option<String>,
 }
 
 impl ConnectionTerminalOptions {
@@ -154,6 +156,7 @@ impl ConnectionTerminalOptions {
             && self.backspace_sequence.is_none()
             && self.delete_sequence.is_none()
             && self.semantic_scheme.is_none()
+            && self.highlight_rule_set.is_none()
     }
 }
 

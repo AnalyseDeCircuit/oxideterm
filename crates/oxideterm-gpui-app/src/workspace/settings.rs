@@ -5,11 +5,12 @@ use gpui::{
     point, relative,
 };
 use oxideterm_settings::{
-    AppIconVariant, FrostedGlassMode, HighlightRule, IdeAgentMode, Language, MAX_HIGHLIGHT_RULES,
-    PersistedSettings, RECOMMENDED_FOCUS_HANDOFF_COMMANDS, RemoteShellIntegrationMode,
-    SettingsApplicationProxyMode, SettingsUpstreamProxyAuth, SettingsUpstreamProxyConfig,
-    SettingsUpstreamProxyProtocol, TerminalSemanticScheme, UpdateChannel, UpdateProxyMode,
-    UpdateProxyProtocol, create_default_highlight_rule, reindex_highlight_rules,
+    AppIconVariant, FrostedGlassMode, HighlightRule, HighlightRuleSet, IdeAgentMode, Language,
+    MAX_HIGHLIGHT_RULE_SETS, MAX_HIGHLIGHT_RULES, PersistedSettings,
+    RECOMMENDED_FOCUS_HANDOFF_COMMANDS, RemoteShellIntegrationMode, SettingsApplicationProxyMode,
+    SettingsUpstreamProxyAuth, SettingsUpstreamProxyConfig, SettingsUpstreamProxyProtocol,
+    TerminalSemanticScheme, UpdateChannel, UpdateProxyMode, UpdateProxyProtocol,
+    create_default_highlight_rule, reindex_highlight_rules, sanitize_highlight_rule_sets,
 };
 use oxideterm_settings_model::{
     AcpAgentPreset, AiProviderModelChipItem, AiProviderModelPanel, AiSettingsPage,

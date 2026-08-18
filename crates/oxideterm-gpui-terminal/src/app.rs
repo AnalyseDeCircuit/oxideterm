@@ -309,6 +309,9 @@ pub struct TerminalPane {
     serial_port_available: Option<bool>,
     focus_handle: FocusHandle,
     preference_overrides: TerminalUiPreferenceOverrides,
+    // The pane owns only its live-session highlight choice. Saved connection
+    // defaults remain connection-store data and never affect node ownership.
+    session_highlight_override: Option<TerminalHighlightRuleSetOverride>,
     preferences: TerminalUiPreferences,
     settings: TerminalUiSettings,
     theme: TerminalUiTheme,
@@ -736,6 +739,7 @@ impl TerminalPane {
             serial_port_available: None,
             focus_handle,
             preference_overrides: TerminalUiPreferenceOverrides::default(),
+            session_highlight_override: None,
             preferences: preferences.clone(),
             settings: TerminalUiSettings::from_preferences(&preferences),
             theme: preferences.theme.clone(),
@@ -1158,6 +1162,9 @@ impl TerminalPane {
     pub fn set_preferences(&mut self, preferences: TerminalUiPreferences, cx: &mut Context<Self>) {
         let mut preferences = preferences;
         self.preference_overrides.apply_to(&mut preferences);
+        if let Some(highlight_override) = &self.session_highlight_override {
+            preferences.highlight_rules = highlight_override.rules.clone();
+        }
         if self.preferences.terminal_encoding != preferences.terminal_encoding {
             self.terminal
                 .lock()
@@ -1210,6 +1217,24 @@ impl TerminalPane {
 
     pub fn preference_overrides_snapshot(&self) -> TerminalUiPreferenceOverrides {
         self.preference_overrides.clone()
+    }
+
+    pub fn session_highlight_rule_set_id(&self) -> Option<&str> {
+        self.session_highlight_override
+            .as_ref()
+            .map(|highlight_override| highlight_override.id.as_str())
+    }
+
+    pub fn set_session_highlight_override(
+        &mut self,
+        highlight_override: Option<TerminalHighlightRuleSetOverride>,
+        application_preferences: TerminalUiPreferences,
+        cx: &mut Context<Self>,
+    ) {
+        // Session-only state is retained by this pane and is discarded with
+        // the pane without mutating the shared SSH node or saved connection.
+        self.session_highlight_override = highlight_override;
+        self.set_preferences(application_preferences, cx);
     }
 
     pub fn set_preference_overrides(
@@ -3484,6 +3509,48 @@ mod tests {
 
         assert_eq!(label, "[01:02:03.004]");
         assert_eq!(label.chars().count(), TERMINAL_TIMESTAMP_LABEL_CELLS);
+    }
+
+    #[gpui::test]
+    fn session_highlight_override_wins_over_connection_and_application_rules(
+        cx: &mut TestAppContext,
+    ) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| TerminalPane::new(window, cx).expect("test terminal pane"))
+        });
+        let rule = |id: &str| TerminalHighlightRule {
+            id: id.to_string(),
+            pattern: id.to_string(),
+            enabled: true,
+            ..TerminalHighlightRule::default()
+        };
+        pane.update(cx, |pane, cx| {
+            let mut application = TerminalUiPreferences::default();
+            application.highlight_rules = Arc::from([rule("application")]);
+            pane.set_preference_overrides(
+                TerminalUiPreferenceOverrides {
+                    highlight_rules: Some(Arc::from([rule("connection")])),
+                    highlight_rule_set_id: Some("connection-set".to_string()),
+                    ..TerminalUiPreferenceOverrides::default()
+                },
+                application.clone(),
+                cx,
+            );
+            pane.set_session_highlight_override(
+                Some(TerminalHighlightRuleSetOverride {
+                    id: "session-set".to_string(),
+                    rules: Arc::from([rule("session")]),
+                }),
+                application,
+                cx,
+            );
+        });
+
+        pane.read_with(cx, |pane, _cx| {
+            assert_eq!(pane.preferences.highlight_rules[0].id, "session");
+            assert_eq!(pane.session_highlight_rule_set_id(), Some("session-set"));
+        });
     }
 
     #[test]

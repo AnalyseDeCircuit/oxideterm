@@ -32,6 +32,7 @@ pub(in crate::workspace) mod completion;
 mod bar;
 mod context;
 mod git;
+mod highlight;
 mod privilege;
 mod sender;
 

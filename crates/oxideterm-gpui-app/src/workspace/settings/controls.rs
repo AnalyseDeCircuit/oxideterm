@@ -650,6 +650,52 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Terminal, SettingsSelect::HighlightRuleSet) => {
+                let mut popup =
+                    select_overlay_popup(&self.tokens, width).child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            self.i18n
+                                .t("settings_view.terminal.highlight_rules.rule_set_global_base"),
+                            settings.terminal.default_highlight_rule_set.is_none(),
+                        ),
+                        false,
+                        false,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.close_settings_select();
+                            this.edit_settings(
+                                |settings| settings.terminal.default_highlight_rule_set = None,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                if !settings.terminal.highlight_rule_sets.is_empty() {
+                    popup = popup.child(select_separator(&self.tokens));
+                    for rule_set in &settings.terminal.highlight_rule_sets {
+                        let id = rule_set.id.clone();
+                        let selected = settings.terminal.default_highlight_rule_set.as_deref()
+                            == Some(id.as_str());
+                        popup = popup.child(select_option_action(
+                            select_option(&self.tokens, rule_set.name.clone(), selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.close_settings_select();
+                                this.edit_settings(
+                                    |settings| {
+                                        settings.terminal.default_highlight_rule_set =
+                                            Some(id.clone());
+                                    },
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ));
+                    }
+                }
+                Some(popup)
+            }
             (SettingsTab::Terminal, SettingsSelect::SemanticSchemeRuleClass(index)) => {
                 let selected = settings
                     .terminal

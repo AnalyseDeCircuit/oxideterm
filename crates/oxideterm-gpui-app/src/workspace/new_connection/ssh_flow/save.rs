@@ -1030,12 +1030,16 @@ impl WorkspaceApp {
             return;
         }
 
+        let mut connected_profile_id = None;
         if action == NewConnectionSubmitAction::SaveAndConnect {
             let request = save_request
                 .take()
                 .expect("telnet save-and-open action must build a telnet profile request");
             match self.connection_store.upsert_telnet_profile(request) {
-                Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
+                Ok(profile) => {
+                    connected_profile_id = Some(profile.id);
+                    self.queue_cloud_sync_dirty_refresh(cx);
+                }
                 Err(error) => {
                     self.update_connection_form_state(cx, |state| {
                         if let Some(form) = state.form.as_mut() {
@@ -1055,10 +1059,13 @@ impl WorkspaceApp {
         // Telnet is opened as a native local terminal transport. It does not
         // create an SSH node, so SSH-only saved-connection/test flows stay out.
         match self.create_telnet_terminal_tab(config, terminal_options, window, cx) {
-            Ok(_) => {
+            Ok(session_id) => {
                 if let Some(request) = save_request {
                     match self.connection_store.upsert_telnet_profile(request) {
-                        Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
+                        Ok(profile) => {
+                            connected_profile_id = Some(profile.id);
+                            self.queue_cloud_sync_dirty_refresh(cx);
+                        }
                         Err(error) => {
                             let message = format!(
                                 "{}: {error}",
@@ -1069,6 +1076,10 @@ impl WorkspaceApp {
                             });
                         }
                     }
+                }
+                if let Some(profile_id) = connected_profile_id {
+                    self.telnet_terminal_profile_ids
+                        .insert(session_id, profile_id);
                 }
                 self.update_connection_form_state(cx, ConnectionFormState::clear);
             }

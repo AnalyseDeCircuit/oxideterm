@@ -155,27 +155,34 @@ pub fn persisted_settings_input_value(
                     .cloned()
             })
             .unwrap_or_default(),
+        SettingsInput::HighlightRuleSetName => settings
+            .terminal
+            .default_highlight_rule_set
+            .as_deref()
+            .and_then(|id| settings.terminal.highlight_rule_set(id))
+            .map(|rule_set| rule_set.name.clone())
+            .unwrap_or_default(),
         SettingsInput::HighlightLabel(index) => settings
             .terminal
-            .highlight_rules
+            .effective_highlight_rules()
             .get(index)
             .map(|rule| rule.label.clone())
             .unwrap_or_default(),
         SettingsInput::HighlightPattern(index) => settings
             .terminal
-            .highlight_rules
+            .effective_highlight_rules()
             .get(index)
             .map(|rule| rule.pattern.clone())
             .unwrap_or_default(),
         SettingsInput::HighlightForeground(index) => settings
             .terminal
-            .highlight_rules
+            .effective_highlight_rules()
             .get(index)
             .and_then(|rule| rule.foreground.clone())
             .unwrap_or_default(),
         SettingsInput::HighlightBackground(index) => settings
             .terminal
-            .highlight_rules
+            .effective_highlight_rules()
             .get(index)
             .and_then(|rule| rule.background.clone())
             .unwrap_or_default(),
@@ -472,6 +479,24 @@ pub fn apply_persisted_settings_input_draft(
             .map(|()| SettingsInputDraftApply::Applied)
             .unwrap_or(SettingsInputDraftApply::Invalid)
         }
+        SettingsInput::HighlightRuleSetName => {
+            let name = draft.trim();
+            if name.is_empty() {
+                return SettingsInputDraftApply::Invalid;
+            }
+            let Some(id) = settings.terminal.default_highlight_rule_set.clone() else {
+                return SettingsInputDraftApply::Applied;
+            };
+            if let Some(rule_set) = settings
+                .terminal
+                .highlight_rule_sets
+                .iter_mut()
+                .find(|rule_set| rule_set.id == id)
+            {
+                rule_set.name = name.to_string();
+            }
+            SettingsInputDraftApply::Applied
+        }
         SettingsInput::HighlightLabel(index) => edit_highlight_rule(settings, index, |rule| {
             rule.label = draft.trim().to_string()
         }),
@@ -647,12 +672,12 @@ fn edit_highlight_rule(
     index: usize,
     edit: impl FnOnce(&mut oxideterm_settings::HighlightRule),
 ) -> SettingsInputDraftApply {
-    let Some(rule) = settings.terminal.highlight_rules.get_mut(index) else {
+    let rules = settings.terminal.effective_highlight_rules_mut();
+    let Some(rule) = rules.get_mut(index) else {
         return SettingsInputDraftApply::Applied;
     };
     edit(rule);
-    settings.terminal.highlight_rules =
-        reindex_highlight_rules(settings.terminal.highlight_rules.clone());
+    *rules = reindex_highlight_rules(rules.clone());
     SettingsInputDraftApply::Applied
 }
 
@@ -927,6 +952,46 @@ mod tests {
                 "0",
             ),
             SettingsInputDraftApply::Applied
+        );
+    }
+
+    #[test]
+    fn highlight_drafts_edit_the_selected_rule_set_without_changing_global_base() {
+        let mut settings = PersistedSettings::default();
+        settings
+            .terminal
+            .highlight_rules
+            .push(oxideterm_settings::HighlightRule {
+                id: "base".to_string(),
+                label: "Base".to_string(),
+                ..oxideterm_settings::HighlightRule::default()
+            });
+        settings
+            .terminal
+            .highlight_rule_sets
+            .push(oxideterm_settings::HighlightRuleSet {
+                id: "operations".to_string(),
+                name: "Operations".to_string(),
+                rules: vec![oxideterm_settings::HighlightRule {
+                    id: "override".to_string(),
+                    label: "Override".to_string(),
+                    ..oxideterm_settings::HighlightRule::default()
+                }],
+            });
+        settings.terminal.default_highlight_rule_set = Some("operations".to_string());
+
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::HighlightLabel(0),
+                "Edited",
+            ),
+            SettingsInputDraftApply::Applied
+        );
+        assert_eq!(settings.terminal.highlight_rules[0].label, "Base");
+        assert_eq!(
+            settings.terminal.highlight_rule_sets[0].rules[0].label,
+            "Edited"
         );
     }
 

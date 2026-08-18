@@ -84,6 +84,20 @@
       "search_no_results": "沒有結果",
       "player_empty": "尚無回放輸出"
     },
+    "highlight_override": {
+      "title": "關鍵字與正規表示式醒目提示",
+      "source_global_base": "正在使用全域基礎規則",
+      "source_session": "目前工作階段覆寫：{{name}}",
+      "source_connection": "連線覆寫：{{name}}",
+      "source_global": "全域設定：{{name}}",
+      "override_hint": "此處的選擇會覆寫目前工作階段的基礎設定。",
+      "use_inherited": "使用繼承設定",
+      "use_global_for_session": "本工作階段使用全域設定：{{name}}",
+      "save_to_connection": "將目前選擇儲存至此連線",
+      "saved_to_connection": "醒目提示覆寫已儲存至連線",
+      "reset_connection": "將此連線恢復為繼承",
+      "manage_rule_sets": "管理基礎規則與規則集…"
+    },
     "trzsz": {
       "select_upload_directory_title": "選擇要上傳的資料夾",
       "select_upload_directory_description": "選擇要透過 trzsz 傳送的本機目錄。",

@@ -154,6 +154,20 @@
       "search_no_results": "No results",
       "player_empty": "No playback output yet"
     },
+    "highlight_override": {
+      "title": "Keyword & regex highlighting",
+      "source_global_base": "Using global base rules",
+      "source_session": "Session override: {{name}}",
+      "source_connection": "Connection override: {{name}}",
+      "source_global": "Global setting: {{name}}",
+      "override_hint": "Selections here override the base setting for this session.",
+      "use_inherited": "Use inherited setting",
+      "use_global_for_session": "Use global setting for this session: {{name}}",
+      "save_to_connection": "Save current choice to this connection",
+      "saved_to_connection": "Highlight override saved to connection",
+      "reset_connection": "Reset this connection to inherit",
+      "manage_rule_sets": "Manage base rules and rule sets…"
+    },
     "trzsz": {
       "select_upload_directory_title": "Select a folder to upload",
       "select_upload_directory_description": "Choose the local directory that should be sent through trzsz.",

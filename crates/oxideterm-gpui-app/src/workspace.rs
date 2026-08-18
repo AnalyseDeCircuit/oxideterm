@@ -166,13 +166,13 @@ use oxideterm_gpui_terminal::{
     TerminalBackgroundFit, TerminalBackgroundPreferences, TerminalBroadcastInputKind,
     TerminalCommandSelectionLabels, TerminalContextAction, TerminalHighlightMatchScope,
     TerminalHighlightRenderMode, TerminalHighlightRule as UiHighlightRule,
-    TerminalInputBroadcaster, TerminalInputInterceptor, TerminalInputInterceptorResult,
-    TerminalModemLabels, TerminalNotice, TerminalNoticeVariant, TerminalOutputProcessor,
-    TerminalPane, TerminalPaneEvent, TerminalPasteLabels, TerminalRecordingState,
-    TerminalRecordingStatus, TerminalSearchStatus, TerminalSerialControlLabels,
-    TerminalTrzszLabels, TerminalUiPreferenceOverrides, TerminalUiPreferences, TerminalUiTheme,
-    TerminalWorkingDirectorySource, detect_custom_privilege_prompt,
-    resolved_terminal_semantic_scheme,
+    TerminalHighlightRuleSetOverride, TerminalInputBroadcaster, TerminalInputInterceptor,
+    TerminalInputInterceptorResult, TerminalModemLabels, TerminalNotice, TerminalNoticeVariant,
+    TerminalOutputProcessor, TerminalPane, TerminalPaneEvent, TerminalPasteLabels,
+    TerminalRecordingState, TerminalRecordingStatus, TerminalSearchStatus,
+    TerminalSerialControlLabels, TerminalTrzszLabels, TerminalUiPreferenceOverrides,
+    TerminalUiPreferences, TerminalUiTheme, TerminalWorkingDirectorySource,
+    detect_custom_privilege_prompt, resolved_terminal_semantic_scheme,
 };
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{
@@ -211,11 +211,11 @@ use oxideterm_session_adapter::{
 };
 use oxideterm_settings::{
     AI_SIDEBAR_ABSOLUTE_MAX_WIDTH, AI_SIDEBAR_ABSOLUTE_MIN_WIDTH, BackgroundFit, BackgroundScope,
-    CursorStyle as SettingsCursorStyle, FontFamily, FrostedGlassMode, HighlightRuleMatchScope,
-    HighlightRuleRenderMode, Language, MAX_TERMINAL_BACKGROUND_OPACITY, MAX_WINDOW_OPACITY,
-    MIN_TERMINAL_BACKGROUND_OPACITY, MIN_WINDOW_OPACITY, PersistedSettings, SettingsStore,
-    background_images_directory, default_settings_path, ensure_bundled_background_image,
-    list_background_images,
+    CursorStyle as SettingsCursorStyle, FontFamily, FrostedGlassMode, GLOBAL_HIGHLIGHT_RULE_SET_ID,
+    HighlightRule, HighlightRuleMatchScope, HighlightRuleRenderMode, Language,
+    MAX_TERMINAL_BACKGROUND_OPACITY, MAX_WINDOW_OPACITY, MIN_TERMINAL_BACKGROUND_OPACITY,
+    MIN_WINDOW_OPACITY, PersistedSettings, SettingsStore, background_images_directory,
+    default_settings_path, ensure_bundled_background_image, list_background_images,
 };
 use oxideterm_settings_model::{
     AiMcpServerDraft, AiProviderKeyStatusDelivery, SettingsNavigationLayout,
@@ -737,11 +737,14 @@ pub(crate) struct WorkspaceApp {
     tab_host: Entity<tabs::WorkspaceTabHostEntity>,
     _tab_host_subscription: Subscription,
     search: SearchBarState,
+    terminal_highlight_popover_open: bool,
     terminal_command_sender: Entity<terminal_command_sender::TerminalCommandSenderEntity>,
     _terminal_command_sender_observation: Subscription,
     detached_local_terminals: HashMap<TerminalSessionId, DetachedLocalTerminalSession>,
     detached_local_terminal_order: Vec<TerminalSessionId>,
     serial_terminal_configs: HashMap<TerminalSessionId, SerialSessionConfig>,
+    // A Telnet pane keeps only the stable profile owner needed for toolbar persistence.
+    telnet_terminal_profile_ids: HashMap<TerminalSessionId, String>,
     detached_local_terminals_popover_open: bool,
     command_palette: Entity<command_palette::CommandPaletteEntity>,
     _command_palette_observation: Subscription,

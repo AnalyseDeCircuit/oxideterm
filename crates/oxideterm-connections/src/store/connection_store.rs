@@ -764,6 +764,49 @@ impl ConnectionStore {
         Ok(true)
     }
 
+    pub fn set_terminal_highlight_rule_set(
+        &mut self,
+        id: &str,
+        rule_set_id: Option<String>,
+    ) -> Result<bool> {
+        let rule_set_id = rule_set_id.and_then(|id| {
+            let id = id.trim();
+            (!id.is_empty()).then(|| id.to_string())
+        });
+
+        if let Some(connection) = self
+            .data
+            .connections
+            .iter_mut()
+            .find(|connection| connection.id == id)
+        {
+            if connection.options.terminal.highlight_rule_set == rule_set_id {
+                return Ok(true);
+            }
+            connection.options.terminal.highlight_rule_set = rule_set_id;
+            connection.updated_at = Some(Utc::now());
+            self.save()?;
+            return Ok(true);
+        }
+
+        // Telnet profiles own the same terminal presentation options without an SSH node.
+        let Some(profile) = self
+            .data
+            .telnet_profiles
+            .iter_mut()
+            .find(|profile| profile.id == id)
+        else {
+            return Ok(false);
+        };
+        if profile.terminal.highlight_rule_set == rule_set_id {
+            return Ok(true);
+        }
+        profile.terminal.highlight_rule_set = rule_set_id;
+        profile.updated_at = Utc::now();
+        self.save()?;
+        Ok(true)
+    }
+
     pub fn upsert_serial_profile(
         &mut self,
         request: SaveSerialProfileRequest,

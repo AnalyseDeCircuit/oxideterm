@@ -106,6 +106,7 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::SemanticSchemeRuleContext(index) => {
                 SelectAnchorId::SettingsSemanticSchemeRuleContext(index)
             }
+            Self::HighlightRuleSet => SelectAnchorId::SettingsHighlightRuleSet,
             Self::HighlightPreset => SelectAnchorId::SettingsHighlightPreset,
             Self::HighlightRenderMode(index) => SelectAnchorId::SettingsHighlightRenderMode(index),
             Self::HighlightMatchScope(index) => SelectAnchorId::SettingsHighlightMatchScope(index),

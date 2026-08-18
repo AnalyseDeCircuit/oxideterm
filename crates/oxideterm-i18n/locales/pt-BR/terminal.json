@@ -84,6 +84,20 @@
       "search_no_results": "No results",
       "player_empty": "No playback output yet"
     },
+    "highlight_override": {
+      "title": "Destaque de palavras-chave e regex",
+      "source_global_base": "Usando regras base globais",
+      "source_session": "Substituição da sessão: {{name}}",
+      "source_connection": "Substituição da conexão: {{name}}",
+      "source_global": "Configuração global: {{name}}",
+      "override_hint": "A seleção substitui a configuração base desta sessão.",
+      "use_inherited": "Usar configuração herdada",
+      "use_global_for_session": "Usar configuração global nesta sessão: {{name}}",
+      "save_to_connection": "Salvar escolha nesta conexão",
+      "saved_to_connection": "Substituição salva na conexão",
+      "reset_connection": "Redefinir conexão para herdar",
+      "manage_rule_sets": "Gerenciar regras base e conjuntos…"
+    },
     "trzsz": {
       "select_upload_directory_title": "Selecionar pasta para upload",
       "select_upload_directory_description": "Escolha o diretório local que deve ser enviado via trzsz.",
