@@ -285,6 +285,8 @@ Core changes:
     upload length;
   - exposes `update_dynamic_texture`, `paint_dynamic_texture`,
     `drop_dynamic_texture`, and `renderer_resource_generation`;
+  - records the atlas generation used by every rendered scene, forces a full
+    repaint after a generation change, and refuses to present a stale scene;
   - creates a blank stable atlas entry when an update precedes first paint;
 - `crates/gpui-ce/gpui/src/platform/test/window.rs`
   - records dynamic texture allocations and uploads in the test atlas;
