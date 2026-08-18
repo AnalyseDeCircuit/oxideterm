@@ -66,6 +66,7 @@ pub(super) fn saved_connection_fixture(auth: SavedAuth) -> SavedConnection {
         auth,
         proxy_chain: Vec::new(),
         upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
+        proxy_command: None,
         options: oxideterm_connections::ConnectionOptions::default(),
         created_at: now,
         last_used_at: None,
@@ -362,6 +363,27 @@ pub(super) fn save_request_from_form_preserves_custom_icon_and_independent_color
     assert_eq!(request.icon.as_deref(), Some("cloud"));
     assert_eq!(request.color.as_deref(), Some("#7dd3fc"));
     assert_eq!(request.icon_background_color.as_deref(), Some("#082f49"));
+}
+
+#[test]
+pub(super) fn save_request_moves_manual_proxy_command_into_a_redacted_secret_owner() {
+    let mut form = base_form();
+    form.proxy_command_enabled = true;
+    form.proxy_command = "helper --token proxy-command-secret".to_string();
+
+    let request = save_request_from_form(&mut form, None).unwrap();
+    let saved_command = request.proxy_command.unwrap();
+
+    assert!(form.proxy_command.is_empty());
+    assert_eq!(
+        saved_command
+            .plaintext_command
+            .as_ref()
+            .unwrap()
+            .expose_secret(),
+        "helper --token proxy-command-secret"
+    );
+    assert!(!format!("{saved_command:?}").contains("proxy-command-secret"));
 }
 
 #[test]

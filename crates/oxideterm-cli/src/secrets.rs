@@ -497,6 +497,7 @@ fn write_connection_secret(
             auth,
             proxy_chain: connection.proxy_chain,
             upstream_proxy: connection.upstream_proxy,
+            proxy_command: connection.proxy_command,
             color: connection.color,
             icon_background_color: connection.icon_background_color,
             icon: connection.icon,

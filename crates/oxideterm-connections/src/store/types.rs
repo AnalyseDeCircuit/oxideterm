@@ -321,6 +321,30 @@ impl Default for SavedUpstreamProxyPolicy {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SavedProxyCommand {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keychain_id: Option<String>,
+    #[serde(skip)]
+    pub plaintext_command: Option<SecretString>,
+}
+
+impl fmt::Debug for SavedProxyCommand {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SavedProxyCommand")
+            .field("keychain_id", &self.keychain_id)
+            .field(
+                "plaintext_command",
+                &self
+                    .plaintext_command
+                    .as_ref()
+                    .map(|_| "[redacted secret]"),
+            )
+            .finish()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PrivilegeCredentialKind {
@@ -405,6 +429,9 @@ pub struct SavedConnection {
     pub proxy_chain: Vec<SavedProxyHop>,
     #[serde(default, skip_serializing_if = "SavedUpstreamProxyPolicy::is_use_global")]
     pub upstream_proxy: SavedUpstreamProxyPolicy,
+    /// Manual ProxyCommand text stays in the protected store; metadata keeps only its reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_command: Option<SavedProxyCommand>,
     #[serde(default)]
     pub options: ConnectionOptions,
     pub created_at: DateTime<Utc>,
@@ -1089,6 +1116,7 @@ pub struct SaveConnectionRequest {
     pub auth: SavedAuth,
     pub proxy_chain: Vec<SavedProxyHop>,
     pub upstream_proxy: SavedUpstreamProxyPolicy,
+    pub proxy_command: Option<SavedProxyCommand>,
     pub color: Option<String>,
     pub icon_background_color: Option<String>,
     pub icon: Option<String>,
@@ -1111,6 +1139,7 @@ pub struct SavedConnectionRuntimeSecrets {
     pub auth: Option<SecretString>,
     pub proxy_chain: Vec<Option<SecretString>>,
     pub upstream_proxy: Option<SecretString>,
+    pub proxy_command: Option<SecretString>,
 }
 
 /// Identifies one typed secret-bearing slot without exposing its protected-store key.
@@ -1138,6 +1167,13 @@ impl fmt::Debug for SavedConnectionRuntimeSecrets {
                 "upstream_proxy",
                 &self
                     .upstream_proxy
+                    .as_ref()
+                    .map(|_| "[redacted secret]"),
+            )
+            .field(
+                "proxy_command",
+                &self
+                    .proxy_command
                     .as_ref()
                     .map(|_| "[redacted secret]"),
             )

@@ -59,6 +59,7 @@ mod tests {
                 legacy_ssh_compatibility: false,
             }],
             upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
+            proxy_command: None,
             options: ConnectionOptions {
                 connect_timeout_seconds: Some(120),
                 keep_alive_interval: 30,

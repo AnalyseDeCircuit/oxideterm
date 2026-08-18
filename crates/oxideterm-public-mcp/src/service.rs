@@ -2067,10 +2067,14 @@ fn define_explicit_approval_tool<T: JsonSchema>(
 }
 
 fn schema_object<T: JsonSchema>() -> JsonObject {
-    serde_json::to_value(schema_for!(T))
+    let mut schema = serde_json::to_value(schema_for!(T))
         .ok()
         .and_then(|value| value.as_object().cloned())
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    // MCP tool arguments cross the protocol as JSON objects, even when the schema uses oneOf.
+    schema.insert("type".to_owned(), Value::String("object".to_owned()));
+    schema
 }
 
 fn parse_arguments<T: DeserializeOwned>(arguments: JsonObject) -> Result<T, Box<CallToolResult>> {
@@ -2542,4 +2546,39 @@ fn tool_error(code: &'static str, message: impl Into<String>) -> CallToolResult 
 
 fn unauthorized_error() -> McpError {
     McpError::invalid_request("Unauthorized MCP client", None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_tool_input_schemas_have_object_roots() {
+        // MCP tool arguments must expose an object at the schema root, including tagged enums.
+        for definition in tool_definitions() {
+            assert_eq!(
+                definition
+                    .tool
+                    .input_schema
+                    .get("type")
+                    .and_then(Value::as_str),
+                Some("object"),
+                "tool {} must expose an object input schema",
+                definition.tool.name
+            );
+        }
+
+        for schema in [
+            schema_object::<RecordingsControlArgs>(),
+            schema_object::<StartTransferArgs>(),
+        ] {
+            assert!(
+                schema
+                    .get("oneOf")
+                    .and_then(Value::as_array)
+                    .is_some_and(|variants| !variants.is_empty()),
+                "tagged enum alternatives must be preserved"
+            );
+        }
+    }
 }

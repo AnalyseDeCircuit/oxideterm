@@ -25,6 +25,7 @@ mod tests {
             auth,
             proxy_chain: Vec::new(),
             upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
+            proxy_command: None,
             color: None,
             icon_background_color: None,
             icon: None,
@@ -425,6 +426,47 @@ mod tests {
     }
 
     #[test]
+    fn proxy_command_is_protected_and_returned_for_one_runtime_handoff() {
+        let mut store = load_empty_store("proxy-command-save");
+        let store_path = store.path().to_path_buf();
+        let mut save_request = request("conn-1", SavedAuth::Agent);
+        save_request.proxy_command = Some(SavedProxyCommand {
+            keychain_id: None,
+            plaintext_command: Some(SecretString::from(
+                "helper --token proxy-command-secret",
+            )),
+        });
+
+        let (_, runtime_secrets) = store
+            .upsert_with_runtime_secrets(save_request)
+            .unwrap();
+        let connection = store.get("conn-1").unwrap();
+        let saved_command = connection.proxy_command.as_ref().unwrap();
+        let keychain_id = saved_command.keychain_id.clone().unwrap();
+
+        assert_eq!(
+            runtime_secrets.proxy_command.as_ref().unwrap(),
+            "helper --token proxy-command-secret"
+        );
+        assert_eq!(
+            store.get_saved_proxy_command(saved_command).unwrap(),
+            "helper --token proxy-command-secret"
+        );
+        let persisted = fs::read_to_string(store_path).unwrap();
+        assert!(persisted.contains(&keychain_id));
+        assert!(!persisted.contains("proxy-command-secret"));
+        assert!(!format!("{saved_command:?}").contains("proxy-command-secret"));
+        let decoded: SavedProxyCommand = serde_json::from_str(
+            r#"{"keychain_id":"reference","command":"proxy-command-secret"}"#,
+        )
+        .unwrap();
+        assert!(decoded.plaintext_command.is_none());
+
+        store.delete("conn-1").unwrap();
+        assert!(store.keychain.get(&keychain_id).is_err());
+    }
+
+    #[test]
     fn mosh_password_is_saved_to_keychain_reference() {
         let mut store = load_empty_store("mosh-password-save");
         let secret = "mosh-secret";
@@ -602,6 +644,7 @@ mod tests {
             auth: SavedAuth::Agent,
             proxy_chain: Vec::new(),
             upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
+            proxy_command: None,
             options: ConnectionOptions {
                 post_connect_command: Some("uptime".to_string()),
                 ..ConnectionOptions::default()
@@ -1499,6 +1542,7 @@ mod tests {
             },
             proxy_chain: Vec::new(),
             upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
+            proxy_command: None,
             options: ConnectionOptions::default(),
             created_at: chrono::Utc::now(),
             last_used_at: None,
@@ -2565,6 +2609,7 @@ mod tests {
             },
             proxy_chain: Vec::new(),
             upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
+            proxy_command: None,
             options: ConnectionOptions::default(),
             created_at: Utc::now(),
             last_used_at: None,

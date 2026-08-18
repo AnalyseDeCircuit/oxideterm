@@ -66,37 +66,84 @@ impl WorkspaceApp {
                     }
                 }
             }
-            if let Err(error) = validate_proxy_chain_form(form) {
-                form.error = Some(error);
-                cx.notify();
-                return None;
-            }
-            let missing_credentials_message =
-                this.i18n.t("sessions.saved_next_hop.missing_credentials");
-            let saved_proxy_hop_auth = match saved_proxy_hop_auth_from_store(
-                &this.connection_store,
-                form,
-                &missing_credentials_message,
-            ) {
-                Ok(saved_auth) => saved_auth,
-                Err(error) => {
+            let saved_proxy_hop_auth = if form.proxy_command_enabled {
+                Vec::new()
+            } else {
+                if let Err(error) = validate_proxy_chain_form(form) {
                     form.error = Some(error);
                     cx.notify();
                     return None;
                 }
+                let missing_credentials_message =
+                    this.i18n.t("sessions.saved_next_hop.missing_credentials");
+                match saved_proxy_hop_auth_from_store(
+                    &this.connection_store,
+                    form,
+                    &missing_credentials_message,
+                ) {
+                    Ok(saved_auth) => saved_auth,
+                    Err(error) => {
+                        form.error = Some(error);
+                        cx.notify();
+                        return None;
+                    }
+                }
             };
-            // Resolve every fallible proxy input before moving any form-owned secret.
-            let upstream_proxy = match upstream_proxy_config_from_form(
-                &this.connection_store,
-                this.settings_store.settings(),
-                form,
-                secret_handoff,
-            ) {
-                Ok(upstream_proxy) => upstream_proxy,
-                Err(error) => {
-                    form.error = Some(error.to_string());
-                    cx.notify();
-                    return None;
+            // Resolve every fallible route input before moving authentication drafts.
+            let proxy_command = if form.proxy_command_enabled {
+                let command = if form.proxy_command.trim().is_empty() {
+                    let saved_command = SavedProxyCommand {
+                        keychain_id: form.proxy_command_keychain_id.clone(),
+                        plaintext_command: None,
+                    };
+                    match this
+                        .connection_store
+                        .get_saved_proxy_command(&saved_command)
+                    {
+                        Ok(command) => command,
+                        Err(error) => {
+                            form.error = Some(error.to_string());
+                            cx.notify();
+                            return None;
+                        }
+                    }
+                } else {
+                    SecretString::from(secret_handoff.zeroizing(&mut form.proxy_command))
+                };
+                let proxy_alias = if form.name.trim().is_empty() {
+                    host.as_str()
+                } else {
+                    form.name.trim()
+                };
+                Some(proxy_command_from_value(
+                    this.settings_store
+                        .settings()
+                        .ssh_config
+                        .allow_proxy_command,
+                    command,
+                    proxy_alias,
+                    &host,
+                    Some(&username),
+                    port,
+                ))
+            } else {
+                None
+            };
+            let upstream_proxy = if proxy_command.is_some() {
+                None
+            } else {
+                match upstream_proxy_config_from_form(
+                    &this.connection_store,
+                    this.settings_store.settings(),
+                    form,
+                    secret_handoff,
+                ) {
+                    Ok(upstream_proxy) => upstream_proxy,
+                    Err(error) => {
+                        form.error = Some(error.to_string());
+                        cx.notify();
+                        return None;
+                    }
                 }
             };
             let auth = match form.auth_tab {
@@ -126,7 +173,11 @@ impl WorkspaceApp {
                 ),
                 SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
             };
-            let proxy_chain = proxy_chain_from_form(form, secret_handoff, saved_proxy_hop_auth);
+            let proxy_chain = if proxy_command.is_some() {
+                None
+            } else {
+                proxy_chain_from_form(form, secret_handoff, saved_proxy_hop_auth)
+            };
             let config = SshConfig {
                 host: host.clone(),
                 port: port.unwrap_or(22),
@@ -140,6 +191,7 @@ impl WorkspaceApp {
                 x11_forwarding: x11_forward_policy(form.x11_forwarding),
                 proxy_chain,
                 upstream_proxy,
+                proxy_command,
                 strict_host_key_checking: true,
                 post_connect_command: (!form.post_connect_command.trim().is_empty())
                     .then(|| form.post_connect_command.trim().to_string()),

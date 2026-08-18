@@ -1839,6 +1839,7 @@ fn imported_draft_to_saved_connection(
             .map(imported_proxy_hop_to_saved)
             .collect(),
         upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
+        proxy_command: None,
         options: ConnectionOptions::default(),
         created_at: Utc::now(),
         last_used_at: None,

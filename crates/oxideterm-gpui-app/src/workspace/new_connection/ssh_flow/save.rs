@@ -1747,7 +1747,23 @@ impl WorkspaceApp {
         let Some((mut config, title)) = self.build_new_connection_config(secret_handoff, cx) else {
             return;
         };
+        if config.proxy_command.is_none()
+            && let Some(conn) = self.connection_store.get(&id)
+            && let Some(saved_config) = ssh_config_from_saved_connection_with_auth(
+                &self.connection_store,
+                self.settings_store.settings(),
+                conn,
+                Some(AuthMethod::Agent),
+            )
+            && saved_config.proxy_command.is_some()
+        {
+            // Imported ProxyCommand routing remains attached when only auth is supplied by a prompt.
+            config.proxy_command = saved_config.proxy_command;
+            config.proxy_chain = None;
+            config.upstream_proxy = None;
+        }
         if config.proxy_chain.is_none()
+            && config.proxy_command.is_none()
             && let Some(conn) = self.connection_store.get(&id)
             && let Some(proxy_chain) =
                 proxy_chain_config_from_saved_connection(&self.connection_store, conn)
@@ -1933,21 +1949,33 @@ impl WorkspaceApp {
         let source_auth = source_connection
             .as_ref()
             .map(|connection| connection.auth.clone());
-        let Some(save_request) = self.with_connection_form_mut(cx, |_this, form, _cx| {
+        let Some(save_request) = self.with_connection_form_mut(cx, |this, form, _cx| {
             let form = form?;
-            Some(
-                save_request_from_form_with_existing_auth(form, None, source_auth.as_ref()).map(
-                    |mut request| {
-                        if form.proxy_hops.is_empty()
-                            && let Some(connection) = source_connection.as_ref()
-                        {
-                            // Preserve the source chain when it was not expanded for editing.
-                            request.proxy_chain = connection.proxy_chain.clone();
-                        }
-                        request
-                    },
-                ),
-            )
+            Some((|| {
+                let mut request =
+                    save_request_from_form_with_existing_auth(form, None, source_auth.as_ref())?;
+                if form.proxy_hops.is_empty()
+                    && let Some(connection) = source_connection.as_ref()
+                {
+                    // Preserve the source chain when it was not expanded for editing.
+                    request.proxy_chain = connection.proxy_chain.clone();
+                }
+                if request.proxy_command.is_some()
+                    && let Some(source_command) = source_connection
+                        .as_ref()
+                        .and_then(|connection| connection.proxy_command.as_ref())
+                {
+                    // A duplicate receives a new protected-store owner instead of sharing an id.
+                    request.proxy_command = Some(SavedProxyCommand {
+                        keychain_id: None,
+                        plaintext_command: Some(
+                            this.connection_store
+                                .get_saved_proxy_command(source_command)?,
+                        ),
+                    });
+                }
+                Ok::<SaveConnectionRequest, anyhow::Error>(request)
+            })())
         }) else {
             return;
         };
@@ -2088,11 +2116,12 @@ impl WorkspaceApp {
         let worker_title = title;
         std::thread::spawn(move || {
             let status = match tokio::runtime::Runtime::new() {
-                Ok(runtime) => runtime.block_on(check_host_key_with_upstream_proxy(
+                Ok(runtime) => runtime.block_on(check_host_key_with_route(
                     &host,
                     port,
                     connect_timeout_seconds,
                     upstream_proxy.as_ref(),
+                    worker_config.proxy_command.as_ref(),
                 )),
                 Err(error) => HostKeyStatus::Error {
                     message: format!("failed to initialize SSH runtime: {error}"),

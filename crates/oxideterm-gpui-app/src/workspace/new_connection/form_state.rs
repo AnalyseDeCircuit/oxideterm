@@ -190,6 +190,7 @@ pub(in crate::workspace) enum NewConnectionField {
     IdentityAgent,
     Group,
     PostConnectCommand,
+    ProxyCommand,
     Color,
     IconBackgroundColor,
     JumpHost,
@@ -502,10 +503,26 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) save_password: bool,
     pub(in crate::workspace) group: String,
     pub(in crate::workspace) post_connect_command: String,
+    pub(in crate::workspace) proxy_command_enabled: bool,
+    pub(in crate::workspace) proxy_command: String,
+    pub(in crate::workspace) proxy_command_keychain_id: Option<String>,
     pub(in crate::workspace) color: String,
     pub(in crate::workspace) icon_background_color: String,
     pub(in crate::workspace) icon: String,
     pub(in crate::workspace) icon_picker_expanded: bool,
+    // None uses the default expanded state; user toggles remain transient UI state.
+    pub(in crate::workspace) basic_section_expanded: Option<bool>,
+    pub(in crate::workspace) authentication_section_expanded: Option<bool>,
+    pub(in crate::workspace) route_section_expanded: Option<bool>,
+    pub(in crate::workspace) ssh_options_section_expanded: Option<bool>,
+    pub(in crate::workspace) terminal_section_expanded: Option<bool>,
+    pub(in crate::workspace) appearance_section_expanded: Option<bool>,
+    pub(in crate::workspace) remote_gateway_section_expanded: Option<bool>,
+    pub(in crate::workspace) vnc_preferences_section_expanded: Option<bool>,
+    pub(in crate::workspace) remote_features_section_expanded: Option<bool>,
+    pub(in crate::workspace) serial_parameters_section_expanded: Option<bool>,
+    pub(in crate::workspace) mosh_options_section_expanded: Option<bool>,
+    pub(in crate::workspace) local_shell_section_expanded: Option<bool>,
     pub(in crate::workspace) tags: Vec<String>,
     pub(in crate::workspace) proxy_hops: Vec<NewConnectionProxyHop>,
     pub(in crate::workspace) proxy_chain_expanded: bool,
@@ -595,10 +612,52 @@ impl fmt::Debug for NewConnectionForm {
             .field("save_password", &self.save_password)
             .field("group", &self.group)
             .field("post_connect_command", &self.post_connect_command)
+            .field("proxy_command_enabled", &self.proxy_command_enabled)
+            .field("proxy_command", &"[redacted secret]")
+            .field("proxy_command_keychain_id", &self.proxy_command_keychain_id)
             .field("color", &self.color)
             .field("icon_background_color", &self.icon_background_color)
             .field("icon", &self.icon)
             .field("icon_picker_expanded", &self.icon_picker_expanded)
+            .field("basic_section_expanded", &self.basic_section_expanded)
+            .field(
+                "authentication_section_expanded",
+                &self.authentication_section_expanded,
+            )
+            .field("route_section_expanded", &self.route_section_expanded)
+            .field(
+                "ssh_options_section_expanded",
+                &self.ssh_options_section_expanded,
+            )
+            .field("terminal_section_expanded", &self.terminal_section_expanded)
+            .field(
+                "appearance_section_expanded",
+                &self.appearance_section_expanded,
+            )
+            .field(
+                "remote_gateway_section_expanded",
+                &self.remote_gateway_section_expanded,
+            )
+            .field(
+                "vnc_preferences_section_expanded",
+                &self.vnc_preferences_section_expanded,
+            )
+            .field(
+                "remote_features_section_expanded",
+                &self.remote_features_section_expanded,
+            )
+            .field(
+                "serial_parameters_section_expanded",
+                &self.serial_parameters_section_expanded,
+            )
+            .field(
+                "mosh_options_section_expanded",
+                &self.mosh_options_section_expanded,
+            )
+            .field(
+                "local_shell_section_expanded",
+                &self.local_shell_section_expanded,
+            )
             .field("tags", &self.tags)
             .field("proxy_hops", &self.proxy_hops)
             .field("proxy_chain_expanded", &self.proxy_chain_expanded)
@@ -690,10 +749,25 @@ impl Default for NewConnectionForm {
             save_password: false,
             group: String::new(),
             post_connect_command: String::new(),
+            proxy_command_enabled: false,
+            proxy_command: String::new(),
+            proxy_command_keychain_id: None,
             color: String::new(),
             icon_background_color: String::new(),
             icon: String::new(),
             icon_picker_expanded: false,
+            basic_section_expanded: None,
+            authentication_section_expanded: None,
+            route_section_expanded: None,
+            ssh_options_section_expanded: None,
+            terminal_section_expanded: None,
+            appearance_section_expanded: None,
+            remote_gateway_section_expanded: None,
+            vnc_preferences_section_expanded: None,
+            remote_features_section_expanded: None,
+            serial_parameters_section_expanded: None,
+            mosh_options_section_expanded: None,
+            local_shell_section_expanded: None,
             tags: Vec::new(),
             proxy_hops: Vec::new(),
             proxy_chain_expanded: false,
@@ -755,6 +829,7 @@ impl NewConnectionForm {
         self.password.zeroize();
         self.passphrase.zeroize();
         self.upstream_proxy_password.zeroize();
+        self.proxy_command.zeroize();
     }
 }
 
@@ -1004,9 +1079,9 @@ pub(in crate::workspace) fn next_connection_field(
     }
     if transport == NewConnectionTransport::Serial {
         let fields = [
+            NewConnectionField::SerialProfileName,
             NewConnectionField::SerialPortPath,
             NewConnectionField::SerialBaudRate,
-            NewConnectionField::SerialProfileName,
         ];
         let index = fields
             .iter()
@@ -1023,9 +1098,9 @@ pub(in crate::workspace) fn next_connection_field(
     }
     if transport == NewConnectionTransport::Telnet {
         let fields = [
+            NewConnectionField::TelnetProfileName,
             NewConnectionField::Host,
             NewConnectionField::Port,
-            NewConnectionField::TelnetProfileName,
         ];
         let index = fields
             .iter()
@@ -1047,6 +1122,7 @@ pub(in crate::workspace) fn next_connection_field(
         let fields = if transport == NewConnectionTransport::Rdp {
             vec![
                 NewConnectionField::Name,
+                NewConnectionField::Group,
                 NewConnectionField::Host,
                 NewConnectionField::Port,
                 NewConnectionField::Username,
@@ -1055,6 +1131,7 @@ pub(in crate::workspace) fn next_connection_field(
         } else {
             vec![
                 NewConnectionField::Name,
+                NewConnectionField::Group,
                 NewConnectionField::Host,
                 NewConnectionField::Port,
                 NewConnectionField::Password,
@@ -1077,68 +1154,68 @@ pub(in crate::workspace) fn next_connection_field(
     let mut fields: Vec<NewConnectionField> = match auth_tab {
         SshAuthTab::Password => vec![
             NewConnectionField::Name,
+            NewConnectionField::Group,
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::Username,
             NewConnectionField::Password,
-            NewConnectionField::Group,
             NewConnectionField::PostConnectCommand,
         ],
         SshAuthTab::DefaultKey => vec![
             NewConnectionField::Name,
+            NewConnectionField::Group,
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::Username,
             NewConnectionField::Passphrase,
-            NewConnectionField::Group,
             NewConnectionField::PostConnectCommand,
         ],
         SshAuthTab::SshKey => vec![
             NewConnectionField::Name,
+            NewConnectionField::Group,
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::Username,
             NewConnectionField::KeyPath,
             NewConnectionField::Passphrase,
-            NewConnectionField::Group,
             NewConnectionField::PostConnectCommand,
         ],
         SshAuthTab::ManagedKey => vec![
             NewConnectionField::Name,
+            NewConnectionField::Group,
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::Username,
             NewConnectionField::ManagedKeyId,
             NewConnectionField::Passphrase,
-            NewConnectionField::Group,
             NewConnectionField::PostConnectCommand,
         ],
         SshAuthTab::Certificate => vec![
             NewConnectionField::Name,
+            NewConnectionField::Group,
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::Username,
             NewConnectionField::KeyPath,
             NewConnectionField::CertPath,
             NewConnectionField::Passphrase,
-            NewConnectionField::Group,
             NewConnectionField::PostConnectCommand,
         ],
         SshAuthTab::Agent => vec![
             NewConnectionField::Name,
+            NewConnectionField::Group,
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::Username,
             NewConnectionField::IdentityAgent,
-            NewConnectionField::Group,
             NewConnectionField::PostConnectCommand,
         ],
         SshAuthTab::TwoFactor => vec![
             NewConnectionField::Name,
+            NewConnectionField::Group,
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::Username,
-            NewConnectionField::Group,
             NewConnectionField::PostConnectCommand,
         ],
     };
@@ -1258,6 +1335,7 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::IdentityAgent => &mut form.identity_agent,
         NewConnectionField::Group => &mut form.group,
         NewConnectionField::PostConnectCommand => &mut form.post_connect_command,
+        NewConnectionField::ProxyCommand => &mut form.proxy_command,
         NewConnectionField::UpstreamProxyHost => &mut form.upstream_proxy_host,
         NewConnectionField::UpstreamProxyPort => &mut form.upstream_proxy_port,
         NewConnectionField::UpstreamProxyNoProxy => &mut form.upstream_proxy_no_proxy,
@@ -1353,6 +1431,7 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::IdentityAgent => &form.identity_agent,
         NewConnectionField::Group => &form.group,
         NewConnectionField::PostConnectCommand => &form.post_connect_command,
+        NewConnectionField::ProxyCommand => &form.proxy_command,
         NewConnectionField::UpstreamProxyHost => &form.upstream_proxy_host,
         NewConnectionField::UpstreamProxyPort => &form.upstream_proxy_port,
         NewConnectionField::UpstreamProxyNoProxy => &form.upstream_proxy_no_proxy,
@@ -1903,6 +1982,7 @@ mod tests {
 
     #[test]
     fn telnet_transport_tabs_between_endpoint_and_profile_name() {
+        // Keyboard traversal follows the same profile-first order as the form.
         assert_eq!(
             next_connection_field(
                 NewConnectionField::Host,
@@ -1939,10 +2019,48 @@ mod tests {
     }
 
     #[test]
+    fn serial_transport_tabs_from_profile_to_device_parameters() {
+        // Keyboard traversal follows the same profile-first order as the form.
+        assert_eq!(
+            next_connection_field(
+                NewConnectionField::SerialProfileName,
+                super::SshAuthTab::Password,
+                NewConnectionTransport::Serial,
+                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
+                super::NewConnectionUpstreamProxyAuth::None,
+                true,
+            ),
+            NewConnectionField::SerialPortPath
+        );
+        assert_eq!(
+            next_connection_field(
+                NewConnectionField::SerialBaudRate,
+                super::SshAuthTab::Password,
+                NewConnectionTransport::Serial,
+                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
+                super::NewConnectionUpstreamProxyAuth::None,
+                true,
+            ),
+            NewConnectionField::SerialProfileName
+        );
+    }
+
+    #[test]
     fn remote_desktop_transport_tabs_through_rdp_login_fields() {
         assert_eq!(
             next_connection_field(
                 NewConnectionField::Name,
+                super::SshAuthTab::Password,
+                NewConnectionTransport::Rdp,
+                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
+                super::NewConnectionUpstreamProxyAuth::None,
+                true,
+            ),
+            NewConnectionField::Group
+        );
+        assert_eq!(
+            next_connection_field(
+                NewConnectionField::Group,
                 super::SshAuthTab::Password,
                 NewConnectionTransport::Rdp,
                 super::NewConnectionUpstreamProxyPolicy::UseGlobal,
@@ -2241,6 +2359,35 @@ mod tests {
             next_jump_connection_field(NewConnectionField::JumpUsername, SshAuthTab::Agent, true,),
             NewConnectionField::JumpIdentityAgent
         );
+    }
+
+    #[test]
+    fn ssh_and_mosh_tab_navigation_follow_basic_information_order() {
+        // Both forms render name and group before endpoint and authentication fields.
+        for transport in [NewConnectionTransport::Ssh, NewConnectionTransport::Mosh] {
+            assert_eq!(
+                next_connection_field(
+                    NewConnectionField::Name,
+                    SshAuthTab::Password,
+                    transport,
+                    NewConnectionUpstreamProxyPolicy::UseGlobal,
+                    NewConnectionUpstreamProxyAuth::None,
+                    true,
+                ),
+                NewConnectionField::Group
+            );
+            assert_eq!(
+                next_connection_field(
+                    NewConnectionField::Group,
+                    SshAuthTab::Password,
+                    transport,
+                    NewConnectionUpstreamProxyPolicy::UseGlobal,
+                    NewConnectionUpstreamProxyAuth::None,
+                    true,
+                ),
+                NewConnectionField::Host
+            );
+        }
     }
 
     #[test]

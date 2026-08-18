@@ -322,6 +322,8 @@ fn save_profile(
                     &profile.upstream_proxy,
                     existing.map(|connection| &connection.upstream_proxy),
                 ),
+                // Public MCP edits cannot read ProxyCommand text, so retain its local reference.
+                proxy_command: existing.and_then(|connection| connection.proxy_command.clone()),
                 color: profile.color.clone(),
                 icon_background_color: profile.icon_background_color.clone(),
                 icon: profile.icon.clone(),

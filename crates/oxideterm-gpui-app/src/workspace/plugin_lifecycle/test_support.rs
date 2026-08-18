@@ -346,6 +346,7 @@ pub(super) fn test_connection_store_with_agent_connection(
             auth: oxideterm_connections::SavedAuth::Agent,
             proxy_chain: Vec::new(),
             upstream_proxy: oxideterm_connections::SavedUpstreamProxyPolicy::UseGlobal,
+            proxy_command: None,
             color: None,
             icon_background_color: None,
             icon: None,

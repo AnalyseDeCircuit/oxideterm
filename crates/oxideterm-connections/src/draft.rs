@@ -141,6 +141,7 @@ pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnec
         auth,
         proxy_chain,
         upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
+        proxy_command: None,
         options: ConnectionOptions {
             connect_timeout_seconds: host.connect_timeout_seconds,
             agent_forwarding: host.agent_forwarding,
@@ -210,6 +211,7 @@ pub fn save_request_from_draft(
         },
         proxy_chain: saved_proxy_chain_from_drafts(draft.proxy_hops)?,
         upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
+        proxy_command: None,
         color: (!draft.color.trim().is_empty()).then(|| draft.color.trim().to_string()),
         icon_background_color: (!draft.icon_background_color.trim().is_empty())
             .then(|| draft.icon_background_color.trim().to_string()),

@@ -31,7 +31,7 @@ pub use ssh_config::{
     SshBatchImportResult, SshConfigHost, SshConfigImportError, SshConfigProxyHop,
     canonical_ssh_config_alias, default_ssh_config_path, import_ssh_config_alias,
     is_literal_ssh_config_alias_query, list_ssh_config_hosts, list_ssh_config_hosts_from_path,
-    resolve_ssh_config_alias,
+    resolve_proxy_command, resolve_ssh_config_alias,
 };
 pub use ssh_config_sync::{
     SshConfigSyncOutcome, SshConfigSyncService, sync_ssh_config_path_into_store,
@@ -53,8 +53,8 @@ pub use store::{
     SaveSerialProfileRequest, SaveTelnetProfileRequest, SavedAuth, SavedConnection,
     SavedConnectionRuntimeSecrets, SavedConnectionSyncRecord, SavedConnectionsConflictStrategy,
     SavedConnectionsSyncCleanup, SavedConnectionsSyncSnapshot, SavedMoshProfileRuntimeSecrets,
-    SavedPrivilegeCredential, SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig,
-    SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol, SerialFlowControl, SerialParity,
-    SerialProfile, SerialProfilesSyncSnapshot, TelnetProfile, TelnetProfilesSyncSnapshot,
-    validate_group_name,
+    SavedPrivilegeCredential, SavedProxyCommand, SavedProxyHop, SavedUpstreamProxyAuth,
+    SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol,
+    SerialFlowControl, SerialParity, SerialProfile, SerialProfilesSyncSnapshot, TelnetProfile,
+    TelnetProfilesSyncSnapshot, validate_group_name,
 };

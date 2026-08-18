@@ -608,6 +608,8 @@ fn build_saved_connection_from_sync_payload(
             existing,
             preserve_auth,
         ),
+        // ProxyCommand text is device-local protected data and never enters cloud snapshots.
+        proxy_command: existing.and_then(|connection| connection.proxy_command.clone()),
         options: synced_options
             .cloned()
             .unwrap_or_else(|| ConnectionOptions {

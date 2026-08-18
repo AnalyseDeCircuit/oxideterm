@@ -4,7 +4,8 @@
 use oxideterm_connections::{
     ConnectionStore, ConnectionX11ForwardingMode, ConnectionX11ForwardingOptions, SSH_CONFIG_TAG,
     SSH_PROXY_COMMAND_TAG, SavedAuth, SavedConnection, SavedConnectionRuntimeSecrets,
-    SavedUpstreamProxyAuth, SavedUpstreamProxyPolicy, SecretString, resolve_ssh_config_alias,
+    SavedUpstreamProxyAuth, SavedUpstreamProxyPolicy, SecretString, resolve_proxy_command,
+    resolve_ssh_config_alias,
 };
 use oxideterm_settings::PersistedSettings;
 use oxideterm_ssh::{
@@ -30,8 +31,19 @@ pub fn ssh_config_from_saved_connection_with_auth(
 ) -> Option<SshConfig> {
     // An unsaved UI password can move directly into runtime auth after metadata persistence.
     let auth = auth_override.or_else(|| auth_method_from_saved_auth(store, &conn.auth))?;
-    let proxy_chain = proxy_chain_config_from_saved_connection(store, conn)?;
-    let proxy_command = proxy_command_from_imported_ssh_config(settings, conn);
+    let proxy_command = proxy_command_from_saved_connection(store, settings, conn, None);
+    let proxy_chain = if proxy_command.is_some() {
+        Vec::new()
+    } else {
+        proxy_chain_config_from_saved_connection(store, conn)?
+    };
+    let upstream_proxy = if proxy_command.is_some() {
+        None
+    } else {
+        // A configured proxy that cannot be hydrated must stop materialization
+        // instead of silently turning into a direct connection.
+        upstream_proxy_config_from_saved_policy(store, settings, &conn.upstream_proxy).ok()?
+    };
     Some(SshConfig {
         host: conn.host.clone(),
         port: conn.port,
@@ -39,14 +51,7 @@ pub fn ssh_config_from_saved_connection_with_auth(
         auth,
         timeout_secs: conn.options.effective_connect_timeout_seconds(),
         proxy_chain: (!proxy_chain.is_empty()).then_some(proxy_chain),
-        // A configured proxy that cannot be hydrated must stop materialization
-        // instead of silently turning into a direct connection.
-        upstream_proxy: upstream_proxy_config_from_saved_policy(
-            store,
-            settings,
-            &conn.upstream_proxy,
-        )
-        .ok()?,
+        upstream_proxy,
         proxy_command,
         agent_forwarding: conn.options.agent_forwarding,
         identity_agent: conn.options.identity_agent.clone(),
@@ -81,33 +86,47 @@ pub fn ssh_config_from_saved_connection_with_runtime_secrets(
             runtime_secrets.auth.take(),
         )?,
     };
-    let proxy_chain = conn
-        .proxy_chain
-        .iter()
-        .zip(runtime_secrets.proxy_chain)
-        .map(|(hop, secret)| {
-            Some(ProxyHopConfig {
-                host: hop.host.clone(),
-                port: hop.port,
-                username: hop.username.clone(),
-                auth: auth_method_from_saved_auth_with_runtime_secret(store, &hop.auth, secret)?,
-                agent_forwarding: hop.agent_forwarding,
-                identity_agent: hop.identity_agent.clone(),
-                agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
-                legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
-                strict_host_key_checking: true,
-                trust_host_key: None,
-                expected_host_key_fingerprint: None,
-            })
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let upstream_proxy = upstream_proxy_from_saved_policy_with_runtime_secret(
+    let proxy_command = proxy_command_from_saved_connection(
         store,
         settings,
-        &conn.upstream_proxy,
-        runtime_secrets.upstream_proxy.take(),
-    )?;
-    let proxy_command = proxy_command_from_imported_ssh_config(settings, conn);
+        conn,
+        runtime_secrets.proxy_command.take(),
+    );
+    let proxy_chain = if proxy_command.is_some() {
+        Vec::new()
+    } else {
+        conn.proxy_chain
+            .iter()
+            .zip(runtime_secrets.proxy_chain)
+            .map(|(hop, secret)| {
+                Some(ProxyHopConfig {
+                    host: hop.host.clone(),
+                    port: hop.port,
+                    username: hop.username.clone(),
+                    auth: auth_method_from_saved_auth_with_runtime_secret(
+                        store, &hop.auth, secret,
+                    )?,
+                    agent_forwarding: hop.agent_forwarding,
+                    identity_agent: hop.identity_agent.clone(),
+                    agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
+                    legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+                    strict_host_key_checking: true,
+                    trust_host_key: None,
+                    expected_host_key_fingerprint: None,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?
+    };
+    let upstream_proxy = if proxy_command.is_some() {
+        None
+    } else {
+        upstream_proxy_from_saved_policy_with_runtime_secret(
+            store,
+            settings,
+            &conn.upstream_proxy,
+            runtime_secrets.upstream_proxy.take(),
+        )?
+    };
     Some(SshConfig {
         host: conn.host.clone(),
         port: conn.port,
@@ -212,10 +231,28 @@ fn upstream_proxy_from_saved_policy_with_runtime_secret(
     }
 }
 
-fn proxy_command_from_imported_ssh_config(
+fn proxy_command_from_saved_connection(
+    store: &ConnectionStore,
     settings: &PersistedSettings,
     connection: &SavedConnection,
+    runtime_command: Option<SecretString>,
 ) -> Option<ProxyCommandConfig> {
+    if let Some(saved_command) = connection.proxy_command.as_ref() {
+        if !settings.ssh_config.allow_proxy_command {
+            return Some(ProxyCommandConfig::AuthorizationRequired);
+        }
+        let command = runtime_command.or_else(|| store.get_saved_proxy_command(saved_command).ok());
+        return Some(command.map_or(ProxyCommandConfig::Unavailable, |command| {
+            proxy_command_from_value(
+                true,
+                command,
+                &connection.name,
+                &connection.host,
+                Some(&connection.username),
+                Some(connection.port),
+            )
+        }));
+    }
     if !connection.tags.iter().any(|tag| tag == SSH_CONFIG_TAG) {
         return None;
     }
@@ -251,6 +288,24 @@ pub(crate) fn proxy_command_runtime_policy(
             .map(|word| word.into_zeroizing())
             .collect(),
     )
+}
+
+pub fn proxy_command_from_value(
+    authorized: bool,
+    command: SecretString,
+    alias: &str,
+    hostname: &str,
+    user: Option<&str>,
+    port: Option<u16>,
+) -> ProxyCommandConfig {
+    if !authorized {
+        return ProxyCommandConfig::AuthorizationRequired;
+    }
+    proxy_command_runtime_policy(
+        true,
+        Some(resolve_proxy_command(command, alias, hostname, user, port)),
+    )
+    .unwrap_or(ProxyCommandConfig::Unavailable)
 }
 
 pub fn proxy_chain_config_from_saved_connection(

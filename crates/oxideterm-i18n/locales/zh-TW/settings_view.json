@@ -641,7 +641,7 @@
         "auto_sync": "自動同步 SSH 設定主機",
         "auto_sync_hint": "設定變更時匯入新主機，並更新先前由 SSH 設定匯入的連線。手動連線不會被覆寫。",
         "allow_proxy_command": "允許直接執行 ProxyCommand 程式",
-        "allow_proxy_command_hint": "執行已匯入 SSH 設定主機引用的直接可執行程式。預設停用；不支援 shell 運算子、管線與重新導向。",
+        "allow_proxy_command_hint": "執行手動設定或已匯入 SSH 設定主機引用的直接可執行程式。預設停用；不支援 Shell 運算子、管線與重新導向。",
         "load_failed": "讀取 SSH 設定失敗：{{error}}",
         "no_hosts": "在 ~/.ssh/config 中找不到主機",
         "import": "匯入",

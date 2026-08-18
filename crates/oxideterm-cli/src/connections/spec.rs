@@ -170,6 +170,7 @@ pub(super) fn connection_request_from_spec(
         upstream_proxy: existing
             .map(|connection| connection.upstream_proxy.clone())
             .unwrap_or_default(),
+        proxy_command: existing.and_then(|connection| connection.proxy_command.clone()),
         color: spec
             .color
             .unwrap_or_else(|| existing.and_then(|connection| connection.color.clone())),

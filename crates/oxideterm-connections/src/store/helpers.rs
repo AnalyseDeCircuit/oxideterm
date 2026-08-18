@@ -255,11 +255,18 @@ fn existing_upstream_proxy_password_keychain_id(
     }
 }
 
+fn existing_proxy_command_keychain_id(
+    proxy_command: Option<&SavedProxyCommand>,
+) -> Option<String> {
+    proxy_command.and_then(|command| command.keychain_id.clone())
+}
+
 fn collect_connection_keychain_ids(connection: &SavedConnection) -> Vec<String> {
     collect_keychain_ids_for_parts(
         &connection.auth,
         &connection.proxy_chain,
         &connection.upstream_proxy,
+        connection.proxy_command.as_ref(),
     )
 }
 
@@ -299,12 +306,14 @@ fn collect_keychain_ids_for_parts(
     auth: &SavedAuth,
     proxy_chain: &[SavedProxyHop],
     upstream_proxy: &SavedUpstreamProxyPolicy,
+    proxy_command: Option<&SavedProxyCommand>,
 ) -> Vec<String> {
     let mut ids = collect_keychain_ids_for_auth(auth);
     for hop in proxy_chain {
         ids.extend(collect_keychain_ids_for_auth(&hop.auth));
     }
     ids.extend(collect_keychain_ids_for_upstream_proxy(upstream_proxy));
+    ids.extend(proxy_command.and_then(|command| command.keychain_id.clone()));
     ids
 }
 
@@ -478,6 +487,10 @@ fn new_key_passphrase_keychain_id() -> String {
 
 fn new_upstream_proxy_password_keychain_id() -> String {
     format!("oxide_conn_upstream_proxy_{}", Uuid::new_v4())
+}
+
+fn new_proxy_command_keychain_id() -> String {
+    format!("oxide_conn_proxy_command_{}", Uuid::new_v4())
 }
 
 fn privilege_keychain_id(connection_id: &str, credential_id: &str) -> String {

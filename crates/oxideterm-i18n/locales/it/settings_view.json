@@ -641,7 +641,7 @@
         "auto_sync": "Sincronizza automaticamente gli host della configurazione SSH",
         "auto_sync_hint": "Importa i nuovi host e aggiorna le connessioni SSH importate in precedenza quando la configurazione cambia. Le connessioni manuali non vengono mai sovrascritte.",
         "allow_proxy_command": "Consenti programmi ProxyCommand diretti",
-        "allow_proxy_command_hint": "Esegue programmi diretti indicati dagli host SSH importati. Disattivato per impostazione predefinita; operatori shell, pipe e reindirizzamenti vengono rifiutati.",
+        "allow_proxy_command_hint": "Esegue programmi diretti configurati manualmente o indicati dagli host SSH importati. Disattivato per impostazione predefinita; operatori shell, pipe e reindirizzamenti vengono rifiutati.",
         "load_failed": "Impossibile leggere la configurazione SSH: {{error}}",
         "no_hosts": "Nessun host trovato in ~/.ssh/config",
         "import": "Importa",

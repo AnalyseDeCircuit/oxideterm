@@ -68,7 +68,7 @@ mod field_controls;
 mod form_modal;
 mod proxy_chain_view;
 
-use field_controls::{AuthSelectorContext, serial_port_display_label};
+use field_controls::{AuthSelectorContext, ConnectionFormSection, serial_port_display_label};
 
 const TAURI_EDIT_MODAL_WIDTH: f32 = 500.0; // Tauri sm:max-w-[500px]
 const TAURI_EDIT_COLOR_FALLBACK: u32 = 0x22d3ee;
@@ -88,7 +88,6 @@ const TAURI_PROXY_CHAIN_LINE_WIDTH: f32 = 32.0; // Tauri w-8
 const TAURI_PROXY_CHAIN_CONNECTOR_THICKNESS: f32 = 2.0; // Tauri w-0.5 h-0.5
 const TAURI_PROXY_CHAIN_CARD_PADDING: f32 = 12.0; // Tauri p-3
 const TAURI_SERIAL_GRID_GAP: f32 = 16.0; // Tauri serial grid gap-4
-const TAURI_CONNECTION_PANEL_BG_ALPHA: u32 = 0x66; // Tauri connection panel bg-theme-bg/40
 const NEW_CONNECTION_TYPE_SIDEBAR_WIDTH: f32 = 160.0;
 const CONNECTION_TERMINAL_CONTROL_MIN_WIDTH: f32 = 220.0;
 const CONNECTION_ICON_COLOR_CONTROL_MIN_WIDTH: f32 = 220.0;
@@ -206,6 +205,7 @@ impl WorkspaceApp {
                     | NewConnectionField::Host
                     | NewConnectionField::Username
                     | NewConnectionField::Group
+                    | NewConnectionField::ProxyCommand
                     | NewConnectionField::Color
                     | NewConnectionField::IdentityAgent
                     | NewConnectionField::TelnetProfileName

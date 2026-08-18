@@ -131,6 +131,29 @@ pub fn resolve_ssh_config_alias(alias: &str) -> Result<Option<SshConfigHost>> {
     resolve_ssh_config_alias_from_blocks(alias, &blocks)
 }
 
+pub fn resolve_proxy_command(
+    command: SecretString,
+    alias: &str,
+    hostname: &str,
+    user: Option<&str>,
+    port: Option<u16>,
+) -> Vec<SecretString> {
+    // Tokenize directly into zeroizing owners before expanding OpenSSH placeholders.
+    split_ssh_words(command.expose_secret())
+        .into_iter()
+        .map(SecretString::from)
+        .map(|word| {
+            SecretString::new(expand_proxy_command_tokens(
+                word.expose_secret(),
+                alias,
+                hostname,
+                user,
+                port,
+            ))
+        })
+        .collect()
+}
+
 /// Resolves and imports one literal SSH config alias as one store transaction.
 pub fn import_ssh_config_alias(store: &mut ConnectionStore, alias: &str) -> Result<bool> {
     if store

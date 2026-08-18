@@ -316,6 +316,7 @@ mod tests {
                 auth: SavedAuth::Agent,
                 proxy_chain: Vec::new(),
                 upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
+                proxy_command: None,
                 color: None,
                 icon_background_color: None,
                 icon: None,

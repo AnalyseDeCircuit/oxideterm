@@ -17,9 +17,9 @@ use gpui::{Div, EventEmitter, Task, prelude::*, rgba};
 use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
     ConnectionStore, MoshProfile, ProxyHopDraft, RemoteDesktopProfile, SaveConnectionRequest,
-    SavedAuth, SavedConnection, SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig,
-    SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol, SecretString, SerialProfile,
-    SshConfigHost, TelnetProfile,
+    SavedAuth, SavedConnection, SavedProxyCommand, SavedProxyHop, SavedUpstreamProxyAuth,
+    SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol, SecretString,
+    SerialProfile, SshConfigHost, TelnetProfile,
     oxide_file::{
         ExportPreflightResult, ForwardDetail, ImportConflictStrategy, ImportPreview,
         ImportResultEnvelope, OxideExportOptions, OxideFile, OxideFileError, OxideForwardRecord,

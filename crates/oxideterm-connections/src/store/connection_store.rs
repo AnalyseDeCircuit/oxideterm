@@ -233,8 +233,19 @@ impl ConnectionStore {
                 request.upstream_proxy,
                 existing.as_ref().map(|conn| &conn.upstream_proxy),
             )?;
-        let next_keychain_ids =
-            collect_keychain_ids_for_parts(&auth, &proxy_chain, &upstream_proxy);
+        let (proxy_command, proxy_command_secret) = self
+            .materialize_proxy_command_with_runtime_secret(
+                request.proxy_command,
+                existing
+                    .as_ref()
+                    .and_then(|connection| connection.proxy_command.as_ref()),
+            )?;
+        let next_keychain_ids = collect_keychain_ids_for_parts(
+            &auth,
+            &proxy_chain,
+            &upstream_proxy,
+            proxy_command.as_ref(),
+        );
         let post_connect_command = request.post_connect_command.and_then(|command| {
             let command = command.trim().to_string();
             (!command.is_empty()).then_some(command)
@@ -260,6 +271,7 @@ impl ConnectionStore {
             auth,
             proxy_chain,
             upstream_proxy,
+            proxy_command,
             options,
             created_at: self.get(&id).map(|conn| conn.created_at).unwrap_or(now),
             // Editing metadata must not change recent-connection ordering.
@@ -296,6 +308,7 @@ impl ConnectionStore {
                 auth: auth_secret,
                 proxy_chain: proxy_chain_secrets,
                 upstream_proxy: upstream_proxy_secret,
+                proxy_command: proxy_command_secret,
             },
         ))
     }
@@ -1274,6 +1287,9 @@ impl ConnectionStore {
         connection.proxy_chain = self.materialize_proxy_chain(connection.proxy_chain)?;
         connection.upstream_proxy =
             self.materialize_upstream_proxy_policy(connection.upstream_proxy, None)?;
+        connection.proxy_command = self
+            .materialize_proxy_command_with_runtime_secret(connection.proxy_command, None)?
+            .0;
         // Third-party imports do not carry privilege helper secrets. The user
         // must explicitly create them after import.
         connection.privilege_credentials.clear();
@@ -1316,6 +1332,14 @@ impl ConnectionStore {
             connection.upstream_proxy,
             existing.as_ref().map(|conn| &conn.upstream_proxy),
         )?;
+        connection.proxy_command = self
+            .materialize_proxy_command_with_runtime_secret(
+                connection.proxy_command,
+                existing
+                    .as_ref()
+                    .and_then(|connection| connection.proxy_command.as_ref()),
+            )?
+            .0;
         if let Some(existing) = existing.as_ref() {
             connection.created_at = existing.created_at;
             connection.last_used_at = existing.last_used_at;
@@ -1329,6 +1353,7 @@ impl ConnectionStore {
             &connection.auth,
             &connection.proxy_chain,
             &connection.upstream_proxy,
+            connection.proxy_command.as_ref(),
         );
         if let Some(index) = self
             .data
@@ -1767,6 +1792,16 @@ impl ConnectionStore {
             } => bail!("Upstream proxy password is not saved"),
             SavedUpstreamProxyAuth::None => bail!("Upstream proxy does not use password auth"),
         }
+    }
+
+    pub fn get_saved_proxy_command(&self, command: &SavedProxyCommand) -> Result<SecretString> {
+        let keychain_id = command
+            .keychain_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("ProxyCommand is not saved"))?;
+        self.keychain
+            .get(keychain_id)
+            .context("failed to load ProxyCommand from protected storage")
     }
 
     pub fn save_global_upstream_proxy_password(&self, password: &SecretString) -> Result<String> {
@@ -2259,6 +2294,41 @@ impl ConnectionStore {
         }
     }
 
+    fn materialize_proxy_command_with_runtime_secret(
+        &self,
+        command: Option<SavedProxyCommand>,
+        existing_command: Option<&SavedProxyCommand>,
+    ) -> Result<(Option<SavedProxyCommand>, Option<SecretString>)> {
+        let Some(command) = command else {
+            return Ok((None, None));
+        };
+        if let Some(plaintext_command) = command.plaintext_command {
+            let keychain_id = existing_proxy_command_keychain_id(existing_command)
+                .or(command.keychain_id)
+                .unwrap_or_else(new_proxy_command_keychain_id);
+            self.keychain.store(&keychain_id, &plaintext_command)?;
+            return Ok((
+                Some(SavedProxyCommand {
+                    keychain_id: Some(keychain_id),
+                    plaintext_command: None,
+                }),
+                Some(plaintext_command),
+            ));
+        }
+
+        let keychain_id = command
+            .keychain_id
+            .or_else(|| existing_proxy_command_keychain_id(existing_command))
+            .ok_or_else(|| anyhow::anyhow!("ProxyCommand value is required"))?;
+        Ok((
+            Some(SavedProxyCommand {
+                keychain_id: Some(keychain_id),
+                plaintext_command: None,
+            }),
+            None,
+        ))
+    }
+
     fn stage_imported_connection(
         &mut self,
         mut connection: SavedConnection,
@@ -2310,9 +2380,23 @@ impl ConnectionStore {
             existing.as_ref().map(|conn| &conn.upstream_proxy),
         )?;
         touched_keychain_ids.extend(collect_keychain_ids_for_upstream_proxy(&upstream_proxy));
+        let proxy_command = self
+            .materialize_proxy_command_with_runtime_secret(
+                connection.proxy_command,
+                existing
+                    .as_ref()
+                    .and_then(|connection| connection.proxy_command.as_ref()),
+            )?
+            .0;
+        touched_keychain_ids.extend(
+            proxy_command
+                .as_ref()
+                .and_then(|command| command.keychain_id.clone()),
+        );
         connection.auth = auth;
         connection.proxy_chain = proxy_chain;
         connection.upstream_proxy = upstream_proxy;
+        connection.proxy_command = proxy_command;
         if let Some(existing) = existing.as_ref() {
             connection.created_at = existing.created_at;
             connection.last_used_at = existing.last_used_at;
@@ -2334,6 +2418,7 @@ impl ConnectionStore {
             &connection.auth,
             &connection.proxy_chain,
             &connection.upstream_proxy,
+            connection.proxy_command.as_ref(),
         );
         let stale_old_keychain_ids = old_keychain_ids
             .into_iter()

@@ -688,6 +688,7 @@ fn encrypted_connection_to_saved(
                 })
                 .collect::<Result<_, _>>()?,
             upstream_proxy: import_upstream_proxy_policy(conn.upstream_proxy),
+            proxy_command: None,
             options,
             created_at: now,
             last_used_at: None,

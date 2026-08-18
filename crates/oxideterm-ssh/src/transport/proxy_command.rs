@@ -58,7 +58,7 @@ pub(super) async fn dial_proxy_command(
                 "ProxyCommand execution requires explicit authorization in settings"
             }
             crate::ProxyCommandConfig::Unavailable => {
-                "ProxyCommand is no longer available from the imported SSH config"
+                "ProxyCommand is unavailable from its configured source"
             }
             crate::ProxyCommandConfig::Direct { .. } => unreachable!(),
         };

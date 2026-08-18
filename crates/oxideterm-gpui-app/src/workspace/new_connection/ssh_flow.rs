@@ -10,7 +10,7 @@ use oxideterm_connections::{
     MoshUdpPortSelection as SavedMoshUdpPortSelection, SaveConnectionRequest,
     SaveMoshProfileRequest, SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest,
     SaveTelnetProfileRequest, SavedConnectionRuntimeSecrets, SavedMoshProfileRuntimeSecrets,
-    SavedUpstreamProxyProtocol, SecretString, first_available_default_key_path,
+    SavedProxyCommand, SavedUpstreamProxyProtocol, SecretString, first_available_default_key_path,
 };
 use oxideterm_mosh::{MoshBootstrapConfig, MoshBootstrapContext};
 use oxideterm_remote_desktop::{
@@ -23,7 +23,8 @@ use oxideterm_ssh::{
     NativeSessionTreeConnectPlan, NativeSessionTreeConnectStep, NodeId, NodeReadiness,
     NodeTreeExpansion, ProxyHopConfig, SshConfig, SshPromptError, SshPromptHandler,
     SshTransportClient, UpstreamProxyAuth, UpstreamProxyConfig, UpstreamProxyProtocol,
-    X11ForwardPolicy, X11ForwardTrust, check_host_key_with_upstream_proxy,
+    X11ForwardPolicy, X11ForwardTrust, check_host_key_with_route,
+    check_host_key_with_upstream_proxy,
 };
 use tokio::sync::oneshot;
 
@@ -48,7 +49,8 @@ use crate::workspace::{
 };
 use oxideterm_session_adapter::{
     auth_method_from_saved_auth, managed_key_resolver_from_store,
-    proxy_chain_config_from_saved_connection, ssh_config_from_saved_connection,
+    proxy_chain_config_from_saved_connection, proxy_command_from_value,
+    ssh_config_from_saved_connection, ssh_config_from_saved_connection_with_auth,
     ssh_config_from_saved_connection_with_runtime_secrets,
 };
 use oxideterm_terminal::{MoshTerminalConfig, SerialSessionConfig, TelnetSessionConfig};
