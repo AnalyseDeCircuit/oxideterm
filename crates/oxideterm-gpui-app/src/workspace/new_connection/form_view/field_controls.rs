@@ -431,6 +431,9 @@ impl WorkspaceApp {
             NewConnectionSelect::TerminalDeleteSequence => {
                 SelectAnchorId::NewConnectionTerminalDeleteSequence
             }
+            NewConnectionSelect::TerminalSemanticScheme => {
+                SelectAnchorId::NewConnectionTerminalSemanticScheme
+            }
         }
     }
 
@@ -1093,7 +1096,8 @@ impl WorkspaceApp {
                     | NewConnectionSelect::SerialFlowControl
                     | NewConnectionSelect::TerminalEncoding
                     | NewConnectionSelect::TerminalBackspaceSequence
-                    | NewConnectionSelect::TerminalDeleteSequence => return,
+                    | NewConnectionSelect::TerminalDeleteSequence
+                    | NewConnectionSelect::TerminalSemanticScheme => return,
                 }
                 form.field_focused = false;
                 form.selected_field = None;
@@ -3287,11 +3291,13 @@ impl WorkspaceApp {
     pub(super) fn render_connection_terminal_options(&self, cx: &mut Context<Self>) -> AnyElement {
         // Saved host controls are optional overrides so application defaults
         // continue to govern legacy records and temporary local terminals.
-        let Some((terminal, dedicated_new_terminal_connection)) = self
-            .connection_form_state(cx)
-            .form
-            .as_ref()
-            .map(|form| (form.terminal, form.dedicated_new_terminal_connection))
+        let Some((terminal, dedicated_new_terminal_connection)) =
+            self.connection_form_state(cx).form.as_ref().map(|form| {
+                (
+                    form.terminal.clone(),
+                    form.dedicated_new_terminal_connection,
+                )
+            })
         else {
             return div().into_any_element();
         };
@@ -3300,6 +3306,17 @@ impl WorkspaceApp {
         let default_backspace =
             terminal_backspace_sequence_label(application_defaults.backspace_sequence);
         let default_delete = terminal_delete_sequence_label(application_defaults.delete_sequence);
+        let default_scheme = application_defaults
+            .active_custom_semantic_scheme()
+            .map(|scheme| scheme.name.clone())
+            .unwrap_or_else(|| match application_defaults.semantic_scheme {
+                oxideterm_settings::TerminalSemanticScheme::Balanced => self
+                    .i18n
+                    .t("settings_view.terminal.highlight_rules.semantic_scheme_balanced"),
+                oxideterm_settings::TerminalSemanticScheme::Conservative => self
+                    .i18n
+                    .t("settings_view.terminal.highlight_rules.semantic_scheme_conservative"),
+            });
         let inherited_label = |value: &str| {
             self.i18n
                 .t("ssh.form.terminal_use_application_default")
@@ -3320,6 +3337,24 @@ impl WorkspaceApp {
             .map(connection_terminal_delete_sequence_label)
             .map(str::to_string)
             .unwrap_or_else(|| inherited_label(default_delete));
+        let scheme_label = terminal
+            .semantic_scheme
+            .as_deref()
+            .map(|id| match id {
+                "balanced" => self
+                    .i18n
+                    .t("settings_view.terminal.highlight_rules.semantic_scheme_balanced"),
+                "conservative" => self
+                    .i18n
+                    .t("settings_view.terminal.highlight_rules.semantic_scheme_conservative"),
+                custom_id => application_defaults
+                    .custom_semantic_schemes
+                    .iter()
+                    .find(|scheme| scheme.id == custom_id)
+                    .map(|scheme| scheme.name.clone())
+                    .unwrap_or_else(|| custom_id.to_string()),
+            })
+            .unwrap_or_else(|| inherited_label(&default_scheme));
 
         div()
             .flex()
@@ -3373,6 +3408,23 @@ impl WorkspaceApp {
                                 self.render_new_connection_select_control(
                                     NewConnectionSelect::TerminalDeleteSequence,
                                     delete_label,
+                                    false,
+                                    false,
+                                    cx,
+                                ),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(CONNECTION_TERMINAL_CONTROL_MIN_WIDTH))
+                            .child(form_field(
+                                &self.tokens,
+                                self.i18n
+                                    .t("settings_view.terminal.highlight_rules.semantic_scheme"),
+                                self.render_new_connection_select_control(
+                                    NewConnectionSelect::TerminalSemanticScheme,
+                                    scheme_label,
                                     false,
                                     false,
                                     cx,
@@ -3613,6 +3665,23 @@ impl WorkspaceApp {
         self.update_connection_form_state(cx, |state| {
             if let Some(form) = state.form.as_mut() {
                 form.terminal.delete_sequence = sequence;
+                form.field_focused = false;
+                clear_connection_selection(form);
+                form.error = None;
+            }
+        });
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    pub(super) fn set_new_connection_terminal_semantic_scheme(
+        &mut self,
+        scheme_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_connection_form_state(cx, |state| {
+            if let Some(form) = state.form.as_mut() {
+                form.terminal.semantic_scheme = scheme_id;
                 form.field_focused = false;
                 clear_connection_selection(form);
                 form.error = None;

@@ -11,6 +11,10 @@ use oxideterm_settings::{
 use oxideterm_terminal::{
     TerminalColor, TerminalCursorShape, TerminalEncoding, TrzszTransferPolicy,
 };
+use oxideterm_terminal_semantic::{
+    CompiledSemanticScheme, SemanticScheme, SemanticSchemeDocument, SemanticShellDialect,
+    compile_scheme_document, compiled_builtin_scheme,
+};
 use oxideterm_theme::{ThemeTokens, default_tokens};
 
 pub const MAX_HIGHLIGHT_RULES: usize = 32;
@@ -78,7 +82,8 @@ pub struct TerminalUiPreferences {
     pub open_links_with_modifier: bool,
     pub detect_file_paths_as_links: bool,
     pub semantic_coloring: bool,
-    pub semantic_scheme: TerminalSemanticScheme,
+    pub semantic_scheme: Arc<CompiledSemanticScheme>,
+    pub semantic_shell: SemanticShellDialect,
     pub selection_requires_shift: bool,
     pub free_type_mode: bool,
     pub backspace_sequence: TerminalBackspaceSequence,
@@ -105,15 +110,20 @@ pub struct TerminalUiPreferences {
     pub trzsz_policy: Option<TrzszTransferPolicy>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Default)]
 pub struct TerminalUiPreferenceOverrides {
     pub terminal_encoding: Option<TerminalEncoding>,
     pub backspace_sequence: Option<TerminalBackspaceSequence>,
     pub delete_sequence: Option<TerminalDeleteSequence>,
+    pub semantic_scheme: Option<Arc<CompiledSemanticScheme>>,
+    pub semantic_scheme_id: Option<String>,
+    pub semantic_shell: Option<SemanticShellDialect>,
+    // Retain the local shell identity so settings refreshes can resolve its Scheme again.
+    pub local_shell_id: Option<String>,
 }
 
 impl TerminalUiPreferenceOverrides {
-    pub fn apply_to(self, preferences: &mut TerminalUiPreferences) {
+    pub fn apply_to(&self, preferences: &mut TerminalUiPreferences) {
         // These protocol-facing values belong to the terminal session. Apply
         // them after application defaults so later settings refreshes cannot
         // erase a saved host's explicit behavior.
@@ -125,6 +135,12 @@ impl TerminalUiPreferenceOverrides {
         }
         if let Some(delete_sequence) = self.delete_sequence {
             preferences.delete_sequence = delete_sequence;
+        }
+        if let Some(semantic_scheme) = &self.semantic_scheme {
+            preferences.semantic_scheme = semantic_scheme.clone();
+        }
+        if let Some(semantic_shell) = self.semantic_shell {
+            preferences.semantic_shell = semantic_shell;
         }
     }
 }
@@ -151,7 +167,11 @@ impl Default for TerminalUiPreferences {
             open_links_with_modifier: TERMINAL_OPEN_LINKS_WITH_MODIFIER,
             detect_file_paths_as_links: TERMINAL_DETECT_FILE_PATHS_AS_LINKS,
             semantic_coloring: true,
-            semantic_scheme: TerminalSemanticScheme::default(),
+            semantic_scheme: resolved_terminal_semantic_scheme(
+                TerminalSemanticScheme::default(),
+                None,
+            ),
+            semantic_shell: SemanticShellDialect::Auto,
             selection_requires_shift: TERMINAL_SELECTION_REQUIRES_SHIFT,
             free_type_mode: TERMINAL_FREE_TYPE_MODE,
             backspace_sequence: TERMINAL_BACKSPACE_SEQUENCE,
@@ -178,6 +198,22 @@ impl Default for TerminalUiPreferences {
             trzsz_policy: None,
         }
     }
+}
+
+pub fn resolved_terminal_semantic_scheme(
+    built_in: TerminalSemanticScheme,
+    custom: Option<&SemanticSchemeDocument>,
+) -> Arc<CompiledSemanticScheme> {
+    if let Some(custom) = custom
+        && let Ok(compiled) = compile_scheme_document(custom)
+    {
+        return Arc::new(compiled);
+    }
+    let built_in = match built_in {
+        TerminalSemanticScheme::Balanced => SemanticScheme::Balanced,
+        TerminalSemanticScheme::Conservative => SemanticScheme::Conservative,
+    };
+    Arc::new(compiled_builtin_scheme(built_in).clone())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -829,6 +865,7 @@ mod tests {
             terminal_encoding: Some(TerminalEncoding::Gb18030),
             backspace_sequence: Some(TerminalBackspaceSequence::ControlH),
             delete_sequence: Some(TerminalDeleteSequence::Delete),
+            ..TerminalUiPreferenceOverrides::default()
         }
         .apply_to(&mut preferences);
 

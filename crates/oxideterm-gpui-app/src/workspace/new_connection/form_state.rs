@@ -161,6 +161,7 @@ pub(in crate::workspace) enum NewConnectionSelect {
     TerminalEncoding,
     TerminalBackspaceSequence,
     TerminalDeleteSequence,
+    TerminalSemanticScheme,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -980,7 +981,7 @@ pub(in crate::workspace) fn form_from_telnet_profile(
     form.icon_background_color = profile.icon_background_color.clone().unwrap_or_default();
     form.host = profile.host.clone();
     form.port = profile.port.to_string();
-    form.terminal = profile.terminal;
+    form.terminal = profile.terminal.clone();
     form.focused_field = NewConnectionField::TelnetProfileName;
     form
 }

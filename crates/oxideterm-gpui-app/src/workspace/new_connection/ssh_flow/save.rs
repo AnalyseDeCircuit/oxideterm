@@ -993,11 +993,11 @@ impl WorkspaceApp {
                     icon_background_color: asset_color_from_form(&form.icon_background_color),
                     host: host.clone(),
                     port,
-                    terminal: form.terminal,
+                    terminal: form.terminal.clone(),
                     connect_on_open: existing_connect_on_open,
                 });
                 let config = TelnetSessionConfig { host, port };
-                let terminal_options = form.terminal;
+                let terminal_options = form.terminal.clone();
                 form.pending = true;
                 form.error = None;
                 Some((config, terminal_options, save_request))

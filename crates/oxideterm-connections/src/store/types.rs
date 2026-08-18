@@ -135,7 +135,7 @@ pub enum ConnectionTerminalDeleteSequence {
     ControlH,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionTerminalOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -144,6 +144,8 @@ pub struct ConnectionTerminalOptions {
     pub backspace_sequence: Option<ConnectionTerminalBackspaceSequence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delete_sequence: Option<ConnectionTerminalDeleteSequence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_scheme: Option<String>,
 }
 
 impl ConnectionTerminalOptions {
@@ -151,6 +153,7 @@ impl ConnectionTerminalOptions {
         self.encoding.is_none()
             && self.backspace_sequence.is_none()
             && self.delete_sequence.is_none()
+            && self.semantic_scheme.is_none()
     }
 }
 

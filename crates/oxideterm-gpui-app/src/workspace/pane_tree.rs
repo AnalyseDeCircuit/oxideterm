@@ -357,13 +357,20 @@ impl WorkspaceApp {
         let group_id = self.alloc_pane_id(cx);
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
-        let preferences = self.prepare_terminal_preferences_for_tab_kind(&tab_kind, cx);
+        let mut preferences = self.prepare_terminal_preferences_for_tab_kind(&tab_kind, cx);
         let local_config =
             (tab_kind == TabKind::LocalTerminal).then(|| self.local_terminal_config());
+        let local_preference_overrides = local_config.as_ref().map(|config| {
+            self.terminal_preference_overrides_for_local_shell(config.shell.as_ref())
+        });
+        if let Some(overrides) = &local_preference_overrides {
+            overrides.apply_to(&mut preferences);
+        }
         let pane = cx.new(|cx| {
             if let Some(config) = local_config {
                 TerminalPane::new_local_with_config_and_preferences(config, preferences, window, cx)
                     .expect("failed to initialize split terminal pane")
+                    .with_preference_overrides(local_preference_overrides.unwrap_or_default())
             } else {
                 TerminalPane::new_with_preferences(preferences, window, cx)
                     .expect("failed to initialize split terminal pane")

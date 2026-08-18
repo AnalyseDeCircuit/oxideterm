@@ -162,16 +162,17 @@ use oxideterm_gpui_platform::{
     window_opacity::{apply_window_opacity, normalized_window_opacity},
 };
 use oxideterm_gpui_terminal::{
-    BackgroundImageRenderCache, PrivilegePromptMatch, SharedTerminalSession, TerminalBackgroundFit,
-    TerminalBackgroundPreferences, TerminalBroadcastInputKind, TerminalCommandSelectionLabels,
-    TerminalContextAction, TerminalHighlightMatchScope, TerminalHighlightRenderMode,
-    TerminalHighlightRule as UiHighlightRule, TerminalInputBroadcaster, TerminalInputInterceptor,
-    TerminalInputInterceptorResult, TerminalModemLabels, TerminalNotice, TerminalNoticeVariant,
-    TerminalOutputProcessor, TerminalPane, TerminalPaneEvent, TerminalPasteLabels,
-    TerminalRecordingState, TerminalRecordingStatus, TerminalSearchStatus,
-    TerminalSerialControlLabels, TerminalTrzszLabels, TerminalUiPreferenceOverrides,
-    TerminalUiPreferences, TerminalUiTheme, TerminalWorkingDirectorySource,
-    detect_custom_privilege_prompt,
+    BackgroundImageRenderCache, PrivilegePromptMatch, SemanticShellDialect, SharedTerminalSession,
+    TerminalBackgroundFit, TerminalBackgroundPreferences, TerminalBroadcastInputKind,
+    TerminalCommandSelectionLabels, TerminalContextAction, TerminalHighlightMatchScope,
+    TerminalHighlightRenderMode, TerminalHighlightRule as UiHighlightRule,
+    TerminalInputBroadcaster, TerminalInputInterceptor, TerminalInputInterceptorResult,
+    TerminalModemLabels, TerminalNotice, TerminalNoticeVariant, TerminalOutputProcessor,
+    TerminalPane, TerminalPaneEvent, TerminalPasteLabels, TerminalRecordingState,
+    TerminalRecordingStatus, TerminalSearchStatus, TerminalSerialControlLabels,
+    TerminalTrzszLabels, TerminalUiPreferenceOverrides, TerminalUiPreferences, TerminalUiTheme,
+    TerminalWorkingDirectorySource, detect_custom_privilege_prompt,
+    resolved_terminal_semantic_scheme,
 };
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{

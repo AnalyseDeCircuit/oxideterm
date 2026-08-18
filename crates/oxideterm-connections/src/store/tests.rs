@@ -87,6 +87,7 @@ mod tests {
                 encoding: Some(ConnectionTerminalEncoding::Utf8),
                 backspace_sequence: Some(ConnectionTerminalBackspaceSequence::ControlH),
                 delete_sequence: Some(ConnectionTerminalDeleteSequence::Delete),
+                semantic_scheme: Some("conservative".to_string()),
             },
             ..ConnectionOptions::default()
         };
@@ -94,6 +95,7 @@ mod tests {
         assert_eq!(serialized["terminal"]["encoding"], "utf-8");
         assert_eq!(serialized["terminal"]["backspaceSequence"], "controlH");
         assert_eq!(serialized["terminal"]["deleteSequence"], "delete");
+        assert_eq!(serialized["terminal"]["semanticScheme"], "conservative");
         assert_eq!(serialized["dedicated_new_terminal_connection"], true);
         assert_eq!(
             serde_json::to_value(ConnectionTerminalEncoding::EucJp).unwrap(),
@@ -2208,6 +2210,7 @@ mod tests {
                 encoding: Some(ConnectionTerminalEncoding::Big5),
                 backspace_sequence: None,
                 delete_sequence: Some(ConnectionTerminalDeleteSequence::ControlH),
+                semantic_scheme: None,
             },
             connect_on_open: true,
             created_at: now,

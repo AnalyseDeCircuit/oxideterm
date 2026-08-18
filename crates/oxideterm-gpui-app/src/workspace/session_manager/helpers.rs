@@ -397,7 +397,7 @@ pub(in crate::workspace) fn form_from_saved_connection(
     form.connect_timeout_seconds = conn.options.effective_connect_timeout_seconds();
     form.dedicated_new_terminal_connection = conn.options.dedicated_new_terminal_connection;
     form.x11_forwarding = conn.options.x11_forwarding;
-    form.terminal = conn.options.terminal;
+    form.terminal = conn.options.terminal.clone();
     form.save_connection = true;
     form.error = error;
     form
@@ -641,7 +641,7 @@ fn connection_draft_from_form_with_proxy_hop_prefix(
         dedicated_new_terminal_connection: form.dedicated_new_terminal_connection,
         x11_forwarding: form.x11_forwarding,
         post_connect_command: form.post_connect_command.clone(),
-        terminal: form.terminal,
+        terminal: form.terminal.clone(),
     }
 }
 

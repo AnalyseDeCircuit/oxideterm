@@ -1,4 +1,5 @@
 use super::*;
+use crate::workspace::root::init::terminal_preference_overrides;
 
 const SETTINGS_CONNECTION_IMPORTERS_SECTION_INDEX: usize = 5;
 
@@ -1262,8 +1263,49 @@ impl WorkspaceApp {
             .collect::<Vec<_>>();
         for (pane_id, pane) in panes {
             let preferences = self.terminal_preferences_for_pane(pane_id, cx);
+            let retained_overrides = pane.read(cx).preference_overrides_snapshot();
+            let local_shell_id = retained_overrides.local_shell_id.clone();
+            let session_id = self.tabs(cx).iter().find_map(|tab| {
+                tab.root_pane
+                    .as_ref()
+                    .and_then(|root| root.session_id_for_pane(pane_id))
+            });
+            let ssh_node_id = session_id.and_then(|session_id| {
+                self.workspace_runtime
+                    .read(cx)
+                    .ssh_terminal_node_id(session_id)
+            });
+            let refreshed_overrides = local_shell_id
+                .as_deref()
+                .map(|shell_id| {
+                    self.terminal_preference_overrides_for_local_shell(Some(&ShellInfo::new(
+                        shell_id, shell_id, shell_id,
+                    )))
+                })
+                .or_else(|| {
+                    ssh_node_id
+                        .as_ref()
+                        .map(|node_id| self.terminal_preference_overrides_for_ssh_node(node_id))
+                })
+                .or_else(|| {
+                    let scheme_id = retained_overrides.semantic_scheme_id.as_ref()?;
+                    let mut overrides = retained_overrides.clone();
+                    overrides.semantic_scheme = terminal_preference_overrides(
+                        ConnectionTerminalOptions {
+                            semantic_scheme: Some(scheme_id.clone()),
+                            ..ConnectionTerminalOptions::default()
+                        },
+                        &self.settings_store.settings().terminal,
+                    )
+                    .semantic_scheme;
+                    Some(overrides)
+                });
             let _ = pane.update(cx, |pane, cx| {
-                pane.set_preferences(preferences, cx);
+                if let Some(overrides) = refreshed_overrides {
+                    pane.set_preference_overrides(overrides, preferences, cx);
+                } else {
+                    pane.set_preferences(preferences, cx);
+                }
             });
         }
         // Tauri's IDE reads Settings.ide live from settingsStore. Native IDE

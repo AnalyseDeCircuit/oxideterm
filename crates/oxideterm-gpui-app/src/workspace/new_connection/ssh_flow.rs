@@ -119,7 +119,7 @@ impl SshTerminalConnectionOptions {
     pub(in crate::workspace) fn from_form(form: &NewConnectionForm) -> Self {
         // Keep the SSH session ownership policy separate from terminal protocol overrides.
         Self {
-            terminal: form.terminal,
+            terminal: form.terminal.clone(),
             dedicated_new_terminal_connection: form.dedicated_new_terminal_connection,
         }
     }

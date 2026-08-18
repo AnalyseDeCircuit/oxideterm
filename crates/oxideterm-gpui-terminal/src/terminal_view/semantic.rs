@@ -3,10 +3,14 @@
 
 use std::ops::Range;
 
-use oxideterm_settings::TerminalSemanticScheme;
 use oxideterm_terminal::{TerminalAttrs, TerminalCommandMark, TerminalSnapshot};
 use oxideterm_terminal_semantic::{
-    SemanticClass, SemanticLineRole, SemanticScheme, classify_line_with_scheme,
+    CompiledSemanticScheme, SemanticClass, SemanticLineRole, SemanticShellDialect,
+    classify_line_with_compiled_scheme_and_shell,
+};
+#[cfg(test)]
+use oxideterm_terminal_semantic::{
+    SemanticScheme, built_in_scheme_document, compile_scheme_document, compiled_builtin_scheme,
 };
 
 use crate::terminal_ui::{TerminalUiTheme, terminal_color_from_hex};
@@ -20,7 +24,8 @@ pub(super) fn append_terminal_semantics_for_rows(
     command_marks: &[TerminalCommandMark],
     rows: Range<usize>,
     theme: &TerminalUiTheme,
-    semantic_scheme: TerminalSemanticScheme,
+    semantic_scheme: &CompiledSemanticScheme,
+    semantic_shell: SemanticShellDialect,
     layout: &mut TerminalHighlightLayout,
 ) {
     let mut seen_lines = std::collections::HashSet::new();
@@ -33,13 +38,18 @@ pub(super) fn append_terminal_semantics_for_rows(
         }
         let role = semantic_line_role_for_rows(snapshot, command_marks, line_range.clone());
         let line = build_logical_line(snapshot, line_range);
-        for span in classify_line_with_scheme(&line.text, role, engine_scheme(semantic_scheme)) {
+        for span in classify_line_with_compiled_scheme_and_shell(
+            &line.text,
+            role,
+            semantic_scheme,
+            semantic_shell,
+        ) {
             let start = line.text[..span.range.start].chars().count();
             let end = line.text[..span.range.end].chars().count();
             let Some(cells) = line.map.get(start..end) else {
                 continue;
             };
-            let foreground = semantic_foreground(theme, span.class);
+            let foreground = semantic_foreground(theme, span.class, semantic_scheme);
             for mapped in cells {
                 let key = (mapped.row, mapped.col);
                 if layout.foregrounds.contains_key(&key) {
@@ -62,13 +72,6 @@ pub(super) fn append_terminal_semantics_for_rows(
                 layout.foregrounds.insert(key, foreground);
             }
         }
-    }
-}
-
-fn engine_scheme(scheme: TerminalSemanticScheme) -> SemanticScheme {
-    match scheme {
-        TerminalSemanticScheme::Balanced => SemanticScheme::Balanced,
-        TerminalSemanticScheme::Conservative => SemanticScheme::Conservative,
     }
 }
 
@@ -106,19 +109,34 @@ pub(super) fn semantic_line_role_for_rows(
     SemanticLineRole::Unknown
 }
 
-fn semantic_foreground(theme: &TerminalUiTheme, class: SemanticClass) -> gpui::Hsla {
+fn semantic_foreground(
+    theme: &TerminalUiTheme,
+    class: SemanticClass,
+    semantic_scheme: &CompiledSemanticScheme,
+) -> gpui::Hsla {
+    if let Some(color) = semantic_scheme.color(class).and_then(parse_scheme_color) {
+        return to_hsla(terminal_color_from_hex(color));
+    }
     let terminal = theme.tokens.terminal;
     let color = match class {
         SemanticClass::Command | SemanticClass::Link => terminal.bright_cyan,
+        SemanticClass::Keyword | SemanticClass::Operator => terminal.bright_magenta,
         SemanticClass::Option | SemanticClass::Timestamp => terminal.cyan,
         SemanticClass::String | SemanticClass::Path => terminal.yellow,
-        SemanticClass::Address | SemanticClass::Info => terminal.bright_blue,
+        SemanticClass::Variable | SemanticClass::Address | SemanticClass::Info => {
+            terminal.bright_blue
+        }
+        SemanticClass::Comment => terminal.bright_black,
         SemanticClass::Number => terminal.bright_magenta,
         SemanticClass::Error => terminal.bright_red,
         SemanticClass::Warning => terminal.bright_yellow,
         SemanticClass::Success => terminal.bright_green,
     };
     to_hsla(terminal_color_from_hex(color))
+}
+
+fn parse_scheme_color(color: &str) -> Option<u32> {
+    u32::from_str_radix(color.strip_prefix('#')?, 16).ok()
 }
 
 #[cfg(test)]
@@ -186,7 +204,8 @@ mod tests {
             &[],
             0..1,
             &TerminalUiTheme::default(),
-            TerminalSemanticScheme::Balanced,
+            compiled_builtin_scheme(SemanticScheme::Balanced),
+            SemanticShellDialect::Auto,
             &mut layout,
         );
 
@@ -216,7 +235,8 @@ mod tests {
             &[],
             0..1,
             &TerminalUiTheme::default(),
-            TerminalSemanticScheme::Balanced,
+            compiled_builtin_scheme(SemanticScheme::Balanced),
+            SemanticShellDialect::Auto,
             &mut layout,
         );
 
@@ -234,12 +254,28 @@ mod tests {
             &[],
             0..1,
             &TerminalUiTheme::default(),
-            TerminalSemanticScheme::Conservative,
+            compiled_builtin_scheme(SemanticScheme::Conservative),
+            SemanticShellDialect::Auto,
             &mut layout,
         );
 
         assert!(!layout.foregrounds.contains_key(&(0, 0)));
         assert!(!layout.foregrounds.contains_key(&(0, 5)));
         assert!(layout.foregrounds.contains_key(&(0, 9)));
+    }
+
+    #[test]
+    fn custom_scheme_color_overrides_the_theme_semantic_color() {
+        let mut document = built_in_scheme_document(SemanticScheme::Balanced);
+        document.id = "custom:colors".to_string();
+        document
+            .colors
+            .insert(SemanticClass::Error, "#123456".to_string());
+        let scheme = compile_scheme_document(&document).expect("compile custom scheme");
+
+        assert_eq!(
+            semantic_foreground(&TerminalUiTheme::default(), SemanticClass::Error, &scheme),
+            to_hsla(terminal_color_from_hex(0x123456))
+        );
     }
 }

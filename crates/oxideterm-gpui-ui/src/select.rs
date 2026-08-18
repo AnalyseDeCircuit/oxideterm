@@ -77,6 +77,7 @@ pub enum SelectAnchorId {
     SettingsRemoteShellIntegrationMode,
     SettingsIdeAgentMode,
     SettingsLocalShell,
+    SettingsLocalShellSemanticScheme(usize),
     SettingsLocalPrivilegeKind,
     SettingsConnectionIdleTimeout,
     SettingsReconnectMaxAttempts,
@@ -99,6 +100,8 @@ pub enum SelectAnchorId {
     SettingsSftpDirectoryParallelism,
     SettingsSftpConflict,
     SettingsTerminalSemanticScheme,
+    SettingsSemanticSchemeRuleClass(usize),
+    SettingsSemanticSchemeRuleContext(usize),
     SettingsHighlightPreset,
     SettingsHighlightRenderMode(usize),
     SettingsHighlightMatchScope(usize),
@@ -130,6 +133,7 @@ pub enum SelectAnchorId {
     NewConnectionTerminalEncoding,
     NewConnectionTerminalBackspaceSequence,
     NewConnectionTerminalDeleteSequence,
+    NewConnectionTerminalSemanticScheme,
     SettingsConnectionImportSource,
     SettingsConnectionImportDuplicateStrategy,
     CloudSyncBackend,
@@ -176,6 +180,7 @@ impl SelectAnchorId {
                 | Self::SettingsRemoteShellIntegrationMode
                 | Self::SettingsIdeAgentMode
                 | Self::SettingsLocalShell
+                | Self::SettingsLocalShellSemanticScheme(_)
                 | Self::SettingsLocalPrivilegeKind
                 | Self::SettingsConnectionIdleTimeout
                 | Self::SettingsReconnectMaxAttempts
@@ -198,6 +203,8 @@ impl SelectAnchorId {
                 | Self::SettingsSftpDirectoryParallelism
                 | Self::SettingsSftpConflict
                 | Self::SettingsTerminalSemanticScheme
+                | Self::SettingsSemanticSchemeRuleClass(_)
+                | Self::SettingsSemanticSchemeRuleContext(_)
                 | Self::SettingsHighlightPreset
                 | Self::SettingsHighlightRenderMode(_)
                 | Self::SettingsHighlightMatchScope(_)
@@ -230,6 +237,7 @@ impl SelectAnchorId {
                 | Self::NewConnectionTerminalEncoding
                 | Self::NewConnectionTerminalBackspaceSequence
                 | Self::NewConnectionTerminalDeleteSequence
+                | Self::NewConnectionTerminalSemanticScheme
         )
     }
 

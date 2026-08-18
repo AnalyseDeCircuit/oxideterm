@@ -1,3 +1,4 @@
+use super::highlight::{semantic_class_label, semantic_context_label};
 use super::*;
 
 pub(in crate::workspace) const SETTINGS_ROW_LABEL_MIN_WIDTH: f32 = 180.0; // Keep localized labels readable before controls wrap.
@@ -608,7 +609,111 @@ impl WorkspaceApp {
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_settings_select();
                             this.edit_settings(
-                                |settings| settings.terminal.semantic_scheme = scheme,
+                                |settings| {
+                                    settings.terminal.semantic_scheme = scheme;
+                                    settings.terminal.semantic_custom_scheme = None;
+                                },
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                if !settings.terminal.custom_semantic_schemes.is_empty() {
+                    popup = popup
+                        .child(select_separator(&self.tokens))
+                        .child(select_label(
+                            &self.tokens,
+                            self.i18n
+                                .t("settings_view.terminal.highlight_rules.semantic_scheme_custom"),
+                        ));
+                    for custom in &settings.terminal.custom_semantic_schemes {
+                        let id = custom.id.clone();
+                        let selected = settings.terminal.semantic_custom_scheme.as_deref()
+                            == Some(id.as_str());
+                        popup = popup.child(select_option_action(
+                            select_option(&self.tokens, custom.name.clone(), selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.close_settings_select();
+                                this.edit_settings(
+                                    |settings| {
+                                        settings.terminal.semantic_custom_scheme = Some(id.clone());
+                                    },
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ));
+                    }
+                }
+                Some(popup)
+            }
+            (SettingsTab::Terminal, SettingsSelect::SemanticSchemeRuleClass(index)) => {
+                let selected = settings
+                    .terminal
+                    .active_custom_semantic_scheme()
+                    .and_then(|scheme| scheme.rules.get(index))
+                    .map(|rule| rule.class)?;
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for &class in SEMANTIC_CLASSES {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            semantic_class_label(class, &self.i18n),
+                            class == selected,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_settings_select();
+                            this.edit_settings(
+                                |settings| {
+                                    let _ = edit_custom_semantic_scheme(settings, |scheme| {
+                                        if let Some(rule) = scheme.rules.get_mut(index) {
+                                            rule.class = class;
+                                        }
+                                    });
+                                },
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Terminal, SettingsSelect::SemanticSchemeRuleContext(index)) => {
+                let selected = settings
+                    .terminal
+                    .active_custom_semantic_scheme()
+                    .and_then(|scheme| scheme.rules.get(index))
+                    .map(|rule| rule.context)?;
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for context in [
+                    SemanticRuleContext::Any,
+                    SemanticRuleContext::Command,
+                    SemanticRuleContext::Output,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            semantic_context_label(context, &self.i18n),
+                            context == selected,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_settings_select();
+                            this.edit_settings(
+                                |settings| {
+                                    let _ = edit_custom_semantic_scheme(settings, |scheme| {
+                                        if let Some(rule) = scheme.rules.get_mut(index) {
+                                            rule.context = context;
+                                        }
+                                    });
+                                },
                                 cx,
                             );
                             cx.stop_propagation();
@@ -718,6 +823,112 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }),
                     ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Terminal, SettingsSelect::LocalShellSemanticScheme(index)) => {
+                let shell = self
+                    .effective_local_shells_for_settings(settings)
+                    .into_iter()
+                    .nth(index)?;
+                let selected = settings.local_terminal.semantic_scheme_for_shell(&shell.id);
+                let shell_id = shell.id.clone();
+                let inherited_label = self
+                    .i18n
+                    .t("ssh.form.terminal_use_application_default")
+                    .replace(
+                        "{{value}}",
+                        &application_semantic_scheme_label(settings, &self.i18n),
+                    );
+                let mut popup =
+                    select_overlay_popup(&self.tokens, width).child(select_option_action(
+                        select_option(&self.tokens, inherited_label, selected.is_none()),
+                        false,
+                        false,
+                        cx.listener({
+                            let shell_id = shell_id.clone();
+                            move |this, _event, _window, cx| {
+                                this.close_settings_select();
+                                this.edit_settings(
+                                    |settings| {
+                                        settings
+                                            .local_terminal
+                                            .semantic_scheme_by_shell
+                                            .remove(&shell_id);
+                                    },
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }
+                        }),
+                    ));
+                for (scheme_id, scheme) in [
+                    ("balanced", TerminalSemanticScheme::Balanced),
+                    ("conservative", TerminalSemanticScheme::Conservative),
+                ] {
+                    let scheme_id = scheme_id.to_string();
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            terminal_semantic_scheme_label(scheme, &self.i18n),
+                            selected == Some(scheme_id.as_str()),
+                        ),
+                        false,
+                        false,
+                        cx.listener({
+                            let shell_id = shell_id.clone();
+                            move |this, _event, _window, cx| {
+                                this.close_settings_select();
+                                this.edit_settings(
+                                    |settings| {
+                                        settings
+                                            .local_terminal
+                                            .semantic_scheme_by_shell
+                                            .insert(shell_id.clone(), scheme_id.clone());
+                                    },
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }
+                        }),
+                    ));
+                }
+                if !settings.terminal.custom_semantic_schemes.is_empty() {
+                    popup = popup
+                        .child(select_separator(&self.tokens))
+                        .child(select_label(
+                            &self.tokens,
+                            self.i18n
+                                .t("settings_view.terminal.highlight_rules.semantic_scheme_custom"),
+                        ));
+                    for custom in &settings.terminal.custom_semantic_schemes {
+                        let scheme_id = custom.id.clone();
+                        popup = popup.child(select_option_action(
+                            select_option(
+                                &self.tokens,
+                                custom.name.clone(),
+                                selected == Some(scheme_id.as_str()),
+                            ),
+                            false,
+                            false,
+                            cx.listener({
+                                let shell_id = shell_id.clone();
+                                move |this, _event, _window, cx| {
+                                    this.close_settings_select();
+                                    this.edit_settings(
+                                        |settings| {
+                                            settings
+                                                .local_terminal
+                                                .semantic_scheme_by_shell
+                                                .insert(shell_id.clone(), scheme_id.clone());
+                                        },
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                }
+                            }),
+                        ));
+                    }
                 }
                 Some(popup)
             }

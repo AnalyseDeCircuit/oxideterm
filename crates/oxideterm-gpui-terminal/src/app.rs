@@ -1208,6 +1208,10 @@ impl TerminalPane {
         self
     }
 
+    pub fn preference_overrides_snapshot(&self) -> TerminalUiPreferenceOverrides {
+        self.preference_overrides.clone()
+    }
+
     pub fn set_preference_overrides(
         &mut self,
         preference_overrides: TerminalUiPreferenceOverrides,

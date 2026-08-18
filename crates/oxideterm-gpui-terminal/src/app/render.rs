@@ -260,7 +260,8 @@ impl Render for TerminalPane {
         .semantic_coloring(
             self.preferences.semantic_coloring && !terminal_mode.contains(TermMode::ALT_SCREEN),
         )
-        .semantic_scheme(self.preferences.semantic_scheme)
+        .semantic_scheme(self.preferences.semantic_scheme.clone())
+        .semantic_shell(self.preferences.semantic_shell)
         .row_timestamps(row_timestamps)
         .transparent_background(background.is_some() || self.preferences.transparent_background)
         .ghost_text(self.terminal_ghost_text())

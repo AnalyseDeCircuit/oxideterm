@@ -10,9 +10,11 @@ use gpui::{
     GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, Pixels, Style, TextRun,
     Window, fill, point, px, relative, rgb, rgba, size,
 };
-use oxideterm_settings::TerminalSemanticScheme;
 use oxideterm_terminal::{
     TerminalColor, TerminalCommandMark, TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
+};
+use oxideterm_terminal_semantic::{
+    CompiledSemanticScheme, SemanticScheme, SemanticShellDialect, compiled_builtin_scheme,
 };
 use oxideterm_terminal_unicode::{TerminalVisualLine, visual_line_for_row};
 use parking_lot::Mutex;
@@ -62,7 +64,8 @@ pub(crate) struct TerminalElement {
     hovered_command_mark_id: Option<String>,
     highlight_rules: Arc<[TerminalHighlightRule]>,
     semantic_coloring: bool,
-    semantic_scheme: TerminalSemanticScheme,
+    semantic_scheme: Arc<CompiledSemanticScheme>,
+    semantic_shell: SemanticShellDialect,
     hovered_link: Option<TerminalLinkRange>,
     detect_file_paths_as_links: bool,
     bidi_enabled: bool,
@@ -412,7 +415,8 @@ impl TerminalElement {
             hovered_command_mark_id: None,
             highlight_rules: Arc::from(Vec::<TerminalHighlightRule>::new()),
             semantic_coloring: false,
-            semantic_scheme: TerminalSemanticScheme::default(),
+            semantic_scheme: Arc::new(compiled_builtin_scheme(SemanticScheme::Balanced).clone()),
+            semantic_shell: SemanticShellDialect::Auto,
             hovered_link,
             detect_file_paths_as_links: true,
             bidi_enabled,
@@ -441,8 +445,13 @@ impl TerminalElement {
         self
     }
 
-    pub(crate) fn semantic_scheme(mut self, scheme: TerminalSemanticScheme) -> Self {
+    pub(crate) fn semantic_scheme(mut self, scheme: Arc<CompiledSemanticScheme>) -> Self {
         self.semantic_scheme = scheme;
+        self
+    }
+
+    pub(crate) fn semantic_shell(mut self, shell: SemanticShellDialect) -> Self {
+        self.semantic_shell = shell;
         self
     }
 
@@ -763,7 +772,8 @@ impl TerminalElement {
                 &self.command_marks,
                 rows,
                 &self.theme,
-                self.semantic_scheme,
+                &self.semantic_scheme,
+                self.semantic_shell,
                 &mut layout,
             );
         }
@@ -1027,9 +1037,11 @@ impl TerminalElement {
         terminal.bright_green.hash(hasher);
         terminal.bright_yellow.hash(hasher);
         terminal.bright_blue.hash(hasher);
+        terminal.bright_black.hash(hasher);
         terminal.bright_magenta.hash(hasher);
         terminal.bright_cyan.hash(hasher);
-        self.semantic_scheme.hash(hasher);
+        self.semantic_scheme.signature().hash(hasher);
+        self.semantic_shell.hash(hasher);
         semantic_line_role_for_rows(&self.snapshot, &self.command_marks, rows).hash(hasher);
     }
 

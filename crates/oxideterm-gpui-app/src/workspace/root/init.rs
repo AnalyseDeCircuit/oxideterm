@@ -917,11 +917,45 @@ impl WorkspaceApp {
     ) -> TerminalUiPreferenceOverrides {
         let Some(options) = saved_connection_id
             .and_then(|saved_connection_id| self.connection_store.get(saved_connection_id))
-            .map(|connection| connection.options.terminal)
+            .map(|connection| connection.options.terminal.clone())
         else {
             return TerminalUiPreferenceOverrides::default();
         };
-        terminal_preference_overrides(options)
+        terminal_preference_overrides(options, &self.settings_store.settings().terminal)
+    }
+
+    pub(in crate::workspace) fn terminal_preference_overrides_for_local_shell(
+        &self,
+        shell: Option<&ShellInfo>,
+    ) -> TerminalUiPreferenceOverrides {
+        let fallback_shell;
+        let shell = if let Some(shell) = shell {
+            shell
+        } else {
+            fallback_shell = oxideterm_terminal::default_shell();
+            &fallback_shell
+        };
+        let settings = self.settings_store.settings();
+        let semantic_scheme_id = settings
+            .local_terminal
+            .semantic_scheme_for_shell(&shell.id)
+            .map(str::to_string);
+        let semantic_scheme = semantic_scheme_id
+            .as_ref()
+            .map(|scheme_id| ConnectionTerminalOptions {
+                semantic_scheme: Some(scheme_id.to_string()),
+                ..ConnectionTerminalOptions::default()
+            })
+            .map(|options| terminal_preference_overrides(options, &settings.terminal))
+            .and_then(|overrides| overrides.semantic_scheme);
+
+        TerminalUiPreferenceOverrides {
+            semantic_scheme,
+            semantic_scheme_id,
+            semantic_shell: Some(semantic_shell_dialect(&shell.id)),
+            local_shell_id: Some(shell.id.clone()),
+            ..TerminalUiPreferenceOverrides::default()
+        }
     }
 
     pub(in crate::workspace) fn terminal_preference_overrides_for_ssh_node(
@@ -935,7 +969,10 @@ impl WorkspaceApp {
             return self
                 .terminal_preference_overrides_for_saved_connection(Some(saved_connection_id));
         }
-        terminal_preference_overrides(node.terminal_options)
+        terminal_preference_overrides(
+            node.terminal_options.clone(),
+            &self.settings_store.settings().terminal,
+        )
     }
 
     pub(in crate::workspace) fn apply_saved_connection_terminal_preferences(
@@ -967,7 +1004,11 @@ impl WorkspaceApp {
         for (pane_id, pane) in panes {
             let application_preferences = self.terminal_preferences_for_pane(pane_id, cx);
             pane.update(cx, |pane, cx| {
-                pane.set_preference_overrides(preference_overrides, application_preferences, cx);
+                pane.set_preference_overrides(
+                    preference_overrides.clone(),
+                    application_preferences,
+                    cx,
+                );
             });
         }
     }
@@ -1026,7 +1067,11 @@ impl WorkspaceApp {
             open_links_with_modifier: terminal.open_links_with_modifier,
             detect_file_paths_as_links: terminal.detect_file_paths_as_links,
             semantic_coloring: terminal.semantic_coloring,
-            semantic_scheme: terminal.semantic_scheme,
+            semantic_scheme: resolved_terminal_semantic_scheme(
+                terminal.semantic_scheme,
+                terminal.active_custom_semantic_scheme(),
+            ),
+            semantic_shell: SemanticShellDialect::Auto,
             selection_requires_shift: terminal.selection_requires_shift,
             free_type_mode: terminal.free_type_mode,
             backspace_sequence: terminal.backspace_sequence,
@@ -1300,7 +1345,29 @@ impl WorkspaceApp {
 
 pub(in crate::workspace) fn terminal_preference_overrides(
     options: ConnectionTerminalOptions,
+    terminal_settings: &oxideterm_settings::TerminalSettings,
 ) -> TerminalUiPreferenceOverrides {
+    let semantic_scheme_id = options.semantic_scheme.clone();
+    let semantic_scheme = options.semantic_scheme.as_deref().and_then(|id| match id {
+        "balanced" => Some(resolved_terminal_semantic_scheme(
+            oxideterm_settings::TerminalSemanticScheme::Balanced,
+            None,
+        )),
+        "conservative" => Some(resolved_terminal_semantic_scheme(
+            oxideterm_settings::TerminalSemanticScheme::Conservative,
+            None,
+        )),
+        custom_id => terminal_settings
+            .custom_semantic_schemes
+            .iter()
+            .find(|scheme| scheme.id == custom_id)
+            .map(|scheme| {
+                resolved_terminal_semantic_scheme(
+                    oxideterm_settings::TerminalSemanticScheme::Balanced,
+                    Some(scheme),
+                )
+            }),
+    });
     TerminalUiPreferenceOverrides {
         terminal_encoding: options.encoding.map(terminal_encoding_from_connection),
         backspace_sequence: options
@@ -1309,6 +1376,45 @@ pub(in crate::workspace) fn terminal_preference_overrides(
         delete_sequence: options
             .delete_sequence
             .map(terminal_delete_sequence_from_connection),
+        semantic_scheme,
+        semantic_scheme_id,
+        semantic_shell: None,
+        local_shell_id: None,
+    }
+}
+
+fn semantic_shell_dialect(shell_id: &str) -> SemanticShellDialect {
+    let shell_id = shell_id.to_ascii_lowercase();
+    if shell_id.contains("powershell") || shell_id == "pwsh" {
+        SemanticShellDialect::PowerShell
+    } else if shell_id.contains("zsh") {
+        SemanticShellDialect::Zsh
+    } else if shell_id.contains("fish") {
+        SemanticShellDialect::Fish
+    } else if shell_id.contains("bash") || shell_id.starts_with("wsl") {
+        SemanticShellDialect::Bash
+    } else {
+        SemanticShellDialect::Auto
+    }
+}
+
+#[cfg(test)]
+mod semantic_scheme_tests {
+    use super::*;
+
+    #[test]
+    fn local_shell_ids_select_the_matching_tree_sitter_dialect() {
+        assert_eq!(semantic_shell_dialect("bash"), SemanticShellDialect::Bash);
+        assert_eq!(
+            semantic_shell_dialect("pwsh"),
+            SemanticShellDialect::PowerShell
+        );
+        assert_eq!(semantic_shell_dialect("zsh"), SemanticShellDialect::Zsh);
+        assert_eq!(semantic_shell_dialect("fish"), SemanticShellDialect::Fish);
+        assert_eq!(
+            semantic_shell_dialect("custom-shell"),
+            SemanticShellDialect::Auto
+        );
     }
 }
 

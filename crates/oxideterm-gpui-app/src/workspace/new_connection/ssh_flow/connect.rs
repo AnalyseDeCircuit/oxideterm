@@ -765,7 +765,7 @@ impl WorkspaceApp {
             SshConnectionIntent::ConnectSaved(id) => {
                 if let Some(connection_options) = self.connection_store.get(&id).map(|connection| {
                     (
-                        connection.options.terminal,
+                        connection.options.terminal.clone(),
                         connection.options.dedicated_new_terminal_connection,
                     )
                 }) && let Some(node) = self.ssh_nodes.get_mut(&target_node_id)

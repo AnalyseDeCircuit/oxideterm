@@ -518,6 +518,71 @@ impl WorkspaceApp {
                     ));
                 }
             }
+            NewConnectionSelect::TerminalSemanticScheme => {
+                let selected = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .and_then(|form| form.terminal.semantic_scheme.clone());
+                let terminal = &self.settings_store.settings().terminal;
+                let default_name = terminal
+                    .active_custom_semantic_scheme()
+                    .map(|scheme| scheme.name.clone())
+                    .unwrap_or_else(|| match terminal.semantic_scheme {
+                        oxideterm_settings::TerminalSemanticScheme::Balanced => self
+                            .i18n
+                            .t("settings_view.terminal.highlight_rules.semantic_scheme_balanced"),
+                        oxideterm_settings::TerminalSemanticScheme::Conservative => self.i18n.t(
+                            "settings_view.terminal.highlight_rules.semantic_scheme_conservative",
+                        ),
+                    });
+                let default_label = self
+                    .i18n
+                    .t("ssh.form.terminal_use_application_default")
+                    .replace("{{value}}", &default_name);
+                popup = popup.child(select_option_action(
+                    select_option(&self.tokens, default_label, selected.is_none()),
+                    false,
+                    false,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.close_new_connection_select(cx);
+                        this.set_new_connection_terminal_semantic_scheme(None, cx);
+                        cx.stop_propagation();
+                    }),
+                ));
+                let mut schemes = vec![
+                    (
+                        "balanced".to_string(),
+                        self.i18n
+                            .t("settings_view.terminal.highlight_rules.semantic_scheme_balanced"),
+                    ),
+                    (
+                        "conservative".to_string(),
+                        self.i18n.t(
+                            "settings_view.terminal.highlight_rules.semantic_scheme_conservative",
+                        ),
+                    ),
+                ];
+                schemes.extend(
+                    terminal
+                        .custom_semantic_schemes
+                        .iter()
+                        .map(|scheme| (scheme.id.clone(), scheme.name.clone())),
+                );
+                for (id, name) in schemes {
+                    let is_selected = selected.as_deref() == Some(id.as_str());
+                    popup = popup.child(select_option_action(
+                        select_option(&self.tokens, name, is_selected),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_new_connection_select(cx);
+                            this.set_new_connection_terminal_semantic_scheme(Some(id.clone()), cx);
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+            }
             NewConnectionSelect::SerialPort => {
                 let selected_port = self
                     .connection_form_state(cx)

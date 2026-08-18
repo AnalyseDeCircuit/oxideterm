@@ -92,10 +92,7 @@ impl WorkspaceApp {
                     let shell_count = effective_shells.len();
                     let mut list = div().w_full().min_w(px(0.0)).flex().flex_col();
                     for (index, shell) in effective_shells.iter().enumerate() {
-                        list = list.child(self.available_shell_row(
-                            shell,
-                            settings.local_terminal.default_shell_id.as_deref(),
-                        ));
+                        list = list.child(self.available_shell_row(index, shell, settings, cx));
                         if index + 1 < shell_count {
                             list = list.child(self.card_separator());
                         }

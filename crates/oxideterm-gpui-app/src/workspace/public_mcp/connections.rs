@@ -672,6 +672,7 @@ fn terminal_options(options: &PublicTerminalOptions) -> ConnectionTerminalOption
             PublicTerminalDeleteSequence::Delete => ConnectionTerminalDeleteSequence::Delete,
             PublicTerminalDeleteSequence::ControlH => ConnectionTerminalDeleteSequence::ControlH,
         }),
+        semantic_scheme: None,
     }
 }
 
@@ -1110,6 +1111,7 @@ pub(super) fn terminal_options_projection(options: &ConnectionTerminalOptions) -
             ConnectionTerminalDeleteSequence::Delete => "delete",
             ConnectionTerminalDeleteSequence::ControlH => "control_h",
         }),
+        "semantic_scheme": options.semantic_scheme,
     })
 }
 

@@ -95,8 +95,11 @@ impl WorkspaceApp {
         let tab_id = self.alloc_tab_id(cx);
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
-        let preferences =
+        let preference_overrides =
+            self.terminal_preference_overrides_for_local_shell(terminal_config.shell.as_ref());
+        let mut preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
+        preference_overrides.apply_to(&mut preferences);
         let pane = cx.new(|cx| {
             TerminalPane::new_local_with_config_and_preferences(
                 terminal_config,
@@ -105,6 +108,7 @@ impl WorkspaceApp {
                 cx,
             )
             .expect("failed to initialize terminal pane")
+            .with_preference_overrides(preference_overrides)
         });
         let shared_session = pane.read(cx).shared_session();
 
@@ -153,7 +157,10 @@ impl WorkspaceApp {
         let tab_id = self.alloc_tab_id(cx);
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
-        let preference_overrides = terminal_preference_overrides(terminal_options);
+        let preference_overrides = terminal_preference_overrides(
+            terminal_options,
+            &self.settings_store.settings().terminal,
+        );
         let mut preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
         preference_overrides.apply_to(&mut preferences);
@@ -299,7 +306,7 @@ impl WorkspaceApp {
             .get(&saved_connection_id)
             .map(|connection| {
                 (
-                    connection.options.terminal,
+                    connection.options.terminal.clone(),
                     connection.options.dedicated_new_terminal_connection,
                 )
             })
@@ -315,7 +322,7 @@ impl WorkspaceApp {
         }) {
             self.associate_existing_node_with_saved_connection(&node_id, &saved_connection_id);
             if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
-                node.terminal_options = saved_terminal_options;
+                node.terminal_options = saved_terminal_options.clone();
                 node.dedicated_new_terminal_connection = saved_dedicated_new_terminal_connection;
             }
             if let Some(session_id) = self
@@ -405,7 +412,7 @@ impl WorkspaceApp {
                     &saved_connection_id,
                 );
                 if let Some(node) = self.ssh_nodes.get_mut(&existing_node_id) {
-                    node.terminal_options = saved_terminal_options;
+                    node.terminal_options = saved_terminal_options.clone();
                     node.dedicated_new_terminal_connection =
                         saved_dedicated_new_terminal_connection;
                 }
@@ -462,7 +469,7 @@ impl WorkspaceApp {
                 Some(saved_connection_id.clone()),
             );
             if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
-                node.terminal_options = saved_terminal_options;
+                node.terminal_options = saved_terminal_options.clone();
                 node.dedicated_new_terminal_connection = saved_dedicated_new_terminal_connection;
             }
             let cleanup_node_id = node_id.clone();
@@ -1114,7 +1121,7 @@ impl WorkspaceApp {
                     let terminal_options = self
                         .ssh_nodes
                         .get(&node_id)
-                        .map(|node| node.terminal_options)
+                        .map(|node| node.terminal_options.clone())
                         .unwrap_or_default();
                     SshConnectionIntent::Connect(SshTerminalConnectionOptions {
                         terminal: terminal_options,
