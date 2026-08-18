@@ -43,13 +43,29 @@ impl TextEditorView {
         }
 
         let rows = Arc::new(self.compute_display_rows(wrap_column));
+        let max_width_columns = rows
+            .iter()
+            .map(|row| row.end_col.saturating_sub(row.start_col))
+            .max()
+            .unwrap_or(0);
         *self.display_rows_cache.borrow_mut() = Some(DisplayRowsCache {
             buffer_version,
             wrap_column,
             fold_revision: self.fold_revision,
+            max_width_columns,
             rows: rows.clone(),
         });
         rows
+    }
+
+    pub(super) fn document_width_columns(&self) -> usize {
+        // Populate the shared row cache once, then reuse its width summary on every scroll frame.
+        let _ = self.display_rows();
+        self.display_rows_cache
+            .borrow()
+            .as_ref()
+            .map(|cache| cache.max_width_columns)
+            .unwrap_or(0)
     }
 
     fn compute_display_rows(&self, wrap_column: Option<usize>) -> Vec<DisplayRow> {

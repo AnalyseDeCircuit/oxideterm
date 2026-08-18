@@ -20,6 +20,7 @@ pub struct VisibleRows {
 pub struct EditorViewport {
     pub scroll_x_px: f32,
     pub scroll_y_px: f32,
+    pub width_px: f32,
     pub height_px: f32,
     pub overscan_rows: usize,
 }
@@ -29,9 +30,19 @@ impl EditorViewport {
         Self {
             scroll_x_px: 0.0,
             scroll_y_px: 0.0,
+            width_px: 0.0,
             height_px: 0.0,
             overscan_rows,
         }
+    }
+
+    pub fn set_width(&mut self, width_px: f32) -> bool {
+        let width_px = width_px.max(0.0);
+        if (self.width_px - width_px).abs() < VIEWPORT_SIZE_EPSILON_PX {
+            return false;
+        }
+        self.width_px = width_px;
+        true
     }
 
     pub fn set_height(&mut self, height_px: f32) -> bool {
@@ -47,12 +58,13 @@ impl EditorViewport {
         &mut self,
         dx_px: f32,
         dy_px: f32,
+        max_scroll_x_px: f32,
         line_count: usize,
         line_height: f32,
     ) -> bool {
         let old_x = self.scroll_x_px;
         let old_y = self.scroll_y_px;
-        self.scroll_x_px = (self.scroll_x_px + dx_px).max(0.0);
+        self.scroll_x_px = (self.scroll_x_px + dx_px).clamp(0.0, max_scroll_x_px.max(0.0));
         self.scroll_y_px = (self.scroll_y_px + dy_px)
             .clamp(0.0, max_scroll_y(line_count, line_height, self.height_px));
         (self.scroll_x_px - old_x).abs() > f32::EPSILON
@@ -63,6 +75,10 @@ impl EditorViewport {
         self.scroll_y_px = self
             .scroll_y_px
             .clamp(0.0, max_scroll_y(line_count, line_height, self.height_px));
+    }
+
+    pub fn clamp_horizontal(&mut self, max_scroll_x_px: f32) {
+        self.scroll_x_px = self.scroll_x_px.clamp(0.0, max_scroll_x_px.max(0.0));
     }
 
     pub fn reveal_line(&mut self, line: usize, line_count: usize, line_height: f32) -> bool {
@@ -134,10 +150,21 @@ mod tests {
         let mut viewport = EditorViewport::new(0);
         viewport.height_px = 100.0;
 
-        viewport.scroll_by(12.0, 10_000.0, 8, 20.0);
+        viewport.scroll_by(12.0, 10_000.0, 40.0, 8, 20.0);
 
         assert_eq!(viewport.scroll_x_px, 12.0);
         assert_eq!(viewport.scroll_y_px, 60.0);
+    }
+
+    #[test]
+    fn clamps_horizontal_scroll_to_content_width() {
+        let mut viewport = EditorViewport::new(0);
+
+        viewport.scroll_by(500.0, 0.0, 180.0, 1, 20.0);
+        assert_eq!(viewport.scroll_x_px, 180.0);
+
+        viewport.clamp_horizontal(64.0);
+        assert_eq!(viewport.scroll_x_px, 64.0);
     }
 
     #[test]
@@ -161,5 +188,16 @@ mod tests {
         assert_eq!(viewport.height_px, 120.0);
         assert!(viewport.set_height(121.0));
         assert_eq!(viewport.height_px, 121.0);
+    }
+
+    #[test]
+    fn ignores_subpixel_width_jitter() {
+        let mut viewport = EditorViewport::new(0);
+        viewport.width_px = 640.0;
+
+        assert!(!viewport.set_width(640.25));
+        assert_eq!(viewport.width_px, 640.0);
+        assert!(viewport.set_width(641.0));
+        assert_eq!(viewport.width_px, 641.0);
     }
 }
