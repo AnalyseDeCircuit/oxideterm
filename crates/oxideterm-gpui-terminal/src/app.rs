@@ -3027,9 +3027,9 @@ fn current_terminal_timestamp_label() -> String {
 }
 
 fn terminal_timestamp_label(hour: u32, minute: u32, second: u32, millis: u32) -> String {
-    // Fixed-width millisecond labels keep the paint-only gutter stable while
-    // making closely spaced device output distinguishable at a glance.
-    format!("{hour:02}:{minute:02}:{second:02}.{millis:03}")
+    // Bracketed fixed-width labels separate timestamp metadata from terminal
+    // output while keeping the paint-only gutter stable.
+    format!("[{hour:02}:{minute:02}:{second:02}.{millis:03}]")
 }
 
 fn record_timestampable_snapshot_rows(
@@ -3476,6 +3476,14 @@ mod tests {
         record_timestampable_snapshot_rows(&mut row_timestamps, &cleared_snapshot, "10:00:04");
 
         assert!(!row_timestamps.contains_key(&42));
+    }
+
+    #[test]
+    fn terminal_timestamp_labels_are_bracketed_and_match_the_gutter_width() {
+        let label = terminal_timestamp_label(1, 2, 3, 4);
+
+        assert_eq!(label, "[01:02:03.004]");
+        assert_eq!(label.chars().count(), TERMINAL_TIMESTAMP_LABEL_CELLS);
     }
 
     #[test]
