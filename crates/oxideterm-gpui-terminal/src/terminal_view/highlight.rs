@@ -38,18 +38,18 @@ impl TerminalHighlightLayout {
 }
 
 #[derive(Clone)]
-struct LogicalLine {
-    text: String,
-    map: Vec<TextCell>,
+pub(super) struct LogicalLine {
+    pub(super) text: String,
+    pub(super) map: Vec<TextCell>,
     // The line paint range excludes fixed-width terminal padding.
     content_len: usize,
 }
 
 #[derive(Clone)]
-struct TextCell {
-    row: usize,
-    col: usize,
-    cells: usize,
+pub(super) struct TextCell {
+    pub(super) row: usize,
+    pub(super) col: usize,
+    pub(super) cells: usize,
 }
 
 #[derive(Clone)]
@@ -196,7 +196,7 @@ fn runtime_matcher(rule: &TerminalHighlightRule) -> Option<RuntimeHighlightMatch
     (!regex.is_match("")).then_some(RuntimeHighlightMatcher::Regex(regex))
 }
 
-fn logical_line_range(snapshot: &TerminalSnapshot, row: usize) -> Option<Range<usize>> {
+pub(super) fn logical_line_range(snapshot: &TerminalSnapshot, row: usize) -> Option<Range<usize>> {
     if row >= snapshot.lines.len() {
         return None;
     }
@@ -211,7 +211,7 @@ fn logical_line_range(snapshot: &TerminalSnapshot, row: usize) -> Option<Range<u
     Some(start..end)
 }
 
-fn build_logical_line(snapshot: &TerminalSnapshot, rows: Range<usize>) -> LogicalLine {
+pub(super) fn build_logical_line(snapshot: &TerminalSnapshot, rows: Range<usize>) -> LogicalLine {
     let mut text = String::new();
     let mut map = Vec::new();
     for row_index in rows {

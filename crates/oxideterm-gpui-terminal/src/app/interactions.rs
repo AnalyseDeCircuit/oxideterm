@@ -2604,6 +2604,7 @@ mod tests {
             wide: false,
             fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
             bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
+            style_origin: Default::default(),
             attrs: TerminalAttrs::default(),
             hyperlink: None,
             cursor: false,

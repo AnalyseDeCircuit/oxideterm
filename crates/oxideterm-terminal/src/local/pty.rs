@@ -746,6 +746,7 @@ fn snapshot_row_from_term<T: EventListener>(
                 wide: false,
                 fg: OXIDETERM_DARK_THEME.foreground,
                 bg: OXIDETERM_DARK_THEME.ansi_background,
+                style_origin: TerminalStyleOrigin::default(),
                 attrs: TerminalAttrs::default(),
                 hyperlink: None,
                 cursor: false,
@@ -772,12 +773,14 @@ fn snapshot_row_from_term<T: EventListener>(
         let ch = if cell.c == '\0' { ' ' } else { cell.c };
         let attrs = attrs_from_flags(cell.flags);
         let (fg, bg) = style_colors_for_cell(cell.fg, cell.bg, ch, attrs);
+        let style_origin = style_origin_for_cell(cell.fg, cell.bg, attrs);
         snapshot_row.cells_mut()[col] = TerminalCell {
             ch,
             zerowidth: cell.zerowidth().into_iter().flatten().copied().collect(),
             wide: cell.flags.contains(Flags::WIDE_CHAR),
             fg,
             bg,
+            style_origin,
             attrs,
             hyperlink: cell
                 .hyperlink()

@@ -71,6 +71,7 @@ members = [
   "crates/oxideterm-terminal-encoding",
   "crates/oxideterm-terminal-graphics",
   "crates/oxideterm-terminal-model",
+  "crates/oxideterm-terminal-semantic",
   "crates/oxideterm-terminal-unicode",
   "crates/oxideterm-theme",
   "crates/oxideterm-trzsz",

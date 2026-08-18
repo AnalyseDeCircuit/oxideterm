@@ -8001,6 +8001,7 @@ dependencies = [
  "oxideterm-ssh",
  "oxideterm-terminal",
  "oxideterm-terminal-recording",
+ "oxideterm-terminal-semantic",
  "oxideterm-terminal-unicode",
  "oxideterm-theme",
  "oxideterm-trzsz",
@@ -8504,6 +8505,13 @@ name = "oxideterm-terminal-recording"
 version = "2.0.21"
 dependencies = [
  "serde_json",
+]
+
+[[package]]
+name = "oxideterm-terminal-semantic"
+version = "2.0.21"
+dependencies = [
+ "regex",
 ]
 
 [[package]]

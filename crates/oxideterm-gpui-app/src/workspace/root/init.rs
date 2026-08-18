@@ -1025,6 +1025,7 @@ impl WorkspaceApp {
             right_click_paste: terminal.right_click_paste,
             open_links_with_modifier: terminal.open_links_with_modifier,
             detect_file_paths_as_links: terminal.detect_file_paths_as_links,
+            semantic_coloring: terminal.semantic_coloring,
             selection_requires_shift: terminal.selection_requires_shift,
             free_type_mode: terminal.free_type_mode,
             backspace_sequence: terminal.backspace_sequence,

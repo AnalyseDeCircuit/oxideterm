@@ -245,6 +245,10 @@ fn default_detect_file_paths_as_links() -> bool {
     true
 }
 
+fn default_terminal_semantic_coloring() -> bool {
+    true
+}
+
 fn default_confirm_before_closing_ssh() -> bool {
     true
 }
@@ -316,6 +320,9 @@ pub struct TerminalSettings {
     #[serde(default)]
     pub background_scope: BackgroundScope,
     pub background_enabled_tabs: Vec<String>,
+    // Semantic coloring supplements only terminal cells without explicit ANSI styling.
+    #[serde(default = "default_terminal_semantic_coloring")]
+    pub semantic_coloring: bool,
     pub highlight_rules: Vec<HighlightRule>,
     pub in_band_transfer: InBandTransferSettings,
     pub graphics: TerminalGraphicsSettings,
@@ -372,6 +379,7 @@ impl Default for TerminalSettings {
             background_fit: BackgroundFit::Cover,
             background_scope: BackgroundScope::Content,
             background_enabled_tabs: vec!["terminal".to_string(), "local_terminal".to_string()],
+            semantic_coloring: true,
             highlight_rules: Vec::new(),
             in_band_transfer: InBandTransferSettings::default(),
             graphics: TerminalGraphicsSettings::default(),
@@ -408,7 +416,7 @@ mod tests {
 
     #[test]
     fn terminal_settings_restore_legacy_presentation_defaults() {
-        let defaults: [(&str, bool, fn(&TerminalSettings) -> bool); 5] = [
+        let defaults: [(&str, bool, fn(&TerminalSettings) -> bool); 6] = [
             ("smoothScroll", true, |settings| settings.smooth_scroll),
             ("highlightTabOnNewOutput", true, |settings| {
                 settings.highlight_tab_on_new_output
@@ -420,6 +428,9 @@ mod tests {
             ),
             ("fontLigatures", false, |settings| settings.font_ligatures),
             ("rightClickPaste", false, |settings| settings.right_click_paste),
+            ("semanticColoring", true, |settings| {
+                settings.semantic_coloring
+            }),
         ];
 
         for (field, expected, read) in defaults {

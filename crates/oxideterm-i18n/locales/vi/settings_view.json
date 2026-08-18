@@ -349,6 +349,8 @@
       "highlight_rules": {
         "title": "Quy tắc tô nổi bật",
         "description": "Lưu các điểm tô nổi bật dựa trên từ khóa hoặc regex cho đầu ra terminal. Khi chồng lấp, quy tắc có ưu tiên cao hơn sẽ được áp dụng.",
+        "semantic_coloring": "Tô màu ngữ nghĩa",
+        "semantic_coloring_hint": "Tự động tô màu lệnh, cụm từ trạng thái, số, dấu thời gian, địa chỉ và văn bản terminal chưa có kiểu khác. Các kiểu ANSI tường minh được giữ nguyên.",
         "add_preset": "Thêm preset",
         "preset_group_logs": "Nhật ký và trạng thái",
         "preset_group_network": "Mạng",

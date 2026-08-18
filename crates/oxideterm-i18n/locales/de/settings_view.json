@@ -349,6 +349,8 @@
       "highlight_rules": {
         "title": "Hervorhebungsregeln",
         "description": "Dauerhafte Hervorhebungen für Terminalausgaben per Schlüsselwort oder Regex. Bei Überschneidungen gilt die höher priorisierte Regel.",
+        "semantic_coloring": "Semantische Einfärbung",
+        "semantic_coloring_hint": "Färbt Befehle, Statusausdrücke, Zahlen, Zeitstempel, Adressen und weiteren unformatierten Terminaltext automatisch ein. Explizite ANSI-Stile bleiben erhalten.",
         "add_preset": "Vorgabe hinzufügen",
         "preset_group_logs": "Protokolle und Status",
         "preset_group_network": "Netzwerk",

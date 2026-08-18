@@ -20,9 +20,16 @@ pub struct TerminalCell {
     pub wide: bool,
     pub fg: TerminalColor,
     pub bg: TerminalColor,
+    pub style_origin: TerminalStyleOrigin,
     pub attrs: TerminalAttrs,
     pub hyperlink: Option<String>,
     pub cursor: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
+pub struct TerminalStyleOrigin {
+    pub foreground_explicit: bool,
+    pub background_explicit: bool,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -111,6 +118,7 @@ mod tests {
             wide: false,
             fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
             bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
+            style_origin: TerminalStyleOrigin::default(),
             attrs: TerminalAttrs::default(),
             hyperlink: None,
             cursor: false,

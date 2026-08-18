@@ -349,6 +349,8 @@
       "highlight_rules": {
         "title": "하이라이트 규칙",
         "description": "터미널 출력에 대한 키워드 또는 정규식 기반 하이라이트를 저장합니다. 겹치는 경우 우선순위가 더 높은 규칙이 적용됩니다.",
+        "semantic_coloring": "의미 기반 색상",
+        "semantic_coloring_hint": "명령, 상태 문구, 숫자, 타임스탬프, 주소 등 스타일이 없는 터미널 텍스트에 자동으로 색상을 적용합니다. 명시적 ANSI 스타일은 유지됩니다.",
         "add_preset": "프리셋 추가",
         "preset_group_logs": "로그 및 상태",
         "preset_group_network": "네트워크",

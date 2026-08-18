@@ -3,6 +3,7 @@ mod highlight;
 mod input;
 mod links;
 mod selection;
+mod semantic;
 
 pub(crate) use element::*;
 pub(crate) use input::*;

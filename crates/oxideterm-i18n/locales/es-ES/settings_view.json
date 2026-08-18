@@ -349,6 +349,8 @@
       "highlight_rules": {
         "title": "Reglas de resaltado",
         "description": "Guarda resaltados basados en palabras clave o regex para la salida del terminal. Si hay solapamientos, gana la regla con mayor prioridad.",
+        "semantic_coloring": "Coloración semántica",
+        "semantic_coloring_hint": "Colorea automáticamente comandos, frases de estado, números, marcas de tiempo, direcciones y otro texto del terminal sin estilo. Se conservan los estilos ANSI explícitos.",
         "add_preset": "Agregar preset",
         "preset_group_logs": "Registros y estado",
         "preset_group_network": "Red",

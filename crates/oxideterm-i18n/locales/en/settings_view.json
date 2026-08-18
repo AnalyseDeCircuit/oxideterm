@@ -351,6 +351,8 @@
       "highlight_rules": {
         "title": "Highlight Rules",
         "description": "Persist keyword or regex-based highlights for terminal output. Higher rules win when matches overlap.",
+        "semantic_coloring": "Semantic Coloring",
+        "semantic_coloring_hint": "Automatically color commands, status phrases, numbers, timestamps, addresses, and other unstyled terminal text. Explicit ANSI styles are preserved.",
         "add_preset": "Add Preset",
         "preset_group_logs": "Logs & Status",
         "preset_group_network": "Network",

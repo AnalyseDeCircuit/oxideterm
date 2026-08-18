@@ -351,6 +351,8 @@
       "highlight_rules": {
         "title": "高亮规则",
         "description": "为终端输出保存基于关键词或正则的高亮。匹配重叠时，优先级更高的规则生效。",
+        "semantic_coloring": "语义着色",
+        "semantic_coloring_hint": "自动为命令、状态短语、数字、时间戳、地址等未设置样式的终端文字着色，并保留显式 ANSI 样式。",
         "add_preset": "添加预设",
         "preset_group_logs": "日志与状态",
         "preset_group_network": "网络",

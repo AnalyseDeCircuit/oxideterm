@@ -117,6 +117,64 @@ impl WorkspaceApp {
                                 ),
                         ),
                 )
+                .child(self.card_separator())
+                .child(
+                    div()
+                        .w_full()
+                        .min_w(px(0.0))
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap(px(16.0))
+                        .child(
+                            div()
+                                .min_w(px(0.0))
+                                .flex_1()
+                                .flex_basis(px(260.0))
+                                .flex()
+                                .flex_col()
+                                .gap(px(4.0))
+                                .child(
+                                    div()
+                                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                                        .font_weight(gpui::FontWeight::MEDIUM)
+                                        .text_color(rgb(self.tokens.ui.text))
+                                        .child(self.i18n.t(
+                                            "settings_view.terminal.highlight_rules.semantic_coloring",
+                                        )),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                                        .text_color(rgb(self.tokens.ui.text_muted))
+                                        .child(self.i18n.t(
+                                            "settings_view.terminal.highlight_rules.semantic_coloring_hint",
+                                        )),
+                                ),
+                        )
+                        .child(
+                            div().flex_none().child(
+                                checkbox(
+                                    &self.tokens,
+                                    String::new(),
+                                    settings.terminal.semantic_coloring,
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.edit_settings(
+                                            |settings| {
+                                                settings.terminal.semantic_coloring =
+                                                    !settings.terminal.semantic_coloring;
+                                            },
+                                            cx,
+                                        );
+                                    }),
+                                ),
+                            ),
+                        ),
+                )
+                .child(self.card_separator())
                 .child(
                     div()
                         .flex()

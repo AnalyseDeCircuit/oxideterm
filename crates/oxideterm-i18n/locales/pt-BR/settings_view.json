@@ -349,6 +349,8 @@
       "highlight_rules": {
         "title": "Regras de destaque",
         "description": "Mantém destaques por palavra-chave ou regex na saída do terminal. Em sobreposição, vale a regra de maior prioridade.",
+        "semantic_coloring": "Coloração semântica",
+        "semantic_coloring_hint": "Colore automaticamente comandos, expressões de status, números, carimbos de data e hora, endereços e outros textos do terminal sem estilo. Os estilos ANSI explícitos são preservados.",
         "add_preset": "Adicionar predefinição",
         "preset_group_logs": "Logs e status",
         "preset_group_network": "Rede",

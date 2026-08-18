@@ -5,7 +5,9 @@ pub use oxideterm_terminal_graphics::{
     GraphicsOptions, TerminalImageAnimationState, TerminalImageData, TerminalImageFrame,
     TerminalImageId, TerminalImageProtocol,
 };
-pub use oxideterm_terminal_model::{TerminalAttrs, TerminalCell, TerminalColor, TerminalRow};
+pub use oxideterm_terminal_model::{
+    TerminalAttrs, TerminalCell, TerminalColor, TerminalRow, TerminalStyleOrigin,
+};
 
 #[derive(Clone, Debug)]
 pub struct TerminalSnapshot {
@@ -104,6 +106,7 @@ mod tests {
             wide: false,
             fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
             bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
+            style_origin: TerminalStyleOrigin::default(),
             attrs: TerminalAttrs::default(),
             hyperlink: None,
             cursor: false,

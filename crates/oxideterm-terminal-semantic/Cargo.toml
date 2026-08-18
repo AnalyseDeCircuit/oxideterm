@@ -1,0 +1,8 @@
+[package]
+name = "oxideterm-terminal-semantic"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+regex.workspace = true

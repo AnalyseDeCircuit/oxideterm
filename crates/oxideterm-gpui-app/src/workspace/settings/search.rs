@@ -279,6 +279,8 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             "settings_view.terminal.highlight_rules.title",
             &[
                 "settings_view.terminal.highlight_rules.description",
+                "settings_view.terminal.highlight_rules.semantic_coloring",
+                "settings_view.terminal.highlight_rules.semantic_coloring_hint",
                 "settings_view.terminal.highlight_rules.pattern",
                 "settings_view.terminal.highlight_rules.foreground",
                 "settings_view.terminal.highlight_rules.background",

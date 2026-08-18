@@ -349,6 +349,8 @@
       "highlight_rules": {
         "title": "高亮規則",
         "description": "為終端輸出儲存基於關鍵字或正則的高亮。匹配重疊時，以優先級較高的規則為準。",
+        "semantic_coloring": "語義著色",
+        "semantic_coloring_hint": "自動為命令、狀態片語、數字、時間戳、位址等未設定樣式的終端文字著色，並保留明確的 ANSI 樣式。",
         "add_preset": "新增預設",
         "preset_group_logs": "日誌與狀態",
         "preset_group_network": "網路",

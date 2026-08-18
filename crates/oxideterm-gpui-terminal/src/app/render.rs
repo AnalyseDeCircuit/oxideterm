@@ -18,7 +18,7 @@ use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_terminal::{
     DetectedModemProtocol, ModemTransferDirection, SerialControlLine, SerialDisplayMode,
     SerialFlowControl, SerialLineEnding, SerialParity, SerialSendMode, SerialSessionConfig,
-    TerminalCommandMark, TerminalCursorShape, TerminalLifecycle, TerminalSnapshot,
+    TermMode, TerminalCommandMark, TerminalCursorShape, TerminalLifecycle, TerminalSnapshot,
 };
 
 use super::{
@@ -257,6 +257,9 @@ impl Render for TerminalPane {
             hovered_command_mark_id,
         )
         .highlight_rules(self.preferences.highlight_rules.clone())
+        .semantic_coloring(
+            self.preferences.semantic_coloring && !terminal_mode.contains(TermMode::ALT_SCREEN),
+        )
         .row_timestamps(row_timestamps)
         .transparent_background(background.is_some() || self.preferences.transparent_background)
         .ghost_text(self.terminal_ghost_text())
