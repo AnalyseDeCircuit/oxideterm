@@ -402,6 +402,33 @@ fn kitty_keyboard_reports_modified_printable_keys_as_csi_u() {
 }
 
 #[test]
+fn kitty_keyboard_keeps_shifted_text_on_text_input_path_without_report_all() {
+    let mode = TermMode::default()
+        | TermMode::DISAMBIGUATE_ESC_CODES
+        | TermMode::REPORT_EVENT_TYPES
+        | TermMode::REPORT_ALTERNATE_KEYS;
+
+    for (key, shifted_text) in [("a", "A"), (";", ":")] {
+        let sequence = oxideterm_key_escape_sequence(
+            &Keystroke {
+                key: key.to_string(),
+                key_char: Some(shifted_text.to_string()),
+                modifiers: Modifiers {
+                    shift: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            &mode,
+            false,
+            KittyKeyEventType::Press,
+        );
+
+        assert_eq!(sequence, None);
+    }
+}
+
+#[test]
 fn kitty_keyboard_can_report_plain_keys_when_requested() {
     let sequence = oxideterm_key_escape_sequence(
         &Keystroke {

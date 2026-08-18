@@ -608,6 +608,23 @@ pub(crate) fn kitty_keyboard_escape_sequence(
         return None;
     }
 
+    if event_type == KittyKeyEventType::Press
+        && !mode.contains(TermMode::REPORT_ALL_KEYS_AS_ESC)
+        && keystroke.modifiers.shift
+        && !keystroke.modifiers.alt
+        && !keystroke.modifiers.control
+        && !keystroke.modifiers.platform
+        && !keystroke.modifiers.function
+        && keystroke
+            .key_char
+            .as_deref()
+            .is_some_and(|text| !text.is_empty() && text.chars().all(|ch| !ch.is_control()))
+    {
+        // Shift-only printable keys still produce text unless the application
+        // explicitly requests that all keys use Kitty escape sequences.
+        return None;
+    }
+
     if !has_reportable_modifier
         && !mode.contains(TermMode::REPORT_ALL_KEYS_AS_ESC)
         && event_type == KittyKeyEventType::Press
