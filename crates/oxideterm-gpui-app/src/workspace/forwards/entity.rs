@@ -496,16 +496,33 @@ impl ForwardingWorkspaceEntity {
         let event_drain =
             delivery::drain_channel(&self.runtime_event_rx, delivery::LIFECYCLE_DELIVERY_BUDGET);
         for event in event_drain.items {
-            let session_id = match &event {
+            match &event {
+                ForwardEvent::StatsUpdated {
+                    session_id,
+                    forward_id,
+                    stats,
+                } => {
+                    if let Some(node_id) = ForwardingRuntimeService::node_id_for_session(session_id)
+                        && let Some(snapshot) = self.runtime_snapshots.get_mut(&node_id)
+                        && snapshot.rules.iter().any(|rule| {
+                            rule.id == *forward_id && rule.status == ForwardStatus::Active
+                        })
+                    {
+                        // A stats read emits this event. Apply its payload directly so
+                        // delivery cannot refresh stats and recursively emit another event.
+                        snapshot
+                            .stats_by_forward_id
+                            .insert(forward_id.clone(), stats.clone());
+                    }
+                }
                 ForwardEvent::StatusChanged { session_id, .. }
-                | ForwardEvent::StatsUpdated { session_id, .. }
-                | ForwardEvent::SessionSuspended { session_id, .. } => Some(session_id.as_str()),
-                ForwardEvent::PortDetected { .. } => None,
-            };
-            if let Some(node_id) =
-                session_id.and_then(ForwardingRuntimeService::node_id_for_session)
-            {
-                self.refresh_runtime_snapshot(&node_id);
+                | ForwardEvent::SessionSuspended { session_id, .. } => {
+                    if let Some(node_id) = ForwardingRuntimeService::node_id_for_session(session_id)
+                    {
+                        self.refresh_runtime_snapshot(&node_id);
+                    }
+                }
+                ForwardEvent::PortDetected { .. } => {}
             }
             self.delivery_intents
                 .push_back(ForwardingDeliveryIntent::Runtime(event));
@@ -788,6 +805,68 @@ mod tests {
             .unwrap();
         assert!(state.has_scanned_ports);
         assert_eq!(state.detected_ports.len(), 1);
+    }
+
+    #[gpui::test]
+    fn stats_delivery_updates_cached_snapshot_without_refreshing_manager(cx: &mut TestAppContext) {
+        let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
+        let delivery_wake = worker_tx.wake();
+        let (runtime_tx, runtime_rx) = std::sync::mpsc::channel();
+        let runtime_service = ForwardingRuntimeService::test_fixture();
+        let entity = cx.new(|cx| {
+            ForwardingWorkspaceEntity::new(worker_tx, worker_rx, runtime_rx, runtime_service, cx)
+        });
+        let node_id = NodeId::new("stats-forward");
+        let forwarded_port = 3000;
+        let mut rule = ForwardRule::local("127.0.0.1", forwarded_port, "localhost", forwarded_port);
+        rule.status = ForwardStatus::Active;
+        let forward_id = rule.id.clone();
+        entity.update(cx, |entity, _cx| {
+            entity.runtime_snapshots.insert(
+                node_id.clone(),
+                ForwardingRuntimeSnapshot {
+                    rules: vec![rule],
+                    stats_by_forward_id: HashMap::new(),
+                },
+            );
+        });
+        let stats = ForwardStats {
+            connection_count: 2,
+            active_connections: 1,
+            bytes_sent: 128,
+            bytes_received: 256,
+        };
+
+        runtime_tx
+            .send(ForwardEvent::StatsUpdated {
+                forward_id: forward_id.clone(),
+                session_id: ForwardingRuntimeService::session_id_for_node(&node_id),
+                stats: stats.clone(),
+            })
+            .expect("stats delivery");
+        delivery_wake.mark();
+        cx.run_until_parked();
+
+        cx.read(|cx| {
+            let snapshot = entity
+                .read(cx)
+                .runtime_snapshots
+                .get(&node_id)
+                .expect("cached forwarding snapshot");
+            assert_eq!(snapshot.rules.len(), 1);
+            assert_eq!(snapshot.stats_by_forward_id.get(&forward_id), Some(&stats));
+        });
+        let intents = entity.update(cx, |entity, _cx| entity.take_delivery_intents());
+        assert_eq!(intents.len(), 1);
+        assert!(matches!(
+            intents.front(),
+            Some(ForwardingDeliveryIntent::Runtime(
+                ForwardEvent::StatsUpdated {
+                    forward_id: delivered_forward_id,
+                    ..
+                }
+            )) if delivered_forward_id == &forward_id
+        ));
     }
 
     #[gpui::test]
