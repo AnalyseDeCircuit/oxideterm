@@ -98,6 +98,11 @@ fn connection_form_section_expanded_for_form(
     override_value.unwrap_or(true)
 }
 
+fn remote_desktop_feature_columns(feature_count: usize) -> u16 {
+    // Two columns reduce vertical scanning without squeezing a lone display option.
+    if feature_count > 1 { 2 } else { 1 }
+}
+
 const REMOTE_DESKTOP_CLIPBOARD_FEATURES: &[(RemoteDesktopSessionFeature, &str, &str)] = &[
     (
         RemoteDesktopSessionFeature::ClipboardText,
@@ -2769,6 +2774,19 @@ impl WorkspaceApp {
         capabilities: &oxideterm_remote_desktop::RemoteDesktopProviderCapabilities,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let feature_grid = div()
+            .grid()
+            .grid_cols(remote_desktop_feature_columns(features.len()))
+            .gap(px(self.tokens.spacing.two))
+            .children(features.iter().map(|(feature, label_key, hint_key)| {
+                self.render_remote_desktop_feature_row(
+                    self.i18n.t(label_key),
+                    self.i18n.t(hint_key),
+                    remote_desktop_feature_supported(capabilities, *feature),
+                    *feature,
+                    cx,
+                )
+            }));
         div()
             .flex()
             .flex_col()
@@ -2780,15 +2798,7 @@ impl WorkspaceApp {
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(self.i18n.t(title_key)),
             )
-            .children(features.iter().map(|(feature, label_key, hint_key)| {
-                self.render_remote_desktop_feature_row(
-                    self.i18n.t(label_key),
-                    self.i18n.t(hint_key),
-                    remote_desktop_feature_supported(capabilities, *feature),
-                    *feature,
-                    cx,
-                )
-            }))
+            .child(feature_grid)
             .into_any_element()
     }
 
@@ -2822,6 +2832,7 @@ impl WorkspaceApp {
         };
 
         div()
+            .min_w_0()
             .flex()
             .flex_col()
             .gap(px(self.tokens.spacing.one))
@@ -2856,6 +2867,7 @@ impl WorkspaceApp {
             )
             .child(
                 div()
+                    .min_w_0()
                     .pl(px(
                         self.tokens.metrics.ui_checkbox_size + self.tokens.spacing.two
                     ))
@@ -4178,6 +4190,14 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn remote_desktop_feature_groups_use_compact_columns() {
+        // Single display options stay full-width; larger groups use two columns.
+        assert_eq!(remote_desktop_feature_columns(0), 1);
+        assert_eq!(remote_desktop_feature_columns(1), 1);
+        assert_eq!(remote_desktop_feature_columns(2), 2);
+        assert_eq!(remote_desktop_feature_columns(3), 2);
+    }
 
     #[test]
     fn secret_field_render_values_borrow_entity_owned_allocations() {
