@@ -5,7 +5,9 @@ use gpui::{
     Window, px, rgb,
 };
 use oxideterm_render_policy::EffectiveRenderPolicy;
-use oxideterm_settings::{TerminalBackspaceSequence, TerminalDeleteSequence};
+use oxideterm_settings::{
+    TerminalBackspaceSequence, TerminalDeleteSequence, TerminalSemanticScheme,
+};
 use oxideterm_terminal::{
     TerminalColor, TerminalCursorShape, TerminalEncoding, TrzszTransferPolicy,
 };
@@ -76,6 +78,7 @@ pub struct TerminalUiPreferences {
     pub open_links_with_modifier: bool,
     pub detect_file_paths_as_links: bool,
     pub semantic_coloring: bool,
+    pub semantic_scheme: TerminalSemanticScheme,
     pub selection_requires_shift: bool,
     pub free_type_mode: bool,
     pub backspace_sequence: TerminalBackspaceSequence,
@@ -148,6 +151,7 @@ impl Default for TerminalUiPreferences {
             open_links_with_modifier: TERMINAL_OPEN_LINKS_WITH_MODIFIER,
             detect_file_paths_as_links: TERMINAL_DETECT_FILE_PATHS_AS_LINKS,
             semantic_coloring: true,
+            semantic_scheme: TerminalSemanticScheme::default(),
             selection_requires_shift: TERMINAL_SELECTION_REQUIRES_SHIFT,
             free_type_mode: TERMINAL_FREE_TYPE_MODE,
             backspace_sequence: TERMINAL_BACKSPACE_SEQUENCE,

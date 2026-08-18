@@ -594,6 +594,29 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Terminal, SettingsSelect::TerminalSemanticScheme) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for &scheme in terminal_semantic_scheme_options() {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            terminal_semantic_scheme_label(scheme, &self.i18n),
+                            scheme == settings.terminal.semantic_scheme,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_settings_select();
+                            this.edit_settings(
+                                |settings| settings.terminal.semantic_scheme = scheme,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
             (SettingsTab::Terminal, SettingsSelect::HighlightPreset) => {
                 let mut popup = select_overlay_popup(&self.tokens, width.max(288.0));
                 for (group_index, group) in

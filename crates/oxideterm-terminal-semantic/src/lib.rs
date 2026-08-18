@@ -13,5 +13,5 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use classifier::classify_line;
-pub use types::{SemanticClass, SemanticLineRole, SemanticSpan};
+pub use classifier::{classify_line, classify_line_with_scheme};
+pub use types::{SemanticClass, SemanticLineRole, SemanticScheme, SemanticSpan};

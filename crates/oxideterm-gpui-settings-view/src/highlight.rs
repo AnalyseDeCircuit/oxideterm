@@ -7,7 +7,7 @@ use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, prelude::*, px, 
 use oxideterm_i18n::I18n;
 use oxideterm_settings::{
     HighlightRule, HighlightRuleMatchScope, HighlightRuleRenderMode, MAX_HIGHLIGHT_PATTERN_LENGTH,
-    create_default_highlight_rule,
+    TerminalSemanticScheme, create_default_highlight_rule,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -265,6 +265,24 @@ pub fn highlight_match_scope_label(mode: HighlightRuleMatchScope, i18n: &I18n) -
         }
         HighlightRuleMatchScope::LogicalLine => {
             i18n.t("settings_view.terminal.highlight_rules.match_scope_logical_line")
+        }
+    }
+}
+
+pub fn terminal_semantic_scheme_options() -> &'static [TerminalSemanticScheme] {
+    &[
+        TerminalSemanticScheme::Balanced,
+        TerminalSemanticScheme::Conservative,
+    ]
+}
+
+pub fn terminal_semantic_scheme_label(scheme: TerminalSemanticScheme, i18n: &I18n) -> String {
+    match scheme {
+        TerminalSemanticScheme::Balanced => {
+            i18n.t("settings_view.terminal.highlight_rules.semantic_scheme_balanced")
+        }
+        TerminalSemanticScheme::Conservative => {
+            i18n.t("settings_view.terminal.highlight_rules.semantic_scheme_conservative")
         }
     }
 }

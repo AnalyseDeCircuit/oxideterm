@@ -175,6 +175,18 @@ impl WorkspaceApp {
                         ),
                 )
                 .child(self.card_separator())
+                .child(self.select_setting_row(
+                    "settings_view.terminal.highlight_rules.semantic_scheme",
+                    "settings_view.terminal.highlight_rules.semantic_scheme_hint",
+                    SettingsSelect::TerminalSemanticScheme,
+                    terminal_semantic_scheme_label(
+                        settings.terminal.semantic_scheme,
+                        &self.i18n,
+                    ),
+                    self.tokens.metrics.settings_select_width,
+                    cx,
+                ))
+                .child(self.card_separator())
                 .child(
                     div()
                         .flex()

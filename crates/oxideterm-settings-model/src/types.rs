@@ -115,6 +115,7 @@ pub enum SettingsSelect {
     SftpConcurrent,
     SftpDirectoryParallelism,
     SftpConflict,
+    TerminalSemanticScheme,
     HighlightPreset,
     HighlightRenderMode(usize),
     HighlightMatchScope(usize),

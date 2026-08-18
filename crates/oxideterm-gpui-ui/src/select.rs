@@ -98,6 +98,7 @@ pub enum SelectAnchorId {
     SettingsSftpConcurrent,
     SettingsSftpDirectoryParallelism,
     SettingsSftpConflict,
+    SettingsTerminalSemanticScheme,
     SettingsHighlightPreset,
     SettingsHighlightRenderMode(usize),
     SettingsHighlightMatchScope(usize),
@@ -196,6 +197,7 @@ impl SelectAnchorId {
                 | Self::SettingsSftpConcurrent
                 | Self::SettingsSftpDirectoryParallelism
                 | Self::SettingsSftpConflict
+                | Self::SettingsTerminalSemanticScheme
                 | Self::SettingsHighlightPreset
                 | Self::SettingsHighlightRenderMode(_)
                 | Self::SettingsHighlightMatchScope(_)

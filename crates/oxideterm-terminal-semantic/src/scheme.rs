@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::{SemanticClass, SemanticLineRole, SemanticSpan};
+use crate::{SemanticClass, SemanticLineRole, SemanticScheme, SemanticSpan};
 
 #[derive(Clone, Copy)]
 enum RuleContext {
@@ -156,9 +156,16 @@ static BUILT_IN_RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
     ]
 });
 
-pub(crate) fn candidates(text: &str, role: SemanticLineRole) -> Vec<Candidate> {
+pub(crate) fn candidates(
+    text: &str,
+    role: SemanticLineRole,
+    semantic_scheme: SemanticScheme,
+) -> Vec<Candidate> {
     let mut candidates = Vec::new();
-    for rule in BUILT_IN_RULES.iter().filter(|rule| rule.applies_to(role)) {
+    for rule in BUILT_IN_RULES
+        .iter()
+        .filter(|rule| rule.applies_to(role) && semantic_scheme.includes(rule.class))
+    {
         for captures in rule.matcher.captures_iter(text) {
             let Some(matched) = captures.get(rule.capture) else {
                 continue;

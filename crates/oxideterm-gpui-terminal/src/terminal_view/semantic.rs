@@ -3,8 +3,11 @@
 
 use std::ops::Range;
 
+use oxideterm_settings::TerminalSemanticScheme;
 use oxideterm_terminal::{TerminalAttrs, TerminalCommandMark, TerminalSnapshot};
-use oxideterm_terminal_semantic::{SemanticClass, SemanticLineRole, classify_line};
+use oxideterm_terminal_semantic::{
+    SemanticClass, SemanticLineRole, SemanticScheme, classify_line_with_scheme,
+};
 
 use crate::terminal_ui::{TerminalUiTheme, terminal_color_from_hex};
 use crate::terminal_view::element::to_hsla;
@@ -17,6 +20,7 @@ pub(super) fn append_terminal_semantics_for_rows(
     command_marks: &[TerminalCommandMark],
     rows: Range<usize>,
     theme: &TerminalUiTheme,
+    semantic_scheme: TerminalSemanticScheme,
     layout: &mut TerminalHighlightLayout,
 ) {
     let mut seen_lines = std::collections::HashSet::new();
@@ -29,7 +33,7 @@ pub(super) fn append_terminal_semantics_for_rows(
         }
         let role = semantic_line_role_for_rows(snapshot, command_marks, line_range.clone());
         let line = build_logical_line(snapshot, line_range);
-        for span in classify_line(&line.text, role) {
+        for span in classify_line_with_scheme(&line.text, role, engine_scheme(semantic_scheme)) {
             let start = line.text[..span.range.start].chars().count();
             let end = line.text[..span.range.end].chars().count();
             let Some(cells) = line.map.get(start..end) else {
@@ -58,6 +62,13 @@ pub(super) fn append_terminal_semantics_for_rows(
                 layout.foregrounds.insert(key, foreground);
             }
         }
+    }
+}
+
+fn engine_scheme(scheme: TerminalSemanticScheme) -> SemanticScheme {
+    match scheme {
+        TerminalSemanticScheme::Balanced => SemanticScheme::Balanced,
+        TerminalSemanticScheme::Conservative => SemanticScheme::Conservative,
     }
 }
 
@@ -175,6 +186,7 @@ mod tests {
             &[],
             0..1,
             &TerminalUiTheme::default(),
+            TerminalSemanticScheme::Balanced,
             &mut layout,
         );
 
@@ -204,10 +216,30 @@ mod tests {
             &[],
             0..1,
             &TerminalUiTheme::default(),
+            TerminalSemanticScheme::Balanced,
             &mut layout,
         );
 
         assert_eq!(layout.foregrounds.get(&(0, 0)), Some(&manual_color));
         assert!(layout.foregrounds.contains_key(&(0, 1)));
+    }
+
+    #[test]
+    fn conservative_scheme_reaches_the_render_adapter() {
+        let snapshot = snapshot("Info 247 failed", 0..0);
+        let mut layout = TerminalHighlightLayout::empty();
+
+        append_terminal_semantics_for_rows(
+            &snapshot,
+            &[],
+            0..1,
+            &TerminalUiTheme::default(),
+            TerminalSemanticScheme::Conservative,
+            &mut layout,
+        );
+
+        assert!(!layout.foregrounds.contains_key(&(0, 0)));
+        assert!(!layout.foregrounds.contains_key(&(0, 5)));
+        assert!(layout.foregrounds.contains_key(&(0, 9)));
     }
 }

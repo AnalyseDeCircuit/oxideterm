@@ -1,10 +1,18 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{SemanticLineRole, SemanticSpan, scheme};
+use crate::{SemanticLineRole, SemanticScheme, SemanticSpan, scheme};
 
 pub fn classify_line(text: &str, role: SemanticLineRole) -> Vec<SemanticSpan> {
-    let mut candidates = scheme::candidates(text, role);
+    classify_line_with_scheme(text, role, SemanticScheme::default())
+}
+
+pub fn classify_line_with_scheme(
+    text: &str,
+    role: SemanticLineRole,
+    semantic_scheme: SemanticScheme,
+) -> Vec<SemanticSpan> {
+    let mut candidates = scheme::candidates(text, role, semantic_scheme);
     candidates.sort_by(|left, right| {
         right
             .priority

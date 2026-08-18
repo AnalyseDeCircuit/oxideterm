@@ -253,6 +253,14 @@ fn default_confirm_before_closing_ssh() -> bool {
     true
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TerminalSemanticScheme {
+    #[default]
+    Balanced,
+    Conservative,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
@@ -323,6 +331,8 @@ pub struct TerminalSettings {
     // Semantic coloring supplements only terminal cells without explicit ANSI styling.
     #[serde(default = "default_terminal_semantic_coloring")]
     pub semantic_coloring: bool,
+    #[serde(default)]
+    pub semantic_scheme: TerminalSemanticScheme,
     pub highlight_rules: Vec<HighlightRule>,
     pub in_band_transfer: InBandTransferSettings,
     pub graphics: TerminalGraphicsSettings,
@@ -380,6 +390,7 @@ impl Default for TerminalSettings {
             background_scope: BackgroundScope::Content,
             background_enabled_tabs: vec!["terminal".to_string(), "local_terminal".to_string()],
             semantic_coloring: true,
+            semantic_scheme: TerminalSemanticScheme::default(),
             highlight_rules: Vec::new(),
             in_band_transfer: InBandTransferSettings::default(),
             graphics: TerminalGraphicsSettings::default(),
@@ -440,6 +451,23 @@ mod tests {
             let settings: TerminalSettings = serde_json::from_value(value).unwrap();
             assert_eq!(read(&settings), expected, "legacy {field} default");
         }
+    }
+
+    #[test]
+    fn terminal_semantic_scheme_defaults_and_serializes_stably() {
+        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("semanticScheme");
+
+        let legacy: TerminalSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(legacy.semantic_scheme, TerminalSemanticScheme::Balanced);
+
+        let mut conservative = TerminalSettings::default();
+        conservative.semantic_scheme = TerminalSemanticScheme::Conservative;
+        let value = serde_json::to_value(conservative).unwrap();
+        assert_eq!(value["semanticScheme"], serde_json::json!("conservative"));
     }
 
     #[test]

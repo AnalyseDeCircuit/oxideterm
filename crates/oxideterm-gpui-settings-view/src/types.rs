@@ -96,6 +96,7 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::SftpConcurrent => SelectAnchorId::SettingsSftpConcurrent,
             Self::SftpDirectoryParallelism => SelectAnchorId::SettingsSftpDirectoryParallelism,
             Self::SftpConflict => SelectAnchorId::SettingsSftpConflict,
+            Self::TerminalSemanticScheme => SelectAnchorId::SettingsTerminalSemanticScheme,
             Self::HighlightPreset => SelectAnchorId::SettingsHighlightPreset,
             Self::HighlightRenderMode(index) => SelectAnchorId::SettingsHighlightRenderMode(index),
             Self::HighlightMatchScope(index) => SelectAnchorId::SettingsHighlightMatchScope(index),

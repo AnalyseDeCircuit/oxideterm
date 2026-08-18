@@ -1,7 +1,9 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{SemanticClass, SemanticLineRole, classify_line};
+use crate::{
+    SemanticClass, SemanticLineRole, SemanticScheme, classify_line, classify_line_with_scheme,
+};
 
 fn matched_texts(text: &str) -> Vec<(&str, SemanticClass)> {
     classify_line(text, SemanticLineRole::Output)
@@ -57,6 +59,21 @@ fn warning_terms_use_the_warning_class() {
             ("skipped", SemanticClass::Warning),
         ]
     );
+}
+
+#[test]
+fn conservative_scheme_omits_noisy_classes_but_keeps_structured_values() {
+    let text = "Info: 247 updates on 192.168.1.52 failed";
+    let matches =
+        classify_line_with_scheme(text, SemanticLineRole::Output, SemanticScheme::Conservative)
+            .into_iter()
+            .map(|span| (&text[span.range], span.class))
+            .collect::<Vec<_>>();
+
+    assert!(!matches.contains(&("Info", SemanticClass::Info)));
+    assert!(!matches.contains(&("247", SemanticClass::Number)));
+    assert!(matches.contains(&("192.168.1.52", SemanticClass::Address)));
+    assert!(matches.contains(&("failed", SemanticClass::Error)));
 }
 
 #[test]
