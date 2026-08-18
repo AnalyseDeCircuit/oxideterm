@@ -1,5 +1,5 @@
-// Modified by OxideTerm contributors to preserve mutable DirectWrite callback provenance and
-// release mapped glyph readback resources deterministically.
+// Modified by OxideTerm contributors to preserve mutable DirectWrite callback provenance,
+// retain callback font identities, and release mapped glyph readback resources deterministically.
 
 use std::{
     borrow::Cow,
@@ -36,6 +36,12 @@ struct FontInfo {
     features: IDWriteTypography,
     fallbacks: Option<IDWriteFontFallback>,
     font_collection: IDWriteFontCollection1,
+}
+
+struct CachedFontFace {
+    font_id: FontId,
+    // Keep the callback face alive while its pointer address is used as a draw-local key.
+    _font_face: IDWriteFontFace3,
 }
 
 pub(crate) struct DirectWriteTextSystem {
@@ -78,7 +84,6 @@ struct DirectWriteState {
     custom_font_collection: IDWriteFontCollection1,
     fonts: Vec<FontInfo>,
     font_to_font_id: HashMap<Font, FontId>,
-    font_info_cache: HashMap<usize, FontId>,
     layout_line_scratch: Vec<u16>,
 }
 
@@ -215,7 +220,6 @@ impl DirectWriteTextSystem {
                 custom_font_collection,
                 fonts: Vec::new(),
                 font_to_font_id: HashMap::default(),
-                font_info_cache: HashMap::default(),
                 layout_line_scratch: Vec::new(),
             }),
         })
@@ -323,9 +327,7 @@ impl DirectWriteState {
                 })?;
 
             let font_id = FontId(this.fonts.len());
-            let font_face_key = info.font_face.cast::<IUnknown>().unwrap().as_raw().addr();
             this.fonts.push(info);
-            this.font_info_cache.insert(font_face_key, font_id);
             Some(font_id)
         };
 
@@ -615,6 +617,7 @@ impl DirectWriteState {
                 text_system: self,
                 components,
                 index_converter: StringIndexConverter::new(text),
+                font_info_cache: HashMap::default(),
                 runs: &mut runs,
                 width: 0.0,
             };
@@ -1371,6 +1374,7 @@ struct RendererContext<'t, 'a, 'b> {
     text_system: &'t mut DirectWriteState,
     components: &'a DirectWriteComponents,
     index_converter: StringIndexConverter<'a>,
+    font_info_cache: HashMap<usize, CachedFontFace>,
     runs: &'b mut Vec<ShapedRun>,
     width: f32,
 }
@@ -1499,10 +1503,9 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
 
         let font_face_key = font_face.cast::<IUnknown>().unwrap().as_raw().addr();
         let font_id = context
-            .text_system
             .font_info_cache
             .get(&font_face_key)
-            .copied()
+            .map(|cached| cached.font_id)
             // in some circumstances, we might be getting served a FontFace that we did not create ourselves
             // so create a new font from it and cache it accordingly. The usual culprit here seems to be Segoe UI Symbol
             .map_or_else(
@@ -1516,10 +1519,13 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
                             .select_and_cache_font(context.components, &font)
                             .ok_or_else(|| Error::new(DWRITE_E_NOFONT, "Failed to create font"))?,
                     };
-                    context
-                        .text_system
-                        .font_info_cache
-                        .insert(font_face_key, font_id);
+                    context.font_info_cache.insert(
+                        font_face_key,
+                        CachedFontFace {
+                            font_id,
+                            _font_face: font_face.clone(),
+                        },
+                    );
                     windows::core::Result::Ok(font_id)
                 },
                 Ok,

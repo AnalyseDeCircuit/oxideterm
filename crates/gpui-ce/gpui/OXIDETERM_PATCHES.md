@@ -260,6 +260,9 @@ landed in `zed-industries/zed@89e8a4b9ec7e` after the pinned GPUI-CE baseline:
   measured width through that pointer;
 - DirectWrite glyph arrays are converted with a null-aware helper, so a zero-length null array is
   accepted without constructing an invalid Rust slice and a nonzero null array is rejected;
+- draw-local font-face cache entries retain the DirectWrite callback face whose COM identity
+  supplies the pointer-address key, preventing a released fallback face address from being reused
+  for a different CJK face and resolving glyph IDs through the wrong cached font;
 - color-glyph staging textures are unmapped immediately after their rows are copied.
 
 The mutable-pointer provenance fix prevents optimized Windows builds from treating callback writes
