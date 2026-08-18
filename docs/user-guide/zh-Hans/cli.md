@@ -90,6 +90,20 @@ oxideterm cloud-sync secrets status --json
 OXIDETERM_MCP_TOKEN='<客户端凭据>' oxideterm mcp bridge
 ```
 
+CC Switch 等接受单个 MCP 服务对象的客户端可以使用：
+
+```json
+{
+  "command": "oxideterm",
+  "args": ["mcp", "bridge"],
+  "env": {
+    "OXIDETERM_MCP_TOKEN": "<客户端凭据>"
+  }
+}
+```
+
+需要顶层 `mcpServers` 的客户端则把该对象放到 `mcpServers.oxideterm` 下。
+
 bridge 会从当前配置目录发现正在运行的回环端点。使用命名 profile 时，客户端命令也要带相同的 `--profile`；自定义配置目录则带 `--config-dir`。只有自动发现不可用时才设置 `OXIDETERM_MCP_ENDPOINT` 或 `--endpoint`，且它必须是 `http://localhost.../mcp`、`127.0.0.1` 或 `::1`。凭据只能放在外部客户端的秘密环境设置中，不要放进命令参数、日志或项目文件。
 
 ## Batch Plans

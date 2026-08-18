@@ -147,6 +147,36 @@ OxideSens 可以从工作区、用户数据目录和已启用的 Native 插件�
    监听端口默认为 `0`，由应用自动选择；需要固定端口时可输入 `1` 至 `65535` 并应用。端口偏好只保存在当前设备，不进入普通设置、`.oxide` 导出或云同步。
 3. 在外部 MCP 客户端中把端点配置为 Streamable HTTP URL，并添加 `Authorization: Bearer <凭据>` 请求头。
    如果客户端只支持 stdio，把命令设为 `oxideterm mcp bridge`，并通过客户端的秘密环境配置提供 `OXIDETERM_MCP_TOKEN=<凭据>`；bridge 会自动发现当前回环端点。不要把凭据放进命令参数。
+
+   CC Switch 及接受 `command`、`args`、`env` 对象的客户端可以直接使用应用中“复制 stdio JSON”生成的配置：
+
+   ```json
+   {
+     "command": "oxideterm",
+     "args": ["mcp", "bridge"],
+     "env": {
+       "OXIDETERM_MCP_TOKEN": "<客户端凭据>"
+     }
+   }
+   ```
+
+   如果客户端要求顶层 `mcpServers`，将同一个对象包装为：
+
+   ```json
+   {
+     "mcpServers": {
+       "oxideterm": {
+         "command": "oxideterm",
+         "args": ["mcp", "bridge"],
+         "env": {
+           "OXIDETERM_MCP_TOKEN": "<客户端凭据>"
+         }
+       }
+     }
+   }
+   ```
+
+   两种 JSON 都包含客户端凭据，只能保存到受信任客户端的秘密配置中，不要写入项目文件、日志或公开内容。运行前需在“设置 → 常规”安装命令行工具，并保持 OxideTerm 运行。
 4. 让客户端先调用 `connections_browse`，再按需读取连接详情。连接管理组可创建、修改或删除 SSH、Mosh、Telnet、串口、RDP 和 VNC 配置；凭据管理组只能写入新值、查看存在性或遗忘指定槽位，不能读取既有秘密。
 5. 普通模式下，在 OxideTerm 的“待批准操作”中检查实际客户端、目标和命令；批准后，客户端调用 `mcp_commit_action`。完全权限模式直接执行。
 6. 使用返回的 `command_ref` 查询状态并分段读取标准输出和标准错误。

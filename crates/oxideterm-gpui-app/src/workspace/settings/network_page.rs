@@ -12,6 +12,31 @@ const SETTINGS_PUBLIC_MCP_COMMAND_PADDING_X: f32 = 8.0;
 const SETTINGS_PUBLIC_MCP_COMMAND_PADDING_Y: f32 = 6.0;
 const SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE: f32 = 14.0;
 
+#[derive(serde::Serialize)]
+struct PublicMcpStdioEnvironment<'a> {
+    #[serde(rename = "OXIDETERM_MCP_TOKEN")]
+    credential: &'a str,
+}
+
+#[derive(serde::Serialize)]
+struct PublicMcpStdioConfig<'a> {
+    command: &'static str,
+    args: [&'static str; 2],
+    env: PublicMcpStdioEnvironment<'a>,
+}
+
+fn public_mcp_stdio_json(credential: &str) -> zeroize::Zeroizing<String> {
+    // Borrow the credential during serialization so the JSON output is the only temporary copy.
+    zeroize::Zeroizing::new(
+        serde_json::to_string_pretty(&PublicMcpStdioConfig {
+            command: CLI_COMPANION_COMMAND_NAME,
+            args: ["mcp", "bridge"],
+            env: PublicMcpStdioEnvironment { credential },
+        })
+        .expect("serializing the stdio MCP configuration cannot fail"),
+    )
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum NetworkProxyAuthMode {
     None,
@@ -465,9 +490,21 @@ impl WorkspaceApp {
                         div()
                             .min_w(px(0.0))
                             .flex_1()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(self.i18n.t("settings_view.network.credential_once")),
+                            .flex()
+                            .flex_col()
+                            .gap(px(SETTINGS_PUBLIC_MCP_STATUS_GAP))
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(self.i18n.t("settings_view.network.credential_once")),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(self.tokens.ui.warning))
+                                    .child(self.i18n.t("settings_view.network.stdio_json_hint")),
+                            ),
                     )
                     .child(self.workspace_toolbar_action_button(
                         self.i18n.t("settings_view.network.copy_credential"),
@@ -488,6 +525,24 @@ impl WorkspaceApp {
                                 cx.write_to_clipboard(ClipboardItem::new_string(
                                     credential.to_owned(),
                                 ));
+                            }
+                            cx.stop_propagation();
+                        }),
+                    ))
+                    .child(self.workspace_toolbar_action_button(
+                        self.i18n.t("settings_view.network.copy_stdio_json"),
+                        Some(Self::render_lucide_icon(
+                            LucideIcon::Copy,
+                            SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
+                            rgb(self.tokens.ui.text),
+                        )),
+                        ToolbarButtonOptions::default(),
+                        cx.listener(|this, _event, _window, cx| {
+                            if let Some(credential) = this.public_mcp.revealed_credential() {
+                                let mut config = public_mcp_stdio_json(credential);
+                                // The clipboard is the explicit external boundary; app state never retains the JSON.
+                                let clipboard_config = std::mem::take(&mut *config);
+                                cx.write_to_clipboard(ClipboardItem::new_string(clipboard_config));
                             }
                             cx.stop_propagation();
                         }),
@@ -1999,6 +2054,18 @@ mod tests {
     use super::*;
     use gpui::{AppContext, TestAppContext};
     use oxideterm_ssh::{UpstreamProxyAuth, UpstreamProxyProtocol};
+
+    #[test]
+    fn stdio_mcp_json_escapes_the_one_time_credential() {
+        let credential = "credential-with-\"quote\\slash";
+        let config = public_mcp_stdio_json(credential);
+        let value: serde_json::Value =
+            serde_json::from_str(&config).expect("parse generated stdio MCP configuration");
+
+        assert_eq!(value["command"], CLI_COMPANION_COMMAND_NAME);
+        assert_eq!(value["args"], serde_json::json!(["mcp", "bridge"]));
+        assert_eq!(value["env"]["OXIDETERM_MCP_TOKEN"], credential);
+    }
 
     #[test]
     fn proxy_route_test_enters_workspace_tokio_runtime() {
