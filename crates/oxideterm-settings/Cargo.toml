@@ -9,6 +9,7 @@ anyhow.workspace = true
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
+oxideterm-terminal-semantic = { path = "../oxideterm-terminal-semantic", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 

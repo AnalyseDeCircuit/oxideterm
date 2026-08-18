@@ -3,11 +3,18 @@
 
 use std::ops::Range;
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum SemanticClass {
     Command,
+    Keyword,
     Option,
+    Operator,
     String,
+    Variable,
+    Comment,
     Link,
     Path,
     Address,
@@ -17,6 +24,36 @@ pub enum SemanticClass {
     Warning,
     Success,
     Info,
+}
+
+pub const SEMANTIC_CLASSES: &[SemanticClass] = &[
+    SemanticClass::Command,
+    SemanticClass::Keyword,
+    SemanticClass::Option,
+    SemanticClass::Operator,
+    SemanticClass::String,
+    SemanticClass::Variable,
+    SemanticClass::Comment,
+    SemanticClass::Link,
+    SemanticClass::Path,
+    SemanticClass::Address,
+    SemanticClass::Timestamp,
+    SemanticClass::Number,
+    SemanticClass::Error,
+    SemanticClass::Warning,
+    SemanticClass::Success,
+    SemanticClass::Info,
+];
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SemanticShellDialect {
+    #[default]
+    Auto,
+    Bash,
+    Zsh,
+    Fish,
+    PowerShell,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]

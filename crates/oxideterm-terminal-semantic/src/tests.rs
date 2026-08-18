@@ -105,3 +105,27 @@ fn every_span_uses_valid_utf8_boundaries() {
         assert!(span.range.start < span.range.end);
     }
 }
+
+#[test]
+fn multilingual_status_terms_receive_the_same_semantic_classes() {
+    let cases = [
+        ("连接失败", "失败", SemanticClass::Error),
+        ("操作成功", "成功", SemanticClass::Success),
+        ("警告：空间不足", "警告", SemanticClass::Warning),
+        ("Échec de connexion", "Échec", SemanticClass::Error),
+        ("Vorgang erfolgreich", "erfolgreich", SemanticClass::Success),
+        ("작업 완료", "완료", SemanticClass::Success),
+        ("Cảnh báo dung lượng", "Cảnh báo", SemanticClass::Warning),
+    ];
+
+    for (text, expected_text, expected_class) in cases {
+        let matches = classify_line(text, SemanticLineRole::Output)
+            .into_iter()
+            .map(|span| (&text[span.range], span.class))
+            .collect::<Vec<_>>();
+        assert!(
+            matches.contains(&(expected_text, expected_class)),
+            "missing {expected_text:?} in {matches:?}"
+        );
+    }
+}

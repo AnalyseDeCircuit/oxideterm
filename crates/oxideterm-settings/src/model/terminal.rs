@@ -333,6 +333,10 @@ pub struct TerminalSettings {
     pub semantic_coloring: bool,
     #[serde(default)]
     pub semantic_scheme: TerminalSemanticScheme,
+    #[serde(default)]
+    pub semantic_custom_scheme: Option<String>,
+    #[serde(default)]
+    pub custom_semantic_schemes: Vec<SemanticSchemeDocument>,
     pub highlight_rules: Vec<HighlightRule>,
     pub in_band_transfer: InBandTransferSettings,
     pub graphics: TerminalGraphicsSettings,
@@ -344,6 +348,16 @@ pub struct TerminalSettings {
 pub const DEFAULT_TERMINAL_BACKGROUND_OPACITY: f64 = 0.15;
 pub const MIN_TERMINAL_BACKGROUND_OPACITY: f64 = 0.03;
 pub const MAX_TERMINAL_BACKGROUND_OPACITY: f64 = 1.0;
+pub const MAX_CUSTOM_SEMANTIC_SCHEMES: usize = 32;
+
+impl TerminalSettings {
+    pub fn active_custom_semantic_scheme(&self) -> Option<&SemanticSchemeDocument> {
+        let active_id = self.semantic_custom_scheme.as_deref()?;
+        self.custom_semantic_schemes
+            .iter()
+            .find(|scheme| scheme.id == active_id)
+    }
+}
 
 impl Default for TerminalSettings {
     fn default() -> Self {
@@ -391,6 +405,8 @@ impl Default for TerminalSettings {
             background_enabled_tabs: vec!["terminal".to_string(), "local_terminal".to_string()],
             semantic_coloring: true,
             semantic_scheme: TerminalSemanticScheme::default(),
+            semantic_custom_scheme: None,
+            custom_semantic_schemes: Vec::new(),
             highlight_rules: Vec::new(),
             in_band_transfer: InBandTransferSettings::default(),
             graphics: TerminalGraphicsSettings::default(),
@@ -468,6 +484,23 @@ mod tests {
         conservative.semantic_scheme = TerminalSemanticScheme::Conservative;
         let value = serde_json::to_value(conservative).unwrap();
         assert_eq!(value["semanticScheme"], serde_json::json!("conservative"));
+    }
+
+    #[test]
+    fn custom_semantic_schemes_round_trip_and_resolve_by_id() {
+        let mut scheme = oxideterm_terminal_semantic::built_in_scheme_document(
+            oxideterm_terminal_semantic::SemanticScheme::Balanced,
+        );
+        scheme.id = "custom:operations".to_string();
+        scheme.name = "Operations".to_string();
+
+        let mut settings = TerminalSettings::default();
+        settings.semantic_custom_scheme = Some(scheme.id.clone());
+        settings.custom_semantic_schemes.push(scheme.clone());
+        let value = serde_json::to_value(settings).unwrap();
+        let decoded: TerminalSettings = serde_json::from_value(value).unwrap();
+
+        assert_eq!(decoded.active_custom_semantic_scheme(), Some(&scheme));
     }
 
     #[test]

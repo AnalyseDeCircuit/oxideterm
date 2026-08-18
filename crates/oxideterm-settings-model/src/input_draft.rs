@@ -16,10 +16,11 @@ use oxideterm_settings::{
     MIN_AI_TOOL_MAX_ROUNDS, PersistedSettings, RECOMMENDED_FOCUS_HANDOFF_COMMANDS,
     SettingsUpstreamProxyAuth, UpdateProxyMode, reindex_highlight_rules,
 };
+use oxideterm_terminal_semantic::SEMANTIC_CLASSES;
 
 use crate::{
-    SettingsInput, ai_update_provider, parse_focus_handoff_command_list,
-    set_ai_model_max_response_tokens, set_ai_user_context_window,
+    SettingsInput, ai_update_provider, edit_custom_semantic_scheme,
+    parse_focus_handoff_command_list, set_ai_model_max_response_tokens, set_ai_user_context_window,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -126,6 +127,34 @@ pub fn persisted_settings_input_value(
             .cloned()
             .collect::<Vec<_>>()
             .join(", "),
+        SettingsInput::SemanticSchemeName => settings
+            .terminal
+            .active_custom_semantic_scheme()
+            .map(|scheme| scheme.name.clone())
+            .unwrap_or_default(),
+        SettingsInput::SemanticSchemeRulePattern(index) => settings
+            .terminal
+            .active_custom_semantic_scheme()
+            .and_then(|scheme| scheme.rules.get(index))
+            .map(|rule| rule.pattern.clone())
+            .unwrap_or_default(),
+        SettingsInput::SemanticSchemeRuleCapture(index) => settings
+            .terminal
+            .active_custom_semantic_scheme()
+            .and_then(|scheme| scheme.rules.get(index))
+            .map(|rule| rule.capture.to_string())
+            .unwrap_or_default(),
+        SettingsInput::SemanticSchemeColor(index) => SEMANTIC_CLASSES
+            .get(index)
+            .and_then(|class| {
+                settings
+                    .terminal
+                    .active_custom_semantic_scheme()?
+                    .colors
+                    .get(class)
+                    .cloned()
+            })
+            .unwrap_or_default(),
         SettingsInput::HighlightLabel(index) => settings
             .terminal
             .highlight_rules
@@ -401,6 +430,47 @@ pub fn apply_persisted_settings_input_draft(
             }
             settings.terminal.command_bar.focus_handoff_commands = commands;
             SettingsInputDraftApply::Applied
+        }
+        SettingsInput::SemanticSchemeName => edit_custom_semantic_scheme(settings, |scheme| {
+            scheme.name = draft.trim().to_string();
+        })
+        .map(|()| SettingsInputDraftApply::Applied)
+        .unwrap_or(SettingsInputDraftApply::Invalid),
+        SettingsInput::SemanticSchemeRulePattern(index) => {
+            edit_custom_semantic_scheme(settings, |scheme| {
+                if let Some(rule) = scheme.rules.get_mut(index) {
+                    rule.pattern = draft.trim().to_string();
+                }
+            })
+            .map(|()| SettingsInputDraftApply::Applied)
+            .unwrap_or(SettingsInputDraftApply::Invalid)
+        }
+        SettingsInput::SemanticSchemeRuleCapture(index) => {
+            let Ok(capture) = draft.trim().parse::<usize>() else {
+                return SettingsInputDraftApply::Invalid;
+            };
+            edit_custom_semantic_scheme(settings, |scheme| {
+                if let Some(rule) = scheme.rules.get_mut(index) {
+                    rule.capture = capture;
+                }
+            })
+            .map(|()| SettingsInputDraftApply::Applied)
+            .unwrap_or(SettingsInputDraftApply::Invalid)
+        }
+        SettingsInput::SemanticSchemeColor(index) => {
+            let Some(&class) = SEMANTIC_CLASSES.get(index) else {
+                return SettingsInputDraftApply::Invalid;
+            };
+            edit_custom_semantic_scheme(settings, |scheme| {
+                let color = draft.trim();
+                if color.is_empty() {
+                    scheme.colors.remove(&class);
+                } else {
+                    scheme.colors.insert(class, color.to_string());
+                }
+            })
+            .map(|()| SettingsInputDraftApply::Applied)
+            .unwrap_or(SettingsInputDraftApply::Invalid)
         }
         SettingsInput::HighlightLabel(index) => edit_highlight_rule(settings, index, |rule| {
             rule.label = draft.trim().to_string()
@@ -798,6 +868,66 @@ mod tests {
         );
 
         assert_eq!(settings.connection_defaults.port, original);
+    }
+
+    #[test]
+    fn semantic_scheme_drafts_validate_before_mutating_the_active_document() {
+        let mut settings = PersistedSettings::default();
+        crate::create_custom_semantic_scheme(
+            &mut settings,
+            "Operations".to_string(),
+            oxideterm_settings::TerminalSemanticScheme::Balanced,
+        )
+        .expect("create semantic scheme");
+        let original_pattern = settings
+            .terminal
+            .active_custom_semantic_scheme()
+            .unwrap()
+            .rules[0]
+            .pattern
+            .clone();
+
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::SemanticSchemeRulePattern(0),
+                "(",
+            ),
+            SettingsInputDraftApply::Invalid
+        );
+        assert_eq!(
+            settings
+                .terminal
+                .active_custom_semantic_scheme()
+                .unwrap()
+                .rules[0]
+                .pattern,
+            original_pattern
+        );
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::SemanticSchemeColor(0),
+                "#123456",
+            ),
+            SettingsInputDraftApply::Applied
+        );
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::SemanticSchemeRuleCapture(0),
+                "99",
+            ),
+            SettingsInputDraftApply::Invalid
+        );
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::SemanticSchemeRuleCapture(0),
+                "0",
+            ),
+            SettingsInputDraftApply::Applied
+        );
     }
 
     #[test]

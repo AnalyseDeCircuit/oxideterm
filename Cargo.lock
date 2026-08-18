@@ -8354,6 +8354,7 @@ dependencies = [
  "oxideterm-atomic-file",
  "oxideterm-portable-runtime",
  "oxideterm-render-policy",
+ "oxideterm-terminal-semantic",
  "serde",
  "serde_json",
  "tempfile",
@@ -8366,6 +8367,7 @@ dependencies = [
  "oxideterm-ai",
  "oxideterm-cloud-sync",
  "oxideterm-settings",
+ "oxideterm-terminal-semantic",
  "oxideterm-theme",
  "serde_json",
  "zeroize",
@@ -8511,7 +8513,11 @@ dependencies = [
 name = "oxideterm-terminal-semantic"
 version = "2.0.21"
 dependencies = [
+ "oxideterm-editor-syntax",
  "regex",
+ "roxmltree",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

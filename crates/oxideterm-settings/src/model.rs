@@ -1,6 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use oxideterm_terminal_semantic::SemanticSchemeDocument;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 

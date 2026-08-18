@@ -9,6 +9,9 @@ pub struct LocalTerminalSettings {
     pub oh_my_posh_enabled: bool,
     pub oh_my_posh_theme: Option<String>,
     pub custom_env_vars: Map<String, Value>,
+    // Shell-specific selections inherit the application Scheme when absent.
+    #[serde(default)]
+    pub semantic_scheme_by_shell: std::collections::BTreeMap<String, String>,
     #[serde(flatten)]
     pub extra: ExtraFields,
 }
@@ -24,8 +27,17 @@ impl Default for LocalTerminalSettings {
             oh_my_posh_enabled: false,
             oh_my_posh_theme: None,
             custom_env_vars: Map::new(),
+            semantic_scheme_by_shell: std::collections::BTreeMap::new(),
             extra: ExtraFields::new(),
         }
+    }
+}
+
+impl LocalTerminalSettings {
+    pub fn semantic_scheme_for_shell(&self, shell_id: &str) -> Option<&str> {
+        self.semantic_scheme_by_shell
+            .get(shell_id)
+            .map(String::as_str)
     }
 }
 
