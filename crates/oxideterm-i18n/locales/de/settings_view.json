@@ -570,7 +570,7 @@
       "border_radius_unit": "px",
       "ui_font": "UI-Schriftart",
       "ui_font_hint": "Benutzerdefinierte Schriftart für die Anwendungsoberfläche. Leer lassen für Systemstandard.",
-      "ui_font_placeholder": "Systemstandard (Inter)",
+      "ui_font_placeholder": "Systemstandard",
       "ui_font_size": "UI-Schriftgröße",
       "ui_font_size_hint": "Textgröße in der gesamten Anwendungsoberfläche anpassen",
       "show_window_titlebar": "Fenstertitelleiste anzeigen",

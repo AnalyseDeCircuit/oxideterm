@@ -570,7 +570,7 @@
       "border_radius_unit": "px",
       "ui_font": "Police de l'interface",
       "ui_font_hint": "Police personnalisée pour l'interface de l'application. Laisser vide pour la police par défaut.",
-      "ui_font_placeholder": "Par défaut du système (Inter)",
+      "ui_font_placeholder": "Par défaut du système",
       "ui_font_size": "Taille de police de l'interface",
       "ui_font_size_hint": "Ajuster la taille du texte dans toute l'interface de l'application",
       "show_window_titlebar": "Afficher la barre de titre de la fenêtre",

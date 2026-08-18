@@ -570,7 +570,7 @@
       "border_radius_unit": "px",
       "ui_font": "Fonte da interface",
       "ui_font_hint": "Fonte personalizada para a interface do aplicativo. Deixe vazio para a fonte padrão do sistema.",
-      "ui_font_placeholder": "Padrão do sistema (Inter)",
+      "ui_font_placeholder": "Padrão do sistema",
       "ui_font_size": "Tamanho da fonte da interface",
       "ui_font_size_hint": "Ajuste o tamanho do texto em toda a interface do aplicativo",
       "show_window_titlebar": "Mostrar barra de título da janela",

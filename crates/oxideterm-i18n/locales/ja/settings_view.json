@@ -570,7 +570,7 @@
       "border_radius_unit": "px",
       "ui_font": "UIフォント",
       "ui_font_hint": "アプリケーションインターフェースのカスタムフォント。空欄でシステムデフォルト。",
-      "ui_font_placeholder": "システムデフォルト（Inter）",
+      "ui_font_placeholder": "システムデフォルト",
       "ui_font_size": "UIフォントサイズ",
       "ui_font_size_hint": "アプリケーション全体の文字サイズを調整します",
       "show_window_titlebar": "ウィンドウタイトルバーを表示",
