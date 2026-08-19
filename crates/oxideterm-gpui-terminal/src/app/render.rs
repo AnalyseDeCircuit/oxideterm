@@ -18,7 +18,8 @@ use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_terminal::{
     DetectedModemProtocol, ModemTransferDirection, SerialControlLine, SerialDisplayMode,
     SerialFlowControl, SerialLineEnding, SerialParity, SerialSendMode, SerialSessionConfig,
-    TermMode, TerminalCommandMark, TerminalCursorShape, TerminalLifecycle, TerminalSnapshot,
+    TermMode, TerminalCommandMark, TerminalCursorShape, TerminalLifecycle, TerminalSessionKind,
+    TerminalSnapshot,
 };
 
 use super::{
@@ -136,6 +137,14 @@ impl Render for TerminalPane {
                 .elapsed()
                 .as_micros()
                 .min(u128::from(u64::MAX)) as u64;
+        }
+        if self.preferences.show_performance_overlay {
+            // Element timings are published after prepaint and paint, so the pane displays the
+            // most recently completed frame without scheduling an extra diagnostic repaint.
+            let performance = self.layout_cache.lock().performance();
+            self.render_stats.layout_micros = performance.layout_micros;
+            self.render_stats.paint_micros = performance.paint_micros;
+            self.render_stats.layout_cache_hit_percent = performance.cache_hit_percent;
         }
         self.metrics = TerminalMetrics::measure_with_preferences(window, &self.preferences);
         let scrollbar_display_offset = self.smooth_scroll_display_offset();
@@ -268,6 +277,7 @@ impl Render for TerminalPane {
         .viewport_rows(viewport_rows)
         .scrollbar_display_offset(scrollbar_display_offset)
         .scroll_y_offset(smooth_scroll_y_offset)
+        .performance_metrics_enabled(self.preferences.show_performance_overlay)
         .command_mark_gutter_width(if command_mark_ui_visible {
             self.command_mark_gutter_width()
         } else {
@@ -839,29 +849,25 @@ impl TerminalPane {
             return (snapshot, px(0.0), viewport_rows);
         }
 
-        let remainder = f32::from(self.scroll_remainder_px);
-        if remainder.abs() <= f32::EPSILON {
+        let line_height = self.metrics.line_height_f32();
+        if line_height <= f32::EPSILON {
             return (snapshot, px(0.0), viewport_rows);
         }
 
-        let overscan_rows = viewport_rows.saturating_add(1);
-        if remainder > 0.0 && snapshot.display_offset < snapshot.scrollback_lines {
-            let display_offset = snapshot.display_offset.saturating_add(1);
-            let overscan = self.smooth_scroll_overscan_snapshot(display_offset, overscan_rows);
-            return (
-                overscan,
-                self.scroll_remainder_px - self.metrics.line_height,
-                viewport_rows,
-            );
+        let visual_display_offset = self.smooth_scroll_display_offset();
+        let base_display_offset = visual_display_offset.ceil() as usize;
+        let y_offset = px((visual_display_offset - base_display_offset as f32) * line_height);
+        let needs_overscan = f32::from(y_offset).abs() > f32::EPSILON;
+        if base_display_offset == snapshot.display_offset && !needs_overscan {
+            return (snapshot, px(0.0), viewport_rows);
         }
 
-        if remainder < 0.0 && snapshot.display_offset > 0 {
-            let overscan =
-                self.smooth_scroll_overscan_snapshot(snapshot.display_offset, overscan_rows);
-            return (overscan, self.scroll_remainder_px, viewport_rows);
-        }
-
-        (snapshot, px(0.0), viewport_rows)
+        // Absolute visual positioning lets repeated wheel events accumulate without requiring
+        // one overscan row per pending line. Only the fractional leading row needs clipping.
+        let requested_rows = viewport_rows.saturating_add(usize::from(needs_overscan));
+        let animated_snapshot =
+            self.smooth_scroll_overscan_snapshot(base_display_offset, requested_rows);
+        (animated_snapshot, y_offset, viewport_rows)
     }
 
     fn smooth_scroll_overscan_snapshot(
@@ -876,10 +882,22 @@ impl TerminalPane {
         {
             return cached.snapshot.clone();
         }
+        let snapshot_started = self.preferences.show_performance_overlay.then(Instant::now);
         let snapshot = self
             .terminal
             .lock()
             .snapshot_with_display_offset(display_offset, rows);
+        if let Some(snapshot_started) = snapshot_started {
+            // Count only cache misses because cached overscan snapshots do not rebuild terminal
+            // rows and therefore do not represent smooth-scroll snapshot work.
+            self.render_stats.scroll_snapshot_micros = snapshot_started
+                .elapsed()
+                .as_micros()
+                .min(u128::from(u64::MAX))
+                as u64;
+            self.render_stats.scroll_snapshot_count =
+                self.render_stats.scroll_snapshot_count.saturating_add(1);
+        }
         self.smooth_scroll_snapshot_cache = Some(SmoothScrollSnapshotCache {
             source_generation: self.snapshot.generation,
             display_offset,
@@ -1544,13 +1562,20 @@ impl TerminalPane {
 
     fn render_terminal_performance_overlay(&self) -> AnyElement {
         let stats = self.render_stats;
+        let backend = match self.session_kind() {
+            TerminalSessionKind::LocalPty => "L",
+            TerminalSessionKind::SshPty => "SSH",
+            TerminalSessionKind::Telnet => "TN",
+            TerminalSessionKind::Mosh => "M",
+            TerminalSessionKind::Serial => "SER",
+        };
         div()
             .absolute()
             .top(px(TERMINAL_PERFORMANCE_OVERLAY_INSET))
             .right(px(TERMINAL_PERFORMANCE_OVERLAY_INSET))
             .flex()
-            .items_center()
-            .gap(px(6.0))
+            .flex_col()
+            .items_start()
             .px(px(8.0))
             .py(px(2.0))
             .rounded(px(4.0))
@@ -1559,35 +1584,69 @@ impl TerminalPane {
             .bg(rgba(0x0d0f12dd))
             .text_size(px(10.0))
             .font_family(SharedString::from(self.preferences.font_family.clone()))
-            .line_height(px(20.0))
             .child(
                 div()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(stats.tier.color()))
-                    .child(stats.tier.label()),
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .line_height(px(16.0))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgb(stats.tier.color()))
+                            .child(stats.tier.label()),
+                    )
+                    .child(
+                        div()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgba(0xe6e8eb99))
+                            .child(backend),
+                    )
+                    .child(div().text_color(rgba(0xe6e8eb99)).child("|"))
+                    .child(
+                        div()
+                            .text_color(rgb(self.theme.foreground))
+                            .child(stats.writes_per_sec.to_string()),
+                    )
+                    .child(div().text_color(rgba(0xe6e8eb99)).child("wps"))
+                    .child(div().text_color(rgba(0xe6e8eb99)).child("·"))
+                    .child(
+                        div()
+                            .text_color(rgba(0xe6e8eb99))
+                            .child(format!("{}b", stats.pending_bytes)),
+                    ),
             )
-            .child(div().text_color(rgba(0xe6e8eb99)).child("|"))
             .child(
                 div()
-                    .text_color(rgb(self.theme.foreground))
-                    .child(stats.writes_per_sec.to_string()),
-            )
-            .child(div().text_color(rgba(0xe6e8eb99)).child("wps"))
-            .child(div().text_color(rgba(0xe6e8eb99)).child("·"))
-            .child(
-                div()
+                    .line_height(px(16.0))
                     .text_color(rgba(0xe6e8eb99))
-                    .child(format!("{}b", stats.pending_bytes)),
+                    .child(format!(
+                        "d{} d95{} db{} dc{} dp{} dl{} l95{}us",
+                        stats.drain_micros,
+                        stats.drain_p95_micros,
+                        stats.drained_bytes,
+                        stats.max_data_chunk_bytes,
+                        stats.output_processing_micros,
+                        stats.terminal_lock_wait_micros,
+                        stats.input_latency_p95_micros,
+                    )),
             )
-            .child(div().text_color(rgba(0xe6e8eb99)).child("·"))
-            .child(div().text_color(rgba(0xe6e8eb99)).child(format!(
-                "d{} s{} q{} i{} l95{}us",
-                stats.drain_micros,
-                stats.snapshot_micros,
-                stats.search_micros,
-                stats.image_prepare_micros,
-                stats.input_latency_p95_micros,
-            )))
+            .child(
+                div()
+                    .line_height(px(16.0))
+                    .text_color(rgba(0xe6e8eb99))
+                    .child(format!(
+                        "s{} ly{} p{} c{}% ss{}#{} q{} i{}",
+                        stats.snapshot_micros,
+                        stats.layout_micros,
+                        stats.paint_micros,
+                        stats.layout_cache_hit_percent,
+                        stats.scroll_snapshot_micros,
+                        stats.scroll_snapshot_count,
+                        stats.search_micros,
+                        stats.image_prepare_micros,
+                    )),
+            )
             .into_any_element()
     }
 

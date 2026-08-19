@@ -1,4 +1,7 @@
-use std::{env, time::Duration};
+use std::{
+    env,
+    time::{Duration, Instant},
+};
 
 use gpui::{
     ClipboardItem, Context, KeyDownEvent, KeyUpEvent, Modifiers, MouseButton, MouseDownEvent,
@@ -14,7 +17,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::{
     FreeTypeDragAction, FreeTypeDragState, PendingTerminalEditorClipboard, ScrollbarDrag,
-    ScrollbarGeometry, TerminalContextMenu, TerminalPane, TerminalPaneEvent,
+    ScrollbarGeometry, SmoothScrollAnimation, TerminalContextMenu, TerminalPane, TerminalPaneEvent,
     command_mark_ui_available,
 };
 use crate::command_facts::TerminalAutosuggestInputState;
@@ -263,55 +266,90 @@ impl TerminalPane {
             return;
         }
 
-        let previous_offset = self.snapshot.display_offset;
-        let snapshot = if scroll_delta.rows == 0 {
-            self.snapshot.clone()
-        } else {
-            let mut terminal = self.terminal.lock();
-            terminal.scroll_lines(terminal_scroll_delta(scroll_delta.rows));
-            terminal.snapshot()
-        };
-        if scroll_delta.rows != 0 && snapshot.display_offset == previous_offset {
-            let had_remainder = self.clear_smooth_scroll_remainder();
-            if had_remainder {
+        if scroll_delta.rows == 0 {
+            let clamped_remainder = self.clamp_smooth_scroll_remainder_to_bounds();
+            if scroll_delta.repaint || clamped_remainder {
                 cx.notify();
             }
             return;
         }
-        if scroll_delta.rows != 0 {
-            self.snapshot = self.stamp_snapshot(snapshot);
-            if scroll_delta.animate_rows {
-                self.start_smooth_scroll_row_animation(scroll_delta.rows);
+
+        let previous_offset = self.snapshot.display_offset;
+        let snapshot_was_dirty = self.snapshot_dirty;
+        let snapshot_started = self.preferences.show_performance_overlay.then(Instant::now);
+        let snapshot = {
+            let mut terminal = self.terminal.lock();
+            let delta = terminal_scroll_delta(scroll_delta.rows);
+            if self.snapshot_dirty {
+                terminal.scroll_lines(delta);
+                terminal.snapshot()
+            } else {
+                terminal.scroll_lines_snapshot_incremental(delta, &self.snapshot)
             }
+        };
+        if let Some(snapshot_started) = snapshot_started {
+            // This includes the synchronous viewport snapshot used by both precise touchpads and
+            // discrete wheels; overscan animation snapshots update the same diagnostic counter.
+            self.render_stats.scroll_snapshot_micros = snapshot_started
+                .elapsed()
+                .as_micros()
+                .min(u128::from(u64::MAX))
+                as u64;
+            self.render_stats.scroll_snapshot_count =
+                self.render_stats.scroll_snapshot_count.saturating_add(1);
+        }
+        if snapshot.display_offset == previous_offset {
+            if snapshot_was_dirty {
+                self.snapshot = self.stamp_snapshot(snapshot);
+                self.snapshot_dirty = false;
+            }
+            let had_remainder = self.clear_smooth_scroll_remainder();
+            if snapshot_was_dirty || had_remainder {
+                cx.notify();
+            }
+            return;
+        }
+        let applied_rows = if snapshot.display_offset >= previous_offset {
+            (snapshot.display_offset - previous_offset) as f32
+        } else {
+            -((previous_offset - snapshot.display_offset) as f32)
+        };
+        self.snapshot_dirty = false;
+        self.snapshot = self.stamp_snapshot(snapshot);
+        if scroll_delta.animate_rows {
+            self.start_smooth_scroll_row_animation(applied_rows);
         }
         let clamped_remainder = self.clamp_smooth_scroll_remainder_to_bounds();
-        if scroll_delta.rows != 0 || scroll_delta.repaint || clamped_remainder {
+        if scroll_delta.repaint || clamped_remainder || applied_rows.abs() > f32::EPSILON {
             cx.notify();
         }
     }
 
     pub(super) fn clear_smooth_scroll_remainder(&mut self) -> bool {
-        let had_remainder = f32::from(self.scroll_remainder_px).abs() > f32::EPSILON
-            || self.smooth_scroll_animation_active;
-        self.scroll_remainder_px = px(0.0);
-        self.smooth_scroll_animation_active = false;
+        let had_remainder = f32::from(self.scroll_input_remainder_px).abs() > f32::EPSILON
+            || f32::from(self.smooth_scroll_offset_px).abs() > f32::EPSILON
+            || self.smooth_scroll_animation.is_some();
+        self.scroll_input_remainder_px = px(0.0);
+        self.smooth_scroll_offset_px = px(0.0);
+        self.smooth_scroll_animation = None;
         had_remainder
     }
 
-    fn start_smooth_scroll_row_animation(&mut self, rows: i32) {
-        // Line-based wheel events arrive as whole terminal rows. Keep the PTY
-        // state line-based, then animate the newly snapped snapshot back into
-        // place so text can be partially clipped during the transition.
-        self.scroll_remainder_px = if rows > 0 {
-            -self.metrics.line_height
-        } else {
-            self.metrics.line_height
-        };
-        self.smooth_scroll_animation_active = true;
+    fn start_smooth_scroll_row_animation(&mut self, applied_rows: f32) {
+        let now = Instant::now();
+        let _ = self.advance_smooth_scroll_animation(now);
+        // The backend owns the integer target while the pane keeps the current visual position.
+        // Repeated wheel events move that target without snapping an in-flight animation.
+        self.smooth_scroll_offset_px -= px(applied_rows * self.metrics.line_height_f32());
+        self.smooth_scroll_animation = Some(SmoothScrollAnimation {
+            started_at: now,
+            start_offset_px: self.smooth_scroll_offset_px,
+        });
+        self.wake_terminal_scheduler();
     }
 
     pub(super) fn clamp_smooth_scroll_remainder_to_bounds(&mut self) -> bool {
-        let remainder = f32::from(self.scroll_remainder_px);
+        let remainder = f32::from(self.smooth_scroll_offset_px);
         let at_bottom = self.snapshot.display_offset == 0;
         let at_top = self.snapshot.display_offset >= self.snapshot.scrollback_lines;
         if (at_bottom && remainder < 0.0) || (at_top && remainder > 0.0) {
@@ -326,31 +364,42 @@ impl TerminalPane {
         scroll_multiplier: f32,
     ) -> Option<TerminalWheelScrollDelta> {
         match event.touch_phase {
-            TouchPhase::Started => {
-                self.scroll_remainder_px = px(0.0);
-                self.smooth_scroll_animation_active = false;
-                None
-            }
+            TouchPhase::Started => Some(TerminalWheelScrollDelta {
+                rows: 0,
+                repaint: self.clear_smooth_scroll_remainder(),
+                animate_rows: false,
+            }),
             TouchPhase::Moved => {
-                if self.smooth_scroll_animation_active {
-                    self.scroll_remainder_px = px(0.0);
-                    self.smooth_scroll_animation_active = false;
+                let precise = event.delta.precise();
+                if precise && self.smooth_scroll_animation.is_some() {
+                    let _ = self.advance_smooth_scroll_animation(Instant::now());
+                    // Preserve the current visual position when a touchpad takes over a wheel
+                    // animation, then normalize it through the same row accumulator below.
+                    self.scroll_input_remainder_px = self.smooth_scroll_offset_px;
+                    self.smooth_scroll_animation = None;
                 }
                 let line_height = self.metrics.line_height;
-                let previous_remainder = self.scroll_remainder_px;
-                self.scroll_remainder_px +=
+                let previous_visual_offset = self.smooth_scroll_offset_px;
+                self.scroll_input_remainder_px +=
                     event.delta.pixel_delta(line_height).y * scroll_multiplier;
-                let rows = (self.scroll_remainder_px / line_height) as i32;
+                let rows = (self.scroll_input_remainder_px / line_height) as i32;
                 if rows != 0 {
-                    self.scroll_remainder_px -= px(rows as f32 * self.metrics.line_height_f32());
+                    self.scroll_input_remainder_px -=
+                        px(rows as f32 * self.metrics.line_height_f32());
                 }
                 let smooth_scroll = self.settings.smooth_scroll;
+                if smooth_scroll && precise {
+                    self.smooth_scroll_offset_px = self.scroll_input_remainder_px;
+                } else if !smooth_scroll {
+                    self.smooth_scroll_offset_px = px(0.0);
+                    self.smooth_scroll_animation = None;
+                }
                 Some(TerminalWheelScrollDelta {
                     rows,
                     repaint: smooth_scroll
-                        && rows == 0
-                        && self.scroll_remainder_px != previous_remainder,
-                    animate_rows: smooth_scroll && rows != 0 && !event.delta.precise(),
+                        && precise
+                        && self.smooth_scroll_offset_px != previous_visual_offset,
+                    animate_rows: smooth_scroll && rows != 0 && !precise,
                 })
             }
             TouchPhase::Ended => None,
@@ -698,11 +747,11 @@ impl TerminalPane {
             / self.metrics.cell_width_f32())
         .floor()
         .max(0.0) as usize;
-        let smooth_scroll_y_offset = self
-            .settings
-            .smooth_scroll
-            .then(|| f32::from(self.scroll_remainder_px))
-            .unwrap_or_default();
+        let smooth_scroll_y_offset = if self.settings.smooth_scroll {
+            f32::from(self.smooth_scroll_offset_px)
+        } else {
+            0.0
+        };
         let row = terminal_viewport_row_for_position(
             f32::from(position.y - origin.y),
             smooth_scroll_y_offset,
@@ -732,8 +781,11 @@ impl TerminalPane {
             .get(point.row)
             .and_then(|row| row.cells.get(point.col))?;
 
-        display_link_ranges_with_path_detection(
+        // Pointer hover needs links only for the row under the cursor. Scanning the full
+        // viewport here repeats URL and path detection for every mouse-move event.
+        display_link_ranges_for_rows_with_path_detection(
             &self.snapshot,
+            point.row..point.row.saturating_add(1),
             self.settings.detect_file_paths_as_links,
         )
         .into_iter()

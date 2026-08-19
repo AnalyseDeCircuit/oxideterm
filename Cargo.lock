@@ -7991,7 +7991,9 @@ name = "oxideterm-gpui-terminal"
 version = "2.0.21"
 dependencies = [
  "anyhow",
+ "async-channel",
  "chrono",
+ "futures",
  "gpui",
  "image",
  "oxideterm-gpui-ui",

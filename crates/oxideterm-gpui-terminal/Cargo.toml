@@ -6,7 +6,9 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-channel.workspace = true
 chrono.workspace = true
+futures.workspace = true
 gpui.workspace = true
 image.workspace = true
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }

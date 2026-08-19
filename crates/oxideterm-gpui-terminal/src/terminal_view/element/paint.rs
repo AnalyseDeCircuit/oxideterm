@@ -385,15 +385,18 @@ pub(crate) fn paint_text_run(
             px(run.col as f32 * metrics.cell_width_f32()),
             px(run.row as f32 * metrics.line_height_f32()),
         );
-    let _ = window
-        .text_system()
-        .shape_line(
-            SharedString::from(run.text.clone()),
-            metrics.font_size,
-            std::slice::from_ref(&run.style),
-            Some(metrics.cell_width),
-        )
-        .paint(
+    if let Some(shaped) = &run.shaped {
+        // Stable terminal rows retain their shaped glyph layout with the row-layout cache.
+        // Transient runs keep using GPUI's frame cache through the fallback below.
+        let shaped = shaped.get_or_init(|| {
+            window.text_system().shape_line(
+                run.text.clone(),
+                metrics.font_size,
+                std::slice::from_ref(&run.style),
+                Some(metrics.cell_width),
+            )
+        });
+        let _ = shaped.paint(
             position,
             metrics.line_height,
             TextAlign::Left,
@@ -401,6 +404,23 @@ pub(crate) fn paint_text_run(
             window,
             cx,
         );
+        return;
+    }
+
+    let shaped = window.text_system().shape_line(
+        run.text.clone(),
+        metrics.font_size,
+        std::slice::from_ref(&run.style),
+        Some(metrics.cell_width),
+    );
+    let _ = shaped.paint(
+        position,
+        metrics.line_height,
+        TextAlign::Left,
+        None,
+        window,
+        cx,
+    );
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
