@@ -43,13 +43,20 @@ const OPENH264_LIBRARY_PATH_ENV: &str = "OXIDETERM_OPENH264_LIBRARY";
 /// Gives the session loop a safe way to request the latest EGFX base frame.
 #[derive(Clone)]
 pub(super) struct EgfxSessionBridge {
-    renderer: Arc<Mutex<EgfxRenderer>>,
+    renderer: Option<Arc<Mutex<EgfxRenderer>>>,
 }
 
 impl EgfxSessionBridge {
+    /// Creates a no-op bridge for sessions that intentionally omit the EGFX channel.
+    pub(super) fn disabled() -> Self {
+        Self { renderer: None }
+    }
+
     pub(super) fn request_base_frame(&self) -> Result<bool, io::Error> {
-        let mut renderer = self
-            .renderer
+        let Some(renderer) = self.renderer.as_ref() else {
+            return Ok(false);
+        };
+        let mut renderer = renderer
             .lock()
             .map_err(|_| io::Error::other("EGFX renderer lock is poisoned"))?;
         if renderer.awaiting_reactivation {
@@ -65,8 +72,10 @@ impl EgfxSessionBridge {
     }
 
     pub(super) fn begin_frame_transition(&self, graphics_epoch: u64) -> Result<(), io::Error> {
-        let mut renderer = self
-            .renderer
+        let Some(renderer) = self.renderer.as_ref() else {
+            return Ok(());
+        };
+        let mut renderer = renderer
             .lock()
             .map_err(|_| io::Error::other("EGFX renderer lock is poisoned"))?;
         renderer.graphics_epoch = graphics_epoch;
@@ -77,8 +86,10 @@ impl EgfxSessionBridge {
     }
 
     pub(super) fn prepare_for_reactivation(&self, graphics_epoch: u64) -> Result<(), io::Error> {
-        let mut renderer = self
-            .renderer
+        let Some(renderer) = self.renderer.as_ref() else {
+            return Ok(());
+        };
+        let mut renderer = renderer
             .lock()
             .map_err(|_| io::Error::other("EGFX renderer lock is poisoned"))?;
         renderer.discard_graphics_state();
@@ -108,7 +119,7 @@ pub(super) fn new_egfx_channel(
     renderer.graphics_epoch = graphics_epoch;
     let renderer = Arc::new(Mutex::new(renderer));
     let bridge = EgfxSessionBridge {
-        renderer: renderer.clone(),
+        renderer: Some(renderer.clone()),
     };
     let handler = OxideTermGraphicsPipelineHandler {
         renderer,
@@ -1039,6 +1050,15 @@ fn bgra_to_rgba(mut pixels: Vec<u8>) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disabled_bridge_defers_frames_to_the_bitmap_path() {
+        let bridge = EgfxSessionBridge::disabled();
+
+        assert!(!bridge.request_base_frame().unwrap());
+        bridge.begin_frame_transition(2).unwrap();
+        bridge.prepare_for_reactivation(3).unwrap();
+    }
 
     #[test]
     fn handler_advertises_only_non_avc_v8() {

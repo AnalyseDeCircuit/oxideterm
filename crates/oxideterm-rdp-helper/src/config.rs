@@ -50,7 +50,7 @@ pub(super) fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<Client
         enable_server_pointer: true,
         pointer_software_rendering: false,
         multitransport_flags: None,
-        support_dyn_vc_gfx_protocol: true,
+        support_dyn_vc_gfx_protocol: !config.session_options.rdp.disable_graphics_pipeline,
         compression_type: Some(CompressionType::Rdp61),
         performance_flags: PerformanceFlags::default(),
         timezone_info: TimezoneInfo::default(),

@@ -137,6 +137,11 @@ const REMOTE_DESKTOP_DISPLAY_FEATURES: &[(RemoteDesktopSessionFeature, &str, &st
     "modals.new_connection.remote_desktop_multi_monitor",
     "modals.new_connection.remote_desktop_multi_monitor_hint",
 )];
+const RDP_COMPATIBILITY_FEATURES: &[(RemoteDesktopSessionFeature, &str, &str)] = &[(
+    RemoteDesktopSessionFeature::DisableRdpGraphicsPipeline,
+    "modals.new_connection.remote_desktop_disable_graphics_pipeline",
+    "modals.new_connection.remote_desktop_disable_graphics_pipeline_hint",
+)];
 const VNC_SECURITY_PREFERENCES: &[(RemoteDesktopVncPreference, &str)] = &[
     (
         RemoteDesktopVncPreference::Security(
@@ -2646,7 +2651,7 @@ impl WorkspaceApp {
                 },
             )
             .child({
-                let features = self.render_remote_desktop_features(&capabilities, cx);
+                let features = self.render_remote_desktop_features(protocol, &capabilities, cx);
                 self.render_connection_form_section(
                     ConnectionFormSection::RemoteFeatures,
                     features,
@@ -2747,6 +2752,7 @@ impl WorkspaceApp {
 
     fn render_remote_desktop_features(
         &self,
+        protocol: oxideterm_remote_desktop::RemoteDesktopProtocol,
         capabilities: &oxideterm_remote_desktop::RemoteDesktopProviderCapabilities,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -2772,6 +2778,17 @@ impl WorkspaceApp {
                 capabilities,
                 cx,
             ))
+            .when(
+                protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp,
+                |features| {
+                    features.child(self.render_remote_desktop_feature_group(
+                        "modals.new_connection.remote_desktop_compatibility_group",
+                        RDP_COMPATIBILITY_FEATURES,
+                        capabilities,
+                        cx,
+                    ))
+                },
+            )
             .into_any_element()
     }
 

@@ -407,6 +407,9 @@ pub struct PublicRemoteDesktopOptions {
     pub audio_capture: bool,
     #[serde(default)]
     pub use_all_monitors: bool,
+    /// Disables the RDP Graphics Pipeline for hosts affected by EGFX rendering corruption.
+    #[serde(default)]
+    pub disable_rdp_graphics_pipeline: bool,
     #[serde(default)]
     pub vnc_security_policy: PublicVncSecurityPolicy,
     #[serde(default)]
@@ -426,6 +429,7 @@ impl Default for PublicRemoteDesktopOptions {
             audio_playback: true,
             audio_capture: false,
             use_all_monitors: false,
+            disable_rdp_graphics_pipeline: false,
             vnc_security_policy: PublicVncSecurityPolicy::default(),
             vnc_session_mode: PublicVncSessionMode::default(),
             vnc_image_quality: PublicVncImageQuality::default(),

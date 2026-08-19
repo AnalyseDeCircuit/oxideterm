@@ -227,6 +227,7 @@ pub(in crate::workspace) enum RemoteDesktopSessionFeature {
     AudioPlayback,
     AudioCapture,
     MultiMonitor,
+    DisableRdpGraphicsPipeline,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -275,6 +276,8 @@ pub(in crate::workspace) fn remote_desktop_feature_supported(
         RemoteDesktopSessionFeature::AudioPlayback => capabilities.audio_playback,
         RemoteDesktopSessionFeature::AudioCapture => capabilities.audio_capture,
         RemoteDesktopSessionFeature::MultiMonitor => capabilities.multi_monitor,
+        // Compatibility controls are client policy rather than provider capabilities.
+        RemoteDesktopSessionFeature::DisableRdpGraphicsPipeline => true,
     }
 }
 
@@ -290,6 +293,9 @@ pub(in crate::workspace) fn remote_desktop_feature_selected(
         RemoteDesktopSessionFeature::AudioPlayback => options.audio.playback,
         RemoteDesktopSessionFeature::AudioCapture => options.audio.capture,
         RemoteDesktopSessionFeature::MultiMonitor => options.display.use_all_monitors,
+        RemoteDesktopSessionFeature::DisableRdpGraphicsPipeline => {
+            options.rdp.disable_graphics_pipeline
+        }
     }
 }
 
@@ -307,6 +313,9 @@ pub(in crate::workspace) fn toggle_remote_desktop_feature(
         RemoteDesktopSessionFeature::AudioCapture => options.audio.capture = !selected,
         RemoteDesktopSessionFeature::MultiMonitor => {
             options.display.use_all_monitors = !selected;
+        }
+        RemoteDesktopSessionFeature::DisableRdpGraphicsPipeline => {
+            options.rdp.disable_graphics_pipeline = !selected;
         }
     }
 }
@@ -1600,7 +1609,7 @@ mod tests {
     };
     use oxideterm_remote_desktop::{
         RemoteDesktopAudioOptions, RemoteDesktopClipboardOptions, RemoteDesktopDisplayOptions,
-        RemoteDesktopProtocol,
+        RemoteDesktopProtocol, RemoteDesktopRdpOptions,
     };
 
     use super::{
@@ -1719,6 +1728,9 @@ mod tests {
             },
             display: RemoteDesktopDisplayOptions {
                 use_all_monitors: true,
+            },
+            rdp: RemoteDesktopRdpOptions {
+                disable_graphics_pipeline: true,
             },
             vnc: RemoteDesktopVncOptions {
                 security_policy: RemoteDesktopVncSecurityPolicy::AllowLegacy,
@@ -2150,6 +2162,7 @@ mod tests {
             RemoteDesktopSessionFeature::AudioPlayback,
             RemoteDesktopSessionFeature::AudioCapture,
             RemoteDesktopSessionFeature::MultiMonitor,
+            RemoteDesktopSessionFeature::DisableRdpGraphicsPipeline,
         ] {
             assert!(remote_desktop_feature_supported(&rdp.capabilities, feature));
         }
@@ -2185,6 +2198,14 @@ mod tests {
         assert!(options.audio.playback);
         assert!(!options.audio.capture);
         assert!(!options.display.use_all_monitors);
+        assert!(!options.rdp.disable_graphics_pipeline);
+
+        toggle_remote_desktop_feature(
+            &mut options,
+            RemoteDesktopSessionFeature::DisableRdpGraphicsPipeline,
+        );
+        assert!(options.rdp.disable_graphics_pipeline);
+        assert!(options.clipboard.files);
     }
 
     #[test]

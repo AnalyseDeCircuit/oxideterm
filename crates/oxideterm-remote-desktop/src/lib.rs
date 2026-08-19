@@ -45,10 +45,11 @@ pub use model::{
     RemoteDesktopDisplayOptions, RemoteDesktopEndpoint, RemoteDesktopFrame,
     RemoteDesktopFrameCompression, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate,
     RemoteDesktopFrameUpdateBatch, RemoteDesktopMonitor, RemoteDesktopMonitorLayout,
-    RemoteDesktopMonitorOrientation, RemoteDesktopProtocol, RemoteDesktopRect,
-    RemoteDesktopSessionId, RemoteDesktopSessionOptions, RemoteDesktopSessionStatus,
-    RemoteDesktopSize, RemoteDesktopVncCompression, RemoteDesktopVncImageQuality,
-    RemoteDesktopVncOptions, RemoteDesktopVncSecurityPolicy, RemoteDesktopVncSessionMode,
+    RemoteDesktopMonitorOrientation, RemoteDesktopProtocol, RemoteDesktopRdpOptions,
+    RemoteDesktopRect, RemoteDesktopSessionId, RemoteDesktopSessionOptions,
+    RemoteDesktopSessionStatus, RemoteDesktopSize, RemoteDesktopVncCompression,
+    RemoteDesktopVncImageQuality, RemoteDesktopVncOptions, RemoteDesktopVncSecurityPolicy,
+    RemoteDesktopVncSessionMode,
 };
 pub use provider::{
     RemoteDesktopProviderCapabilities, RemoteDesktopProviderEntry, RemoteDesktopProviderError,

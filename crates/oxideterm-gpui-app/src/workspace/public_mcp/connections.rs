@@ -21,9 +21,9 @@ use oxideterm_public_mcp::{
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopAudioOptions, RemoteDesktopClipboardOptions, RemoteDesktopDisplayOptions,
-    RemoteDesktopProtocol, RemoteDesktopSessionOptions, RemoteDesktopVncCompression,
-    RemoteDesktopVncImageQuality, RemoteDesktopVncOptions, RemoteDesktopVncSecurityPolicy,
-    RemoteDesktopVncSessionMode,
+    RemoteDesktopProtocol, RemoteDesktopRdpOptions, RemoteDesktopSessionOptions,
+    RemoteDesktopVncCompression, RemoteDesktopVncImageQuality, RemoteDesktopVncOptions,
+    RemoteDesktopVncSecurityPolicy, RemoteDesktopVncSessionMode,
 };
 use serde_json::{Value, json};
 
@@ -691,6 +691,9 @@ fn remote_desktop_options(options: &PublicRemoteDesktopOptions) -> RemoteDesktop
         display: RemoteDesktopDisplayOptions {
             use_all_monitors: options.use_all_monitors,
         },
+        rdp: RemoteDesktopRdpOptions {
+            disable_graphics_pipeline: options.disable_rdp_graphics_pipeline,
+        },
         vnc: RemoteDesktopVncOptions {
             security_policy: match options.vnc_security_policy {
                 PublicVncSecurityPolicy::RequireVerifiedEncryption => {
@@ -1039,6 +1042,7 @@ pub(super) fn remote_desktop_options_projection(options: &RemoteDesktopSessionOp
         "audio_playback": options.audio.playback,
         "audio_capture": options.audio.capture,
         "use_all_monitors": options.display.use_all_monitors,
+        "disable_rdp_graphics_pipeline": options.rdp.disable_graphics_pipeline,
         "vnc_security_policy": match options.vnc.security_policy {
             RemoteDesktopVncSecurityPolicy::RequireVerifiedEncryption => "require_verified_encryption",
             RemoteDesktopVncSecurityPolicy::AllowUnverifiedEncryption => "allow_unverified_encryption",

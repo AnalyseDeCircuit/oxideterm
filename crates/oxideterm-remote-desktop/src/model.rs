@@ -160,6 +160,15 @@ pub struct RemoteDesktopDisplayOptions {
     pub use_all_monitors: bool,
 }
 
+/// RDP-specific compatibility controls persisted with a connection profile.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopRdpOptions {
+    /// Disables the EGFX dynamic channel so the server falls back to bitmap updates.
+    #[serde(default)]
+    pub disable_graphics_pipeline: bool,
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteDesktopSessionOptions {
@@ -169,6 +178,8 @@ pub struct RemoteDesktopSessionOptions {
     pub audio: RemoteDesktopAudioOptions,
     #[serde(default)]
     pub display: RemoteDesktopDisplayOptions,
+    #[serde(default)]
+    pub rdp: RemoteDesktopRdpOptions,
     #[serde(default)]
     pub vnc: RemoteDesktopVncOptions,
 }
@@ -1039,6 +1050,7 @@ mod tests {
             options.vnc.session_mode,
             RemoteDesktopVncSessionMode::Shared
         );
+        assert!(!options.rdp.disable_graphics_pipeline);
     }
 
     #[test]

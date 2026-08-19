@@ -387,14 +387,13 @@ pub(super) fn attach_client_virtual_channels(
     session_options: RemoteDesktopSessionOptions,
     monitor_layout: RemoteDesktopMonitorLayout,
 ) -> EgfxSessionBridge {
-    let (graphics_pipeline, egfx_bridge) = new_egfx_channel(output_tx.clone(), graphics_epoch);
     let initial_layout = if session_options.display.use_all_monitors {
         build_display_control_layout(&monitor_layout).ok()
     } else {
         None
     };
-    let mut dynamic_channels = DrdynvcClient::new()
-        .with_dynamic_channel(DisplayControlClient::new(move |capabilities| {
+    let mut dynamic_channels =
+        DrdynvcClient::new().with_dynamic_channel(DisplayControlClient::new(move |capabilities| {
             let Some(layout) = initial_layout.as_ref() else {
                 return Ok(Vec::new());
             };
@@ -410,8 +409,15 @@ pub(super) fn attach_client_virtual_channels(
                 return Ok(Vec::new());
             }
             Ok(vec![Box::new(DisplayControlPdu::from(layout.clone()))])
-        }))
-        .with_dynamic_channel(graphics_pipeline);
+        }));
+    let egfx_bridge = if session_options.rdp.disable_graphics_pipeline {
+        // DisplayControl remains attached while EGFX is omitted for bitmap fallback.
+        EgfxSessionBridge::disabled()
+    } else {
+        let (graphics_pipeline, bridge) = new_egfx_channel(output_tx.clone(), graphics_epoch);
+        dynamic_channels = dynamic_channels.with_dynamic_channel(graphics_pipeline);
+        bridge
+    };
     if session_options.audio.capture {
         dynamic_channels =
             dynamic_channels.with_dynamic_channel(AudioInputClient::new(input_tx.clone()));

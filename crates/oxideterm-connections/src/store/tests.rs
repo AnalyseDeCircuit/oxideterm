@@ -2744,6 +2744,9 @@ mod tests {
             display: oxideterm_remote_desktop::RemoteDesktopDisplayOptions {
                 use_all_monitors: true,
             },
+            rdp: oxideterm_remote_desktop::RemoteDesktopRdpOptions {
+                disable_graphics_pipeline: true,
+            },
             vnc: oxideterm_remote_desktop::RemoteDesktopVncOptions {
                 security_policy:
                     oxideterm_remote_desktop::RemoteDesktopVncSecurityPolicy::AllowLegacy,
