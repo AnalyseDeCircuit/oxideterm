@@ -60,8 +60,16 @@ pub enum SemanticShellDialect {
 pub enum SemanticLineRole {
     Command,
     Output,
+    PsAuxOutput,
+    PsFullOutput,
     #[default]
     Unknown,
+}
+
+impl SemanticLineRole {
+    pub(crate) fn is_output(self) -> bool {
+        matches!(self, Self::Output | Self::PsAuxOutput | Self::PsFullOutput)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
@@ -86,10 +94,16 @@ impl SemanticScheme {
 pub struct SemanticSpan {
     pub range: Range<usize>,
     pub class: SemanticClass,
+    /// Optional presentation variant for semantic peers such as nested brackets.
+    pub style_variant: Option<u8>,
 }
 
 impl SemanticSpan {
     pub(crate) fn new(range: Range<usize>, class: SemanticClass) -> Self {
-        Self { range, class }
+        Self {
+            range,
+            class,
+            style_variant: None,
+        }
     }
 }

@@ -67,6 +67,30 @@ const BASH_HIGHLIGHTS_QUERY: &str = r#"
 (raw_string) @string
 (command_name) @function
 (variable_name) @variable
+
+; Keep structural shell punctuation visible without treating dashes in words as operators.
+[
+  "$"
+  "&&"
+  "||"
+  "&"
+  "|"
+  ";"
+  ";;"
+  ">"
+  ">>"
+  "<"
+  "<<"
+  "<<<"
+  "="
+  "=="
+  "=~"
+  "+"
+  "-"
+  "*"
+  "/"
+  "%"
+] @operator
 "#;
 
 // `tree-sitter-cmake` ships a highlight query file but does not export it from

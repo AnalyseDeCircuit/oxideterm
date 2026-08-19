@@ -1049,7 +1049,12 @@ impl TerminalElement {
             {
                 let link = !block_cursor
                     && (cell.hyperlink.is_some() || is_link_stylable_cell(cell))
-                    && link_ranges_contain(link_ranges, row_index, col_index);
+                    && link_should_be_styled(
+                        link_ranges,
+                        self.hovered_link.as_ref(),
+                        row_index,
+                        col_index,
+                    );
                 let style = text_run_for_cell(cell, fg, link, &self.metrics);
                 let cell_text = cell_text(cell);
                 if cell.zerowidth.is_empty() && powerline_separator(cell.ch).is_some() {
@@ -1094,6 +1099,7 @@ impl TerminalElement {
                 row,
                 &visual_line,
                 link_ranges,
+                self.hovered_link.as_ref(),
                 &self.metrics,
                 self.cursor_visible,
                 self.snapshot.cursor_shape,
@@ -1162,6 +1168,13 @@ impl TerminalElement {
         self.hash_semantic_layout(semantic_rows, semantic_role, &mut hasher);
         self.bidi_enabled.hash(&mut hasher);
         self.detect_file_paths_as_links.hash(&mut hasher);
+        if let Some(hovered_link) = self
+            .hovered_link
+            .as_ref()
+            .filter(|hovered_link| hovered_link.row == row_index)
+        {
+            hovered_link.hash(&mut hasher);
+        }
         hash_selection_for_row(
             self.selection,
             row_index,
@@ -1624,15 +1637,19 @@ fn terminal_semantic_style_signature(
     enabled.hash(&mut hasher);
     if enabled {
         let terminal = theme.tokens.terminal;
-        terminal.yellow.hash(&mut hasher);
-        terminal.cyan.hash(&mut hasher);
+        terminal.red.hash(&mut hasher);
         terminal.bright_red.hash(&mut hasher);
+        terminal.green.hash(&mut hasher);
         terminal.bright_green.hash(&mut hasher);
+        terminal.yellow.hash(&mut hasher);
         terminal.bright_yellow.hash(&mut hasher);
+        terminal.blue.hash(&mut hasher);
         terminal.bright_blue.hash(&mut hasher);
-        terminal.bright_black.hash(&mut hasher);
+        terminal.magenta.hash(&mut hasher);
         terminal.bright_magenta.hash(&mut hasher);
+        terminal.cyan.hash(&mut hasher);
         terminal.bright_cyan.hash(&mut hasher);
+        terminal.bright_black.hash(&mut hasher);
         scheme.signature().hash(&mut hasher);
         shell.hash(&mut hasher);
     }
@@ -1783,6 +1800,7 @@ fn push_visual_text_runs(
     row: &oxideterm_terminal::TerminalRow,
     visual_line: &TerminalVisualLine,
     link_ranges: &[TerminalLinkRange],
+    hovered_link: Option<&TerminalLinkRange>,
     metrics: &TerminalMetrics,
     cursor_visible: bool,
     cursor_shape: TerminalCursorShape,
@@ -1815,7 +1833,12 @@ fn push_visual_text_runs(
         };
         let link = !block_cursor
             && (cell.hyperlink.is_some() || is_link_stylable_cell(cell))
-            && link_ranges_contain(link_ranges, source_row_index, cluster.logical_col);
+            && link_should_be_styled(
+                link_ranges,
+                hovered_link,
+                source_row_index,
+                cluster.logical_col,
+            );
         let style = text_run_for_cell(cell, fg, link, metrics);
         if cell.zerowidth.is_empty() && powerline_separator(cell.ch).is_some() {
             if let Some(run) = current_run.take() {

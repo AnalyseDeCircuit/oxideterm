@@ -15,6 +15,28 @@ use crate::{
     validate_scheme_document,
 };
 
+// Match the standard hexadecimal IPv6 forms, including compressed addresses,
+// while leaving IPv4-mapped forms for a later dedicated rule.
+const IPV6_ADDRESS_PATTERN: &str = r"(?ix)(?:^|[^0-9a-f:])(
+    (?:(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}
+      |(?:[0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4}
+      |(?:[0-9a-f]{1,4}:){1,5}(?::[0-9a-f]{1,4}){1,2}
+      |(?:[0-9a-f]{1,4}:){1,4}(?::[0-9a-f]{1,4}){1,3}
+      |(?:[0-9a-f]{1,4}:){1,3}(?::[0-9a-f]{1,4}){1,4}
+      |(?:[0-9a-f]{1,4}:){1,2}(?::[0-9a-f]{1,4}){1,5}
+      |[0-9a-f]{1,4}:(?:(?::[0-9a-f]{1,4}){1,6})
+      |:(?:(?::[0-9a-f]{1,4}){1,7}))\b
+    |(?:[0-9a-f]{1,4}:){1,7}:
+)";
+
+const WINDOWS_PATH_PATTERN: &str = r#"(?ix)(?:^|[\s(])((?:
+    [a-z]:[\\/][^\s<>"|?*]+
+    |\\\\[^\\/\s:*?"<>|]+[\\/][^\\/\s:*?"<>|]+(?:[\\/][^\s<>"|?*]+)*
+))"#;
+
+const OPTION_ASSIGNMENT_PATTERN: &str = r"(?:^|\s)(--?[A-Za-z][A-Za-z0-9_-]*)(=)([^\s]+)";
+const VARIABLE_ASSIGNMENT_PATTERN: &str = r"(?:^|[\s,])([A-Za-z_][A-Za-z0-9_-]*)(=)([^,\s]+)";
+
 #[derive(Clone)]
 struct Rule {
     id: String,
@@ -50,7 +72,7 @@ impl Rule {
         match self.context {
             SemanticRuleContext::Any => true,
             SemanticRuleContext::Command => role == SemanticLineRole::Command,
-            SemanticRuleContext::Output => role == SemanticLineRole::Output,
+            SemanticRuleContext::Output => role.is_output(),
         }
     }
 }
@@ -80,6 +102,10 @@ impl CompiledSemanticScheme {
     pub fn color(&self, class: SemanticClass) -> Option<&str> {
         self.colors.get(&class).map(String::as_str)
     }
+
+    pub(crate) fn contains_rule_class(&self, class: SemanticClass) -> bool {
+        self.rules.iter().any(|rule| rule.class == class)
+    }
 }
 
 pub(crate) struct Candidate {
@@ -88,12 +114,22 @@ pub(crate) struct Candidate {
 }
 
 impl Candidate {
-    #[cfg(feature = "shell-syntax")]
     pub(crate) fn new(range: std::ops::Range<usize>, class: SemanticClass, priority: u8) -> Self {
         Self {
             span: SemanticSpan::new(range, class),
             priority,
         }
+    }
+
+    pub(crate) fn new_with_style_variant(
+        range: std::ops::Range<usize>,
+        class: SemanticClass,
+        priority: u8,
+        style_variant: u8,
+    ) -> Self {
+        let mut candidate = Self::new(range, class, priority);
+        candidate.span.style_variant = Some(style_variant);
+        candidate
     }
 }
 
@@ -124,6 +160,22 @@ static BUILT_IN_RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
             SemanticRuleContext::Any,
         ),
         Rule::new(
+            "windows-path",
+            WINDOWS_PATH_PATTERN,
+            1,
+            SemanticClass::Path,
+            90,
+            SemanticRuleContext::Any,
+        ),
+        Rule::new(
+            "ipv6-address",
+            IPV6_ADDRESS_PATTERN,
+            1,
+            SemanticClass::Address,
+            89,
+            SemanticRuleContext::Any,
+        ),
+        Rule::new(
             "mac-address",
             r"(?i)\b(?:[0-9a-f]{2}:){5}[0-9a-f]{2}\b",
             0,
@@ -139,9 +191,43 @@ static BUILT_IN_RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
             87,
             SemanticRuleContext::Any,
         ),
+        // macOS ps switches STIME between a clock, weekday-clock, and
+        // day-month-year form as a process gets older.
+        Rule::new(
+            "twelve-hour-time",
+            r"(?i)\b(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s?(?:0?[1-9]|1[0-2])|(?:0?[1-9]|1[0-2]):[0-5]\d(?::[0-5]\d)?(?:\.\d+)?)\s?(?:AM|PM)\b",
+            0,
+            SemanticClass::Timestamp,
+            86,
+            SemanticRuleContext::Any,
+        ),
+        Rule::new(
+            "ps-start-date",
+            r"(?i)\b(?:0?[1-9]|[12]\d|3[01])(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\d{2}|\d{4})\b",
+            0,
+            SemanticClass::Timestamp,
+            86,
+            SemanticRuleContext::Any,
+        ),
+        Rule::new(
+            "localized-month-day",
+            r"(?:^|[^\p{L}\p{N}])((?:0?[1-9]|1[0-2])(?:月|월)(?:[12]\d|3[01]|0?[1-9])(?:日|일)?)",
+            1,
+            SemanticClass::Timestamp,
+            86,
+            SemanticRuleContext::Any,
+        ),
         Rule::new(
             "date-time",
             r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T]\d{1,2}(?::\d{2}){1,2}(?:\.\d+)?)?\b",
+            0,
+            SemanticClass::Timestamp,
+            85,
+            SemanticRuleContext::Any,
+        ),
+        Rule::new(
+            "elapsed-time",
+            r"\b\d{3,}:[0-5]\d(?::[0-5]\d)?(?:\.\d+)?\b",
             0,
             SemanticClass::Timestamp,
             85,
@@ -157,15 +243,55 @@ static BUILT_IN_RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
         ),
         Rule::new(
             "option",
-            r"(?:^|\s)(--?[A-Za-z0-9][A-Za-z0-9_-]*(?:=[^\s]+)?)",
+            r"(?:^|\s)(--?[A-Za-z][A-Za-z0-9_-]*)",
             1,
             SemanticClass::Option,
             82,
             SemanticRuleContext::Any,
         ),
         Rule::new(
+            "option-assignment-operator",
+            OPTION_ASSIGNMENT_PATTERN,
+            2,
+            SemanticClass::Operator,
+            81,
+            SemanticRuleContext::Any,
+        ),
+        Rule::new(
+            "option-assignment-value",
+            OPTION_ASSIGNMENT_PATTERN,
+            3,
+            SemanticClass::String,
+            80,
+            SemanticRuleContext::Any,
+        ),
+        Rule::new(
+            "variable-assignment-name",
+            VARIABLE_ASSIGNMENT_PATTERN,
+            1,
+            SemanticClass::Variable,
+            82,
+            SemanticRuleContext::Any,
+        ),
+        Rule::new(
+            "variable-assignment-operator",
+            VARIABLE_ASSIGNMENT_PATTERN,
+            2,
+            SemanticClass::Operator,
+            81,
+            SemanticRuleContext::Any,
+        ),
+        Rule::new(
+            "variable-assignment-value",
+            VARIABLE_ASSIGNMENT_PATTERN,
+            3,
+            SemanticClass::String,
+            80,
+            SemanticRuleContext::Any,
+        ),
+        Rule::new(
             "error-status",
-            r"(?i)\b(?:bad|cannot(?:\s+\w+){0,2}|denied|deprecated|disabled|errors?|failed?|failure|false|incorrect|invalid|no(?:\s+\w+)?|none|not(?:\s+\w+){0,2}|(?:do|does|ca|wo|could|should|would)n't(?:\s+\w+){0,2}|refused|unknown|unsupported|wrong)\b",
+            r"(?i)\b(?:bad|cannot(?:\s+\w+){0,2}|denied|deprecated|disabled|errors?|failed?|failure|false|incorrect|invalid|no\s+(?:access|permission)|none|not\s+(?:available|configured|connected|enabled|found|installed|running|supported|valid)|(?:ca|could)n't|refused|unknown|unsupported|wrong)\b",
             0,
             SemanticClass::Error,
             78,
@@ -173,7 +299,7 @@ static BUILT_IN_RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
         ),
         Rule::new(
             "success-status",
-            r"(?i)\b(?:can(?:\s+be)?(?:\s+\w+)?|correct(?:ly)?|known|ok|passed?|success(?:ful(?:ly)?)?|supported|true|yes|valid)\b",
+            r"(?i)\b(?:can\s+be\s+(?:applied|enabled|installed|updated|upgraded)|correct(?:ly)?|known|ok|passed?|success(?:ful(?:ly)?)?|supported|true|yes|valid)\b",
             0,
             SemanticClass::Success,
             77,

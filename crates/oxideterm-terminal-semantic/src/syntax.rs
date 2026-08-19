@@ -129,6 +129,20 @@ mod tests {
         assert!(matches.contains(&("if", SemanticClass::Keyword)));
         assert!(matches.contains(&("\"$HOME/app.log\"", SemanticClass::String)));
         assert!(matches.contains(&("echo", SemanticClass::Command)));
+        assert!(matches.contains(&(";", SemanticClass::Operator)));
+    }
+
+    #[test]
+    fn bash_parser_colors_pipeline_and_redirection_operators() {
+        let text = "ps aux | grep node && echo done > result.log";
+        let matches = matched(text, SemanticShellDialect::Bash);
+
+        for operator in ["|", "&&", ">"] {
+            assert!(
+                matches.contains(&(operator, SemanticClass::Operator)),
+                "missing operator {operator:?} in {matches:?}"
+            );
+        }
     }
 
     #[test]

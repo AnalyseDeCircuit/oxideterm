@@ -241,6 +241,46 @@ fn terminal_element_underlines_detected_links() {
 }
 
 #[test]
+fn terminal_element_underlines_detected_paths_only_while_hovered() {
+    let snapshot = selection_snapshot("open ./crates/oxideterm-gpui-app/src/main.rs");
+    let hovered_link = display_link_ranges_with_path_detection(&snapshot, true)
+        .into_iter()
+        .next()
+        .expect("detected path");
+    let layout = |hovered_link| {
+        TerminalElement::new(
+            snapshot.clone(),
+            None,
+            test_metrics(),
+            true,
+            None,
+            None,
+            Vec::new(),
+            None,
+            hovered_link,
+            None,
+        )
+        .layout()
+    };
+
+    let unhovered = layout(None);
+    let unhovered_path = unhovered
+        .text_runs
+        .iter()
+        .find(|run| run.text.contains("crates"))
+        .expect("unhovered path run");
+    assert!(unhovered_path.style.underline.is_none());
+
+    let hovered = layout(Some(hovered_link));
+    let hovered_path = hovered
+        .text_runs
+        .iter()
+        .find(|run| run.text.contains("crates"))
+        .expect("hovered path run");
+    assert!(hovered_path.style.underline.is_some());
+}
+
+#[test]
 fn terminal_element_does_not_recolor_path_like_prompt_segments() {
     let mut snapshot = selection_snapshot("~/Documents/OxideTerm");
     for cell in &mut snapshot.lines[0].cells_mut()[..21] {

@@ -13,7 +13,7 @@ struct LinkText {
     boundaries: Vec<usize>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct TerminalLinkRange {
     pub(crate) row: usize,
     pub(crate) start_col: usize,
@@ -23,16 +23,22 @@ pub(crate) struct TerminalLinkRange {
     pub(crate) kind: TerminalLinkKind,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum TerminalLinkKind {
     Url,
     Path,
 }
 
-pub(crate) fn link_ranges_contain(ranges: &[TerminalLinkRange], row: usize, col: usize) -> bool {
+pub(crate) fn link_should_be_styled(
+    ranges: &[TerminalLinkRange],
+    hovered: Option<&TerminalLinkRange>,
+    row: usize,
+    col: usize,
+) -> bool {
     ranges
         .iter()
-        .any(|range| range.row == row && col >= range.start_col && col < range.end_col)
+        .find(|range| range.row == row && col >= range.start_col && col < range.end_col)
+        .is_some_and(|range| range.kind == TerminalLinkKind::Url || hovered == Some(range))
 }
 
 pub(crate) fn is_link_stylable_cell(cell: &TerminalCell) -> bool {
