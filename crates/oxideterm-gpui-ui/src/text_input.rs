@@ -1,9 +1,9 @@
-use std::ops::Range;
+use std::{cell::RefCell, ops::Range, rc::Rc};
 
 use gpui::{
-    AnyElement, App, Bounds, CursorStyle, Div, Element, ElementId, GlobalElementId,
-    InspectorElementId, IntoElement, LayoutId, ParentElement, Pixels, Styled, StyledText, Window,
-    div, fill, point, prelude::*, px, rgb, rgba, size,
+    AnyElement, App, Bounds, CursorStyle, Div, Element, ElementId, GlobalElementId, HighlightStyle,
+    InspectorElementId, IntoElement, LayoutId, ParentElement, Pixels, Point, Styled, StyledText,
+    TextLayout, UnderlineStyle, Window, div, fill, point, prelude::*, px, rgb, rgba, size,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -35,6 +35,57 @@ pub struct TextInputView<'a> {
     pub selected_all: bool,
     pub selected_range: Option<Range<usize>>,
     pub marked_text: Option<&'a str>,
+}
+
+/// Keeps the measured layout and horizontal position for one single-line input.
+#[derive(Clone, Default)]
+pub struct TextInputViewport {
+    state: Rc<RefCell<TextInputViewportState>>,
+}
+
+#[derive(Default)]
+struct TextInputViewportState {
+    scroll_x: Pixels,
+    layout: Option<TextLayout>,
+}
+
+impl TextInputViewport {
+    /// Maps a screen position through the currently visible text layout.
+    pub fn byte_index_for_position(&self, position: Point<Pixels>) -> Option<usize> {
+        let state = self.state.borrow();
+        let layout = state.layout.as_ref()?;
+        let line_origin = layout.position_for_index(0)?;
+        // Single-line controls hit-test by x even when the click lands in vertical padding.
+        let position = point(position.x, line_origin.y + layout.line_height() * 0.5);
+        Some(match layout.index_for_position(position) {
+            Ok(index) | Err(index) => index,
+        })
+    }
+
+    /// Returns the screen position of one UTF-8 byte boundary in the visible layout.
+    pub fn position_for_byte_index(&self, index: usize) -> Option<Point<Pixels>> {
+        self.state
+            .borrow()
+            .layout
+            .as_ref()?
+            .position_for_index(index)
+    }
+
+    fn update_layout(&self, layout: TextLayout, scroll_x: Pixels) {
+        let mut state = self.state.borrow_mut();
+        state.layout = Some(layout);
+        state.scroll_x = scroll_x;
+    }
+
+    fn scroll_x(&self) -> Pixels {
+        self.state.borrow().scroll_x
+    }
+
+    fn reset(&self) {
+        let mut state = self.state.borrow_mut();
+        state.scroll_x = px(0.0);
+        state.layout = None;
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -131,7 +182,29 @@ impl Element for TextInputAnchorProbe {
 }
 
 pub fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
-    text_input_with_content_align(tokens, view, TextInputContentAlign::Start)
+    text_input_with_content_align_and_viewport(
+        tokens,
+        view,
+        TextInputContentAlign::Start,
+        None,
+        None,
+    )
+}
+
+/// Renders a single-line input backed by a persistent horizontal viewport.
+pub fn text_input_with_viewport(
+    tokens: &ThemeTokens,
+    view: TextInputView<'_>,
+    viewport: &TextInputViewport,
+    active_offset: Option<usize>,
+) -> Div {
+    text_input_with_content_align_and_viewport(
+        tokens,
+        view,
+        TextInputContentAlign::Start,
+        Some(viewport),
+        active_offset,
+    )
 }
 
 pub fn text_input_with_content_align(
@@ -139,6 +212,21 @@ pub fn text_input_with_content_align(
     view: TextInputView<'_>,
     align: TextInputContentAlign,
 ) -> Div {
+    text_input_with_content_align_and_viewport(tokens, view, align, None, None)
+}
+
+fn text_input_with_content_align_and_viewport(
+    tokens: &ThemeTokens,
+    view: TextInputView<'_>,
+    align: TextInputContentAlign,
+    viewport: Option<&TextInputViewport>,
+    active_offset: Option<usize>,
+) -> Div {
+    if !view.focused
+        && let Some(viewport) = viewport
+    {
+        viewport.reset();
+    }
     let theme = tokens.ui;
     let empty = view.value.is_empty();
     let marked = view.marked_text.unwrap_or_default();
@@ -188,6 +276,8 @@ pub fn text_input_with_content_align(
         .as_ref()
         .filter(|range| range.start == range.end)
         .map(|range| range.start);
+    let active_offset = active_offset
+        .map(|offset| text_input_visual_range(view.value, view.secret, offset..offset).start);
     let show_selection = selection_range.is_some();
     let show_positioned_caret = caret_offset.is_some() && !show_selection;
     let show_marked_text = marked_range.is_some();
@@ -225,6 +315,7 @@ pub fn text_input_with_content_align(
                 .flex()
                 .flex_row()
                 .items_center()
+                .when(viewport.is_some(), |row| row.w_full().min_w_0())
                 .when(align == TextInputContentAlign::Center, |row| {
                     row.w_full().justify_center()
                 });
@@ -239,15 +330,18 @@ pub fn text_input_with_content_align(
                         &display,
                         &marked_display,
                         marked_range,
+                        viewport.cloned(),
                     )
                 } else {
-                    text_input_value_segments(
+                    text_input_value_segments_with_viewport(
                         tokens,
                         &display,
                         visually_empty,
                         selection_range,
                         caret_offset,
                         view.caret_visible,
+                        viewport.cloned(),
+                        active_offset,
                     )
                 }
             })
@@ -301,28 +395,100 @@ pub fn text_input_value_segments(
     )
 }
 
+fn text_input_value_segments_with_viewport(
+    tokens: &ThemeTokens,
+    display: &str,
+    visually_empty: bool,
+    selection_range: Option<Range<usize>>,
+    caret_offset: Option<usize>,
+    caret_visible: bool,
+    viewport: Option<TextInputViewport>,
+    active_offset: Option<usize>,
+) -> Div {
+    let theme = tokens.ui;
+    let base = div().text_color(if visually_empty {
+        rgb(theme.text_muted)
+    } else {
+        rgb(theme.text)
+    });
+    let len = display.encode_utf16().count();
+    let selection_range = selection_range.and_then(|range| text_input_clamped_range(len, range));
+    let caret_offset = caret_offset.map(|offset| offset.min(len));
+    if selection_range.is_none() && caret_offset.is_none() {
+        if let Some(viewport) = viewport.as_ref() {
+            viewport.reset();
+        }
+        return base.child(display.to_string());
+    }
+    let caret_offset = if selection_range.is_some() {
+        None
+    } else {
+        caret_offset
+    };
+    text_input_value_with_overlays(
+        tokens,
+        base,
+        display,
+        selection_range,
+        caret_offset,
+        caret_visible,
+        viewport,
+        active_offset,
+    )
+}
+
 fn text_input_value_segments_with_marked_text(
     tokens: &ThemeTokens,
     display: &str,
     marked_display: &str,
     marked_range: Range<usize>,
+    viewport: Option<TextInputViewport>,
 ) -> Div {
     let theme = tokens.ui;
     let (before, after) = text_input_marked_display_parts(display, marked_range);
+    if viewport.is_none() {
+        return div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .text_color(rgb(theme.text))
+            .when(!before.is_empty(), |row| row.child(before))
+            .child(
+                div()
+                    .underline()
+                    .text_color(rgb(theme.text))
+                    .child(marked_display.to_string()),
+            )
+            .when(!after.is_empty(), |row| row.child(after));
+    }
+    let marked_start = before.len();
+    let marked_end = marked_start + marked_display.len();
+    let projected = format!("{before}{marked_display}{after}");
+    let focus_offset = projected[..marked_end].encode_utf16().count();
+    let styled = StyledText::new(projected.clone()).with_highlights([(
+        marked_start..marked_end,
+        HighlightStyle {
+            underline: Some(UnderlineStyle {
+                thickness: px(1.0),
+                color: Some(rgb(theme.text).into()),
+                wavy: false,
+            }),
+            ..HighlightStyle::default()
+        },
+    )]);
 
-    div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .text_color(rgb(theme.text))
-        .when(!before.is_empty(), |row| row.child(before))
-        .child(
-            div()
-                .underline()
-                .text_color(rgb(theme.text))
-                .child(marked_display.to_string()),
-        )
-        .when(!after.is_empty(), |row| row.child(after))
+    div().w_full().min_w_0().text_color(rgb(theme.text)).child(
+        TextInputOverlayValue::with_styled_text(
+            tokens,
+            projected,
+            styled,
+            None,
+            None,
+            Some(focus_offset),
+            false,
+            viewport,
+        ),
+    )
 }
 
 pub fn text_input_value_segments_with_marked_range(
@@ -405,6 +571,8 @@ pub fn text_input_value_segments_with_color(
         selection_range,
         caret_offset,
         caret_visible,
+        None,
+        None,
     )
 }
 
@@ -415,14 +583,20 @@ fn text_input_value_with_overlays(
     selection_range: Option<Range<usize>>,
     caret_offset: Option<usize>,
     caret_visible: bool,
+    viewport: Option<TextInputViewport>,
+    active_offset: Option<usize>,
 ) -> Div {
-    base.min_w_0().child(TextInputOverlayValue::new(
-        tokens,
-        display,
-        selection_range,
-        caret_offset,
-        caret_visible,
-    ))
+    base.min_w_0()
+        .when(viewport.is_some(), |base| base.w_full())
+        .child(TextInputOverlayValue::new(
+            tokens,
+            display,
+            selection_range,
+            caret_offset,
+            caret_visible,
+            viewport,
+            active_offset,
+        ))
 }
 
 struct TextInputOverlayValue {
@@ -430,7 +604,9 @@ struct TextInputOverlayValue {
     text: StyledText,
     selection_range: Option<Range<usize>>,
     caret_offset: Option<usize>,
+    focus_offset: Option<usize>,
     caret_visible: bool,
+    viewport: Option<TextInputViewport>,
     accent: u32,
     caret_width: f32,
     caret_height: f32,
@@ -443,13 +619,42 @@ impl TextInputOverlayValue {
         selection_range: Option<Range<usize>>,
         caret_offset: Option<usize>,
         caret_visible: bool,
+        viewport: Option<TextInputViewport>,
+        active_offset: Option<usize>,
     ) -> Self {
-        Self {
-            display: display.to_string(),
-            text: StyledText::new(display.to_string()),
+        let focus_offset = active_offset
+            .or(caret_offset)
+            .or_else(|| selection_range.as_ref().map(|range| range.end));
+        Self::with_styled_text(
+            tokens,
+            display.to_string(),
+            StyledText::new(display.to_string()),
             selection_range,
             caret_offset,
+            focus_offset,
             caret_visible,
+            viewport,
+        )
+    }
+
+    fn with_styled_text(
+        tokens: &ThemeTokens,
+        display: String,
+        text: StyledText,
+        selection_range: Option<Range<usize>>,
+        caret_offset: Option<usize>,
+        focus_offset: Option<usize>,
+        caret_visible: bool,
+        viewport: Option<TextInputViewport>,
+    ) -> Self {
+        Self {
+            display,
+            text,
+            selection_range,
+            caret_offset,
+            focus_offset,
+            caret_visible,
+            viewport,
             accent: tokens.ui.accent,
             caret_width: tokens.metrics.form_caret_width,
             caret_height: tokens.metrics.form_caret_height,
@@ -458,6 +663,30 @@ impl TextInputOverlayValue {
 
     fn byte_index_for_offset(&self, offset: usize) -> usize {
         byte_index_for_utf16(&self.display, offset)
+    }
+
+    fn update_horizontal_offset(&self, bounds: Bounds<Pixels>) -> Pixels {
+        let Some(viewport) = self.viewport.as_ref() else {
+            return px(0.0);
+        };
+        let Some(focus_offset) = self.focus_offset else {
+            return px(0.0);
+        };
+        let layout = self.text.layout();
+        let Some(focus) = layout.position_for_index(self.byte_index_for_offset(focus_offset))
+        else {
+            return px(0.0);
+        };
+        let Some(end) = layout.position_for_index(self.display.len()) else {
+            return px(0.0);
+        };
+        update_text_input_scroll(
+            viewport.scroll_x(),
+            focus.x - bounds.origin.x,
+            end.x - bounds.origin.x,
+            bounds.size.width,
+            px(self.caret_width),
+        )
     }
 }
 
@@ -501,7 +730,25 @@ impl Element for TextInputOverlayValue {
         cx: &mut App,
     ) -> Self::PrepaintState {
         self.text
-            .prepaint(id, inspector_id, bounds, request_layout, window, cx)
+            .prepaint(id, inspector_id, bounds, request_layout, window, cx);
+        let horizontal_offset = self.update_horizontal_offset(bounds);
+        if horizontal_offset > px(0.0) {
+            // Re-anchor the shaped line so the active caret remains inside the clipped input.
+            self.text.prepaint(
+                id,
+                inspector_id,
+                Bounds {
+                    origin: point(bounds.origin.x - horizontal_offset, bounds.origin.y),
+                    size: bounds.size,
+                },
+                request_layout,
+                window,
+                cx,
+            );
+        }
+        if let Some(viewport) = self.viewport.as_ref() {
+            viewport.update_layout(self.text.layout().clone(), horizontal_offset);
+        }
     }
 
     fn paint(
@@ -573,6 +820,27 @@ fn text_input_clamped_range(len: usize, range: Range<usize>) -> Option<Range<usi
     (start < end).then_some(start..end)
 }
 
+fn update_text_input_scroll(
+    current_scroll: Pixels,
+    focus_x: Pixels,
+    text_width: Pixels,
+    viewport_width: Pixels,
+    caret_width: Pixels,
+) -> Pixels {
+    if viewport_width <= px(0.0) {
+        return px(0.0);
+    }
+    let content_width = text_width + caret_width;
+    let max_offset = (content_width - viewport_width).max(px(0.0));
+    let mut scroll_x = current_scroll.clamp(px(0.0), max_offset);
+    if focus_x < scroll_x {
+        scroll_x = focus_x.max(px(0.0));
+    } else if focus_x + caret_width > scroll_x + viewport_width {
+        scroll_x = (focus_x + caret_width - viewport_width).min(max_offset);
+    }
+    scroll_x
+}
+
 fn utf16_slice(value: &str, range: Range<usize>) -> String {
     let start = byte_index_for_utf16(value, range.start);
     let end = byte_index_for_utf16(value, range.end);
@@ -625,10 +893,47 @@ fn secret_mask_offset_for_utf16(raw_value: &str, offset: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        text_input_marked_display_parts, text_input_projected_marked_parts, text_input_secret_mask,
-        text_input_visual_range,
+    use gpui::{
+        Context, InteractiveElement, IntoElement, Render, Styled, TestAppContext, Window, point,
+        px, size,
     };
+    use oxideterm_theme::{ThemeTokens, default_tokens};
+
+    use super::{
+        TextInputView, TextInputViewport, text_input_marked_display_parts,
+        text_input_projected_marked_parts, text_input_secret_mask, text_input_visual_range,
+        text_input_with_viewport, update_text_input_scroll,
+    };
+
+    struct LongTextInput {
+        tokens: ThemeTokens,
+        viewport: TextInputViewport,
+        value: String,
+        marked_text: Option<String>,
+    }
+
+    impl Render for LongTextInput {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let end = self.value.encode_utf16().count();
+            text_input_with_viewport(
+                &self.tokens,
+                TextInputView {
+                    value: &self.value,
+                    placeholder: String::new(),
+                    focused: true,
+                    caret_visible: true,
+                    secret: false,
+                    selected_all: false,
+                    selected_range: Some(end..end),
+                    marked_text: self.marked_text.as_deref(),
+                },
+                &self.viewport,
+                Some(end),
+            )
+            .w(px(120.0))
+            .debug_selector(|| "long-input".to_string())
+        }
+    }
 
     #[test]
     fn secret_mask_uses_one_visible_glyph_per_scalar() {
@@ -662,6 +967,103 @@ mod tests {
         assert_eq!(
             text_input_projected_marked_parts("a感激b", 1..3),
             ("a".to_string(), "感激".to_string(), "b".to_string())
+        );
+    }
+
+    #[test]
+    fn horizontal_scroll_moves_only_when_the_caret_leaves_the_viewport() {
+        assert_eq!(
+            update_text_input_scroll(px(0.0), px(60.0), px(80.0), px(100.0), px(1.0)),
+            px(0.0)
+        );
+        assert_eq!(
+            update_text_input_scroll(px(41.0), px(130.0), px(160.0), px(100.0), px(1.0)),
+            px(41.0)
+        );
+        assert_eq!(
+            update_text_input_scroll(px(41.0), px(160.0), px(160.0), px(100.0), px(1.0)),
+            px(61.0)
+        );
+        assert_eq!(
+            update_text_input_scroll(px(61.0), px(30.0), px(160.0), px(100.0), px(1.0)),
+            px(30.0)
+        );
+        assert_eq!(
+            update_text_input_scroll(px(61.0), px(40.0), px(60.0), px(100.0), px(1.0)),
+            px(0.0)
+        );
+    }
+
+    #[gpui::test]
+    fn long_input_viewport_keeps_end_caret_visible_and_hit_testable(cx: &mut TestAppContext) {
+        let value = "echo this command is wider than the input viewport".to_string();
+        let viewport = TextInputViewport::default();
+        let viewport_for_view = viewport.clone();
+        let value_len = value.len();
+        let (view, cx) = cx.add_window_view(move |_, _| LongTextInput {
+            tokens: default_tokens(),
+            viewport: viewport_for_view,
+            value,
+            marked_text: None,
+        });
+        cx.simulate_resize(size(px(320.0), px(200.0)));
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+
+        let input_bounds = cx.debug_bounds("long-input").expect("input bounds");
+        let caret = viewport
+            .position_for_byte_index(value_len)
+            .expect("end caret position");
+        assert!(caret.x >= input_bounds.left());
+        assert!(caret.x <= input_bounds.right());
+        assert_eq!(viewport.byte_index_for_position(caret), Some(value_len));
+        assert_eq!(
+            viewport.byte_index_for_position(point(caret.x, input_bounds.top())),
+            Some(value_len)
+        );
+        assert_eq!(
+            viewport.byte_index_for_position(point(caret.x, input_bounds.bottom())),
+            Some(value_len)
+        );
+
+        cx.update(|window, cx| {
+            view.update(cx, |input, cx| {
+                input.value.clear();
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+        });
+        assert!(viewport.position_for_byte_index(0).is_none());
+    }
+
+    #[gpui::test]
+    fn long_marked_text_uses_the_scrolled_layout_for_hit_testing(cx: &mut TestAppContext) {
+        let value = "echo this command is already wider than its viewport".to_string();
+        let marked_text = "中文参数".to_string();
+        let projected_len = value.len() + marked_text.len();
+        let viewport = TextInputViewport::default();
+        let viewport_for_view = viewport.clone();
+        let (_, cx) = cx.add_window_view(move |_, _| LongTextInput {
+            tokens: default_tokens(),
+            viewport: viewport_for_view,
+            value,
+            marked_text: Some(marked_text),
+        });
+        cx.simulate_resize(size(px(320.0), px(200.0)));
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+
+        let input_bounds = cx.debug_bounds("long-input").expect("input bounds");
+        let composition_end = viewport
+            .position_for_byte_index(projected_len)
+            .expect("composition end position");
+        assert!(composition_end.x >= input_bounds.left());
+        assert!(composition_end.x <= input_bounds.right());
+        assert_eq!(
+            viewport.byte_index_for_position(composition_end),
+            Some(projected_len)
         );
     }
 }

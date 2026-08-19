@@ -3,9 +3,10 @@ pub(super) use oxideterm_quick_commands::{
     QuickCommandDraft, QuickCommandIcon, QuickCommandImportResult, QuickCommandImportStrategy,
     QuickCommandsSnapshot, default_quick_command_categories, default_quick_commands, now_ms,
 };
-use std::{cell::RefCell, path::Path, path::PathBuf};
+use std::{cell::RefCell, collections::HashMap, path::Path, path::PathBuf};
 
 use gpui::{ListAlignment, ListState, px};
+use oxideterm_gpui_ui::text_input::TextInputViewport;
 use zeroize::Zeroizing;
 
 use super::{
@@ -71,6 +72,7 @@ pub(in crate::workspace) struct TerminalQuickCommandsState {
     pub(super) pending_command: Option<Zeroizing<String>>,
     pub(super) list_state: ListState,
     pub(super) list_cache: RefCell<VirtualListSignatureCache>,
+    pub(super) input_viewports: RefCell<HashMap<QuickCommandInput, TextInputViewport>>,
 }
 
 impl TerminalQuickCommandsState {
@@ -93,7 +95,17 @@ impl TerminalQuickCommandsState {
             )
             .measure_all(),
             list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            // Each editor field keeps browser-like horizontal position across redraws.
+            input_viewports: RefCell::new(HashMap::new()),
         }
+    }
+
+    pub(super) fn input_viewport(&self, input: QuickCommandInput) -> TextInputViewport {
+        self.input_viewports
+            .borrow_mut()
+            .entry(input)
+            .or_default()
+            .clone()
     }
 }
 

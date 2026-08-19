@@ -14,7 +14,7 @@ use oxideterm_gpui_ui::{
     modal::rounded_shell_child_radius,
     select::SelectAnchorId,
     status_pill,
-    text_input::{TextInputView, text_input, text_input_anchor_probe},
+    text_input::{TextInputView, text_input_anchor_probe, text_input_with_viewport},
 };
 use oxideterm_quick_commands::{
     QuickCommandRisk, classify_command_risk, match_quick_command_host_pattern,
@@ -1725,9 +1725,11 @@ window.focus(&this.focus_handle, cx);
         let focused = focused_input == Some(input);
         let target = WorkspaceImeTarget::QuickCommand(input);
         let workspace = cx.entity();
+        let viewport = self.terminal.read(cx).quick_commands.input_viewport(input);
+        let active_offset = self.ime_active_offset_for_target(target, cx);
         text_input_anchor_probe(
             target.anchor_id(),
-            text_input(
+            text_input_with_viewport(
                 &self.tokens,
                 TextInputView {
                     value: &value,
@@ -1739,6 +1741,8 @@ window.focus(&this.focus_handle, cx);
                     selected_range: self.ime_selected_range_for_target(target, cx),
                     marked_text: self.marked_text_for_target(target, cx),
                 },
+                &viewport,
+                active_offset,
             )
             .h(px(32.0))
             .cursor(CursorStyle::IBeam)
