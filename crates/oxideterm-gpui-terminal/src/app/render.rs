@@ -266,6 +266,11 @@ impl Render for TerminalPane {
             hovered_command_mark_id,
         )
         .highlight_rules(self.preferences.highlight_rules.clone())
+        .transient_command_highlight(
+            self.command_context_highlighting_enabled
+                .then(|| self.command_fact_ledger.transient_command_highlight())
+                .flatten(),
+        )
         .semantic_coloring(
             self.preferences.semantic_coloring && !terminal_mode.contains(TermMode::ALT_SCREEN),
         )

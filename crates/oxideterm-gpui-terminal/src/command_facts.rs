@@ -1,9 +1,14 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use oxideterm_terminal::{
     TerminalCommandMark, TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence,
     TerminalCommandMarkDetectionSource,
 };
+
+use crate::terminal_ui::MAX_HIGHLIGHT_PATTERN_LENGTH;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalCommandFactStatus {
@@ -59,11 +64,27 @@ pub struct TerminalAutosuggestInputState {
     pub is_cursor_at_end: bool,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct TransientCommandHighlight {
+    pub(crate) command_id: Arc<str>,
+    pub(crate) query: Arc<str>,
+    pub(crate) case_sensitive: bool,
+    pub(crate) output_start_global_line: usize,
+    pub(crate) output_end_global_line: Option<usize>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct TransientLiteralQuery {
+    query: String,
+    case_sensitive: bool,
+}
+
 #[derive(Default)]
 pub(crate) struct CommandFactLedger {
     facts: Vec<TerminalCommandFact>,
     ai_records: Vec<TerminalAiCommandRecord>,
     autosuggest_records: Vec<TerminalAutosuggestCommandRecord>,
+    transient_command_highlight: Option<TransientCommandHighlight>,
 }
 
 impl CommandFactLedger {
@@ -77,6 +98,10 @@ impl CommandFactLedger {
 
     pub(crate) fn autosuggest_records(&self) -> Vec<TerminalAutosuggestCommandRecord> {
         self.autosuggest_records.clone()
+    }
+
+    pub(crate) fn transient_command_highlight(&self) -> Option<TransientCommandHighlight> {
+        self.transient_command_highlight.clone()
     }
 
     pub(crate) fn autosuggest_ghost_text(
@@ -136,6 +161,19 @@ impl CommandFactLedger {
         }
 
         self.close_previous_open(mark.start_line);
+        // The pane owns one derived query for only the latest command fact. Replacing
+        // it here prevents a prior grep query from leaking into later output.
+        self.transient_command_highlight = mark
+            .command
+            .as_deref()
+            .and_then(transient_literal_query)
+            .map(|query| TransientCommandHighlight {
+                command_id: Arc::from(mark.command_id.as_str()),
+                query: Arc::from(query.query),
+                case_sensitive: query.case_sensitive,
+                output_start_global_line: mark.command_line.saturating_add(1),
+                output_end_global_line: None,
+            });
         let fact = TerminalCommandFact {
             fact_id: format!("native-command-fact-{}", mark.command_id),
             client_mark_id: mark.command_id.clone(),
@@ -181,6 +219,19 @@ impl CommandFactLedger {
             fact.exit_code = mark.exit_code;
             fact.closed_at = Some(mark.finished_at.unwrap_or_else(now_millis));
             closed_fact = Some(fact.clone());
+        }
+
+        if self
+            .transient_command_highlight
+            .as_ref()
+            .is_some_and(|highlight| highlight.command_id.as_ref() == mark.command_id)
+        {
+            if mark.stale {
+                self.transient_command_highlight = None;
+            } else if let Some(highlight) = self.transient_command_highlight.as_mut() {
+                highlight.output_end_global_line =
+                    closed_fact.as_ref().and_then(|fact| fact.end_global_line);
+            }
         }
 
         if let Some(fact) = closed_fact {
@@ -261,6 +312,121 @@ impl CommandFactLedger {
             self.ai_records.drain(0..overflow);
         }
     }
+}
+
+fn transient_literal_query(command: &str) -> Option<TransientLiteralQuery> {
+    // Keep the first stage intentionally conservative: unsupported shell syntax
+    // or grep/rg options produce no transient highlight instead of a wrong one.
+    let tokens = command.split_whitespace().collect::<Vec<_>>();
+    let mut command_position = true;
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = tokens[index];
+        if is_shell_separator(token) {
+            command_position = true;
+            index += 1;
+            continue;
+        }
+        if command_position {
+            command_position = false;
+            let executable = token.rsplit(['/', '\\']).next().unwrap_or(token);
+            let executable = executable.strip_suffix(".exe").unwrap_or(executable);
+            if executable.eq_ignore_ascii_case("grep") || executable.eq_ignore_ascii_case("rg") {
+                return literal_query_after_command(&tokens[index + 1..]);
+            }
+        }
+        index += 1;
+    }
+    None
+}
+
+fn literal_query_after_command(tokens: &[&str]) -> Option<TransientLiteralQuery> {
+    let mut case_sensitive = true;
+    let mut fixed_strings = false;
+    let mut options_ended = false;
+    for token in tokens {
+        if is_shell_separator(token) {
+            return None;
+        }
+        if !options_ended && *token == "--" {
+            options_ended = true;
+            continue;
+        }
+        if !options_ended && token.starts_with("--") {
+            match *token {
+                "--ignore-case" => case_sensitive = false,
+                "--case-sensitive" => case_sensitive = true,
+                "--fixed-strings" => fixed_strings = true,
+                "--line-number" | "--with-filename" | "--no-filename" | "--only-matching"
+                | "--no-color" | "--text" | "--hidden" => {}
+                "--invert-match" | "--regexp" | "--smart-case" => return None,
+                option if option.starts_with("--color=") => {}
+                _ => return None,
+            }
+            continue;
+        }
+        if !options_ended && token.starts_with('-') && token.len() > 1 {
+            for flag in token[1..].chars() {
+                match flag {
+                    'i' => case_sensitive = false,
+                    's' => case_sensitive = true,
+                    'F' => fixed_strings = true,
+                    'n' | 'H' | 'h' | 'o' | 'u' | 'a' => {}
+                    'v' | 'e' | 'S' => return None,
+                    _ => return None,
+                }
+            }
+            continue;
+        }
+
+        let query = simple_query_token(token)?;
+        if query.chars().count() > MAX_HIGHLIGHT_PATTERN_LENGTH
+            || (!fixed_strings && query.chars().any(is_regex_meta_character))
+        {
+            return None;
+        }
+        let query = if case_sensitive {
+            query.to_string()
+        } else {
+            query.to_lowercase()
+        };
+        return Some(TransientLiteralQuery {
+            query,
+            case_sensitive,
+        });
+    }
+    None
+}
+
+fn simple_query_token(token: &str) -> Option<&str> {
+    if token.is_empty()
+        || token
+            .chars()
+            .any(|ch| matches!(ch, '$' | '`' | '<' | '>' | '&' | ';'))
+    {
+        return None;
+    }
+    let bytes = token.as_bytes();
+    if matches!(bytes.first(), Some(b'\'') | Some(b'"')) {
+        let quote = *bytes.first()?;
+        if bytes.len() < 2 || bytes.last().copied() != Some(quote) {
+            return None;
+        }
+        let inner = &token[1..token.len() - 1];
+        return (!inner.is_empty() && !inner.as_bytes().contains(&quote)).then_some(inner);
+    }
+    (!token.contains('\'') && !token.contains('"')).then_some(token)
+}
+
+fn is_shell_separator(token: &str) -> bool {
+    matches!(token, "|" | "||" | "&&" | ";")
+}
+
+fn is_regex_meta_character(ch: char) -> bool {
+    matches!(
+        ch,
+        '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '\\'
+    )
 }
 
 fn now_millis() -> u64 {
@@ -365,5 +531,42 @@ mod tests {
             }),
             None
         );
+    }
+
+    #[test]
+    fn command_fact_ledger_limits_literal_query_to_latest_command() {
+        let mut ledger = CommandFactLedger::default();
+        ledger.create_from_mark(&mark("cmd-1", Some("ps -ef | grep -i dbx"), false));
+
+        let highlight = ledger
+            .transient_command_highlight()
+            .expect("grep query highlight");
+        assert_eq!(highlight.query.as_ref(), "dbx");
+        assert!(!highlight.case_sensitive);
+        assert_eq!(highlight.output_start_global_line, 11);
+
+        let closed = mark("cmd-1", Some("ps -ef | grep -i dbx"), true);
+        ledger.close_from_mark(&closed);
+        assert_eq!(
+            ledger
+                .transient_command_highlight()
+                .and_then(|highlight| highlight.output_end_global_line),
+            Some(12)
+        );
+
+        let mut next = mark("cmd-2", Some("pwd"), false);
+        next.start_line = 20;
+        next.command_line = 20;
+        ledger.create_from_mark(&next);
+
+        assert!(ledger.transient_command_highlight().is_none());
+        assert_eq!(
+            transient_literal_query("rg needle"),
+            Some(TransientLiteralQuery {
+                query: "needle".to_string(),
+                case_sensitive: true,
+            })
+        );
+        assert!(transient_literal_query("grep 'db.*'").is_none());
     }
 }

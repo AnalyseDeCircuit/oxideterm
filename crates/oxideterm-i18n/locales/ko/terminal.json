@@ -96,6 +96,7 @@
       "save_to_connection": "현재 선택을 이 연결에 저장",
       "saved_to_connection": "강조 재정의를 연결에 저장했습니다",
       "reset_connection": "이 연결을 상속으로 재설정",
+      "command_context": "grep/rg 검색어 강조 표시",
       "manage_rule_sets": "기본 규칙 및 규칙 세트 관리…"
     },
     "trzsz": {

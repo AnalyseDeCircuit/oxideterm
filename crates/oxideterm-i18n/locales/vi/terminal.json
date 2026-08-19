@@ -96,6 +96,7 @@
       "save_to_connection": "Lưu lựa chọn vào kết nối này",
       "saved_to_connection": "Đã lưu ghi đè vào kết nối",
       "reset_connection": "Đặt kết nối về kế thừa",
+      "command_context": "Làm nổi bật từ khóa tìm kiếm grep/rg",
       "manage_rule_sets": "Quản lý quy tắc cơ sở và bộ quy tắc…"
     },
     "trzsz": {

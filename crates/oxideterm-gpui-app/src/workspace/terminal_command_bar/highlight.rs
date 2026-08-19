@@ -193,6 +193,16 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn toggle_active_command_context_highlighting(&mut self, cx: &mut Context<Self>) {
+        let Some(pane) = self.active_pane(cx) else {
+            return;
+        };
+        let enabled = pane.read(cx).command_context_highlighting_enabled();
+        pane.update(cx, |pane, cx| {
+            pane.set_command_context_highlighting_enabled(!enabled, cx);
+        });
+    }
+
     fn save_active_highlight_override_to_connection(&mut self, cx: &mut Context<Self>) {
         let Some(saved_profile_id) = self.active_terminal_saved_profile_id(cx) else {
             return;
@@ -265,6 +275,9 @@ impl WorkspaceApp {
                 .session_highlight_rule_set_id()
                 .map(str::to_string)
         });
+        let command_context_highlighting_enabled = active_pane
+            .as_ref()
+            .is_some_and(|pane| pane.read(cx).command_context_highlighting_enabled());
         let connection_rule_set_id = active_pane.as_ref().and_then(|pane| {
             pane.read(cx)
                 .preference_overrides_snapshot()
@@ -324,11 +337,20 @@ impl WorkspaceApp {
                         .child(self.i18n.t("terminal.highlight_override.override_hint")),
                 ),
         )
+        .child(self.card_separator())
+        .child(self.terminal_highlight_choice_row(
+            self.i18n.t("terminal.highlight_override.command_context"),
+            command_context_highlighting_enabled,
+            cx.listener(|this, _event, _window, cx| {
+                this.toggle_active_command_context_highlighting(cx);
+                cx.stop_propagation();
+            }),
+        ))
         .child(self.card_separator());
 
         let mut choices = div().w_full().flex().flex_col();
         let inherited_selected = session_rule_set_id.is_none();
-        choices = choices.child(self.terminal_highlight_rule_set_row(
+        choices = choices.child(self.terminal_highlight_choice_row(
             self.i18n.t("terminal.highlight_override.use_inherited"),
             inherited_selected,
             cx.listener(|this, _event, _window, cx| {
@@ -346,7 +368,7 @@ impl WorkspaceApp {
                     .t("settings_view.terminal.highlight_rules.rule_set_global_base")
             });
         choices = choices.child(
-            self.terminal_highlight_rule_set_row(
+            self.terminal_highlight_choice_row(
                 self.i18n
                     .t("terminal.highlight_override.use_global_for_session")
                     .replace("{{name}}", &global_name),
@@ -363,7 +385,7 @@ impl WorkspaceApp {
 
         for rule_set in &settings.terminal.highlight_rule_sets {
             let id = rule_set.id.clone();
-            choices = choices.child(self.terminal_highlight_rule_set_row(
+            choices = choices.child(self.terminal_highlight_choice_row(
                 rule_set.name.clone(),
                 session_rule_set_id.as_deref() == Some(id.as_str()),
                 cx.listener(move |this, _event, _window, cx| {
@@ -411,7 +433,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn terminal_highlight_rule_set_row(
+    fn terminal_highlight_choice_row(
         &self,
         label: String,
         selected: bool,

@@ -8,6 +8,7 @@ use oxideterm_terminal::{
     TerminalSearchMatch, TerminalSnapshot,
 };
 
+use crate::command_facts::TransientCommandHighlight;
 use crate::terminal_ui::*;
 
 fn test_metrics() -> TerminalMetrics {

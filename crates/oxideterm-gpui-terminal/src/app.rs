@@ -332,6 +332,9 @@ pub struct TerminalPane {
     // The pane owns only its live-session highlight choice. Saved connection
     // defaults remain connection-store data and never affect node ownership.
     session_highlight_override: Option<TerminalHighlightRuleSetOverride>,
+    // Command-derived query highlighting is session-only and never becomes a
+    // persisted keyword rule or shared backend state.
+    command_context_highlighting_enabled: bool,
     preferences: TerminalUiPreferences,
     settings: TerminalUiSettings,
     theme: TerminalUiTheme,
@@ -835,6 +838,7 @@ impl TerminalPane {
             focus_handle,
             preference_overrides: TerminalUiPreferenceOverrides::default(),
             session_highlight_override: None,
+            command_context_highlighting_enabled: true,
             preferences: preferences.clone(),
             settings: TerminalUiSettings::from_preferences(&preferences),
             theme: preferences.theme.clone(),
@@ -1327,6 +1331,22 @@ impl TerminalPane {
         self.session_highlight_override
             .as_ref()
             .map(|highlight_override| highlight_override.id.as_str())
+    }
+
+    pub fn command_context_highlighting_enabled(&self) -> bool {
+        self.command_context_highlighting_enabled
+    }
+
+    pub fn set_command_context_highlighting_enabled(
+        &mut self,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.command_context_highlighting_enabled == enabled {
+            return;
+        }
+        self.command_context_highlighting_enabled = enabled;
+        cx.notify();
     }
 
     pub fn set_session_highlight_override(

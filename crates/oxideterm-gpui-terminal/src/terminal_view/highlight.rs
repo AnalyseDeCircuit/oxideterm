@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     ops::Range,
     sync::{Arc, Mutex, OnceLock},
@@ -7,6 +8,7 @@ use std::{
 use gpui::{Hsla, rgba};
 use regex::RegexBuilder;
 
+use crate::command_facts::TransientCommandHighlight;
 use crate::terminal_ui::{
     MAX_HIGHLIGHT_PATTERN_LENGTH, MAX_HIGHLIGHT_RULES, TerminalHighlightMatchScope,
     TerminalHighlightRenderMode, TerminalHighlightRule,
@@ -77,13 +79,14 @@ enum RuntimeHighlightMatcher {
 pub(crate) fn terminal_highlights_for_rows(
     snapshot: &TerminalSnapshot,
     rules: &[TerminalHighlightRule],
+    transient: Option<(&TransientCommandHighlight, Hsla)>,
     rows: Range<usize>,
 ) -> TerminalHighlightLayout {
-    if rows.is_empty() || !rules.iter().any(|rule| rule.enabled) {
+    if rows.is_empty() || (!rules.iter().any(|rule| rule.enabled) && transient.is_none()) {
         return TerminalHighlightLayout::empty();
     }
     let rules = compiled_runtime_rules(rules);
-    if rules.is_empty() {
+    if rules.is_empty() && transient.is_none() {
         return TerminalHighlightLayout::empty();
     }
 
@@ -97,12 +100,56 @@ pub(crate) fn terminal_highlights_for_rows(
         if !seen_lines.insert(line_range.clone()) {
             continue;
         }
+        // Check the command range before assembling logical-line text so
+        // off-screen history and unrelated output add no transient work.
+        let transient_for_line = transient.filter(|(highlight, _)| {
+            logical_line_overlaps_transient_output(snapshot, line_range.clone(), highlight)
+        });
+        if rules.is_empty() && transient_for_line.is_none() {
+            continue;
+        }
         let line = build_logical_line(snapshot, line_range);
-        let matches = accepted_matches(&line.text, line.content_len, &rules);
-        apply_matches(&line, matches, &mut layout);
+        if !rules.is_empty() {
+            let matches = accepted_matches(&line.text, line.content_len, &rules);
+            apply_matches(&line, matches, &mut layout);
+        }
+        if let Some((highlight, color)) = transient_for_line {
+            for_each_literal_match(
+                &line.text,
+                &highlight.query,
+                highlight.case_sensitive,
+                |start, len| {
+                    let end = start.saturating_add(len);
+                    if start < end
+                        && let Some(cells) = line.map.get(start..end)
+                    {
+                        layout.backgrounds.extend(rects_for_match(cells, color));
+                    }
+                },
+            );
+        }
     }
 
     layout
+}
+
+fn logical_line_overlaps_transient_output(
+    snapshot: &TerminalSnapshot,
+    rows: Range<usize>,
+    highlight: &TransientCommandHighlight,
+) -> bool {
+    snapshot
+        .lines
+        .get(rows)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|row| usize::try_from(row.absolute_line).ok())
+        .any(|absolute_line| {
+            absolute_line >= highlight.output_start_global_line
+                && highlight
+                    .output_end_global_line
+                    .is_none_or(|end_line| absolute_line <= end_line)
+        })
 }
 
 fn compiled_runtime_rules(rules: &[TerminalHighlightRule]) -> Arc<Vec<RuntimeHighlightRule>> {
@@ -320,28 +367,36 @@ fn collect_rule_matches<'a>(
             needle,
             case_sensitive,
         } => {
-            if needle.is_empty() {
-                return;
-            }
-            let haystack = if *case_sensitive {
-                text.to_string()
-            } else {
-                text.to_lowercase()
-            };
-            let mut search_from = 0;
-            while search_from < haystack.len() {
-                let Some(byte_index) = haystack[search_from..].find(needle) else {
-                    break;
-                };
-                let start_byte = search_from + byte_index;
-                matches.push(MatchCandidate {
-                    rule,
-                    start: haystack[..start_byte].chars().count(),
-                    len: needle.chars().count(),
-                });
-                search_from = start_byte + needle.len().max(1);
-            }
+            for_each_literal_match(text, needle, *case_sensitive, |start, len| {
+                matches.push(MatchCandidate { rule, start, len });
+            });
         }
+    }
+}
+
+fn for_each_literal_match(
+    text: &str,
+    needle: &str,
+    case_sensitive: bool,
+    mut visit: impl FnMut(usize, usize),
+) {
+    if needle.is_empty() {
+        return;
+    }
+    let haystack = if case_sensitive {
+        Cow::Borrowed(text)
+    } else {
+        Cow::Owned(text.to_lowercase())
+    };
+    let needle_len = needle.chars().count();
+    let mut search_from = 0;
+    while search_from < haystack.len() {
+        let Some(byte_index) = haystack[search_from..].find(needle) else {
+            break;
+        };
+        let start_byte = search_from + byte_index;
+        visit(haystack[..start_byte].chars().count(), needle_len);
+        search_from = start_byte + needle.len().max(1);
     }
 }
 

@@ -23,6 +23,7 @@ use parking_lot::Mutex;
 use unicode_width::UnicodeWidthChar;
 
 use crate::app::{TerminalInputHandler, TerminalPane, TerminalRenderedImage, TerminalRowTimestamp};
+use crate::command_facts::TransientCommandHighlight;
 use crate::terminal_ui::*;
 use crate::terminal_view::highlight::{TerminalHighlightLayout, terminal_highlights_for_rows};
 use crate::terminal_view::links::*;
@@ -38,6 +39,7 @@ mod style;
 const TERMINAL_ROW_LAYOUT_CACHE_CAPACITY: usize = 512;
 const TERMINAL_HIGHLIGHT_CACHE_CAPACITY: usize = 128;
 const TERMINAL_LINK_CACHE_CAPACITY: usize = 512;
+const TRANSIENT_COMMAND_HIGHLIGHT_ALPHA: u32 = 0x52;
 
 pub(crate) use layout::*;
 use paint::*;
@@ -66,6 +68,8 @@ pub(crate) struct TerminalElement {
     hovered_command_mark_id: Option<String>,
     highlight_rules: Arc<[TerminalHighlightRule]>,
     highlight_rules_signature: u64,
+    transient_command_highlight: Option<TransientCommandHighlight>,
+    transient_command_highlight_signature: u64,
     semantic_coloring: bool,
     semantic_scheme: Arc<CompiledSemanticScheme>,
     semantic_shell: SemanticShellDialect,
@@ -508,6 +512,8 @@ impl TerminalElement {
             hovered_command_mark_id: None,
             highlight_rules,
             highlight_rules_signature,
+            transient_command_highlight: None,
+            transient_command_highlight_signature: 0,
             semantic_coloring,
             semantic_scheme,
             semantic_shell,
@@ -534,6 +540,17 @@ impl TerminalElement {
     ) -> Self {
         self.highlight_rules = rules.into();
         self.highlight_rules_signature = terminal_highlight_rules_signature(&self.highlight_rules);
+        self
+    }
+
+    pub(crate) fn transient_command_highlight(
+        mut self,
+        highlight: Option<TransientCommandHighlight>,
+    ) -> Self {
+        self.transient_command_highlight = highlight;
+        self.transient_command_highlight_signature = terminal_transient_command_highlight_signature(
+            self.transient_command_highlight.as_ref(),
+        );
         self
     }
 
@@ -889,8 +906,19 @@ impl TerminalElement {
     }
 
     fn highlight_layout_for_rows(&self, rows: Range<usize>) -> TerminalHighlightLayout {
-        let mut layout =
-            terminal_highlights_for_rows(&self.snapshot, &self.highlight_rules, rows.clone());
+        let transient = self.transient_command_highlight.as_ref().map(|highlight| {
+            (
+                highlight,
+                rgba((self.theme.tokens.ui.warning << 8) | TRANSIENT_COMMAND_HIGHLIGHT_ALPHA)
+                    .into(),
+            )
+        });
+        let mut layout = terminal_highlights_for_rows(
+            &self.snapshot,
+            &self.highlight_rules,
+            transient,
+            rows.clone(),
+        );
         if self.semantic_coloring {
             append_terminal_semantics_for_rows(
                 &self.snapshot,
@@ -1142,6 +1170,7 @@ impl TerminalElement {
             &mut hasher,
         );
         self.highlight_rules_signature.hash(&mut hasher);
+        self.transient_command_highlight_signature.hash(&mut hasher);
         TerminalRowLayoutCacheKey {
             signature: hasher.finish(),
         }
@@ -1160,6 +1189,7 @@ impl TerminalElement {
         let mut hasher = DefaultHasher::new();
         self.snapshot.cols.hash(&mut hasher);
         self.highlight_rules_signature.hash(&mut hasher);
+        self.transient_command_highlight_signature.hash(&mut hasher);
         self.hash_semantic_layout(rows.clone(), semantic_role, &mut hasher);
         rows.len().hash(&mut hasher);
         for row in self.snapshot.lines.get(rows).unwrap_or(&[]) {
@@ -1573,6 +1603,14 @@ fn hash_highlight_rules(rules: &[TerminalHighlightRule], hasher: &mut impl Hashe
 fn terminal_highlight_rules_signature(rules: &[TerminalHighlightRule]) -> u64 {
     let mut hasher = DefaultHasher::new();
     hash_highlight_rules(rules, &mut hasher);
+    hasher.finish()
+}
+
+fn terminal_transient_command_highlight_signature(
+    highlight: Option<&TransientCommandHighlight>,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    highlight.hash(&mut hasher);
     hasher.finish()
 }
 

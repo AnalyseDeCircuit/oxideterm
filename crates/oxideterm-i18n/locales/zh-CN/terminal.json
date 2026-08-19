@@ -166,6 +166,7 @@
       "save_to_connection": "将当前选择保存到此连接",
       "saved_to_connection": "高亮覆盖已保存到连接",
       "reset_connection": "将此连接恢复为继承",
+      "command_context": "高亮 grep/rg 查询词",
       "manage_rule_sets": "管理基础规则和规则集…"
     },
     "trzsz": {

@@ -96,6 +96,7 @@
       "save_to_connection": "Guardar la selección en esta conexión",
       "saved_to_connection": "Reemplazo guardado en la conexión",
       "reset_connection": "Restablecer esta conexión para heredar",
+      "command_context": "Resaltar términos de búsqueda de grep/rg",
       "manage_rule_sets": "Administrar reglas base y conjuntos…"
     },
     "trzsz": {

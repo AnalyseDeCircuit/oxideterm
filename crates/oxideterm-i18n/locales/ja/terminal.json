@@ -96,6 +96,7 @@
       "save_to_connection": "現在の選択をこの接続に保存",
       "saved_to_connection": "ハイライト上書きを接続に保存しました",
       "reset_connection": "この接続を継承へ戻す",
+      "command_context": "grep/rg の検索語を強調表示",
       "manage_rule_sets": "基本ルールとルールセットを管理…"
     },
     "trzsz": {

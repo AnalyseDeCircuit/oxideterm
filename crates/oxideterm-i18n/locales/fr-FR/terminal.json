@@ -96,6 +96,7 @@
       "save_to_connection": "Enregistrer le choix dans cette connexion",
       "saved_to_connection": "Remplacement enregistré dans la connexion",
       "reset_connection": "Rétablir l’héritage pour cette connexion",
+      "command_context": "Surligner les termes de recherche grep/rg",
       "manage_rule_sets": "Gérer les règles de base et les jeux…"
     },
     "trzsz": {

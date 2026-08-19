@@ -96,6 +96,7 @@
       "save_to_connection": "Aktuelle Auswahl für diese Verbindung speichern",
       "saved_to_connection": "Hervorhebung für Verbindung gespeichert",
       "reset_connection": "Verbindung auf Vererbung zurücksetzen",
+      "command_context": "grep/rg-Suchbegriffe hervorheben",
       "manage_rule_sets": "Basisregeln und Regelsätze verwalten…"
     },
     "trzsz": {

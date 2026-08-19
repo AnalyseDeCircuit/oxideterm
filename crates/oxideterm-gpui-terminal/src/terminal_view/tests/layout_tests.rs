@@ -656,6 +656,41 @@ fn terminal_element_keeps_highlights_across_output_rescans() {
 }
 
 #[test]
+fn transient_command_highlight_stays_inside_latest_command_output() {
+    let snapshot = multirow_snapshot(&[
+        "$ grep dbx",
+        "dbx first result",
+        "$ printf dbx",
+        "dbx later output",
+    ]);
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .transient_command_highlight(Some(TransientCommandHighlight {
+        command_id: Arc::from("cmd-1"),
+        query: Arc::from("dbx"),
+        case_sensitive: true,
+        output_start_global_line: 1,
+        output_end_global_line: Some(1),
+    }))
+    .layout();
+
+    assert_eq!(layout.highlight_backgrounds.len(), 1);
+    assert_eq!(layout.highlight_backgrounds[0].row, 1);
+    assert_eq!(layout.highlight_backgrounds[0].col, 0);
+    assert_eq!(layout.highlight_backgrounds[0].cells, 3);
+}
+
+#[test]
 fn terminal_highlight_can_preserve_existing_background() {
     let layout = TerminalElement::new(
         selection_snapshot("ERROR output"),

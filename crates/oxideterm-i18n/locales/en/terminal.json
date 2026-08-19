@@ -166,6 +166,7 @@
       "save_to_connection": "Save current choice to this connection",
       "saved_to_connection": "Highlight override saved to connection",
       "reset_connection": "Reset this connection to inherit",
+      "command_context": "Highlight grep/rg query terms",
       "manage_rule_sets": "Manage base rules and rule sets…"
     },
     "trzsz": {

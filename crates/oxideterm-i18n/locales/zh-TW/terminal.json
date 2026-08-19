@@ -96,6 +96,7 @@
       "save_to_connection": "將目前選擇儲存至此連線",
       "saved_to_connection": "醒目提示覆寫已儲存至連線",
       "reset_connection": "將此連線恢復為繼承",
+      "command_context": "醒目顯示 grep/rg 查詢詞",
       "manage_rule_sets": "管理基礎規則與規則集…"
     },
     "trzsz": {
