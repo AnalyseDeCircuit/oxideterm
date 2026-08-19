@@ -882,6 +882,7 @@ pub(in crate::workspace) fn form_from_remote_desktop_profile(
     form.saved_password_keychain_id = profile.credential_ref.clone();
     form.save_password = profile.credential_ref.is_some();
     form.group = profile.group.clone().unwrap_or(ungrouped_label);
+    form.notes = profile.notes.clone().unwrap_or_default();
     form.icon = profile.icon.clone().unwrap_or_default();
     form.color = profile.color.clone().unwrap_or_default();
     form.icon_background_color = profile.icon_background_color.clone().unwrap_or_default();
@@ -917,6 +918,7 @@ pub(in crate::workspace) fn form_from_mosh_profile(
         .to_string();
     form.cert_path = profile.auth.cert_path().unwrap_or_default().to_string();
     form.group = profile.group.clone().unwrap_or(ungrouped_label);
+    form.notes = profile.notes.clone().unwrap_or_default();
     form.icon = profile.icon.clone().unwrap_or_default();
     form.color = profile.color.clone().unwrap_or_default();
     form.icon_background_color = profile.icon_background_color.clone().unwrap_or_default();
@@ -974,6 +976,7 @@ pub(in crate::workspace) fn form_from_serial_profile(
     form.serial_profile_id = Some(profile.id.clone());
     form.serial_profile_name = profile.name.clone();
     form.group = profile.group.clone().unwrap_or(ungrouped_label);
+    form.notes = profile.notes.clone().unwrap_or_default();
     form.icon = profile.icon.clone().unwrap_or_default();
     form.color = profile.color.clone().unwrap_or_default();
     form.icon_background_color = profile.icon_background_color.clone().unwrap_or_default();
@@ -997,6 +1000,7 @@ pub(in crate::workspace) fn form_from_telnet_profile(
     form.telnet_profile_id = Some(profile.id.clone());
     form.telnet_profile_name = profile.name.clone();
     form.group = profile.group.clone().unwrap_or(ungrouped_label);
+    form.notes = profile.notes.clone().unwrap_or_default();
     form.icon = profile.icon.clone().unwrap_or_default();
     form.color = profile.color.clone().unwrap_or_default();
     form.icon_background_color = profile.icon_background_color.clone().unwrap_or_default();
@@ -1769,6 +1773,7 @@ mod tests {
             id: "remote-1".to_string(),
             name: "Lab desktop".to_string(),
             group: Some("Lab".to_string()),
+            notes: Some("Shared display".to_string()),
             icon: Some("cloud".to_string()),
             color: Some("#7dd3fc".to_string()),
             icon_background_color: Some("#082f49".to_string()),
@@ -1795,6 +1800,7 @@ mod tests {
         assert_eq!(form.port, "3389");
         assert_eq!(form.username, "operator");
         assert_eq!(form.group, "Lab");
+        assert_eq!(form.notes, "Shared display");
         assert_eq!(form.icon, "cloud");
         assert_eq!(form.color, "#7dd3fc");
         assert_eq!(form.icon_background_color, "#082f49");
@@ -1825,6 +1831,7 @@ mod tests {
         );
         profile.id = "mosh-1".to_string();
         profile.group = Some("Mobile".to_string());
+        profile.notes = Some("Intermittent link".to_string());
         profile.icon = Some("wifi".to_string());
         profile.color = Some("#93c5fd".to_string());
         profile.server_executable = "/opt/mosh/bin/mosh-server".to_string();
@@ -1846,6 +1853,7 @@ mod tests {
         assert_eq!(form.port, "2222");
         assert_eq!(form.username, "operator");
         assert_eq!(form.group, "Mobile");
+        assert_eq!(form.notes, "Intermittent link");
         assert_eq!(form.icon, "wifi");
         assert_eq!(form.color, "#93c5fd");
         assert_eq!(form.mosh_server_executable, "/opt/mosh/bin/mosh-server");
@@ -1868,6 +1876,7 @@ mod tests {
         let mut profile = SerialProfile::new("Console cable", "/dev/cu.usbserial-10");
         profile.id = "serial-1".to_string();
         profile.group = Some("Lab".to_string());
+        profile.notes = Some("Rack B".to_string());
         profile.icon = Some("radio".to_string());
         profile.color = Some("#fbbf24".to_string());
         profile.icon_background_color = Some("#451a03".to_string());
@@ -1883,6 +1892,7 @@ mod tests {
         assert_eq!(form.transport, NewConnectionTransport::Serial);
         assert_eq!(form.serial_profile_name, "Console cable");
         assert_eq!(form.group, "Lab");
+        assert_eq!(form.notes, "Rack B");
         assert_eq!(form.icon, "radio");
         assert_eq!(form.color, "#fbbf24");
         assert_eq!(form.icon_background_color, "#451a03");
@@ -1902,6 +1912,7 @@ mod tests {
         let mut profile = TelnetProfile::new("Router console", "router.example.com", 2323);
         profile.id = "telnet-1".to_string();
         profile.group = Some("Lab".to_string());
+        profile.notes = Some("Legacy management plane".to_string());
         profile.icon = Some("network".to_string());
         profile.color = Some("#86efac".to_string());
         profile.icon_background_color = Some("#052e16".to_string());
@@ -1915,6 +1926,7 @@ mod tests {
         assert_eq!(form.transport, NewConnectionTransport::Telnet);
         assert_eq!(form.telnet_profile_name, "Router console");
         assert_eq!(form.group, "Lab");
+        assert_eq!(form.notes, "Legacy management plane");
         assert_eq!(form.icon, "network");
         assert_eq!(form.color, "#86efac");
         assert_eq!(form.icon_background_color, "#052e16");

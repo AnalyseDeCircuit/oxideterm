@@ -656,6 +656,9 @@ pub struct SerialProfile {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    /// Free-form user metadata. UI copy warns against storing credentials here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -681,6 +684,7 @@ pub struct SaveSerialProfileRequest {
     pub id: Option<String>,
     pub name: String,
     pub group: Option<String>,
+    pub notes: Option<String>,
     pub icon: Option<String>,
     pub color: Option<String>,
     pub icon_background_color: Option<String>,
@@ -699,6 +703,9 @@ pub struct TelnetProfile {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    /// Free-form user metadata. UI copy warns against storing credentials here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -725,6 +732,7 @@ pub struct SaveTelnetProfileRequest {
     pub id: Option<String>,
     pub name: String,
     pub group: Option<String>,
+    pub notes: Option<String>,
     pub icon: Option<String>,
     pub color: Option<String>,
     pub icon_background_color: Option<String>,
@@ -767,6 +775,9 @@ pub struct MoshProfile {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    /// Free-form user metadata. UI copy warns against storing credentials here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -809,6 +820,7 @@ pub struct SaveMoshProfileRequest {
     pub id: Option<String>,
     pub name: String,
     pub group: Option<String>,
+    pub notes: Option<String>,
     pub icon: Option<String>,
     pub color: Option<String>,
     pub icon_background_color: Option<String>,
@@ -846,6 +858,9 @@ pub struct RemoteDesktopProfile {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    /// Free-form user metadata. UI copy warns against storing credentials here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -880,6 +895,7 @@ pub struct SaveRemoteDesktopProfileRequest {
     pub id: Option<String>,
     pub name: String,
     pub group: Option<String>,
+    pub notes: Option<String>,
     pub icon: Option<String>,
     pub color: Option<String>,
     pub icon_background_color: Option<String>,
@@ -906,6 +922,7 @@ impl SerialProfile {
             id: Uuid::new_v4().to_string(),
             name: name.into(),
             group: None,
+            notes: None,
             icon: None,
             color: None,
             icon_background_color: None,
@@ -952,6 +969,7 @@ impl TelnetProfile {
             id: Uuid::new_v4().to_string(),
             name: name.into(),
             group: None,
+            notes: None,
             icon: None,
             color: None,
             icon_background_color: None,
@@ -992,6 +1010,7 @@ impl MoshProfile {
             id: Uuid::new_v4().to_string(),
             name: name.into(),
             group: None,
+            notes: None,
             icon: None,
             color: None,
             icon_background_color: None,
@@ -1065,6 +1084,7 @@ impl RemoteDesktopProfile {
             id: Uuid::new_v4().to_string(),
             name: name.into(),
             group: None,
+            notes: None,
             icon: None,
             color: None,
             icon_background_color: None,

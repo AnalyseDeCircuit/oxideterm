@@ -833,6 +833,7 @@ impl ConnectionStore {
 
         profile.name = request.name.trim().to_string();
         profile.group = group;
+        profile.notes = normalize_optional_text(request.notes);
         profile.icon = normalize_optional_text(request.icon);
         profile.color = normalize_optional_text(request.color);
         profile.icon_background_color = normalize_optional_text(request.icon_background_color);
@@ -917,6 +918,7 @@ impl ConnectionStore {
 
         profile.name = request.name.trim().to_string();
         profile.group = group;
+        profile.notes = normalize_optional_text(request.notes);
         profile.icon = normalize_optional_text(request.icon);
         profile.color = normalize_optional_text(request.color);
         profile.icon_background_color = normalize_optional_text(request.icon_background_color);
@@ -1014,6 +1016,7 @@ impl ConnectionStore {
         });
         profile.name = request.name.trim().to_string();
         profile.group = group.clone();
+        profile.notes = normalize_optional_text(request.notes);
         profile.icon = normalize_optional_text(request.icon);
         profile.color = normalize_optional_text(request.color);
         profile.icon_background_color = normalize_optional_text(request.icon_background_color);
@@ -1176,6 +1179,7 @@ impl ConnectionStore {
         });
         profile.name = request.name.trim().to_string();
         profile.group = group.clone();
+        profile.notes = normalize_optional_text(request.notes);
         profile.icon = normalize_optional_text(request.icon);
         profile.color = normalize_optional_text(request.color);
         profile.icon_background_color = normalize_optional_text(request.icon_background_color);

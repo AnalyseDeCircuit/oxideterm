@@ -709,6 +709,27 @@ impl WorkspaceApp {
         )
     }
 
+    pub(super) fn render_connection_notes_fields(
+        &self,
+        notes: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // Notes are ordinary metadata; the warning keeps credentials in protected fields.
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.two))
+            .child(self.render_connection_multiline_field(
+                self.i18n.t("ssh.form.notes"),
+                notes,
+                self.i18n.t("ssh.form.notes_placeholder"),
+                NewConnectionField::Notes,
+                cx,
+            ))
+            .child(self.render_connection_hint(self.i18n.t("ssh.form.notes_hint")))
+            .into_any_element()
+    }
+
     pub(super) fn render_connection_secret_field(
         &self,
         label: String,
@@ -2551,6 +2572,7 @@ impl WorkspaceApp {
             keeps_saved_password,
             save_password,
             group,
+            notes,
             ssh_gateway_connection_id,
         )) = self.connection_form_state(cx).form.as_ref().map(|form| {
             (
@@ -2562,6 +2584,7 @@ impl WorkspaceApp {
                     && form.saved_password_keychain_id.is_some(),
                 form.save_password,
                 form.group.clone(),
+                form.notes.clone(),
                 form.remote_desktop_ssh_gateway_connection_id.clone(),
             )
         })
@@ -2589,6 +2612,7 @@ impl WorkspaceApp {
                 cx,
             ))
             .child(self.render_connection_group_select(self.i18n.t("ssh.form.group"), &group, cx))
+            .child(self.render_connection_notes_fields(&notes, cx))
             .child(
                 div()
                     .flex()
@@ -2952,12 +2976,13 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_telnet_form_branch(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some((host, port, profile_name)) =
+        let Some((host, port, profile_name, notes)) =
             self.connection_form_state(cx).form.as_ref().map(|form| {
                 (
                     form.host.clone(),
                     form.port.clone(),
                     form.telnet_profile_name.clone(),
+                    form.notes.clone(),
                 )
             })
         else {
@@ -2979,6 +3004,7 @@ impl WorkspaceApp {
                     cx,
                 ),
             )
+            .child(self.render_connection_notes_fields(&notes, cx))
             .child(
                 div()
                     .flex()
@@ -3059,18 +3085,27 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_serial_form_branch(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some((ports, baud_rate, data_bits, stop_bits, parity, flow_control, profile_name)) =
-            self.connection_form_state(cx).form.as_ref().map(|form| {
-                (
-                    form.serial_ports.clone(),
-                    form.serial_baud_rate.clone(),
-                    form.serial_data_bits,
-                    form.serial_stop_bits,
-                    form.serial_parity,
-                    form.serial_flow_control,
-                    form.serial_profile_name.clone(),
-                )
-            })
+        let Some((
+            ports,
+            baud_rate,
+            data_bits,
+            stop_bits,
+            parity,
+            flow_control,
+            profile_name,
+            notes,
+        )) = self.connection_form_state(cx).form.as_ref().map(|form| {
+            (
+                form.serial_ports.clone(),
+                form.serial_baud_rate.clone(),
+                form.serial_data_bits,
+                form.serial_stop_bits,
+                form.serial_parity,
+                form.serial_flow_control,
+                form.serial_profile_name.clone(),
+                form.notes.clone(),
+            )
+        })
         else {
             return div().into_any_element();
         };
@@ -3148,6 +3183,7 @@ impl WorkspaceApp {
                     cx,
                 ),
             )
+            .child(self.render_connection_notes_fields(&notes, cx))
             .into_any_element();
         div()
             .flex()

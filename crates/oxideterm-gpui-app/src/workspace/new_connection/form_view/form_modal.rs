@@ -422,19 +422,7 @@ impl WorkspaceApp {
                                             &form.group,
                                             cx,
                                         ))
-                                        .when(ssh_submission_mode, |basic| {
-                                            basic
-                                                .child(self.render_connection_multiline_field(
-                                                    self.i18n.t("ssh.form.notes"),
-                                                    &form.notes,
-                                                    self.i18n.t("ssh.form.notes_placeholder"),
-                                                    NewConnectionField::Notes,
-                                                    cx,
-                                                ))
-                                                .child(self.render_connection_hint(
-                                                    self.i18n.t("ssh.form.notes_hint"),
-                                                ))
-                                        })
+                                        .child(self.render_connection_notes_fields(&form.notes, cx))
                                         .child(
                                             div()
                                                 .flex()

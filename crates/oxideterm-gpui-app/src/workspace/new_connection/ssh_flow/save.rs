@@ -39,6 +39,11 @@ fn mosh_password_draft_is_persistent(form: &NewConnectionForm) -> bool {
     form.save_password || (form.mosh_profile_id.is_some() && !form.password.is_empty())
 }
 
+fn saved_profile_notes(notes: &str) -> Option<String> {
+    let notes = notes.trim();
+    (!notes.is_empty()).then(|| notes.to_string())
+}
+
 fn saved_mosh_auth_from_form(form: &mut NewConnectionForm) -> SavedAuth {
     match form.auth_tab {
         SshAuthTab::Password => {
@@ -857,6 +862,7 @@ impl WorkspaceApp {
                     id: editing_profile_id,
                     name: serial_profile_name_or_port(&form.serial_profile_name, &port_path),
                     group: serial_profile_group_from_form(&form.group, &this.i18n),
+                    notes: saved_profile_notes(&form.notes),
                     icon: asset_icon_from_form(&form.icon),
                     color: asset_color_from_form(&form.color),
                     icon_background_color: asset_color_from_form(&form.icon_background_color),
@@ -988,6 +994,7 @@ impl WorkspaceApp {
                     id: editing_profile_id,
                     name: telnet_profile_name_or_endpoint(&form.telnet_profile_name, &host, port),
                     group: serial_profile_group_from_form(&form.group, &this.i18n),
+                    notes: saved_profile_notes(&form.notes),
                     icon: asset_icon_from_form(&form.icon),
                     color: asset_color_from_form(&form.color),
                     icon_background_color: asset_color_from_form(&form.icon_background_color),
@@ -1203,6 +1210,7 @@ impl WorkspaceApp {
                 id: form.mosh_profile_id.clone(),
                 name: title,
                 group: serial_profile_group_from_form(&form.group, &this.i18n),
+                notes: saved_profile_notes(&form.notes),
                 icon: asset_icon_from_form(&form.icon),
                 color: asset_color_from_form(&form.color),
                 icon_background_color: asset_color_from_form(&form.icon_background_color),
@@ -1402,6 +1410,7 @@ impl WorkspaceApp {
                     id: editing_profile_id,
                     name: label.clone(),
                     group: serial_profile_group_from_form(&form.group, &this.i18n),
+                    notes: saved_profile_notes(&form.notes),
                     icon: asset_icon_from_form(&form.icon),
                     color: asset_color_from_form(&form.color),
                     icon_background_color: asset_color_from_form(&form.icon_background_color),

@@ -429,6 +429,7 @@ mod tests {
                 id: Some("mosh-1".to_string()),
                 name: "Roaming shell".to_string(),
                 group: Some("Mobile".to_string()),
+                notes: Some("Intermittent link".to_string()),
                 icon: None,
                 color: None,
                 icon_background_color: None,
@@ -481,6 +482,10 @@ mod tests {
         .unwrap();
         assert_eq!(imported.imported_mosh_profiles, 1);
         assert_eq!(target.mosh_profiles()[0].id, profile.id);
+        assert_eq!(
+            target.mosh_profiles()[0].notes.as_deref(),
+            Some("Intermittent link")
+        );
         assert!(matches!(target.mosh_profiles()[0].auth, SavedAuth::Agent));
     }
 
@@ -496,6 +501,7 @@ mod tests {
                 id: Some("remote-1".to_string()),
                 name: "Lab desktop".to_string(),
                 group: Some("Lab".to_string()),
+                notes: Some("Shared display".to_string()),
                 protocol: RemoteDesktopProtocol::Vnc,
                 host: "vnc.example.com".to_string(),
                 port: 5900,
@@ -556,6 +562,7 @@ mod tests {
         assert_eq!(imported_profile.id, "remote-1");
         assert_eq!(imported_profile.protocol, RemoteDesktopProtocol::Vnc);
         assert_eq!(imported_profile.host, "vnc.example.com");
+        assert_eq!(imported_profile.notes.as_deref(), Some("Shared display"));
         assert!(imported_profile.credential_ref.is_none());
         assert_eq!(
             imported_profile.ssh_gateway_connection_id.as_deref(),

@@ -250,6 +250,8 @@ pub struct PublicSerialProfile {
     pub name: String,
     #[serde(default)]
     pub group: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
     pub port_path: String,
     #[serde(default)]
     pub baud_rate: Option<u32>,
@@ -277,6 +279,8 @@ pub struct PublicTelnetProfile {
     pub name: String,
     #[serde(default)]
     pub group: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
     pub host: String,
     #[serde(default = "default_telnet_port")]
     pub port: u16,
@@ -330,6 +334,8 @@ pub struct PublicMoshProfile {
     pub name: String,
     #[serde(default)]
     pub group: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
     pub host: String,
     #[serde(default = "default_ssh_port")]
     pub ssh_port: u16,
@@ -446,6 +452,8 @@ pub struct PublicRemoteDesktopProfile {
     pub name: String,
     #[serde(default)]
     pub group: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
     pub host: String,
     pub port: u16,
     #[serde(default)]

@@ -306,6 +306,7 @@ pub(super) fn saved_profile_selection_is_typed_separately_from_ssh_ids() {
         id: "shared-id".to_string(),
         name: "Remote desktop".to_string(),
         group: None,
+        notes: None,
         icon: None,
         color: None,
         icon_background_color: None,
