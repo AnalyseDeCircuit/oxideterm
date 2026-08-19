@@ -200,6 +200,13 @@ impl LocalPtySession {
             };
             report.events_drained += 1;
             report.drained_bytes = report.drained_bytes.saturating_add(stats.raw_bytes);
+            report.max_data_chunk_bytes = report
+                .max_data_chunk_bytes
+                .max(stats.max_data_chunk_bytes);
+            if budget.collect_performance_metrics {
+                report.output_processing_duration += stats.output_processing_duration;
+                report.terminal_lock_wait_duration += stats.terminal_lock_wait_duration;
+            }
             report.budget_exhausted |= stats.budget_exhausted;
         }
 
@@ -554,6 +561,15 @@ impl LocalPtySession {
         }
     }
 
+    pub fn scroll_lines_snapshot_incremental(
+        &mut self,
+        delta: i32,
+        previous: &TerminalSnapshot,
+    ) -> TerminalSnapshot {
+        let mut term = self.term.lock();
+        scroll_snapshot_from_term(&mut term, self.size, &self.graphics, delta, previous)
+    }
+
     pub fn page_up(&mut self) {
         self.term.lock().scroll_display(Scroll::PageUp);
     }
@@ -686,6 +702,78 @@ pub(crate) fn incremental_snapshot_from_term<T: EventListener>(
     snapshot
 }
 
+pub(crate) fn scroll_snapshot_from_term<T: EventListener>(
+    term: &mut Term<T>,
+    size: TerminalSize,
+    graphics: &TerminalGraphicsState,
+    delta: i32,
+    previous: &TerminalSnapshot,
+) -> TerminalSnapshot {
+    if delta != 0 {
+        term.scroll_display(Scroll::Delta(delta));
+    }
+
+    let scrollback_lines = term.total_lines().saturating_sub(term.screen_lines());
+    let display_offset = term.grid().display_offset().min(scrollback_lines);
+    let compatible = previous.cols == size.cols
+        && previous.rows == size.rows
+        && previous.scrollback_lines == scrollback_lines
+        && previous.lines.len() == size.rows;
+    let offset_distance = previous.display_offset.abs_diff(display_offset);
+    if !compatible || offset_distance >= size.rows {
+        let snapshot = snapshot_from_term_with_display_offset(
+            term,
+            size,
+            graphics,
+            display_offset,
+            size.rows,
+        );
+        term.reset_damage();
+        return snapshot;
+    }
+
+    let previous_row_index = |row: usize| {
+        if display_offset >= previous.display_offset {
+            row.checked_sub(offset_distance)
+        } else {
+            row.checked_add(offset_distance)
+                .filter(|row| *row < previous.lines.len())
+        }
+    };
+    let lines = (0..size.rows)
+        .map(|row| {
+            previous_row_index(row)
+                .and_then(|previous_row| previous.lines.get(previous_row))
+                .cloned()
+                .unwrap_or_else(|| snapshot_row_from_term(term, size, display_offset, row))
+        })
+        .collect::<Vec<_>>();
+
+    // The caller guarantees that the previous snapshot represented the terminal immediately
+    // before this viewport-only scroll, so overlapping rows can retain their shared cell buffers.
+    let mapped_cursor_row = if display_offset >= previous.display_offset {
+        previous.cursor_row.checked_add(offset_distance)
+    } else {
+        previous.cursor_row.checked_sub(offset_distance)
+    }
+    .unwrap_or(usize::MAX);
+    let mut snapshot = TerminalSnapshot {
+        generation: 0,
+        cols: size.cols,
+        rows: size.rows,
+        cursor_col: previous.cursor_col,
+        cursor_row: mapped_cursor_row,
+        cursor_shape: previous.cursor_shape,
+        display_offset,
+        scrollback_lines,
+        lines,
+        images: Vec::new(),
+    };
+    refresh_snapshot_metadata(&mut snapshot, term, size, graphics, display_offset);
+    term.reset_damage();
+    snapshot
+}
+
 pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
     term: &Term<T>,
     size: TerminalSize,
@@ -706,7 +794,7 @@ pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
 
     if cursor_row < rows.len() && cursor_col < size.cols {
         rows[cursor_row].cells_mut()[cursor_col].cursor = true;
-        mark_active_input_rows(&mut rows, cursor_row);
+        let _ = mark_active_input_rows(&mut rows, cursor_row);
     }
 
     for row in &mut rows {
@@ -802,22 +890,47 @@ fn refresh_snapshot_metadata<T: EventListener>(
     let content = term.renderable_content();
     let cursor_row = (content.cursor.point.line.0 + display_offset as i32).max(0) as usize;
     let cursor_col = content.cursor.point.column.0;
-    if snapshot.cursor_row < snapshot.lines.len() && snapshot.cursor_col < size.cols {
-        snapshot.lines[snapshot.cursor_row].cells_mut()[snapshot.cursor_col].cursor = false;
+    let mut metadata_rows = Vec::new();
+    let cursor_position_changed = snapshot.cursor_row != cursor_row || snapshot.cursor_col != cursor_col;
+    if cursor_position_changed
+        && snapshot.cursor_row < snapshot.lines.len()
+        && snapshot.cursor_col < size.cols
+    {
+        let previous_cursor_row = snapshot.cursor_row;
+        if snapshot.lines[previous_cursor_row].cells[snapshot.cursor_col].cursor {
+            snapshot.lines[previous_cursor_row].cells_mut()[snapshot.cursor_col].cursor = false;
+            metadata_rows.push(previous_cursor_row);
+        }
     }
-    for row in &mut snapshot.lines {
-        row.active_input = false;
+    let active_input_rows = if cursor_row < snapshot.lines.len() && cursor_col < size.cols {
+        active_input_row_range(&snapshot.lines, cursor_row)
+    } else {
+        0..0
+    };
+    for (row_index, row) in snapshot.lines.iter_mut().enumerate() {
+        let active_input = active_input_rows.contains(&row_index);
+        if row.active_input != active_input {
+            row.active_input = active_input;
+            metadata_rows.push(row_index);
+        }
     }
-    if cursor_row < snapshot.lines.len() && cursor_col < size.cols {
+    if cursor_row < snapshot.lines.len()
+        && cursor_col < size.cols
+        && !snapshot.lines[cursor_row].cells[cursor_col].cursor
+    {
         snapshot.lines[cursor_row].cells_mut()[cursor_col].cursor = true;
-        mark_active_input_rows(&mut snapshot.lines, cursor_row);
+        metadata_rows.push(cursor_row);
     }
     snapshot.cursor_col = cursor_col;
     snapshot.cursor_row = cursor_row;
     snapshot.cursor_shape = content.cursor.shape.into();
     snapshot.images = graphics.visible_images(display_offset, snapshot.lines.len());
-    for row in &mut snapshot.lines {
-        row.refresh_signature();
+    // Damaged rows already carry fresh signatures. Rehash only rows whose cursor or active-input
+    // metadata changed instead of walking every visible cell after a small terminal update.
+    metadata_rows.sort_unstable();
+    metadata_rows.dedup();
+    for row_index in metadata_rows {
+        snapshot.lines[row_index].refresh_signature();
     }
 }
 
@@ -877,6 +990,31 @@ mod incremental_snapshot_tests {
     }
 
     #[test]
+    fn scroll_snapshot_reuses_overlapping_viewport_rows() {
+        let size = TerminalSize {
+            cols: 8,
+            rows: 3,
+            cell_width: 0,
+            cell_height: 0,
+        };
+        let (listener, _events) = local_event_channel();
+        let mut term = Term::new(Config::default(), &size, listener);
+        let graphics = TerminalGraphicsState::default();
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(&mut term, b"one\r\ntwo\r\nthree\r\nfour");
+        let previous = snapshot_from_term(&term, size, &graphics);
+
+        let next = scroll_snapshot_from_term(&mut term, size, &graphics, 1, &previous);
+        let full = snapshot_from_term(&term, size, &graphics);
+
+        assert!(Arc::ptr_eq(
+            &previous.lines[0].cells,
+            &next.lines[1].cells
+        ));
+        assert_snapshot_content_eq(&next, &full);
+    }
+
+    #[test]
     fn incremental_snapshot_clears_the_previous_cursor_cell() {
         let size = TerminalSize {
             cols: 8,
@@ -925,7 +1063,21 @@ mod incremental_snapshot_tests {
     }
 }
 
-fn mark_active_input_rows(rows: &mut [TerminalRow], cursor_row: usize) {
+fn mark_active_input_rows(
+    rows: &mut [TerminalRow],
+    cursor_row: usize,
+) -> std::ops::Range<usize> {
+    let active_rows = active_input_row_range(rows, cursor_row);
+    for row in &mut rows[active_rows.clone()] {
+        row.active_input = true;
+    }
+    active_rows
+}
+
+fn active_input_row_range(
+    rows: &[TerminalRow],
+    cursor_row: usize,
+) -> std::ops::Range<usize> {
     let mut start = cursor_row;
     while start > 0 && rows.get(start - 1).is_some_and(|row| row.wrapped) {
         start -= 1;
@@ -935,8 +1087,5 @@ fn mark_active_input_rows(rows: &mut [TerminalRow], cursor_row: usize) {
     while end < rows.len() && rows.get(end - 1).is_some_and(|row| row.wrapped) {
         end += 1;
     }
-
-    for row in &mut rows[start..end] {
-        row.active_input = true;
-    }
+    start..end
 }

@@ -194,6 +194,14 @@ pub trait TerminalSessionBackend: Send {
     fn set_focused(&mut self, focused: bool) -> Result<()>;
     fn resize_with_cell_size(&mut self, resize: TerminalResize) -> Result<()>;
     fn scroll_lines(&mut self, delta: i32);
+    fn scroll_lines_snapshot_incremental(
+        &mut self,
+        delta: i32,
+        previous: &TerminalSnapshot,
+    ) -> TerminalSnapshot {
+        self.scroll_lines(delta);
+        self.snapshot_incremental(previous)
+    }
     fn page_up(&mut self);
     fn page_down(&mut self);
     fn scroll_to_top(&mut self);

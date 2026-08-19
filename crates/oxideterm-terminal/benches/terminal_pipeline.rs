@@ -3,6 +3,7 @@ use oxideterm_terminal::{GraphicsOptions, TerminalSession};
 
 const BENCHMARK_ROWS: usize = 40;
 const BENCHMARK_COLS: usize = 120;
+const BENCHMARK_SCROLL_DELTA: i32 = 1;
 
 fn terminal_corpus(lines: usize) -> Vec<u8> {
     let mut corpus = Vec::with_capacity(lines * 96);
@@ -56,6 +57,38 @@ fn benchmark_terminal_pipeline(criterion: &mut Criterion) {
     });
     criterion.bench_function("snapshot_incremental_unchanged_120x40", |bencher| {
         bencher.iter(|| black_box(terminal.snapshot_incremental(black_box(&previous_snapshot))));
+    });
+    let mut full_scroll_terminal = populated_terminal(20_000);
+    let mut full_scroll_delta = BENCHMARK_SCROLL_DELTA;
+    criterion.bench_function("snapshot_scroll_full_120x40", |bencher| {
+        bencher.iter(|| {
+            full_scroll_terminal.scroll_lines(full_scroll_delta);
+            let snapshot = full_scroll_terminal.snapshot();
+            full_scroll_delta = if snapshot.display_offset == 0 {
+                BENCHMARK_SCROLL_DELTA
+            } else {
+                -BENCHMARK_SCROLL_DELTA
+            };
+            black_box(snapshot)
+        });
+    });
+    let mut incremental_scroll_terminal = populated_terminal(20_000);
+    let mut incremental_scroll_snapshot = incremental_scroll_terminal.snapshot();
+    let mut incremental_scroll_delta = BENCHMARK_SCROLL_DELTA;
+    criterion.bench_function("snapshot_scroll_incremental_120x40", |bencher| {
+        bencher.iter(|| {
+            let snapshot = incremental_scroll_terminal.scroll_lines_snapshot_incremental(
+                incremental_scroll_delta,
+                black_box(&incremental_scroll_snapshot),
+            );
+            incremental_scroll_delta = if snapshot.display_offset == 0 {
+                BENCHMARK_SCROLL_DELTA
+            } else {
+                -BENCHMARK_SCROLL_DELTA
+            };
+            incremental_scroll_snapshot = snapshot;
+            black_box(incremental_scroll_snapshot.display_offset)
+        });
     });
     let search_source = terminal
         .search_source()

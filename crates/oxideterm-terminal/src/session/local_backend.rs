@@ -110,6 +110,14 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::scroll_lines(self, delta);
     }
 
+    fn scroll_lines_snapshot_incremental(
+        &mut self,
+        delta: i32,
+        previous: &TerminalSnapshot,
+    ) -> TerminalSnapshot {
+        LocalPtySession::scroll_lines_snapshot_incremental(self, delta, previous)
+    }
+
     fn page_up(&mut self) {
         LocalPtySession::page_up(self);
     }

@@ -305,9 +305,13 @@ impl TelnetSession {
                 let TelnetWorkerEvent::Output(bytes) = event.into_inner() else {
                     unreachable!("only output events enter the local drain queue");
                 };
-                report.drained_bytes = report.drained_bytes.saturating_add(bytes.len());
                 report.events_drained += 1;
+                let processing_started = budget.collect_performance_metrics.then(Instant::now);
                 self.feed_transport_output(&bytes);
+                report.record_data_chunk(
+                    bytes.len(),
+                    processing_started.map_or(Duration::ZERO, |started| started.elapsed()),
+                );
                 report.mark_changed();
                 continue;
             }
@@ -342,9 +346,13 @@ impl TelnetSession {
                     report.mark_changed();
                 }
                 TelnetWorkerEvent::Output(bytes) => {
-                    report.drained_bytes = report.drained_bytes.saturating_add(bytes.len());
                     report.events_drained += 1;
+                    let processing_started = budget.collect_performance_metrics.then(Instant::now);
                     self.feed_transport_output(&bytes);
+                    report.record_data_chunk(
+                        bytes.len(),
+                        processing_started.map_or(Duration::ZERO, |started| started.elapsed()),
+                    );
                     report.mark_changed();
                 }
                 TelnetWorkerEvent::Failed(error) => {
@@ -728,6 +736,26 @@ impl TerminalSessionBackend for TelnetSession {
         if delta != 0 {
             self.term.lock().scroll_display(Scroll::Delta(delta));
         }
+    }
+
+    fn scroll_lines_snapshot_incremental(
+        &mut self,
+        delta: i32,
+        previous: &TerminalSnapshot,
+    ) -> TerminalSnapshot {
+        let mut term = self.term.lock();
+        scroll_snapshot_from_term(
+            &mut term,
+            TerminalSize {
+                cols: self.resize.cols,
+                rows: self.resize.rows,
+                cell_width: self.resize.cell_width,
+                cell_height: self.resize.cell_height,
+            },
+            &self.graphics,
+            delta,
+            previous,
+        )
     }
 
     fn page_up(&mut self) {

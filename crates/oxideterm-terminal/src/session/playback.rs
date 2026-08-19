@@ -243,6 +243,20 @@ impl TerminalSessionBackend for PlaybackTerminalSession {
         }
     }
 
+    fn scroll_lines_snapshot_incremental(
+        &mut self,
+        delta: i32,
+        previous: &TerminalSnapshot,
+    ) -> TerminalSnapshot {
+        scroll_snapshot_from_term(
+            &mut self.term.lock(),
+            self.size,
+            &self.graphics,
+            delta,
+            previous,
+        )
+    }
+
     fn page_up(&mut self) {
         self.term.lock().scroll_display(Scroll::PageUp);
     }

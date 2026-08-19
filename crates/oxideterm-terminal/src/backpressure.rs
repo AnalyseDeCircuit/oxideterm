@@ -29,6 +29,7 @@ pub struct TerminalDrainBudget {
     pub max_bytes: usize,
     pub max_events: usize,
     pub max_duration: Duration,
+    pub collect_performance_metrics: bool,
 }
 
 impl TerminalDrainBudget {
@@ -37,11 +38,17 @@ impl TerminalDrainBudget {
             max_bytes,
             max_events,
             max_duration: Duration::MAX,
+            collect_performance_metrics: false,
         }
     }
 
     pub const fn with_max_duration(mut self, max_duration: Duration) -> Self {
         self.max_duration = max_duration;
+        self
+    }
+
+    pub const fn with_performance_metrics(mut self, enabled: bool) -> Self {
+        self.collect_performance_metrics = enabled;
         self
     }
 
@@ -85,6 +92,9 @@ pub struct TerminalDrainReport {
     pub pending_bytes: usize,
     pub events_drained: usize,
     pub drain_duration: Duration,
+    pub max_data_chunk_bytes: usize,
+    pub output_processing_duration: Duration,
+    pub terminal_lock_wait_duration: Duration,
     pub budget_exhausted: bool,
 }
 
@@ -93,12 +103,21 @@ impl TerminalDrainReport {
         self.changed = true;
     }
 
+    pub fn record_data_chunk(&mut self, byte_len: usize, processing_duration: Duration) {
+        self.drained_bytes = self.drained_bytes.saturating_add(byte_len);
+        self.max_data_chunk_bytes = self.max_data_chunk_bytes.max(byte_len);
+        self.output_processing_duration += processing_duration;
+    }
+
     pub fn combine(&mut self, other: TerminalDrainReport) {
         self.changed |= other.changed;
         self.drained_bytes = self.drained_bytes.saturating_add(other.drained_bytes);
         self.pending_bytes = self.pending_bytes.saturating_add(other.pending_bytes);
         self.events_drained = self.events_drained.saturating_add(other.events_drained);
         self.drain_duration += other.drain_duration;
+        self.max_data_chunk_bytes = self.max_data_chunk_bytes.max(other.max_data_chunk_bytes);
+        self.output_processing_duration += other.output_processing_duration;
+        self.terminal_lock_wait_duration += other.terminal_lock_wait_duration;
         self.budget_exhausted |= other.budget_exhausted;
     }
 }

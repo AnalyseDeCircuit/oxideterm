@@ -396,6 +396,15 @@ impl TerminalSession {
         self.backend.scroll_lines(delta);
     }
 
+    pub fn scroll_lines_snapshot_incremental(
+        &mut self,
+        delta: i32,
+        previous: &TerminalSnapshot,
+    ) -> TerminalSnapshot {
+        self.backend
+            .scroll_lines_snapshot_incremental(delta, previous)
+    }
+
     pub fn page_up(&mut self) {
         self.backend.page_up();
     }

@@ -1,3 +1,23 @@
+const SSH_OUTPUT_PARSE_SLICE_BYTES: usize = 4 * 1024;
+
+struct PendingSshOutput {
+    chunk: SshOutputChunk,
+    consumed_bytes: usize,
+}
+
+impl PendingSshOutput {
+    fn new(chunk: SshOutputChunk) -> Self {
+        Self {
+            chunk,
+            consumed_bytes: 0,
+        }
+    }
+
+    fn remaining_len(&self) -> usize {
+        self.chunk.len().saturating_sub(self.consumed_bytes)
+    }
+}
+
 pub struct SshPtySession {
     config: SshSessionConfig,
     term: Arc<FairMutex<Term<LocalEventListener>>>,
@@ -16,7 +36,7 @@ pub struct SshPtySession {
     graphics_ingress: GraphicsIngress,
     graphics: TerminalGraphicsState,
     graphics_alt_screen_active: bool,
-    output_queue: VecDeque<SshOutputChunk>,
+    output_queue: VecDeque<PendingSshOutput>,
     output_queue_bytes: usize,
     magic_scan: MagicScanWindow,
     encoding: TerminalEncoding,
@@ -500,11 +520,27 @@ impl SshPtySession {
                 break;
             }
 
-            if let Some(bytes) = self.output_queue.pop_front() {
-                self.output_queue_bytes = self.output_queue_bytes.saturating_sub(bytes.len());
-                report.drained_bytes = report.drained_bytes.saturating_add(bytes.len());
+            if let Some(mut output) = self.output_queue.pop_front() {
+                let remaining_budget = budget.max_bytes.saturating_sub(report.drained_bytes);
+                let slice_len = output
+                    .remaining_len()
+                    .min(SSH_OUTPUT_PARSE_SLICE_BYTES)
+                    .min(remaining_budget);
+                let slice_end = output.consumed_bytes.saturating_add(slice_len);
                 report.events_drained += 1;
-                self.feed_transport_output(&bytes);
+                let processing_started = budget.collect_performance_metrics.then(Instant::now);
+                self.feed_transport_output(&output.chunk[output.consumed_bytes..slice_end]);
+                report.record_data_chunk(
+                    slice_len,
+                    processing_started.map_or(Duration::ZERO, |started| started.elapsed()),
+                );
+                output.consumed_bytes = slice_end;
+                self.output_queue_bytes = self.output_queue_bytes.saturating_sub(slice_len);
+                if output.remaining_len() > 0 {
+                    // Keep the transport permit and the unconsumed suffix together so
+                    // backpressure and byte ordering remain unchanged across UI yields.
+                    self.output_queue.push_front(output);
+                }
                 report.mark_changed();
                 continue;
             }
@@ -518,19 +554,8 @@ impl SshPtySession {
 
             match result {
                 Ok(bytes) => {
-                    if report.drained_bytes > 0
-                        && report.drained_bytes.saturating_add(bytes.len()) > budget.max_bytes
-                    {
-                        self.output_queue_bytes =
-                            self.output_queue_bytes.saturating_add(bytes.len());
-                        self.output_queue.push_back(bytes);
-                        report.budget_exhausted = true;
-                        break;
-                    }
-                    report.drained_bytes = report.drained_bytes.saturating_add(bytes.len());
-                    report.events_drained += 1;
-                    self.feed_transport_output(&bytes);
-                    report.mark_changed();
+                    self.output_queue_bytes = self.output_queue_bytes.saturating_add(bytes.len());
+                    self.output_queue.push_back(PendingSshOutput::new(bytes));
                 }
                 Err(TryRecvError::Disconnected) => {
                     if self.lifecycle.is_running() {
@@ -838,6 +863,26 @@ impl TerminalSessionBackend for SshPtySession {
         if delta != 0 {
             self.term.lock().scroll_display(Scroll::Delta(delta));
         }
+    }
+
+    fn scroll_lines_snapshot_incremental(
+        &mut self,
+        delta: i32,
+        previous: &TerminalSnapshot,
+    ) -> TerminalSnapshot {
+        let mut term = self.term.lock();
+        scroll_snapshot_from_term(
+            &mut term,
+            TerminalSize {
+                cols: self.resize.cols,
+                rows: self.resize.rows,
+                cell_width: self.resize.cell_width,
+                cell_height: self.resize.cell_height,
+            },
+            &self.graphics,
+            delta,
+            previous,
+        )
     }
 
     fn page_up(&mut self) {

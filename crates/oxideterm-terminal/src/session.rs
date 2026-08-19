@@ -3,7 +3,7 @@ use std::{
     collections::VecDeque,
     io::{Read, Write},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use alacritty_terminal::{
@@ -43,7 +43,8 @@ use crate::{
     TerminalProcessInfo, TerminalProcessProbe, TerminalSearchMatch, TerminalSize, TerminalSnapshot,
     append_grid_line_text, backpressure::MagicScanWindow, focus_report_sequence,
     graphics_cursor_from_term, incremental_snapshot_from_term, interactive_terminal_config,
-    local_event_channel, privilege_prompt::TerminalPrivilegePromptStream, search_matches_from_term,
+    local_event_channel, privilege_prompt::TerminalPrivilegePromptStream,
+    scroll_snapshot_from_term, search_matches_from_term,
     shell_integration::TerminalShellIntegration, snapshot_from_term,
     snapshot_from_term_with_display_offset,
 };

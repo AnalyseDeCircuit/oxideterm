@@ -18,7 +18,7 @@ use std::{
         mpsc::{self, Receiver, Sender, TryRecvError},
     },
     thread::JoinHandle,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use alacritty_terminal::{
@@ -73,6 +73,9 @@ pub(crate) enum LocalGraphicsMsg {
 pub(crate) struct LocalPtyReadReport {
     pub(crate) raw_bytes: usize,
     pub(crate) parsed_bytes: usize,
+    pub(crate) max_data_chunk_bytes: usize,
+    pub(crate) output_processing_duration: Duration,
+    pub(crate) terminal_lock_wait_duration: Duration,
     pub(crate) budget_exhausted: bool,
 }
 
@@ -396,6 +399,9 @@ where
         let mut unprocessed = 0;
         let mut processed = 0;
         let mut raw_bytes = 0;
+        let mut max_data_chunk_bytes = 0;
+        let mut output_processing_duration = Duration::ZERO;
+        let mut terminal_lock_wait_duration = Duration::ZERO;
         let mut graphics_changed = false;
         let mut budget_exhausted = false;
         let terminal_lease = self.terminal.lease();
@@ -419,13 +425,18 @@ where
                 Some(terminal) => terminal,
                 None => terminal.insert(match self.terminal.try_lock_unfair() {
                     None if unprocessed >= LOCAL_PTY_READ_BUFFER_BYTES => {
-                        self.terminal.lock_unfair()
+                        let lock_started = Instant::now();
+                        let terminal = self.terminal.lock_unfair();
+                        terminal_lock_wait_duration += lock_started.elapsed();
+                        terminal
                     }
                     None => continue,
                     Some(terminal) => terminal,
                 }),
             };
 
+            let chunk_bytes = unprocessed;
+            let processing_started = Instant::now();
             let (parsed_bytes, changed) = Self::advance_processed_output(
                 state,
                 terminal,
@@ -435,6 +446,8 @@ where
                 &self.event_tx,
                 &self.graphics_tx,
             );
+            output_processing_duration += processing_started.elapsed();
+            max_data_chunk_bytes = max_data_chunk_bytes.max(chunk_bytes);
             graphics_changed |= changed;
 
             processed += parsed_bytes;
@@ -460,6 +473,9 @@ where
         Ok(LocalPtyReadReport {
             raw_bytes,
             parsed_bytes: processed,
+            max_data_chunk_bytes,
+            output_processing_duration,
+            terminal_lock_wait_duration,
             budget_exhausted,
         })
     }
@@ -477,7 +493,10 @@ where
         let magic_tx = self.magic_tx.clone();
         let graphics_tx = self.graphics_tx.clone();
         let event_tx = self.event_tx.clone();
+        let lock_started = Instant::now();
         let mut terminal = self.terminal.lock_unfair();
+        let terminal_lock_wait_duration = lock_started.elapsed();
+        let processing_started = Instant::now();
         let (processed, graphics_changed) = Self::advance_guarded_bytes(
             state,
             &mut *terminal,
@@ -487,6 +506,7 @@ where
             &event_tx,
             &graphics_tx,
         );
+        let output_processing_duration = processing_started.elapsed();
         drop(terminal);
 
         if state.needs_write() {
@@ -500,6 +520,9 @@ where
         Ok(LocalPtyReadReport {
             raw_bytes,
             parsed_bytes: processed,
+            max_data_chunk_bytes: raw_bytes,
+            output_processing_duration,
+            terminal_lock_wait_duration,
             budget_exhausted: false,
         })
     }
