@@ -208,7 +208,8 @@ pub(super) fn connection_request_from_spec(
             existing.and_then(|connection| connection.post_connect_command().map(ToOwned::to_owned))
         }),
         terminal: existing
-            .map(|connection| connection.options.terminal)
+            // Preserve the stored terminal options while resolving CLI overrides from a shared connection.
+            .map(|connection| connection.options.terminal.clone())
             .unwrap_or_default(),
     })
 }
