@@ -85,7 +85,7 @@
       "player_empty": "No playback output yet"
     },
     "highlight_override": {
-      "title": "Evidenziazione di parole chiave e regex",
+      "title": "Evidenziazione",
       "source_global_base": "Uso delle regole di base globali",
       "source_session": "Override sessione: {{name}}",
       "source_connection": "Override connessione: {{name}}",

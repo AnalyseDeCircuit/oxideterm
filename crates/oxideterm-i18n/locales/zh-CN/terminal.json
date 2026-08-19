@@ -155,7 +155,7 @@
       "player_empty": "暂无回放输出"
     },
     "highlight_override": {
-      "title": "关键词与正则高亮",
+      "title": "高亮",
       "source_global_base": "正在使用全局基础规则",
       "source_session": "当前会话覆盖：{{name}}",
       "source_connection": "连接覆盖：{{name}}",

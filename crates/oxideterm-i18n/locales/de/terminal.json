@@ -85,7 +85,7 @@
       "player_empty": "No playback output yet"
     },
     "highlight_override": {
-      "title": "Schlüsselwort- und Regex-Hervorhebung",
+      "title": "Hervorhebung",
       "source_global_base": "Globale Basisregeln werden verwendet",
       "source_session": "Sitzungsüberschreibung: {{name}}",
       "source_connection": "Verbindungsüberschreibung: {{name}}",

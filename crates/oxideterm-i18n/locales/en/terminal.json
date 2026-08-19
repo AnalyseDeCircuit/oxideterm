@@ -155,7 +155,7 @@
       "player_empty": "No playback output yet"
     },
     "highlight_override": {
-      "title": "Keyword & regex highlighting",
+      "title": "Highlighting",
       "source_global_base": "Using global base rules",
       "source_session": "Session override: {{name}}",
       "source_connection": "Connection override: {{name}}",

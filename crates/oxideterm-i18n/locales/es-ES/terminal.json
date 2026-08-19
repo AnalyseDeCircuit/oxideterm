@@ -85,7 +85,7 @@
       "player_empty": "No playback output yet"
     },
     "highlight_override": {
-      "title": "Resaltado de palabras clave y regex",
+      "title": "Resaltado",
       "source_global_base": "Usando reglas base globales",
       "source_session": "Reemplazo de sesión: {{name}}",
       "source_connection": "Reemplazo de conexión: {{name}}",

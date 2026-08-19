@@ -85,7 +85,7 @@
       "player_empty": "尚無回放輸出"
     },
     "highlight_override": {
-      "title": "關鍵字與正規表示式醒目提示",
+      "title": "醒目提示",
       "source_global_base": "正在使用全域基礎規則",
       "source_session": "目前工作階段覆寫：{{name}}",
       "source_connection": "連線覆寫：{{name}}",

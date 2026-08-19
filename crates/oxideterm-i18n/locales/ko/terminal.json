@@ -85,7 +85,7 @@
       "player_empty": "No playback output yet"
     },
     "highlight_override": {
-      "title": "키워드 및 정규식 강조",
+      "title": "강조 표시",
       "source_global_base": "전역 기본 규칙 사용 중",
       "source_session": "세션 재정의: {{name}}",
       "source_connection": "연결 재정의: {{name}}",

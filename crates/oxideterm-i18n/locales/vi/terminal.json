@@ -85,7 +85,7 @@
       "player_empty": "No playback output yet"
     },
     "highlight_override": {
-      "title": "Tô sáng từ khóa và biểu thức chính quy",
+      "title": "Tô sáng",
       "source_global_base": "Đang dùng quy tắc cơ sở toàn cục",
       "source_session": "Ghi đè phiên: {{name}}",
       "source_connection": "Ghi đè kết nối: {{name}}",

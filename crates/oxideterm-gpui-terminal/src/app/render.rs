@@ -272,7 +272,7 @@ impl Render for TerminalPane {
                 .flatten(),
         )
         .semantic_coloring(
-            self.preferences.semantic_coloring && !terminal_mode.contains(TermMode::ALT_SCREEN),
+            self.semantic_coloring_enabled() && !terminal_mode.contains(TermMode::ALT_SCREEN),
         )
         .semantic_scheme(self.preferences.semantic_scheme.clone())
         .semantic_shell(self.preferences.semantic_shell)

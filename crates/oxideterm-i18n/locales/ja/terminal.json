@@ -85,7 +85,7 @@
       "player_empty": "No playback output yet"
     },
     "highlight_override": {
-      "title": "キーワード・正規表現ハイライト",
+      "title": "ハイライト",
       "source_global_base": "グローバル基本ルールを使用中",
       "source_session": "セッション上書き：{{name}}",
       "source_connection": "接続上書き：{{name}}",

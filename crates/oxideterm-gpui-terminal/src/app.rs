@@ -332,6 +332,9 @@ pub struct TerminalPane {
     // The pane owns only its live-session highlight choice. Saved connection
     // defaults remain connection-store data and never affect node ownership.
     session_highlight_override: Option<TerminalHighlightRuleSetOverride>,
+    // This optional override belongs only to the pane and never mutates the
+    // application setting or the lifetime of its backing terminal session.
+    session_semantic_coloring_override: Option<bool>,
     // Command-derived query highlighting is session-only and never becomes a
     // persisted keyword rule or shared backend state.
     command_context_highlighting_enabled: bool,
@@ -838,6 +841,7 @@ impl TerminalPane {
             focus_handle,
             preference_overrides: TerminalUiPreferenceOverrides::default(),
             session_highlight_override: None,
+            session_semantic_coloring_override: None,
             command_context_highlighting_enabled: true,
             preferences: preferences.clone(),
             settings: TerminalUiSettings::from_preferences(&preferences),
@@ -1272,6 +1276,9 @@ impl TerminalPane {
         if let Some(highlight_override) = &self.session_highlight_override {
             preferences.highlight_rules = highlight_override.rules.clone();
         }
+        if self.session_semantic_coloring_override == Some(preferences.semantic_coloring) {
+            self.session_semantic_coloring_override = None;
+        }
         if self.preferences.terminal_encoding != preferences.terminal_encoding {
             self.terminal
                 .lock()
@@ -1331,6 +1338,24 @@ impl TerminalPane {
         self.session_highlight_override
             .as_ref()
             .map(|highlight_override| highlight_override.id.as_str())
+    }
+
+    pub fn semantic_coloring_enabled(&self) -> bool {
+        self.session_semantic_coloring_override
+            .unwrap_or(self.preferences.semantic_coloring)
+    }
+
+    pub fn session_semantic_coloring_overridden(&self) -> bool {
+        self.session_semantic_coloring_override.is_some()
+    }
+
+    pub fn set_session_semantic_coloring_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        let semantic_override = (enabled != self.preferences.semantic_coloring).then_some(enabled);
+        if self.session_semantic_coloring_override == semantic_override {
+            return;
+        }
+        self.session_semantic_coloring_override = semantic_override;
+        cx.notify();
     }
 
     pub fn command_context_highlighting_enabled(&self) -> bool {

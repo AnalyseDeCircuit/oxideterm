@@ -85,7 +85,7 @@
       "player_empty": "No playback output yet"
     },
     "highlight_override": {
-      "title": "Surlignage par mots-clés et regex",
+      "title": "Surlignage",
       "source_global_base": "Utilisation des règles globales de base",
       "source_session": "Remplacement de session : {{name}}",
       "source_connection": "Remplacement de connexion : {{name}}",
