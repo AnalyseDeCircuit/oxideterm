@@ -120,6 +120,8 @@ impl Render for DetachedTabWindow {
             .id(("detached-tab-window", tab_id.0))
             .size_full()
             .track_focus(&self.focus_handle)
-            .child(content)
+            .child(window_shell::render_resizable_window_content(
+                content, window,
+            ))
     }
 }

@@ -1,6 +1,190 @@
-use gpui::{App, Context, Entity, FocusHandle, Focusable, IntoElement, Render, Window};
+use gpui::{
+    AnyElement, App, Context, CursorStyle, Decorations, Entity, FocusHandle, Focusable,
+    IntoElement, MouseButton, Render, ResizeEdge, Tiling, Window, div, prelude::*, px,
+};
 
 use super::*;
+
+const CLIENT_WINDOW_RESIZE_EDGE_SIZE: f32 = 6.0;
+const CLIENT_WINDOW_RESIZE_CORNER_SIZE: f32 = 12.0;
+
+fn client_window_resize_enabled(
+    is_linux: bool,
+    decorations: Decorations,
+    maximized: bool,
+    fullscreen: bool,
+) -> bool {
+    is_linux && matches!(decorations, Decorations::Client { .. }) && !maximized && !fullscreen
+}
+
+fn client_window_resize_edge_enabled(edge: ResizeEdge, tiling: Tiling) -> bool {
+    match edge {
+        ResizeEdge::Top => !tiling.top,
+        ResizeEdge::TopRight => !tiling.top && !tiling.right,
+        ResizeEdge::Right => !tiling.right,
+        ResizeEdge::BottomRight => !tiling.bottom && !tiling.right,
+        ResizeEdge::Bottom => !tiling.bottom,
+        ResizeEdge::BottomLeft => !tiling.bottom && !tiling.left,
+        ResizeEdge::Left => !tiling.left,
+        ResizeEdge::TopLeft => !tiling.top && !tiling.left,
+    }
+}
+
+fn client_window_resize_cursor(edge: ResizeEdge) -> CursorStyle {
+    match edge {
+        ResizeEdge::Top | ResizeEdge::Bottom => CursorStyle::ResizeUpDown,
+        ResizeEdge::Left | ResizeEdge::Right => CursorStyle::ResizeLeftRight,
+        ResizeEdge::TopLeft | ResizeEdge::BottomRight => CursorStyle::ResizeUpLeftDownRight,
+        ResizeEdge::TopRight | ResizeEdge::BottomLeft => CursorStyle::ResizeUpRightDownLeft,
+    }
+}
+
+fn render_client_window_resize_handles(window: &Window) -> Option<AnyElement> {
+    let decorations = window.window_decorations();
+    if !client_window_resize_enabled(
+        cfg!(target_os = "linux"),
+        decorations,
+        window.is_maximized(),
+        window.is_fullscreen(),
+    ) {
+        return None;
+    }
+    let Decorations::Client { tiling } = decorations else {
+        return None;
+    };
+    let edge_size = px(CLIENT_WINDOW_RESIZE_EDGE_SIZE);
+    let corner_size = px(CLIENT_WINDOW_RESIZE_CORNER_SIZE);
+    let handle = |id, edge| {
+        div()
+            .id(id)
+            .absolute()
+            .occlude()
+            .cursor(client_window_resize_cursor(edge))
+            .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+                window.start_window_resize(edge);
+                cx.stop_propagation();
+            })
+    };
+
+    Some(
+        div()
+            .id("client-window-resize-handles")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .when(
+                client_window_resize_edge_enabled(ResizeEdge::Top, tiling),
+                |handles| {
+                    handles.child(
+                        handle("client-window-resize-top", ResizeEdge::Top)
+                            .top_0()
+                            .left(corner_size)
+                            .right(corner_size)
+                            .h(edge_size),
+                    )
+                },
+            )
+            .when(
+                client_window_resize_edge_enabled(ResizeEdge::Right, tiling),
+                |handles| {
+                    handles.child(
+                        handle("client-window-resize-right", ResizeEdge::Right)
+                            .top(corner_size)
+                            .right_0()
+                            .bottom(corner_size)
+                            .w(edge_size),
+                    )
+                },
+            )
+            .when(
+                client_window_resize_edge_enabled(ResizeEdge::Bottom, tiling),
+                |handles| {
+                    handles.child(
+                        handle("client-window-resize-bottom", ResizeEdge::Bottom)
+                            .right(corner_size)
+                            .bottom_0()
+                            .left(corner_size)
+                            .h(edge_size),
+                    )
+                },
+            )
+            .when(
+                client_window_resize_edge_enabled(ResizeEdge::Left, tiling),
+                |handles| {
+                    handles.child(
+                        handle("client-window-resize-left", ResizeEdge::Left)
+                            .top(corner_size)
+                            .bottom(corner_size)
+                            .left_0()
+                            .w(edge_size),
+                    )
+                },
+            )
+            .when(
+                client_window_resize_edge_enabled(ResizeEdge::TopLeft, tiling),
+                |handles| {
+                    handles.child(
+                        handle("client-window-resize-top-left", ResizeEdge::TopLeft)
+                            .top_0()
+                            .left_0()
+                            .size(corner_size),
+                    )
+                },
+            )
+            .when(
+                client_window_resize_edge_enabled(ResizeEdge::TopRight, tiling),
+                |handles| {
+                    handles.child(
+                        handle("client-window-resize-top-right", ResizeEdge::TopRight)
+                            .top_0()
+                            .right_0()
+                            .size(corner_size),
+                    )
+                },
+            )
+            .when(
+                client_window_resize_edge_enabled(ResizeEdge::BottomRight, tiling),
+                |handles| {
+                    handles.child(
+                        handle("client-window-resize-bottom-right", ResizeEdge::BottomRight)
+                            .right_0()
+                            .bottom_0()
+                            .size(corner_size),
+                    )
+                },
+            )
+            .when(
+                client_window_resize_edge_enabled(ResizeEdge::BottomLeft, tiling),
+                |handles| {
+                    handles.child(
+                        handle("client-window-resize-bottom-left", ResizeEdge::BottomLeft)
+                            .bottom_0()
+                            .left_0()
+                            .size(corner_size),
+                    )
+                },
+            )
+            .into_any_element(),
+    )
+}
+
+pub(in crate::workspace) fn render_resizable_window_content(
+    content: AnyElement,
+    window: &Window,
+) -> AnyElement {
+    let Some(handles) = render_client_window_resize_handles(window) else {
+        return content;
+    };
+    div()
+        .size_full()
+        .relative()
+        .child(content)
+        // Keep native resize hit targets above content-owned overlays.
+        .child(handles)
+        .into_any_element()
+}
 
 /// Owns native-window state while retaining the shared workspace session.
 pub(crate) struct WorkspaceWindowShell {
@@ -82,9 +266,10 @@ impl Focusable for WorkspaceWindowShell {
 impl Render for WorkspaceWindowShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.native_style.apply(&self.session, window, cx);
-        self.session.update(cx, |session, cx| {
+        let content = self.session.update(cx, |session, cx| {
             session.render_main_window(&self.background, window, cx)
-        })
+        });
+        render_resizable_window_content(content, window)
     }
 }
 
@@ -181,6 +366,65 @@ mod tests {
     use gpui::TestAppContext;
 
     use super::*;
+
+    #[test]
+    fn client_resize_requires_linux_client_decorations_in_windowed_state() {
+        let decorations = Decorations::Client {
+            tiling: Tiling::default(),
+        };
+
+        assert!(client_window_resize_enabled(
+            true,
+            decorations,
+            false,
+            false
+        ));
+        assert!(!client_window_resize_enabled(
+            false,
+            decorations,
+            false,
+            false
+        ));
+        assert!(!client_window_resize_enabled(
+            true,
+            Decorations::Server,
+            false,
+            false
+        ));
+        assert!(!client_window_resize_enabled(
+            true,
+            decorations,
+            true,
+            false
+        ));
+        assert!(!client_window_resize_enabled(
+            true,
+            decorations,
+            false,
+            true
+        ));
+    }
+
+    #[test]
+    fn client_resize_omits_tiled_edges_and_their_corners() {
+        let tiling = Tiling {
+            top: true,
+            left: false,
+            right: false,
+            bottom: false,
+        };
+
+        assert!(!client_window_resize_edge_enabled(ResizeEdge::Top, tiling));
+        assert!(!client_window_resize_edge_enabled(
+            ResizeEdge::TopLeft,
+            tiling
+        ));
+        assert!(client_window_resize_edge_enabled(ResizeEdge::Left, tiling));
+        assert!(client_window_resize_edge_enabled(
+            ResizeEdge::BottomLeft,
+            tiling
+        ));
+    }
 
     struct SessionDropProbe {
         drops: Arc<AtomicUsize>,
