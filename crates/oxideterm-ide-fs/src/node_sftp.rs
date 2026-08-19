@@ -620,7 +620,7 @@ fn map_sftp_error(error: SftpError) -> IdeFileError {
         }
         SftpError::SubsystemNotAvailable(_) => IdeFileErrorKind::Unsupported,
         SftpError::InvalidPath(_) => IdeFileErrorKind::NotFound,
-        SftpError::TransferCancelled => IdeFileErrorKind::Other,
+        SftpError::TransferCancelled | SftpError::TransferShutdown => IdeFileErrorKind::Other,
         SftpError::TransferInterrupted(_) => IdeFileErrorKind::Disconnected,
         SftpError::NotInitialized(_) => IdeFileErrorKind::Disconnected,
         SftpError::TransferError(_) | SftpError::WriteError(_) | SftpError::StorageError(_) => {

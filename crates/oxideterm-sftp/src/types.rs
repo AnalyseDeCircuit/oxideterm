@@ -98,6 +98,16 @@ pub enum LocalDownloadDisposition {
     ResumeVerified,
 }
 
+/// Controls whether a remote relay may replace an existing remote target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteRelayDisposition {
+    /// Create a new target and fail if it already exists.
+    CreateNew,
+    /// Stage the relay beside the target before replacing the existing entry.
+    ReplaceExisting,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TransferState {

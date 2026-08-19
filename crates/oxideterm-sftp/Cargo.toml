@@ -21,6 +21,7 @@ rmp-serde.workspace = true
 russh = { path = "../russh" }
 russh-sftp = { path = "../russh-sftp" }
 serde.workspace = true
+sha2.workspace = true
 tar = "0.4"
 thiserror.workspace = true
 tokio.workspace = true

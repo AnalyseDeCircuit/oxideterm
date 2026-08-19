@@ -801,6 +801,11 @@ impl SftpTransferManager {
             return Ok(());
         };
         if control.is_cancelled() {
+            if self.shutdown_state.load(Ordering::Acquire) != TRANSFER_MANAGER_RUNNING {
+                // Application shutdown stops live I/O but keeps resumable progress;
+                // an explicit user cancellation still removes partial targets.
+                return Err(SftpError::TransferShutdown);
+            }
             return Err(SftpError::TransferCancelled);
         }
         if let Some(reason) = control.interrupt_reason() {
@@ -809,6 +814,9 @@ impl SftpTransferManager {
         while control.is_paused() {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             if control.is_cancelled() {
+                if self.shutdown_state.load(Ordering::Acquire) != TRANSFER_MANAGER_RUNNING {
+                    return Err(SftpError::TransferShutdown);
+                }
                 return Err(SftpError::TransferCancelled);
             }
             if let Some(reason) = control.interrupt_reason() {
@@ -1191,6 +1199,32 @@ mod tests {
             BackgroundTransferState::Cancelled
         );
         manager.unregister("tx-late");
+    }
+
+    #[tokio::test]
+    async fn session_shutdown_interrupts_resumable_workers_instead_of_user_cancelling_them() {
+        let manager = Arc::new(SftpTransferManager::new());
+        let control = manager.register("tx-resumable");
+        let shutdown_manager = manager.clone();
+        let shutdown = tokio::spawn(async move {
+            shutdown_manager
+                .shutdown_session_transfers(Duration::from_millis(300))
+                .await
+        });
+        let mut cancellation = control.subscribe_cancellation();
+        cancellation
+            .changed()
+            .await
+            .expect("shutdown should signal the worker");
+
+        let error = manager
+            .check_control("tx-resumable")
+            .await
+            .expect_err("shutdown should preserve resumable state");
+        assert!(matches!(error, SftpError::TransferShutdown));
+        manager.unregister("tx-resumable");
+        let report = shutdown.await.expect("join shutdown");
+        assert!(report.drained);
     }
 
     #[tokio::test]

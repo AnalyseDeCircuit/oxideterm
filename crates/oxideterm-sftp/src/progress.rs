@@ -12,7 +12,79 @@ use redb::ReadableTable;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
-use crate::SftpError;
+use crate::{RemoteRelayDisposition, SftpError};
+
+const REMOTE_RELAY_PROGRESS_VERSION: u8 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteRelayProgressContext {
+    pub profile_id: String,
+    pub profile_revision: String,
+    pub source_endpoint_id: String,
+    pub destination_endpoint_id: String,
+}
+
+impl RemoteRelayProgressContext {
+    pub fn storage_key(&self) -> String {
+        format!("standalone-sftp-relay:{}", self.profile_id)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StoredRemoteRelayProgress {
+    #[serde(default = "default_remote_relay_progress_version")]
+    pub version: u8,
+    pub profile_id: String,
+    pub profile_revision: String,
+    pub source_endpoint_id: String,
+    pub destination_endpoint_id: String,
+    pub staging_path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup_path: Option<PathBuf>,
+    pub disposition: RemoteRelayDisposition,
+    pub source_size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_modified: Option<u32>,
+    pub source_sample_sha256: String,
+}
+
+const fn default_remote_relay_progress_version() -> u8 {
+    REMOTE_RELAY_PROGRESS_VERSION
+}
+
+impl StoredRemoteRelayProgress {
+    pub fn new(
+        context: &RemoteRelayProgressContext,
+        staging_path: PathBuf,
+        backup_path: Option<PathBuf>,
+        disposition: RemoteRelayDisposition,
+        source_size: u64,
+        source_modified: Option<u32>,
+        source_sample_sha256: String,
+    ) -> Self {
+        Self {
+            version: REMOTE_RELAY_PROGRESS_VERSION,
+            profile_id: context.profile_id.clone(),
+            profile_revision: context.profile_revision.clone(),
+            source_endpoint_id: context.source_endpoint_id.clone(),
+            destination_endpoint_id: context.destination_endpoint_id.clone(),
+            staging_path,
+            backup_path,
+            disposition,
+            source_size,
+            source_modified,
+            source_sample_sha256,
+        }
+    }
+
+    pub fn supports_resume(&self) -> bool {
+        self.version == REMOTE_RELAY_PROGRESS_VERSION
+    }
+
+    pub fn contains_endpoint(&self, endpoint_id: &str) -> bool {
+        self.source_endpoint_id == endpoint_id || self.destination_endpoint_id == endpoint_id
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredTransferProgress {
@@ -30,6 +102,8 @@ pub struct StoredTransferProgress {
     pub last_updated: DateTime<Utc>,
     pub session_id: String,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_relay: Option<StoredRemoteRelayProgress>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -104,6 +178,7 @@ impl StoredTransferProgress {
             last_updated: Utc::now(),
             session_id,
             error: None,
+            remote_relay: None,
         }
     }
 
@@ -769,6 +844,25 @@ mod tests {
             .expect("system clock should be after unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("oxideterm-sftp-{name}-{nonce}.redb"))
+    }
+
+    #[test]
+    fn legacy_progress_defaults_to_a_non_relay_transfer() {
+        let progress: StoredTransferProgress = serde_json::from_value(serde_json::json!({
+            "transfer_id": "legacy-transfer",
+            "transfer_type": "Download",
+            "source_path": "/remote/file.txt",
+            "destination_path": "/local/file.txt",
+            "transferred_bytes": 4,
+            "total_bytes": 8,
+            "status": "Paused",
+            "last_updated": "2026-08-19T00:00:00Z",
+            "session_id": "session-1",
+            "error": null
+        }))
+        .expect("deserialize legacy progress");
+
+        assert!(progress.remote_relay.is_none());
     }
 
     #[test]

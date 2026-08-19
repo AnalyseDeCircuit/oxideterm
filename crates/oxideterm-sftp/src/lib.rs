@@ -35,7 +35,8 @@ pub use path_utils::{
 };
 pub use progress::{
     DummyProgressStore, LazyProgressStore, ProgressStore, RedbProgressStore,
-    StoredTransferProgress, TransferProtocol, TransferStatus, TransferStrategy, TransferType,
+    RemoteRelayProgressContext, StoredRemoteRelayProgress, StoredTransferProgress,
+    TransferProtocol, TransferStatus, TransferStrategy, TransferType,
 };
 pub use retry::{
     RetryConfig, calculate_backoff, error_is_auth_failure, error_is_connection_unavailable,
@@ -63,5 +64,6 @@ pub use transfer_manager::{
 };
 pub use types::{
     AssetFileKind, FileInfo, FileType, ListFilter, LocalDownloadDisposition, PreviewContent,
-    SortOrder, TransferDirection, TransferProgress, TransferState, encode_to_encoding,
+    RemoteRelayDisposition, SortOrder, TransferDirection, TransferProgress, TransferState,
+    encode_to_encoding,
 };

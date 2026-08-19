@@ -20,6 +20,7 @@ use russh_sftp::{
     },
     protocol::{FileAttributes, OpenFlags},
 };
+use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tracing::{debug, info, warn};
 use zeroize::Zeroizing;
@@ -31,15 +32,16 @@ use super::{
     },
     types::{
         AdaptiveChunkSizer, AssetFileKind, FileInfo, FileType, ListFilter,
-        LocalDownloadDisposition, PreviewContent, SortOrder, TransferDirection, TransferProgress,
-        TransferState, constants, detect_and_decode, extension_to_language, font_mime_type,
-        generate_hex_dump, is_font_extension, is_likely_text_content, is_office_extension,
-        is_text_extension,
+        LocalDownloadDisposition, PreviewContent, RemoteRelayDisposition, SortOrder,
+        TransferDirection, TransferProgress, TransferState, constants, detect_and_decode,
+        extension_to_language, font_mime_type, generate_hex_dump, is_font_extension,
+        is_likely_text_content, is_office_extension, is_text_extension,
     },
 };
 use crate::{
-    ProgressStore, SftpTransferGuard, SftpTransferManager, StoredTransferProgress,
-    TransferProtocol, TransferStrategy, TransferType,
+    ProgressStore, RemoteRelayProgressContext, SftpTransferGuard, SftpTransferManager,
+    StoredRemoteRelayProgress, StoredTransferProgress, TransferProtocol, TransferStrategy,
+    TransferType,
 };
 
 const SFTP_DOWNLOAD_MAX_REQUESTS: usize = 64;
@@ -102,5 +104,6 @@ include!("session/preview.rs");
 include!("session/file_ops.rs");
 include!("session/directory_scheduler.rs");
 include!("session/transfers.rs");
+include!("session/relay.rs");
 include!("session/preview_helpers.rs");
 include!("session/helpers.rs");
