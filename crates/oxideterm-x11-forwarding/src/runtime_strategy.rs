@@ -89,29 +89,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn windows_strategy_rejects_unix_socket_endpoint() {
-        let strategy = X11RuntimeStrategy::for_platform(X11RuntimePlatform::Windows);
+    fn runtime_strategy_matches_platform_capabilities() {
+        // The matrix keeps platform transport and xauth capabilities visible together.
+        let cases = [
+            (
+                X11RuntimePlatform::Windows,
+                X11RuntimeSupport::Partial,
+                false,
+                true,
+                true,
+                true,
+            ),
+            (
+                X11RuntimePlatform::MacOs,
+                X11RuntimeSupport::Partial,
+                true,
+                true,
+                true,
+                true,
+            ),
+            (
+                X11RuntimePlatform::Unix,
+                X11RuntimeSupport::Full,
+                true,
+                true,
+                true,
+                true,
+            ),
+        ];
 
-        assert_eq!(strategy.support, X11RuntimeSupport::Partial);
-        assert!(!strategy.supports_unix_socket_endpoint);
-        assert!(strategy.supports_tcp_endpoint);
-    }
-
-    #[test]
-    fn macos_strategy_is_partial_but_uses_xquartz_paths() {
-        let strategy = X11RuntimeStrategy::for_platform(X11RuntimePlatform::MacOs);
-
-        assert_eq!(strategy.support, X11RuntimeSupport::Partial);
-        assert!(strategy.supports_unix_socket_endpoint);
-        assert!(strategy.can_read_xauthority_file);
-    }
-
-    #[test]
-    fn unix_strategy_is_full_runtime_baseline() {
-        let strategy = X11RuntimeStrategy::for_platform(X11RuntimePlatform::Unix);
-
-        assert_eq!(strategy.support, X11RuntimeSupport::Full);
-        assert!(strategy.supports_unix_socket_endpoint);
-        assert!(strategy.can_run_remote_xauth_update);
+        for (platform, support, unix_socket, tcp, read_xauthority, remote_xauth) in cases {
+            let strategy = X11RuntimeStrategy::for_platform(platform);
+            assert_eq!(strategy.support, support);
+            assert_eq!(strategy.supports_unix_socket_endpoint, unix_socket);
+            assert_eq!(strategy.supports_tcp_endpoint, tcp);
+            assert_eq!(strategy.can_read_xauthority_file, read_xauthority);
+            assert_eq!(strategy.can_run_remote_xauth_update, remote_xauth);
+        }
     }
 }

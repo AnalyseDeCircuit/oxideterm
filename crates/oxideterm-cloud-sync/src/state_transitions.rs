@@ -369,8 +369,6 @@ mod tests {
             plugin_settings: BTreeMap::new(),
         };
         let snapshot = CloudSyncLocalSnapshot {
-            metadata: Default::default(),
-            scope: Default::default(),
             dirty: StructuredDirtyInfo {
                 current_state: local_state.clone(),
                 dirty_sections: StructuredDirtySections {
@@ -381,13 +379,7 @@ mod tests {
             },
             upload_units: 2,
             connections_record_count: 3,
-            forwards_record_count: 0,
-            quick_commands_record_count: 0,
-            serial_profiles_record_count: 0,
-            telnet_profiles_record_count: 0,
-            mosh_profiles_record_count: 0,
-            remote_desktop_profiles_record_count: 0,
-            sensitive_credentials_record_count: 0,
+            ..CloudSyncLocalSnapshot::default()
         };
         let outcome = UploadOutcome {
             revision: "rev-2".to_string(),
@@ -470,22 +462,13 @@ mod tests {
             plugin_settings: BTreeMap::new(),
         };
         let snapshot = CloudSyncLocalSnapshot {
-            metadata: Default::default(),
-            scope: Default::default(),
             dirty: StructuredDirtyInfo {
                 current_state: local_state,
                 dirty_sections: Default::default(),
                 has_dirty: false,
             },
-            upload_units: 0,
             connections_record_count: 2,
-            forwards_record_count: 0,
-            quick_commands_record_count: 0,
-            serial_profiles_record_count: 0,
-            telnet_profiles_record_count: 0,
-            mosh_profiles_record_count: 0,
-            remote_desktop_profiles_record_count: 0,
-            sensitive_credentials_record_count: 0,
+            ..CloudSyncLocalSnapshot::default()
         };
         let outcome = ApplyStructuredPreviewOutcome {
             local_snapshot: snapshot.clone(),
@@ -634,8 +617,6 @@ mod tests {
     #[test]
     fn finish_legacy_apply_preserves_conflict_when_remote_is_partial() {
         let snapshot = CloudSyncLocalSnapshot {
-            metadata: Default::default(),
-            scope: Default::default(),
             dirty: StructuredDirtyInfo {
                 current_state: Default::default(),
                 dirty_sections: StructuredDirtySections {
@@ -644,15 +625,8 @@ mod tests {
                 },
                 has_dirty: true,
             },
-            upload_units: 0,
             connections_record_count: 1,
-            forwards_record_count: 0,
-            quick_commands_record_count: 0,
-            serial_profiles_record_count: 0,
-            telnet_profiles_record_count: 0,
-            mosh_profiles_record_count: 0,
-            remote_desktop_profiles_record_count: 0,
-            sensitive_credentials_record_count: 0,
+            ..CloudSyncLocalSnapshot::default()
         };
         let metadata = RemoteMetadata {
             exists: true,

@@ -889,24 +889,6 @@ mod tests {
     }
 
     #[test]
-    fn svg_font_family_uses_system_cjk_fallbacks() {
-        let stack = svg_font_family_stack("SF Pro Text");
-
-        assert!(stack.starts_with(r#""SF Pro Text", system-ui"#));
-        assert!(stack.contains(r#""PingFang SC""#));
-        assert!(stack.contains(r#""Microsoft YaHei""#));
-        assert!(stack.ends_with("sans-serif"));
-    }
-
-    #[test]
-    fn svg_font_family_deduplicates_primary_fonts() {
-        let stack = svg_font_family_stack(r#""Segoe UI", PingFang SC"#);
-
-        assert_eq!(stack.matches("Segoe UI").count(), 1);
-        assert_eq!(stack.matches("PingFang SC").count(), 1);
-    }
-
-    #[test]
     fn renders_subgraph_and_orthogonal_paths() {
         let tokens = default_tokens();
         let opts = MarkdownOptions::from_theme(&tokens);

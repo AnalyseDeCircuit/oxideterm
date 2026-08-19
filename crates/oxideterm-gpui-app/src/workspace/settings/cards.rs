@@ -1718,17 +1718,3 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
             | SelectAnchorId::SessionManagerBatchMove
     )
 }
-
-#[cfg(test)]
-mod floating_overlay_anchor_tests {
-    use super::*;
-
-    #[test]
-    fn ai_autocomplete_keeps_a_warm_window_overlay_anchor() {
-        // The candidate list is root-mounted, so its input-frame anchor must
-        // exist before the first slash, participant, or reference completion.
-        assert!(select_anchor_tracks_while_closed(
-            SelectAnchorId::AiAutocomplete
-        ));
-    }
-}

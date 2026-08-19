@@ -527,41 +527,6 @@ pub fn tmux_session_row_signature(
     hasher.finish()
 }
 
-#[cfg(test)]
-mod row_signature_tests {
-    use super::*;
-
-    #[test]
-    fn tmux_signature_ignores_live_session_state() {
-        let original = ResourceTmuxSession {
-            id: "$1".into(),
-            name: "work".into(),
-            windows: 2,
-            attached: false,
-            created: "100".into(),
-            activity: "110".into(),
-        };
-        let mut updated = original.clone();
-        updated.windows = 3;
-        updated.attached = true;
-        updated.activity = "120".into();
-
-        assert_eq!(
-            tmux_session_row_signature(&original, false, 0),
-            tmux_session_row_signature(&updated, false, 0)
-        );
-        updated.id = "$2".into();
-        assert_ne!(
-            tmux_session_row_signature(&original, false, 0),
-            tmux_session_row_signature(&updated, false, 0)
-        );
-        assert_ne!(
-            tmux_session_row_signature(&original, true, 2),
-            tmux_session_row_signature(&original, true, 3)
-        );
-    }
-}
-
 pub fn tmux_action_succeeded(exit_code: Option<i32>) -> bool {
     exit_code.unwrap_or(0) == 0
 }

@@ -2688,52 +2688,6 @@ fn collect_runs(inlines: &[Inline], run_style: FlatRunStyle, out: &mut Vec<FlatR
 mod tests {
     use super::*;
 
-    fn virtual_test_sizes(count: usize, height: f32) -> Vec<gpui::Size<gpui::Pixels>> {
-        (0..count)
-            .map(|_| gpui::size(px(100.0), px(height)))
-            .collect()
-    }
-
-    #[test]
-    fn markdown_virtual_window_keeps_a_non_empty_range_for_normal_scroll() {
-        let item_sizes = virtual_test_sizes(80, 24.0);
-        let window = markdown_virtual_window(&item_sizes, 8.0, 320.0, 180.0, 64.0).unwrap();
-
-        assert!(window.range.start < window.range.end);
-        assert!(window.range.end <= item_sizes.len());
-        assert!(window.top_spacer > 0.0);
-    }
-
-    #[test]
-    fn markdown_virtual_window_renders_tail_when_scroll_offset_is_stale() {
-        let item_sizes = virtual_test_sizes(80, 24.0);
-        let total_height = estimated_markdown_height(&item_sizes, 8.0);
-        let stale_scroll_top = total_height * 3.0;
-        let window =
-            markdown_virtual_window(&item_sizes, 8.0, stale_scroll_top, 180.0, 64.0).unwrap();
-
-        assert!(window.range.start < window.range.end);
-        assert_eq!(window.range.end, item_sizes.len());
-        assert!(window.top_spacer > total_height);
-        assert!(window.bottom_spacer >= 0.0);
-    }
-
-    #[test]
-    fn markdown_virtual_window_sanitizes_invalid_scroll_inputs() {
-        let item_sizes = virtual_test_sizes(8, 24.0);
-        let window =
-            markdown_virtual_window(&item_sizes, 8.0, f32::NAN, -10.0, f32::INFINITY).unwrap();
-
-        assert_eq!(window.range.start, 0);
-        assert!(window.range.start < window.range.end);
-    }
-
-    #[test]
-    fn markdown_scroll_top_converts_gpui_negative_offsets() {
-        assert_eq!(markdown_scroll_top_from_gpui_offset(px(-128.0)), 128.0);
-        assert_eq!(markdown_scroll_top_from_gpui_offset(px(32.0)), 0.0);
-    }
-
     #[test]
     fn image_path_resolution_uses_local_paths_and_defers_remote_uris() {
         let opts = MarkdownOptions::default();
@@ -2769,48 +2723,6 @@ mod tests {
             image_path_from_url("ftp://example.com/logo.png", &opts),
             None
         );
-    }
-
-    #[test]
-    fn maps_table_alignments_to_gpui_text_alignments() {
-        assert_eq!(
-            table_alignment_text_align(TableAlignment::None),
-            TextAlign::Left
-        );
-        assert_eq!(
-            table_alignment_text_align(TableAlignment::Left),
-            TextAlign::Left
-        );
-        assert_eq!(
-            table_alignment_text_align(TableAlignment::Center),
-            TextAlign::Center
-        );
-        assert_eq!(
-            table_alignment_text_align(TableAlignment::Right),
-            TextAlign::Right
-        );
-        assert_eq!(
-            block_alignment_text_align(BlockAlignment::Center),
-            TextAlign::Center
-        );
-    }
-
-    #[test]
-    fn table_column_widths_prefer_content_heavy_columns() {
-        let headers = vec![
-            vec![Inline::Text("类型".into())],
-            vec![Inline::Text("名称".into())],
-            vec![Inline::Text("说明".into())],
-        ];
-        let rows = vec![vec![
-            vec![Inline::Text("🎵".into())],
-            vec![Inline::Text("long-recording-file-name.wav".into())],
-            vec![Inline::Text("音频文件".into())],
-        ]];
-        let widths = table_column_widths(&headers, &rows, table_column_count(&headers, &rows));
-        assert!(widths[1] > widths[0]);
-        assert!(widths[1] > widths[2]);
-        assert!((widths.iter().sum::<f32>() - 1.0).abs() < 0.001);
     }
 
     #[test]

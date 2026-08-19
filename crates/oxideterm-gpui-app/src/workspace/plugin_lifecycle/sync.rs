@@ -11,8 +11,6 @@ use oxideterm_connections::{
         preview_oxide_import_with_progress,
     },
 };
-#[cfg(test)]
-pub(super) use oxideterm_plugin_host_api::sync::native_plugin_apply_oxide_import_core;
 pub(super) use oxideterm_plugin_host_api::sync::{
     NativePluginQuickCommandImportStrategy, native_plugin_bool_arg, native_plugin_file_data_arg,
     native_plugin_optional_string_arg, native_plugin_selected_plugin_settings,

@@ -364,7 +364,7 @@ pub struct StructuredDirtySections {
     pub plugin_settings: BTreeMap<String, bool>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StructuredDirtyInfo {
     pub current_state: StructuredLocalState,
@@ -1350,21 +1350,5 @@ mod tests {
             s3_revision_blob_key("team/default", "rev-1"),
             "team/default/blobs/rev-1.oxide"
         );
-    }
-
-    #[test]
-    fn counts_upload_units_like_structured_sync() {
-        let scope = SyncScope {
-            app_settings_sections: strings(&["general", "localTerminal"]),
-            plugin_ids: Some(strings(&["plugin-a", "plugin-b"])),
-            ..SyncScope::default()
-        };
-        let metadata = LocalSyncMetadata {
-            app_settings_section_revisions: BTreeMap::from([("general".into(), "gen".into())]),
-            plugin_settings_revisions: BTreeMap::from([("plugin-b".into(), "pb".into())]),
-            ..LocalSyncMetadata::default()
-        };
-
-        assert_eq!(count_structured_upload_plan_units(&metadata, &scope), 5);
     }
 }

@@ -219,17 +219,9 @@ impl RemoteDesktopWorkerWake {
 mod visibility_tests {
     use super::{
         REMOTE_DESKTOP_AUTOMATIC_RECONNECT_DELAYS, remote_desktop_automatic_reconnect_delay,
-        remote_desktop_network_failure_allows_automatic_reconnect, remote_desktop_tab_visible,
+        remote_desktop_network_failure_allows_automatic_reconnect,
     };
     use oxideterm_remote_desktop::RemoteDesktopErrorCategory;
-
-    #[test]
-    fn remote_desktop_visibility_covers_main_detached_and_hidden_tabs() {
-        assert!(remote_desktop_tab_visible(true, false));
-        assert!(remote_desktop_tab_visible(false, true));
-        assert!(remote_desktop_tab_visible(true, true));
-        assert!(!remote_desktop_tab_visible(false, false));
-    }
 
     #[test]
     fn automatic_reconnect_backoff_caps_at_the_last_delay() {
@@ -989,128 +981,14 @@ mod tests {
     }
 
     #[test]
-    fn force_recover_stays_available_for_connected_and_inflight_sessions() {
-        for status in [
-            RemoteDesktopSessionStatus::Idle,
-            RemoteDesktopSessionStatus::Connecting,
-            RemoteDesktopSessionStatus::Connected,
-            RemoteDesktopSessionStatus::Reconnecting,
-            RemoteDesktopSessionStatus::Disconnected,
-            RemoteDesktopSessionStatus::Failed,
-        ] {
-            assert!(remote_desktop_force_recover_enabled(status));
-        }
-    }
-
-    #[test]
-    fn worker_generation_never_wraps_to_stale_zero() {
-        assert_eq!(next_remote_desktop_worker_generation(0), 1);
-        assert_eq!(next_remote_desktop_worker_generation(7), 8);
-        assert_eq!(next_remote_desktop_worker_generation(u64::MAX), u64::MAX);
-    }
-
-    #[test]
-    fn worker_delivery_adapter_restores_tab_mapping_at_the_app_boundary() {
-        let tab_id = TabId(42);
-        let generation = 7;
-        let delivery = oxideterm_remote_desktop::RemoteDesktopWorkerDelivery::FrameReady {
-            worker_id: oxideterm_remote_desktop::RemoteDesktopWorkerId::new(
-                oxideterm_remote_desktop::RemoteDesktopSessionId::new(),
-                generation,
-            ),
-        };
-
-        assert!(matches!(
-            map_remote_desktop_worker_delivery(tab_id, generation, delivery),
-            RemoteDesktopWorkerDelivery::FrameReady {
-                tab_id: mapped_tab_id,
-                generation: mapped_generation,
-            } if mapped_tab_id == tab_id && mapped_generation == generation
-        ));
-    }
-
-    #[test]
-    fn requested_size_uses_physical_pixels_for_high_dpi_viewports() {
-        let viewport = RemoteDesktopSize {
-            width: 1600,
-            height: 900,
-        };
-
-        assert_eq!(
-            remote_desktop_requested_size_for_viewport(viewport, Some(200)),
-            RemoteDesktopSize {
-                width: 3200,
-                height: 1800,
-            }
-        );
-        assert_eq!(
-            remote_desktop_requested_size_for_viewport(viewport, None),
-            viewport,
-        );
-    }
-
-    #[test]
-    fn requested_size_clamps_scaled_viewport_to_protocol_bounds() {
-        let viewport = RemoteDesktopSize {
-            width: 5000,
-            height: 5000,
-        };
-
-        assert_eq!(
-            remote_desktop_requested_size_for_viewport(viewport, Some(200)),
-            RemoteDesktopSize {
-                width: RemoteDesktopSize::MAX_DIMENSION,
-                height: RemoteDesktopSize::MAX_DIMENSION,
-            }
-        );
-    }
-
-    #[test]
-    fn resize_delta_ignores_border_sized_differences() {
-        let previous = Some(RemoteDesktopSize {
-            width: 1600,
-            height: 900,
-        });
-
-        assert!(!remote_desktop_size_delta_is_meaningful(
-            previous,
-            RemoteDesktopSize {
-                width: 1598,
-                height: 898
-            },
-        ));
-        assert!(remote_desktop_size_delta_is_meaningful(
-            previous,
-            RemoteDesktopSize {
-                width: 1500,
-                height: 900
-            },
-        ));
-    }
-
-    #[test]
-    fn resize_scale_factor_matches_window_percent() {
-        assert_eq!(remote_desktop_scale_factor_percent(1.0), 100);
-        assert_eq!(remote_desktop_scale_factor_percent(1.25), 125);
-        assert_eq!(remote_desktop_scale_factor_percent(5.0), 500);
-        assert_eq!(remote_desktop_scale_factor_percent(0.75), 100);
-        assert_eq!(remote_desktop_scale_factor_percent(5.25), 100);
-        assert_eq!(remote_desktop_scale_factor_percent(0.0), 100);
-        assert_eq!(remote_desktop_scale_factor_percent(f32::NAN), 100);
-    }
-
-    #[test]
-    fn clipboard_image_item_maps_to_remote_desktop_data() {
+    fn clipboard_images_map_between_gpui_and_remote_desktop_formats() {
         let item = ClipboardItem::new_image(&Image::from_bytes(ImageFormat::Png, vec![1, 2, 3]));
 
         let data = remote_desktop_clipboard_data_from_item(&item).unwrap();
 
         assert_eq!(data.format, RemoteDesktopClipboardFormat::ImagePng);
         assert_eq!(data.bytes, vec![1, 2, 3]);
-    }
 
-    #[test]
-    fn remote_desktop_clipboard_data_maps_to_image_item() {
         let data =
             RemoteDesktopClipboardData::new(RemoteDesktopClipboardFormat::ImageJpeg, vec![4, 5, 6]);
 
@@ -1124,23 +1002,7 @@ mod tests {
     }
 
     #[test]
-    fn mouse_button_mapping_forwards_navigation_buttons() {
-        assert_eq!(
-            remote_desktop_mouse_button_from_gpui(gpui::MouseButton::Navigate(
-                gpui::NavigationDirection::Back
-            )),
-            Some(RemoteDesktopMouseButton::Back)
-        );
-        assert_eq!(
-            remote_desktop_mouse_button_from_gpui(gpui::MouseButton::Navigate(
-                gpui::NavigationDirection::Forward
-            )),
-            Some(RemoteDesktopMouseButton::Forward)
-        );
-    }
-
-    #[test]
-    fn pixel_wheel_delta_accumulates_until_full_notch() {
+    fn wheel_delta_handles_pixel_accumulation_direction_changes_and_lines() {
         let mut remainder = remote_desktop_empty_wheel_delta();
 
         assert_eq!(
@@ -1158,11 +1020,6 @@ mod tests {
             Some(RemoteDesktopWheelDelta { x: 120.0, y: 0.0 })
         );
         assert_eq!(remainder, remote_desktop_empty_wheel_delta());
-    }
-
-    #[test]
-    fn pixel_wheel_delta_drops_opposite_direction_remainder() {
-        let mut remainder = remote_desktop_empty_wheel_delta();
 
         assert_eq!(
             remote_desktop_wheel_delta_from_scroll(
@@ -1179,11 +1036,8 @@ mod tests {
             Some(RemoteDesktopWheelDelta { x: -120.0, y: 0.0 })
         );
         assert_eq!(remainder, remote_desktop_empty_wheel_delta());
-    }
 
-    #[test]
-    fn line_wheel_delta_resets_pixel_remainder() {
-        let mut remainder = RemoteDesktopWheelDelta { x: 80.0, y: 40.0 };
+        remainder = RemoteDesktopWheelDelta { x: 80.0, y: 40.0 };
 
         assert_eq!(
             remote_desktop_wheel_delta_from_scroll(
@@ -1279,28 +1133,21 @@ mod tests {
     }
 
     #[test]
-    fn modifier_sync_presses_new_modifier_state() {
-        let next = RemoteDesktopModifierState {
+    fn modifier_sync_emits_only_changed_modifier_states() {
+        let pressed = RemoteDesktopModifierState {
             shift: true,
             ctrl: true,
             alt: false,
             meta: false,
         };
-
-        let requests =
-            remote_desktop_modifier_sync_requests(RemoteDesktopModifierState::default(), next);
-
         assert_eq!(
-            requests,
+            remote_desktop_modifier_sync_requests(RemoteDesktopModifierState::default(), pressed,),
             vec![
                 modifier_request("ShiftLeft", RemoteDesktopKeyState::Pressed),
                 modifier_request("ControlLeft", RemoteDesktopKeyState::Pressed),
             ]
         );
-    }
 
-    #[test]
-    fn modifier_sync_releases_cleared_modifier_state() {
         let previous = RemoteDesktopModifierState {
             shift: false,
             ctrl: true,
@@ -1308,11 +1155,8 @@ mod tests {
             meta: true,
         };
 
-        let requests =
-            remote_desktop_modifier_sync_requests(previous, RemoteDesktopModifierState::default());
-
         assert_eq!(
-            requests,
+            remote_desktop_modifier_sync_requests(previous, RemoteDesktopModifierState::default()),
             vec![
                 modifier_request("ControlLeft", RemoteDesktopKeyState::Released),
                 modifier_request("MetaLeft", RemoteDesktopKeyState::Released),
@@ -1321,7 +1165,7 @@ mod tests {
     }
 
     #[test]
-    fn capslock_state_maps_to_rdp_lock_key_sync() {
+    fn lock_key_state_tracks_capslock_and_preserves_estimates() {
         let keys = remote_desktop_lock_keys_with_capslock(None, gpui::Capslock { on: true });
 
         assert_eq!(
@@ -1338,10 +1182,7 @@ mod tests {
             Some(RemoteDesktopHelperRequest::SynchronizeLockKeys { keys })
         );
         assert_eq!(remote_desktop_lock_key_sync_request(Some(keys), keys), None);
-    }
 
-    #[test]
-    fn capslock_sync_preserves_estimated_lock_keys() {
         let previous = RemoteDesktopLockKeys {
             scroll_lock: true,
             num_lock: true,

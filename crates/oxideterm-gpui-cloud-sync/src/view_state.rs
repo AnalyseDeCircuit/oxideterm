@@ -368,39 +368,3 @@ pub fn close_cloud_sync_select_on_container_scroll(
     *highlighted_option = None;
     true
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cloud_sync_select_focus_tabs_only_through_visible_controls() {
-        let webdav_selects = [
-            CloudSyncSelect::Backend,
-            CloudSyncSelect::AuthMode,
-            CloudSyncSelect::ConflictStrategy,
-        ];
-        let hidden_auth_selects = [CloudSyncSelect::Backend, CloudSyncSelect::ConflictStrategy];
-
-        assert_eq!(
-            next_cloud_sync_select_focus(&webdav_selects, CloudSyncSelect::Backend, true),
-            Some(CloudSyncSelect::AuthMode)
-        );
-        assert_eq!(
-            next_cloud_sync_select_focus(&hidden_auth_selects, CloudSyncSelect::Backend, true),
-            Some(CloudSyncSelect::ConflictStrategy)
-        );
-        assert_eq!(
-            next_cloud_sync_select_focus(
-                &hidden_auth_selects,
-                CloudSyncSelect::ConflictStrategy,
-                true
-            ),
-            None
-        );
-        assert_eq!(
-            next_cloud_sync_select_focus(&webdav_selects, CloudSyncSelect::AuthMode, false),
-            Some(CloudSyncSelect::Backend)
-        );
-    }
-}

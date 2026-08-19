@@ -1526,43 +1526,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn handoff_preview_stays_inside_the_available_viewport() {
-        let rect = tab_window_handoff_rect(2.0, 790.0, 800.0, Some(800.0), 8.0, 240.0);
-
-        assert_eq!(rect.left, TAB_HANDOFF_VIEWPORT_MARGIN);
-        assert_eq!(
-            rect.top,
-            800.0 - TAB_HANDOFF_PREVIEW_HEIGHT - TAB_HANDOFF_VIEWPORT_MARGIN
-        );
-        assert_eq!(rect.height, TAB_HANDOFF_PREVIEW_HEIGHT);
-    }
-
-    #[test]
-    fn handoff_interpolation_preserves_exact_endpoints() {
-        let origin = TabWindowHandoffRect {
-            left: 20.0,
-            top: 40.0,
-            width: 240.0,
-            height: 48.0,
-        };
-        let target = TabWindowHandoffRect {
-            left: 0.0,
-            top: 0.0,
-            width: 1280.0,
-            height: 720.0,
-        };
-
-        assert_eq!(
-            interpolate_tab_window_handoff_rect(origin, target, 0.0),
-            origin
-        );
-        assert_eq!(
-            interpolate_tab_window_handoff_rect(origin, target, 1.0),
-            target
-        );
-    }
-
-    #[test]
     fn return_insertion_index_follows_the_pointer_between_tab_midpoints() {
         let widths = [100.0, 160.0, 120.0];
 

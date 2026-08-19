@@ -151,7 +151,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn blank_forward_hosts_default_to_localhost() {
+    fn forward_rules_normalize_blank_hosts_at_each_entrypoint() {
         let local = ForwardRule::local("  ", 8080, "\t", 3000);
         assert_eq!(local.bind_address, "localhost");
         assert_eq!(local.target_host, "localhost");
@@ -163,10 +163,7 @@ mod tests {
         let dynamic = ForwardRule::dynamic(" \n ", 1080);
         assert_eq!(dynamic.bind_address, "localhost");
         assert_eq!(dynamic.target_host, "");
-    }
 
-    #[test]
-    fn forward_updates_default_blank_hosts() {
         let mut rule = ForwardRule::local("127.0.0.1", 8080, "example.test", 3000);
         rule.apply_update(ForwardUpdate {
             bind_address: Some(" ".to_string()),
@@ -176,10 +173,7 @@ mod tests {
 
         assert_eq!(rule.bind_address, "localhost");
         assert_eq!(rule.target_host, "localhost");
-    }
 
-    #[test]
-    fn runtime_normalization_handles_struct_literal_rules() {
         let mut rule = ForwardRule {
             id: "forward-1".to_string(),
             forward_type: ForwardType::Local,

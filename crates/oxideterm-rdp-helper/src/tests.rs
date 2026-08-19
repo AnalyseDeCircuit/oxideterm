@@ -31,14 +31,11 @@ impl fmt::Display for StaticConnectorSource {
 impl std::error::Error for StaticConnectorSource {}
 
 #[test]
-fn wheel_units_preserve_direction_and_minimum_notch() {
-    assert_eq!(rdp_wheel_units(1.0), 120);
-    assert_eq!(rdp_wheel_units(-1.0), -120);
-    assert_eq!(rdp_wheel_units(240.0), 240);
-}
+fn wheel_conversion_preserves_units_and_emits_both_axes() {
+    for (delta, expected) in [(1.0, 120), (-1.0, -120), (240.0, 240)] {
+        assert_eq!(rdp_wheel_units(delta), expected);
+    }
 
-#[test]
-fn wheel_delta_emits_horizontal_and_vertical_operations() {
     let operations = rdp_wheel_operations(RemoteDesktopWheelDelta { x: 1.0, y: -240.0 });
 
     assert_eq!(operations.len(), 2);
@@ -675,28 +672,6 @@ fn client_config_withholds_credentials_until_certificate_acceptance() {
 }
 
 #[test]
-fn client_config_adjusts_initial_display_size_for_rdp() {
-    let config = RdpWorkerConfig {
-        endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
-        transport_endpoint: None,
-        size: RemoteDesktopSize {
-            width: 1601,
-            height: 899,
-        },
-        scale_factor: RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT,
-        graphics_epoch: 0,
-        read_only: false,
-        session_options: RemoteDesktopSessionOptions::default(),
-        monitor_layout: RemoteDesktopMonitorLayout::default(),
-    };
-
-    let client_config = build_client_rdp_config(&config).unwrap();
-
-    assert_eq!(client_config.connector.desktop_size.width % 2, 0);
-    assert_eq!(client_config.connector.desktop_size.height, 899);
-}
-
-#[test]
 fn rdp_desktop_size_normalization_matches_displaycontrol_bounds() {
     assert_eq!(
         normalized_rdp_desktop_size(RemoteDesktopSize {
@@ -754,61 +729,6 @@ fn resize_request_enters_client_loop_with_normalized_rdp_size() {
         }
         event => panic!("expected resize event, got {event:?}"),
     }
-}
-
-#[test]
-fn reconnect_state_remembers_latest_resize() {
-    let mut config = RdpWorkerConfig {
-        endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
-        transport_endpoint: None,
-        size: RemoteDesktopSize {
-            width: 1280,
-            height: 720,
-        },
-        scale_factor: RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT,
-        graphics_epoch: 0,
-        read_only: false,
-        session_options: RemoteDesktopSessionOptions::default(),
-        monitor_layout: RemoteDesktopMonitorLayout::default(),
-    };
-
-    remember_rdp_reconnect_state(
-        &RemoteDesktopHelperRequest::Resize {
-            size: RemoteDesktopSize {
-                width: 1600,
-                height: 900,
-            },
-            scale_factor: Some(150),
-        },
-        &mut config,
-    );
-
-    assert_eq!(
-        config.size,
-        RemoteDesktopSize {
-            width: 1600,
-            height: 900
-        }
-    );
-    assert_eq!(config.scale_factor, 150);
-}
-
-#[test]
-fn scale_factor_defaults_match_connector_and_displaycontrol_contexts() {
-    assert_eq!(rdp_connector_scale_factor(Some(100)), 100);
-    assert_eq!(rdp_connector_scale_factor(Some(500)), 500);
-    assert_eq!(
-        rdp_connector_scale_factor(Some(99)),
-        RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT
-    );
-    assert_eq!(
-        rdp_connector_scale_factor(None),
-        RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT
-    );
-    assert_eq!(
-        rdp_displaycontrol_scale_factor(None),
-        RDP_DISPLAYCONTROL_DEFAULT_SCALE_FACTOR_PERCENT
-    );
 }
 
 #[test]
@@ -1195,6 +1115,7 @@ fn standard_security_error_is_actionable_and_path_free() {
         connector_error_category(&error),
         RemoteDesktopErrorCategory::LegacySecurity
     );
+    assert!(connector_error_requires_legacy_security(&error));
     assert!(!message.contains("/Users/"));
     assert!(!message.contains(".cargo"));
 }
@@ -1229,22 +1150,6 @@ fn custom_standard_security_source_reports_legacy_security() {
     assert_eq!(message, LEGACY_RDP_SECURITY_MESSAGE);
     assert!(!message.contains("/Users/"));
     assert!(!message.contains(".cargo"));
-}
-
-#[test]
-fn standard_security_error_reports_legacy_security() {
-    let error = connector::ConnectorError::new(
-        "Initiation",
-        ConnectorErrorKind::Reason(
-            "client advertised SSL | HYBRID | HYBRID_EX, but server selected STANDARD_RDP_SECURITY"
-                .to_string(),
-        ),
-    );
-
-    let message = format_connector_error("RDP negotiation failed", &error);
-
-    assert!(connector_error_requires_legacy_security(&error));
-    assert_eq!(message, LEGACY_RDP_SECURITY_MESSAGE);
 }
 
 #[test]

@@ -751,47 +751,51 @@ mod tests {
     use tokio::{io::AsyncWriteExt, net::TcpListener};
 
     #[test]
-    fn parses_bare_socks5_env_value_with_proxy_dns_default() {
-        let proxy = parse_socks5_proxy_value("proxy.example.com:1080").unwrap();
+    fn parses_supported_upstream_proxy_forms() {
+        let cases = [
+            (
+                parse_socks5_proxy_value
+                    as fn(&str) -> Result<UpstreamProxyConfig, SshTransportError>,
+                "proxy.example.com:1080",
+                UpstreamProxyProtocol::Socks5,
+                "proxy.example.com",
+                1080,
+                true,
+                UpstreamProxyAuth::None,
+            ),
+            (
+                parse_socks5_proxy_value,
+                "socks5://user:secret@[::1]:1080/path",
+                UpstreamProxyProtocol::Socks5,
+                "::1",
+                1080,
+                false,
+                UpstreamProxyAuth::Password {
+                    username: "user".to_string(),
+                    password: Zeroizing::new("secret".to_string()),
+                },
+            ),
+            (
+                parse_http_proxy_value,
+                "http://user:secret@proxy.example.com:8080/path",
+                UpstreamProxyProtocol::HttpConnect,
+                "proxy.example.com",
+                8080,
+                true,
+                UpstreamProxyAuth::Password {
+                    username: "user".to_string(),
+                    password: Zeroizing::new("secret".to_string()),
+                },
+            ),
+        ];
 
-        assert_eq!(proxy.protocol, UpstreamProxyProtocol::Socks5);
-        assert_eq!(proxy.host, "proxy.example.com");
-        assert_eq!(proxy.port, 1080);
-        assert!(proxy.remote_dns);
-        assert_eq!(proxy.auth, UpstreamProxyAuth::None);
-    }
-
-    #[test]
-    fn parses_socks5_url_with_local_dns_semantics() {
-        let proxy = parse_socks5_proxy_value("socks5://user:secret@[::1]:1080/path").unwrap();
-
-        assert_eq!(proxy.host, "::1");
-        assert_eq!(proxy.port, 1080);
-        assert!(!proxy.remote_dns);
-        match proxy.auth {
-            UpstreamProxyAuth::Password { username, password } => {
-                assert_eq!(username, "user");
-                assert_eq!(&*password, "secret");
-            }
-            UpstreamProxyAuth::None => panic!("expected password auth"),
-        }
-    }
-
-    #[test]
-    fn parses_http_proxy_url_for_connect_env() {
-        let proxy = parse_http_proxy_value("http://user:secret@proxy.example.com:8080/path")
-            .expect("http proxy");
-
-        assert_eq!(proxy.protocol, UpstreamProxyProtocol::HttpConnect);
-        assert_eq!(proxy.host, "proxy.example.com");
-        assert_eq!(proxy.port, 8080);
-        assert!(proxy.remote_dns);
-        match proxy.auth {
-            UpstreamProxyAuth::Password { username, password } => {
-                assert_eq!(username, "user");
-                assert_eq!(&*password, "secret");
-            }
-            UpstreamProxyAuth::None => panic!("expected password auth"),
+        for (parse, input, protocol, host, port, remote_dns, auth) in cases {
+            let proxy = parse(input).unwrap();
+            assert_eq!(proxy.protocol, protocol);
+            assert_eq!(proxy.host, host);
+            assert_eq!(proxy.port, port);
+            assert_eq!(proxy.remote_dns, remote_dns);
+            assert_eq!(proxy.auth, auth);
         }
     }
 

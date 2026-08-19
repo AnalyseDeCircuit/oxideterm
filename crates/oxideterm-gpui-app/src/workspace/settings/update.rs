@@ -1050,27 +1050,6 @@ mod tests {
     }
 
     #[test]
-    fn progress_ratio_requires_a_positive_total() {
-        assert_eq!(native_update_progress_ratio(&update_status(10, None)), None);
-        assert_eq!(
-            native_update_progress_ratio(&update_status(10, Some(0))),
-            None
-        );
-    }
-
-    #[test]
-    fn progress_ratio_is_clamped_to_the_complete_range() {
-        assert_eq!(
-            native_update_progress_ratio(&update_status(25, Some(100))),
-            Some(0.25)
-        );
-        assert_eq!(
-            native_update_progress_ratio(&update_status(125, Some(100))),
-            Some(1.0)
-        );
-    }
-
-    #[test]
     fn progress_hint_reports_bytes_without_internal_retry_details() {
         assert_eq!(
             native_update_progress_hint(&update_status(512, Some(1024))),

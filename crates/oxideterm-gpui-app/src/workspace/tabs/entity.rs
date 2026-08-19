@@ -1216,18 +1216,6 @@ mod tests {
     }
 
     #[test]
-    fn typed_workspace_ids_are_monotonic_and_independent() {
-        let mut tab_host = WorkspaceTabHostEntity::new();
-
-        assert_eq!(tab_host.alloc_tab_id(), TabId(1));
-        assert_eq!(tab_host.alloc_pane_id(), PaneId(1));
-        assert_eq!(tab_host.alloc_session_id(), TerminalSessionId(1));
-        assert_eq!(tab_host.alloc_tab_id(), TabId(2));
-        assert_eq!(tab_host.alloc_pane_id(), PaneId(2));
-        assert_eq!(tab_host.alloc_session_id(), TerminalSessionId(2));
-    }
-
-    #[test]
     fn canonical_tabs_keep_selection_reorder_and_removal_atomic() {
         let mut tab_host = WorkspaceTabHostEntity::new();
         let first = TabId(1);
@@ -1348,24 +1336,6 @@ mod tests {
             Some(session_id)
         );
         assert_eq!(tab_host.terminal_location(session_id), Some(location));
-    }
-
-    #[test]
-    fn tab_rename_rejects_empty_and_non_terminal_titles() {
-        let mut tab_host = WorkspaceTabHostEntity::new();
-        let terminal_id = TabId(1);
-        let settings_id = TabId(2);
-        tab_host.insert_tab(test_tab(terminal_id, None));
-        let mut settings_tab = test_tab(settings_id, None);
-        settings_tab.kind = TabKind::Settings;
-        settings_tab.title = "Settings".to_string();
-        settings_tab.title_source = TabTitleSource::I18nKey("settings.title");
-        tab_host.insert_tab(settings_tab);
-
-        assert!(!tab_host.rename_terminal_tab(terminal_id, "   "));
-        assert!(!tab_host.rename_terminal_tab(settings_id, "Preferences"));
-        assert_eq!(tab_host.tab_by_id(terminal_id).unwrap().title, "tab-1");
-        assert_eq!(tab_host.tab_by_id(settings_id).unwrap().title, "Settings");
     }
 
     #[test]

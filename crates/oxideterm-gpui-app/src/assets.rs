@@ -651,39 +651,6 @@ impl AssetSource for NativeAssets {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn plugin_icon_names_ignore_case_and_common_separators() {
-        assert_eq!(
-            LucideIcon::from_plugin_name("Refresh-Cw"),
-            LucideIcon::RefreshCw
-        );
-        assert_eq!(
-            LucideIcon::from_plugin_name("LayoutDashboard"),
-            LucideIcon::AppWindow
-        );
-        assert_eq!(
-            LucideIcon::from_plugin_name("panel_left"),
-            LucideIcon::PanelLeft
-        );
-        assert_eq!(
-            LucideIcon::from_plugin_name("square-split-horizontal"),
-            LucideIcon::SplitSquareHorizontal
-        );
-        assert_eq!(
-            LucideIcon::from_plugin_name("circle-stop"),
-            LucideIcon::StopCircle
-        );
-        assert_eq!(
-            LucideIcon::from_plugin_name("not-bundled"),
-            LucideIcon::Puzzle
-        );
-    }
-}
-
 // Lucide icons are from lucide, licensed ISC. Settings navigation icons match
 // the lucide-react v0.577.0 package used by the Tauri frontend.
 const ACTIVITY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>"#;

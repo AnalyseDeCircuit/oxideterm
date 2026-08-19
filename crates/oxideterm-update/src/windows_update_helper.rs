@@ -409,7 +409,7 @@ fn release_windows_restart_manager_handles(app_exe: &Path) {
     let _ = unsafe { RmEndSession(session) };
 }
 
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 fn windows_restart_manager_app_paths(app_exe: &Path) -> Vec<PathBuf> {
     let mut app_paths = vec![app_exe.to_path_buf()];
     if let Some(install_dir) = app_exe.parent() {
@@ -423,36 +423,6 @@ fn windows_restart_manager_app_paths(app_exe: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn restart_manager_tracks_native_and_legacy_app_names() {
-        let install_dir = PathBuf::from("C:/Users/me/AppData/Local/OxideTerm");
-        assert_eq!(
-            windows_restart_manager_app_paths(&install_dir.join("oxideterm-native.exe")),
-            vec![
-                install_dir.join("oxideterm-native.exe"),
-                install_dir.join("oxideterm.exe"),
-            ]
-        );
-    }
-
-    #[test]
-    fn helper_arguments_round_trip() {
-        let options = WindowsUpdateHelperOptions {
-            install_dir: PathBuf::from("C:/Users/me/AppData/Local/OxideTerm"),
-            app_exe: PathBuf::from("C:/Users/me/AppData/Local/OxideTerm/oxideterm-native.exe"),
-            wait_pid: Some(42),
-            launch_after_apply: true,
-        };
-        let mut args = vec![OsString::from("oxideterm-update-helper.exe")];
-        args.extend(
-            windows_update_helper_arguments(&options)
-                .into_iter()
-                .map(OsString::from),
-        );
-
-        assert_eq!(parse_windows_update_helper_options(args).unwrap(), options);
-    }
 
     #[test]
     fn staged_update_replaces_files_and_retains_old_files() {

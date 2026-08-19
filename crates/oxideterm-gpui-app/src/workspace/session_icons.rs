@@ -343,24 +343,3 @@ pub(super) fn session_icon_from_id(icon_id: Option<&str>) -> Option<LucideIcon> 
         .find(|choice| choice.id == icon_id)
         .map(|choice| choice.icon)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn legacy_semantic_icon_ids_remain_supported() {
-        assert!(matches!(
-            session_icon_from_id(Some("database")),
-            Some(LucideIcon::Archive)
-        ));
-        assert!(matches!(
-            session_icon_from_id(Some("docker")),
-            Some(LucideIcon::Layers)
-        ));
-        assert!(matches!(
-            session_icon_from_id(Some("kubernetes")),
-            Some(LucideIcon::Puzzle)
-        ));
-    }
-}

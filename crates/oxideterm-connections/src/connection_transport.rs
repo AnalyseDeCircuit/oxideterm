@@ -125,7 +125,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn port_transition_replaces_only_empty_or_known_defaults() {
+    fn transport_transitions_preserve_custom_values_and_local_only_state() {
         assert_eq!(
             transport_port_replacement("22", ConnectionTransport::Ssh, ConnectionTransport::Rdp),
             Some("3389")
@@ -138,10 +138,6 @@ mod tests {
             transport_port_replacement("2200", ConnectionTransport::Ssh, ConnectionTransport::Rdp),
             None
         );
-    }
-
-    #[test]
-    fn username_transition_preserves_custom_values() {
         assert_eq!(
             transport_username_transition(
                 "root",
@@ -166,10 +162,6 @@ mod tests {
             ),
             Some(TransportUsernameTransition::Clear)
         );
-    }
-
-    #[test]
-    fn local_terminal_is_a_non_persistable_launch_target() {
         assert!(!transport_is_persistable(
             ConnectionTransport::LocalTerminal
         ));

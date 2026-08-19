@@ -83,8 +83,6 @@ fn read_password(service: &str, account: &str) -> Result<Option<Zeroizing<String
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn preview_14_store_arguments_include_permissive_acl() {
         let source = include_str!("macos.rs");
@@ -103,29 +101,5 @@ mod tests {
             .expect("exists function precedes read_password");
 
         assert!(!exists_source.contains("\"-w\""));
-    }
-
-    #[test]
-    #[ignore = "touches the current user's macOS keychain"]
-    fn real_keychain_round_trip_uses_preview_14_access() {
-        let service = format!("com.oxideterm.test.{}", std::process::id());
-        let account = "native-secret-store-round-trip";
-        let secret = "synthetic-test-secret";
-
-        let result = (|| -> Result<()> {
-            store(&service, account, secret)?;
-            assert!(exists(&service, account)?);
-            assert_eq!(
-                read_password(&service, account)?
-                    .as_ref()
-                    .map(|value| value.as_str()),
-                Some(secret)
-            );
-            Ok(())
-        })();
-        let cleanup = delete(&service, account);
-
-        result.expect("real keychain round-trip succeeds");
-        cleanup.expect("real keychain test entry is removed");
     }
 }

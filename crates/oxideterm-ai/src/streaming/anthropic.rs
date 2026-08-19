@@ -640,6 +640,34 @@ mod tests {
             suggestions: Vec::new(),
         };
 
+        let assistant = AiChatMessage {
+            role: AiChatRole::Assistant,
+            content: "hello".to_string(),
+            ..system.clone()
+        };
+        let repeated_assistant = AiChatMessage {
+            content: "again".to_string(),
+            ..assistant.clone()
+        };
+        let user = AiChatMessage {
+            role: AiChatRole::User,
+            content: "question".to_string(),
+            ..system.clone()
+        };
+        let (merged_system, merged_messages) =
+            anthropic_chat_messages(&[system.clone(), assistant, repeated_assistant, user]);
+        assert_eq!(merged_system.as_deref(), Some("sys"));
+        assert_eq!(merged_messages[0]["role"].as_str(), Some("user"));
+        assert_eq!(
+            merged_messages[0]["content"].as_str(),
+            Some("(Continue from previous context)")
+        );
+        assert_eq!(merged_messages[1]["role"].as_str(), Some("assistant"));
+        assert_eq!(
+            merged_messages[1]["content"].as_str(),
+            Some("hello\n\nagain")
+        );
+
         let (system_prompt, converted) =
             anthropic_chat_messages(&[system, empty_system.clone(), tool]);
         assert_eq!(system_prompt.as_deref(), Some("sys\n\n"));

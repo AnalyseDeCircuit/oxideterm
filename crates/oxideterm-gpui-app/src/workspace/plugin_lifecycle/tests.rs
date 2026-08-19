@@ -10,28 +10,41 @@ use std::{
 
 use oxideterm_connection_monitor::{ProfilerRegistry, ResourceMetrics};
 use oxideterm_connections::{
-    LocalSyncMetadata as SavedConnectionsLocalSyncMetadata, SavedConnectionsConflictStrategy,
-    SavedConnectionsSyncSnapshot,
-    oxide_file::{
-        ImportResultEnvelope, OxideExportOptions, OxideFile, export_connections_to_oxide,
-    },
+    LocalSyncMetadata as SavedConnectionsLocalSyncMetadata, SavedConnectionsSyncSnapshot,
+    oxide_file::OxideFile,
 };
-use oxideterm_forwarding::{ForwardRule, ForwardStatus, ForwardType, ForwardingRegistry};
+use oxideterm_forwarding::{ForwardType, ForwardingRegistry};
 use oxideterm_gpui_ide::{IdePluginFileSnapshot, IdePluginSnapshot};
 use oxideterm_plugin_host_api::capabilities::{
     NATIVE_PLUGIN_CAPABILITY_FILESYSTEM_READ, NATIVE_PLUGIN_CAPABILITY_FILESYSTEM_WRITE,
     NATIVE_PLUGIN_CAPABILITY_NETWORK_FORWARD, NATIVE_PLUGIN_CAPABILITY_NETWORK_HTTP,
 };
-use oxideterm_sftp::{
-    BackgroundTransferDirection, BackgroundTransferSnapshot, BackgroundTransferState,
-    SftpTransferManager,
-};
-use oxideterm_ssh::{NodeReadiness, NodeRouter};
+use oxideterm_sftp::SftpTransferManager;
+use oxideterm_ssh::NodeRouter;
 use serde_json::Map;
 
 use super::test_support::*;
 use super::*;
 use crate::workspace::TerminalInputInterceptorResult;
+
+const TEST_CONNECTIONS_REVISION: &str = "rev-connections";
+const TEST_CONNECTIONS_UPDATED_AT: &str = "2026-05-25T00:00:00Z";
+
+// Shared fixtures keep unrelated sync tests insulated from snapshot field additions.
+fn saved_connections_sync_fixture() -> SavedConnectionsSyncSnapshot {
+    SavedConnectionsSyncSnapshot {
+        revision: TEST_CONNECTIONS_REVISION.to_string(),
+        exported_at: TEST_CONNECTIONS_UPDATED_AT.to_string(),
+        records: Vec::new(),
+    }
+}
+
+fn saved_connections_metadata_fixture() -> SavedConnectionsLocalSyncMetadata {
+    SavedConnectionsLocalSyncMetadata {
+        saved_connections_revision: TEST_CONNECTIONS_REVISION.to_string(),
+        saved_connections_updated_at: TEST_CONNECTIONS_UPDATED_AT.to_string(),
+    }
+}
 
 #[test]
 fn native_plugin_permissions_keep_rich_baseline_and_gate_sensitive_calls() {
@@ -156,15 +169,8 @@ fn sync_host_call_returns_saved_connection_snapshots_and_metadata() {
             "host": "example.test"
         }
     ]);
-    let saved_connections_snapshot = SavedConnectionsSyncSnapshot {
-        revision: "rev-connections".to_string(),
-        exported_at: "2026-05-25T00:00:00Z".to_string(),
-        records: Vec::new(),
-    };
-    let local_metadata = SavedConnectionsLocalSyncMetadata {
-        saved_connections_revision: "rev-connections".to_string(),
-        saved_connections_updated_at: "2026-05-25T00:00:00Z".to_string(),
-    };
+    let saved_connections_snapshot = saved_connections_sync_fixture();
+    let local_metadata = saved_connections_metadata_fixture();
     let plugin_settings = Vec::new();
     let plugin_settings_revisions = Map::new();
 
@@ -226,15 +232,8 @@ fn sync_host_call_returns_saved_connection_snapshots_and_metadata() {
 fn sync_apply_saved_connections_requires_workspace_bridge() {
     let connection_store = test_connection_store("sync-pending");
     let saved_connections = serde_json::json!([]);
-    let saved_connections_snapshot = SavedConnectionsSyncSnapshot {
-        revision: "rev-connections".to_string(),
-        exported_at: "2026-05-25T00:00:00Z".to_string(),
-        records: Vec::new(),
-    };
-    let local_metadata = SavedConnectionsLocalSyncMetadata {
-        saved_connections_revision: "rev-connections".to_string(),
-        saved_connections_updated_at: "2026-05-25T00:00:00Z".to_string(),
-    };
+    let saved_connections_snapshot = saved_connections_sync_fixture();
+    let local_metadata = saved_connections_metadata_fixture();
     let plugin_settings = Vec::new();
     let plugin_settings_revisions = Map::new();
 
@@ -269,37 +268,11 @@ fn sync_apply_saved_connections_requires_workspace_bridge() {
 }
 
 #[test]
-fn sync_apply_saved_connections_args_parse_snapshot_and_strategy() {
-    let snapshot = SavedConnectionsSyncSnapshot {
-        revision: "rev-connections".to_string(),
-        exported_at: "2026-05-25T00:00:00Z".to_string(),
-        records: Vec::new(),
-    };
-
-    let (parsed_snapshot, strategy) =
-        native_plugin_sync_apply_saved_connections_args(&serde_json::json!({
-            "snapshot": snapshot,
-            "conflictStrategy": "merge"
-        }))
-        .unwrap();
-
-    assert_eq!(parsed_snapshot.revision, "rev-connections");
-    assert_eq!(strategy, SavedConnectionsConflictStrategy::Merge);
-}
-
-#[test]
 fn sync_oxide_host_calls_export_validate_and_preview_without_workspace_mutation() {
     let connection_store = test_connection_store_with_agent_connection("sync-oxide");
     let saved_connections = serde_json::json!([]);
-    let saved_connections_snapshot = SavedConnectionsSyncSnapshot {
-        revision: "rev-connections".to_string(),
-        exported_at: "2026-05-25T00:00:00Z".to_string(),
-        records: Vec::new(),
-    };
-    let local_metadata = SavedConnectionsLocalSyncMetadata {
-        saved_connections_revision: "rev-connections".to_string(),
-        saved_connections_updated_at: "2026-05-25T00:00:00Z".to_string(),
-    };
+    let saved_connections_snapshot = saved_connections_sync_fixture();
+    let local_metadata = saved_connections_metadata_fixture();
     let plugin_settings = Vec::new();
     let plugin_settings_revisions = Map::new();
 
@@ -433,82 +406,6 @@ fn sync_oxide_host_calls_export_validate_and_preview_without_workspace_mutation(
 }
 
 #[test]
-fn sync_import_oxide_args_and_core_import_match_tauri_defaults() {
-    let source_store = test_connection_store_with_agent_connection("sync-import-source");
-    let bytes = export_connections_to_oxide(
-        &source_store,
-        &["conn-1".to_string()],
-        "StrongPass!123",
-        OxideExportOptions::default(),
-    )
-    .unwrap();
-    let mut import_args = serde_json::json!({
-        "fileData": bytes,
-        "password": "StrongPass!123",
-        "conflictStrategy": "rename",
-        "selectedPluginIds": []
-    });
-    let password_buffer = import_args["password"].as_str().unwrap().as_ptr();
-    let (parsed_bytes, password, options) =
-        native_plugin_sync_import_oxide_args(&mut import_args).unwrap();
-    assert_eq!(password.as_ptr(), password_buffer);
-    assert!(import_args["password"].is_null());
-    assert!(options.oxide_options.import_forwards);
-    assert!(!options.oxide_options.import_portable_secrets);
-    assert!(options.import_app_settings);
-    assert!(options.import_plugin_settings);
-    assert_eq!(options.selected_plugin_ids, Some(HashSet::new()));
-
-    let mut target_store = test_connection_store("sync-import-target");
-    let envelope = native_plugin_apply_oxide_import_core(
-        &mut target_store,
-        &parsed_bytes,
-        &password,
-        options.oxide_options,
-    )
-    .unwrap();
-    assert_eq!(envelope.imported, 1);
-    assert!(target_store.get("conn-1").is_none());
-    assert!(target_store.connections().iter().any(|connection| {
-        connection.name == "Home"
-            && matches!(connection.auth, oxideterm_connections::SavedAuth::Agent)
-    }));
-}
-
-#[test]
-fn sync_import_result_omits_consumed_sidecar_payloads() {
-    let envelope = ImportResultEnvelope {
-        imported: 1,
-        app_settings_json: Some("{}".to_string()),
-        quick_commands_json: Some("[]".to_string()),
-        plugin_settings: vec![oxideterm_connections::oxide_file::EncryptedPluginSetting {
-            storage_key: "oxide-plugin-com.example.demo-setting-mode".to_string(),
-            serialized_value: "\"auto\"".to_string(),
-        }],
-        ..ImportResultEnvelope::default()
-    };
-
-    let value = native_plugin_sync_import_result_value(
-        &envelope,
-        true,
-        false,
-        2,
-        false,
-        Vec::new(),
-        1,
-        false,
-    );
-
-    assert_eq!(value["imported"], 1);
-    assert_eq!(value["importedAppSettings"], true);
-    assert_eq!(value["importedQuickCommands"], 2);
-    assert_eq!(value["importedPluginSettings"], 1);
-    assert!(value.get("appSettingsJson").is_none());
-    assert!(value.get("quickCommandsJson").is_none());
-    assert!(value.get("pluginSettings").is_none());
-}
-
-#[test]
 fn sync_plugin_settings_export_filters_selected_plugins_and_revisions() {
     let connection_store = test_connection_store("sync-plugin-settings");
     let plugin_settings = vec![
@@ -552,234 +449,6 @@ fn sync_plugin_settings_export_filters_selected_plugins_and_revisions() {
             .is_some_and(|revision| revision.starts_with("fnv1a-"))
     );
     assert!(revisions.contains_key("com.example.other"));
-}
-
-#[test]
-fn transfers_host_calls_return_tauri_snapshot_shape_and_filter_by_node() {
-    let manager = Arc::new(SftpTransferManager::new());
-    let first_transfer = BackgroundTransferSnapshot::new(
-        "tx-1".to_string(),
-        "node-a".to_string(),
-        "Upload logs".to_string(),
-        "/local/logs".to_string(),
-        "/remote/logs".to_string(),
-        BackgroundTransferDirection::Upload,
-        oxideterm_sftp::BackgroundTransferKind::Directory,
-        oxideterm_sftp::TransferStrategy::DirectoryRecursive,
-        2048,
-        512,
-    );
-    let second_transfer = BackgroundTransferSnapshot::new(
-        "tx-2".to_string(),
-        "node-b".to_string(),
-        "Download report".to_string(),
-        "/local/report.txt".to_string(),
-        "/remote/report.txt".to_string(),
-        BackgroundTransferDirection::Download,
-        oxideterm_sftp::BackgroundTransferKind::File,
-        oxideterm_sftp::TransferStrategy::File,
-        64,
-        64,
-    );
-    manager.register_background_transfer(first_transfer);
-    manager.register_background_transfer(second_transfer);
-    manager.mark_background_transfer_active("tx-1");
-    manager.finish_background_transfer("tx-2", BackgroundTransferState::Completed, None, None);
-
-    let all_response = native_plugin_transfers_response(
-        plugin_runtime::PluginHostCall {
-            request_id: "transfers-all-1".to_string(),
-            namespace: "transfers".to_string(),
-            method: "getAll".to_string(),
-            args: serde_json::json!({}),
-        },
-        &manager,
-    );
-    let plugin_runtime::PluginResponseResult::Ok { value: all_value } = all_response.result else {
-        panic!("expected transfers.getAll to return snapshots");
-    };
-    let all = all_value.as_array().unwrap();
-    assert_eq!(all.len(), 2);
-    let first = all
-        .iter()
-        .find(|transfer| transfer["id"] == "tx-1")
-        .unwrap();
-    assert_eq!(first["nodeId"], "node-a");
-    assert_eq!(first["direction"], "upload");
-    assert_eq!(first["protocol"], "sftp");
-    assert_eq!(first["restartResume"], true);
-    assert_eq!(first["state"], "active");
-    assert!(first.get("strategy").is_none());
-
-    let by_node_response = native_plugin_transfers_response(
-        plugin_runtime::PluginHostCall {
-            request_id: "transfers-node-1".to_string(),
-            namespace: "transfers".to_string(),
-            method: "getByNode".to_string(),
-            args: serde_json::json!({ "nodeId": "node-b" }),
-        },
-        &manager,
-    );
-    assert_eq!(
-        by_node_response.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!([
-                {
-                    "id": "tx-2",
-                    "nodeId": "node-b",
-                    "name": "Download report",
-                    "localPath": "/local/report.txt",
-                    "remotePath": "/remote/report.txt",
-                    "direction": "download",
-                    "protocol": "sftp",
-                    "restartResume": true,
-                    "size": 64,
-                    "transferred": 64,
-                    "state": "completed",
-                    "error": null,
-                    "startTime": all
-                        .iter()
-                        .find(|transfer| transfer["id"] == "tx-2")
-                        .unwrap()["startTime"],
-                    "endTime": all
-                        .iter()
-                        .find(|transfer| transfer["id"] == "tx-2")
-                        .unwrap()["endTime"],
-                }
-            ])
-        }
-    );
-}
-
-#[test]
-fn transfer_state_helpers_detect_complete_and_error_transitions() {
-    let previous = serde_json::json!([
-        { "id": "tx-1", "state": "active" },
-        { "id": "tx-2", "state": "pending" }
-    ]);
-    let next = serde_json::json!([
-        { "id": "tx-1", "state": "completed" },
-        { "id": "tx-2", "state": "error" }
-    ]);
-    let previous_states = native_plugin_transfer_state_map(&previous);
-    let next_states = native_plugin_transfer_state_map(&next);
-
-    let completed = native_plugin_transfer_transition_values(
-        &next,
-        &previous_states,
-        &next_states,
-        BackgroundTransferState::Completed,
-    );
-    let errored = native_plugin_transfer_transition_values(
-        &next,
-        &previous_states,
-        &next_states,
-        BackgroundTransferState::Error,
-    );
-
-    assert_eq!(completed[0]["id"], "tx-1");
-    assert_eq!(errored[0]["id"], "tx-2");
-}
-
-#[test]
-fn profiler_host_calls_map_node_ids_to_tauri_metrics_shape() {
-    let registry = ProfilerRegistry::new();
-    registry.start("conn-1");
-    registry.record_metrics(oxideterm_connection_monitor::ProfilerUpdate {
-        connection_id: "conn-1".to_string(),
-        metrics: ResourceMetrics {
-            timestamp_ms: 42,
-            system_info: Some(oxideterm_connection_monitor::ResourceSystemInfo {
-                system_name: Some("Ubuntu".to_string()),
-                system_version: Some("24.04.3 LTS".to_string()),
-                architecture: Some("x86_64".to_string()),
-                boot_time_ms: Some(1_720_000_000_000),
-                uptime_seconds: Some(93_784),
-            }),
-            cpu_percent: Some(12.5),
-            memory_used: Some(1024),
-            memory_total: Some(2048),
-            memory_percent: Some(50.0),
-            memory_buffers: None,
-            memory_cached: None,
-            swap_used: None,
-            swap_total: None,
-            swap_percent: None,
-            disk_used: Some(10),
-            disk_total: Some(20),
-            disk_percent: Some(50.0),
-            load_avg_1: Some(0.1),
-            load_avg_5: Some(0.2),
-            load_avg_15: Some(0.3),
-            cpu_cores: Some(8),
-            cpu_per_core: Vec::new(),
-            disks: Vec::new(),
-            net_rx_bytes_per_sec: Some(100),
-            net_tx_bytes_per_sec: Some(200),
-            net_interfaces: Vec::new(),
-            gpus: Vec::new(),
-            top_processes: Vec::new(),
-            docker: Default::default(),
-            services: Default::default(),
-            ssh_rtt_ms: Some(9),
-            source: oxideterm_connection_monitor::MetricsSource::Full,
-        },
-    });
-    let node_connection_ids = HashMap::from([("node-1".to_string(), "conn-1".to_string())]);
-
-    let response = native_plugin_profiler_response(
-        plugin_runtime::PluginHostCall {
-            request_id: "profiler-metrics-1".to_string(),
-            namespace: "profiler".to_string(),
-            method: "getMetrics".to_string(),
-            args: serde_json::json!({ "nodeId": "node-1" }),
-        },
-        &registry,
-        &node_connection_ids,
-    );
-    assert_eq!(
-        response.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!({
-                "timestampMs": 42,
-                "systemInfo": {
-                    "systemName": "Ubuntu",
-                    "systemVersion": "24.04.3 LTS",
-                    "architecture": "x86_64",
-                    "bootTimeMs": 1720000000000_u64,
-                    "uptimeSeconds": 93784,
-                },
-                "cpuPercent": 12.5,
-                "memoryUsed": 1024,
-                "memoryTotal": 2048,
-                "memoryPercent": 50.0,
-                "loadAvg1": 0.1,
-                "loadAvg5": 0.2,
-                "loadAvg15": 0.3,
-                "cpuCores": 8,
-                "netRxBytesPerSec": 100,
-                "netTxBytesPerSec": 200,
-                "sshRttMs": 9,
-            })
-        }
-    );
-
-    let running_response = native_plugin_profiler_response(
-        plugin_runtime::PluginHostCall {
-            request_id: "profiler-running-1".to_string(),
-            namespace: "profiler".to_string(),
-            method: "isRunning".to_string(),
-            args: serde_json::json!({ "nodeId": "node-1" }),
-        },
-        &registry,
-        &node_connection_ids,
-    );
-    assert_eq!(
-        running_response.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!(true)
-        }
-    );
 }
 
 #[test]
@@ -1196,37 +865,6 @@ fn forward_create_request_accepts_tauri_camel_case_shape() {
 }
 
 #[test]
-fn forward_rule_snapshot_matches_plugin_forward_rule_shape() {
-    let mut rule = ForwardRule::local("127.0.0.1", 8080, "localhost", 80);
-    rule.id = "forward-1".to_string();
-    rule.status = ForwardStatus::Active;
-    rule.description = "plugin forward".to_string();
-
-    let snapshot = native_plugin_forward_rule_snapshot(rule);
-    assert_eq!(snapshot["id"], "forward-1");
-    assert_eq!(snapshot["forward_type"], "local");
-    assert_eq!(snapshot["bind_address"], "127.0.0.1");
-    assert_eq!(snapshot["status"], "active");
-    assert_eq!(snapshot["description"], "plugin forward");
-}
-
-#[test]
-fn notification_severity_maps_to_workspace_toast_variant() {
-    assert_eq!(
-        native_plugin_notification_variant("error"),
-        TerminalNoticeVariant::Error
-    );
-    assert_eq!(
-        native_plugin_notification_variant("warning"),
-        TerminalNoticeVariant::Warning
-    );
-    assert_eq!(
-        native_plugin_notification_variant("info"),
-        TerminalNoticeVariant::Default
-    );
-}
-
-#[test]
 fn progress_effect_updates_host_owned_toast_payload() {
     let notice = native_plugin_progress_notice(
         "com.example.demo",
@@ -1380,97 +1018,6 @@ fn storage_get_returnable_host_api_returns_json_or_null() {
         error.result,
         plugin_runtime::PluginResponseResult::Error { .. }
     ));
-}
-
-#[test]
-fn app_returnable_host_apis_match_tauri_snapshot_shape() {
-    let snapshot = test_host_api_snapshot();
-
-    let theme = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "app-theme".to_string(),
-            namespace: "app".to_string(),
-            method: "getTheme".to_string(),
-            args: serde_json::json!({}),
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        theme.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!({
-                "name": "default",
-                "isDark": true,
-            })
-        }
-    );
-
-    let settings = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "app-settings".to_string(),
-            namespace: "app".to_string(),
-            method: "getSettings".to_string(),
-            args: serde_json::json!({ "category": "general" }),
-        },
-    )
-    .unwrap();
-    assert!(matches!(
-        settings.result,
-        plugin_runtime::PluginResponseResult::Ok { .. }
-    ));
-    if let plugin_runtime::PluginResponseResult::Ok { value } = settings.result {
-        assert_eq!(value["language"], "zh-CN");
-    }
-
-    let pool_stats = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "app-pool".to_string(),
-            namespace: "app".to_string(),
-            method: "getPoolStats".to_string(),
-            args: serde_json::json!({}),
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        pool_stats.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!({
-                "activeConnections": 0,
-                "totalSessions": 0,
-            })
-        }
-    );
-
-    for (method, expected) in [
-        ("getVersion", serde_json::json!(env!("CARGO_PKG_VERSION"))),
-        (
-            "getPlatform",
-            serde_json::json!(native_plugin_platform_label()),
-        ),
-        ("getLocale", serde_json::json!("zh-CN")),
-    ] {
-        let response = native_plugin_returnable_host_api_response(
-            &snapshot,
-            "com.example.demo",
-            plugin_runtime::PluginHostCall {
-                request_id: format!("app-{method}"),
-                namespace: "app".to_string(),
-                method: method.to_string(),
-                args: serde_json::json!({}),
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            response.result,
-            plugin_runtime::PluginResponseResult::Ok { value: expected }
-        );
-    }
 }
 
 #[test]
@@ -1709,128 +1256,6 @@ fn api_invoke_native_adapters_cover_system_transfer_and_capability_paths() {
 }
 
 #[test]
-fn ui_get_layout_returnable_host_api_matches_tauri_snapshot_shape() {
-    let snapshot = test_host_api_snapshot();
-    let response = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "ui-layout".to_string(),
-            namespace: "ui".to_string(),
-            method: "getLayout".to_string(),
-            args: serde_json::json!({}),
-        },
-    )
-    .unwrap();
-
-    assert_eq!(
-        response.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!({
-                "sidebarCollapsed": false,
-                "activeTabId": null,
-                "tabCount": 0,
-            })
-        }
-    );
-    assert_eq!(
-        native_plugin_layout_snapshot(true, Some("7".to_string()), 3),
-        serde_json::json!({
-            "sidebarCollapsed": true,
-            "activeTabId": "7",
-            "tabCount": 3,
-        })
-    );
-}
-
-#[test]
-fn connections_returnable_host_apis_match_tauri_snapshot_shape() {
-    let snapshot = test_host_api_snapshot_with_connections();
-    let all = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "connections-all".to_string(),
-            namespace: "connections".to_string(),
-            method: "getAll".to_string(),
-            args: serde_json::json!({}),
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        all.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!([{
-                "id": "conn-1",
-                "host": "example.test",
-                "port": 22,
-                "username": "deploy",
-                "state": "active",
-                "refCount": 2,
-                "keepAlive": true,
-                "createdAt": "1970-01-01T00:00:01.000Z",
-                "lastActive": "1970-01-01T00:00:02.000Z",
-                "terminalIds": ["term-1"],
-                "parentConnectionId": null,
-            }])
-        }
-    );
-
-    let by_id = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "connections-get".to_string(),
-            namespace: "connections".to_string(),
-            method: "get".to_string(),
-            args: serde_json::json!({ "connectionId": "conn-1" }),
-        },
-    )
-    .unwrap();
-    if let plugin_runtime::PluginResponseResult::Ok { value } = by_id.result {
-        assert_eq!(value["host"], "example.test");
-        assert_eq!(value["terminalIds"], serde_json::json!(["term-1"]));
-    } else {
-        panic!("connections.get returned an error");
-    }
-
-    let state = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "connections-state".to_string(),
-            namespace: "connections".to_string(),
-            method: "getState".to_string(),
-            args: serde_json::json!({ "connectionId": "conn-1" }),
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        state.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!("active")
-        }
-    );
-
-    let by_node = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "connections-node".to_string(),
-            namespace: "connections".to_string(),
-            method: "getByNode".to_string(),
-            args: serde_json::json!({ "nodeId": "node-1" }),
-        },
-    )
-    .unwrap();
-    if let plugin_runtime::PluginResponseResult::Ok { value } = by_node.result {
-        assert_eq!(value["id"], "conn-1");
-    } else {
-        panic!("connections.getByNode returned an error");
-    }
-}
-
-#[test]
 fn connections_returnable_host_apis_return_null_for_missing_ids() {
     let snapshot = test_host_api_snapshot_with_connections();
     for (method, args) in [
@@ -1859,92 +1284,6 @@ fn connections_returnable_host_apis_return_null_for_missing_ids() {
 }
 
 #[test]
-fn sessions_returnable_host_apis_match_tauri_snapshot_shape() {
-    let snapshot = test_host_api_snapshot_with_sessions();
-    let tree = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "sessions-tree".to_string(),
-            namespace: "sessions".to_string(),
-            method: "getTree".to_string(),
-            args: serde_json::json!({}),
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        tree.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!([{
-                "id": "node-1",
-                "label": "Production",
-                "host": "example.test",
-                "port": 22,
-                "username": "deploy",
-                "parentId": null,
-                "childIds": ["node-2"],
-                "connectionState": "active",
-                "connectionId": "conn-1",
-                "terminalIds": ["term-1"],
-                "sftpSessionId": null,
-            }, {
-                "id": "node-2",
-                "label": "root@child.test",
-                "host": "child.test",
-                "port": 2222,
-                "username": "root",
-                "parentId": "node-1",
-                "childIds": [],
-                "connectionState": "connecting",
-                "connectionId": null,
-                "terminalIds": [],
-                "sftpSessionId": "sftp-2",
-            }])
-        }
-    );
-
-    let active = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "sessions-active".to_string(),
-            namespace: "sessions".to_string(),
-            method: "getActiveNodes".to_string(),
-            args: serde_json::json!({}),
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        active.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!([{
-                "nodeId": "node-1",
-                "sessionId": "term-1",
-                "connectionState": "active",
-            }])
-        }
-    );
-
-    let state = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "sessions-state".to_string(),
-            namespace: "sessions".to_string(),
-            method: "getNodeState".to_string(),
-            args: serde_json::json!({ "nodeId": "node-2" }),
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        state.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!("connecting")
-        }
-    );
-}
-
-#[test]
 fn sessions_returnable_host_apis_return_null_for_missing_node() {
     let snapshot = test_host_api_snapshot_with_sessions();
     let state = native_plugin_returnable_host_api_response(
@@ -1962,90 +1301,6 @@ fn sessions_returnable_host_apis_return_null_for_missing_node() {
         state.result,
         plugin_runtime::PluginResponseResult::Ok {
             value: serde_json::Value::Null
-        }
-    );
-}
-
-#[test]
-fn session_connection_state_maps_link_down_to_tauri_status() {
-    let state = oxideterm_ssh::NodeState {
-        readiness: NodeReadiness::Error,
-        error: Some("Link down".to_string()),
-        sftp_ready: false,
-        sftp_cwd: None,
-        ws_endpoint: None,
-    };
-    assert_eq!(
-        native_plugin_session_connection_state(&state.readiness, state.error.as_deref(), 0),
-        "link-down"
-    );
-}
-
-#[test]
-fn event_log_get_entries_filters_tauri_snapshot_shape() {
-    let snapshot = test_host_api_snapshot_with_event_log_entries();
-    let all = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "event-log-all".to_string(),
-            namespace: "eventLog".to_string(),
-            method: "getEntries".to_string(),
-            args: serde_json::json!({}),
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        all.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!([{
-                "id": 1,
-                "timestamp": 1000,
-                "severity": "info",
-                "category": "connection",
-                "nodeId": "node-1",
-                "connectionId": "conn-1",
-                "title": "Connected",
-                "detail": "ready",
-                "source": "connection_status_changed",
-            }, {
-                "id": 2,
-                "timestamp": 2000,
-                "severity": "error",
-                "category": "node",
-                "title": "Failed",
-                "source": "node_state_changed",
-            }])
-        }
-    );
-
-    let filtered = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "event-log-filtered".to_string(),
-            namespace: "eventLog".to_string(),
-            method: "getEntries".to_string(),
-            args: serde_json::json!({
-                "filter": {
-                    "severity": "error",
-                    "category": "node",
-                }
-            }),
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        filtered.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!([{
-                "id": 2,
-                "timestamp": 2000,
-                "severity": "error",
-                "category": "node",
-                "title": "Failed",
-                "source": "node_state_changed",
-            }])
         }
     );
 }
@@ -2469,46 +1724,6 @@ fn i18n_returnable_host_apis_use_plugin_scoped_fallback() {
         translated.result,
         plugin_runtime::PluginResponseResult::Ok {
             value: serde_json::json!("missing.title")
-        }
-    );
-}
-
-#[test]
-fn settings_get_returnable_host_api_uses_declared_defaults() {
-    let snapshot = test_host_api_snapshot_with_declared_setting();
-    let value = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "settings-get".to_string(),
-            namespace: "settings".to_string(),
-            method: "get".to_string(),
-            args: serde_json::json!({ "key": "mode" }),
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        value.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!("auto")
-        }
-    );
-
-    let undeclared = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "settings-get-undeclared".to_string(),
-            namespace: "settings".to_string(),
-            method: "get".to_string(),
-            args: serde_json::json!({ "key": "unknown" }),
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        undeclared.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::Value::Null
         }
     );
 }

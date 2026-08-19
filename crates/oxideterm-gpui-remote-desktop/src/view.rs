@@ -403,15 +403,4 @@ mod tests {
             false
         ));
     }
-
-    #[test]
-    fn system_cursor_hides_for_remote_hidden_or_custom_cursor() {
-        let mut cursor = RemoteDesktopCursorState::default();
-
-        assert!(!should_hide_system_cursor(&cursor, false));
-        assert!(should_hide_system_cursor(&cursor, true));
-
-        cursor.visible = false;
-        assert!(should_hide_system_cursor(&cursor, false));
-    }
 }

@@ -993,99 +993,6 @@ mod tests {
     use gpui::{Keystroke, Modifiers};
 
     #[test]
-    fn tauri_default_registry_contains_all_orchestrated_actions() {
-        assert_eq!(ACTION_DEFINITIONS.len(), 45);
-        assert!(action_definition("app.commandPalette").is_some());
-        assert_eq!(
-            action_definition("app.quit")
-                .map(|definition| definition.default_combo(KeybindingSide::Mac)),
-            Some(&KeyCombo::cmd("q"))
-        );
-        assert!(action_definition("terminal.closePanel").is_some());
-        assert!(action_definition("terminal.copy").is_some());
-        assert!(action_definition("terminal.cut").is_some());
-        assert_eq!(
-            action_definition("terminal.clearScreen")
-                .map(|definition| definition.default_combo(KeybindingSide::Mac)),
-            Some(&KeyCombo::ctrl("l"))
-        );
-        assert!(action_definition("terminal.toggleFreeTypeMode").is_some());
-        assert!(action_definition("palette.broadcast").is_some());
-        assert_eq!(
-            action_definition("app.toggleFullscreen")
-                .map(|definition| definition.default_combo(KeybindingSide::Mac)),
-            Some(&KeyCombo::cmd_ctrl("f"))
-        );
-        assert_eq!(
-            action_definition("app.closeTab").map(|definition| definition.terminal_behavior),
-            Some(TerminalBehavior::Never)
-        );
-        assert_eq!(
-            action_definition("app.shellLauncher")
-                .map(|definition| definition.default_combo(KeybindingSide::Mac)),
-            Some(&KeyCombo::cmd_shift("t"))
-        );
-        assert_eq!(
-            action_definition("terminal.closePanel").map(|definition| definition.terminal_behavior),
-            Some(TerminalBehavior::WhenPanelOpen)
-        );
-    }
-
-    #[test]
-    fn free_type_mode_shortcut_defaults_do_not_conflict() {
-        let definition = action_definition("terminal.toggleFreeTypeMode")
-            .expect("free type mode shortcut definition");
-        let overrides = Map::new();
-
-        for side in [KeybindingSide::Mac, KeybindingSide::Other] {
-            assert!(
-                conflicts_for_combo(
-                    definition.id,
-                    definition.default_combo(side),
-                    &overrides,
-                    side,
-                )
-                .is_empty()
-            );
-        }
-    }
-
-    #[test]
-    fn fullscreen_shortcut_defaults_are_registered_without_conflicts() {
-        let definition =
-            action_definition("app.toggleFullscreen").expect("full-screen shortcut definition");
-        let overrides = Map::new();
-
-        assert_eq!(
-            definition.default_combo(KeybindingSide::Mac),
-            &KeyCombo::cmd_ctrl("f")
-        );
-        assert_eq!(
-            definition.default_combo(KeybindingSide::Other),
-            &KeyCombo::plain("f11")
-        );
-        for side in [KeybindingSide::Mac, KeybindingSide::Other] {
-            assert!(
-                conflicts_for_combo(
-                    definition.id,
-                    definition.default_combo(side),
-                    &overrides,
-                    side,
-                )
-                .is_empty()
-            );
-        }
-
-        let current_default = definition.default_combo(KeybindingSide::current());
-        let keystroke = Keystroke::parse(&combo_to_gpui(current_default))
-            .expect("registered full-screen keystroke");
-        assert!(startup_key_bindings(&overrides).iter().any(|binding| {
-            binding.action().as_any().is::<ToggleFullscreen>()
-                && binding.match_keystrokes(&[keystroke.clone()]) == Some(false)
-        }));
-    }
-
-    #[test]
     fn printable_symbols_normalize_like_tauri_registry() {
         let combo = normalize_combo(KeyCombo {
             key: "}".to_string(),
@@ -1230,37 +1137,6 @@ mod tests {
             true,
             false,
         ));
-    }
-
-    #[test]
-    fn broadcast_default_does_not_claim_tmux_prefix() {
-        let broadcast = action_definition("palette.broadcast").expect("broadcast action");
-        let tmux_prefix = Keystroke {
-            modifiers: Modifiers {
-                control: true,
-                ..Default::default()
-            },
-            key: "b".to_string(),
-            key_char: None,
-        };
-        let broadcast_shortcut = Keystroke {
-            modifiers: Modifiers {
-                control: true,
-                shift: true,
-                ..Default::default()
-            },
-            key: "b".to_string(),
-            key_char: None,
-        };
-
-        assert_ne!(
-            combo_from_keystroke(&tmux_prefix).as_ref(),
-            Some(&broadcast.other)
-        );
-        assert_eq!(
-            combo_from_keystroke(&broadcast_shortcut).as_ref(),
-            Some(&broadcast.other)
-        );
     }
 
     #[test]

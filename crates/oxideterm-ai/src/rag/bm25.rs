@@ -439,7 +439,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tokenize_english() {
+    fn tokenization_handles_supported_text_classes() {
         let tokens = tokenize("Hello world, this is a test!");
         // Stemmed: "hello" → "hello", "world" → "world", "test" → "test"
         assert!(tokens.contains(&"hello".to_string()));
@@ -450,10 +450,6 @@ mod tests {
         assert!(!tokens.contains(&"is".to_string()));
         // Single chars like "a" should be filtered (stop word)
         assert!(!tokens.contains(&"a".to_string()));
-    }
-
-    #[test]
-    fn test_tokenize_stop_words() {
         let tokens = tokenize("the quick brown fox jumps over the lazy dog");
         // Stop words filtered
         assert!(!tokens.contains(&"the".to_string()));
@@ -465,29 +461,17 @@ mod tests {
         assert!(tokens.contains(&"jump".to_string())); // "jumps" → "jump"
         assert!(tokens.contains(&"lazi".to_string())); // "lazy" → "lazi"
         assert!(tokens.contains(&"dog".to_string()));
-    }
-
-    #[test]
-    fn test_stemming() {
         // Snowball English stemmer should normalize inflected forms
         let tokens = tokenize("deployments deploying deployed containers running");
         assert!(tokens.contains(&"deploy".to_string())); // all three → "deploy"
         assert_eq!(tokens.iter().filter(|t| *t == "deploy").count(), 3);
         assert!(tokens.contains(&"contain".to_string())); // "containers" → "contain"
         assert!(tokens.contains(&"run".to_string())); // "running" → "run"
-    }
-
-    #[test]
-    fn test_tokenize_cjk_bigrams() {
         let tokens = tokenize("运维文档");
         // Should produce bigrams: "运维", "维文", "文档"
         assert!(tokens.contains(&"运维".to_string()));
         assert!(tokens.contains(&"维文".to_string()));
         assert!(tokens.contains(&"文档".to_string()));
-    }
-
-    #[test]
-    fn test_tokenize_mixed() {
         let tokens = tokenize("Docker 部署指南 version 2.0");
         assert!(tokens.contains(&"docker".to_string()));
         assert!(tokens.contains(&"部署".to_string()));
@@ -497,23 +481,7 @@ mod tests {
         // "2" and "0" are single-char non-stop tokens — kept
         assert!(tokens.contains(&"2".to_string()));
         assert!(tokens.contains(&"0".to_string()));
-    }
 
-    #[test]
-    fn test_term_frequencies() {
-        let tokens = vec![
-            "hello".to_string(),
-            "world".to_string(),
-            "hello".to_string(),
-        ];
-        let tf = term_frequencies(&tokens);
-        assert_eq!(tf.get("hello"), Some(&2.0));
-        assert_eq!(tf.get("world"), Some(&1.0));
-    }
-
-    #[test]
-    fn test_empty_query() {
-        let tokens = tokenize("");
-        assert!(tokens.is_empty());
+        assert!(tokenize("").is_empty());
     }
 }

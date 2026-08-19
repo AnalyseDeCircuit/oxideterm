@@ -51,33 +51,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn secret_host_call_debug_redacts_arguments() {
-        let call = PluginHostCall {
-            request_id: "secret-1".to_string(),
-            namespace: "secrets".to_string(),
-            method: "set".to_string(),
-            args: serde_json::json!({ "key": "token", "value": "sensitive-value" }),
-        };
-
-        let rendered = format!("{call:?}");
-
-        assert!(rendered.contains("<redacted>"));
-        assert!(!rendered.contains("sensitive-value"));
-    }
-
-    #[test]
-    fn sync_password_host_call_debug_redacts_arguments() {
-        let call = PluginHostCall {
-            request_id: "sync-1".to_string(),
-            namespace: "sync".to_string(),
-            method: "importOxide".to_string(),
-            args: serde_json::json!({ "password": "sensitive-value" }),
-        };
-
-        let rendered = format!("{call:?}");
-
-        assert!(rendered.contains("<redacted>"));
-        assert!(!rendered.contains("sensitive-value"));
+    fn sensitive_host_call_debug_redacts_arguments() {
+        // Every sensitive namespace must hide argument values from debug output.
+        for (request_id, namespace, method, args) in [
+            (
+                "secret-1",
+                "secrets",
+                "set",
+                serde_json::json!({ "key": "token", "value": "sensitive-value" }),
+            ),
+            (
+                "sync-1",
+                "sync",
+                "importOxide",
+                serde_json::json!({ "password": "sensitive-value" }),
+            ),
+        ] {
+            let call = PluginHostCall {
+                request_id: request_id.to_string(),
+                namespace: namespace.to_string(),
+                method: method.to_string(),
+                args,
+            };
+            let rendered = format!("{call:?}");
+            assert!(rendered.contains("<redacted>"));
+            assert!(!rendered.contains("sensitive-value"));
+        }
     }
 
     #[test]

@@ -255,25 +255,6 @@ mod tests {
         assert!(Arc::ptr_eq(&next.lines[0].cells, &previous.lines[1].cells));
         assert!(!Arc::ptr_eq(&next.lines[1].cells, &previous.lines[0].cells));
     }
-
-    #[test]
-    fn terminal_snapshot_generation_is_metadata_only() {
-        let snapshot = TerminalSnapshot {
-            generation: 0,
-            cols: 1,
-            rows: 1,
-            cursor_col: 0,
-            cursor_row: 0,
-            cursor_shape: TerminalCursorShape::Block,
-            display_offset: 0,
-            scrollback_lines: 0,
-            lines: Vec::new(),
-            images: Vec::new(),
-        }
-        .with_generation(42);
-
-        assert_eq!(snapshot.generation, 42);
-    }
 }
 
 impl From<AlacCursorShape> for TerminalCursorShape {

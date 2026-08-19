@@ -600,7 +600,7 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn keeps_multi_selection_when_context_target_is_selected() {
+    fn context_target_preserves_or_replaces_selection() {
         let mut selected = HashSet::from(["one".to_string(), "two".to_string()]);
 
         let changed = preserve_or_move_context_selection(&mut selected, "two".to_string());
@@ -610,11 +610,6 @@ mod tests {
             selected,
             HashSet::from(["one".to_string(), "two".to_string()])
         );
-    }
-
-    #[test]
-    fn moves_selection_when_context_target_is_not_selected() {
-        let mut selected = HashSet::from(["one".to_string(), "two".to_string()]);
 
         let changed = preserve_or_move_context_selection(&mut selected, "three".to_string());
 
@@ -623,43 +618,58 @@ mod tests {
     }
 
     #[test]
-    fn context_menu_position_collides_with_viewport_edges() {
+    fn context_menu_position_clamps_to_both_viewport_edges() {
         let placement = clamp_context_menu_position(760.0, 580.0, 800.0, 600.0, 220.0, 180.0, 8.0);
 
         assert_eq!(
             placement,
             super::BrowserOverlayPlacement { x: 572.0, y: 412.0 }
         );
-    }
-
-    #[test]
-    fn context_menu_position_keeps_viewport_margin() {
         let placement = clamp_context_menu_position(-20.0, 2.0, 800.0, 600.0, 220.0, 180.0, 8.0);
 
         assert_eq!(placement, super::BrowserOverlayPlacement { x: 8.0, y: 8.0 });
     }
 
     #[test]
-    fn pointer_capture_reports_no_owner_when_idle() {
-        assert_eq!(
-            resolve_browser_pointer_capture_owner(BrowserPointerCaptureState::default()),
-            None
-        );
-    }
+    fn pointer_capture_owner_follows_priority_and_active_gesture() {
+        let cases = [
+            (BrowserPointerCaptureState::default(), None),
+            (
+                BrowserPointerCaptureState {
+                    sidebar_resizing: true,
+                    text_selection_dragging: true,
+                    sftp_file_dragging: true,
+                    ..BrowserPointerCaptureState::default()
+                },
+                Some(BrowserPointerCaptureOwner::SidebarResize),
+            ),
+            (
+                BrowserPointerCaptureState {
+                    terminal_command_sender_resizing: true,
+                    ..BrowserPointerCaptureState::default()
+                },
+                Some(BrowserPointerCaptureOwner::TerminalCommandSenderResize),
+            ),
+            (
+                BrowserPointerCaptureState {
+                    host_tools_tab_scrollbar_dragging: true,
+                    ..BrowserPointerCaptureState::default()
+                },
+                Some(BrowserPointerCaptureOwner::HostToolsTabScrollbar),
+            ),
+            (
+                BrowserPointerCaptureState {
+                    sftp_file_dragging: true,
+                    tab_dragging: true,
+                    ..BrowserPointerCaptureState::default()
+                },
+                Some(BrowserPointerCaptureOwner::SftpFileDrag),
+            ),
+        ];
 
-    #[test]
-    fn pointer_capture_prioritizes_structural_resize_handles() {
-        let state = BrowserPointerCaptureState {
-            sidebar_resizing: true,
-            text_selection_dragging: true,
-            sftp_file_dragging: true,
-            ..BrowserPointerCaptureState::default()
-        };
-
-        assert_eq!(
-            resolve_browser_pointer_capture_owner(state),
-            Some(BrowserPointerCaptureOwner::SidebarResize)
-        );
+        for (state, expected) in cases {
+            assert_eq!(resolve_browser_pointer_capture_owner(state), expected);
+        }
     }
 
     #[test]
@@ -691,46 +701,6 @@ mod tests {
         assert!(!pointer_capture_needs_workspace_overlay(
             BrowserPointerCaptureOwner::SftpFileDrag
         ));
-    }
-
-    #[test]
-    fn pointer_capture_reports_terminal_sender_resize_owner() {
-        let state = BrowserPointerCaptureState {
-            terminal_command_sender_resizing: true,
-            ..BrowserPointerCaptureState::default()
-        };
-
-        assert_eq!(
-            resolve_browser_pointer_capture_owner(state),
-            Some(BrowserPointerCaptureOwner::TerminalCommandSenderResize)
-        );
-    }
-
-    #[test]
-    fn pointer_capture_reports_host_tools_tab_scrollbar_owner() {
-        let state = BrowserPointerCaptureState {
-            host_tools_tab_scrollbar_dragging: true,
-            ..BrowserPointerCaptureState::default()
-        };
-
-        assert_eq!(
-            resolve_browser_pointer_capture_owner(state),
-            Some(BrowserPointerCaptureOwner::HostToolsTabScrollbar)
-        );
-    }
-
-    #[test]
-    fn pointer_capture_keeps_content_drags_as_event_owners() {
-        let state = BrowserPointerCaptureState {
-            sftp_file_dragging: true,
-            tab_dragging: true,
-            ..BrowserPointerCaptureState::default()
-        };
-
-        assert_eq!(
-            resolve_browser_pointer_capture_owner(state),
-            Some(BrowserPointerCaptureOwner::SftpFileDrag)
-        );
     }
 
     #[test]
@@ -771,7 +741,7 @@ mod tests {
     }
 
     #[test]
-    fn highlighted_select_pointer_toggle_preserves_trigger_focus() {
+    fn highlighted_select_pointer_toggle_and_focus_clear_release_state() {
         let mut open_select = None;
         let mut focused_select = None;
         let mut focus_origin = None;
@@ -803,14 +773,6 @@ mod tests {
         assert_eq!(focused_select, Some("backend"));
         assert_eq!(focus_origin, Some(BrowserFocusOrigin::Pointer));
         assert_eq!(highlighted_option, None);
-    }
-
-    #[test]
-    fn highlighted_select_focus_clear_releases_all_owners() {
-        let mut open_select = Some("backend");
-        let mut focused_select = Some("backend");
-        let mut focus_origin = Some(BrowserFocusOrigin::Keyboard);
-        let mut highlighted_option = Some(("backend", 1));
 
         clear_browser_highlighted_select_focus(
             &mut open_select,
@@ -826,7 +788,7 @@ mod tests {
     }
 
     #[test]
-    fn focus_cycle_uses_browser_footer_order() {
+    fn focus_cycle_uses_browser_order_and_recovers_from_stale_focus() {
         let actions = ["cancel", "confirm", "extra"];
         let cycle = FocusCycle::new(&actions);
 
@@ -835,10 +797,6 @@ mod tests {
         assert_eq!(cycle.next(Some("cancel"), true), Some("confirm"));
         assert_eq!(cycle.next(Some("cancel"), false), Some("extra"));
         assert_eq!(cycle.next(Some("extra"), true), Some("cancel"));
-    }
-
-    #[test]
-    fn focus_cycle_recovers_from_missing_or_empty_actions() {
         let actions = ["cancel", "confirm"];
 
         assert_eq!(
@@ -914,7 +872,7 @@ mod tests {
     }
 
     #[test]
-    fn modal_footer_input_key_action_models_input_then_footer_cycle() {
+    fn modal_footer_input_key_action_models_focus_cycle_and_activation() {
         let actions = ["cancel", "confirm"];
 
         assert_eq!(
@@ -947,11 +905,6 @@ mod tests {
             ),
             Some(super::ModalFooterInputKeyAction::FocusInput)
         );
-    }
-
-    #[test]
-    fn modal_footer_input_key_action_keeps_activation_explicit() {
-        let actions = ["cancel", "confirm"];
 
         assert_eq!(
             modal_footer_input_key_action(

@@ -325,7 +325,7 @@ mod tests {
     use gpui::{ListAlignment, px};
 
     #[test]
-    fn signature_sync_initializes_list_state_for_identity() {
+    fn signature_sync_resets_for_new_identity_and_preserves_same_identity_follow_mode() {
         let mut state = ListState::new(0, ListAlignment::Top, px(0.0));
         let mut cache = VirtualListSignatureCache::default();
 
@@ -342,15 +342,6 @@ mod tests {
         assert_eq!(state.item_count(), 3);
         assert_eq!(cache.identity.as_deref(), Some("conversation-a"));
         assert_eq!(cache.signatures, vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn signature_sync_rebuilds_when_identity_changes() {
-        let mut state = ListState::new(3, ListAlignment::Top, px(0.0));
-        let mut cache = VirtualListSignatureCache {
-            identity: Some("conversation-a".to_string()),
-            signatures: vec![1, 2, 3],
-        };
 
         let list_was_reset = sync_virtual_list_state_by_signatures(
             &mut state,
@@ -365,21 +356,12 @@ mod tests {
         assert_eq!(state.item_count(), 1);
         assert_eq!(cache.identity.as_deref(), Some("conversation-b"));
         assert_eq!(cache.signatures, vec![9]);
-    }
-
-    #[test]
-    fn signature_sync_preserves_tail_follow_for_same_identity() {
-        let mut state = ListState::new(1, ListAlignment::Top, px(0.0));
         state.set_follow_mode(gpui::FollowMode::Tail);
-        let mut cache = VirtualListSignatureCache {
-            identity: Some("conversation-a".to_string()),
-            signatures: vec![1],
-        };
 
         let list_was_reset = sync_virtual_list_state_by_signatures(
             &mut state,
             &mut cache,
-            "conversation-a",
+            "conversation-b",
             &[2],
             ListAlignment::Top,
             px(32.0),
@@ -409,43 +391,23 @@ mod tests {
     }
 
     #[test]
-    fn browser_drag_edge_scroll_step_is_idle_away_from_edges() {
-        assert_eq!(
-            browser_drag_edge_scroll_step(px(100.0), px(300.0), px(150.0)),
-            None
-        );
-        assert_eq!(
-            browser_drag_edge_scroll_step(px(100.0), px(300.0), px(250.0)),
-            None
-        );
-    }
+    fn browser_drag_edge_scroll_step_handles_idle_direction_and_clamping() {
+        let cases = [
+            (150.0, None),
+            (250.0, None),
+            (0.0, Some(-BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX)),
+            (400.0, Some(BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX)),
+        ];
+        for (pointer_y, expected) in cases {
+            assert_eq!(
+                browser_drag_edge_scroll_step(px(100.0), px(300.0), px(pointer_y)),
+                expected
+            );
+        }
 
-    #[test]
-    fn browser_drag_edge_scroll_step_tracks_edge_direction() {
         let upward_step = browser_drag_edge_scroll_step(px(100.0), px(300.0), px(120.0)).unwrap();
         let downward_step = browser_drag_edge_scroll_step(px(100.0), px(300.0), px(280.0)).unwrap();
-
         assert!(upward_step < 0.0);
         assert!(downward_step > 0.0);
-        assert!(
-            upward_step.abs() <= BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX,
-            "edge autoscroll must clamp to the shared browser-like max step"
-        );
-        assert!(
-            downward_step.abs() <= BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX,
-            "edge autoscroll must clamp to the shared browser-like max step"
-        );
-    }
-
-    #[test]
-    fn browser_drag_edge_scroll_step_clamps_past_edges() {
-        assert_eq!(
-            browser_drag_edge_scroll_step(px(100.0), px(300.0), px(0.0)),
-            Some(-BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX)
-        );
-        assert_eq!(
-            browser_drag_edge_scroll_step(px(100.0), px(300.0), px(400.0)),
-            Some(BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX)
-        );
     }
 }

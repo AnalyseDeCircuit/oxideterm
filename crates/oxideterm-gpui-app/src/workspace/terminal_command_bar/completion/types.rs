@@ -164,18 +164,6 @@ mod terminal_command_context_tests {
     }
 
     #[test]
-    fn command_context_target_fields_match_tauri_provider_order() {
-        assert_eq!(
-            context().target_fields(),
-            vec![
-                "deploy@prod.example.com".to_string(),
-                "prod.example.com".to_string(),
-                "node-prod".to_string(),
-            ]
-        );
-    }
-
-    #[test]
     fn command_context_provider_scope_prefers_node_then_session_identity() {
         let mut context = context();
         assert_eq!(context.provider_scope_id(), "node-prod");

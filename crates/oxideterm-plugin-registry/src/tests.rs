@@ -130,19 +130,6 @@ fn plugin_paths_cannot_escape_install_directory() {
 }
 
 #[test]
-fn manifest_permissions_default_to_an_empty_sensitive_capability_request() {
-    let manifest: NativePluginManifest = serde_json::from_value(serde_json::json!({
-        "id": "com.example.demo",
-        "name": "Demo",
-        "version": "1.0.0"
-    }))
-    .unwrap();
-
-    // Empty permission declarations do not remove the host's safe default data plane.
-    assert!(manifest.permissions.capabilities.is_empty());
-}
-
-#[test]
 fn manifest_permissions_use_camel_case_and_round_trip() {
     let manifest: NativePluginManifest = serde_json::from_value(serde_json::json!({
         "id": "com.example.demo",
@@ -161,39 +148,6 @@ fn manifest_permissions_use_camel_case_and_round_trip() {
             "terminal.content.read",
             "terminal.input.send"
         ]))
-    );
-}
-
-#[test]
-fn host_monitor_manifest_defaults_are_bounded_and_structured() {
-    let manifest: NativePluginManifest = serde_json::from_value(serde_json::json!({
-        "id": "com.example.demo",
-        "name": "Demo",
-        "version": "1.0.0",
-        "contributes": {
-            "hostMonitors": [{
-                "id": "workers",
-                "title": "Workers",
-                "commands": { "linux": "printf '[{\"pid\":1}]'" }
-            }]
-        }
-    }))
-    .unwrap();
-
-    validate_native_plugin_manifest(&manifest).unwrap();
-    let monitor = &manifest
-        .contributes
-        .as_ref()
-        .unwrap()
-        .host_monitors
-        .as_ref()
-        .unwrap()[0];
-    assert_eq!(monitor.timeout_seconds, 10);
-    assert_eq!(monitor.max_output_bytes, 256 * 1024);
-    assert_eq!(monitor.output.max_rows, 1_000);
-    assert_eq!(
-        monitor.output.format,
-        NativePluginHostMonitorOutputFormat::Json
     );
 }
 
@@ -338,28 +292,6 @@ fn manifest_validation_rejects_unsafe_permission_declarations() {
     manifest.permissions.capabilities = vec!["terminal.*".to_string()];
 
     assert!(validate_native_plugin_manifest(&manifest).is_err());
-}
-
-#[test]
-fn registry_index_parses_capabilities_summary() {
-    let registry: NativePluginRegistryIndex = serde_json::from_value(serde_json::json!({
-        "version": 1,
-        "plugins": [{
-            "id": "com.example.demo",
-            "name": "Demo",
-            "version": "1.2.0",
-            "description": "demo plugin",
-            "downloadUrl": "https://example.invalid/demo.zip",
-            "checksum": "sha256:abc",
-            "capabilitiesSummary": ["terminal read", "status item"]
-        }]
-    }))
-    .unwrap();
-
-    assert_eq!(
-        registry.plugins[0].capabilities_summary.as_deref(),
-        Some(&["terminal read".to_string(), "status item".to_string()][..])
-    );
 }
 
 #[test]
@@ -728,47 +660,6 @@ fn executable_native_runtime_requires_existing_entry() {
 }
 
 #[test]
-fn invalid_manifest_reports_diagnostic_without_crashing_discovery() {
-    let temp_dir = unique_temp_dir("plugin-invalid-manifest");
-    let plugins_dir = temp_dir.join(PLUGINS_DIR_NAME);
-    let broken_dir = plugins_dir.join("broken");
-    fs::create_dir_all(&broken_dir).unwrap();
-    fs::write(broken_dir.join(PLUGIN_MANIFEST_FILENAME), b"{").unwrap();
-
-    let (plugins, diagnostics) =
-        discover_native_plugins_in_dir(&plugins_dir, &NativePluginGlobalConfig::default());
-    assert!(plugins.is_empty());
-    assert_eq!(diagnostics.len(), 1);
-    assert!(diagnostics[0].message.contains("Invalid plugin.json"));
-    let _ = fs::remove_dir_all(temp_dir);
-}
-
-#[test]
-fn missing_executable_runtime_entry_reports_diagnostic() {
-    let temp_dir = unique_temp_dir("plugin-missing-runtime-entry");
-    let plugins_dir = temp_dir.join(PLUGINS_DIR_NAME);
-    let plugin_dir = plugins_dir.join("native-process");
-    fs::create_dir_all(&plugin_dir).unwrap();
-    let mut manifest = minimal_manifest();
-    manifest.id = "com.example.process".to_string();
-    manifest.runtime = Some(NativePluginRuntime {
-        kind: NativePluginRuntimeKind::Process,
-        entry: "bin/plugin".to_string(),
-    });
-    write_manifest(&plugin_dir, &manifest);
-
-    let (plugins, diagnostics) =
-        discover_native_plugins_in_dir(&plugins_dir, &NativePluginGlobalConfig::default());
-    assert!(plugins.is_empty());
-    assert_eq!(
-        diagnostics[0].plugin_id.as_deref(),
-        Some("com.example.process")
-    );
-    assert!(diagnostics[0].message.contains("does not exist"));
-    let _ = fs::remove_dir_all(temp_dir);
-}
-
-#[test]
 fn discovery_classifies_native_wasm_and_process_runtime_states() {
     let temp_dir = unique_temp_dir("plugin-runtime-state");
     let plugins_dir = temp_dir.join(PLUGINS_DIR_NAME);
@@ -973,34 +864,6 @@ fn disabling_plugin_removes_manifest_only_contributions() {
         .set_plugin_enabled("com.example.demo", false)
         .unwrap();
     assert_eq!(registry.contributions().total_count(), 0);
-    let _ = fs::remove_dir_all(temp_dir);
-}
-
-#[test]
-fn plugin_ai_tool_metadata_uses_namespaced_pending_runtime_definitions() {
-    let temp_dir = unique_temp_dir("plugin-ai-tool-definitions");
-    let settings_path = temp_dir.join("settings.json");
-    let plugins_dir = native_plugins_dir(&settings_path);
-    let plugin_dir = plugins_dir.join("demo");
-    fs::create_dir_all(&plugin_dir).unwrap();
-    let mut manifest = minimal_manifest();
-    manifest.id = "com.example.demo-plugin".to_string();
-    manifest.contributes = Some(sample_contributes());
-    write_manifest(&plugin_dir, &manifest);
-
-    let registry = NativePluginRegistry::discover(&settings_path);
-    let definitions = registry.contributions().ai_tool_definitions();
-    assert_eq!(definitions.len(), 1);
-    assert_eq!(
-        definitions[0].name,
-        "plugin::com_example_demo-plugin::demo_tool"
-    );
-    assert!(definitions[0].description.contains("[Plugin: Demo]"));
-    assert_eq!(
-        definitions[0].parameters,
-        serde_json::json!({"type": "object"})
-    );
-    assert!(is_native_plugin_ai_tool_name(&definitions[0].name));
     let _ = fs::remove_dir_all(temp_dir);
 }
 

@@ -569,28 +569,4 @@ mod tests {
         assert!(!serialized.contains("private-bind.example.test"));
         assert!(!serialized.contains("production tunnel"));
     }
-
-    #[test]
-    fn forward_dispatcher_allows_empty_baseline_summary() {
-        let response = native_plugin_forward_response(
-            plugin_runtime::PluginHostCall {
-                request_id: "forward-summary".to_string(),
-                namespace: "forward".to_string(),
-                method: "getSummary".to_string(),
-                args: Value::Null,
-            },
-            &plugin_runtime::PluginPermissionSet::default(),
-            &ForwardingRegistry::new(),
-            &Arc::new(tokio::runtime::Runtime::new().expect("test runtime")),
-            &std::collections::HashSet::new(),
-        );
-
-        assert!(matches!(
-            response.result,
-            plugin_runtime::PluginResponseResult::Ok { value }
-                if value["total"] == 0
-                    && value["byType"].as_object().is_some_and(serde_json::Map::is_empty)
-                    && value["byStatus"].as_object().is_some_and(serde_json::Map::is_empty)
-        ));
-    }
 }

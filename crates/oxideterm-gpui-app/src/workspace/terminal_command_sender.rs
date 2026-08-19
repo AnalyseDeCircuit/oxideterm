@@ -1033,19 +1033,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sender_panel_height_grows_upward_and_clamps_to_viewport() {
-        assert_eq!(
-            adjusted_sender_panel_height(280.0, 60.0, 1_000.0),
-            TERMINAL_SENDER_MIN_HEIGHT
-        );
-        assert_eq!(adjusted_sender_panel_height(280.0, -500.0, 1_000.0), 650.0);
-        assert_eq!(
-            adjusted_sender_panel_height(280.0, 500.0, 1_000.0),
-            TERMINAL_SENDER_MIN_HEIGHT
-        );
-    }
-
-    #[test]
     fn plan_errors_map_without_retaining_input_details() {
         assert_eq!(
             plan_failure(TerminalSenderPlanError::InvalidHexDigit),

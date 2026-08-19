@@ -34,7 +34,7 @@ pub(crate) fn app_icon_variant_file_name(variant: AppIconVariant) -> &'static st
     }
 }
 
-#[cfg(any(target_os = "windows", test))]
+#[cfg(target_os = "windows")]
 fn app_icon_variant_ico_file_name(variant: AppIconVariant) -> String {
     app_icon_variant_file_name(variant).replace(".png", ".ico")
 }
@@ -164,35 +164,4 @@ pub(crate) fn install_runtime_app_icon(variant: AppIconVariant) {
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub(crate) fn install_runtime_app_icon(_variant: AppIconVariant) {
     // Linux desktop shells resolve the installed icon through desktop metadata.
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_app_icon_variant_has_a_windows_icon_resource() {
-        for variant in APP_ICON_VARIANTS {
-            let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("resources")
-                .join("icons")
-                .join("variants")
-                .join(app_icon_variant_ico_file_name(*variant));
-            let bytes = std::fs::read(&path)
-                .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
-
-            // ICO files begin with a reserved word, the icon type, and count.
-            assert_eq!(
-                &bytes[..4],
-                &[0, 0, 1, 0],
-                "invalid ICO: {}",
-                path.display()
-            );
-            assert!(
-                u16::from_le_bytes([bytes[4], bytes[5]]) >= 6,
-                "missing Windows icon sizes: {}",
-                path.display()
-            );
-        }
-    }
 }

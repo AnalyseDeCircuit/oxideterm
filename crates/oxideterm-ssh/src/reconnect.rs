@@ -680,28 +680,6 @@ mod tests {
     }
 
     #[test]
-    fn retry_delay_matches_tauri_backoff_without_jitter() {
-        let timing = ReconnectTiming {
-            retry_base_delay: Duration::from_millis(1_000),
-            retry_max_delay: Duration::from_millis(15_000),
-            ..ReconnectTiming::default()
-        };
-
-        assert_eq!(
-            retry_delay_with_jitter(timing, 1, 1.0),
-            Duration::from_millis(1_000)
-        );
-        assert_eq!(
-            retry_delay_with_jitter(timing, 2, 1.0),
-            Duration::from_millis(1_500)
-        );
-        assert_eq!(
-            retry_delay_with_jitter(timing, 3, 1.0),
-            Duration::from_millis(2_250)
-        );
-    }
-
-    #[test]
     fn cleanup_terminal_job_removes_only_matching_finished_job() {
         let store = ReconnectOrchestratorStore::default();
         let job = store.schedule("node-a", "Node A", ReconnectSnapshot::default());

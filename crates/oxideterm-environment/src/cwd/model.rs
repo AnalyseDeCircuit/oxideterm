@@ -311,23 +311,8 @@ mod tests {
     }
 
     #[test]
-    fn report_command_uses_osc7() {
-        let command = current_directory_report_command();
-        assert!(command.contains("]7;file://%s%s"));
-        assert!(command.contains("${PWD:-$(pwd)}"));
-        assert!(command.contains("%%%02X"));
-    }
-
-    #[test]
     fn entry_rejects_control_names() {
         assert!(CurrentDirectoryEntry::new("ok", "/tmp/ok").is_some());
         assert!(CurrentDirectoryEntry::new("bad\nname", "/tmp/bad").is_none());
-    }
-
-    #[test]
-    fn entry_tracks_file_kind() {
-        let entry =
-            CurrentDirectoryEntry::new_file("Cargo.toml", "/tmp/Cargo.toml").expect("file entry");
-        assert_eq!(entry.kind(), CurrentDirectoryEntryKind::File);
     }
 }

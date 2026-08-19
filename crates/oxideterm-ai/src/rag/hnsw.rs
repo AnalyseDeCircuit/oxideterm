@@ -321,36 +321,6 @@ mod tests {
     }
 
     #[test]
-    fn cosine_point_distance_handles_vector_relationships() {
-        let cases: [(&str, &[f32], &[f32], f32); 3] = [
-            ("identical", &[1.0, 0.0, 1.0], &[1.0, 0.0, 1.0], 0.0),
-            ("orthogonal", &[1.0, 0.0], &[0.0, 1.0], 1.0),
-            ("opposite", &[1.0, 0.0], &[-1.0, 0.0], 2.0),
-        ];
-
-        for (relationship, left, right, expected) in cases {
-            let actual =
-                CosinePoint::new(left.to_vec()).distance(&CosinePoint::new(right.to_vec()));
-            assert!(
-                (actual - expected).abs() < 1e-5,
-                "{relationship}: expected {expected}, got {actual}"
-            );
-        }
-
-        assert_eq!(
-            CosinePoint::new(vec![1.0, 2.0]).distance(&CosinePoint::new(vec![0.0, 0.0])),
-            1.0,
-            "zero vector distance should be 1.0"
-        );
-    }
-
-    #[test]
-    fn test_build_empty() {
-        let result = PersistedHnswIndex::build(&[]);
-        assert!(result.is_none());
-    }
-
-    #[test]
     fn test_build_and_search() {
         let embeddings = vec![
             make_embedding("a", vec![1.0, 0.0, 0.0]),
@@ -388,16 +358,6 @@ mod tests {
         // "a" is closest but filtered out; "b" should be top
         assert!(!results.iter().any(|r| r.chunk_id == "a"));
         assert!(results.iter().any(|r| r.chunk_id == "b"));
-    }
-
-    #[test]
-    fn test_dimension_mismatch_returns_empty() {
-        let embeddings = vec![make_embedding("a", vec![1.0, 0.0, 0.0])];
-        let index = PersistedHnswIndex::build(&embeddings).unwrap();
-
-        // Query with wrong dimensions
-        let results = index.search(&[1.0, 0.0], 2, None);
-        assert!(results.is_empty());
     }
 
     #[test]

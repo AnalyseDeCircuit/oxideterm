@@ -40,14 +40,17 @@ mod tests {
     }
 
     #[test]
-    fn software_adapter_takes_precedence_over_virtual_marker() {
-        let detected = detected_graphics_from_specs(Some(gpu_specs(true, true)));
-        assert_eq!(detected.kind, GraphicsKind::SoftwareEmulated);
-    }
+    fn adapter_kind_is_classified_from_gpu_specs() {
+        // Classification order matters because software adapters may also report as virtual.
+        let cases = [
+            (Some(gpu_specs(true, true)), GraphicsKind::SoftwareEmulated),
+            (Some(gpu_specs(false, true)), GraphicsKind::VirtualGpu),
+            (Some(gpu_specs(false, false)), GraphicsKind::HardwareGpu),
+            (None, GraphicsKind::UnknownHardware),
+        ];
 
-    #[test]
-    fn virtual_adapter_remains_distinct_from_hardware_and_software() {
-        let detected = detected_graphics_from_specs(Some(gpu_specs(false, true)));
-        assert_eq!(detected.kind, GraphicsKind::VirtualGpu);
+        for (specs, expected) in cases {
+            assert_eq!(detected_graphics_from_specs(specs).kind, expected);
+        }
     }
 }

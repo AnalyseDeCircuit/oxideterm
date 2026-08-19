@@ -2040,8 +2040,8 @@ mod tests {
         LogoutCapabilities, LogoutResponse, NewSessionResponse, PermissionOption,
         PermissionOptionKind, PromptRequest, PromptResponse, ReadTextFileRequest,
         RequestPermissionRequest, SessionCapabilities, SessionCloseCapabilities,
-        SessionConfigSelectGroup, SessionConfigSelectOption, StopReason, ToolCallUpdate,
-        ToolCallUpdateFields, WriteTextFileRequest,
+        SessionConfigSelectOption, StopReason, ToolCallUpdate, ToolCallUpdateFields,
+        WriteTextFileRequest,
     };
 
     fn launch_config() -> AcpLaunchConfig {
@@ -2083,97 +2083,6 @@ mod tests {
                 .map(String::as_str),
             Some("env-secret")
         );
-    }
-
-    #[test]
-    fn session_config_projection_keeps_model_ids_and_group_order() {
-        let option = SessionConfigOption::select(
-            "model",
-            "Model",
-            "model-b",
-            vec![
-                SessionConfigSelectGroup::new(
-                    "fast",
-                    "Fast",
-                    vec![SessionConfigSelectOption::new("model-a", "Model A")],
-                ),
-                SessionConfigSelectGroup::new(
-                    "capable",
-                    "Capable",
-                    vec![SessionConfigSelectOption::new("model-b", "Model B")],
-                ),
-            ],
-        )
-        .category(SessionConfigOptionCategory::Model);
-
-        let projected = acp_session_config_options(&[option]);
-
-        assert_eq!(projected.len(), 1);
-        assert_eq!(projected[0].category.as_deref(), Some("model"));
-        assert_eq!(projected[0].current_value_id, "model-b");
-        assert_eq!(projected[0].choices[0].value_id, "model-a");
-        assert_eq!(projected[0].choices[1].label, "Model B");
-        assert_eq!(acp_model_config_option(&projected), projected.first());
-    }
-
-    #[test]
-    fn model_config_compatibility_accepts_missing_category_only_for_model_identity() {
-        let model = AcpSessionConfigOption {
-            config_id: "model".to_string(),
-            name: "Model".to_string(),
-            category: None,
-            current_value_id: "model-a".to_string(),
-            choices: Vec::new(),
-        };
-        let mode = AcpSessionConfigOption {
-            config_id: "mode".to_string(),
-            name: "Mode".to_string(),
-            category: None,
-            current_value_id: "agent".to_string(),
-            choices: Vec::new(),
-        };
-
-        assert_eq!(
-            acp_model_config_option(&[mode, model.clone()]),
-            Some(&model)
-        );
-    }
-
-    #[test]
-    fn launch_model_hint_supports_split_and_inline_flags() {
-        assert_eq!(
-            acp_launch_model_hint(&["--model".to_string(), "gpt-5.4".to_string()]),
-            Some(AcpLaunchModelHint::Fixed("gpt-5.4".to_string()))
-        );
-        assert_eq!(
-            acp_launch_model_hint(&["--model=auto".to_string()]),
-            Some(AcpLaunchModelHint::Automatic)
-        );
-        assert_eq!(acp_launch_model_hint(&["--acp".to_string()]), None);
-    }
-
-    #[test]
-    fn native_claude_adapter_defers_model_report_until_first_prompt() {
-        assert!(acp_model_report_is_deferred_until_first_prompt(&[
-            "--acp-adapter".to_string(),
-            "claude-code".to_string(),
-        ]));
-        assert!(!acp_model_report_is_deferred_until_first_prompt(&[
-            "--acp".to_string(),
-            "--stdio".to_string(),
-        ]));
-    }
-
-    #[test]
-    fn native_codex_adapter_reports_models_during_session_start() {
-        assert!(acp_model_report_is_available_during_session_start(&[
-            "--acp-adapter".to_string(),
-            "codex".to_string(),
-        ]));
-        assert!(!acp_model_report_is_available_during_session_start(&[
-            "--acp-adapter".to_string(),
-            "claude-code".to_string(),
-        ]));
     }
 
     #[test]

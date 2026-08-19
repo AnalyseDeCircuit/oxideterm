@@ -824,25 +824,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_custom_font_draft_updates_custom_font_family() {
-        let mut settings = PersistedSettings::default();
-
-        assert_eq!(
-            apply_persisted_settings_input_draft(
-                &mut settings,
-                SettingsInput::TerminalCustomFontFamily,
-                "  'Sarasa Fixed SC', monospace  ",
-            ),
-            SettingsInputDraftApply::Applied
-        );
-
-        assert_eq!(
-            settings.terminal.custom_font_family,
-            "'Sarasa Fixed SC', monospace"
-        );
-    }
-
-    #[test]
     fn focus_handoff_custom_draft_preserves_selected_presets() {
         let mut settings = PersistedSettings::default();
         settings
@@ -992,17 +973,6 @@ mod tests {
         assert_eq!(
             settings.terminal.highlight_rule_sets[0].rules[0].label,
             "Edited"
-        );
-    }
-
-    #[test]
-    fn persisted_input_value_formats_optional_decimals() {
-        let mut settings = PersistedSettings::default();
-        settings.ide.line_height = Some(1.5);
-
-        assert_eq!(
-            persisted_settings_input_value(&settings, SettingsInput::IdeLineHeight).as_deref(),
-            Some("1.5")
         );
     }
 

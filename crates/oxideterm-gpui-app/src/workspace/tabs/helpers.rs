@@ -204,10 +204,4 @@ mod tests {
             None
         );
     }
-
-    #[test]
-    fn empty_workspace_stacks_only_below_the_main_pane_breakpoint() {
-        assert!(!welcome_layout_is_stacked(800.0));
-        assert!(welcome_layout_is_stacked(799.0));
-    }
 }

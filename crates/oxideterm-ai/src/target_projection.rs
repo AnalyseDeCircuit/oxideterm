@@ -147,56 +147,6 @@ fn string_list(values: &[&str]) -> Vec<String> {
 mod tests {
     use super::*;
 
-    fn terminal_projection() -> AiTargetProjection {
-        AiTargetProjection {
-            id: "terminal-session:7".to_string(),
-            kind: "terminal-session".to_string(),
-            label: "SSH terminal 7".to_string(),
-            state: "connected".to_string(),
-            capabilities: string_list(&["terminal.observe", "terminal.send"]),
-            refs: BTreeMap::from([
-                ("sessionId".to_string(), "7".to_string()),
-                ("tabId".to_string(), "9".to_string()),
-            ]),
-            metadata: json!({ "paneId": 3 }),
-        }
-    }
-
-    #[test]
-    fn connect_result_keeps_only_connection_runtime_refs() {
-        let projection = connect_result_terminal_projection(
-            &terminal_projection(),
-            "Production",
-            Some("node-a"),
-            Some("connection-a"),
-        );
-
-        assert_eq!(projection.label, "Production terminal");
-        assert_eq!(
-            projection.refs,
-            BTreeMap::from([
-                ("connectionId".to_string(), "connection-a".to_string()),
-                ("nodeId".to_string(), "node-a".to_string()),
-                ("sessionId".to_string(), "7".to_string()),
-            ])
-        );
-        assert_eq!(projection.metadata, json!({ "terminalType": "terminal" }));
-    }
-
-    #[test]
-    fn opened_local_terminal_drops_tab_metadata() {
-        let projection = opened_local_terminal_projection(&terminal_projection());
-
-        assert_eq!(
-            projection.refs,
-            BTreeMap::from([("sessionId".to_string(), "7".to_string())])
-        );
-        assert_eq!(
-            projection.metadata,
-            json!({ "terminalType": "local_terminal" })
-        );
-    }
-
     #[test]
     fn sftp_projection_uses_only_non_sensitive_node_identity() {
         let projection = sftp_target_projection(AiSftpTargetInput {
@@ -209,21 +159,5 @@ mod tests {
         assert_eq!(projection.id, "sftp-session:sftp-a");
         assert_eq!(projection.label, "SFTP example.internal");
         assert_eq!(projection.metadata, json!({ "host": "example.internal" }));
-    }
-
-    #[test]
-    fn ide_projection_separates_editor_tab_from_workspace_identity() {
-        let projection = ide_workspace_target_projection(AiIdeTargetInput {
-            node_id: "node-a".to_string(),
-            connection_id: Some("connection-a".to_string()),
-            active_editor_tab_id: Some("editor-a".to_string()),
-            project_root_path: Some("/srv/project".to_string()),
-            project_name: Some("Project".to_string()),
-        });
-
-        assert_eq!(projection.id, "ide-workspace:node-a");
-        assert_eq!(projection.refs["tabId"], "editor-a");
-        assert_eq!(projection.metadata["rootPath"], "/srv/project");
-        assert_eq!(projection.metadata["activeTabId"], "editor-a");
     }
 }

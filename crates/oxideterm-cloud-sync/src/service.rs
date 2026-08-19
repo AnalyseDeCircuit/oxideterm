@@ -26,7 +26,9 @@ use crate::{
     count_structured_upload_plan_units, normalize_sync_scope, plugin_settings,
 };
 
-#[derive(Clone, Debug)]
+/// Snapshot fields default to an empty local state so callers can specify only
+/// the sections relevant to a projection or test fixture.
+#[derive(Clone, Debug, Default)]
 pub struct CloudSyncLocalSnapshot {
     pub metadata: LocalSyncMetadata,
     pub scope: SyncScope,

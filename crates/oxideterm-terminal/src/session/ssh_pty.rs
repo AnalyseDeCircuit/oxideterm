@@ -53,12 +53,53 @@ pub struct SshPtySession {
 
 impl SshPtySession {
     pub fn new(
+        config: SshSessionConfig,
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+        encoding: TerminalEncoding,
+        scrollback_lines: usize,
+    ) -> Self {
+        Self::new_inner(
+            config,
+            cols,
+            rows,
+            graphics_options,
+            encoding,
+            scrollback_lines,
+            true,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_disconnected_for_test(
+        config: SshSessionConfig,
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+        encoding: TerminalEncoding,
+        scrollback_lines: usize,
+    ) -> Self {
+        // State-only tests must not create a runtime or attempt a network connection.
+        Self::new_inner(
+            config,
+            cols,
+            rows,
+            graphics_options,
+            encoding,
+            scrollback_lines,
+            false,
+        )
+    }
+
+    fn new_inner(
         mut config: SshSessionConfig,
         cols: usize,
         rows: usize,
         graphics_options: GraphicsOptions,
         encoding: TerminalEncoding,
         scrollback_lines: usize,
+        start_connection: bool,
     ) -> Self {
         let resize = TerminalResize::new(cols, rows, 0, 0);
         let size = TerminalSize {
@@ -75,15 +116,19 @@ impl SshPtySession {
 
         // GPUI owns a backend runtime for SSH-adjacent work; standalone
         // terminal sessions keep this fallback runtime alive for compatibility.
-        let runtime = if config.runtime_handle.is_some() {
+        let runtime = if !start_connection || config.runtime_handle.is_some() {
             None
         } else {
             Runtime::new().ok()
         };
-        let runtime_handle = config
-            .runtime_handle
-            .take()
-            .or_else(|| runtime.as_ref().map(|runtime| runtime.handle().clone()));
+        let runtime_handle = if start_connection {
+            config
+                .runtime_handle
+                .take()
+                .or_else(|| runtime.as_ref().map(|runtime| runtime.handle().clone()))
+        } else {
+            None
+        };
         let (connect_tx, connect_rx) = unbounded();
         if let Some(runtime_handle) = runtime_handle {
             let connection = config.connection.take();
@@ -185,7 +230,7 @@ impl SshPtySession {
                 let _ = connect_tx.send(result);
                 connect_activity.notify();
             });
-        } else {
+        } else if start_connection {
             let _ = connect_tx.send(Err("failed to initialize SSH runtime".to_string()));
             activity.notify();
         }

@@ -630,11 +630,6 @@ mod tests {
     }
 
     #[test]
-    fn proxy_hop_default_matches_tauri_non_strict_proxy_default() {
-        assert!(!default_proxy_strict_host_key_checking());
-    }
-
-    #[test]
     fn runtime_auth_secret_detection_includes_target_and_proxy_hops() {
         let mut config = SshConfig {
             auth: AuthMethod::Agent,

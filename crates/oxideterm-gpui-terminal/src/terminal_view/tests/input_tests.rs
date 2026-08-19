@@ -2,32 +2,7 @@ use super::*;
 use oxideterm_settings::{TerminalBackspaceSequence, TerminalDeleteSequence};
 
 #[test]
-fn app_cursor_navigation_uses_application_sequences() {
-    let normal = oxideterm_key_escape_sequence(
-        &Keystroke {
-            key: "up".to_string(),
-            ..Default::default()
-        },
-        &TermMode::default(),
-        false,
-        KittyKeyEventType::Press,
-    );
-    assert_eq!(normal.as_deref(), Some("\x1b[A"));
-
-    let app_cursor = oxideterm_key_escape_sequence(
-        &Keystroke {
-            key: "up".to_string(),
-            ..Default::default()
-        },
-        &(TermMode::default() | TermMode::APP_CURSOR),
-        false,
-        KittyKeyEventType::Press,
-    );
-    assert_eq!(app_cursor.as_deref(), Some("\x1bOA"));
-}
-
-#[test]
-fn held_navigation_repeats_legacy_arrow_sequences() {
+fn legacy_navigation_emits_normal_application_and_modified_sequences() {
     let normal = oxideterm_key_escape_sequence(
         &Keystroke {
             key: "down".to_string(),
@@ -49,10 +24,7 @@ fn held_navigation_repeats_legacy_arrow_sequences() {
         KittyKeyEventType::Repeat,
     );
     assert_eq!(app_cursor.as_deref(), Some("\x1bOA"));
-}
 
-#[test]
-fn modified_arrows_include_xterm_modifier_code() {
     let sequence = oxideterm_key_escape_sequence(
         &Keystroke {
             modifiers: Modifiers {
@@ -68,10 +40,43 @@ fn modified_arrows_include_xterm_modifier_code() {
     );
 
     assert_eq!(sequence.as_deref(), Some("\x1b[1;5C"));
+
+    let cases = [
+        ("up", "\x1b[A", "\x1bOA"),
+        ("down", "\x1b[B", "\x1bOB"),
+        ("right", "\x1b[C", "\x1bOC"),
+        ("left", "\x1b[D", "\x1bOD"),
+        ("home", "\x1b[H", "\x1bOH"),
+        ("end", "\x1b[F", "\x1bOF"),
+    ];
+
+    for (key, normal, app_cursor) in cases {
+        let normal_sequence = oxideterm_key_escape_sequence(
+            &Keystroke {
+                key: key.to_string(),
+                ..Default::default()
+            },
+            &TermMode::default(),
+            false,
+            KittyKeyEventType::Press,
+        );
+        assert_eq!(normal_sequence.as_deref(), Some(normal));
+
+        let app_cursor_sequence = oxideterm_key_escape_sequence(
+            &Keystroke {
+                key: key.to_string(),
+                ..Default::default()
+            },
+            &(TermMode::default() | TermMode::APP_CURSOR),
+            false,
+            KittyKeyEventType::Press,
+        );
+        assert_eq!(app_cursor_sequence.as_deref(), Some(app_cursor));
+    }
 }
 
 #[test]
-fn plain_printable_keys_are_left_for_gpui_text_input() {
+fn plain_text_input_and_tab_follow_separate_paths() {
     let sequence = oxideterm_key_escape_sequence(
         &Keystroke {
             key: "l".to_string(),
@@ -84,10 +89,7 @@ fn plain_printable_keys_are_left_for_gpui_text_input() {
     );
 
     assert_eq!(sequence, None);
-}
 
-#[test]
-fn plain_tab_emits_tab_character_for_shell_completion() {
     let sequence = oxideterm_key_escape_sequence(
         &Keystroke {
             key: "tab".to_string(),
@@ -102,7 +104,7 @@ fn plain_tab_emits_tab_character_for_shell_completion() {
 }
 
 #[test]
-fn legacy_backspace_sequence_is_configurable() {
+fn legacy_backspace_and_delete_sequences_are_configurable() {
     let key = Keystroke {
         key: "backspace".to_string(),
         ..Default::default()
@@ -127,10 +129,7 @@ fn legacy_backspace_sequence_is_configurable() {
 
     assert_eq!(delete.as_deref(), Some("\x7f"));
     assert_eq!(control_h.as_deref(), Some("\x08"));
-}
 
-#[test]
-fn legacy_delete_sequence_is_configurable() {
     let key = Keystroke {
         key: "delete".to_string(),
         ..Default::default()
@@ -155,7 +154,7 @@ fn legacy_delete_sequence_is_configurable() {
 }
 
 #[test]
-fn kitty_keyboard_mode_ignores_legacy_key_sequence_settings() {
+fn kitty_keyboard_protocol_encodes_modes_modifiers_and_event_types() {
     let sequence = configurable_key_escape_sequence(
         &Keystroke {
             key: "backspace".to_string(),
@@ -169,10 +168,82 @@ fn kitty_keyboard_mode_ignores_legacy_key_sequence_settings() {
     );
 
     assert_eq!(sequence.as_deref(), Some("\x1b[127;1u"));
+
+    let sequence = oxideterm_key_escape_sequence(
+        &Keystroke {
+            key: "l".to_string(),
+            key_char: Some("l".to_string()),
+            modifiers: Modifiers {
+                control: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        &(TermMode::default() | TermMode::DISAMBIGUATE_ESC_CODES),
+        false,
+        KittyKeyEventType::Press,
+    );
+    assert_eq!(sequence.as_deref(), Some("\x1b[108;5u"));
+
+    let mode = TermMode::default()
+        | TermMode::DISAMBIGUATE_ESC_CODES
+        | TermMode::REPORT_EVENT_TYPES
+        | TermMode::REPORT_ALTERNATE_KEYS;
+    for (key, shifted_text) in [("a", "A"), (";", ":")] {
+        let sequence = oxideterm_key_escape_sequence(
+            &Keystroke {
+                key: key.to_string(),
+                key_char: Some(shifted_text.to_string()),
+                modifiers: Modifiers {
+                    shift: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            &mode,
+            false,
+            KittyKeyEventType::Press,
+        );
+        assert_eq!(sequence, None);
+    }
+
+    let sequence = oxideterm_key_escape_sequence(
+        &Keystroke {
+            key: "enter".to_string(),
+            ..Default::default()
+        },
+        &(TermMode::default() | TermMode::REPORT_ALL_KEYS_AS_ESC),
+        false,
+        KittyKeyEventType::Press,
+    );
+    assert_eq!(sequence.as_deref(), Some("\x1b[13;1u"));
+
+    let mode =
+        TermMode::default() | TermMode::REPORT_ALL_KEYS_AS_ESC | TermMode::REPORT_EVENT_TYPES;
+    let key = Keystroke {
+        key: "a".to_string(),
+        key_char: Some("a".to_string()),
+        ..Default::default()
+    };
+    let repeat = oxideterm_key_escape_sequence(&key, &mode, false, KittyKeyEventType::Repeat);
+    let release = oxideterm_key_escape_sequence(&key, &mode, false, KittyKeyEventType::Release);
+    assert_eq!(repeat.as_deref(), Some("\x1b[97;1:2u"));
+    assert_eq!(release.as_deref(), Some("\x1b[97;1:3u"));
+
+    let sequence = oxideterm_key_escape_sequence(
+        &Keystroke {
+            key: "f5".to_string(),
+            ..Default::default()
+        },
+        &(TermMode::default() | TermMode::REPORT_EVENT_TYPES),
+        false,
+        KittyKeyEventType::Release,
+    );
+    assert_eq!(sequence.as_deref(), Some("\x1b[15;1:3~"));
 }
 
 #[test]
-fn ctrl_alpha_keys_emit_ascii_control_codes() {
+fn ctrl_keys_emit_terminal_control_codes() {
     for byte in b'a'..=b'z' {
         let sequence = oxideterm_key_escape_sequence(
             &Keystroke {
@@ -211,10 +282,7 @@ fn ctrl_alpha_keys_emit_ascii_control_codes() {
 
         assert_eq!(sequence.as_bytes(), &[(byte.to_ascii_lowercase()) & 0x1f]);
     }
-}
 
-#[test]
-fn ctrl_symbol_keys_emit_terminal_control_codes() {
     let cases = [
         ("@", 0x00),
         ("[", 0x1b),
@@ -346,180 +414,41 @@ fn alt_meta_printable_keys_emit_escape_prefixed_ascii_when_enabled() {
 }
 
 #[test]
-fn app_cursor_navigation_covers_arrows_home_and_end() {
+fn mouse_reports_preserve_protocol_coordinates_buttons_and_release_encoding() {
+    let sgr_mode = TermMode::MOUSE_REPORT_CLICK | TermMode::SGR_MOUSE;
     let cases = [
-        ("up", "\x1b[A", "\x1bOA"),
-        ("down", "\x1b[B", "\x1bOB"),
-        ("right", "\x1b[C", "\x1bOC"),
-        ("left", "\x1b[D", "\x1bOD"),
-        ("home", "\x1b[H", "\x1bOH"),
-        ("end", "\x1b[F", "\x1bOF"),
+        (
+            TerminalPoint { row: 4, col: 7 },
+            MouseButton::Left,
+            true,
+            sgr_mode,
+            b"\x1b[<0;8;5M".as_slice(),
+        ),
+        (
+            TerminalPoint { row: 0, col: 0 },
+            MouseButton::Middle,
+            true,
+            sgr_mode,
+            b"\x1b[<1;1;1M".as_slice(),
+        ),
+        (
+            TerminalPoint { row: 0, col: 0 },
+            MouseButton::Right,
+            true,
+            sgr_mode,
+            b"\x1b[<2;1;1M".as_slice(),
+        ),
+        (
+            TerminalPoint { row: 0, col: 0 },
+            MouseButton::Left,
+            false,
+            TermMode::MOUSE_REPORT_CLICK,
+            b"\x1b[M#!!".as_slice(),
+        ),
     ];
 
-    for (key, normal, app_cursor) in cases {
-        let normal_sequence = oxideterm_key_escape_sequence(
-            &Keystroke {
-                key: key.to_string(),
-                ..Default::default()
-            },
-            &TermMode::default(),
-            false,
-            KittyKeyEventType::Press,
-        );
-        assert_eq!(normal_sequence.as_deref(), Some(normal));
-
-        let app_cursor_sequence = oxideterm_key_escape_sequence(
-            &Keystroke {
-                key: key.to_string(),
-                ..Default::default()
-            },
-            &(TermMode::default() | TermMode::APP_CURSOR),
-            false,
-            KittyKeyEventType::Press,
-        );
-        assert_eq!(app_cursor_sequence.as_deref(), Some(app_cursor));
+    for (point, button, pressed, mode, expected) in cases {
+        let report = mouse_button_report(point, button, Modifiers::default(), pressed, mode);
+        assert_eq!(report.as_deref(), Some(expected));
     }
-}
-
-#[test]
-fn kitty_keyboard_reports_modified_printable_keys_as_csi_u() {
-    let sequence = oxideterm_key_escape_sequence(
-        &Keystroke {
-            key: "l".to_string(),
-            key_char: Some("l".to_string()),
-            modifiers: Modifiers {
-                control: true,
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        &(TermMode::default() | TermMode::DISAMBIGUATE_ESC_CODES),
-        false,
-        KittyKeyEventType::Press,
-    );
-
-    assert_eq!(sequence.as_deref(), Some("\x1b[108;5u"));
-}
-
-#[test]
-fn kitty_keyboard_keeps_shifted_text_on_text_input_path_without_report_all() {
-    let mode = TermMode::default()
-        | TermMode::DISAMBIGUATE_ESC_CODES
-        | TermMode::REPORT_EVENT_TYPES
-        | TermMode::REPORT_ALTERNATE_KEYS;
-
-    for (key, shifted_text) in [("a", "A"), (";", ":")] {
-        let sequence = oxideterm_key_escape_sequence(
-            &Keystroke {
-                key: key.to_string(),
-                key_char: Some(shifted_text.to_string()),
-                modifiers: Modifiers {
-                    shift: true,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            &mode,
-            false,
-            KittyKeyEventType::Press,
-        );
-
-        assert_eq!(sequence, None);
-    }
-}
-
-#[test]
-fn kitty_keyboard_can_report_plain_keys_when_requested() {
-    let sequence = oxideterm_key_escape_sequence(
-        &Keystroke {
-            key: "enter".to_string(),
-            ..Default::default()
-        },
-        &(TermMode::default() | TermMode::REPORT_ALL_KEYS_AS_ESC),
-        false,
-        KittyKeyEventType::Press,
-    );
-
-    assert_eq!(sequence.as_deref(), Some("\x1b[13;1u"));
-}
-
-#[test]
-fn kitty_keyboard_reports_repeat_and_release_event_types() {
-    let mode =
-        TermMode::default() | TermMode::REPORT_ALL_KEYS_AS_ESC | TermMode::REPORT_EVENT_TYPES;
-    let key = Keystroke {
-        key: "a".to_string(),
-        key_char: Some("a".to_string()),
-        ..Default::default()
-    };
-
-    let repeat = oxideterm_key_escape_sequence(&key, &mode, false, KittyKeyEventType::Repeat);
-    let release = oxideterm_key_escape_sequence(&key, &mode, false, KittyKeyEventType::Release);
-
-    assert_eq!(repeat.as_deref(), Some("\x1b[97;1:2u"));
-    assert_eq!(release.as_deref(), Some("\x1b[97;1:3u"));
-}
-
-#[test]
-fn kitty_keyboard_reports_function_keys_with_event_types() {
-    let sequence = oxideterm_key_escape_sequence(
-        &Keystroke {
-            key: "f5".to_string(),
-            ..Default::default()
-        },
-        &(TermMode::default() | TermMode::REPORT_EVENT_TYPES),
-        false,
-        KittyKeyEventType::Release,
-    );
-
-    assert_eq!(sequence.as_deref(), Some("\x1b[15;1:3~"));
-}
-
-#[test]
-fn bracketed_mouse_reports_use_sgr_coordinates() {
-    let report = mouse_button_report(
-        TerminalPoint { row: 4, col: 7 },
-        MouseButton::Left,
-        Modifiers::default(),
-        true,
-        TermMode::MOUSE_REPORT_CLICK | TermMode::SGR_MOUSE,
-    );
-
-    assert_eq!(report.as_deref(), Some(b"\x1b[<0;8;5M".as_slice()));
-}
-
-#[test]
-fn middle_and_right_mouse_buttons_use_xterm_button_codes() {
-    let mode = TermMode::MOUSE_REPORT_CLICK | TermMode::SGR_MOUSE;
-
-    let middle = mouse_button_report(
-        TerminalPoint { row: 0, col: 0 },
-        MouseButton::Middle,
-        Modifiers::default(),
-        true,
-        mode,
-    );
-    assert_eq!(middle.as_deref(), Some(b"\x1b[<1;1;1M".as_slice()));
-
-    let right = mouse_button_report(
-        TerminalPoint { row: 0, col: 0 },
-        MouseButton::Right,
-        Modifiers::default(),
-        true,
-        mode,
-    );
-    assert_eq!(right.as_deref(), Some(b"\x1b[<2;1;1M".as_slice()));
-}
-
-#[test]
-fn normal_mouse_reports_are_one_based_and_release_as_button_three() {
-    let report = mouse_button_report(
-        TerminalPoint { row: 0, col: 0 },
-        MouseButton::Left,
-        Modifiers::default(),
-        false,
-        TermMode::MOUSE_REPORT_CLICK,
-    );
-
-    assert_eq!(report.as_deref(), Some(b"\x1b[M#!!".as_slice()));
 }

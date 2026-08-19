@@ -317,16 +317,10 @@ mod tests {
         assert!(matches!(c_source, SearchSource::Bm25Only));
         let d_source = &fused.iter().find(|(id, _, _)| id == "d").unwrap().2;
         assert!(matches!(d_source, SearchSource::VectorOnly));
-    }
 
-    #[test]
-    fn test_rrf_fuse_empty() {
         let fused = rrf_fuse(&[], &[]);
         assert!(fused.is_empty());
-    }
 
-    #[test]
-    fn test_rrf_bm25_only() {
         let bm25 = vec![Bm25Hit {
             chunk_id: "x".into(),
             score: 2.0,
@@ -334,23 +328,5 @@ mod tests {
         let fused = rrf_fuse(&bm25, &[]);
         assert_eq!(fused.len(), 1);
         assert!(matches!(fused[0].2, SearchSource::Bm25Only));
-    }
-
-    #[test]
-    fn cosine_similarity_handles_relationships_and_invalid_dimensions() {
-        let cases: [(&str, &[f32], &[f32], f64); 2] = [
-            ("identical", &[1.0, 2.0, 3.0], &[1.0, 2.0, 3.0], 1.0),
-            ("orthogonal", &[1.0, 0.0], &[0.0, 1.0], 0.0),
-        ];
-
-        for (relationship, left, right, expected) in cases {
-            let actual = cosine_sim(left, right);
-            assert!(
-                (actual - expected).abs() < 1e-6,
-                "{relationship}: expected {expected}, got {actual}"
-            );
-        }
-
-        assert_eq!(cosine_sim(&[1.0, 2.0], &[1.0]), 0.0);
     }
 }

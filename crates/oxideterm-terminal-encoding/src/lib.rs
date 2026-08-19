@@ -410,26 +410,23 @@ mod tests {
     }
 
     #[test]
-    fn paste_converts_line_endings_to_terminal_cr_without_bracketed_mode() {
-        let encoded =
-            TerminalInputEncoder::new(TerminalEncoding::Utf8).encode_paste("line 1\nline 2", false);
+    fn paste_normalizes_line_endings_and_wraps_multiline_content() {
+        // The matrix keeps plain, bracketed multiline, and bracketed single-line semantics together.
+        let cases: [(&str, bool, &[u8]); 3] = [
+            ("line 1\nline 2", false, b"line 1\rline 2"),
+            (
+                "line 1\r\nline 2\nline 3",
+                true,
+                b"\x1b[200~line 1\rline 2\rline 3\x1b[201~",
+            ),
+            ("pwd", true, b"pwd"),
+        ];
 
-        assert_eq!(encoded, b"line 1\rline 2");
-    }
-
-    #[test]
-    fn bracketed_paste_converts_line_endings_to_terminal_cr() {
-        let encoded = TerminalInputEncoder::new(TerminalEncoding::Utf8)
-            .encode_paste("line 1\r\nline 2\nline 3", true);
-
-        assert_eq!(encoded, b"\x1b[200~line 1\rline 2\rline 3\x1b[201~");
-    }
-
-    #[test]
-    fn bracketed_paste_leaves_single_line_unwrapped_like_tauri() {
-        let encoded = TerminalInputEncoder::new(TerminalEncoding::Utf8).encode_paste("pwd", true);
-
-        assert_eq!(encoded, b"pwd");
+        for (text, bracketed, expected) in cases {
+            let encoded =
+                TerminalInputEncoder::new(TerminalEncoding::Utf8).encode_paste(text, bracketed);
+            assert_eq!(encoded, expected);
+        }
     }
 
     #[test]

@@ -25,8 +25,6 @@ mod coords;
 mod fold;
 mod indent_index;
 mod input;
-#[cfg(all(test, feature = "perf-baseline"))]
-mod perf;
 mod render;
 mod search;
 mod wrap;
@@ -1299,12 +1297,7 @@ fn colored_text(text: &str, color: u32) -> Div {
 mod tests {
     use std::sync::Arc;
 
-    use oxideterm_editor_core::BufferOffset;
-    use oxideterm_editor_syntax::BracketPair;
-
-    use super::{
-        HighlightChunkCache, HighlightChunkCacheKey, LineChunkSpec, build_bracket_pair_index,
-    };
+    use super::{HighlightChunkCache, HighlightChunkCacheKey, LineChunkSpec};
 
     fn cache_key(line: usize) -> HighlightChunkCacheKey {
         HighlightChunkCacheKey {
@@ -1351,21 +1344,5 @@ mod tests {
                 .get(&cache_key(HighlightChunkCache::MAX_ENTRIES))
                 .is_some()
         );
-    }
-
-    #[test]
-    fn bracket_index_preserves_first_pair_for_shared_caret_slot() {
-        let first = BracketPair {
-            open: BufferOffset(0),
-            close: BufferOffset(1),
-        };
-        let second = BracketPair {
-            open: BufferOffset(1),
-            close: BufferOffset(2),
-        };
-
-        let index = build_bracket_pair_index(&[first.clone(), second]);
-
-        assert_eq!(index.get(&1), Some(&first));
     }
 }

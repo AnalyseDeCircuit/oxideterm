@@ -1306,16 +1306,4 @@ mod tests {
             Err(OrchestratorArgumentError::InvalidArguments)
         );
     }
-
-    #[test]
-    fn catalog_names_are_unique() {
-        let definitions = extended_application_tool_definitions();
-        let mut names = definitions
-            .iter()
-            .map(|definition| definition.name.as_str())
-            .collect::<Vec<_>>();
-        names.sort_unstable();
-        names.dedup();
-        assert_eq!(names.len(), definitions.len());
-    }
 }

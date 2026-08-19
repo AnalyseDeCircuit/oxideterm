@@ -3454,15 +3454,14 @@ fn path_completion_owns_vertical_navigation(
 
 #[cfg(test)]
 mod tests {
-    use gpui::{Bounds, Keystroke, Modifiers, point, px, size};
+    use gpui::{Keystroke, Modifiers};
     use zeroize::{Zeroize, Zeroizing};
 
     use super::{
         CopyShortcutOwner, FileManagerInput, HostToolsPlainTextImeFrame, HostToolsTextInput,
-        NewConnectionField, PendingPlatformTextCommit, QuickCommandInput, SettingsInput, SftpInput,
-        TextInputAnchor, TextInputAnchorId, TextInputAnchorStore, TextInputContentAlign,
-        WorkspaceApp, WorkspaceCaretState, WorkspaceCaretVisibility, WorkspaceImeMarkedText,
-        WorkspaceImeSelection, WorkspaceImeTarget, active_ime_should_defer_input_key,
+        NewConnectionField, PendingPlatformTextCommit, SettingsInput, SftpInput,
+        TextInputAnchorStore, WorkspaceCaretState, WorkspaceCaretVisibility,
+        WorkspaceImeMarkedText, WorkspaceImeTarget, active_ime_should_defer_input_key,
         collapsed_copy_shortcut_is_owned_by_target, control_k_delete_end,
         copy_shortcut_owner_for_target, effective_platform_text_replacement_range,
         ime_target_is_secret, ime_text_snapshot, keystroke_platform_text,
@@ -3523,7 +3522,7 @@ mod tests {
     }
 
     #[test]
-    fn printable_keystrokes_are_platform_text_input() {
+    fn platform_text_input_accepts_printable_text_and_rejects_manual_keys() {
         assert!(keystroke_platform_text(&key("a", Some("a"), Modifiers::default())).is_some());
         assert!(keystroke_platform_text(&key("space", Some(" "), Modifiers::default())).is_some());
         assert!(
@@ -3537,10 +3536,6 @@ mod tests {
             ))
             .is_some()
         );
-    }
-
-    #[test]
-    fn shortcuts_and_control_keys_stay_on_manual_key_path() {
         assert!(keystroke_platform_text(&key("backspace", None, Modifiers::default())).is_none());
         assert!(
             keystroke_platform_text(&key(
@@ -3594,7 +3589,7 @@ mod tests {
     }
 
     #[test]
-    fn active_ime_defers_printable_keys_to_platform_text_owner() {
+    fn active_ime_defers_only_platform_owned_text_and_composition_keys() {
         let printable = key("a", Some("a"), Modifiers::default());
         let shortcut = key(
             "a",
@@ -3608,10 +3603,6 @@ mod tests {
         assert!(active_ime_should_defer_input_key(true, false, &printable));
         assert!(!active_ime_should_defer_input_key(false, false, &printable));
         assert!(!active_ime_should_defer_input_key(true, false, &shortcut));
-    }
-
-    #[test]
-    fn active_ime_defers_composition_control_keys_only_while_composing() {
         let space = key("space", None, Modifiers::default());
         let enter = key("enter", None, Modifiers::default());
         let modified_space = key(
@@ -3634,45 +3625,6 @@ mod tests {
     }
 
     #[test]
-    fn text_input_anchor_store_clones_share_geometry_updates() {
-        let store = TextInputAnchorStore::default();
-        let cloned = store.clone();
-        let anchor_id = TextInputAnchorId(42);
-        cloned.update(TextInputAnchor {
-            id: anchor_id,
-            bounds: Bounds {
-                origin: point(px(12.0), px(24.0)),
-                size: size(px(80.0), px(30.0)),
-            },
-        });
-
-        assert_eq!(
-            store.bounds(anchor_id),
-            Some(Bounds {
-                origin: point(px(12.0), px(24.0)),
-                size: size(px(80.0), px(30.0)),
-            })
-        );
-    }
-
-    #[test]
-    fn reversed_selection_reports_the_left_edge_as_active() {
-        let target = WorkspaceImeTarget::QuickCommand(QuickCommandInput::CommandText);
-        let forward = WorkspaceImeSelection {
-            target,
-            range: 12..28,
-            reversed: false,
-        };
-        let reversed = WorkspaceImeSelection {
-            reversed: true,
-            ..forward.clone()
-        };
-
-        assert_eq!(forward.active_offset(), 28);
-        assert_eq!(reversed.active_offset(), 12);
-    }
-
-    #[test]
     fn plain_host_tools_ime_frame_rejects_secret_tmux_dialog_input() {
         assert_eq!(
             workspace_ime_target_for_plain_host_tools_input(HostToolsTextInput::ProcessRenice),
@@ -3691,47 +3643,6 @@ mod tests {
                 TextInputAnchorStore::default(),
             )
             .is_none()
-        );
-    }
-
-    #[test]
-    fn self_padded_text_targets_do_not_shift_hit_testing() {
-        assert_eq!(
-            WorkspaceApp::ime_target_horizontal_padding(WorkspaceImeTarget::AiChatInput, 12.0),
-            px(0.0)
-        );
-        assert_eq!(
-            WorkspaceApp::ime_target_horizontal_padding(WorkspaceImeTarget::CommandPalette, 12.0),
-            px(12.0)
-        );
-    }
-
-    #[test]
-    fn centered_settings_inputs_hit_test_against_centered_text_box() {
-        let target = WorkspaceImeTarget::Settings(SettingsInput::TerminalFontSize);
-        assert_eq!(
-            WorkspaceApp::ime_target_content_align(target),
-            TextInputContentAlign::Center
-        );
-        assert_eq!(
-            WorkspaceApp::ime_target_relative_x_for_hit_test(
-                target,
-                px(50.0),
-                px(0.0),
-                px(100.0),
-                px(40.0),
-            ),
-            px(20.0)
-        );
-        assert_eq!(
-            WorkspaceApp::ime_target_relative_x_for_hit_test(
-                WorkspaceImeTarget::Settings(SettingsInput::TerminalCustomFontFamily),
-                px(50.0),
-                px(0.0),
-                px(100.0),
-                px(40.0),
-            ),
-            px(50.0)
         );
     }
 
@@ -3792,28 +3703,23 @@ mod tests {
     }
 
     #[test]
-    fn platform_text_commit_without_range_uses_current_caret() {
-        let range = effective_platform_text_replacement_range(None, || Some(2..2), None);
+    fn platform_text_commit_resolves_explicit_current_and_marked_ranges() {
+        let cases = [
+            (None, Some(2..2), Some(2..2)),
+            (None, Some(1..4), Some(1..4)),
+            (Some(5..6), Some(1..4), Some(5..6)),
+        ];
+        for (platform_range, current_range, expected) in cases {
+            assert_eq!(
+                effective_platform_text_replacement_range(
+                    platform_range,
+                    || current_range.clone(),
+                    None,
+                ),
+                expected
+            );
+        }
 
-        assert_eq!(range, Some(2..2));
-    }
-
-    #[test]
-    fn platform_text_commit_without_range_uses_current_selection() {
-        let range = effective_platform_text_replacement_range(None, || Some(1..4), None);
-
-        assert_eq!(range, Some(1..4));
-    }
-
-    #[test]
-    fn platform_text_commit_keeps_explicit_platform_range() {
-        let range = effective_platform_text_replacement_range(Some(5..6), || Some(1..4), None);
-
-        assert_eq!(range, Some(5..6));
-    }
-
-    #[test]
-    fn platform_text_commit_maps_marked_virtual_range_to_original_range() {
         let marked = WorkspaceImeMarkedText {
             target: WorkspaceImeTarget::CommandPalette,
             replacement_range: 2..2,

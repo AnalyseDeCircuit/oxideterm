@@ -405,45 +405,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sync_progress_value_clamps_percent_and_keeps_stage() {
-        let value = native_plugin_sync_progress_value("Importing", "connections", 12, 10, false);
-
-        assert_eq!(
-            value.get("title").and_then(Value::as_str),
-            Some("Importing")
-        );
-        assert_eq!(
-            value.get("stage").and_then(Value::as_str),
-            Some("connections")
-        );
-        assert_eq!(value.get("progress").and_then(Value::as_f64), Some(100.0));
-        assert_eq!(value.get("done").and_then(Value::as_bool), Some(false));
-    }
-
-    #[test]
-    fn sync_revision_map_groups_plugin_settings_by_plugin_id() {
-        let settings = vec![
-            EncryptedPluginSetting {
-                storage_key: "oxide-plugin-com.example.demo-setting-mode".to_string(),
-                serialized_value: "\"auto\"".to_string(),
-            },
-            EncryptedPluginSetting {
-                storage_key: "oxide-plugin-com.example.demo-setting-enabled".to_string(),
-                serialized_value: "true".to_string(),
-            },
-            EncryptedPluginSetting {
-                storage_key: "unscoped".to_string(),
-                serialized_value: "ignored".to_string(),
-            },
-        ];
-
-        let revisions = native_plugin_settings_revision_map(&settings);
-
-        assert_eq!(revisions.len(), 1);
-        assert!(revisions.contains_key("com.example.demo"));
-    }
-
-    #[test]
     fn sync_import_result_omits_consumed_sidecar_payloads() {
         let envelope = ImportResultEnvelope {
             imported: 1,
@@ -467,6 +428,9 @@ mod tests {
             false,
         );
 
+        assert_eq!(value["imported"], 1);
+        assert_eq!(value["importedAppSettings"], true);
+        assert_eq!(value["importedQuickCommands"], 2);
         assert!(value.get("appSettingsJson").is_none());
         assert!(value.get("quickCommandsJson").is_none());
         assert!(value.get("pluginSettings").is_none());

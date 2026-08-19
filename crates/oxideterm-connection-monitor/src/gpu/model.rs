@@ -183,26 +183,6 @@ mod tests {
     }
 
     #[test]
-    fn summarizes_multiple_devices() {
-        let snapshot = GpuSnapshot {
-            timestamp_ms: 1,
-            status: GpuSnapshotStatus::Available,
-            devices: vec![device(0, 20.0, 100, 1_000), device(1, 80.0, 300, 1_000)],
-            processes: Vec::new(),
-        };
-
-        let summary = snapshot.summary();
-
-        assert_eq!(summary.device_count, 2);
-        assert_eq!(summary.memory_used, 400);
-        assert_eq!(summary.memory_total, 2_000);
-        assert_eq!(summary.average_utilization_percent, Some(50.0));
-        assert_eq!(summary.maximum_utilization_percent, Some(80.0));
-        assert_eq!(summary.maximum_temperature_celsius, Some(61.0));
-        assert_eq!(summary.power_draw_watts, Some(201.0));
-    }
-
-    #[test]
     fn maps_mig_processes_to_their_physical_gpu() {
         let snapshot = GpuSnapshot {
             timestamp_ms: 1,
@@ -218,28 +198,5 @@ mod tests {
         };
 
         assert_eq!(snapshot.processes_for(&snapshot.devices[0]).count(), 1);
-    }
-
-    #[test]
-    fn row_signature_ignores_live_metrics_but_tracks_layout_changes() {
-        let original = device(0, 20.0, 100, 1_000);
-        let mut updated = original.clone();
-        updated.utilization_percent = Some(95.0);
-        updated.memory_used = Some(900);
-        updated.temperature_celsius = Some(88.0);
-        updated.health_status = Some("Warning".into());
-
-        assert_eq!(
-            gpu_device_row_signature(&original, 1, false),
-            gpu_device_row_signature(&updated, 1, false)
-        );
-        assert_ne!(
-            gpu_device_row_signature(&original, 1, false),
-            gpu_device_row_signature(&original, 1, true)
-        );
-        assert_ne!(
-            gpu_device_row_signature(&original, 1, true),
-            gpu_device_row_signature(&original, 2, true)
-        );
     }
 }

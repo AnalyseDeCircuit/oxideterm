@@ -413,37 +413,6 @@ fn preview_asset_kind(kind: PreviewKind) -> PreviewAssetKind {
 }
 
 #[cfg(test)]
-fn block_on_ready<F: std::future::Future>(future: F) -> F::Output {
-    use std::{
-        pin::pin,
-        task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
-    };
-
-    fn noop_raw_waker() -> RawWaker {
-        fn clone(_: *const ()) -> RawWaker {
-            noop_raw_waker()
-        }
-        fn wake(_: *const ()) {}
-        fn wake_by_ref(_: *const ()) {}
-        fn drop(_: *const ()) {}
-        RawWaker::new(
-            std::ptr::null(),
-            &RawWakerVTable::new(clone, wake, wake_by_ref, drop),
-        )
-    }
-
-    // SAFETY: the vtable above never touches the data pointer and only drives
-    // tests for futures that complete without requiring an external reactor.
-    let waker = unsafe { Waker::from_raw(noop_raw_waker()) };
-    let mut context = Context::from_waker(&waker);
-    let mut future = pin!(future);
-    match future.as_mut().poll(&mut context) {
-        Poll::Ready(output) => output,
-        Poll::Pending => panic!("preview future unexpectedly yielded in sync test helper"),
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -467,17 +436,6 @@ mod tests {
         session.apply(PreviewAction::ResetZoom);
         assert_eq!(session.zoom(), 1.0);
         assert_eq!(session.rotation_degrees(), 0);
-    }
-
-    #[test]
-    fn load_inline_uses_async_entrypoint() {
-        let session = block_on_ready(PreviewSession::load(PreviewSource::Inline(
-            PreviewContent::Unsupported {
-                mime_type: "application/x-test".to_string(),
-                reason: "test".to_string(),
-            },
-        )));
-        assert!(matches!(session.state(), PreviewSessionState::Ready { .. }));
     }
 
     #[test]

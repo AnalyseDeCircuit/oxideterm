@@ -358,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_from_form_clears_hidden_gist_endpoint() {
+    fn settings_from_form_clears_hidden_backend_endpoints() {
         let mut form = CloudSyncFormDraft::from_settings(&CloudSyncSettings::default());
         form.backend_type = BackendType::GithubGist;
         form.auth_mode = AuthMode::Bearer;
@@ -370,10 +370,7 @@ mod tests {
         assert_eq!(settings.auth_mode, AuthMode::None);
         assert!(settings.endpoint.is_empty());
         assert_eq!(settings.git_repository, "abcdef123456");
-    }
 
-    #[test]
-    fn settings_from_form_clears_hidden_google_drive_endpoint() {
         let mut form = CloudSyncFormDraft::from_settings(&CloudSyncSettings::default());
         form.backend_type = BackendType::GoogleDrive;
         form.auth_mode = AuthMode::Bearer;

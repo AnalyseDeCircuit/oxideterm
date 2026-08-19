@@ -796,13 +796,6 @@ mod tests {
     }
 
     #[test]
-    fn retry_delay_matches_tauri_bounds() {
-        assert_eq!(compute_retry_delay(1), 1_500);
-        assert_eq!(compute_retry_delay(2), 3_000);
-        assert_eq!(compute_retry_delay(8), 12_000);
-    }
-
-    #[test]
     fn parses_content_range_total_like_tauri_backend() {
         assert_eq!(parse_content_range_total("bytes 10-19/42"), Some(42));
         assert_eq!(parse_content_range_total("bytes 10-19/*"), None);

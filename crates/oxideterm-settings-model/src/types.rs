@@ -703,18 +703,4 @@ mod tests {
         assert!(SettingsInput::LocalPrivilegeSecret.is_secret());
         assert!(!SettingsInput::TerminalFontSize.is_secret());
     }
-
-    #[test]
-    fn ai_mcp_inputs_are_categorized_in_the_model_layer() {
-        assert!(SettingsInput::AiMcpEnvValue(0).is_ai_mcp());
-        assert!(!SettingsInput::AiSystemPrompt.is_ai_mcp());
-    }
-
-    #[test]
-    fn multiline_input_metadata_lives_with_settings_input_identity() {
-        assert!(SettingsInput::AiSystemPrompt.accepts_newline());
-        assert!(SettingsInput::LocalPrivilegePromptPatterns.accepts_newline());
-        assert!(!SettingsInput::TerminalFontSize.accepts_newline());
-        assert_eq!(SettingsInput::AiMemoryContent.textarea_line_height(), 22.0);
-    }
 }

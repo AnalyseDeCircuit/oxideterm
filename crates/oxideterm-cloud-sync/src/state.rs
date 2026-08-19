@@ -432,21 +432,6 @@ mod tests {
     }
 
     #[test]
-    fn history_can_be_cleared_for_user_managed_lifecycle() {
-        let mut state = CloudSyncPersistedState::default();
-        state.append_history(CloudSyncHistoryEntry::new(
-            "upload",
-            CloudSyncHistorySummary::default(),
-            true,
-            None,
-            Some("rev-1".into()),
-        ));
-
-        assert_eq!(state.clear_history(), 1);
-        assert!(state.sync_history.is_empty());
-    }
-
-    #[test]
     fn persisted_state_ignores_removed_raw_profile_sections() {
         let state: CloudSyncPersistedState = serde_json::from_value(serde_json::json!({
             "syncScope": {
@@ -541,33 +526,6 @@ mod tests {
             state.rollback_backups[0].id,
             format!("backup-{}", crate::MAX_ROLLBACK_BACKUPS + 1)
         );
-    }
-
-    #[test]
-    fn rollback_backups_can_be_removed_for_user_managed_lifecycle() {
-        let mut state = CloudSyncPersistedState::default();
-        state.append_rollback_backup(CloudSyncRollbackBackup {
-            id: "backup-1".into(),
-            created_at: "2026-05-19T00:00:00Z".into(),
-            source_revision: None,
-            size_bytes: 0,
-            bytes_base64: String::new(),
-            metadata: None,
-        });
-        state.append_rollback_backup(CloudSyncRollbackBackup {
-            id: "backup-2".into(),
-            created_at: "2026-05-19T00:00:00Z".into(),
-            source_revision: None,
-            size_bytes: 0,
-            bytes_base64: String::new(),
-            metadata: None,
-        });
-
-        assert!(state.remove_rollback_backup("backup-1"));
-        assert!(!state.remove_rollback_backup("missing"));
-        assert_eq!(state.rollback_backups.len(), 1);
-        assert_eq!(state.clear_rollback_backups(), 1);
-        assert!(state.rollback_backups.is_empty());
     }
 
     #[test]

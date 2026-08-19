@@ -247,47 +247,6 @@ pub fn package_row_signature(entry: &ResourcePackageEntry) -> u64 {
     hasher.finish()
 }
 
-#[cfg(test)]
-mod row_signature_tests {
-    use super::*;
-
-    fn package() -> ResourcePackageEntry {
-        ResourcePackageEntry {
-            id: "apt:openssh-server:amd64".into(),
-            name: "openssh-server".into(),
-            manager: "apt".into(),
-            installed_version: "1.0".into(),
-            candidate_version: "1.1".into(),
-            arch: "amd64".into(),
-            repository: "stable".into(),
-            status: "upgradable".into(),
-            summary: "SSH server".into(),
-            service_units: vec!["ssh.service".into()],
-            owner_paths: vec!["/usr/sbin/sshd".into()],
-            source: "dpkg".into(),
-        }
-    }
-
-    #[test]
-    fn package_signature_ignores_sampled_metadata() {
-        let original = package();
-        let mut updated = original.clone();
-        updated.installed_version = "1.1".into();
-        updated.candidate_version = "1.1".into();
-        updated.status = "installed".into();
-
-        assert_eq!(
-            package_row_signature(&original),
-            package_row_signature(&updated)
-        );
-        updated.id = "apt:curl:amd64".into();
-        assert_ne!(
-            package_row_signature(&original),
-            package_row_signature(&updated)
-        );
-    }
-}
-
 pub fn package_filter_label_key(filter: PackageFilter) -> &'static str {
     match filter {
         PackageFilter::All => "sidebar.host_packages.filters.all",

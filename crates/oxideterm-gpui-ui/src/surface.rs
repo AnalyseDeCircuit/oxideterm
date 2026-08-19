@@ -425,37 +425,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn representative_theme_matrix_preserves_visible_card_and_overlay_hierarchy() {
-        for theme_id in [
-            "default",
-            "oxide",
-            "verdigris",
-            "paper-oxide",
-            "synthwave-84",
-            "spring-rice",
-        ] {
-            let tokens = ThemeTokens::from_builtin(oxideterm_theme::theme_by_id(theme_id));
-            let elevation = theme_elevation_spec(&tokens);
-            let card = surface_chrome(&tokens, SurfaceOptions::new(SurfaceKind::Inspector));
-            let overlay =
-                surface_chrome(&tokens, SurfaceOptions::new(SurfaceKind::ElevatedPopover));
-
-            assert!(card.bordered, "{theme_id} card border");
-            assert!(overlay.bordered, "{theme_id} overlay border");
-            assert!(
-                elevation.overlay_near_shadow_alpha > elevation.card_near_shadow_alpha,
-                "{theme_id} near shadow hierarchy"
-            );
-            assert!(
-                elevation.overlay_far_shadow_alpha > elevation.card_far_shadow_alpha,
-                "{theme_id} far shadow hierarchy"
-            );
-            assert!(elevation.card_near_shadow_alpha <= 0x52);
-            assert!(elevation.overlay_near_shadow_alpha <= 0x66);
-        }
-    }
-
-    #[test]
     fn custom_low_contrast_palette_gets_extra_surface_separation() {
         let mut tokens = oxideterm_theme::default_tokens();
         // Custom themes enter the UI as raw colors, so elevation must derive

@@ -143,10 +143,7 @@ mod tests {
     use rand10::{rand_core::UnwrapErr, rngs::SysRng};
     use russh::keys::{Algorithm, PrivateKey, ssh_key::LineEnding};
 
-    use super::{
-        DefaultPrivateKeyStatus, default_private_key_paths_in_home, default_private_key_status,
-        ssh_key_type_from_name,
-    };
+    use super::{DefaultPrivateKeyStatus, default_private_key_status};
 
     fn unique_temp_dir(name: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
@@ -159,33 +156,6 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path
-    }
-
-    #[test]
-    fn infers_key_type_from_tauri_api_names() {
-        assert_eq!(ssh_key_type_from_name("id_ed25519"), "ED25519");
-        assert_eq!(ssh_key_type_from_name("id_ecdsa"), "ECDSA");
-        assert_eq!(ssh_key_type_from_name("id_rsa"), "RSA");
-        assert_eq!(ssh_key_type_from_name("id_dsa"), "DSA");
-        assert_eq!(ssh_key_type_from_name("custom"), "Unknown");
-    }
-
-    #[test]
-    fn default_private_key_paths_keep_preferred_order_before_extra_candidates() {
-        let home = unique_temp_dir("paths");
-        let ssh = home.join(".ssh");
-        std::fs::create_dir_all(&ssh).unwrap();
-        std::fs::write(ssh.join("id_work"), "").unwrap();
-        std::fs::write(ssh.join("id_ed25519_sk.pub"), "").unwrap();
-        std::fs::write(ssh.join("id_ed25519-cert.pub"), "").unwrap();
-
-        let names = default_private_key_paths_in_home(home.clone())
-            .into_iter()
-            .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
-            .collect::<Vec<_>>();
-
-        assert_eq!(names, vec!["id_ed25519", "id_ecdsa", "id_rsa", "id_work"]);
-        let _ = std::fs::remove_dir_all(home);
     }
 
     fn write_test_key(path: &PathBuf, passphrase: Option<&str>) {

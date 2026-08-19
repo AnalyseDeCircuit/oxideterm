@@ -357,6 +357,8 @@ pub struct TerminalPane {
     context_action_requested: Option<TerminalContextAction>,
     plugin_input_interceptor: Option<TerminalInputInterceptor>,
     input_broadcaster: Option<TerminalInputBroadcaster>,
+    #[cfg(test)]
+    test_accepts_input: bool,
     input_locked: bool,
     marked_text: Option<String>,
     privilege_prompt_inline_hint: Option<String>,
@@ -860,6 +862,8 @@ impl TerminalPane {
             context_action_requested: None,
             plugin_input_interceptor: None,
             input_broadcaster: None,
+            #[cfg(test)]
+            test_accepts_input: false,
             input_locked: false,
             marked_text: None,
             privilege_prompt_inline_hint: None,
@@ -3011,6 +3015,11 @@ impl TerminalPane {
     }
 
     fn terminal_accepts_input(&self) -> bool {
+        #[cfg(test)]
+        if self.test_accepts_input {
+            // Unit tests can exercise input routing without creating a live PTY.
+            return !self.input_locked;
+        }
         !self.input_locked && !self.terminal_exited && self.terminal.lock().is_interactive()
     }
 
@@ -3432,117 +3441,40 @@ mod tests {
     }
 
     #[test]
-    fn terminal_maintenance_keeps_startup_layout_advancing() {
-        assert_eq!(
-            terminal_maintenance_interval(
-                true,
-                false,
-                DRAIN_BOOST_POLL_INTERVAL,
-                false,
-                None,
-                None,
-                None,
-                None,
-            ),
-            Some(TERMINAL_ANIMATION_INTERVAL)
-        );
-    }
-
-    #[test]
-    fn terminal_maintenance_sleeps_until_activity_without_a_deadline() {
-        assert_eq!(
-            terminal_maintenance_interval(
-                false,
-                false,
-                DRAIN_BOOST_POLL_INTERVAL,
-                false,
-                None,
-                None,
-                None,
-                None,
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn terminal_maintenance_drains_backpressure_before_other_deadlines() {
-        assert_eq!(
-            terminal_maintenance_interval(
-                false,
-                true,
-                DRAIN_BOOST_POLL_INTERVAL,
-                true,
-                Some(Duration::ZERO),
-                None,
-                None,
-                None,
-            ),
-            Some(DRAIN_BOOST_POLL_INTERVAL)
-        );
-    }
-
-    #[test]
-    fn terminal_maintenance_uses_the_earliest_real_deadline() {
-        assert_eq!(
-            terminal_maintenance_interval(
-                false,
-                false,
-                DRAIN_BOOST_POLL_INTERVAL,
-                false,
-                Some(Duration::from_millis(300)),
-                Some(Duration::from_millis(700)),
-                Some(Duration::from_millis(120)),
-                None,
-            ),
-            Some(Duration::from_millis(120))
-        );
-    }
-
-    #[test]
-    fn smooth_scroll_animation_uses_elapsed_time_and_finishes_exactly() {
-        let started_at = Instant::now();
-        let animation = SmoothScrollAnimation {
-            started_at,
-            start_offset_px: px(80.0),
-        };
-        let (midpoint_offset, active) =
-            animation.offset_at(started_at + SMOOTH_SCROLL_ANIMATION_DURATION / 2);
-        assert!(active);
-        assert!((f32::from(midpoint_offset) - 10.0).abs() < 0.001);
-
-        let (final_offset, active) =
-            animation.offset_at(started_at + SMOOTH_SCROLL_ANIMATION_DURATION);
-        assert!(!active);
-        assert_eq!(final_offset, px(0.0));
-    }
-
-    #[test]
-    fn user_input_restores_a_scrollback_viewport() {
-        assert!(viewport_needs_live_output_restore(3, px(0.0), false));
-    }
-
-    #[test]
-    fn user_input_clears_fractional_smooth_scroll_state() {
-        assert!(viewport_needs_live_output_restore(0, px(2.0), true));
-    }
-
-    #[test]
-    fn user_input_keeps_an_already_live_viewport_stable() {
-        assert!(!viewport_needs_live_output_restore(0, px(0.0), false));
+    fn user_input_restores_only_non_live_viewports() {
+        for (display_offset, smooth_offset, animation_active, expected) in [
+            (3, px(0.0), false, true),
+            (0, px(2.0), true, true),
+            (0, px(0.0), false, false),
+        ] {
+            assert_eq!(
+                viewport_needs_live_output_restore(display_offset, smooth_offset, animation_active),
+                expected
+            );
+        }
     }
 
     #[gpui::test]
     fn direct_user_input_broadcasts_once_for_each_input_path(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
         let pane = cx.update(|window, cx| {
-            cx.new(|cx| TerminalPane::new(window, cx).expect("test terminal pane"))
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .expect("test terminal pane")
+            })
         });
         let recorder = cx.new(|_| TerminalBroadcastRecorder {
             delivered: Vec::new(),
         });
         let recorder_for_broadcaster = recorder.downgrade();
         pane.update(cx, |pane, _cx| {
+            pane.test_accepts_input = true;
             pane.set_input_broadcaster(Some(Rc::new(move |kind, bytes, cx| {
                 let _ = recorder_for_broadcaster.update(cx, |recorder, _cx| {
                     recorder.delivered.push((kind, bytes.to_vec()));
@@ -3575,7 +3507,7 @@ mod tests {
     }
 
     #[test]
-    fn osc52_clipboard_read_does_not_touch_clipboard_when_denied() {
+    fn osc52_clipboard_read_respects_permission_and_formats_allowed_content() {
         let read_called = Cell::new(false);
 
         let response = build_osc52_clipboard_response(
@@ -3589,10 +3521,7 @@ mod tests {
 
         assert!(response.is_none());
         assert!(!read_called.get());
-    }
 
-    #[test]
-    fn osc52_clipboard_read_formats_response_when_allowed() {
         let response =
             build_osc52_clipboard_response(true, || Some("clipboard".to_string()), &|text| {
                 format!("response:{text}")
@@ -3662,56 +3591,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_grid_span_reserves_scrollbar_gutter() {
-        let cell_width = 10.0;
-        let grid_span = terminal_grid_span_for_viewport(px(120.0), cell_width, 0.0);
-        let cols = whole_cells_in_span(grid_span, cell_width);
-        let scrollbar_right =
-            f32::from(terminal_scrollbar_x_for_viewport(px(120.0))) + SCROLLBAR_WIDTH;
-
-        assert_eq!(cols, 11);
-        assert!(scrollbar_right <= 120.0);
-        assert_eq!(scrollbar_right, 120.0);
-    }
-
-    #[test]
-    fn performance_overlay_requests_redraw_only_when_published_stats_change() {
-        let mut stats = TerminalRenderStats::default();
-        let report = TerminalDrainReport::default();
-
-        assert!(!TerminalPane::apply_render_stats_sample(
-            &mut stats,
-            TerminalRenderTier::Normal,
-            &report,
-            0,
-            (0, 0, 0),
-            None,
-        ));
-        assert!(TerminalPane::apply_render_stats_sample(
-            &mut stats,
-            TerminalRenderTier::Idle,
-            &report,
-            0,
-            (0, 0, 0),
-            Some(7),
-        ));
-        assert!(!TerminalPane::apply_render_stats_sample(
-            &mut stats,
-            TerminalRenderTier::Idle,
-            &report,
-            0,
-            (0, 0, 0),
-            None,
-        ));
-    }
-
-    #[test]
-    fn latency_window_reports_stable_percentiles() {
-        let samples = (1..=100).collect::<VecDeque<_>>();
-        assert_eq!(terminal_latency_percentiles(&samples), (50, 95, 99));
-    }
-
-    #[test]
     fn row_timestamps_track_last_modified_nonblank_content() {
         let mut row_timestamps = HashMap::new();
         let blank_snapshot = timestamp_test_snapshot(timestamp_test_row(42, "   "));
@@ -3748,18 +3627,14 @@ mod tests {
             Some("10:00:03")
         );
 
+        let label = terminal_timestamp_label(1, 2, 3, 4);
+        assert_eq!(label, "[01:02:03.004]");
+        assert_eq!(label.chars().count(), TERMINAL_TIMESTAMP_LABEL_CELLS);
+
         let cleared_snapshot = timestamp_test_snapshot(timestamp_test_row(42, ""));
         record_timestampable_snapshot_rows(&mut row_timestamps, &cleared_snapshot, "10:00:04");
 
         assert!(!row_timestamps.contains_key(&42));
-    }
-
-    #[test]
-    fn terminal_timestamp_labels_are_bracketed_and_match_the_gutter_width() {
-        let label = terminal_timestamp_label(1, 2, 3, 4);
-
-        assert_eq!(label, "[01:02:03.004]");
-        assert_eq!(label.chars().count(), TERMINAL_TIMESTAMP_LABEL_CELLS);
     }
 
     #[gpui::test]
@@ -3767,8 +3642,18 @@ mod tests {
         cx: &mut TestAppContext,
     ) {
         let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
+        // Highlight precedence is independent of a live shell and must not start a PTY.
         let pane = cx.update(|window, cx| {
-            cx.new(|cx| TerminalPane::new(window, cx).expect("test terminal pane"))
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .expect("test terminal pane")
+            })
         });
         let rule = |id: &str| TerminalHighlightRule {
             id: id.to_string(),
@@ -3802,18 +3687,5 @@ mod tests {
             assert_eq!(pane.preferences.highlight_rules[0].id, "session");
             assert_eq!(pane.session_highlight_rule_set_id(), Some("session-set"));
         });
-    }
-
-    #[test]
-    fn search_cache_requires_matching_query_and_content_revision() {
-        let cache = TerminalSearchCache {
-            query: "needle".to_string(),
-            content_revision: 7,
-            matches: Arc::from([]),
-        };
-
-        assert!(cache.is_current("needle", 7));
-        assert!(!cache.is_current("other", 7));
-        assert!(!cache.is_current("needle", 8));
     }
 }

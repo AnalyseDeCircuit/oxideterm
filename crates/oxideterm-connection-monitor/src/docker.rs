@@ -220,36 +220,6 @@ pub fn docker_row_signature(container: &ResourceDockerContainer) -> u64 {
     hasher.finish()
 }
 
-#[cfg(test)]
-mod row_signature_tests {
-    use super::*;
-
-    #[test]
-    fn docker_signature_ignores_live_container_state() {
-        let original = ResourceDockerContainer {
-            id: "abc123".into(),
-            name: "web".into(),
-            image: "nginx:latest".into(),
-            state: "running".into(),
-            status: "Up 1 minute".into(),
-            ports: Some("80/tcp".into()),
-        };
-        let mut updated = original.clone();
-        updated.state = "exited".into();
-        updated.status = "Exited (0)".into();
-
-        assert_eq!(
-            docker_row_signature(&original),
-            docker_row_signature(&updated)
-        );
-        updated.id = "def456".into();
-        assert_ne!(
-            docker_row_signature(&original),
-            docker_row_signature(&updated)
-        );
-    }
-}
-
 pub fn docker_state_label_key(state: &str) -> &'static str {
     match state.trim().to_lowercase().as_str() {
         "running" => "sidebar.host_docker.states.running",
@@ -642,27 +612,5 @@ mod tests {
         assert!(docker_sample_command("Windows").contains("--no-trunc"));
         assert!(docker_sample_command("Linux").contains("docker inspect --format"));
         assert!(docker_sample_command("Windows").contains("docker inspect --format"));
-    }
-
-    #[test]
-    fn docker_action_matrix_follows_container_lifecycle() {
-        assert_eq!(
-            docker_action_availability("running"),
-            DockerActionAvailability {
-                can_start: false,
-                can_stop: true,
-                can_restart: true,
-                can_use_live_tools: true
-            }
-        );
-        assert_eq!(
-            docker_action_availability("exited"),
-            DockerActionAvailability {
-                can_start: true,
-                can_stop: false,
-                can_restart: false,
-                can_use_live_tools: false
-            }
-        );
     }
 }

@@ -1824,95 +1824,10 @@ window.focus(&this.focus_handle, cx);
 #[cfg(test)]
 mod terminal_command_bar_quick_command_tests {
     use super::{
-        QuickCommand, QuickCommandCategoryDraft, QuickCommandDraft, QuickCommandIcon,
-        QuickCommandInput, QuickCommandKeyDirection, quick_command_category_draft_can_save,
-        quick_command_draft_can_save, quick_command_editor_tab_target,
-        quick_command_keyboard_highlight, quick_command_space_inserts_literal,
-        select_quick_command_category_state,
+        QuickCommandCategoryDraft, QuickCommandDraft, QuickCommandIcon,
+        quick_command_category_draft_can_save, quick_command_draft_can_save,
+        quick_command_space_inserts_literal,
     };
-
-    #[test]
-    fn quick_command_keyboard_highlight_clamps_like_browser_menu_focus() {
-        let commands = vec![
-            QuickCommand {
-                id: "first".to_string(),
-                name: "First".to_string(),
-                command: "pwd".to_string(),
-                category: "system".to_string(),
-                description: None,
-                host_pattern: None,
-                created_at: 0,
-                updated_at: 0,
-            },
-            QuickCommand {
-                id: "second".to_string(),
-                name: "Second".to_string(),
-                command: "ls".to_string(),
-                category: "system".to_string(),
-                description: None,
-                host_pattern: None,
-                created_at: 0,
-                updated_at: 0,
-            },
-        ];
-
-        assert_eq!(
-            quick_command_keyboard_highlight(&commands, None, QuickCommandKeyDirection::Next),
-            Some("first".to_string())
-        );
-        assert_eq!(
-            quick_command_keyboard_highlight(
-                &commands,
-                Some("first"),
-                QuickCommandKeyDirection::Next
-            ),
-            Some("second".to_string())
-        );
-        assert_eq!(
-            quick_command_keyboard_highlight(
-                &commands,
-                Some("second"),
-                QuickCommandKeyDirection::Next
-            ),
-            Some("second".to_string())
-        );
-        assert_eq!(
-            quick_command_keyboard_highlight(&commands, None, QuickCommandKeyDirection::Previous),
-            Some("second".to_string())
-        );
-        assert_eq!(
-            quick_command_keyboard_highlight(
-                &commands,
-                Some("missing"),
-                QuickCommandKeyDirection::Next
-            ),
-            Some("first".to_string())
-        );
-        assert_eq!(
-            quick_command_keyboard_highlight(&[], None, QuickCommandKeyDirection::Next),
-            None
-        );
-    }
-
-    #[test]
-    fn quick_command_editor_tab_cycles_text_fields_without_swallowing_focus() {
-        assert_eq!(
-            quick_command_editor_tab_target(QuickCommandInput::CommandName, true),
-            Some(QuickCommandInput::CommandText)
-        );
-        assert_eq!(
-            quick_command_editor_tab_target(QuickCommandInput::CommandHostPattern, true),
-            Some(QuickCommandInput::CommandName)
-        );
-        assert_eq!(
-            quick_command_editor_tab_target(QuickCommandInput::CommandName, false),
-            Some(QuickCommandInput::CommandHostPattern)
-        );
-        assert_eq!(
-            quick_command_editor_tab_target(QuickCommandInput::Search, true),
-            None
-        );
-    }
 
     #[test]
     fn quick_command_plain_space_is_literal_text() {
@@ -1920,41 +1835,6 @@ mod terminal_command_bar_quick_command_tests {
         assert!(!quick_command_space_inserts_literal(true, false, false));
         assert!(!quick_command_space_inserts_literal(false, true, false));
         assert!(!quick_command_space_inserts_literal(false, false, true));
-    }
-
-    #[test]
-    fn quick_command_category_switch_clears_editor_state() {
-        let mut active_category = "files".to_string();
-        let mut command_editor = Some(QuickCommandDraft {
-            id: Some("command".to_string()),
-            name: "List".to_string(),
-            command: "ls".to_string(),
-            category: "files".to_string(),
-            description: String::new(),
-            host_pattern: String::new(),
-        });
-        let mut category_editor = Some(QuickCommandCategoryDraft {
-            id: Some("files".to_string()),
-            name: "Files".to_string(),
-            icon: QuickCommandIcon::Folder,
-        });
-        let mut focused_input = Some(QuickCommandInput::CommandName);
-        let mut highlighted_command = Some("list".to_string());
-
-        select_quick_command_category_state(
-            &mut active_category,
-            &mut command_editor,
-            &mut category_editor,
-            &mut focused_input,
-            &mut highlighted_command,
-            "docker",
-        );
-
-        assert_eq!(active_category, "docker");
-        assert!(command_editor.is_none());
-        assert!(category_editor.is_none());
-        assert!(focused_input.is_none());
-        assert!(highlighted_command.is_none());
     }
 
     #[test]

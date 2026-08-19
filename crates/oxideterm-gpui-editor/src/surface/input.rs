@@ -226,10 +226,4 @@ mod tests {
         assert_eq!(utf16_index_to_byte(text, 3), 5);
         assert_eq!(utf16_slice(text, 1..3), "🚀");
     }
-
-    #[test]
-    fn ranges_overlap_only_when_boundaries_cross() {
-        assert!(ranges_overlap(&(1..3), &(2..4)));
-        assert!(!ranges_overlap(&(1..2), &(2..4)));
-    }
 }

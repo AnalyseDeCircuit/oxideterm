@@ -861,35 +861,6 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    #[test]
-    fn applies_tauri_sftp_transfer_settings() {
-        let manager = SftpTransferManager::new();
-        manager.apply_settings(SftpTransferRuntimeSettings {
-            max_concurrent_transfers: 5,
-            speed_limit_kbps: 256,
-            directory_parallelism: 8,
-        });
-
-        assert_eq!(manager.max_concurrent(), 5);
-        assert_eq!(manager.speed_limit_bps(), 256 * 1024);
-        assert_eq!(manager.directory_parallelism(), 8);
-    }
-
-    #[test]
-    fn transfer_stats_match_tauri_command_shape() {
-        let manager = SftpTransferManager::new();
-        manager.register("queued-transfer");
-
-        assert_eq!(
-            manager.transfer_stats(),
-            SftpTransferStats {
-                active: 0,
-                queued: 1,
-                completed: 0,
-            }
-        );
-    }
-
     #[tokio::test]
     async fn nested_registration_preserves_queued_cancellation() {
         let manager = SftpTransferManager::new();

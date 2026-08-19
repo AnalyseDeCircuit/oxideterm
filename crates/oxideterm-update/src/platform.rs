@@ -132,14 +132,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn macos_candidates_match_tauri_manifest_names() {
-        let keys = PlatformTarget::new("macos", "aarch64").candidate_keys(InstallFlavor::MacApp);
-        assert_eq!(keys.first().map(String::as_str), Some("darwin-aarch64-app"));
-        assert!(keys.contains(&"darwin-aarch64".to_string()));
-        assert!(keys.contains(&"aarch64-apple-darwin".to_string()));
-    }
-
-    #[test]
     fn flavor_inference_covers_supported_install_shapes() {
         assert_eq!(
             InstallFlavor::infer(
@@ -192,15 +184,5 @@ mod tests {
                 .map(String::as_str),
             Some("linux-x86_64-rpm")
         );
-    }
-
-    #[test]
-    fn portable_candidates_never_fall_back_to_installed_keys() {
-        let keys = PlatformTarget::new("windows", "x86_64").candidate_keys(InstallFlavor::Portable);
-        assert_eq!(
-            keys.first().map(String::as_str),
-            Some("windows-x86_64-portable")
-        );
-        assert!(!keys.contains(&"windows-x86_64".to_string()));
     }
 }

@@ -192,8 +192,6 @@ mod sessions;
 mod state;
 mod titlebar;
 
-#[cfg(test)]
-pub(in crate::workspace) use ai::AiCompactionDeliveryKind;
 pub(in crate::workspace) use ai::{
     AcpApplicationToolTurn, AiCompactionDelivery, AiCompactionDeliverySender, AiInlinePanelState,
     AiStreamDelivery, AiStreamDeliveryEvent, AiStreamDeliverySender, ai_now_ms,

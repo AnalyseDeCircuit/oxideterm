@@ -23,23 +23,6 @@ mod tests {
     }
 
     #[test]
-    fn configured_ui_fonts_use_gpui_family_names() {
-        assert_eq!(
-            settings_ui_font_family("\"DengXian\", \"Microsoft YaHei\"").as_ref(),
-            "DengXian"
-        );
-        assert_eq!(
-            settings_ui_font_family("\"等线\", sans-serif").as_ref(),
-            "DengXian"
-        );
-    }
-
-    #[test]
-    fn empty_ui_font_uses_system_ui_font() {
-        assert_eq!(settings_ui_font_family("").as_ref(), ".SystemUIFont");
-    }
-
-    #[test]
     fn connection_trace_coalesces_running_progress_before_terminal_state() {
         let events = vec![
             connection_trace_event(

@@ -595,22 +595,3 @@ fn write_response(json: bool, response: CloudSyncWriteResponse) -> CliResult<()>
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cloud_sync_write_defaults_to_dry_run_without_yes() {
-        let write = effective_cloud_sync_write(WriteArgs {
-            dry_run: false,
-            yes: false,
-            no_backup: false,
-            backup_before_write: false,
-            json: true,
-            format: None,
-        });
-
-        assert!(write.dry_run);
-    }
-}

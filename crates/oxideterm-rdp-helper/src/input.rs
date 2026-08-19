@@ -584,35 +584,20 @@ mod tests {
     }
 
     #[test]
-    fn keyboard_mapper_prefers_keypad_scancode_over_printable_text() {
+    fn keyboard_mapper_uses_physical_scancodes_for_keypad_and_special_keys() {
         let mut mapper = RdpKeyboardInputMapper::default();
-
-        let keypad_down = mapper.operations(
-            &key("Numpad1", Some("1"), false),
-            RemoteDesktopKeyState::Pressed,
-        );
-
-        assert_eq!(keypad_down.len(), 1);
-        assert_eq!(scancode(&keypad_down[0]), 0x4f);
-    }
-
-    #[test]
-    fn keyboard_mapper_prefers_special_key_scancode_over_text() {
-        let mut mapper = RdpKeyboardInputMapper::default();
-
-        let enter_down = mapper.operations(
-            &key("Enter", Some("\n"), false),
-            RemoteDesktopKeyState::Pressed,
-        );
-        assert_eq!(enter_down.len(), 1);
-        assert_eq!(scancode(&enter_down[0]), 0x1c);
-
-        let backspace_down = mapper.operations(
-            &key("Backspace", Some("\u{8}"), false),
-            RemoteDesktopKeyState::Pressed,
-        );
-        assert_eq!(backspace_down.len(), 1);
-        assert_eq!(scancode(&backspace_down[0]), 0x0e);
+        for (code, text, expected) in [
+            ("Numpad1", "1", 0x4f),
+            ("Enter", "\n", 0x1c),
+            ("Backspace", "\u{8}", 0x0e),
+        ] {
+            let operations = mapper.operations(
+                &key(code, Some(text), false),
+                RemoteDesktopKeyState::Pressed,
+            );
+            assert_eq!(operations.len(), 1, "code {code}");
+            assert_eq!(scancode(&operations[0]), expected, "code {code}");
+        }
     }
 
     #[test]

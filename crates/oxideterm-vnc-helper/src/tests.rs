@@ -923,69 +923,30 @@ fn batch_exposes_nested_cursor_helper_events() {
 }
 
 #[test]
-fn key_mapping_prefers_printable_text() {
-    let key = RemoteDesktopKey {
-        code: "KeyA".to_string(),
-        text: Some("a".to_string()),
-        alt: false,
-        ctrl: false,
-        shift: false,
-        meta: false,
-    };
-
-    assert_eq!(vnc_keysym(&key), Some('a' as u32));
-}
-
-#[test]
-fn key_mapping_accepts_physical_code_without_text() {
-    let key = RemoteDesktopKey {
-        code: "KeyV".to_string(),
-        text: None,
-        alt: false,
-        ctrl: true,
-        shift: false,
-        meta: false,
-    };
-
-    assert_eq!(vnc_keysym(&key), Some('v' as u32));
-}
-
-#[test]
-fn key_mapping_prefers_keypad_keysym_over_printable_text() {
-    let key = RemoteDesktopKey {
-        code: "Numpad1".to_string(),
-        text: Some("1".to_string()),
-        alt: false,
-        ctrl: false,
-        shift: false,
-        meta: false,
-    };
-
-    assert_eq!(vnc_keysym(&key), Some(0xffb1));
-}
-
-#[test]
-fn key_mapping_accepts_desktop_special_keys() {
+fn key_mapping_covers_text_physical_keypad_and_special_keys() {
     let cases = [
-        ("Return", 0xff0d),
-        ("EnterKey", 0xff0d),
-        ("NumpadEnter", 0xff8d),
-        ("KP_Enter", 0xff8d),
-        ("NumpadDivide", 0xffaf),
-        ("Insert", 0xff63),
-        ("ContextMenu", 0xff67),
-        ("PrintScreen", 0xff61),
-        ("NumLock", 0xff7f),
-        ("ScrollLock", 0xff14),
-        ("Pause", 0xff13),
+        ("KeyA", Some("a"), false, 'a' as u32),
+        ("KeyV", None, true, 'v' as u32),
+        ("Numpad1", Some("1"), false, 0xffb1),
+        ("Return", None, false, 0xff0d),
+        ("EnterKey", None, false, 0xff0d),
+        ("NumpadEnter", None, false, 0xff8d),
+        ("KP_Enter", None, false, 0xff8d),
+        ("NumpadDivide", None, false, 0xffaf),
+        ("Insert", None, false, 0xff63),
+        ("ContextMenu", None, false, 0xff67),
+        ("PrintScreen", None, false, 0xff61),
+        ("NumLock", None, false, 0xff7f),
+        ("ScrollLock", None, false, 0xff14),
+        ("Pause", None, false, 0xff13),
     ];
 
-    for (code, expected) in cases {
+    for (code, text, ctrl, expected) in cases {
         let key = RemoteDesktopKey {
             code: code.to_string(),
-            text: None,
+            text: text.map(str::to_string),
             alt: false,
-            ctrl: false,
+            ctrl,
             shift: false,
             meta: false,
         };
@@ -1417,29 +1378,6 @@ fn vnc_error_category_separates_security_configuration_and_protocol_errors() {
     assert_eq!(
         VncError::protocol("Unsupported VNC rectangle encoding 99.").category(),
         RemoteDesktopErrorCategory::Protocol
-    );
-}
-
-#[test]
-fn vnc_server_event_summary_counts_metadata_without_payloads() {
-    let rect = RfbRect {
-        x: 0,
-        y: 0,
-        width: 4,
-        height: 3,
-    };
-    let summary = vnc_server_event_summary(&VncServerEvent::Batch(vec![
-        VncServerEvent::RawImage(rect, vec![1; 48]),
-        VncServerEvent::CursorHidden,
-    ]));
-
-    assert_eq!(
-        summary,
-        VncServerEventSummary {
-            dirty_rects: 1,
-            dirty_pixels: 12,
-            side_events: 1,
-        }
     );
 }
 

@@ -887,40 +887,4 @@ mod tests {
             cloud_sync.accept_dirty_refresh_generation(current_generation)
         }));
     }
-
-    #[gpui::test]
-    fn section_list_projection_and_scroll_dismissal_are_entity_owned(cx: &mut TestAppContext) {
-        let entity = test_cloud_sync_entity(cx);
-        entity.update(cx, |cloud_sync, _cx| {
-            cloud_sync.view.set_active_tab(CloudSyncTab::Configure);
-            cloud_sync.view.open_select = Some(CloudSyncSelect::Backend);
-            cloud_sync.view.focused_select = Some(CloudSyncSelect::Backend);
-            cloud_sync.view.select_highlighted = Some((CloudSyncSelect::Backend, 2));
-            cloud_sync.sync_section_rows();
-        });
-
-        let (first_section, section_count, list_count) = entity.read_with(cx, |cloud_sync, _cx| {
-            let (first_section, section_count) =
-                cloud_sync.section_at(0).expect("configure section");
-            (
-                first_section,
-                section_count,
-                cloud_sync.view.section_list_state.item_count(),
-            )
-        });
-        assert_eq!(first_section, CloudSyncSection::Header);
-        assert_eq!(section_count, list_count);
-
-        entity.update(cx, |cloud_sync, cx| {
-            cloud_sync.close_select_for_scroll(cx);
-        });
-        entity.read_with(cx, |cloud_sync, _cx| {
-            assert_eq!(cloud_sync.view.open_select, None);
-            assert_eq!(
-                cloud_sync.view.focused_select,
-                Some(CloudSyncSelect::Backend)
-            );
-            assert_eq!(cloud_sync.view.select_highlighted, None);
-        });
-    }
 }

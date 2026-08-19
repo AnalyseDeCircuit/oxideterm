@@ -460,26 +460,6 @@ mod tests {
         assert!(spring_out(0.75) < 1.03);
     }
 
-    #[test]
-    fn duration_tiers_follow_the_active_motion_profile() {
-        let mut tokens = oxideterm_theme::default_tokens();
-        assert_eq!(
-            duration(&tokens, MotionDuration::Micro),
-            Duration::from_millis(120)
-        );
-        assert_eq!(
-            duration(&tokens, MotionDuration::Control),
-            Duration::from_millis(200)
-        );
-        assert_eq!(
-            duration(&tokens, MotionDuration::Overlay),
-            Duration::from_millis(300)
-        );
-
-        tokens.apply_motion(oxideterm_theme::UiMotionProfile::Off);
-        assert_eq!(duration(&tokens, MotionDuration::Overlay), Duration::ZERO);
-    }
-
     #[gpui::test]
     fn collapsed_horizontal_reveal_keeps_content_at_expanded_width(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_, _| {

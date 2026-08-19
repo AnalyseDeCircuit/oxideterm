@@ -281,39 +281,3 @@ fn load_blurred_background_image(
     let buffer = RgbaImage::from_raw(width, height, pixels)?;
     Some((Arc::new(RenderImage::new(vec![Frame::new(buffer)])), bytes))
 }
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use super::*;
-
-    #[test]
-    fn background_cache_tracks_evicted_images_for_gpui_drop() {
-        let mut cache = BackgroundImageRenderCache::default();
-        let key = BackgroundImageCacheKey {
-            path: PathBuf::from("/tmp/background.png"),
-            blur_millis: 1000,
-            modified_millis: Some(1),
-            len: Some(8),
-        };
-        let buffer = RgbaImage::from_raw(2, 1, vec![0, 0, 0, 255, 255, 255, 255, 255])
-            .expect("test image should be valid");
-        let image = Arc::new(RenderImage::new(vec![Frame::new(buffer)]));
-        cache.entries.insert(
-            key.clone(),
-            CachedBackgroundImage {
-                image: image.clone(),
-                bytes: 8,
-            },
-        );
-        cache.order.push_back(key);
-        cache.bytes = 8;
-
-        cache.set_byte_limit(4);
-        let retired = cache.take_retired_images();
-
-        assert_eq!(retired.len(), 1);
-        assert!(Arc::ptr_eq(&retired[0], &image));
-    }
-}

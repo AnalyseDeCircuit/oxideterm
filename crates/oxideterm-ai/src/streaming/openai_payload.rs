@@ -548,6 +548,19 @@ mod tests {
         let converted = openai_chat_messages(
             &config,
             &[
+                message(AiChatRole::System, "one"),
+                message(AiChatRole::User, "hi"),
+                message(AiChatRole::System, "two"),
+            ],
+        );
+        assert_eq!(converted[0]["role"].as_str(), Some("system"));
+        assert_eq!(converted[0]["content"].as_str(), Some("one\n\ntwo"));
+        assert_eq!(converted[1]["role"].as_str(), Some("user"));
+        assert_eq!(converted[1]["content"].as_str(), Some("hi"));
+
+        let converted = openai_chat_messages(
+            &config,
+            &[
                 message(AiChatRole::System, ""),
                 message(AiChatRole::User, "hello"),
             ],

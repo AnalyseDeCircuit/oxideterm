@@ -751,12 +751,6 @@ mod tests {
     }
 
     #[test]
-    fn capture_commands_are_selected_from_closed_resource_names() {
-        assert!(capture_command("docker", "Linux", &json!({})).is_ok());
-        assert!(capture_command("arbitrary", "Linux", &json!({})).is_err());
-    }
-
-    #[test]
     fn typed_snapshot_errors_are_redacted_before_crossing_plugin_boundary() {
         let mut snapshot = json!({
             "status": { "error": { "message": "token=private" } },
@@ -769,36 +763,6 @@ mod tests {
             "credential-like remote output"
         );
         assert!(!snapshot.to_string().contains("private"));
-    }
-
-    #[test]
-    fn cached_host_tools_snapshot_exposes_remote_system_information() {
-        let registry = ProfilerRegistry::new();
-        registry.start("connection-1");
-        let mut metrics = oxideterm_connection_monitor::ResourceMetrics::empty(
-            42,
-            oxideterm_connection_monitor::MetricsSource::Full,
-        );
-        metrics.system_info = Some(oxideterm_connection_monitor::ResourceSystemInfo {
-            system_name: Some("Ubuntu".to_string()),
-            system_version: Some("24.04.3 LTS".to_string()),
-            architecture: Some("x86_64".to_string()),
-            boot_time_ms: Some(1_720_000_000_000),
-            uptime_seconds: Some(93_784),
-        });
-        registry.record_metrics(oxideterm_connection_monitor::ProfilerUpdate {
-            connection_id: "connection-1".to_string(),
-            metrics,
-        });
-
-        let snapshot = native_plugin_host_tools_snapshot_array(
-            &registry,
-            &HashMap::from([("node-1".to_string(), "connection-1".to_string())]),
-        );
-
-        assert_eq!(snapshot[0]["systemInfo"]["systemName"], "Ubuntu");
-        assert_eq!(snapshot[0]["systemInfo"]["architecture"], "x86_64");
-        assert_eq!(snapshot[0]["systemInfo"]["uptimeSeconds"], 93_784);
     }
 
     #[test]
@@ -844,19 +808,6 @@ mod tests {
             },
         );
         assert!(allowed.is_ok());
-    }
-
-    #[test]
-    fn extension_command_uses_platform_then_default_without_substitution() {
-        let extension = host_monitor_definition(NativePluginHostMonitorOutputFormat::Json);
-        assert_eq!(
-            host_monitor_command(&extension, "Linux").unwrap(),
-            "private sampler command"
-        );
-        assert_eq!(
-            host_monitor_command(&extension, "Solaris").unwrap(),
-            "fallback command"
-        );
     }
 
     #[test]

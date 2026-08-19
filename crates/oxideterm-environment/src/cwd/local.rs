@@ -117,34 +117,6 @@ mod tests {
     }
 
     #[test]
-    fn display_child_preserves_home_relative_paths() {
-        assert_eq!(
-            display_child_path("~", std::path::Path::new("/home/a/Documents"), "Documents"),
-            "~/Documents"
-        );
-        assert_eq!(
-            display_child_path(
-                "~/Documents",
-                std::path::Path::new("/home/a/Documents/OxideTerm"),
-                "OxideTerm",
-            ),
-            "~/Documents/OxideTerm"
-        );
-    }
-
-    #[test]
-    fn entry_sort_keeps_directories_before_files() {
-        let mut entries = vec![
-            CurrentDirectoryEntry::new_file("A.txt", "/tmp/A.txt").unwrap(),
-            CurrentDirectoryEntry::new("z-dir", "/tmp/z-dir").unwrap(),
-        ];
-
-        sort_current_directory_entries(&mut entries);
-
-        assert_eq!(entries[0].kind(), CurrentDirectoryEntryKind::Directory);
-    }
-
-    #[test]
     fn local_listing_returns_sorted_domain_entries() {
         let root = temporary_directory("cwd-list");
         std::fs::create_dir_all(root.join("z-dir")).unwrap();

@@ -237,7 +237,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stale_transition_generation_cannot_finish_a_newer_selection() {
+    fn stale_or_cleared_generations_cannot_finish_newer_transitions() {
         let mut state = UserSegmentedControlMotionState::default();
         let first = state.begin_with_vertical_offset(TERMINAL_SETTINGS_SWITCHER_ID, 1, None);
         let second = state.begin_with_vertical_offset(TERMINAL_SETTINGS_SWITCHER_ID, 2, None);
@@ -246,11 +246,7 @@ mod tests {
         assert!(state.is_active_for(TERMINAL_SETTINGS_SWITCHER_ID, 2));
         assert!(state.finish(TERMINAL_SETTINGS_SWITCHER_ID, second));
         assert!(!state.is_active_for(TERMINAL_SETTINGS_SWITCHER_ID, 2));
-    }
 
-    #[test]
-    fn clearing_a_transition_makes_remount_render_settled() {
-        let mut state = UserSegmentedControlMotionState::default();
         let cleared_generation = state.begin_with_vertical_offset(AI_SETTINGS_SWITCHER_ID, 1, None);
 
         state.clear(AI_SETTINGS_SWITCHER_ID);
@@ -263,17 +259,13 @@ mod tests {
     }
 
     #[test]
-    fn programmatic_target_change_does_not_reuse_user_transition() {
+    fn transitions_are_bounded_per_control_and_target() {
         let mut state = UserSegmentedControlMotionState::default();
         state.begin_with_vertical_offset(CLOUD_SYNC_SWITCHER_ID, 1, None);
 
         assert!(state.is_active_for(CLOUD_SYNC_SWITCHER_ID, 1));
         assert!(!state.is_active_for(CLOUD_SYNC_SWITCHER_ID, 2));
-    }
-
-    #[test]
-    fn repeated_user_transitions_replace_one_bounded_control_slot() {
-        let mut state = UserSegmentedControlMotionState::default();
+        state.clear(CLOUD_SYNC_SWITCHER_ID);
 
         for target_index in 0..1_000 {
             state.begin_with_vertical_offset(PLUGIN_MANAGER_SWITCHER_ID, target_index, None);
@@ -288,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn spatial_transition_keeps_only_the_current_measured_offset() {
+    fn transition_metadata_survives_until_replacement_or_completion() {
         let mut state = UserSegmentedControlMotionState::default();
         state.begin_with_vertical_offset(SETTINGS_NAVIGATION_ID, 3, Some(-52.0));
         let latest_generation =
@@ -299,11 +291,7 @@ mod tests {
             Some((latest_generation, Some(91.0)))
         );
         assert_eq!(state.transition_for(SETTINGS_NAVIGATION_ID, 3), None);
-    }
 
-    #[test]
-    fn horizontal_transition_retains_its_previous_index_until_completion() {
-        let mut state = UserSegmentedControlMotionState::default();
         let generation =
             state.begin_with_previous_index(NEW_CONNECTION_AUTH_SELECTOR_ID, Some(0), 2, None);
 

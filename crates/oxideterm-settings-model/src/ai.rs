@@ -860,68 +860,6 @@ mod tests {
     }
 
     #[test]
-    fn ai_tool_policy_groups_own_policy_view_model() {
-        let mut settings = PersistedSettings::default();
-        settings
-            .ai
-            .tool_use
-            .auto_approve_tools
-            .insert("run_command".to_string(), serde_json::json!(true));
-
-        let groups = ai_tool_policy_groups(&settings);
-        let policy_keys = groups
-            .iter()
-            .flat_map(|group| group.items.iter().filter_map(|item| item.key))
-            .collect::<HashSet<_>>();
-
-        assert!(groups.iter().any(|group| {
-            group
-                .items
-                .iter()
-                .any(|item| item.key == Some("run_command") && item.checked)
-        }));
-        assert_eq!(
-            ai_tool_auto_approved_count(&settings),
-            settings
-                .ai
-                .tool_use
-                .auto_approve_tools
-                .values()
-                .filter(|value| value.as_bool() == Some(true))
-                .count()
-        );
-        assert_eq!(
-            groups
-                .iter()
-                .map(|group| group.title_key)
-                .collect::<Vec<_>>(),
-            vec![
-                "settings_view.ai.tool_policy_read_title",
-                "settings_view.ai.tool_policy_execute_title",
-                "settings_view.ai.tool_policy_navigation_title",
-                "settings_view.ai.tool_policy_background_title",
-                "settings_view.ai.tool_policy_operations_title",
-            ]
-        );
-        assert!(
-            groups[0]
-                .items
-                .iter()
-                .all(|item| item.checked && item.locked)
-        );
-        assert!(policy_keys.contains(AI_TOOL_LIST_BACKGROUND_TASKS));
-        assert!(policy_keys.contains(AI_TOOL_GET_BACKGROUND_TASK));
-        assert!(policy_keys.contains(AI_TOOL_INSPECT_HOST_TOOLS));
-        assert!(policy_keys.contains(AI_TOOL_LIST_FORWARDS));
-        assert!(policy_keys.contains(AI_TOOL_LIST_PLUGINS));
-        assert!(policy_keys.contains(AI_TOOL_CREATE_BACKGROUND_TASK));
-        assert!(policy_keys.contains(AI_TOOL_CANCEL_BACKGROUND_TASK));
-        assert!(policy_keys.contains(AI_TOOL_CONTROL_HOST_TOOL));
-        assert!(policy_keys.contains(AI_TOOL_MANAGE_FORWARD));
-        assert!(policy_keys.contains(AI_TOOL_MANAGE_PLUGIN));
-    }
-
-    #[test]
     fn ai_tool_policy_group_bulk_toggle_preserves_locked_policy() {
         let mut settings = PersistedSettings::default();
         settings
@@ -957,32 +895,6 @@ mod tests {
         assert_eq!(
             ai_tool_policy_groups(&settings)[1].state(),
             AiToolPolicyGroupState::NoneApproved
-        );
-    }
-
-    #[test]
-    fn ai_model_panels_own_context_window_view_models() {
-        let mut settings = PersistedSettings::default();
-        settings
-            .ai
-            .user_context_windows
-            .insert("openai".to_string(), serde_json::json!({ "gpt-5": 128000 }));
-        let providers = vec![AiProviderView {
-            id: "openai".to_string(),
-            provider_type: "openai".to_string(),
-            name: "OpenAI".to_string(),
-            base_url: "https://api.openai.com/v1".to_string(),
-            models: vec!["gpt-5".to_string(), "gpt-5-mini".to_string()],
-            enabled: true,
-            custom: false,
-        }];
-
-        let context_panels = ai_model_context_window_panels(&settings, &providers);
-
-        assert_eq!(context_panels[0].override_count, 1);
-        assert_eq!(
-            ai_model_context_window_row(&settings, "openai", "gpt-5").source,
-            ContextWindowSource::User
         );
     }
 

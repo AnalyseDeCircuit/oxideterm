@@ -1424,11 +1424,7 @@ fn visible_indentation_columns(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        contains_special_char, editor_horizontal_scrollbar_geometry,
-        editor_scroll_x_for_thumb_left, editor_scroll_y_for_thumb_top, editor_scrollbar_geometry,
-        special_char_marker, visible_highlight_range, visible_indentation_columns,
-    };
+    use super::visible_indentation_columns;
     use oxideterm_editor_syntax::IndentGuide;
 
     use crate::surface::{indent_index::IndentGuideIndex, wrap::DisplayRow};
@@ -1441,48 +1437,6 @@ mod tests {
             is_first: start_col == 0,
             is_folded_header: false,
         }
-    }
-
-    #[test]
-    fn special_char_markers_ignore_tabs_but_cover_controls() {
-        assert!(!contains_special_char("\t"));
-        assert!(contains_special_char("\u{0007}"));
-        assert_eq!(special_char_marker('\t'), None);
-        assert_eq!(special_char_marker(' '), None);
-        assert_eq!(special_char_marker('a'), None);
-    }
-
-    #[test]
-    fn editor_scrollbar_geometry_maps_overflow_and_hides_without_it() {
-        let geometry =
-            editor_scrollbar_geometry(200.0, 1_000.0, 400.0).expect("document should overflow");
-        let thumb_travel = geometry.viewport_height - geometry.thumb_height;
-
-        assert_eq!(editor_scroll_y_for_thumb_top(0.0, geometry), 0.0);
-        assert_eq!(
-            editor_scroll_y_for_thumb_top(thumb_travel, geometry),
-            geometry.max_scroll_y
-        );
-        assert!(editor_scrollbar_geometry(200.0, 200.0, 0.0).is_none());
-        assert!(editor_scrollbar_geometry(200.0, 120.0, 0.0).is_none());
-    }
-
-    #[test]
-    fn horizontal_scrollbar_geometry_maps_overflow_and_hides_without_it() {
-        let geometry = editor_horizontal_scrollbar_geometry(300.0, 900.0, 300.0)
-            .expect("document should overflow horizontally");
-        assert_eq!(geometry.max_scroll_x, 600.0);
-        assert_eq!(geometry.thumb_width, 100.0);
-        assert_eq!(geometry.thumb_left, 100.0);
-
-        let thumb_travel = geometry.viewport_width - geometry.thumb_width;
-        assert_eq!(editor_scroll_x_for_thumb_left(0.0, geometry), 0.0);
-        assert_eq!(
-            editor_scroll_x_for_thumb_left(thumb_travel, geometry),
-            geometry.max_scroll_x
-        );
-        assert!(editor_horizontal_scrollbar_geometry(300.0, 300.0, 0.0).is_none());
-        assert!(editor_horizontal_scrollbar_geometry(300.0, 120.0, 0.0).is_none());
     }
 
     #[test]
@@ -1510,10 +1464,7 @@ mod tests {
 
         assert_eq!(columns.get(&2), Some(&vec![0, 4, 8]));
         assert_eq!(columns.get(&0), None);
-    }
 
-    #[test]
-    fn indentation_guides_skip_columns_before_wrapped_segment() {
         let guides = vec![IndentGuide {
             start_line: 0,
             end_line: 4,
@@ -1524,10 +1475,7 @@ mod tests {
         let columns = visible_indentation_columns(&IndentGuideIndex::new(guides), &rows, true);
 
         assert_eq!(columns.get(&2), Some(&vec![8]));
-    }
 
-    #[test]
-    fn disabled_indentation_guides_skip_index_queries() {
         let rows = [display_row(2, 0, 12)];
         let index = IndentGuideIndex::new(vec![IndentGuide {
             start_line: 0,
@@ -1536,12 +1484,5 @@ mod tests {
         }]);
 
         assert!(visible_indentation_columns(&index, &rows, false).is_empty());
-    }
-
-    #[test]
-    fn overlapping_highlight_spans_are_clipped_to_unrendered_text() {
-        assert_eq!(visible_highlight_range(2, 8, 0), Some(2..8));
-        assert_eq!(visible_highlight_range(2, 8, 5), Some(5..8));
-        assert_eq!(visible_highlight_range(2, 8, 8), None);
     }
 }

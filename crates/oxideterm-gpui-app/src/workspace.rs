@@ -282,13 +282,13 @@ use self::root::state::{ReconnectWorkerResult, WorkspaceSshNode, WorkspaceSshNod
 use self::root::{background::*, helpers::*};
 use self::session_manager::{SessionManagerState, SessionManagerWorkspaceEvent};
 use self::sidebar::AiInlinePanelState;
+#[cfg(test)]
+use self::sidebar::AiStreamDeliveryEvent;
 use self::sidebar::{ActiveSessionSidebarViewMode, SidebarSection};
 use self::sidebar::{
     AiCompactionDelivery, AiCompactionDeliverySender, AiStreamDelivery, AiStreamDeliverySender,
     ai_now_ms,
 };
-#[cfg(test)]
-use self::sidebar::{AiCompactionDeliveryKind, AiStreamDeliveryEvent};
 use self::tabs::{TabRemovalTransition, TerminalLocation};
 use self::terminal_entity::{WorkspaceTerminalEntity, WorkspaceTerminalEvent};
 use self::window_intent::WorkspaceWindowIntentEntity;

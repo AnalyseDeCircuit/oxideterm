@@ -6,7 +6,6 @@
 use std::{collections::HashMap, time::Duration};
 
 use oxideterm_i18n::I18n;
-use oxideterm_notification_center::{EventCategory, EventLogEntry, EventSeverity};
 use oxideterm_ssh::{
     ConnectionConsumer, ConnectionInfo, ConnectionState, NodeMetadataSnapshot, NodeOrigin,
     NodeReadiness,
@@ -142,38 +141,6 @@ pub(super) fn test_host_api_snapshot_with_connections() -> NativePluginHostApiSn
     }
 }
 
-pub(super) fn test_host_api_snapshot_with_event_log_entries() -> NativePluginHostApiSnapshot {
-    let entries = vec![
-        EventLogEntry {
-            id: 1,
-            timestamp: std::time::UNIX_EPOCH + Duration::from_secs(1),
-            severity: EventSeverity::Info,
-            category: EventCategory::Connection,
-            node_id: Some("node-1".to_string()),
-            connection_id: Some("conn-1".to_string()),
-            title: "Connected".to_string(),
-            detail: Some("ready".to_string()),
-            source: "connection_status_changed",
-        },
-        EventLogEntry {
-            id: 2,
-            timestamp: std::time::UNIX_EPOCH + Duration::from_secs(2),
-            severity: EventSeverity::Error,
-            category: EventCategory::Node,
-            node_id: None,
-            connection_id: None,
-            title: "Failed".to_string(),
-            detail: None,
-            source: "node_state_changed",
-        },
-    ];
-    let event_log_entries = native_plugin_event_log_entries(entries.iter());
-    NativePluginHostApiSnapshot {
-        event_log_entries,
-        ..test_host_api_snapshot()
-    }
-}
-
 pub(super) fn test_host_api_snapshot_with_terminal() -> NativePluginHostApiSnapshot {
     NativePluginHostApiSnapshot {
         active_terminal_target: serde_json::json!({
@@ -240,46 +207,6 @@ pub(super) fn test_host_api_snapshot_with_sessions() -> NativePluginHostApiSnaps
     NativePluginHostApiSnapshot {
         session_tree,
         session_node_states,
-        ..test_host_api_snapshot()
-    }
-}
-
-pub(super) fn test_host_api_snapshot_with_declared_setting() -> NativePluginHostApiSnapshot {
-    let temp_dir = std::env::temp_dir().join(format!(
-        "oxideterm-plugin-lifecycle-settings-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    let settings_path = temp_dir.join("settings.json");
-    let plugin_dir = super::super::plugin_host::native_plugins_dir(&settings_path).join("demo");
-    std::fs::create_dir_all(&plugin_dir).unwrap();
-    let manifest_path = plugin_dir.join("plugin.json");
-    let manifest = serde_json::json!({
-        "id": "com.example.demo",
-        "name": "Demo",
-        "version": "1.0.0",
-        "runtime": { "kind": "manifest-only", "entry": "plugin.json" },
-        "contributes": {
-            "settings": [{
-                "id": "mode",
-                "type": "select",
-                "default": "auto",
-                "title": "Mode",
-                "options": [{ "label": "Auto", "value": "auto" }]
-            }]
-        }
-    });
-    std::fs::write(
-        &manifest_path,
-        serde_json::to_vec_pretty(&manifest).unwrap(),
-    )
-    .unwrap();
-    let registry = super::super::plugin_host::NativePluginRegistry::discover(&settings_path);
-    let _ = std::fs::remove_dir_all(&temp_dir);
-    NativePluginHostApiSnapshot {
-        registry: registry.into(),
         ..test_host_api_snapshot()
     }
 }

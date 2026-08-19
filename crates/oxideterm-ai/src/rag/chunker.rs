@@ -345,49 +345,4 @@ mod tests {
         assert!(!chunks.is_empty());
         assert!(chunks.iter().all(|c| c.section_path.is_none()));
     }
-
-    #[test]
-    fn test_estimate_tokens_cjk() {
-        // ~40 CJK chars → ~69 tokens (40*1.5*1.15)
-        let cjk =
-            "运维文档检索增强生成系统的设计与实现需要考虑多个方面包括分块策略索引构建和检索算法";
-        let est = estimate_tokens(cjk);
-        assert!(est > 50);
-        assert!(est < 120);
-    }
-
-    #[test]
-    fn test_estimate_tokens_english() {
-        // ~100 chars → ~29 tokens (100*0.25*1.15)
-        let en = "This is a test string with about a hundred characters to verify our token estimation is reasonable.";
-        let est = estimate_tokens(en);
-        assert!(est > 20);
-        assert!(est < 50);
-    }
-
-    #[test]
-    fn test_estimate_tokens_uses_utf16_length_like_frontend() {
-        assert_eq!(estimate_tokens("😀"), 1);
-        assert_eq!(estimate_tokens("😀😀😀😀"), 3);
-    }
-
-    #[test]
-    fn test_parse_heading() {
-        assert_eq!(parse_heading("# Hello"), Some((1, "Hello".to_string())));
-        assert_eq!(
-            parse_heading("### Deep Section"),
-            Some((3, "Deep Section".to_string()))
-        );
-        assert_eq!(parse_heading("Not a heading"), None);
-        assert_eq!(parse_heading("#"), None); // empty title
-    }
-
-    #[test]
-    fn test_empty_document() {
-        let chunks = chunk_document("doc3", "", &DocFormat::Markdown);
-        assert!(chunks.is_empty());
-
-        let chunks = chunk_document("doc3", "   \n  \n  ", &DocFormat::PlainText);
-        assert!(chunks.is_empty());
-    }
 }

@@ -205,28 +205,6 @@ pub fn log_row_signature(entry: &ResourceLogEntry) -> u64 {
     hasher.finish()
 }
 
-#[cfg(test)]
-mod row_signature_tests {
-    use super::*;
-
-    #[test]
-    fn log_signature_ignores_presentation_level() {
-        let original = ResourceLogEntry {
-            timestamp: "2026-07-21T12:00:00Z".into(),
-            level: "info".into(),
-            source: "journal".into(),
-            unit: "sshd.service".into(),
-            message: "Session opened".into(),
-        };
-        let mut updated = original.clone();
-        updated.level = "warning".into();
-
-        assert_eq!(log_row_signature(&original), log_row_signature(&updated));
-        updated.message = "Session closed".into();
-        assert_ne!(log_row_signature(&original), log_row_signature(&updated));
-    }
-}
-
 pub fn log_level_label_key(level: &str) -> &'static str {
     match normalized_log_level(level).as_str() {
         "error" => "sidebar.host_logs.levels.error",

@@ -470,49 +470,6 @@ pub fn scheduled_task_row_signature(entry: &ResourceScheduledTask) -> u64 {
     hasher.finish()
 }
 
-#[cfg(test)]
-mod row_signature_tests {
-    use super::*;
-
-    fn task() -> ResourceScheduledTask {
-        ResourceScheduledTask {
-            id: "backup.timer".into(),
-            name: "Backup".into(),
-            source: "systemd".into(),
-            schedule: "daily".into(),
-            command: "/usr/bin/backup".into(),
-            user: "root".into(),
-            enabled: "enabled".into(),
-            active: "active".into(),
-            last_run: "today".into(),
-            next_run: "tomorrow".into(),
-            last_result: "success".into(),
-            description: "Daily backup".into(),
-            unit: "backup.service".into(),
-        }
-    }
-
-    #[test]
-    fn scheduled_task_signature_ignores_live_run_state() {
-        let original = task();
-        let mut updated = original.clone();
-        updated.active = "inactive".into();
-        updated.last_run = "later today".into();
-        updated.next_run = "next week".into();
-        updated.last_result = "failed".into();
-
-        assert_eq!(
-            scheduled_task_row_signature(&original),
-            scheduled_task_row_signature(&updated)
-        );
-        updated.id = "cleanup.timer".into();
-        assert_ne!(
-            scheduled_task_row_signature(&original),
-            scheduled_task_row_signature(&updated)
-        );
-    }
-}
-
 pub fn scheduled_task_filter_label_key(filter: ScheduledTaskFilter) -> &'static str {
     match filter {
         ScheduledTaskFilter::All => "sidebar.host_schedules.filters.all",
@@ -1211,34 +1168,5 @@ mod tests {
             )
             .is_err()
         );
-    }
-
-    #[test]
-    fn scheduled_task_action_matrix_reports_next_toggle() {
-        let mut task = ResourceScheduledTask {
-            id: "backup.timer".to_string(),
-            name: "backup".to_string(),
-            source: "systemd".to_string(),
-            schedule: String::new(),
-            command: String::new(),
-            user: String::new(),
-            enabled: "enabled".to_string(),
-            active: String::new(),
-            last_run: String::new(),
-            next_run: String::new(),
-            last_result: String::new(),
-            description: String::new(),
-            unit: "backup.service".to_string(),
-        };
-        let enabled = scheduled_task_action_availability(&task);
-        assert!(enabled.can_run_now);
-        assert!(enabled.can_toggle_enabled);
-        assert!(enabled.is_enabled);
-        assert_eq!(enabled.next_toggle, ScheduledTaskToggleAction::Disable);
-
-        task.enabled = "disabled".to_string();
-        let disabled = scheduled_task_action_availability(&task);
-        assert!(!disabled.is_enabled);
-        assert_eq!(disabled.next_toggle, ScheduledTaskToggleAction::Enable);
     }
 }

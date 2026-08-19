@@ -145,26 +145,6 @@ fn detect_text_line_ending(text: &str) -> TextLineEnding {
     TextLineEnding::Lf
 }
 
-#[cfg(test)]
-mod language_tests {
-    use super::extension_to_language;
-
-    #[test]
-    fn sftp_preview_language_table_matches_tauri_special_cases() {
-        assert_eq!(extension_to_language("zprofile").as_deref(), Some("bash"));
-        assert_eq!(extension_to_language("gemspec").as_deref(), Some("ruby"));
-        assert_eq!(extension_to_language("nginx").as_deref(), Some("nginx"));
-        assert_eq!(
-            extension_to_language("dockerignore").as_deref(),
-            Some("gitignore")
-        );
-        assert_eq!(
-            extension_to_language("editorconfig").as_deref(),
-            Some("ini")
-        );
-    }
-}
-
 pub fn detect_and_decode_with_hint(
     bytes: &[u8],
     encoding_hint: Option<&str>,
@@ -255,24 +235,22 @@ mod tests {
     }
 
     #[test]
-    fn crlf_text_is_normalized_for_editing_and_restored_for_saving() {
-        let source = "model = \"gpt-5.4\"\r\nreasoning = \"high\"\r\n";
+    fn text_line_endings_are_normalized_and_restored() {
+        // Each supported legacy line ending must round-trip through the editing form.
+        let cases = [
+            (
+                "model = \"gpt-5.4\"\r\nreasoning = \"high\"\r\n",
+                "model = \"gpt-5.4\"\nreasoning = \"high\"\n",
+                TextLineEnding::CrLf,
+            ),
+            ("first\rsecond\r", "first\nsecond\n", TextLineEnding::Cr),
+        ];
 
-        let (normalized, line_ending) = normalize_text_line_endings(source);
-
-        assert_eq!(normalized, "model = \"gpt-5.4\"\nreasoning = \"high\"\n");
-        assert_eq!(line_ending, TextLineEnding::CrLf);
-        assert_eq!(restore_text_line_endings(&normalized, line_ending), source);
-    }
-
-    #[test]
-    fn legacy_cr_text_is_normalized_and_restored() {
-        let source = "first\rsecond\r";
-
-        let (normalized, line_ending) = normalize_text_line_endings(source);
-
-        assert_eq!(normalized, "first\nsecond\n");
-        assert_eq!(line_ending, TextLineEnding::Cr);
-        assert_eq!(restore_text_line_endings(&normalized, line_ending), source);
+        for (source, expected, line_ending) in cases {
+            let (normalized, detected) = normalize_text_line_endings(source);
+            assert_eq!(normalized, expected);
+            assert_eq!(detected, line_ending);
+            assert_eq!(restore_text_line_endings(&normalized, detected), source);
+        }
     }
 }

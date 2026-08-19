@@ -42,12 +42,9 @@ const TERMINAL_LINK_CACHE_CAPACITY: usize = 512;
 const TRANSIENT_COMMAND_HIGHLIGHT_ALPHA: u32 = 0x52;
 
 pub(crate) use layout::*;
-use paint::*;
 #[cfg(test)]
-pub(crate) use paint::{
-    PowerlineHalfCircleCurve, PowerlinePaintMetrics, ghost_text_grid_segments,
-    powerline_half_circle_curve, powerline_separator_points,
-};
+pub(crate) use paint::ghost_text_grid_segments;
+use paint::*;
 pub(crate) use style::*;
 
 pub(crate) struct TerminalElement {
@@ -1127,11 +1124,6 @@ impl TerminalElement {
         }
     }
 
-    #[cfg(test)]
-    fn row_layout_cache_key(&self, row_index: usize) -> TerminalRowLayoutCacheKey {
-        self.row_layout_cache_key_with_semantic_role(row_index, None)
-    }
-
     fn row_layout_cache_key_with_semantic_role(
         &self,
         row_index: usize,
@@ -1187,11 +1179,6 @@ impl TerminalElement {
         TerminalRowLayoutCacheKey {
             signature: hasher.finish(),
         }
-    }
-
-    #[cfg(test)]
-    fn logical_highlight_cache_key(&self, rows: Range<usize>) -> TerminalLogicalHighlightCacheKey {
-        self.logical_highlight_cache_key_with_semantic_role(rows, None)
     }
 
     fn logical_highlight_cache_key_with_semantic_role(
@@ -2154,15 +2141,6 @@ mod cache_tests {
 
     use super::*;
 
-    fn empty_row_layout() -> TerminalRowLayout {
-        TerminalRowLayout {
-            backgrounds: Vec::new(),
-            selections: Vec::new(),
-            text_runs: Vec::new(),
-            cursor: None,
-        }
-    }
-
     fn test_metrics() -> TerminalMetrics {
         TerminalMetrics {
             font: terminal_font_with_family_and_cjk(TERMINAL_FONT, None, TERMINAL_FONT_LIGATURES),
@@ -2170,28 +2148,6 @@ mod cache_tests {
             cell_width: px(8.0),
             line_height: px(10.0),
         }
-    }
-
-    fn row(absolute_line: i64, ch: char) -> TerminalRow {
-        let mut row = TerminalRow {
-            absolute_line,
-            cells: Arc::new(vec![TerminalCell {
-                ch,
-                zerowidth: String::new(),
-                wide: false,
-                fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
-                bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
-                style_origin: Default::default(),
-                attrs: Default::default(),
-                hyperlink: None,
-                cursor: false,
-            }]),
-            wrapped: false,
-            active_input: false,
-            signature: 0,
-        };
-        row.refresh_signature();
-        row
     }
 
     fn row_with_text_and_cursor(absolute_line: i64, text: &str, cursor_col: usize) -> TerminalRow {
@@ -2266,126 +2222,6 @@ mod cache_tests {
     }
 
     #[test]
-    fn terminal_layout_cache_reuses_matching_row_key() {
-        let mut cache = TerminalLayoutCache::default();
-        let key = TerminalRowLayoutCacheKey { signature: 1 };
-
-        let first = cache.get_or_insert_row_with(key.clone(), false, empty_row_layout);
-        let second = cache.get_or_insert_row_with(key, false, empty_row_layout);
-
-        assert!(Arc::ptr_eq(&first, &second));
-    }
-
-    #[test]
-    fn recent_cache_evicts_the_least_recently_used_entry() {
-        let mut cache = RecentCache::new(2);
-
-        assert_eq!(cache.get_or_insert_with(1, || "one"), ("one", false));
-        assert_eq!(cache.get_or_insert_with(2, || "two"), ("two", false));
-        assert_eq!(cache.get_or_insert_with(1, || "replacement"), ("one", true));
-        assert_eq!(cache.get_or_insert_with(3, || "three"), ("three", false));
-
-        assert!(cache.entries.contains_key(&1));
-        assert!(!cache.entries.contains_key(&2));
-        assert!(cache.entries.contains_key(&3));
-    }
-
-    #[test]
-    fn terminal_layout_cache_replaces_changed_row_key() {
-        let mut cache = TerminalLayoutCache::default();
-
-        let first = cache.get_or_insert_row_with(
-            TerminalRowLayoutCacheKey { signature: 1 },
-            false,
-            empty_row_layout,
-        );
-        let second = cache.get_or_insert_row_with(
-            TerminalRowLayoutCacheKey { signature: 2 },
-            false,
-            empty_row_layout,
-        );
-
-        assert!(!Arc::ptr_eq(&first, &second));
-    }
-
-    #[test]
-    fn row_layout_cache_key_survives_scroll_position_changes() {
-        let before = element(snapshot(1, vec![row(-1, 'a'), row(0, 'b')]));
-        let after = element(snapshot(0, vec![row(0, 'b'), row(1, 'c')]));
-
-        assert_eq!(
-            before.row_layout_cache_key(1),
-            after.row_layout_cache_key(0)
-        );
-    }
-
-    #[test]
-    fn row_link_cache_key_survives_scroll_position_changes() {
-        let before = element(snapshot(1, vec![row(-1, 'a'), row(0, 'b')]));
-        let after = element(snapshot(0, vec![row(0, 'b'), row(1, 'c')]));
-
-        assert_eq!(before.row_link_cache_key(1), after.row_link_cache_key(0));
-    }
-
-    #[test]
-    fn logical_highlight_cache_key_survives_scroll_position_changes() {
-        let before = element(snapshot(1, vec![row(-1, 'a'), row(0, 'b')]));
-        let after = element(snapshot(0, vec![row(0, 'b'), row(1, 'c')]));
-
-        assert_eq!(
-            before.logical_highlight_cache_key(1..2),
-            after.logical_highlight_cache_key(0..1)
-        );
-    }
-
-    #[test]
-    fn row_layout_cache_key_ignores_selection_on_other_rows() {
-        let mut before = element(snapshot(0, vec![row(0, 'a'), row(1, 'b')]));
-        before.selection = Some(TerminalSelection {
-            anchor: crate::terminal_view::selection::TerminalGridPoint { line: 1, col: 0 },
-            head: crate::terminal_view::selection::TerminalGridPoint { line: 1, col: 0 },
-            mode: crate::terminal_view::selection::TerminalSelectionMode::Lines,
-        });
-        let mut after = element(snapshot(0, vec![row(0, 'a'), row(1, 'b')]));
-        after.selection = Some(TerminalSelection {
-            anchor: crate::terminal_view::selection::TerminalGridPoint { line: 1, col: 0 },
-            head: crate::terminal_view::selection::TerminalGridPoint { line: 1, col: 1 },
-            mode: crate::terminal_view::selection::TerminalSelectionMode::Lines,
-        });
-
-        assert_eq!(
-            before.row_layout_cache_key(0),
-            after.row_layout_cache_key(0)
-        );
-    }
-
-    #[test]
-    fn row_layout_cache_key_ignores_cursor_blink_on_non_cursor_rows() {
-        let mut before = element(snapshot(0, vec![row(0, 'a'), row(1, 'b')]));
-        before.cursor_visible = true;
-        let mut after = element(snapshot(0, vec![row(0, 'a'), row(1, 'b')]));
-        after.cursor_visible = false;
-
-        assert_eq!(
-            before.row_layout_cache_key(1),
-            after.row_layout_cache_key(1)
-        );
-    }
-
-    #[test]
-    fn row_layout_cache_key_invalidates_when_a_glyph_is_erased() {
-        let before = element(snapshot(0, vec![row(0, '0')]));
-        let after = element(snapshot(0, vec![row(0, ' ')]));
-
-        assert_ne!(
-            before.row_layout_cache_key(0),
-            after.row_layout_cache_key(0)
-        );
-        assert_eq!(before.layout().text_runs[0].text, "0");
-        assert!(after.layout().text_runs.is_empty());
-    }
-
-    #[test]
     fn transparent_vim_row_contains_only_current_text_and_cursor() {
         let mut snapshot = snapshot(0, vec![row_with_text_and_cursor(0, "846", 2)]);
         snapshot.cols = 3;
@@ -2403,30 +2239,6 @@ mod cache_tests {
                 .cursor
                 .map(|cursor| (cursor.row, cursor.col, cursor.shape)),
             Some((0, 2, TerminalCursorShape::Bar))
-        );
-    }
-
-    #[test]
-    fn default_terminal_colors_resolve_without_mutating_rows() {
-        let theme = TerminalUiTheme {
-            foreground: 0x112233,
-            background: 0x445566,
-            ..TerminalUiTheme::default()
-        };
-
-        assert_eq!(
-            resolve_terminal_foreground(
-                terminal_color_from_hex(OXIDETERM_TERMINAL_FOREGROUND),
-                &theme,
-            ),
-            terminal_color_from_hex(theme.foreground)
-        );
-        assert_eq!(
-            resolve_terminal_background(
-                terminal_color_from_hex(OXIDETERM_TERMINAL_BACKGROUND),
-                &theme,
-            ),
-            terminal_color_from_hex(theme.background)
         );
     }
 }

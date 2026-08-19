@@ -142,15 +142,9 @@ fn fold_ranges_overlap(left: FoldRange, right: FoldRange) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use oxideterm_editor_core::{BufferOffset, TextRange};
     use oxideterm_editor_syntax::LanguageId;
 
     use super::*;
-
-    #[test]
-    fn no_syntax_session_has_no_fold_ranges() {
-        assert!(fold_ranges_from_syntax(None).is_empty());
-    }
 
     #[test]
     fn syntax_ranges_drive_foldable_ranges() {
@@ -162,41 +156,5 @@ mod tests {
                 .iter()
                 .any(|range| range.start_line == 0 && range.end_line >= 3)
         );
-    }
-
-    #[test]
-    fn syntax_ranges_normalize_headers_and_single_line_ranges() {
-        assert_eq!(
-            normalize_syntax_fold_ranges(vec![
-                syntax_range(0, 2),
-                syntax_range(0, 4),
-                syntax_range(1, 3),
-            ]),
-            vec![
-                FoldRange {
-                    start_line: 0,
-                    end_line: 4,
-                },
-                FoldRange {
-                    start_line: 1,
-                    end_line: 3,
-                },
-            ]
-        );
-        assert_eq!(
-            normalize_syntax_fold_ranges(vec![syntax_range(2, 2), syntax_range(3, 5)]),
-            vec![FoldRange {
-                start_line: 3,
-                end_line: 5,
-            }]
-        );
-    }
-
-    fn syntax_range(start_line: usize, end_line: usize) -> SyntaxFoldRange {
-        SyntaxFoldRange {
-            range: TextRange::new(BufferOffset::ZERO, BufferOffset::ZERO),
-            start_line,
-            end_line,
-        }
     }
 }

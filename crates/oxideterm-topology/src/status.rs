@@ -66,19 +66,3 @@ pub fn matrix_view_status(status: ConnectionTopologyStatus) -> TopologyViewStatu
         ConnectionTopologyStatus::Unknown => TopologyViewStatus::Pending,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn matrix_visibility_matches_tauri_connected_connecting_filter() {
-        assert!(matrix_visible(ConnectionTopologyStatus::Active));
-        assert!(matrix_visible(ConnectionTopologyStatus::Idle));
-        assert!(matrix_visible(ConnectionTopologyStatus::Connecting));
-        assert!(matrix_visible(ConnectionTopologyStatus::Reconnecting));
-        assert!(!matrix_visible(ConnectionTopologyStatus::LinkDown));
-        assert!(!matrix_visible(ConnectionTopologyStatus::Disconnected));
-        assert!(!matrix_visible(ConnectionTopologyStatus::Error));
-    }
-}

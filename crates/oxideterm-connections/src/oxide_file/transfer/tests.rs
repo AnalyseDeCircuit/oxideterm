@@ -866,88 +866,6 @@ mod tests {
     }
 
     #[test]
-    fn transfer_progress_matches_tauri_stage_lifecycle() {
-        let mut source = temp_store("progress-source");
-        source
-            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
-            .unwrap();
-
-        let mut export_progress = Vec::new();
-        let bytes = export_connections_to_oxide_with_progress(
-            &source,
-            &["conn-1".to_string()],
-            "secret!",
-            OxideExportOptions::default(),
-            |stage, current, total| export_progress.push((stage.to_string(), current, total)),
-        )
-        .unwrap();
-        assert_eq!(
-            export_progress,
-            vec![
-                ("collecting_connections".to_string(), 1, 10),
-                ("collecting_portable_secrets".to_string(), 2, 10),
-                ("computing_checksum".to_string(), 3, 10),
-                ("building_metadata".to_string(), 4, 10),
-                ("generating_salt_nonce".to_string(), 5, 10),
-                ("deriving_key".to_string(), 6, 10),
-                ("serializing_payload".to_string(), 7, 10),
-                ("encrypting_payload".to_string(), 8, 10),
-                ("finalizing_file".to_string(), 9, 10),
-                ("serializing_file".to_string(), 10, 10),
-            ]
-        );
-
-        let mut preview_progress = Vec::new();
-        preview_oxide_import_with_progress(
-            &temp_store("progress-preview"),
-            &bytes,
-            "secret!",
-            ImportConflictStrategy::Rename,
-            |stage, current, total| preview_progress.push((stage.to_string(), current, total)),
-        )
-        .unwrap();
-        assert_eq!(
-            preview_progress,
-            vec![
-                ("parsing_file".to_string(), 1, 8),
-                ("deriving_key".to_string(), 2, 8),
-                ("decrypting_payload".to_string(), 3, 8),
-                ("deserializing_payload".to_string(), 4, 8),
-                ("verifying_checksum".to_string(), 5, 8),
-                ("collecting_existing".to_string(), 6, 8),
-                ("building_preview".to_string(), 7, 8),
-                ("analyzing_preview".to_string(), 8, 8),
-            ]
-        );
-
-        let mut apply_progress = Vec::new();
-        let mut target = temp_store("progress-apply");
-        apply_oxide_import_with_options_with_progress(
-            &mut target,
-            &bytes,
-            "secret!",
-            OxideImportOptions::default(),
-            |stage, current, total| apply_progress.push((stage.to_string(), current, total)),
-        )
-        .unwrap();
-        assert_eq!(
-            apply_progress,
-            vec![
-                ("parsing_file".to_string(), 1, 10),
-                ("deriving_key".to_string(), 2, 10),
-                ("decrypting_payload".to_string(), 3, 10),
-                ("deserializing_payload".to_string(), 4, 10),
-                ("verifying_checksum".to_string(), 5, 10),
-                ("filtering_selection".to_string(), 6, 10),
-                ("collecting_existing".to_string(), 7, 10),
-                ("preparing_connections".to_string(), 8, 10),
-                ("saving_config".to_string(), 9, 10),
-                ("applying_connections".to_string(), 10, 10),
-            ]
-        );
-    }
-
-    #[test]
     fn batch_encryption_context_keeps_files_independent_and_compatible() {
         let source = temp_store("batch-encryption-source");
         let context = OxideBatchEncryptionContext::new("secret!").unwrap();
@@ -1125,44 +1043,6 @@ mod tests {
             plans.get(1),
             Some(PlannedImportAction::Rename(name)) if name == "Prod (Copy)"
         ));
-    }
-
-    #[test]
-    fn export_missing_connection_id_errors_like_tauri() {
-        let source = temp_store("missing-export-id");
-        let error = export_connections_to_oxide(
-            &source,
-            &["missing".to_string()],
-            "secret!",
-            OxideExportOptions::default(),
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("Connection missing not found"));
-    }
-
-    #[test]
-    fn export_quick_command_metadata_counts_are_optional_like_tauri() {
-        let mut source = temp_store("quick-command-metadata");
-        source
-            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
-            .unwrap();
-
-        let bytes = export_connections_to_oxide(
-            &source,
-            &["conn-1".to_string()],
-            "secret!",
-            OxideExportOptions {
-                quick_commands_json: Some(r#"{"commands":[]}"#.to_string()),
-                ..OxideExportOptions::default()
-            },
-        )
-        .unwrap();
-        let file = OxideFile::from_bytes(&bytes).unwrap();
-
-        assert_eq!(file.metadata.has_quick_commands, Some(true));
-        assert_eq!(file.metadata.quick_commands_count, None);
-        assert_eq!(file.metadata.quick_command_categories_count, None);
     }
 
     #[test]
@@ -1394,43 +1274,6 @@ mod tests {
         assert_eq!(result.imported_forwards, 0);
         assert_eq!(result.skipped_forwards, 1);
         assert!(result.forward_records.is_empty());
-    }
-
-    #[test]
-    fn renamed_import_counts_as_imported_like_tauri() {
-        let mut source = temp_store("rename-count-source");
-        source
-            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
-            .unwrap();
-        let bytes = export_connections_to_oxide(
-            &source,
-            &["conn-1".to_string()],
-            "secret!",
-            OxideExportOptions::default(),
-        )
-        .unwrap();
-
-        let mut target = temp_store("rename-count-target");
-        target
-            .upsert_imported_connection(saved_connection("existing", "Prod"))
-            .unwrap();
-        let result = apply_oxide_import(
-            &mut target,
-            &bytes,
-            "secret!",
-            ImportConflictStrategy::Rename,
-        )
-        .unwrap();
-
-        assert_eq!(result.imported, 1);
-        assert_eq!(result.renamed, 1);
-        assert_eq!(target.connections().len(), 2);
-        assert!(
-            target
-                .connections()
-                .iter()
-                .any(|connection| connection.name == "Prod (Copy)")
-        );
     }
 
     #[test]

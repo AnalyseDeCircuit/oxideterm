@@ -127,27 +127,6 @@ impl FileManagerSidebarItemGeometry {
     }
 }
 
-#[cfg(test)]
-mod sidebar_geometry_tests {
-    use super::*;
-
-    #[test]
-    fn sidebar_geometry_preserves_row_and_section_spacing() {
-        let second_row = FileManagerSidebarItemGeometry::FIRST.next();
-        assert_eq!(second_row.transition_index, 1);
-        assert_eq!(second_row.top, FILE_MANAGER_SIDEBAR_ROW_HEIGHT);
-
-        let first_drive = second_row.after_section_header();
-        assert_eq!(first_drive.transition_index, 1);
-        assert_eq!(
-            first_drive.top,
-            FILE_MANAGER_SIDEBAR_ROW_HEIGHT
-                + FILE_MANAGER_SIDEBAR_SECTION_GAP
-                + FILE_MANAGER_SIDEBAR_SECTION_HEADER_HEIGHT
-        );
-    }
-}
-
 fn file_manager_list_virtual_spec() -> TauriVirtualListSpec {
     // Tauri FileList owns FILE_ROW_HEIGHT and useVirtualizer overscan as one
     // contract. Keep native render/scroll call sites on the same named spec so

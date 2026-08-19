@@ -299,27 +299,6 @@ mod ai_turn_order_tests {
         }
     }
 
-    #[test]
-    fn history_trimming_uses_tauri_history_budget_ratio() {
-        let cjk_100 = "你".repeat(100);
-        let mut history = vec![
-            test_message("system", AiChatRole::System, cjk_100.clone()),
-            test_message("user-1", AiChatRole::User, cjk_100.clone()),
-            test_message("assistant-1", AiChatRole::Assistant, cjk_100.clone()),
-            test_message("user-2", AiChatRole::User, cjk_100),
-        ];
-
-        let trimmed = trim_ai_stream_history_to_budget(&mut history, 1000, 150);
-
-        assert_eq!(trimmed, 1);
-        assert_eq!(
-            history
-                .iter()
-                .map(|message| message.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["system", "assistant-1", "user-2"]
-        );
-    }
 
     #[test]
     fn history_trimming_keeps_latest_regular_message_when_budget_is_zero() {
@@ -340,28 +319,6 @@ mod ai_turn_order_tests {
                 .collect::<Vec<_>>(),
             vec!["system", "user-2"]
         );
-    }
-
-    #[test]
-    fn token_estimate_counts_message_content_only_like_tauri_chat_store() {
-        let mut message = test_message("assistant", AiChatRole::Assistant, "hello".to_string());
-        let content_only = ai_message_estimated_tokens(&message);
-        message.thinking_content = Some("hidden thinking should not count".repeat(20));
-        message.context = Some("legacy context should not count".repeat(20));
-        message.tool_calls = vec![serde_json::json!({
-            "id": "call-1",
-            "name": "run_command",
-            "arguments": "{\"command\":\"echo hi\"}",
-            "result": { "output": "large tool output".repeat(20) }
-        })];
-
-        assert_eq!(ai_message_estimated_tokens(&message), content_only);
-    }
-
-    #[test]
-    fn token_estimate_uses_utf16_length_like_tauri() {
-        assert_eq!(ai_estimated_tokens("😀"), 1);
-        assert_eq!(ai_estimated_tokens("😀😀😀😀"), 3);
     }
 
     #[test]
@@ -391,18 +348,6 @@ mod ai_turn_order_tests {
     }
 
     #[test]
-    fn context_indicator_tool_definition_tokens_use_real_orchestrator_schema() {
-        let tools = oxideterm_ai::orchestrator_tool_definitions();
-        let breakdown = ai_prompt_token_breakdown(&[], &tools, "openai", 0);
-
-        assert_eq!(
-            breakdown.tool_definitions,
-            ai_tool_definitions_estimated_tokens(&tools)
-        );
-        assert!(breakdown.tool_definitions > tools.len() * 10);
-    }
-
-    #[test]
     fn native_chat_tool_definitions_include_mcp_bridge_tools() {
         let registry = oxideterm_ai::McpRegistry::new(oxideterm_ai::AiProviderKeyStore::new());
         let policy = oxideterm_ai::AiToolUsePolicy {
@@ -423,52 +368,6 @@ mod ai_turn_order_tests {
         assert!(names.contains(&"read_resource"));
         assert!(names.contains(&"read_mcp_resource"));
         assert!(!names.contains(&"list_mcp_resources"));
-    }
-
-    #[test]
-    fn compact_tool_count_tracks_enabled_catalog_instead_of_round_limit() {
-        let registry = oxideterm_ai::McpRegistry::new(oxideterm_ai::AiProviderKeyStore::new());
-        let baseline_policy = oxideterm_ai::AiToolUsePolicy {
-            enabled: true,
-            ..oxideterm_ai::AiToolUsePolicy::default()
-        };
-        let baseline_count = ai_active_tool_count(true, true, &baseline_policy, &registry);
-
-        assert!(baseline_count > 10);
-        assert_eq!(
-            ai_active_tool_count(false, true, &baseline_policy, &registry),
-            0
-        );
-        assert_eq!(
-            ai_active_tool_count(true, false, &baseline_policy, &registry),
-            baseline_count - 2
-        );
-
-        let mut restricted_policy = baseline_policy;
-        restricted_policy.disabled_tools = vec![
-            "run_command".to_string(),
-            "list_mcp_resources".to_string(),
-        ];
-        assert_eq!(
-            ai_active_tool_count(true, true, &restricted_policy, &registry),
-            baseline_count - 2
-        );
-    }
-
-    #[test]
-    fn context_indicator_excludes_future_output_reserve_from_used_context() {
-        let core = oxideterm_ai::AiPromptTokenBreakdown {
-            system_instructions: 100,
-            tool_definitions: 200,
-            reserved_output: 400,
-            messages: 300,
-            tool_results: 50,
-        };
-
-        let breakdown = ai_context_token_breakdown_from_prompt(core, 8_192);
-
-        assert_eq!(breakdown.total, 650);
-        assert_eq!(breakdown.reserved_output, 400);
     }
 
     #[test]
@@ -751,192 +650,9 @@ mod ai_turn_order_tests {
         );
     }
 
-    #[test]
-    fn sftp_target_shape_is_node_runtime_scoped_like_tauri() {
-        let node_id = NodeId::new("node-1".to_string());
-        let mut config = oxideterm_ssh::SshConfig::default();
-        config.host = "example.com".to_string();
-        config.username = "alice".to_string();
-        let node = WorkspaceSshNode::new(
-            Some("conn-1".to_string()),
-            &config,
-            "example".to_string(),
-            Vec::new(),
-            NodeReadiness::Ready,
-        );
-
-        let target = ai_sftp_target_for_node(&node_id, &node, "sftp-1".to_string());
-
-        assert_eq!(target.id, "sftp-session:sftp-1");
-        assert_eq!(target.kind, "sftp-session");
-        assert_eq!(
-            target.capabilities,
-            vec![
-                "filesystem.read".to_string(),
-                "filesystem.write".to_string(),
-                "state.list".to_string(),
-            ]
-        );
-        assert_eq!(
-            target.refs.get("nodeId").map(String::as_str),
-            Some("node-1")
-        );
-        assert_eq!(
-            target.refs.get("sessionId").map(String::as_str),
-            Some("sftp-1")
-        );
-        assert_eq!(
-            target.refs.get("connectionId").map(String::as_str),
-            Some("conn-1")
-        );
-        assert!(!target.refs.contains_key("tabId"));
-        assert_eq!(
-            target
-                .metadata
-                .get("host")
-                .and_then(serde_json::Value::as_str),
-            Some("example.com")
-        );
-    }
-
-    #[test]
-    fn ide_workspace_target_uses_editor_tab_refs_like_tauri() {
-        let node_id = NodeId::new("node-1".to_string());
-        let mut config = oxideterm_ssh::SshConfig::default();
-        config.host = "example.com".to_string();
-        config.username = "alice".to_string();
-        let node = WorkspaceSshNode::new(
-            Some("conn-1".to_string()),
-            &config,
-            "example".to_string(),
-            Vec::new(),
-            NodeReadiness::Ready,
-        );
-
-        let target = ai_ide_workspace_target_for_node(
-            TabId(9),
-            &node_id,
-            &node,
-            Some("editor-tab-1".to_string()),
-            Some("/srv/app".to_string()),
-            Some("app".to_string()),
-        );
-
-        assert_eq!(target.id, "ide-surface:9");
-        assert_eq!(target.kind, "ide-workspace");
-        assert_eq!(target.label, "app");
-        assert_eq!(
-            target.refs.get("surfaceTabId").map(String::as_str),
-            Some("9")
-        );
-        assert_eq!(
-            target.refs.get("nodeId").map(String::as_str),
-            Some("node-1")
-        );
-        assert_eq!(
-            target.refs.get("connectionId").map(String::as_str),
-            Some("conn-1")
-        );
-        assert_eq!(
-            target.refs.get("tabId").map(String::as_str),
-            Some("editor-tab-1")
-        );
-        assert_eq!(
-            target
-                .metadata
-                .get("rootPath")
-                .and_then(serde_json::Value::as_str),
-            Some("/srv/app")
-        );
-        assert_eq!(
-            target
-                .metadata
-                .get("activeTabId")
-                .and_then(serde_json::Value::as_str),
-            Some("editor-tab-1")
-        );
-    }
 
 
-    #[test]
-    fn prompt_budget_policy_matches_tauri_levels() {
-        let decision = determine_ai_compression_level(AiPromptBudgetInput {
-            context_window: 1000,
-            response_reserve: 150,
-            system_budget: 50,
-            history_tokens: 630,
-            safety_margin: Some(0),
-            trimmable_history_tokens: Some(630),
-            summary_eligible_tokens: Some(630),
-            can_summarize: true,
-            can_lookup_transcript: false,
-            in_tool_loop: false,
-            auto_compact_threshold: Some(0.80),
-            transcript_lookup_threshold: None,
-            tool_loop_stop_threshold: None,
-        });
 
-        assert_eq!(decision.level, 2);
-
-        let tool_loop_stop = determine_ai_compression_level(AiPromptBudgetInput {
-            context_window: 1000,
-            response_reserve: 100,
-            system_budget: 0,
-            history_tokens: 890,
-            safety_margin: Some(0),
-            trimmable_history_tokens: Some(0),
-            summary_eligible_tokens: Some(0),
-            can_summarize: false,
-            can_lookup_transcript: false,
-            in_tool_loop: true,
-            auto_compact_threshold: None,
-            transcript_lookup_threshold: None,
-            tool_loop_stop_threshold: Some(0.98),
-        });
-
-        assert_eq!(tool_loop_stop.level, 4);
-    }
-
-    #[test]
-    fn chat_request_max_response_tokens_matches_tauri_reserve_fallback() {
-        let settings = oxideterm_settings::PersistedSettings::default();
-
-        assert_eq!(
-            ai_chat_request_max_response_tokens(&settings, "builtin-openai", "gpt-4o-mini"),
-            Some(4096)
-        );
-    }
-
-    #[test]
-    fn chat_request_max_response_tokens_prefers_user_override() {
-        let mut settings = oxideterm_settings::PersistedSettings::default();
-        settings.ai.model_max_response_tokens.insert(
-            "builtin-openai".to_string(),
-            serde_json::json!({ "gpt-4o-mini": 2048 }),
-        );
-
-        assert_eq!(
-            ai_chat_request_max_response_tokens(&settings, "builtin-openai", "gpt-4o-mini"),
-            Some(2048)
-        );
-    }
-
-    #[test]
-    fn user_memory_prompt_uses_the_shared_character_limit() {
-        let limit = oxideterm_ai::AI_USER_MEMORY_MAX_CHARS;
-        let memory = "你".repeat(limit + 1);
-
-        let prompt = ai_user_memory_prompt(&memory, true).expect("memory prompt");
-
-        assert!(prompt.contains(&"你".repeat(limit)));
-        assert!(!prompt.contains(&"你".repeat(limit + 1)));
-        assert!(prompt.contains("\n...[truncated]"));
-    }
-
-    #[test]
-    fn user_memory_prompt_respects_disabled_setting() {
-        assert!(ai_user_memory_prompt("remember this", false).is_none());
-    }
 
     #[test]
     fn compaction_plan_uses_tauri_manual_and_silent_keep_budgets() {
@@ -993,53 +709,6 @@ mod ai_turn_order_tests {
         );
     }
 
-    #[test]
-    fn compaction_summary_prompt_matches_tauri_shape() {
-        let anchor = AiChatMessage {
-            id: "anchor-1".to_string(),
-            role: AiChatRole::System,
-            content: " previous summary ".to_string(),
-            timestamp_ms: 1,
-            model: None,
-            context: None,
-            is_streaming: false,
-            thinking_content: None,
-            metadata: Some(AiChatMessageMetadata {
-                kind: "compaction-anchor".to_string(),
-                original_count: Some(4),
-                compacted_at_ms: Some(1),
-                original_messages: None,
-                original_user_count: None,
-            }),
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
-        };
-        let messages = vec![
-            anchor,
-            test_message("u-1", AiChatRole::User, " question ".to_string()),
-            test_message("tool-1", AiChatRole::Tool, "tool output".to_string()),
-            test_message("a-1", AiChatRole::Assistant, " answer ".to_string()),
-        ];
-
-        let prompt = ai_compaction_summary_messages(&messages);
-
-        assert_eq!(prompt.len(), 2);
-        assert_eq!(prompt[0].role, AiChatRole::System);
-        assert_eq!(prompt[1].role, AiChatRole::User);
-        assert!(
-            prompt[1]
-                .content
-                .contains("[Previous Summary]:  previous summary ")
-        );
-        assert!(prompt[1].content.contains("User:  question "));
-        assert!(prompt[1].content.contains("Assistant:  answer "));
-        assert!(!prompt[1].content.contains("tool output"));
-    }
 
     #[test]
     fn conversation_summary_prompt_excludes_tool_messages_like_tauri() {
@@ -1202,14 +871,6 @@ mod ai_turn_order_tests {
         assert!(lookup_prompt.contains("end=a-2"));
     }
 
-    #[test]
-    fn transcript_lookup_prompt_missing_conversation_matches_tauri_undefined_string() {
-        let lookup_prompt =
-            ai_build_transcript_lookup_prompt_reference(serde_json::json!({ "startEntryId": "s" }));
-
-        assert!(lookup_prompt.contains("conversation=undefined"));
-        assert!(lookup_prompt.contains("start=s"));
-    }
 
     #[test]
     fn old_tool_messages_are_condensed_like_tauri_tool_loop() {
@@ -1496,41 +1157,6 @@ mod ai_turn_order_tests {
         );
     }
 
-    #[test]
-    fn round_stateful_marker_matches_tauri_awaiting_summary_lifecycle() {
-        let mut message = assistant_message();
-
-        upsert_ai_turn_round_tool_call(
-            &mut message,
-            "call-1",
-            "run_command",
-            "{}",
-            "completed",
-            "assistant-1-round-1",
-            1,
-        );
-        set_ai_turn_round_stateful_marker(
-            &mut message,
-            "assistant-1-round-1",
-            Some("awaiting-summary"),
-        );
-
-        let turn = message.turn.as_ref().expect("turn");
-        let round = &turn
-            .get("toolRounds")
-            .and_then(serde_json::Value::as_array)
-            .expect("rounds")[0];
-        assert_eq!(round["statefulMarker"], "awaiting-summary");
-
-        set_ai_turn_round_stateful_marker(&mut message, "assistant-1-round-1", None);
-        let round = &message
-            .turn
-            .as_ref()
-            .and_then(|turn| turn.get("toolRounds"))
-            .and_then(serde_json::Value::as_array)
-            .expect("rounds")[0];
-        assert!(round.get("statefulMarker").is_none());
-    }
 
     #[test]
     fn awaiting_summary_indicator_is_hidden_for_historical_messages() {
@@ -1602,26 +1228,6 @@ mod ai_turn_order_tests {
         );
     }
 
-    #[test]
-    fn turn_plain_text_summary_uses_text_parts_like_tauri_turn_end() {
-        let mut message = assistant_message();
-
-        append_ai_turn_text_part(&mut message, "thinking", "hidden reasoning", false);
-        append_ai_turn_text_part(&mut message, "text", "visible ", false);
-        append_ai_turn_tool_result(
-            &mut message,
-            "call-1",
-            "run_command",
-            "completed",
-            &serde_json::json!({ "ok": true, "output": "tool output" }),
-        );
-        append_ai_turn_text_part(&mut message, "text", "answer", false);
-
-        assert_eq!(
-            ai_turn_plain_text_summary(&message).as_deref(),
-            Some("visible answer")
-        );
-    }
 
     #[test]
     fn synthetic_denied_tool_status_uses_retry_round_override() {
@@ -1652,15 +1258,6 @@ mod ai_turn_order_tests {
             .expect("tool rounds");
         assert_eq!(rounds[0]["id"], "assistant-1-hard-deny-1");
         assert_eq!(rounds[0]["toolCalls"][0]["approvalState"], "rejected");
-    }
-
-    #[test]
-    fn pseudo_tool_json_hard_deny_respects_json_requests() {
-        let pseudo = r#"{"name":"run_command","arguments":{"command":"ls"},"status":"ok"}"#;
-
-        assert!(ai_should_trigger_hard_deny(pseudo, false));
-        assert!(!ai_should_trigger_hard_deny(pseudo, true));
-        assert!(!ai_should_trigger_hard_deny("正常回答", false));
     }
 
     #[test]

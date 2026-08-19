@@ -687,29 +687,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn decode_wsl_output_handles_utf8() {
-        assert_eq!(
-            decode_wsl_output(b"NAME STATE\nUbuntu Running\n"),
-            "NAME STATE\nUbuntu Running\n"
-        );
-    }
-
-    #[test]
-    fn decode_wsl_output_handles_utf16le_with_bom() {
+    fn decode_wsl_output_handles_supported_encodings() {
+        // WSL output may arrive as UTF-8 or UTF-16LE with or without a BOM.
         let text = "NAME STATE\nUbuntu Running\n";
-        let mut raw = vec![0xff, 0xfe];
-        raw.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
-        assert_eq!(decode_wsl_output(&raw), text);
-    }
-
-    #[test]
-    fn decode_wsl_output_handles_utf16le_without_bom() {
-        let text = "NAME STATE\nUbuntu Running\n";
-        let raw = text
+        let utf16 = text
             .encode_utf16()
             .flat_map(u16::to_le_bytes)
             .collect::<Vec<_>>();
-        assert_eq!(decode_wsl_output(&raw), text);
+        let mut utf16_with_bom = vec![0xff, 0xfe];
+        utf16_with_bom.extend_from_slice(&utf16);
+
+        for raw in [text.as_bytes(), utf16_with_bom.as_slice(), utf16.as_slice()] {
+            assert_eq!(decode_wsl_output(raw), text);
+        }
     }
 
     #[test]
@@ -766,26 +756,39 @@ mod tests {
     }
 
     #[test]
-    fn desktop_bootstrap_script_matches_tauri_dbus_run_session_path() {
-        let script = build_desktop_bootstrap_script(":10", "xfce4-session", "dbus-run-session", "");
-        assert!(script.contains("unset WAYLAND_DISPLAY XDG_SESSION_TYPE"));
-        assert!(script.contains("export DISPLAY=:10"));
-        assert!(script.contains("echo $$ > /tmp/oxideterm-desktop.pid"));
-        assert!(script.contains("exec dbus-run-session xfce4-session"));
-    }
+    fn desktop_bootstrap_script_preserves_dbus_launch_paths() {
+        // Both supported D-Bus launch paths must retain their required shell fragments.
+        let cases = [
+            (
+                build_desktop_bootstrap_script(":10", "xfce4-session", "dbus-run-session", ""),
+                [
+                    "unset WAYLAND_DISPLAY XDG_SESSION_TYPE",
+                    "export DISPLAY=:10",
+                    "echo $$ > /tmp/oxideterm-desktop.pid",
+                    "exec dbus-run-session xfce4-session",
+                ],
+            ),
+            (
+                build_desktop_bootstrap_script(
+                    ":11",
+                    "gnome-session --session=gnome-xorg",
+                    "dbus-launch",
+                    "export XDG_SESSION_TYPE=x11\nexport GDK_BACKEND=x11",
+                ),
+                [
+                    "export XDG_SESSION_TYPE=x11",
+                    "eval $(dbus-launch --sh-syntax)",
+                    "export DBUS_SESSION_BUS_ADDRESS",
+                    "exec gnome-session --session=gnome-xorg",
+                ],
+            ),
+        ];
 
-    #[test]
-    fn desktop_bootstrap_script_matches_tauri_dbus_launch_fallback() {
-        let script = build_desktop_bootstrap_script(
-            ":11",
-            "gnome-session --session=gnome-xorg",
-            "dbus-launch",
-            "export XDG_SESSION_TYPE=x11\nexport GDK_BACKEND=x11",
-        );
-        assert!(script.contains("export XDG_SESSION_TYPE=x11"));
-        assert!(script.contains("eval $(dbus-launch --sh-syntax)"));
-        assert!(script.contains("export DBUS_SESSION_BUS_ADDRESS"));
-        assert!(script.contains("exec gnome-session --session=gnome-xorg"));
+        for (script, expected_fragments) in cases {
+            for fragment in expected_fragments {
+                assert!(script.contains(fragment), "missing {fragment:?}");
+            }
+        }
     }
 
     #[test]

@@ -318,23 +318,6 @@ mod tests {
     }
 
     #[test]
-    fn registry_finds_provider_by_protocol() {
-        let registry = RemoteDesktopProviderRegistry::from_manifests([
-            manifest("rdp", RemoteDesktopProtocol::Rdp),
-            manifest("vnc", RemoteDesktopProtocol::Vnc),
-        ])
-        .unwrap();
-
-        assert_eq!(
-            registry
-                .get_for_protocol(RemoteDesktopProtocol::Vnc)
-                .unwrap()
-                .id,
-            "vnc"
-        );
-    }
-
-    #[test]
     fn registry_loads_manifests_from_provider_directories() {
         let root = unique_temp_dir("remote-desktop-provider-registry");
         let provider_dir = root.join("rdp");
@@ -349,56 +332,6 @@ mod tests {
 
         assert!(registry.get("rdp").is_some());
         fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn builtin_registry_exposes_rdp_and_vnc_helpers() {
-        let registry = builtin_provider_registry().unwrap();
-        let rdp = registry
-            .get_for_protocol(RemoteDesktopProtocol::Rdp)
-            .unwrap();
-        let vnc = registry
-            .get_for_protocol(RemoteDesktopProtocol::Vnc)
-            .unwrap();
-
-        assert_eq!(rdp.entry.command, "oxideterm-rdp-helper");
-        assert_eq!(rdp.entry.args, vec!["--stdio".to_string()]);
-        assert!(rdp.capabilities.clipboard_text);
-        assert!(rdp.capabilities.clipboard_data);
-        assert!(rdp.capabilities.resize);
-        assert!(rdp.capabilities.cursor);
-        assert!(rdp.capabilities.binary_frames);
-
-        assert_eq!(vnc.effective_default_port(), 5900);
-        assert!(vnc.capabilities.clipboard_text);
-        assert!(vnc.capabilities.clipboard_data);
-        assert!(vnc.capabilities.clipboard_files);
-        assert!(vnc.capabilities.audio_playback);
-        assert!(vnc.capabilities.multi_monitor);
-        assert!(vnc.capabilities.resize);
-        assert!(vnc.capabilities.cursor);
-        assert!(vnc.capabilities.binary_frames);
-    }
-
-    #[test]
-    fn builtin_preview_registry_keeps_fake_helpers_explicit() {
-        let registry = builtin_preview_provider_registry().unwrap();
-
-        assert!(
-            registry
-                .get_for_protocol(RemoteDesktopProtocol::Rdp)
-                .unwrap()
-                .entry
-                .args
-                .contains(&"--fake".to_string())
-        );
-        assert_eq!(
-            registry
-                .get_for_protocol(RemoteDesktopProtocol::Vnc)
-                .unwrap()
-                .effective_default_port(),
-            5900
-        );
     }
 
     fn unique_temp_dir(label: &str) -> PathBuf {

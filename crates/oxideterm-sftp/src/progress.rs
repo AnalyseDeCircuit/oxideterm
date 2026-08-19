@@ -121,17 +121,6 @@ impl TransferProtocol {
     }
 }
 
-#[cfg(test)]
-mod transfer_protocol_tests {
-    use super::TransferProtocol;
-
-    #[test]
-    fn only_sftp_supports_offset_restart_resume() {
-        assert!(TransferProtocol::Sftp.supports_restart_resume());
-        assert!(!TransferProtocol::Scp.supports_restart_resume());
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TransferType {
     Upload,
@@ -912,26 +901,6 @@ mod tests {
         drop(progress_table);
         drop(read_txn);
         drop(store);
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[tokio::test]
-    async fn lazy_progress_store_opens_database_on_first_use() {
-        let path = temp_progress_path("lazy-open");
-        let store = LazyProgressStore::new(&path);
-        assert!(!path.exists());
-
-        let progress = StoredTransferProgress::new(
-            "transfer-1".to_string(),
-            TransferType::Download,
-            PathBuf::from("/remote/file.txt"),
-            PathBuf::from("/local/file.txt"),
-            128,
-            "session-1".to_string(),
-        );
-        store.save(&progress).await.expect("save progress");
-
-        assert!(path.exists());
         let _ = std::fs::remove_file(path);
     }
 

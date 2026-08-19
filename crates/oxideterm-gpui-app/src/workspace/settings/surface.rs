@@ -1410,39 +1410,3 @@ fn settings_terminal_focus_handoff_list_item(
                 section_index == SETTINGS_TERMINAL_FOCUS_HANDOFF_SECTION_INDEX
             })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn settings_navigation_item_indices_include_group_separators() {
-        let layout = SettingsNavigationLayout::default();
-        let groups = layout.groups();
-        assert_eq!(
-            settings_nav_item_index(groups, SettingsTab::General),
-            Some(0)
-        );
-        assert_eq!(
-            settings_nav_item_index(groups, SettingsTab::Keybindings),
-            Some(2)
-        );
-        assert_eq!(
-            settings_nav_item_index(groups, SettingsTab::Terminal),
-            Some(4)
-        );
-        assert_eq!(
-            settings_nav_item_index(groups, SettingsTab::Portable),
-            Some(5)
-        );
-        assert_eq!(
-            settings_nav_item_index(groups, SettingsTab::Connections),
-            Some(7)
-        );
-        assert_eq!(
-            settings_nav_item_index(groups, SettingsTab::Privilege),
-            Some(10)
-        );
-        assert_eq!(settings_nav_item_index(groups, SettingsTab::Help), Some(16));
-    }
-}

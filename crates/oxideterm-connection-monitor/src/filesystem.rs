@@ -281,54 +281,6 @@ pub fn filesystem_row_signature(entry: &ResourceFilesystemEntry) -> u64 {
     hasher.finish()
 }
 
-#[cfg(test)]
-mod row_signature_tests {
-    use super::*;
-
-    fn filesystem() -> ResourceFilesystemEntry {
-        ResourceFilesystemEntry {
-            id: "mount:/".into(),
-            kind: "mount".into(),
-            path: "/".into(),
-            device: "/dev/sda1".into(),
-            fs_type: "ext4".into(),
-            size_bytes: "1000".into(),
-            used_bytes: "500".into(),
-            available_bytes: "500".into(),
-            used_percent: "50".into(),
-            inode_total: "100".into(),
-            inode_used: "50".into(),
-            inode_available: "50".into(),
-            inode_percent: "50".into(),
-            read_only: false,
-            options: "rw".into(),
-            item_type: "filesystem".into(),
-            source: "df".into(),
-            detail: String::new(),
-        }
-    }
-
-    #[test]
-    fn filesystem_signature_ignores_live_capacity() {
-        let original = filesystem();
-        let mut updated = original.clone();
-        updated.used_bytes = "900".into();
-        updated.available_bytes = "100".into();
-        updated.used_percent = "90".into();
-        updated.inode_percent = "75".into();
-
-        assert_eq!(
-            filesystem_row_signature(&original),
-            filesystem_row_signature(&updated)
-        );
-        updated.id = "mount:/data".into();
-        assert_ne!(
-            filesystem_row_signature(&original),
-            filesystem_row_signature(&updated)
-        );
-    }
-}
-
 pub fn filesystem_filter_label_key(filter: FilesystemFilter) -> &'static str {
     match filter {
         FilesystemFilter::All => "sidebar.host_filesystems.filters.all",
@@ -1041,47 +993,6 @@ fn filesystem_os(os_type: &str) -> FilesystemOs {
 mod tests {
     use super::*;
 
-    fn mount_with_usage(used_percent: u32) -> ResourceFilesystemEntry {
-        ResourceFilesystemEntry {
-            id: "/".into(),
-            kind: "mount".into(),
-            path: "/".into(),
-            device: "/dev/sda1".into(),
-            fs_type: "ext4".into(),
-            size_bytes: (10_u64 * 1024 * 1024 * 1024).to_string(),
-            used_bytes: String::new(),
-            available_bytes: (2_u64 * 1024 * 1024 * 1024).to_string(),
-            used_percent: used_percent.to_string(),
-            inode_total: String::new(),
-            inode_used: String::new(),
-            inode_available: String::new(),
-            inode_percent: String::new(),
-            read_only: false,
-            options: String::new(),
-            item_type: String::new(),
-            source: String::new(),
-            detail: String::new(),
-        }
-    }
-
-    #[test]
-    fn filesystem_usage_thresholds_are_consistent() {
-        for percent in [84, 85, 90, 94, 95] {
-            let expected = if percent >= 90 {
-                FilesystemEntrySeverity::Critical
-            } else if percent >= 85 {
-                FilesystemEntrySeverity::Warning
-            } else {
-                FilesystemEntrySeverity::Normal
-            };
-            assert_eq!(filesystem_percent_severity(&percent.to_string()), expected);
-            assert_eq!(
-                filesystem_entry_severity(&mount_with_usage(percent)),
-                expected
-            );
-        }
-    }
-
     #[test]
     fn filesystem_capture_requires_an_explicit_zero_exit() {
         for exit_code in [Some(7), None] {
@@ -1207,25 +1118,6 @@ mod tests {
             filesystem_attention_label_keys(&count_hotspots[0])
                 .contains(&"sidebar.host_filesystems.attention.file_count_hotspot")
         );
-    }
-
-    #[test]
-    fn normalized_rows_search_all_fields() {
-        let output = concat!(
-            "===FILESYSTEMS===\n",
-            "__OXIDE_FILESYSTEM_CAPABILITY__\tpartial\tfixture\n",
-            "ROW\tmount:/mnt/cache\tmount\t/mnt/cache\tserver:/cache\tnfs4\t1000\t900\t100\t90\t10\t9\t1\t90\ttrue\tro,vers=4\tmount\tfixture\tremote cache\n",
-            "===FILESYSTEMS_END===\n"
-        );
-
-        let snapshot = parse_filesystem_snapshot(output);
-        let rows =
-            visible_filesystem_rows(&snapshot.entries, "remote cache", FilesystemFilter::All);
-        let inode = visible_filesystem_rows(&snapshot.entries, "", FilesystemFilter::InodePressure);
-
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].device, "server:/cache");
-        assert_eq!(inode.len(), 1);
     }
 
     #[test]

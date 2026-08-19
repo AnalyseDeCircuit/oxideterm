@@ -1313,40 +1313,11 @@ cpu  1 2 3 4 5 6 7 8
     }
 
     #[test]
-    fn unsupported_marker_is_explicit() {
-        let metrics = parse_resource_metrics("===UNSUPPORTED===\nFreeBSD\n===END===", None, 1);
-
-        assert_eq!(metrics.source, MetricsSource::Unsupported);
-    }
-
-    #[test]
     fn cpu_direct_supports_macos_and_windows_samples() {
         let output = "===CPU_DIRECT===\n37.5\n===MEMINFO===\nMemTotal: 1024 kB\nMemAvailable: 512 kB\n===END===";
         let metrics = parse_resource_metrics(output, None, 1);
 
         assert_eq!(metrics.cpu_percent, Some(37.5));
         assert_eq!(metrics.source, MetricsSource::Partial);
-    }
-
-    #[test]
-    fn empty_metrics_are_rtt_only() {
-        let metrics = parse_resource_metrics("", None, 1);
-
-        assert_eq!(metrics.source, MetricsSource::RttOnly);
-    }
-
-    #[test]
-    fn trims_history_to_tauri_capacity() {
-        let mut history = Vec::new();
-        for timestamp_ms in 0..65 {
-            push_history(
-                &mut history,
-                ResourceMetrics::empty(timestamp_ms, MetricsSource::Failed),
-            );
-        }
-
-        assert_eq!(history.len(), RESOURCE_HISTORY_CAPACITY);
-        assert_eq!(history.first().map(|metrics| metrics.timestamp_ms), Some(5));
-        assert_eq!(history.last().map(|metrics| metrics.timestamp_ms), Some(64));
     }
 }

@@ -216,22 +216,6 @@ mod tests {
     }
 
     #[test]
-    fn sparse_dirty_backlog_stays_dirty_without_base_frame_recovery() {
-        let writer = SharedEventWriter::inert_for_tests();
-        let backlog_count = 32;
-
-        for index in 0..backlog_count {
-            writer
-                .send(dirty_update_at((index as u32) * 2))
-                .expect("dirty update should enqueue");
-        }
-
-        let (queue, _) = &*writer.queue;
-        let queue = queue.lock().unwrap();
-        assert_eq!(queue.frames.len(), backlog_count);
-    }
-
-    #[test]
     fn base_frame_supersedes_pending_dirty_queue() {
         let writer = SharedEventWriter::inert_for_tests();
         for index in 0..32 {

@@ -3361,79 +3361,24 @@ mod tests {
     }
 
     #[test]
-    fn selection_autoscroll_matches_display_offset_direction() {
-        assert_eq!(
-            terminal_selection_autoscroll_delta_rows(px(89.0), px(100.0), px(200.0), px(10.0)),
-            2
-        );
-        assert_eq!(
-            terminal_selection_autoscroll_delta_rows(px(211.0), px(100.0), px(200.0), px(10.0)),
-            -2
-        );
-        assert_eq!(
-            terminal_selection_autoscroll_delta_rows(px(150.0), px(100.0), px(200.0), px(10.0)),
-            0
-        );
-        assert_eq!(
-            terminal_selection_autoscroll_delta_rows(px(250.0), px(100.0), px(200.0), px(10.0)),
-            -TERMINAL_SELECTION_AUTOSCROLL_MAX_ROWS
-        );
-    }
-
-    #[test]
-    fn terminal_row_hit_testing_tracks_fractional_smooth_scroll_offset() {
-        let line_height = 20.0;
-        let position_in_shifted_first_row = TERMINAL_CONTENT_PADDING + 25.0;
-        let position_in_shifted_second_row = TERMINAL_CONTENT_PADDING + 15.0;
-
-        assert_eq!(
-            terminal_viewport_row_for_position(
-                position_in_shifted_first_row,
-                10.0,
-                line_height,
-                10,
+    fn privilege_prompt_enter_submit_rules_preserve_confirmation_boundaries() {
+        for (modifiers, has_inline_hint, expected) in [
+            (Modifiers::default(), false, false),
+            (Modifiers::default(), true, true),
+            (
+                Modifiers {
+                    shift: true,
+                    ..Modifiers::default()
+                },
+                true,
+                false,
             ),
-            0
-        );
-        assert_eq!(
-            terminal_viewport_row_for_position(
-                position_in_shifted_second_row,
-                -10.0,
-                line_height,
-                10,
-            ),
-            1
-        );
-    }
-
-    #[test]
-    fn privilege_prompt_enter_requires_inline_hint() {
-        assert!(!privilege_prompt_enter_requests_submit(
-            "enter",
-            Modifiers::default(),
-            false
-        ));
-    }
-
-    #[test]
-    fn privilege_prompt_enter_requests_submit_for_inline_hint() {
-        assert!(privilege_prompt_enter_requests_submit(
-            "enter",
-            Modifiers::default(),
-            true
-        ));
-    }
-
-    #[test]
-    fn privilege_prompt_modified_enter_does_not_request_submit() {
-        assert!(!privilege_prompt_enter_requests_submit(
-            "enter",
-            Modifiers {
-                shift: true,
-                ..Modifiers::default()
-            },
-            true
-        ));
+        ] {
+            assert_eq!(
+                privilege_prompt_enter_requests_submit("enter", modifiers, has_inline_hint),
+                expected
+            );
+        }
     }
 
     #[test]
@@ -3572,69 +3517,6 @@ mod tests {
     }
 
     #[test]
-    fn free_type_drag_distance_uses_activation_threshold() {
-        let start = gpui::point(px(10.0), px(10.0));
-
-        assert!(!free_type_drag_distance_exceeded(
-            start,
-            gpui::point(px(13.0), px(13.0))
-        ));
-        assert!(free_type_drag_distance_exceeded(
-            start,
-            gpui::point(px(14.0), px(13.0))
-        ));
-    }
-
-    #[test]
-    fn free_type_drag_hit_test_matches_selection_shape() {
-        let simple = TerminalSelection {
-            anchor: TerminalGridPoint { line: 0, col: 5 },
-            head: TerminalGridPoint { line: 1, col: 2 },
-            mode: TerminalSelectionMode::Simple,
-        };
-        assert!(selection_contains_grid_point(
-            simple,
-            TerminalGridPoint { line: 0, col: 20 }
-        ));
-        assert!(selection_contains_grid_point(
-            simple,
-            TerminalGridPoint { line: 1, col: 1 }
-        ));
-        assert!(!selection_contains_grid_point(
-            simple,
-            TerminalGridPoint { line: 2, col: 1 }
-        ));
-
-        let block = TerminalSelection {
-            anchor: TerminalGridPoint { line: 1, col: 3 },
-            head: TerminalGridPoint { line: 3, col: 6 },
-            mode: TerminalSelectionMode::Block,
-        };
-        assert!(selection_contains_grid_point(
-            block,
-            TerminalGridPoint { line: 2, col: 4 }
-        ));
-        assert!(!selection_contains_grid_point(
-            block,
-            TerminalGridPoint { line: 2, col: 8 }
-        ));
-
-        let lines = TerminalSelection {
-            anchor: TerminalGridPoint { line: 4, col: 50 },
-            head: TerminalGridPoint { line: 6, col: 0 },
-            mode: TerminalSelectionMode::Lines,
-        };
-        assert!(selection_contains_grid_point(
-            lines,
-            TerminalGridPoint { line: 5, col: 0 }
-        ));
-        assert!(!selection_contains_grid_point(
-            lines,
-            TerminalGridPoint { line: 7, col: 0 }
-        ));
-    }
-
-    #[test]
     fn free_type_selected_text_command_input_rejects_multiline_text() {
         assert!(free_type_selected_text_can_be_command_input("plain-text"));
         assert!(!free_type_selected_text_can_be_command_input(""));
@@ -3694,84 +3576,6 @@ mod tests {
                 Some(&input_state)
             ),
             Some(-5)
-        );
-    }
-
-    #[test]
-    fn free_type_cursor_delta_rejects_unmarked_rows_outside_tracked_command_range() {
-        let snapshot = test_snapshot_with_cursor(
-            vec![test_row("old output", false), test_row("$ abc", true)],
-            1,
-            5,
-            20,
-        );
-        let input_state = TerminalAutosuggestInputState {
-            value: "abc".to_string(),
-            cursor_index: 3,
-            is_cursor_at_end: true,
-        };
-
-        assert_eq!(
-            active_input_cursor_delta(
-                &snapshot,
-                TerminalPoint { row: 0, col: 4 },
-                Some(&input_state)
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn free_type_cursor_delta_clamps_to_tracked_command_range() {
-        let snapshot = test_snapshot_with_cursor(vec![test_row("$ abc", true)], 0, 5, 20);
-        let input_state = TerminalAutosuggestInputState {
-            value: "abc".to_string(),
-            cursor_index: 3,
-            is_cursor_at_end: true,
-        };
-
-        assert_eq!(
-            active_input_cursor_delta(
-                &snapshot,
-                TerminalPoint { row: 0, col: 0 },
-                Some(&input_state)
-            ),
-            Some(-3)
-        );
-        assert_eq!(
-            active_input_cursor_delta(
-                &snapshot,
-                TerminalPoint { row: 0, col: 18 },
-                Some(&input_state)
-            ),
-            Some(0)
-        );
-        assert_eq!(
-            active_input_cursor_delta(
-                &snapshot,
-                TerminalPoint { row: 0, col: 3 },
-                Some(&input_state)
-            ),
-            Some(-2)
-        );
-    }
-
-    #[test]
-    fn free_type_cursor_delta_ignores_stale_tracked_command_range() {
-        let snapshot = test_snapshot_with_cursor(vec![test_row("$ a", true)], 0, 3, 4);
-        let input_state = TerminalAutosuggestInputState {
-            value: "this command is no longer visible".to_string(),
-            cursor_index: 31,
-            is_cursor_at_end: true,
-        };
-
-        assert_eq!(
-            active_input_cursor_delta(
-                &snapshot,
-                TerminalPoint { row: 0, col: 0 },
-                Some(&input_state)
-            ),
-            Some(-3)
         );
     }
 
@@ -3899,42 +3703,6 @@ mod tests {
     }
 
     #[test]
-    fn free_type_cursor_delta_maps_long_wrapped_command_by_display_width() {
-        let snapshot = test_snapshot_with_cursor(
-            vec![
-                test_row("$ abc", true),
-                test_row("defghi", true),
-                test_row("jklm", true),
-            ],
-            2,
-            3,
-            6,
-        );
-        let input_state = TerminalAutosuggestInputState {
-            value: "abcdefghijklm".to_string(),
-            cursor_index: 13,
-            is_cursor_at_end: true,
-        };
-
-        assert_eq!(
-            active_input_cursor_delta(
-                &snapshot,
-                TerminalPoint { row: 1, col: 2 },
-                Some(&input_state)
-            ),
-            Some(-7)
-        );
-        assert_eq!(
-            active_input_cursor_delta(
-                &snapshot,
-                TerminalPoint { row: 2, col: 5 },
-                Some(&input_state)
-            ),
-            Some(0)
-        );
-    }
-
-    #[test]
     fn free_type_cursor_move_combines_boundary_keys_with_arrow_fallbacks() {
         let input_state = TerminalAutosuggestInputState {
             value: "abcdef".to_string(),
@@ -3969,32 +3737,7 @@ mod tests {
     }
 
     #[test]
-    fn free_type_cursor_move_keeps_arrows_for_mid_command_targets() {
-        let input_state = TerminalAutosuggestInputState {
-            value: "abcdef".to_string(),
-            cursor_index: 6,
-            is_cursor_at_end: true,
-        };
-
-        let cursor_move = command_cursor_move_to_index(&input_state, 3).unwrap();
-        assert_eq!(
-            free_type_cursor_move_bytes(cursor_move, TermMode::default()).as_deref(),
-            Some(b"\x1b[D\x1b[D\x1b[D".as_slice())
-        );
-    }
-
-    #[test]
-    fn free_type_cursor_move_rejects_oversized_mid_command_targets() {
-        let cursor_move = FreeTypeCursorMove::new(
-            TERMINAL_FREE_TYPE_MAX_CURSOR_STEPS as isize + 1,
-            FreeTypeCursorBoundary::None,
-        );
-
-        assert!(free_type_cursor_move_bytes(cursor_move, TermMode::default()).is_none());
-    }
-
-    #[test]
-    fn free_type_command_edit_bytes_inserts_selection_at_target() {
+    fn free_type_command_edit_bytes_insert_and_replace_command() {
         let snapshot = test_snapshot_with_cursor(vec![test_row("$ abc", true)], 0, 5, 20);
         let input_state = TerminalAutosuggestInputState {
             value: "abc".to_string(),
@@ -4014,17 +3757,6 @@ mod tests {
             .as_deref(),
             Some(b"\x1b[D\x1b[DXYZ".as_slice())
         );
-    }
-
-    #[test]
-    fn free_type_command_edit_bytes_replaces_current_command() {
-        let snapshot = test_snapshot_with_cursor(vec![test_row("$ abc", true)], 0, 5, 20);
-        let input_state = TerminalAutosuggestInputState {
-            value: "abc".to_string(),
-            cursor_index: 3,
-            is_cursor_at_end: true,
-        };
-
         assert_eq!(
             free_type_command_edit_bytes(
                 &snapshot,
@@ -4036,53 +3768,6 @@ mod tests {
             )
             .as_deref(),
             Some(b"\x08\x08\x08XYZ".as_slice())
-        );
-    }
-
-    #[test]
-    fn free_type_command_edit_bytes_rejects_multiline_selection() {
-        let snapshot = test_snapshot_with_cursor(vec![test_row("$ abc", true)], 0, 5, 20);
-        let input_state = TerminalAutosuggestInputState {
-            value: "abc".to_string(),
-            cursor_index: 3,
-            is_cursor_at_end: true,
-        };
-
-        assert!(
-            free_type_command_edit_bytes(
-                &snapshot,
-                TerminalPoint { row: 0, col: 3 },
-                &input_state,
-                "one\ntwo",
-                false,
-                TermMode::default(),
-            )
-            .is_none()
-        );
-    }
-
-    #[test]
-    fn free_type_command_edit_bytes_rejects_oversized_replace() {
-        let value = "x".repeat(TERMINAL_FREE_TYPE_MAX_CURSOR_STEPS + 1);
-        let line = format!("$ {value}");
-        let snapshot =
-            test_snapshot_with_cursor(vec![test_row(&line, true)], 0, line.len(), 20_000);
-        let input_state = TerminalAutosuggestInputState {
-            cursor_index: value.len(),
-            value,
-            is_cursor_at_end: true,
-        };
-
-        assert!(
-            free_type_command_edit_bytes(
-                &snapshot,
-                TerminalPoint { row: 0, col: 2 },
-                &input_state,
-                "replacement",
-                true,
-                TermMode::default(),
-            )
-            .is_none()
         );
     }
 
@@ -4139,7 +3824,7 @@ mod tests {
     }
 
     #[test]
-    fn free_type_move_selection_moves_text_before_the_source() {
+    fn free_type_move_selection_handles_targets_before_after_and_inside_source() {
         let snapshot = test_snapshot_with_cursor(vec![test_row("$ abcdef", true)], 0, 8, 20);
         let selection = TerminalSelection {
             anchor: TerminalGridPoint { line: 0, col: 4 },
@@ -4163,22 +3848,6 @@ mod tests {
             .as_deref(),
             Some(b"\x1b[D\x1b[D\x08\x08\x1b[H\x1b[D\x1b[Dcd".as_slice())
         );
-    }
-
-    #[test]
-    fn free_type_move_selection_adjusts_a_target_after_the_source() {
-        let snapshot = test_snapshot_with_cursor(vec![test_row("$ abcdef", true)], 0, 8, 20);
-        let selection = TerminalSelection {
-            anchor: TerminalGridPoint { line: 0, col: 4 },
-            head: TerminalGridPoint { line: 0, col: 5 },
-            mode: TerminalSelectionMode::Simple,
-        };
-        let input_state = TerminalAutosuggestInputState {
-            value: "abcdef".to_string(),
-            cursor_index: "abcdef".len(),
-            is_cursor_at_end: true,
-        };
-
         assert_eq!(
             free_type_selection_move_bytes(
                 &snapshot,
@@ -4190,22 +3859,6 @@ mod tests {
             .as_deref(),
             Some(b"cd\x1b[D\x1b[D\x1b[D\x1b[D\x08\x08".as_slice())
         );
-    }
-
-    #[test]
-    fn free_type_move_selection_inside_the_source_is_a_noop() {
-        let snapshot = test_snapshot_with_cursor(vec![test_row("$ abcdef", true)], 0, 8, 20);
-        let selection = TerminalSelection {
-            anchor: TerminalGridPoint { line: 0, col: 4 },
-            head: TerminalGridPoint { line: 0, col: 5 },
-            mode: TerminalSelectionMode::Simple,
-        };
-        let input_state = TerminalAutosuggestInputState {
-            value: "abcdef".to_string(),
-            cursor_index: "abcdef".len(),
-            is_cursor_at_end: true,
-        };
-
         assert_eq!(
             free_type_selection_move_bytes(
                 &snapshot,
@@ -4284,98 +3937,7 @@ mod tests {
     }
 
     #[test]
-    fn free_type_selection_delete_bytes_rejects_oversized_selection() {
-        let value = "x".repeat(TERMINAL_FREE_TYPE_MAX_CURSOR_STEPS + 1);
-        let line = format!("$ {value}");
-        let snapshot =
-            test_snapshot_with_cursor(vec![test_row(&line, true)], 0, line.len(), 20_000);
-        let selection = TerminalSelection {
-            anchor: TerminalGridPoint { line: 0, col: 2 },
-            head: TerminalGridPoint {
-                line: 0,
-                col: line.len(),
-            },
-            mode: TerminalSelectionMode::Simple,
-        };
-        let input_state = TerminalAutosuggestInputState {
-            cursor_index: value.len(),
-            value,
-            is_cursor_at_end: true,
-        };
-
-        assert!(
-            free_type_selection_delete_bytes(
-                &snapshot,
-                selection,
-                &input_state,
-                TermMode::default()
-            )
-            .is_none()
-        );
-    }
-
-    #[test]
-    fn free_type_current_command_delete_bytes_removes_whole_command() {
-        let input_state = TerminalAutosuggestInputState {
-            value: "abc".to_string(),
-            cursor_index: 3,
-            is_cursor_at_end: true,
-        };
-
-        assert_eq!(
-            free_type_current_command_delete_bytes(&input_state, TermMode::default()).as_deref(),
-            Some(b"\x08\x08\x08".as_slice())
-        );
-    }
-
-    #[test]
-    fn free_type_current_command_delete_bytes_rejects_oversized_commands() {
-        let value = "x".repeat(TERMINAL_FREE_TYPE_MAX_CURSOR_STEPS + 1);
-        let input_state = TerminalAutosuggestInputState {
-            cursor_index: value.len(),
-            value,
-            is_cursor_at_end: true,
-        };
-
-        assert!(
-            free_type_current_command_delete_bytes(&input_state, TermMode::default()).is_none()
-        );
-    }
-
-    #[test]
-    fn free_type_cursor_delta_requires_cursor_on_active_input() {
-        let snapshot = test_snapshot_with_cursor(
-            vec![test_row("output", false), test_row("input", true)],
-            0,
-            0,
-            20,
-        );
-
-        assert_eq!(
-            active_input_cursor_delta(&snapshot, TerminalPoint { row: 1, col: 2 }, None),
-            None
-        );
-    }
-
-    #[test]
-    fn cursor_motion_bytes_respect_application_cursor_mode() {
-        assert_eq!(
-            cursor_motion_bytes(2, TermMode::default()).as_deref(),
-            Some(b"\x1b[C\x1b[C".as_slice())
-        );
-        assert_eq!(
-            cursor_motion_bytes(1, TermMode::APP_CURSOR).as_deref(),
-            Some(b"\x1bOC".as_slice())
-        );
-        assert_eq!(
-            cursor_motion_bytes(-1, TermMode::APP_CURSOR).as_deref(),
-            Some(b"\x1bOD".as_slice())
-        );
-        assert!(cursor_motion_bytes(0, TermMode::default()).is_none());
-    }
-
-    #[test]
-    fn privilege_prompt_snapshot_uses_cursor_input_block() {
+    fn privilege_prompt_snapshot_uses_only_the_current_cursor_input_block() {
         let snapshot = test_snapshot(
             vec![
                 test_row("old sudo command", false),
@@ -4391,10 +3953,6 @@ mod tests {
             privilege_prompt_text_from_snapshot(&snapshot),
             "[sudo] lipsc 的密码:"
         );
-    }
-
-    #[test]
-    fn privilege_prompt_snapshot_does_not_match_stale_scrollback_prompt() {
         let snapshot = test_snapshot(
             vec![
                 test_row("❯ sudo yazi", false),

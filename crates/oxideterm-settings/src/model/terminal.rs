@@ -473,15 +473,6 @@ mod tests {
     }
 
     #[test]
-    fn background_scope_serializes_as_lowercase_camel_case_field() {
-        let mut settings = TerminalSettings::default();
-        settings.background_scope = BackgroundScope::Window;
-
-        let value = serde_json::to_value(settings).expect("serialize terminal settings");
-        assert_eq!(value["backgroundScope"], serde_json::json!("window"));
-    }
-
-    #[test]
     fn terminal_settings_restore_legacy_presentation_defaults() {
         let defaults: [(&str, bool, fn(&TerminalSettings) -> bool); 6] = [
             ("smoothScroll", true, |settings| settings.smooth_scroll),

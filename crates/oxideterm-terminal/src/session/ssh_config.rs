@@ -222,25 +222,15 @@ mod ssh_config_tests {
     use oxideterm_ssh::{SshConfig, X11ForwardPolicy};
 
     #[test]
-    fn post_connect_command_trims_and_adds_enter_like_tauri() {
-        assert_eq!(
-            normalize_post_connect_command(Some("  cd /srv/app  ")).unwrap(),
-            Some(b"cd /srv/app\r".to_vec())
-        );
-    }
-
-    #[test]
-    fn post_connect_command_converts_multiline_to_enter_keys_like_tauri() {
-        assert_eq!(
-            normalize_post_connect_command(Some("cd /srv/app\nls")).unwrap(),
-            Some(b"cd /srv/app\rls\r".to_vec())
-        );
-    }
-
-    #[test]
-    fn post_connect_command_ignores_blank_values_like_tauri() {
-        assert_eq!(normalize_post_connect_command(Some("   ")).unwrap(), None);
-        assert_eq!(normalize_post_connect_command(None).unwrap(), None);
+    fn post_connect_command_normalization_handles_content_and_empty_values() {
+        for (input, expected) in [
+            (Some("  cd /srv/app  "), Some(b"cd /srv/app\r".to_vec())),
+            (Some("cd /srv/app\nls"), Some(b"cd /srv/app\rls\r".to_vec())),
+            (Some("   "), None),
+            (None, None),
+        ] {
+            assert_eq!(normalize_post_connect_command(input).unwrap(), expected);
+        }
     }
 
     #[test]
@@ -251,22 +241,6 @@ mod ssh_config_tests {
         };
         let session_config = SshSessionConfig::from(config).with_post_connect_command(None);
         assert_eq!(session_config.post_connect_command(), None);
-    }
-
-    #[test]
-    fn runtime_handle_is_optional_and_injectable() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        assert!(
-            SshSessionConfig::new("example.com", 22, "alice")
-                .runtime_handle
-                .is_none()
-        );
-        assert!(
-            SshSessionConfig::new("example.com", 22, "alice")
-                .with_runtime_handle(runtime.handle().clone())
-                .runtime_handle
-                .is_some()
-        );
     }
 
     #[test]

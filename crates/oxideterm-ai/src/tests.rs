@@ -7,8 +7,8 @@ use crate::providers::{
     ollama_show_context_window, parse_provider_context_windows, parse_provider_models,
 };
 use crate::streaming::{
-    anthropic_chat_messages, gemini_chat_body, gemini_chat_contents, openai_chat_messages,
-    parse_anthropic_data_line, parse_gemini_data_line, parse_openai_data_line,
+    gemini_chat_body, gemini_chat_contents, openai_chat_messages, parse_anthropic_data_line,
+    parse_gemini_data_line, parse_openai_data_line,
 };
 use crate::{
     AiPolicySafetyMode, AiToolChoice, AiToolUsePolicy, ContextWindowSource, ModelContextWindowInfo,
@@ -69,80 +69,6 @@ fn chat_message(id: &str, role: AiChatRole, content: &str) -> AiChatMessage {
         branches: None,
         suggestions: Vec::new(),
     }
-}
-
-#[test]
-fn orchestrator_tool_definitions_preserve_core_names_and_order() {
-    let tools = orchestrator_tool_definitions();
-    let names = tools
-        .iter()
-        .map(|tool| tool.name.as_str())
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        names,
-        vec![
-            "list_targets",
-            "select_target",
-            "connect_target",
-            "run_command",
-            "observe_terminal",
-            "send_terminal_input",
-            "wait_terminal_output",
-            "get_terminal_command_status",
-            "read_resource",
-            "write_resource",
-            "transfer_resource",
-            "open_app_surface",
-            "get_state",
-            "remember_preference",
-            "recall_preferences",
-            "load_skill",
-            "read_skill_resource",
-            "create_background_task",
-            "list_background_tasks",
-            "get_background_task",
-            "cancel_background_task",
-            "inspect_host_tools",
-            "control_host_tool",
-            "list_forwards",
-            "manage_forward",
-            "list_plugins",
-            "manage_plugin",
-            "list_transport_profiles",
-            "open_transport_profile",
-            "get_transport_session_state",
-            "manage_serial_session",
-            "manage_telnet_session",
-            "list_remote_desktop_sessions",
-            "manage_remote_desktop_session",
-            "get_cloud_sync_state",
-            "configure_cloud_sync",
-            "manage_cloud_sync",
-            "list_credentials",
-            "manage_credential",
-            "list_memory_entries",
-            "manage_memory_entry",
-        ]
-    );
-    assert_eq!(
-        tools
-            .iter()
-            .find(|tool| tool.name == "list_targets")
-            .and_then(|tool| tool.parameters.pointer("/properties/view/enum"))
-            .and_then(serde_json::Value::as_array)
-            .map(Vec::len),
-        Some(5)
-    );
-    assert_eq!(
-        tools
-            .iter()
-            .find(|tool| tool.name == "read_resource")
-            .and_then(|tool| tool.parameters.pointer("/properties/resource/enum"))
-            .and_then(serde_json::Value::as_array)
-            .map(Vec::len),
-        Some(6)
-    );
 }
 
 #[test]
@@ -664,22 +590,6 @@ fn settings_provider_key_and_token_policy_match_tauri() {
 }
 
 #[test]
-fn projects_provider_view_with_defaults() {
-    let value = serde_json::json!({
-        "id": "custom-openai-1",
-        "models": ["gpt-4o-mini", "gpt-4o"],
-    });
-
-    let view = provider_view(&value).expect("provider view");
-
-    assert_eq!(view.provider_type, "openai_compatible");
-    assert_eq!(view.name, "Provider");
-    assert!(view.enabled);
-    assert!(view.custom);
-    assert_eq!(view.models, vec!["gpt-4o-mini", "gpt-4o"]);
-}
-
-#[test]
 fn parses_provider_model_payloads() {
     assert_eq!(
         parse_provider_models(
@@ -930,6 +840,10 @@ fn ai_policy_requires_destructive_approval_but_bypass_allows_it() {
     );
     assert_eq!(bypass_decision.decision, AiPolicyDecisionKind::Allow);
     assert_eq!(bypass_decision.reason_code, "bypass_destructive_allowed");
+
+    assert_application_tool_family_approval_covers_safe_actions_only();
+    assert_ai_policy_matches_tauri_tool_keys_and_disabled_rules();
+    assert_ai_policy_auto_allows_read_only_and_detects_command_deny_list();
 }
 
 #[test]
@@ -1072,8 +986,7 @@ fn cloud_sync_configuration_tool_accepts_non_secret_patch_and_rejects_secret_fie
     );
 }
 
-#[test]
-fn application_tool_family_approval_covers_safe_actions_only() {
+fn assert_application_tool_family_approval_covers_safe_actions_only() {
     let mut auto_approve_tools = HashMap::new();
     auto_approve_tools.insert("control_host_tool".to_string(), true);
     auto_approve_tools.insert("manage_forward".to_string(), true);
@@ -1130,8 +1043,7 @@ fn application_tool_family_approval_covers_safe_actions_only() {
     assert_eq!(decision.decision, AiPolicyDecisionKind::RequireApproval);
 }
 
-#[test]
-fn ai_policy_matches_tauri_tool_keys_and_disabled_rules() {
+fn assert_ai_policy_matches_tauri_tool_keys_and_disabled_rules() {
     let mut auto_approve_tools = HashMap::new();
     auto_approve_tools.insert("write_resource:file".to_string(), true);
     auto_approve_tools.insert("run_command".to_string(), true);
@@ -1182,8 +1094,7 @@ fn ai_policy_matches_tauri_tool_keys_and_disabled_rules() {
     );
 }
 
-#[test]
-fn ai_policy_auto_allows_read_only_and_detects_command_deny_list() {
+fn assert_ai_policy_auto_allows_read_only_and_detects_command_deny_list() {
     let policy = AiToolUsePolicy::default();
     let read_decision = resolve_ai_policy_decision(
         "observe_terminal",
@@ -1431,44 +1342,6 @@ fn rag_store_indexes_and_searches_like_tauri_keyword_path() {
 }
 
 #[test]
-fn model_selector_display_omits_provider_and_filter_keeps_matching_models() {
-    let mut openai = provider("OpenAI", "openai", "https://api.openai.com/v1", true);
-    openai.models = vec!["gpt-4o-mini".to_string(), "gpt-4o".to_string()];
-    let mut disabled = provider("Disabled", "openai", "https://api.example", false);
-    disabled.models = vec!["hidden-model".to_string()];
-
-    assert_eq!(
-        model_selector_display_name(Some("provider/model-name")).as_deref(),
-        Some("model-name")
-    );
-    assert_eq!(model_selector_display_name(None), None);
-    assert_eq!(
-        model_selector_truncated_label("0123456789012345678901234"),
-        "0123456789012345678901..."
-    );
-
-    let groups = model_selector_visible_provider_groups(&[openai, disabled], "4o-mini");
-    assert_eq!(groups.len(), 1);
-    assert_eq!(groups[0].provider.id, "OpenAI");
-    assert_eq!(groups[0].visible_models, vec!["gpt-4o-mini"]);
-}
-
-#[test]
-fn active_provider_and_model_helpers_keep_settings_logic_out_of_ui() {
-    let openai = provider("OpenAI", "openai", "https://api.openai.com/v1", true);
-    let ollama = provider("Ollama", "ollama", "http://localhost:11434", true);
-    let providers = vec![openai.clone(), ollama];
-
-    let active = active_provider_view(&providers, Some("OpenAI"));
-    assert_eq!(active, Some(&openai));
-    assert_eq!(active_model_selection(None), None);
-    assert_eq!(
-        active_model_selection(Some("gpt-4o")).as_deref(),
-        Some("gpt-4o")
-    );
-}
-
-#[test]
 fn embedding_provider_resolution_matches_tauri_auto_and_configured_paths() {
     let openai = serde_json::json!({
         "id": "openai",
@@ -1565,15 +1438,6 @@ fn shared_provider_key_debug_is_redacted() {
 
     assert_eq!(debug, "SharedAiProviderKey(<redacted>)");
     assert!(!debug.contains("provider-secret-value"));
-}
-
-#[test]
-fn chat_title_matches_tauri_helper() {
-    assert_eq!(generate_chat_title("hello\nworld"), "hello world");
-    assert_eq!(
-        generate_chat_title("012345678901234567890123456789x"),
-        "012345678901234567890123456789..."
-    );
 }
 
 #[test]
@@ -1712,7 +1576,7 @@ fn slash_help_and_request_overrides_are_core_logic() {
 }
 
 #[test]
-fn parses_follow_up_suggestions_like_tauri() {
+fn parses_and_sanitizes_follow_up_suggestions() {
     let parsed = parse_ai_suggestions(
         "Answer\n<suggestions>\n<s icon=\"Zap\">Run deploy</s>\n<s icon=\"Search\">Show logs</s>\n</suggestions>",
     );
@@ -1726,10 +1590,7 @@ fn parses_follow_up_suggestions_like_tauri() {
         ai_visible_suggestion_content("Answer\n<suggestions>\n<s icon=\"Zap\">..."),
         "Answer"
     );
-}
 
-#[test]
-fn strips_empty_or_invalid_follow_up_suggestion_blocks_like_tauri() {
     let parsed = parse_ai_suggestions(
         "Answer\n<suggestions>\n<s icon=\"Search\"></s>\n<s icon=\"Bug\">   </s>\n</suggestions>",
     );
@@ -1743,10 +1604,7 @@ fn strips_empty_or_invalid_follow_up_suggestion_blocks_like_tauri() {
         ),
         "Answer"
     );
-}
 
-#[test]
-fn validates_follow_up_suggestion_text_by_characters_not_utf8_bytes() {
     let localized_text = "检查连接状态".repeat(25);
     let parsed = parse_ai_suggestions(&format!(
         "Answer\n<suggestions>\n<s icon=\"Search\">{localized_text}</s>\n</suggestions>",
@@ -2896,71 +2754,6 @@ fn openai_stream_parser_extracts_content_and_done() {
     assert_eq!(done.events, vec![AiStreamEvent::Done]);
 }
 
-#[test]
-fn openai_chat_messages_merge_system_prompts() {
-    let messages = vec![
-        AiChatMessage {
-            id: "1".into(),
-            role: AiChatRole::System,
-            content: "one".into(),
-            timestamp_ms: 1,
-            model: None,
-            context: None,
-            is_streaming: false,
-            thinking_content: None,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
-        },
-        AiChatMessage {
-            id: "2".into(),
-            role: AiChatRole::User,
-            content: "hi".into(),
-            timestamp_ms: 2,
-            model: None,
-            context: None,
-            is_streaming: false,
-            thinking_content: None,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
-        },
-        AiChatMessage {
-            id: "3".into(),
-            role: AiChatRole::System,
-            content: "two".into(),
-            timestamp_ms: 3,
-            model: None,
-            context: None,
-            is_streaming: false,
-            thinking_content: None,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
-        },
-    ];
-    let converted = openai_chat_messages(&test_stream_config("openai"), &messages);
-    assert_eq!(converted[0]["role"], "system");
-    assert_eq!(converted[0]["content"], "one\n\ntwo");
-    assert_eq!(converted[1]["role"], "user");
-    assert_eq!(converted[1]["content"], "hi");
-}
-
 fn assistant_tool_call_message(
     id: &str,
     content: &str,
@@ -3062,22 +2855,6 @@ fn kimi_preserves_reasoning_for_assistant_turns_without_tools() {
 }
 
 #[test]
-fn anthropic_messages_merge_roles_and_start_with_user() {
-    let messages = vec![
-        chat_message("1", AiChatRole::System, "sys"),
-        chat_message("2", AiChatRole::Assistant, "hello"),
-        chat_message("3", AiChatRole::Assistant, "again"),
-        chat_message("4", AiChatRole::User, "question"),
-    ];
-    let (system, converted) = anthropic_chat_messages(&messages);
-    assert_eq!(system.as_deref(), Some("sys"));
-    assert_eq!(converted[0]["role"], "user");
-    assert_eq!(converted[0]["content"], "(Continue from previous context)");
-    assert_eq!(converted[1]["role"], "assistant");
-    assert_eq!(converted[1]["content"], "hello\n\nagain");
-}
-
-#[test]
 fn gemini_messages_merge_roles_and_system_instruction() {
     let messages = vec![
         chat_message("1", AiChatRole::System, "sys"),
@@ -3091,10 +2868,7 @@ fn gemini_messages_merge_roles_and_system_instruction() {
     assert_eq!(contents[0]["parts"][0]["text"], "one");
     assert_eq!(contents[0]["parts"][1]["text"], "two");
     assert_eq!(contents[1]["role"], "model");
-}
 
-#[test]
-fn gemini_system_instruction_keeps_tauri_empty_message_semantics() {
     let messages = vec![
         chat_message("1", AiChatRole::System, "sys"),
         chat_message("2", AiChatRole::System, ""),

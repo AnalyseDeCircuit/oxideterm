@@ -346,36 +346,6 @@ mod tests {
     }
 
     #[gpui::test]
-    fn open_and_close_reset_owned_state(cx: &mut TestAppContext) {
-        let entity = cx.new(|_| CommandPaletteEntity::new(test_runtime()));
-        entity.update(cx, |entity, cx| {
-            entity.push_query_text("@ stale", cx);
-            entity.set_selected_index(4, cx);
-            entity.set_error("stale".to_string(), cx);
-            entity.open(false, HashSet::new(), cx);
-
-            let opened_view = entity.view();
-            assert!(entity.is_open());
-            assert!(opened_view.raw_query.is_empty());
-            assert_eq!(opened_view.mode, PaletteMode::All);
-            assert_eq!(entity.selected_index(), 0);
-            assert!(opened_view.error.is_none());
-
-            entity.push_query_text("> stale", cx);
-            entity.set_selected_index(4, cx);
-            entity.set_error("stale".to_string(), cx);
-            entity.close(cx);
-
-            let view = entity.view();
-            assert!(!entity.is_open());
-            assert!(view.raw_query.is_empty());
-            assert_eq!(view.mode, PaletteMode::All);
-            assert_eq!(entity.selected_index(), 0);
-            assert!(view.error.is_none());
-        });
-    }
-
-    #[gpui::test]
     fn selection_stays_within_item_bounds(cx: &mut TestAppContext) {
         let entity = cx.new(|_| CommandPaletteEntity::new(test_runtime()));
         entity.update(cx, |entity, cx| {

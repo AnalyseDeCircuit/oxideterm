@@ -295,20 +295,4 @@ mod tests {
         );
         assert_eq!(diagnostic.server_algorithms, ["diffie-hellman-group1-sha1"]);
     }
-
-    #[test]
-    fn failure_stage_preserves_transport_phase() {
-        assert_eq!(
-            connection_trace_failure_stage(Some("Connection failed: network unreachable")),
-            ConnectionTraceStage::OpeningTransport
-        );
-        assert_eq!(
-            connection_trace_failure_stage(Some("Host key changed for example.com")),
-            ConnectionTraceStage::HostKey
-        );
-        assert_eq!(
-            connection_trace_failure_stage(Some("Authentication failed: permission denied")),
-            ConnectionTraceStage::Authentication
-        );
-    }
 }

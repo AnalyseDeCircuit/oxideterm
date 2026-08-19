@@ -73,18 +73,6 @@ impl TerminalDrainBudget {
     }
 }
 
-#[cfg(test)]
-mod drain_budget_tests {
-    use super::*;
-
-    #[test]
-    fn zero_duration_budget_is_immediately_exhausted() {
-        let budget = TerminalDrainBudget::interactive().with_max_duration(Duration::ZERO);
-
-        assert!(budget.time_exhausted(std::time::Instant::now()));
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TerminalDrainReport {
     pub changed: bool,

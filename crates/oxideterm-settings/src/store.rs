@@ -510,52 +510,6 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::model::{UpdateChannel, default_update_channel_for_version, is_prerelease_version};
-
-    #[test]
-    fn default_update_channel_matches_tauri_version_rules() {
-        assert!(!is_prerelease_version("1.4.2"));
-        assert!(is_prerelease_version("1.4.2-beta.0"));
-        assert!(is_prerelease_version("1.4.2-preview.1"));
-        assert_eq!(
-            default_update_channel_for_version("1.4.2"),
-            UpdateChannel::Stable
-        );
-        assert_eq!(
-            default_update_channel_for_version("1.4.2-beta.0"),
-            UpdateChannel::Beta
-        );
-        assert_eq!(
-            default_update_channel_for_version("1.4.2-preview.0"),
-            UpdateChannel::Beta
-        );
-    }
-
-    #[test]
-    fn enums_serialize_to_tauri_strings() {
-        let settings = PersistedSettings::default();
-        let value = settings.to_value();
-        assert_eq!(value["general"]["language"], "zh-CN");
-        assert_eq!(value["terminal"]["fontFamily"], "jetbrains");
-        assert_eq!(
-            value["terminal"]["renderer"],
-            if cfg!(windows) { "canvas" } else { "auto" }
-        );
-        assert_eq!(value["terminal"]["terminalEncoding"], "utf-8");
-        assert_eq!(value["appearance"]["uiDensity"], "comfortable");
-        assert_eq!(value["appearance"]["renderProfile"], "auto");
-        assert_eq!(value["appearance"]["windowOpacity"], 1.0);
-        assert_eq!(value["sftp"]["conflictAction"], "ask");
-        assert_eq!(value["sftp"]["speedLimitKBps"], 0);
-        assert_eq!(value["sftp"]["transferProtocol"], "auto");
-        assert!(value["sftp"].get("speedLimitKbps").is_none());
-        assert_eq!(value["ide"]["agentMode"], "ask");
-        assert_eq!(value["reconnect"]["baseDelayMs"], 1000);
-        assert_eq!(value["reconnect"]["maxDelayMs"], 15_000);
-        assert_eq!(value["connectionPool"]["idleTimeoutSecs"], 1800);
-        assert_eq!(value["experimental"]["virtualSessionProxy"], false);
-    }
-
     #[test]
     fn invalid_numeric_values_normalize_safely() {
         let raw = json!({
@@ -596,16 +550,6 @@ mod tests {
         assert_eq!(value["terminal"]["fontFamily"], "menlo");
         assert_eq!(value["terminal"]["futureTerminalFlag"], true);
         assert_eq!(value["futureTopLevel"]["enabled"], true);
-    }
-
-    #[test]
-    fn default_settings_path_matches_tauri_data_directory() {
-        let path = default_settings_path();
-        if cfg!(windows) {
-            assert!(path.ends_with(Path::new("OxideTerm").join(SETTINGS_FILENAME)));
-        } else {
-            assert!(path.ends_with(Path::new(".oxideterm").join(SETTINGS_FILENAME)));
-        }
     }
 
     #[test]

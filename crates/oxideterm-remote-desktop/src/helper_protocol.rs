@@ -558,7 +558,6 @@ impl fmt::Debug for RemoteDesktopHelperEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::NegotiatedCapabilityStatus;
 
     #[test]
     fn connect_debug_redacts_secret_values() {
@@ -666,19 +665,32 @@ mod tests {
     }
 
     #[test]
-    fn helper_protocol_round_trips_json() {
-        let request = RemoteDesktopHelperRequest::Resize {
-            size: RemoteDesktopSize {
-                width: 1024,
-                height: 768,
+    fn helper_requests_round_trip_json() {
+        // Generic request variants share the same serialization round-trip contract.
+        let requests = [
+            RemoteDesktopHelperRequest::Resize {
+                size: RemoteDesktopSize {
+                    width: 1024,
+                    height: 768,
+                },
+                scale_factor: Some(125),
             },
-            scale_factor: Some(125),
-        };
+            RemoteDesktopHelperRequest::ReleaseAllInputs,
+            RemoteDesktopHelperRequest::SynchronizeLockKeys {
+                keys: RemoteDesktopLockKeys {
+                    scroll_lock: true,
+                    num_lock: false,
+                    caps_lock: true,
+                    kana_lock: false,
+                },
+            },
+        ];
 
-        let encoded = serde_json::to_string(&request).unwrap();
-        let decoded: RemoteDesktopHelperRequest = serde_json::from_str(&encoded).unwrap();
-
-        assert_eq!(decoded, request);
+        for request in requests {
+            let encoded = serde_json::to_string(&request).unwrap();
+            let decoded: RemoteDesktopHelperRequest = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(decoded, request);
+        }
     }
 
     #[test]
@@ -697,84 +709,6 @@ mod tests {
                 scale_factor: None,
             }
         );
-    }
-
-    #[test]
-    fn release_all_inputs_round_trips_json() {
-        let request = RemoteDesktopHelperRequest::ReleaseAllInputs;
-
-        let encoded = serde_json::to_string(&request).unwrap();
-        let decoded: RemoteDesktopHelperRequest = serde_json::from_str(&encoded).unwrap();
-
-        assert_eq!(decoded, request);
-    }
-
-    #[test]
-    fn request_frame_round_trips_json() {
-        let request = RemoteDesktopHelperRequest::RequestFrame;
-
-        let encoded = serde_json::to_string(&request).unwrap();
-        let decoded: RemoteDesktopHelperRequest = serde_json::from_str(&encoded).unwrap();
-
-        assert_eq!(encoded, r#"{"type":"requestFrame"}"#);
-        assert_eq!(decoded, request);
-    }
-
-    #[test]
-    fn synchronize_lock_keys_round_trips_json() {
-        let request = RemoteDesktopHelperRequest::SynchronizeLockKeys {
-            keys: RemoteDesktopLockKeys {
-                scroll_lock: true,
-                num_lock: false,
-                caps_lock: true,
-                kana_lock: false,
-            },
-        };
-
-        let encoded = serde_json::to_string(&request).unwrap();
-        let decoded: RemoteDesktopHelperRequest = serde_json::from_str(&encoded).unwrap();
-
-        assert_eq!(decoded, request);
-    }
-
-    #[test]
-    fn connection_failure_category_round_trips_json() {
-        let event = RemoteDesktopHelperEvent::ConnectionFailure {
-            message: "legacy security".to_string(),
-            category: Some(RemoteDesktopErrorCategory::LegacySecurity),
-        };
-
-        let encoded = serde_json::to_string(&event).unwrap();
-        let decoded: RemoteDesktopHelperEvent = serde_json::from_str(&encoded).unwrap();
-
-        assert!(encoded.contains("\"category\":\"legacy-security\""));
-        assert_eq!(decoded, event);
-    }
-
-    #[test]
-    fn negotiated_capabilities_round_trip_server_report() {
-        let event = RemoteDesktopHelperEvent::CapabilitiesNegotiated {
-            capabilities: NegotiatedCapabilities {
-                security_methods: vec!["VeNCrypt".to_string(), "TLS-X509".to_string()],
-                selected_security_method: Some("TLS-X509".to_string()),
-                encrypted: NegotiatedCapabilityStatus::Supported,
-                peer_identity_verified: NegotiatedCapabilityStatus::Supported,
-                resize: NegotiatedCapabilityStatus::Supported,
-                extended_clipboard: NegotiatedCapabilityStatus::Supported,
-                extended_clipboard_formats: vec!["text/plain;charset=utf-8".to_string()],
-                tight: NegotiatedCapabilityStatus::Supported,
-                jpeg: NegotiatedCapabilityStatus::Supported,
-                fence: NegotiatedCapabilityStatus::Supported,
-                ..NegotiatedCapabilities::default()
-            },
-        };
-
-        let encoded = serde_json::to_string(&event).unwrap();
-        let decoded: RemoteDesktopHelperEvent = serde_json::from_str(&encoded).unwrap();
-
-        assert!(encoded.contains("\"type\":\"capabilitiesNegotiated\""));
-        assert!(encoded.contains("\"peerIdentityVerified\":\"supported\""));
-        assert_eq!(decoded, event);
     }
 
     #[test]

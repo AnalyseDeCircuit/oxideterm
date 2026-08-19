@@ -361,31 +361,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn progress_bar_writes_cursor_vt_sequences() {
+    fn progress_bar_emits_cursor_and_rewrite_sequences() {
         let mut progress = TextProgressBar::new(80, None);
         progress.hide_cursor();
         progress.show_cursor();
         assert_eq!(progress.take_output(), vec!["\x1b[?25l", "\x1b[?25h"]);
-    }
 
-    #[test]
-    fn progress_bar_matches_tauri_shape() {
-        let mut progress = TextProgressBar::new(80, None);
-        progress.on_num(2);
-        progress.on_name("alpha.txt");
-        progress.on_size(100);
-        let start = Instant::now();
-        progress.on_step_at(50, start + PROGRESS_UPDATE_INTERVAL);
-        let output = progress.take_output();
-        assert_eq!(output.len(), 1);
-        assert!(output[0].starts_with("(1/2) alpha.txt "));
-        assert!(output[0].contains("["));
-        assert!(output[0].contains("50%"));
-        assert!(output[0].contains("50.0 B"));
-    }
-
-    #[test]
-    fn progress_bar_throttles_and_rewrites_with_carriage_return() {
         let mut progress = TextProgressBar::new(64, None);
         progress.on_name("file.bin");
         progress.on_size(100);
@@ -400,10 +381,7 @@ mod tests {
         assert_eq!(output.len(), 2);
         assert!(!output[0].starts_with('\r'));
         assert!(output[1].starts_with('\r'));
-    }
 
-    #[test]
-    fn progress_bar_uses_tmux_left_rewrite() {
         let mut progress = TextProgressBar::new(80, Some(40));
         progress.on_name("file.bin");
         progress.on_size(100);

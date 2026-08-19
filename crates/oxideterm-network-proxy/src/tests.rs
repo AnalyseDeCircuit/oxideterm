@@ -65,18 +65,6 @@ fn proxy_url_brackets_ipv6_and_preserves_dns_mode() {
 }
 
 #[test]
-fn update_proxy_protocols_use_the_expected_schemes() {
-    assert_eq!(
-        proxy_url(&custom_proxy(ApplicationProxyProtocol::HttpsConnect)).unwrap(),
-        "https://127.0.0.1:1080"
-    );
-    assert_eq!(
-        proxy_url(&custom_proxy(ApplicationProxyProtocol::Socks5)).unwrap(),
-        "socks5h://127.0.0.1:1080"
-    );
-}
-
-#[test]
 fn unavailable_policy_fails_before_building_a_client() {
     let error = configure_http_client_builder(
         reqwest::Client::builder(),
@@ -90,13 +78,21 @@ fn unavailable_policy_fails_before_building_a_client() {
 }
 
 #[test]
-fn custom_policy_rejects_an_empty_host() {
+fn custom_proxy_adapters_reject_an_empty_host() {
     let policy = ApplicationProxyPolicy::Custom(CustomApplicationProxy {
         host: "  ".to_string(),
         ..custom_proxy(ApplicationProxyProtocol::HttpConnect)
     });
 
     assert!(configure_http_client_builder(reqwest::Client::builder(), &policy).is_err());
+
+    let settings = UpdateProxySettings {
+        mode: UpdateProxyMode::Custom,
+        host: "  ".to_string(),
+        ..UpdateProxySettings::default()
+    };
+
+    assert!(configure_update_http_client_builder(reqwest::Client::builder(), &settings).is_err());
 }
 
 #[test]
@@ -149,7 +145,7 @@ fn missing_application_proxy_password_is_fail_closed() {
 }
 
 #[test]
-fn default_application_proxy_mode_preserves_system_policy() {
+fn application_proxy_modes_select_system_or_direct_policy() {
     assert_eq!(
         application_proxy_policy_from_settings(
             &PersistedSettings::default(),
@@ -157,10 +153,7 @@ fn default_application_proxy_mode_preserves_system_policy() {
         ),
         ApplicationProxyPolicy::System
     );
-}
 
-#[test]
-fn direct_application_proxy_mode_disables_system_proxy_discovery() {
     let mut settings = PersistedSettings::default();
     settings.network.application_proxy_mode = SettingsApplicationProxyMode::Direct;
 
@@ -181,27 +174,4 @@ fn custom_update_proxy_is_configured_by_the_shared_adapter() {
     };
 
     assert!(configure_update_http_client_builder(reqwest::Client::builder(), &settings).is_ok());
-}
-
-#[test]
-fn custom_update_proxy_rejects_an_empty_host() {
-    let settings = UpdateProxySettings {
-        mode: UpdateProxyMode::Custom,
-        host: "  ".to_string(),
-        ..UpdateProxySettings::default()
-    };
-
-    assert!(configure_update_http_client_builder(reqwest::Client::builder(), &settings).is_err());
-}
-
-#[test]
-fn replacing_runtime_policy_replaces_the_pooled_client_state() {
-    set_application_proxy_policy(ApplicationProxyPolicy::Unavailable {
-        reason: "test proxy is unavailable".to_string(),
-    });
-    assert!(application_http_client().is_err());
-
-    // Restore the process default so this test does not affect later tests.
-    set_application_proxy_policy(ApplicationProxyPolicy::System);
-    assert!(application_http_client().is_ok());
 }

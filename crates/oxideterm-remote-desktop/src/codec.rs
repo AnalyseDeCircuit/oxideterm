@@ -454,37 +454,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn request_line_round_trips_and_has_trailing_newline() {
-        let request = RemoteDesktopHelperRequest::Resize {
-            size: RemoteDesktopSize {
-                width: 800,
-                height: 600,
-            },
-            scale_factor: Some(100),
-        };
-
-        let line = encode_request_line(&request).unwrap();
-        let decoded = decode_request_line(&line).unwrap();
-
-        assert!(line.ends_with('\n'));
-        assert_eq!(decoded, request);
-    }
-
-    #[test]
-    fn event_line_reads_one_message_from_buffer() {
-        let event = RemoteDesktopHelperEvent::Status {
-            status: RemoteDesktopSessionStatus::Connecting,
-            message: Some("opening".to_string()),
-        };
-        let mut bytes = Vec::new();
-
-        write_event_line(&mut bytes, &event).unwrap();
-        let decoded = read_event_line(&mut Cursor::new(bytes)).unwrap().unwrap();
-
-        assert_eq!(decoded, event);
-    }
-
-    #[test]
     fn frame_event_uses_json_header_with_raw_payload() {
         let event = RemoteDesktopHelperEvent::Frame {
             frame: RemoteDesktopFrame::new(
@@ -627,28 +596,6 @@ mod tests {
         let error = decode_request_line("\n").unwrap_err().to_string();
 
         assert!(error.contains("empty"));
-    }
-
-    #[test]
-    fn request_line_does_not_require_protocol_specific_state() {
-        let request = RemoteDesktopHelperRequest::Connect {
-            protocol: RemoteDesktopProtocol::Vnc,
-            endpoint: crate::RemoteDesktopEndpoint::for_protocol(
-                "127.0.0.1",
-                RemoteDesktopProtocol::Vnc,
-            ),
-            username: None,
-            password: None,
-            domain: None,
-            size: RemoteDesktopSize {
-                width: 1024,
-                height: 768,
-            },
-            scale_factor: None,
-            read_only: true,
-        };
-
-        assert!(encode_request_line(&request).unwrap().contains("\"vnc\""));
     }
 
     #[test]

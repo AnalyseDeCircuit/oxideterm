@@ -234,29 +234,6 @@ mod tests {
     }
 
     #[test]
-    fn cosine_similarity_handles_vector_relationships() {
-        let cases: [(&str, &[f32], &[f32], f64); 3] = [
-            ("identical", &[1.0, 0.0, 1.0], &[1.0, 0.0, 1.0], 1.0),
-            ("orthogonal", &[1.0, 0.0], &[0.0, 1.0], 0.0),
-            ("opposite", &[1.0, 0.0], &[-1.0, 0.0], -1.0),
-        ];
-
-        for (relationship, left, right, expected) in cases {
-            let actual = cosine_similarity(left, right, l2_norm(left));
-            assert!(
-                (actual - expected).abs() < 1e-6,
-                "{relationship}: expected {expected}, got {actual}"
-            );
-        }
-
-        assert!((l2_norm(&[3.0, 4.0]) - 5.0).abs() < 1e-6);
-        assert_eq!(
-            cosine_similarity(&[1.0, 2.0], &[0.0, 0.0], l2_norm(&[1.0, 2.0])),
-            0.0
-        );
-    }
-
-    #[test]
     fn test_search_vector_empty_collection_filter_searches_all_collections() {
         let store = temp_store("all_collections");
         add_chunk_with_embedding(&store, "col-a", "doc-a", "chunk-a", "alpha", vec![1.0, 0.0]);

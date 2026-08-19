@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn double_click_word_selection_uses_terminal_semantic_word_boundaries() {
+fn word_selection_covers_shell_tokens_and_separators() {
     let snapshot = selection_snapshot("cargo test ./crates/oxideterm-gpui-app");
     let selection = word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 15 })
         .expect("word selection");
@@ -13,17 +13,11 @@ fn double_click_word_selection_uses_terminal_semantic_word_boundaries() {
             TerminalGridPoint { line: 0, col: 37 }
         )
     );
-}
 
-#[test]
-fn word_selection_ignores_separator_cells() {
     let snapshot = selection_snapshot("echo (hello)");
 
     assert!(word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 5 }).is_none());
-}
 
-#[test]
-fn word_selection_splits_shell_control_operators() {
     let snapshot = selection_snapshot("first&&second");
     let first = word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 1 })
         .expect("first token selection");
@@ -45,10 +39,7 @@ fn word_selection_splits_shell_control_operators() {
         )
     );
     assert!(word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 5 }).is_none());
-}
 
-#[test]
-fn word_selection_keeps_url_but_trims_trailing_punctuation() {
     let snapshot = selection_snapshot("open https://example.com/docs).");
     let selection = word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 13 })
         .expect("url selection");
@@ -60,10 +51,7 @@ fn word_selection_keeps_url_but_trims_trailing_punctuation() {
             TerminalGridPoint { line: 0, col: 28 }
         )
     );
-}
 
-#[test]
-fn word_selection_keeps_variable_and_flag_values() {
     let snapshot = selection_snapshot("echo $HOME --color=always");
     let variable = word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 7 })
         .expect("variable selection");
@@ -87,7 +75,7 @@ fn word_selection_keeps_variable_and_flag_values() {
 }
 
 #[test]
-fn free_type_matching_pair_selects_the_innermost_content() {
+fn free_type_matching_pair_handles_nesting_escaping_width_and_wrapping() {
     let snapshot = selection_snapshot("echo outer(inner[chosen])");
     let selection = matching_pair_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 19 })
         .expect("matching pair selection");
@@ -96,10 +84,7 @@ fn free_type_matching_pair_selects_the_innermost_content() {
         selected_text_for_selection(&snapshot, selection).as_deref(),
         Some("chosen")
     );
-}
 
-#[test]
-fn free_type_matching_pair_ignores_quoted_and_escaped_brackets() {
     let snapshot = selection_snapshot(r#"echo ("ignored )" real\) value)"#);
     let selection = matching_pair_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 25 })
         .expect("outer matching pair selection");
@@ -108,10 +93,7 @@ fn free_type_matching_pair_ignores_quoted_and_escaped_brackets() {
         selected_text_for_selection(&snapshot, selection).as_deref(),
         Some(r#""ignored )" real\) value"#)
     );
-}
 
-#[test]
-fn free_type_matching_pair_preserves_wide_text_cells() {
     let snapshot = wide_snapshot("(你好)");
     let selection = matching_pair_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 3 })
         .expect("wide matching pair selection");
@@ -120,10 +102,7 @@ fn free_type_matching_pair_preserves_wide_text_cells() {
         selected_text_for_selection(&snapshot, selection).as_deref(),
         Some("你好")
     );
-}
 
-#[test]
-fn free_type_matching_pair_crosses_soft_wrapped_rows() {
     let mut snapshot = multirow_snapshot(&["(abc", "def)"]);
     snapshot.cols = 4;
     snapshot.lines[0].wrapped = true;
@@ -138,7 +117,7 @@ fn free_type_matching_pair_crosses_soft_wrapped_rows() {
 }
 
 #[test]
-fn triple_click_line_selection_selects_trimmed_visual_line() {
+fn line_selection_handles_trimmed_and_wrapped_lines() {
     let snapshot = selection_snapshot("pwd   ");
     let selection = line_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 1 })
         .expect("line selection");
@@ -150,10 +129,7 @@ fn triple_click_line_selection_selects_trimmed_visual_line() {
             TerminalGridPoint { line: 0, col: 2 }
         )
     );
-}
 
-#[test]
-fn triple_click_line_selection_expands_across_wrapped_visual_rows() {
     let mut snapshot = multirow_snapshot(&["hello", "world", "next"]);
     snapshot.cols = 5;
     snapshot.lines[0].wrapped = true;
@@ -172,34 +148,24 @@ fn triple_click_line_selection_expands_across_wrapped_visual_rows() {
 }
 
 #[test]
-fn selected_text_joins_soft_wrapped_rows_without_newline() {
-    let mut snapshot = multirow_snapshot(&["hello", "world", "next"]);
-    snapshot.cols = 5;
-    snapshot.lines[0].wrapped = true;
-    snapshot.lines[0].refresh_signature();
+fn selected_text_distinguishes_soft_and_hard_wrapped_rows() {
     let selection = TerminalSelection {
         anchor: TerminalGridPoint { line: 0, col: 0 },
         head: TerminalGridPoint { line: 1, col: 4 },
         mode: TerminalSelectionMode::Simple,
     };
+    let mut soft_wrapped = multirow_snapshot(&["hello", "world", "next"]);
+    soft_wrapped.cols = 5;
+    soft_wrapped.lines[0].wrapped = true;
+    soft_wrapped.lines[0].refresh_signature();
 
     assert_eq!(
-        selected_text_for_selection(&snapshot, selection).as_deref(),
+        selected_text_for_selection(&soft_wrapped, selection).as_deref(),
         Some("helloworld")
     );
-}
-
-#[test]
-fn selected_text_keeps_newline_between_hard_wrapped_rows() {
-    let snapshot = multirow_snapshot(&["hello", "world"]);
-    let selection = TerminalSelection {
-        anchor: TerminalGridPoint { line: 0, col: 0 },
-        head: TerminalGridPoint { line: 1, col: 4 },
-        mode: TerminalSelectionMode::Simple,
-    };
 
     assert_eq!(
-        selected_text_for_selection(&snapshot, selection).as_deref(),
+        selected_text_for_selection(&multirow_snapshot(&["hello", "world"]), selection).as_deref(),
         Some("hello\nworld")
     );
 }
@@ -235,7 +201,7 @@ fn block_selection_copies_rectangular_columns() {
 }
 
 #[test]
-fn cross_page_selection_requests_only_its_complete_grid_range() {
+fn selection_snapshot_requests_only_ranges_outside_the_viewport() {
     let mut snapshot = multirow_snapshot(&["visible-a", "visible-b"]);
     snapshot.scrollback_lines = 4;
     let selection = TerminalSelection {
@@ -251,10 +217,7 @@ fn cross_page_selection_requests_only_its_complete_grid_range() {
             rows: 5,
         })
     );
-}
 
-#[test]
-fn in_view_selection_does_not_request_an_extended_snapshot() {
     let snapshot = multirow_snapshot(&["visible-a", "visible-b"]);
     let selection = TerminalSelection {
         anchor: TerminalGridPoint { line: 0, col: 0 },

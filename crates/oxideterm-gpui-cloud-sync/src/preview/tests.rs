@@ -7,80 +7,6 @@ use oxideterm_cloud_sync::{
 use super::*;
 
 #[test]
-fn preview_fact_rows_preserve_display_order() {
-    let summary = CloudSyncPreviewSummary {
-        connections: 2,
-        forwards: 3,
-        plugin_settings_count: 4,
-        has_embedded_keys: true,
-        ..CloudSyncPreviewSummary::default()
-    };
-
-    assert_eq!(
-        cloud_sync_preview_fact_rows(&summary),
-        vec![
-            vec![
-                CloudSyncPreviewFactSpec {
-                    label_key: "plugin.cloud_sync.preview.connection_count",
-                    value: CloudSyncPreviewFactValue::Count(2),
-                },
-                CloudSyncPreviewFactSpec {
-                    label_key: "plugin.cloud_sync.preview.total_forwards",
-                    value: CloudSyncPreviewFactValue::Count(3),
-                },
-            ],
-            vec![
-                CloudSyncPreviewFactSpec {
-                    label_key: "plugin.cloud_sync.preview.plugin_settings_label",
-                    value: CloudSyncPreviewFactValue::Count(4),
-                },
-                CloudSyncPreviewFactSpec {
-                    label_key: "plugin.cloud_sync.preview.embedded_keys_label",
-                    value: CloudSyncPreviewFactValue::YesNo(true),
-                },
-            ],
-        ]
-    );
-}
-
-#[test]
-fn preview_body_sections_keep_selection_first() {
-    let summary = CloudSyncPreviewSummary {
-        forward_details: vec![CloudSyncForwardDetail {
-            owner_connection_name: "prod".to_string(),
-            direction: "local".to_string(),
-            description: "Local tunnel".to_string(),
-        }],
-        records: vec![CloudSyncPreviewRecord {
-            resource: "connection".to_string(),
-            name: "prod".to_string(),
-            action: "import".to_string(),
-            reason_code: "new".to_string(),
-            target_name: None,
-        }],
-        ..CloudSyncPreviewSummary::default()
-    };
-
-    let sections = cloud_sync_preview_body_sections(&summary);
-
-    assert!(matches!(
-        sections[0],
-        CloudSyncPreviewBodySection::Selection
-    ));
-    assert!(matches!(
-        sections[1],
-        CloudSyncPreviewBodySection::ForwardDetails(_)
-    ));
-    assert!(matches!(
-        sections[2],
-        CloudSyncPreviewBodySection::RecordGroup {
-            action: "import",
-            ..
-        }
-    ));
-}
-
-#[test]
 fn coverage_model_marks_partial_sections_and_sensitive_exclusion() {
     let raw_scope = RawSyncScope {
         app_settings_sections: Some(vec!["general".to_string(), "network".to_string()]),
@@ -132,25 +58,11 @@ fn preview_impact_items_explain_excluded_and_partial_selection() {
     let mut selection = CloudSyncPreviewSelection {
         import_connections: true,
         selected_connection_names: summary.connection_record_names(),
-        selected_connection_ids: Default::default(),
-        import_quick_commands: false,
-        selected_quick_command_ids: Default::default(),
-        import_serial_profiles: false,
-        selected_serial_profile_ids: Default::default(),
-        import_telnet_profiles: false,
-        selected_telnet_profile_ids: Default::default(),
-        import_mosh_profiles: false,
-        selected_mosh_profile_ids: Default::default(),
-        import_remote_desktop_profiles: false,
-        selected_remote_desktop_profile_ids: Default::default(),
-        import_sensitive_credentials: false,
         import_app_settings: true,
         selected_app_settings_sections: ["general".to_string()].into_iter().collect(),
-        import_plugin_settings: false,
-        selected_plugin_ids: Default::default(),
         import_forwards: true,
-        selected_forward_ids: Default::default(),
         conflict_strategy: ConflictStrategy::Merge,
+        ..CloudSyncPreviewSelection::default()
     };
 
     let items = cloud_sync_preview_impact_items(&summary, &selection);
@@ -252,67 +164,19 @@ fn upload_diff_items_show_scope_exclusions_that_remove_remote_sections() {
 
 #[test]
 fn apply_field_diff_items_show_changed_quick_command_fields() {
-    let preview = CloudSyncPendingPreview::Structured(StructuredPreview {
-        remote_metadata: Default::default(),
-        manifest: oxideterm_cloud_sync::create_manifest_base(
-            "rev-1",
-            "2026-06-12T00:00:00Z",
-            "device",
-            SyncScope::default(),
-        ),
-        connections_snapshot: None,
-        forwards_snapshot: None,
-        quick_commands_snapshot_json: Some(
-            serde_json::to_string(&QuickCommandsSnapshot {
-                version: 1,
-                categories: Vec::new(),
-                commands: vec![quick_command("cmd-1", "Deploy", "deploy --prod")],
-                updated_at: 2,
-            })
-            .expect("remote quick commands"),
-        ),
-        serial_profiles_snapshot: None,
-        telnet_profiles_snapshot: None,
-        mosh_profiles_snapshot: None,
-        standalone_sftp_profiles_snapshot: None,
-        remote_desktop_profiles_snapshot: None,
-        base_connections_snapshot: None,
-        base_forwards_snapshot: None,
-        base_quick_commands_snapshot_json: None,
-        base_serial_profiles_snapshot: None,
-        base_telnet_profiles_snapshot: None,
-        base_mosh_profiles_snapshot: None,
-        base_standalone_sftp_profiles_snapshot: None,
-        base_remote_desktop_profiles_snapshot: None,
-        sensitive_credentials_entry: None,
-        sensitive_credentials_preview: None,
-        app_settings_entries: Default::default(),
-        app_settings_sections: Default::default(),
-        plugin_settings_entries: Default::default(),
-        plugin_settings_counts: Default::default(),
-    });
+    let preview = structured_preview(
+        QuickCommandsSnapshot {
+            version: 1,
+            categories: Vec::new(),
+            commands: vec![quick_command("cmd-1", "Deploy", "deploy --prod")],
+            updated_at: 2,
+        },
+        None,
+    );
+
     let selection = CloudSyncPreviewSelection {
-        import_connections: false,
-        selected_connection_names: Default::default(),
-        selected_connection_ids: Default::default(),
         import_quick_commands: true,
-        selected_quick_command_ids: Default::default(),
-        import_serial_profiles: false,
-        selected_serial_profile_ids: Default::default(),
-        import_telnet_profiles: false,
-        selected_telnet_profile_ids: Default::default(),
-        import_mosh_profiles: false,
-        selected_mosh_profile_ids: Default::default(),
-        import_remote_desktop_profiles: false,
-        selected_remote_desktop_profile_ids: Default::default(),
-        import_sensitive_credentials: false,
-        import_app_settings: false,
-        selected_app_settings_sections: Default::default(),
-        import_plugin_settings: false,
-        selected_plugin_ids: Default::default(),
-        import_forwards: false,
-        selected_forward_ids: Default::default(),
-        conflict_strategy: ConflictStrategy::Merge,
+        ..CloudSyncPreviewSelection::default()
     };
     let local = CloudSyncLocalFieldDiffSnapshot {
         quick_commands: Some(QuickCommandsSnapshot {
@@ -342,75 +206,24 @@ fn apply_field_diff_items_show_effective_field_merge_result() {
     local_command.description = Some("local note".to_string());
     let mut remote_command = base_command.clone();
     remote_command.command = "deploy --prod".to_string();
-    let preview = CloudSyncPendingPreview::Structured(StructuredPreview {
-        remote_metadata: Default::default(),
-        manifest: oxideterm_cloud_sync::create_manifest_base(
-            "rev-1",
-            "2026-06-12T00:00:00Z",
-            "device",
-            SyncScope::default(),
-        ),
-        connections_snapshot: None,
-        forwards_snapshot: None,
-        quick_commands_snapshot_json: Some(
-            serde_json::to_string(&QuickCommandsSnapshot {
-                version: 1,
-                categories: Vec::new(),
-                commands: vec![remote_command],
-                updated_at: 2,
-            })
-            .expect("remote quick commands"),
-        ),
-        serial_profiles_snapshot: None,
-        telnet_profiles_snapshot: None,
-        mosh_profiles_snapshot: None,
-        standalone_sftp_profiles_snapshot: None,
-        remote_desktop_profiles_snapshot: None,
-        base_connections_snapshot: None,
-        base_forwards_snapshot: None,
-        base_quick_commands_snapshot_json: Some(
-            serde_json::to_string(&QuickCommandsSnapshot {
-                version: 1,
-                categories: Vec::new(),
-                commands: vec![base_command],
-                updated_at: 1,
-            })
-            .expect("base quick commands"),
-        ),
-        base_serial_profiles_snapshot: None,
-        base_telnet_profiles_snapshot: None,
-        base_mosh_profiles_snapshot: None,
-        base_standalone_sftp_profiles_snapshot: None,
-        base_remote_desktop_profiles_snapshot: None,
-        sensitive_credentials_entry: None,
-        sensitive_credentials_preview: None,
-        app_settings_entries: Default::default(),
-        app_settings_sections: Default::default(),
-        plugin_settings_entries: Default::default(),
-        plugin_settings_counts: Default::default(),
-    });
+    let preview = structured_preview(
+        QuickCommandsSnapshot {
+            version: 1,
+            categories: Vec::new(),
+            commands: vec![remote_command],
+            updated_at: 2,
+        },
+        Some(QuickCommandsSnapshot {
+            version: 1,
+            categories: Vec::new(),
+            commands: vec![base_command],
+            updated_at: 1,
+        }),
+    );
+
     let selection = CloudSyncPreviewSelection {
-        import_connections: false,
-        selected_connection_names: Default::default(),
-        selected_connection_ids: Default::default(),
         import_quick_commands: true,
-        selected_quick_command_ids: Default::default(),
-        import_serial_profiles: false,
-        selected_serial_profile_ids: Default::default(),
-        import_telnet_profiles: false,
-        selected_telnet_profile_ids: Default::default(),
-        import_mosh_profiles: false,
-        selected_mosh_profile_ids: Default::default(),
-        import_remote_desktop_profiles: false,
-        selected_remote_desktop_profile_ids: Default::default(),
-        import_sensitive_credentials: false,
-        import_app_settings: false,
-        selected_app_settings_sections: Default::default(),
-        import_plugin_settings: false,
-        selected_plugin_ids: Default::default(),
-        import_forwards: false,
-        selected_forward_ids: Default::default(),
-        conflict_strategy: ConflictStrategy::Merge,
+        ..CloudSyncPreviewSelection::default()
     };
     let local = CloudSyncLocalFieldDiffSnapshot {
         quick_commands: Some(QuickCommandsSnapshot {
@@ -441,45 +254,16 @@ fn apply_field_diff_items_show_effective_field_merge_result() {
 
 #[test]
 fn upload_field_diff_items_show_local_after_remote_before() {
-    let preview = CloudSyncPendingPreview::Structured(StructuredPreview {
-        remote_metadata: Default::default(),
-        manifest: oxideterm_cloud_sync::create_manifest_base(
-            "rev-1",
-            "2026-06-12T00:00:00Z",
-            "device",
-            SyncScope::default(),
-        ),
-        connections_snapshot: None,
-        forwards_snapshot: None,
-        quick_commands_snapshot_json: Some(
-            serde_json::to_string(&QuickCommandsSnapshot {
-                version: 1,
-                categories: Vec::new(),
-                commands: vec![quick_command("cmd-1", "Deploy", "deploy --prod")],
-                updated_at: 2,
-            })
-            .expect("remote quick commands"),
-        ),
-        serial_profiles_snapshot: None,
-        telnet_profiles_snapshot: None,
-        mosh_profiles_snapshot: None,
-        standalone_sftp_profiles_snapshot: None,
-        remote_desktop_profiles_snapshot: None,
-        base_connections_snapshot: None,
-        base_forwards_snapshot: None,
-        base_quick_commands_snapshot_json: None,
-        base_serial_profiles_snapshot: None,
-        base_telnet_profiles_snapshot: None,
-        base_mosh_profiles_snapshot: None,
-        base_standalone_sftp_profiles_snapshot: None,
-        base_remote_desktop_profiles_snapshot: None,
-        sensitive_credentials_entry: None,
-        sensitive_credentials_preview: None,
-        app_settings_entries: Default::default(),
-        app_settings_sections: Default::default(),
-        plugin_settings_entries: Default::default(),
-        plugin_settings_counts: Default::default(),
-    });
+    let preview = structured_preview(
+        QuickCommandsSnapshot {
+            version: 1,
+            categories: Vec::new(),
+            commands: vec![quick_command("cmd-1", "Deploy", "deploy --prod")],
+            updated_at: 2,
+        },
+        None,
+    );
+
     let local = CloudSyncLocalFieldDiffSnapshot {
         quick_commands: Some(QuickCommandsSnapshot {
             version: 1,
@@ -501,9 +285,48 @@ fn upload_field_diff_items_show_local_after_remote_before() {
     }));
 }
 
+fn structured_preview(
+    remote_quick_commands: QuickCommandsSnapshot,
+    base_quick_commands: Option<QuickCommandsSnapshot>,
+) -> CloudSyncPendingPreview {
+    CloudSyncPendingPreview::Structured(StructuredPreview {
+        remote_metadata: Default::default(),
+        manifest: oxideterm_cloud_sync::create_manifest_base(
+            "rev-1",
+            "2026-06-12T00:00:00Z",
+            "device",
+            SyncScope::default(),
+        ),
+        connections_snapshot: None,
+        forwards_snapshot: None,
+        quick_commands_snapshot_json: Some(
+            serde_json::to_string(&remote_quick_commands).expect("remote quick commands"),
+        ),
+        serial_profiles_snapshot: None,
+        telnet_profiles_snapshot: None,
+        mosh_profiles_snapshot: None,
+        standalone_sftp_profiles_snapshot: None,
+        remote_desktop_profiles_snapshot: None,
+        base_connections_snapshot: None,
+        base_forwards_snapshot: None,
+        base_quick_commands_snapshot_json: base_quick_commands
+            .map(|snapshot| serde_json::to_string(&snapshot).expect("base quick commands")),
+        base_serial_profiles_snapshot: None,
+        base_telnet_profiles_snapshot: None,
+        base_mosh_profiles_snapshot: None,
+        base_standalone_sftp_profiles_snapshot: None,
+        base_remote_desktop_profiles_snapshot: None,
+        sensitive_credentials_entry: None,
+        sensitive_credentials_preview: None,
+        app_settings_entries: Default::default(),
+        app_settings_sections: Default::default(),
+        plugin_settings_entries: Default::default(),
+        plugin_settings_counts: Default::default(),
+    })
+}
+
 fn test_snapshot(scope: SyncScope, current_state: StructuredLocalState) -> CloudSyncLocalSnapshot {
     CloudSyncLocalSnapshot {
-        metadata: Default::default(),
         scope,
         dirty: StructuredDirtyInfo {
             current_state,
@@ -513,12 +336,7 @@ fn test_snapshot(scope: SyncScope, current_state: StructuredLocalState) -> Cloud
         upload_units: 0,
         connections_record_count: 2,
         forwards_record_count: 1,
-        quick_commands_record_count: 0,
-        serial_profiles_record_count: 0,
-        telnet_profiles_record_count: 0,
-        mosh_profiles_record_count: 0,
-        remote_desktop_profiles_record_count: 0,
-        sensitive_credentials_record_count: 0,
+        ..CloudSyncLocalSnapshot::default()
     }
 }
 

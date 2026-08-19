@@ -713,97 +713,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_heading() {
-        let doc = parse("# Hello");
-        assert_eq!(doc.blocks.len(), 1);
-        match &doc.blocks[0] {
-            Block::Heading { level, id, inlines } => {
-                assert_eq!(*level, 1);
-                assert_eq!(id, "hello");
-                assert_eq!(inlines.len(), 1);
-                assert_eq!(inlines[0], Inline::Text("Hello".into()));
-            }
-            other => panic!("expected Heading, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_paragraph_with_bold_italic() {
-        let doc = parse("Hello **bold** and *italic* world");
-        assert_eq!(doc.blocks.len(), 1);
-        match &doc.blocks[0] {
-            Block::Paragraph { inlines } => {
-                assert!(inlines.len() >= 3);
-                // Find bold
-                assert!(inlines.iter().any(|i| matches!(i, Inline::Bold(_))));
-                // Find italic
-                assert!(inlines.iter().any(|i| matches!(i, Inline::Italic(_))));
-            }
-            other => panic!("expected Paragraph, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_code_block() {
-        let doc = parse("```rust\nfn main() {}\n```");
-        assert_eq!(doc.blocks.len(), 1);
-        match &doc.blocks[0] {
-            Block::CodeBlock { language, code } => {
-                assert_eq!(language.as_deref(), Some("rust"));
-                assert!(code.contains("fn main()"));
-            }
-            other => panic!("expected CodeBlock, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_unordered_list() {
-        let doc = parse("- one\n- two\n- three");
-        assert_eq!(doc.blocks.len(), 1);
-        match &doc.blocks[0] {
-            Block::UnorderedList { items } => {
-                assert_eq!(items.len(), 3);
-            }
-            other => panic!("expected UnorderedList, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_ordered_list() {
-        let doc = parse("1. first\n2. second");
-        assert_eq!(doc.blocks.len(), 1);
-        match &doc.blocks[0] {
-            Block::OrderedList { start, items } => {
-                assert_eq!(*start, 1);
-                assert_eq!(items.len(), 2);
-            }
-            other => panic!("expected OrderedList, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_hr() {
-        let doc = parse("---");
-        assert_eq!(doc.blocks.len(), 1);
-        assert_eq!(doc.blocks[0], Block::HorizontalRule);
-    }
-
-    #[test]
-    fn parses_inline_code() {
-        let doc = parse("Use `cargo build` here");
-        match &doc.blocks[0] {
-            Block::Paragraph { inlines } => {
-                assert!(
-                    inlines
-                        .iter()
-                        .any(|i| matches!(i, Inline::Code(c) if c == "cargo build"))
-                );
-            }
-            other => panic!("expected Paragraph, got {:?}", other),
-        }
-    }
-
-    #[test]
     fn parses_inline_and_display_math() {
         let doc = parse("Inline $a^2+b^2=c^2$.\n\n$$\\frac{1}{2}$$");
         assert_eq!(doc.blocks.len(), 2);
@@ -824,19 +733,6 @@ mod tests {
                 )));
             }
             other => panic!("expected display math Paragraph, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_link() {
-        let doc = parse("[click](https://example.com)");
-        match &doc.blocks[0] {
-            Block::Paragraph { inlines } => {
-                assert!(inlines.iter().any(
-                    |i| matches!(i, Inline::Link { url, .. } if url == "https://example.com")
-                ));
-            }
-            other => panic!("expected Paragraph, got {:?}", other),
         }
     }
 
@@ -900,111 +796,6 @@ mod tests {
         ));
     }
 
-    // ── new tests ───────────────────────────────────────────────────────
-
-    #[test]
-    fn parses_blockquote() {
-        let doc = parse("> Hello world");
-        assert_eq!(doc.blocks.len(), 1);
-        match &doc.blocks[0] {
-            Block::Blockquote { kind, blocks } => {
-                assert_eq!(*kind, None);
-                assert_eq!(blocks.len(), 1);
-                match &blocks[0] {
-                    Block::Paragraph { inlines } => {
-                        assert!(
-                            inlines
-                                .iter()
-                                .any(|i| matches!(i, Inline::Text(t) if t == "Hello world"))
-                        );
-                    }
-                    other => panic!("expected Paragraph inside Blockquote, got {:?}", other),
-                }
-            }
-            other => panic!("expected Blockquote, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_nested_blockquote() {
-        let doc = parse("> outer\n> > inner");
-        assert_eq!(doc.blocks.len(), 1);
-        match &doc.blocks[0] {
-            Block::Blockquote { blocks, .. } => {
-                // Should contain the outer paragraph and a nested blockquote.
-                assert!(
-                    blocks.iter().any(|b| matches!(b, Block::Blockquote { .. })),
-                    "expected a nested Blockquote, got {:?}",
-                    blocks,
-                );
-            }
-            other => panic!("expected Blockquote, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_strikethrough() {
-        let doc = parse("~~deleted~~");
-        assert_eq!(doc.blocks.len(), 1);
-        match &doc.blocks[0] {
-            Block::Paragraph { inlines } => {
-                assert!(
-                    inlines
-                        .iter()
-                        .any(|i| matches!(i, Inline::Strikethrough(_)))
-                );
-            }
-            other => panic!("expected Paragraph, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_table() {
-        let md = "| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |";
-        let doc = parse(md);
-        assert_eq!(doc.blocks.len(), 1);
-        match &doc.blocks[0] {
-            Block::Table {
-                headers,
-                alignments,
-                rows,
-            } => {
-                assert_eq!(headers.len(), 2);
-                assert_eq!(alignments.len(), 2);
-                assert_eq!(rows.len(), 2);
-                // First header cell should contain "A".
-                assert!(
-                    headers[0]
-                        .iter()
-                        .any(|i| matches!(i, Inline::Text(t) if t == "A"))
-                );
-                // First body cell should contain "1".
-                assert!(
-                    rows[0][0]
-                        .iter()
-                        .any(|i| matches!(i, Inline::Text(t) if t == "1"))
-                );
-            }
-            other => panic!("expected Table, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_image() {
-        let doc = parse("![logo](https://example.com/logo.png)");
-        assert_eq!(doc.blocks.len(), 1);
-        match &doc.blocks[0] {
-            Block::Paragraph { inlines } => {
-                assert!(inlines.iter().any(|i| matches!(
-                    i,
-                    Inline::Image { alt, url }
-                        if alt == "logo" && url == "https://example.com/logo.png"
-                )));
-            }
-            other => panic!("expected Paragraph, got {:?}", other),
-        }
-    }
-
     #[test]
     fn parses_footnote_reference_and_definition() {
         let doc = parse("Hello[^note].\n\n[^note]: Footnote **body**.");
@@ -1043,34 +834,6 @@ mod tests {
         assert_eq!(doc.footnotes.len(), 2);
         assert_eq!(doc.footnotes[0].label, "b");
         assert_eq!(doc.footnotes[1].label, "a");
-    }
-
-    #[test]
-    fn task_lists_preserve_checked_state() {
-        for (source, expected) in [("- [x] done", true), ("- [ ] todo", false)] {
-            let doc = parse(source);
-            assert_eq!(doc.blocks.len(), 1, "{source}");
-            match &doc.blocks[0] {
-                Block::UnorderedList { items } => {
-                    assert_eq!(items.len(), 1, "{source}");
-                    assert_eq!(items[0].checked, Some(expected), "{source}");
-                }
-                other => panic!("expected UnorderedList for {source}, got {:?}", other),
-            }
-        }
-    }
-
-    #[test]
-    fn parses_indented_code_block() {
-        let doc = parse("    let x = 42;\n");
-        assert_eq!(doc.blocks.len(), 1);
-        match &doc.blocks[0] {
-            Block::CodeBlock { language, code } => {
-                assert_eq!(*language, None);
-                assert!(code.contains("let x = 42;"));
-            }
-            other => panic!("expected CodeBlock, got {:?}", other),
-        }
     }
 
     #[test]

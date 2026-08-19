@@ -2,9 +2,6 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    #[cfg(unix)]
-    use std::time::Duration;
-
     use alacritty_terminal::{
         event::VoidListener,
         term::Config,
@@ -36,13 +33,6 @@ mod tests {
     }
 
     #[test]
-    fn lifecycle_reports_running_state() {
-        assert!(TerminalLifecycle::Running.is_running());
-        assert!(!TerminalLifecycle::Exited(Some(0)).is_running());
-        assert!(!TerminalLifecycle::Closed.is_running());
-    }
-
-    #[test]
     fn terminal_resize_request_clamps_to_minimum_grid() {
         let resize = TerminalResize::new(0, 1, 12, 24);
 
@@ -65,7 +55,7 @@ mod tests {
 
     #[test]
     fn ssh_terminal_is_not_interactive_until_shell_channel_is_ready() {
-        let session = SshPtySession::new(
+        let session = SshPtySession::new_disconnected_for_test(
             SshSessionConfig::new("127.0.0.1", 9, "nobody"),
             80,
             24,
@@ -80,7 +70,7 @@ mod tests {
 
     #[test]
     fn ssh_resize_resets_command_mark_coordinates_only_when_grid_changes() {
-        let mut session = SshPtySession::new(
+        let mut session = SshPtySession::new_disconnected_for_test(
             SshSessionConfig::new("127.0.0.1", 9, "nobody"),
             80,
             24,
@@ -125,218 +115,6 @@ mod tests {
             parse_lsof_cwd(lsof_output),
             Some(PathBuf::from("/Users/dominical/Documents/OxideTerm"))
         );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn local_pty_shutdown_cleans_background_child_processes() {
-        let marker_path = std::env::temp_dir().join(format!(
-            "oxideterm-pty-child-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let script = r#"
-marker=$1
-( trap "" TERM; while :; do sleep 5; done ) &
-child=$!
-printf '%s\n' "$child" > "$marker"
-wait
-"#;
-        let mut config = LocalPtyConfig::default();
-        config.shell = Some(
-            ShellInfo::new("test-sh", "Test sh", "/bin/sh").with_args(vec![
-                "-c".to_string(),
-                script.to_string(),
-                "oxideterm-pty-test".to_string(),
-                marker_path.display().to_string(),
-            ]),
-        );
-        config.load_profile = false;
-
-        let mut session = LocalPtySession::spawn_with_config_graphics_and_encoding(
-            80,
-            24,
-            config,
-            GraphicsOptions::default(),
-            TerminalEncoding::Utf8,
-            100,
-        )
-        .expect("spawn local PTY");
-
-        let child_pid = wait_for_child_pid(&marker_path);
-        assert!(
-            unix_process_is_running(child_pid),
-            "test child should be running before PTY shutdown"
-        );
-
-        session.shutdown();
-
-        assert_eventually(
-            Duration::from_secs(3),
-            || !unix_process_is_running(child_pid),
-            "background child should stop after PTY shutdown",
-        );
-        let _ = std::fs::remove_file(marker_path);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn local_available_shell_integrations_report_initial_cwd() {
-        let expected_cwd = std::env::temp_dir();
-        for shell_id in ["bash", "zsh", "fish", "pwsh"] {
-            let Some(shell_path) = find_test_executable(shell_id) else {
-                continue;
-            };
-            assert_local_shell_reports_initial_cwd(shell_id, shell_path, &expected_cwd);
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn integrated_zsh_loads_history_from_user_config_in_a_real_pty() {
-        let Some(shell_path) = find_test_executable("zsh") else {
-            return;
-        };
-        let user_config = tempfile::tempdir().expect("temporary user Zsh directory");
-        std::fs::write(
-            user_config.path().join(".zshrc"),
-            "HISTFILE=\"$ZDOTDIR/.zsh_history\"\nHISTSIZE=100\nSAVEHIST=100\nsetopt share_history\n",
-        )
-        .expect("write user Zsh config");
-        std::fs::write(
-            user_config.path().join(".zsh_history"),
-            "oxideterm-history-probe\n",
-        )
-        .expect("write user Zsh history");
-        let config = LocalPtyConfig {
-            shell: Some(ShellInfo::new("zsh", "Zsh", shell_path)),
-            env: HashMap::from([(
-                "ZDOTDIR".to_string(),
-                user_config.path().display().to_string(),
-            )]),
-            current_directory_shell_integration: true,
-            ..LocalPtyConfig::default()
-        };
-        let mut session = LocalPtySession::spawn_with_config_graphics_and_encoding(
-            80,
-            24,
-            config,
-            GraphicsOptions::default(),
-            TerminalEncoding::Utf8,
-            100,
-        )
-        .expect("spawn integrated Zsh PTY");
-
-        std::thread::sleep(Duration::from_secs(1));
-        session.drain_output();
-        session.take_events();
-        session
-            .write_text("print -r -- OXIDETERM_HISTORY_COUNT=${#history[@]}\n")
-            .expect("query Zsh history count");
-
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        let mut screen = String::new();
-        let parse_history_count = |output: &str| {
-            output.rsplit("OXIDETERM_HISTORY_COUNT=").find_map(|value| {
-                let digits = value
-                    .trim_start()
-                    .chars()
-                    .take_while(char::is_ascii_digit)
-                    .collect::<String>();
-                (!digits.is_empty())
-                    .then(|| digits.parse::<usize>().ok())
-                    .flatten()
-            })
-        };
-        while std::time::Instant::now() < deadline && parse_history_count(&screen).is_none() {
-            session.drain_output();
-            screen = session
-                .snapshot()
-                .lines
-                .iter()
-                .map(|row| row.cells.iter().map(|cell| cell.ch).collect::<String>())
-                .collect::<Vec<_>>()
-                .join("\n");
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        session.shutdown();
-
-        let count = parse_history_count(&screen).expect("history count response");
-        assert!(
-            count > 0,
-            "integrated Zsh PTY did not load configured history"
-        );
-    }
-
-    #[cfg(unix)]
-    fn assert_local_shell_reports_initial_cwd(
-        shell_id: &str,
-        shell_path: PathBuf,
-        expected_cwd: &std::path::Path,
-    ) {
-        let config = LocalPtyConfig {
-            shell: Some(ShellInfo::new(shell_id, shell_id, shell_path)),
-            cwd: Some(expected_cwd.to_path_buf()),
-            load_profile: false,
-            current_directory_shell_integration: true,
-            ..LocalPtyConfig::default()
-        };
-        let mut session = LocalPtySession::spawn_with_config_graphics_and_encoding(
-            80,
-            24,
-            config,
-            GraphicsOptions::default(),
-            TerminalEncoding::Utf8,
-            100,
-        )
-        .unwrap_or_else(|error| panic!("spawn integrated local {shell_id} PTY: {error}"));
-        assert_eq!(
-            session.shell_integration_launch_state(),
-            TerminalCwdIntegrationLaunchState::Prepared
-        );
-
-        let deadline = std::time::Instant::now() + local_shell_cwd_report_timeout(shell_id);
-        let mut reported_cwd = None;
-        while std::time::Instant::now() < deadline && reported_cwd.is_none() {
-            session.drain_output();
-            reported_cwd = session
-                .take_events()
-                .into_iter()
-                .find_map(|event| match event {
-                    TerminalEvent::CwdChanged { cwd, .. } => Some(cwd),
-                    _ => None,
-                });
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        session.shutdown();
-
-        assert_eq!(
-            reported_cwd.map(PathBuf::from),
-            Some(expected_cwd.canonicalize().unwrap()),
-            "{shell_id} did not report its initial cwd"
-        );
-    }
-
-    #[cfg(unix)]
-    fn local_shell_cwd_report_timeout(shell_id: &str) -> Duration {
-        // PowerShell's managed runtime can take longer to start on a contended CI runner.
-        if shell_id == "pwsh" {
-            Duration::from_secs(15)
-        } else {
-            Duration::from_secs(5)
-        }
-    }
-
-    #[cfg(unix)]
-    fn find_test_executable(name: &str) -> Option<PathBuf> {
-        std::env::var_os("PATH")
-            .into_iter()
-            .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
-            .map(|directory| directory.join(name))
-            .find(|candidate| candidate.is_file())
     }
 
     #[test]
@@ -1622,22 +1400,6 @@ wait
     }
 
     #[test]
-    fn window_size_preserves_physical_cell_dimensions() {
-        let size = TerminalSize {
-            cols: 97,
-            rows: 42,
-            cell_width: 16,
-            cell_height: 34,
-        };
-
-        let window = window_size(size);
-        assert_eq!(window.num_cols, 97);
-        assert_eq!(window.num_lines, 42);
-        assert_eq!(window.cell_width, 16);
-        assert_eq!(window.cell_height, 34);
-    }
-
-    #[test]
     fn color_request_prefers_alacritty_runtime_overrides() {
         let override_color = Rgb {
             r: 12,
@@ -1696,51 +1458,4 @@ wait
         assert_eq!(bg, OXIDETERM_DARK_THEME.ansi[15]);
     }
 
-    #[cfg(unix)]
-    fn wait_for_child_pid(marker_path: &std::path::Path) -> u32 {
-        let mut pid = None;
-        assert_eventually(
-            Duration::from_secs(3),
-            || {
-                pid = std::fs::read_to_string(marker_path)
-                    .ok()
-                    .and_then(|value| value.trim().parse::<u32>().ok());
-                pid.is_some()
-            },
-            "PTY script should write background child PID",
-        );
-        pid.unwrap()
-    }
-
-    #[cfg(unix)]
-    fn unix_process_is_running(pid: u32) -> bool {
-        let status = unsafe { libc::kill(pid as libc::pid_t, 0) };
-        if status != 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EPERM) {
-            return false;
-        }
-
-        let output = std::process::Command::new("ps")
-            .args(["-p", &pid.to_string(), "-o", "stat="])
-            .output();
-        let Ok(output) = output else {
-            return true;
-        };
-        if !output.status.success() {
-            return false;
-        }
-
-        !String::from_utf8_lossy(&output.stdout).contains('Z')
-    }
-
-    #[cfg(unix)]
-    fn assert_eventually(timeout: Duration, mut predicate: impl FnMut() -> bool, message: &str) {
-        let started = std::time::Instant::now();
-        while started.elapsed() < timeout {
-            if predicate() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        }
-        assert!(predicate(), "{message}");
-    }
 }

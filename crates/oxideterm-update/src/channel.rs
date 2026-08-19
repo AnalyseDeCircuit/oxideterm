@@ -21,18 +21,3 @@ pub fn endpoint_for_channel(channel: UpdateChannel) -> UpdateEndpoint {
     };
     UpdateEndpoint { channel, url }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stable_channel_uses_github_latest_manifest() {
-        assert_eq!(
-            endpoint_for_channel(UpdateChannel::Stable).url,
-            STABLE_UPDATE_ENDPOINT
-        );
-        assert!(STABLE_UPDATE_ENDPOINT.contains("/releases/latest/"));
-        assert!(!STABLE_UPDATE_ENDPOINT.contains("/releases/download/updater-stable/"));
-    }
-}

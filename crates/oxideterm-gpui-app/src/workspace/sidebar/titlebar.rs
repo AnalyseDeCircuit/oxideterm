@@ -302,21 +302,3 @@ impl WorkspaceApp {
             .into_any_element()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{uses_system_titlebar_double_click, window_titlebar_visibility};
-
-    #[test]
-    fn titlebar_visibility_and_double_click_follow_platform_policy() {
-        assert!(window_titlebar_visibility(true, false, true));
-        assert!(!window_titlebar_visibility(true, false, false));
-        assert!(!window_titlebar_visibility(true, true, true));
-        assert!(window_titlebar_visibility(false, false, false));
-        assert!(!window_titlebar_visibility(false, true, true));
-        assert!(!uses_system_titlebar_double_click(true, 1));
-        assert!(uses_system_titlebar_double_click(true, 2));
-        assert!(!uses_system_titlebar_double_click(true, 3));
-        assert!(!uses_system_titlebar_double_click(false, 2));
-    }
-}

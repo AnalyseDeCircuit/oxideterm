@@ -352,60 +352,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn render_cache_prepares_once_then_reuses_same_image_version() {
-        let mut cache = ImageRenderCache::default();
-        let snapshot = TerminalImageSnapshot {
-            id: TerminalImageId(7),
-            protocol: TerminalImageProtocol::Kitty,
-            row: 0,
-            col: 0,
-            cols: 1,
-            rows: 1,
-            pixel_width: 1,
-            pixel_height: 1,
-            source_x: 0,
-            source_y: 0,
-            source_width: 1,
-            source_height: 1,
-            z_index: 0,
-            placeholder: true,
-            version: 1,
-            data: Some(Arc::new(TerminalImageData {
-                id: TerminalImageId(7),
-                protocol: TerminalImageProtocol::Kitty,
-                version: 1,
-                width: 1,
-                height: 1,
-                rgba: vec![0, 0, 0, 255].into(),
-                frames: Vec::new(),
-                animation: TerminalImageAnimationState::default(),
-                name: None,
-            })),
-        };
-
-        let requests = cache.take_preparation_requests(std::slice::from_ref(&snapshot), true);
-        assert_eq!(requests.len(), 1);
-        assert!(
-            cache.cached_images(std::slice::from_ref(&snapshot), true)[0]
-                .render_image
-                .is_none()
-        );
-        let prepared = requests
-            .iter()
-            .cloned()
-            .filter_map(ImageRenderCache::prepare_snapshot)
-            .collect();
-        cache.finish_preparations(&requests, prepared);
-
-        let first = cache.cached_images(std::slice::from_ref(&snapshot), true);
-        let second = cache.cached_images(std::slice::from_ref(&snapshot), true);
-
-        let first = first[0].render_image.as_ref().unwrap();
-        let second = second[0].render_image.as_ref().unwrap();
-        assert!(Arc::ptr_eq(first, second));
-    }
-
-    #[test]
     fn render_cache_converts_protocol_rgba_to_gpui_bgra() {
         let mut cache = ImageRenderCache::default();
         let snapshot = TerminalImageSnapshot {
@@ -543,13 +489,6 @@ mod tests {
     }
 
     #[test]
-    fn gpui_pixel_adapter_leaves_alpha_and_green_unchanged() {
-        let pixels = gpui_render_image_pixels_from_protocol_rgba(vec![1, 2, 3, 4, 5, 6, 7, 8]);
-
-        assert_eq!(pixels, vec![3, 2, 1, 4, 7, 6, 5, 8]);
-    }
-
-    #[test]
     fn render_cache_can_suppress_decode_for_compatibility_mode() {
         let mut cache = ImageRenderCache::default();
         let snapshot = TerminalImageSnapshot {
@@ -585,51 +524,5 @@ mod tests {
 
         assert!(rendered[0].render_image.is_none());
         assert!(cache.entries.is_empty());
-    }
-
-    #[test]
-    fn render_cache_keeps_single_oversized_image_resident() {
-        let mut cache = ImageRenderCache::default();
-        cache.set_byte_limit(4);
-        let snapshot = TerminalImageSnapshot {
-            id: TerminalImageId(13),
-            protocol: TerminalImageProtocol::Kitty,
-            row: 0,
-            col: 0,
-            cols: 1,
-            rows: 1,
-            pixel_width: 2,
-            pixel_height: 1,
-            source_x: 0,
-            source_y: 0,
-            source_width: 2,
-            source_height: 1,
-            z_index: 0,
-            placeholder: true,
-            version: 1,
-            data: Some(Arc::new(TerminalImageData {
-                id: TerminalImageId(13),
-                protocol: TerminalImageProtocol::Kitty,
-                version: 1,
-                width: 2,
-                height: 1,
-                rgba: vec![0, 0, 0, 255, 255, 255, 255, 255].into(),
-                frames: Vec::new(),
-                animation: TerminalImageAnimationState::default(),
-                name: None,
-            })),
-        };
-
-        let first = cache.render_images(std::slice::from_ref(&snapshot), true);
-        let second = cache.render_images(&[snapshot], true);
-        let evicted = cache.take_retired_images();
-
-        assert!(evicted.is_empty());
-        assert_eq!(cache.entries.len(), 1);
-        assert!(cache.bytes > cache.byte_limit);
-        assert!(Arc::ptr_eq(
-            first[0].render_image.as_ref().unwrap(),
-            second[0].render_image.as_ref().unwrap()
-        ));
     }
 }

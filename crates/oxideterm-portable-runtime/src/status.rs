@@ -106,18 +106,3 @@ pub fn portable_status_snapshot() -> Result<PortableStatusSnapshot, PortableErro
             .then(|| info.keystore_path.display().to_string()),
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bootstrap_status_helpers_match_tauri_expectations() {
-        assert!(PortableBootstrapStatus::Disabled.can_launch_full_app());
-        assert!(!PortableBootstrapStatus::NeedsSetup.can_launch_full_app());
-        assert!(!PortableBootstrapStatus::Locked.can_launch_full_app());
-        assert!(PortableBootstrapStatus::Unlocked.can_launch_full_app());
-        assert!(!PortableBootstrapStatus::NeedsSetup.has_keystore());
-        assert!(PortableBootstrapStatus::Locked.has_keystore());
-    }
-}

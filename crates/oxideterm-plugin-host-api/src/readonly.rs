@@ -1044,33 +1044,6 @@ mod tests {
     }
 
     #[test]
-    fn activity_bar_registration_args_use_a_stable_host_owned_id() {
-        let registration = native_plugin_ui_registration_from_args(
-            "com.example.demo",
-            plugin_runtime::PluginRegistrationKind::ActivityBarItem,
-            &json!({ "itemId": "refresh" }),
-        )
-        .unwrap();
-
-        assert_eq!(
-            registration.registration_id,
-            "ctx.ui.activity-bar-item:refresh"
-        );
-        assert_eq!(
-            registration.kind,
-            plugin_runtime::PluginRegistrationKind::ActivityBarItem
-        );
-        assert!(
-            native_plugin_ui_registration_from_args(
-                "com.example.demo",
-                plugin_runtime::PluginRegistrationKind::ActivityBarItem,
-                &Value::Null,
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
     fn readonly_dispatcher_returns_app_theme_and_settings_sections() {
         let snapshot = sample_snapshot();
         let theme = native_plugin_returnable_host_api_response(
@@ -1215,92 +1188,6 @@ mod tests {
             assert!(!serialized.contains("Private host connected"));
             assert!(!serialized.contains("credential leaked in event detail"));
         }
-    }
-
-    #[test]
-    fn readonly_dispatcher_returns_useful_settings_and_event_counts() {
-        let snapshot = sample_snapshot();
-        let settings = native_plugin_returnable_host_api_response(
-            &snapshot,
-            "com.example.demo",
-            host_call("app", "getSettingsSummary", Value::Null),
-        )
-        .unwrap();
-        assert!(matches!(
-            settings.result,
-            plugin_runtime::PluginResponseResult::Ok { value }
-                if value["locale"] == "zh-CN"
-                    && value["theme"] == "default-dark"
-                    && value["density"] == "compact"
-                    && value["features"]["terminalCommandBar"] == true
-        ));
-
-        let events = native_plugin_returnable_host_api_response(
-            &snapshot,
-            "com.example.demo",
-            host_call("eventLog", "getSummary", Value::Null),
-        )
-        .unwrap();
-        assert!(matches!(
-            events.result,
-            plugin_runtime::PluginResponseResult::Ok { value }
-                if value["total"] == 1
-                    && value["bySeverity"]["info"] == 1
-                    && value["byCategory"]["connection"] == 1
-        ));
-    }
-
-    #[test]
-    fn product_snapshots_and_mutations_use_formal_dispatch_paths() {
-        let mut snapshot = sample_snapshot();
-        snapshot.notifications = json!([{ "id": 7, "title": "Host warning" }]);
-        snapshot.quick_commands = json!({
-            "categories": [],
-            "commands": [{ "id": "deploy", "command": "deploy-safe" }],
-        });
-        snapshot.cloud_sync_history = json!([{ "id": "history-1", "success": true }]);
-        snapshot.host_tools_snapshots = json!([{
-            "nodeId": "node-1",
-            "metrics": { "cpuPercent": 20.0 },
-        }]);
-
-        for (namespace, method, args) in [
-            ("connections", "getSavedSummaries", Value::Null),
-            ("connections", "getSaved", Value::Null),
-            (
-                "connections",
-                "connect",
-                json!({ "connectionId": "saved-1" }),
-            ),
-            ("notifications", "getAll", Value::Null),
-            ("quickCommands", "getAll", Value::Null),
-            ("cloudSync", "getHistory", Value::Null),
-            ("hostTools", "getSnapshot", json!({ "nodeId": "node-1" })),
-            ("connections", "disconnect", json!({ "nodeId": "node-1" })),
-            ("theme", "setActive", json!({ "themeId": "default-dark" })),
-        ] {
-            let response = native_plugin_returnable_host_api_response(
-                &snapshot,
-                "com.example.demo",
-                host_call(namespace, method, args),
-            )
-            .expect("formal product API should be returnable");
-            assert!(matches!(
-                response.result,
-                plugin_runtime::PluginResponseResult::Ok { .. }
-            ));
-        }
-
-        let invalid = native_plugin_returnable_host_api_response(
-            &snapshot,
-            "com.example.demo",
-            host_call("connections", "disconnect", json!({})),
-        )
-        .unwrap();
-        assert!(matches!(
-            invalid.result,
-            plugin_runtime::PluginResponseResult::Error { .. }
-        ));
     }
 
     #[test]

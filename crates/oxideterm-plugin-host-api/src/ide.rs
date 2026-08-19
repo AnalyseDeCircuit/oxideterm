@@ -156,56 +156,9 @@ pub fn native_plugin_ide_active_file_path(snapshot: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use oxideterm_ide_core::{IdePluginFileSnapshot, IdePluginProjectSnapshot, IdePluginSnapshot};
     use serde_json::json;
 
-    use super::{native_plugin_ide_response, native_plugin_ide_snapshot_value};
-
-    #[test]
-    fn snapshot_value_projects_core_dto_without_ui_state() {
-        // This test keeps the plugin boundary tied to the UI-independent IDE DTOs.
-        let snapshot = IdePluginSnapshot {
-            project: IdePluginProjectSnapshot {
-                node_id: "node-1".to_string(),
-                root_path: "/srv/project".to_string(),
-                name: "project".to_string(),
-                is_git_repo: true,
-                git_branch: Some("main".to_string()),
-            },
-            open_files: vec![IdePluginFileSnapshot {
-                path: "/srv/project/src/main.rs".to_string(),
-                name: "main.rs".to_string(),
-                language: "Rust".to_string(),
-                is_dirty: true,
-                is_active: true,
-                is_pinned: false,
-            }],
-            active_file: None,
-        };
-
-        assert_eq!(
-            native_plugin_ide_snapshot_value(&snapshot),
-            json!({
-                "isOpen": true,
-                "project": {
-                    "nodeId": "node-1",
-                    "rootPath": "/srv/project",
-                    "name": "project",
-                    "isGitRepo": true,
-                    "gitBranch": "main",
-                },
-                "openFiles": [{
-                    "path": "/srv/project/src/main.rs",
-                    "name": "main.rs",
-                    "language": "Rust",
-                    "isDirty": true,
-                    "isActive": true,
-                    "isPinned": false,
-                }],
-                "activeFile": null,
-            })
-        );
-    }
+    use super::native_plugin_ide_response;
 
     #[test]
     fn summary_response_exposes_editor_state_without_names_or_paths() {

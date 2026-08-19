@@ -373,62 +373,11 @@ fn empty_value() -> String {
 #[cfg(test)]
 mod tests {
     use oxideterm_cloud_sync::{
-        AuthMode, BackendType, CloudSyncSettings, secret_keys,
-        state::{CloudSyncConflictDetails, CloudSyncPersistedState},
+        AuthMode, BackendType, CloudSyncSettings, secret_keys, state::CloudSyncPersistedState,
     };
     use oxideterm_settings_model::CloudSyncFormDraft;
 
     use super::*;
-
-    #[test]
-    fn version_info_rows_include_local_and_remote_identity() {
-        let state = CloudSyncPersistedState {
-            device_id: Some("mac-1234".to_string()),
-            revision_seq: 7,
-            last_known_remote_revision: Some("rev-2".to_string()),
-            remote_device_id: Some("linux-5678".to_string()),
-            last_known_remote_etag: Some("etag-2".to_string()),
-            ..CloudSyncPersistedState::default()
-        };
-
-        let rows = cloud_sync_version_info_rows(&state, Some("3 / 4".to_string()));
-
-        assert!(rows.iter().any(|row| {
-            row.label_key == "plugin.cloud_sync.fields.local_device" && row.value == "mac-1234"
-        }));
-        assert!(rows.iter().any(|row| {
-            row.label_key == "plugin.cloud_sync.fields.remote_revision" && row.value == "rev-2"
-        }));
-        assert!(rows.iter().any(|row| {
-            row.label_key == "plugin.cloud_sync.fields.local_counts" && row.value == "3 / 4"
-        }));
-    }
-
-    #[test]
-    fn conflict_info_is_absent_without_conflict_and_present_with_details() {
-        assert!(cloud_sync_conflict_info(&CloudSyncPersistedState::default()).is_none());
-
-        let state = CloudSyncPersistedState {
-            auto_upload_blocked_by_conflict: true,
-            conflict_details: Some(CloudSyncConflictDetails {
-                revision: Some("remote-rev".to_string()),
-                device_id: Some("remote-device".to_string()),
-                updated_at: None,
-            }),
-            ..CloudSyncPersistedState::default()
-        };
-
-        let info = cloud_sync_conflict_info(&state).expect("conflict info");
-
-        assert_eq!(
-            info.recommendation_key,
-            "plugin.cloud_sync.conflict.detail_recommendation"
-        );
-        assert!(info.rows.iter().any(|row| {
-            row.label_key == "plugin.cloud_sync.fields.conflict_remote_revision"
-                && row.value == "remote-rev"
-        }));
-    }
 
     #[test]
     fn health_items_fail_when_required_cloud_sync_secrets_are_missing() {

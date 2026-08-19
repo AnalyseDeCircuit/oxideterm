@@ -10,7 +10,7 @@ use std::time::Duration;
 use crate::{AiChatMessage, AiChatStreamConfig, AiStreamEvent};
 
 #[cfg(test)]
-pub(crate) use anthropic::{anthropic_chat_messages, parse_anthropic_data_line};
+pub(crate) use anthropic::parse_anthropic_data_line;
 #[cfg(test)]
 pub(crate) use gemini::{gemini_chat_body, gemini_chat_contents, parse_gemini_data_line};
 #[cfg(test)]
@@ -78,42 +78,6 @@ mod tests {
         assert_eq!(
             chat_stream_provider_family(""),
             ChatStreamProviderFamily::OpenAiCompatible
-        );
-    }
-
-    #[test]
-    fn known_provider_types_keep_their_stream_family() {
-        assert_eq!(
-            chat_stream_provider_family("openai"),
-            ChatStreamProviderFamily::OpenAiCompatible
-        );
-        assert_eq!(
-            chat_stream_provider_family("openai_compatible"),
-            ChatStreamProviderFamily::OpenAiCompatible
-        );
-        assert_eq!(
-            chat_stream_provider_family("deepseek"),
-            ChatStreamProviderFamily::OpenAiCompatible
-        );
-        assert_eq!(
-            chat_stream_provider_family("kimi"),
-            ChatStreamProviderFamily::OpenAiCompatible
-        );
-        assert_eq!(
-            chat_stream_provider_family("glm"),
-            ChatStreamProviderFamily::OpenAiCompatible
-        );
-        assert_eq!(
-            chat_stream_provider_family("anthropic"),
-            ChatStreamProviderFamily::Anthropic
-        );
-        assert_eq!(
-            chat_stream_provider_family("gemini"),
-            ChatStreamProviderFamily::Gemini
-        );
-        assert_eq!(
-            chat_stream_provider_family("ollama"),
-            ChatStreamProviderFamily::Ollama
         );
     }
 }

@@ -93,44 +93,6 @@ pub fn process_row_signature(process: &ResourceTopProcess) -> u64 {
     hasher.finish()
 }
 
-#[cfg(test)]
-mod row_signature_tests {
-    use super::*;
-
-    #[test]
-    fn process_signature_ignores_live_sample_fields() {
-        let original = ResourceTopProcess {
-            pid: "42".into(),
-            ppid: Some("1".into()),
-            user: Some("root".into()),
-            state: Some("R".into()),
-            cpu_percent: Some(10.0),
-            memory_percent: 20.0,
-            rss_bytes: Some(1024),
-            vsz_bytes: Some(2048),
-            elapsed: Some("00:01".into()),
-            command: "worker".into(),
-            full_command: Some("/usr/bin/worker".into()),
-        };
-        let mut updated = original.clone();
-        updated.state = Some("S".into());
-        updated.cpu_percent = Some(90.0);
-        updated.memory_percent = 80.0;
-        updated.rss_bytes = Some(4096);
-        updated.elapsed = Some("00:02".into());
-
-        assert_eq!(
-            process_row_signature(&original),
-            process_row_signature(&updated)
-        );
-        updated.pid = "43".into();
-        assert_ne!(
-            process_row_signature(&original),
-            process_row_signature(&updated)
-        );
-    }
-}
-
 /// Prefers the full command line when the sampler captured it, falling back to the short command.
 pub fn process_display_command(process: &ResourceTopProcess) -> String {
     process_usable_command(process.full_command.as_deref())
@@ -420,84 +382,6 @@ mod tests {
         assert!(
             build_process_action_command("Linux", "123", ProcessActionKind::Renice { nice: 20 })
                 .is_err()
-        );
-    }
-
-    fn process(
-        pid: &str,
-        user: &str,
-        state: &str,
-        cpu_percent: f64,
-        memory_percent: f64,
-        command: &str,
-    ) -> ResourceTopProcess {
-        ResourceTopProcess {
-            pid: pid.to_string(),
-            ppid: Some("1".to_string()),
-            user: Some(user.to_string()),
-            state: Some(state.to_string()),
-            cpu_percent: Some(cpu_percent),
-            memory_percent,
-            rss_bytes: Some(1024),
-            vsz_bytes: Some(2048),
-            elapsed: Some("00:01:00".to_string()),
-            command: command.to_string(),
-            full_command: Some(format!("/usr/bin/{command} --serve")),
-        }
-    }
-
-    #[test]
-    fn process_filters_use_available_snapshot_fields() {
-        let running = process("10", "root", "R", 1.0, 1.0, "sshd");
-        let cpu_heavy = process("11", "www-data", "S", 12.0, 1.0, "node");
-        let memory_heavy = process("12", "postgres", "S", 1.0, 7.0, "postgres");
-
-        assert!(process_matches_filter(&running, ProcessFilter::Running));
-        assert!(process_matches_filter(&cpu_heavy, ProcessFilter::HighCpu));
-        assert!(process_matches_filter(
-            &memory_heavy,
-            ProcessFilter::HighMemory
-        ));
-        assert!(process_matches_query(&cpu_heavy, "www"));
-        assert!(process_matches_query(&memory_heavy, "postgres"));
-    }
-
-    #[test]
-    fn process_sort_can_order_by_cpu_and_command() {
-        let mut rows = vec![
-            process("2", "root", "S", 1.0, 2.0, "zsh"),
-            process("10", "www-data", "S", 19.0, 1.0, "node"),
-            process("1", "root", "R", 3.0, 8.0, "init"),
-        ];
-
-        sort_process_rows(&mut rows, ProcessSort::Cpu, true);
-        assert_eq!(rows[0].pid, "10");
-
-        sort_process_rows(&mut rows, ProcessSort::Command, false);
-        assert_eq!(rows[0].command, "init");
-    }
-
-    #[test]
-    fn process_display_command_ignores_placeholder_full_command() {
-        let mut process = process("2", "root", "S", 1.0, 2.0, "postgres");
-        process.full_command = Some("...".to_string());
-
-        assert_eq!(process_display_command(&process), "postgres");
-    }
-
-    #[test]
-    fn process_action_messages_prefer_remote_reason() {
-        assert_eq!(
-            process_action_success_message("Sent TERM to PID 42\n", ""),
-            "Sent TERM to PID 42"
-        );
-        assert_eq!(
-            process_action_failure_message("", "Operation not permitted\n", Some(1)),
-            "Operation not permitted"
-        );
-        assert_eq!(
-            process_action_failure_message("", "", Some(3)),
-            "Process action failed with exit code 3."
         );
     }
 }

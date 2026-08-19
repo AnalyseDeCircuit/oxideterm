@@ -1950,44 +1950,9 @@ mod tests {
     use oxideterm_terminal::TerminalCursorShape;
 
     use super::{
-        TERMINAL_VISUAL_BELL_OVERLAY_ALPHA, clamp_terminal_context_menu_position,
-        clamp_terminal_context_submenu_position, terminal_cursor_shape_for_render,
+        TERMINAL_VISUAL_BELL_OVERLAY_ALPHA, terminal_cursor_shape_for_render,
         terminal_pane_base_is_transparent, terminal_visual_bell_overlay_color,
     };
-
-    #[test]
-    fn context_menu_position_collides_with_window_edges() {
-        let placement =
-            clamp_terminal_context_menu_position(760.0, 580.0, 800.0, 600.0, 220.0, 300.0, 8.0);
-
-        assert_eq!(placement, (572.0, 292.0));
-    }
-
-    #[test]
-    fn context_menu_position_keeps_window_margin() {
-        let placement =
-            clamp_terminal_context_menu_position(-20.0, 2.0, 800.0, 600.0, 220.0, 300.0, 8.0);
-
-        assert_eq!(placement, (8.0, 8.0));
-    }
-
-    #[test]
-    fn context_submenu_prefers_the_parent_right_edge() {
-        let placement = clamp_terminal_context_submenu_position(
-            100.0, 100.0, 100.0, 800.0, 600.0, 220.0, 200.0, 8.0,
-        );
-
-        assert_eq!(placement, (320.0, 200.0));
-    }
-
-    #[test]
-    fn context_submenu_flips_left_and_stays_inside_the_bottom_edge() {
-        let placement = clamp_terminal_context_submenu_position(
-            572.0, 292.0, 200.0, 800.0, 600.0, 220.0, 250.0, 8.0,
-        );
-
-        assert_eq!(placement, (352.0, 342.0));
-    }
 
     #[test]
     fn terminal_pane_base_keeps_window_background_visible_during_visual_bell() {

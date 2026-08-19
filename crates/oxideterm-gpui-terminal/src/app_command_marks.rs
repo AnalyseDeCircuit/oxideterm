@@ -943,26 +943,20 @@ mod input_tracker_tests {
     use super::{TerminalInputTracker, command_mark_allows_cwd_fallback, cwd_after_simple_cd_command};
 
     #[test]
-    fn input_tracker_completes_plain_command_on_enter() {
+fn input_tracker_handles_submission_editing_state_and_reset_sequences() {
         let mut tracker = TerminalInputTracker::default();
 
         assert_eq!(tracker.apply_bytes(b"pwd"), None);
         assert_eq!(tracker.apply_bytes(b"\r"), Some("pwd".to_string()));
         assert_eq!(tracker.apply_bytes(b"\r"), None);
-    }
 
-    #[test]
-    fn input_tracker_tracks_basic_line_editing_sequences() {
         let mut tracker = TerminalInputTracker::default();
 
         assert_eq!(tracker.apply_bytes(b"abc"), None);
         assert_eq!(tracker.apply_bytes(b"\x1b[D"), None);
         assert_eq!(tracker.apply_bytes(b"\x7f"), None);
         assert_eq!(tracker.apply_bytes(b"Z\r"), Some("aZc".to_string()));
-    }
 
-    #[test]
-    fn input_tracker_exposes_tauri_autosuggest_state_shape() {
         let mut tracker = TerminalInputTracker::default();
 
         assert_eq!(tracker.apply_bytes(b"abc"), None);
@@ -973,10 +967,7 @@ mod input_tracker_tests {
         assert_eq!(state.value, "abZc");
         assert_eq!(state.cursor_index, 3);
         assert!(!state.is_cursor_at_end);
-    }
 
-    #[test]
-    fn input_tracker_resets_on_interrupt_and_bracketed_paste() {
         let mut tracker = TerminalInputTracker::default();
 
         assert_eq!(tracker.apply_bytes(b"rm -rf"), None);
@@ -989,60 +980,43 @@ mod input_tracker_tests {
     }
 
     #[test]
-    fn cd_cwd_action_resolves_plain_paths_from_absolute_cwd() {
-        assert_eq!(
-            cwd_after_simple_cd_command("cd /var/log/../tmp", Some("/home/lipsc")).as_deref(),
-            Some("/var/tmp")
-        );
-        assert_eq!(
-            cwd_after_simple_cd_command("cd .oxideterm", Some("/home/lipsc")).as_deref(),
-            Some("/home/lipsc/.oxideterm")
-        );
-        assert_eq!(
-            cwd_after_simple_cd_command("cd ..", Some("/home/lipsc/OxideTerm")).as_deref(),
-            Some("/home/lipsc")
-        );
-    }
+    fn cd_cwd_action_resolves_literal_paths_and_rejects_shell_dependent_forms() {
+        let cases = [
+            ("cd /var/log/../tmp", Some("/home/lipsc"), Some("/var/tmp")),
+            (
+                "cd .oxideterm",
+                Some("/home/lipsc"),
+                Some("/home/lipsc/.oxideterm"),
+            ),
+            (
+                "cd ..",
+                Some("/home/lipsc/OxideTerm"),
+                Some("/home/lipsc"),
+            ),
+            ("cd", Some("/home/lipsc"), None),
+            (
+                "cd 'dir with spaces'",
+                Some("/home/lipsc"),
+                Some("/home/lipsc/dir with spaces"),
+            ),
+            (
+                "cd -- 'dir with spaces'",
+                Some("/tmp"),
+                Some("/tmp/dir with spaces"),
+            ),
+            ("cd '~/literal space'", Some("/home/lipsc"), None),
+            ("cd $HOME/project", Some("/tmp"), None),
+            ("cd main && ls", Some("/tmp"), None),
+            ("cd -", Some("/tmp"), None),
+            ("cd ~root", Some("/tmp"), None),
+            ("cd src", None, None),
+            ("cd src", Some("~"), None),
+            ("cd /tmp/src", None, Some("/tmp/src")),
+        ];
 
-    #[test]
-    fn cd_cwd_action_rejects_unknown_home_and_handles_quoted_paths() {
-        assert_eq!(cwd_after_simple_cd_command("cd", Some("/home/lipsc")), None);
-        assert_eq!(
-            cwd_after_simple_cd_command("cd 'dir with spaces'", Some("/home/lipsc")).as_deref(),
-            Some("/home/lipsc/dir with spaces")
-        );
-        assert_eq!(
-            cwd_after_simple_cd_command("cd -- 'dir with spaces'", Some("/tmp")).as_deref(),
-            Some("/tmp/dir with spaces")
-        );
-        assert_eq!(
-            cwd_after_simple_cd_command("cd '~/literal space'", Some("/home/lipsc")),
-            None
-        );
-    }
-
-    #[test]
-    fn cd_cwd_action_rejects_shell_dependent_forms() {
-        assert_eq!(
-            cwd_after_simple_cd_command("cd $HOME/project", Some("/tmp")),
-            None
-        );
-        assert_eq!(
-            cwd_after_simple_cd_command("cd main && ls", Some("/tmp")),
-            None
-        );
-        assert_eq!(cwd_after_simple_cd_command("cd -", Some("/tmp")), None);
-        assert_eq!(cwd_after_simple_cd_command("cd ~root", Some("/tmp")), None);
-    }
-
-    #[test]
-    fn cd_cwd_action_requires_current_cwd_for_relative_paths() {
-        assert_eq!(cwd_after_simple_cd_command("cd src", None), None);
-        assert_eq!(cwd_after_simple_cd_command("cd src", Some("~")), None);
-        assert_eq!(
-            cwd_after_simple_cd_command("cd /tmp/src", None).as_deref(),
-            Some("/tmp/src")
-        );
+        for (command, cwd, expected) in cases {
+            assert_eq!(cwd_after_simple_cd_command(command, cwd).as_deref(), expected);
+        }
     }
 
     #[test]

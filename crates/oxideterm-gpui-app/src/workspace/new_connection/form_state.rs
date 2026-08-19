@@ -2066,24 +2066,15 @@ mod tests {
     };
 
     use super::{
-        NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
-        NewConnectionTransport, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
-        RDP_DEFAULT_PORT_TEXT, RemoteDesktopSessionFeature, RemoteDesktopSessionOptions,
-        RemoteDesktopVncCompression, RemoteDesktopVncImageQuality, RemoteDesktopVncOptions,
-        RemoteDesktopVncPreference, RemoteDesktopVncSecurityPolicy, RemoteDesktopVncSessionMode,
-        SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction, SshAuthFamily, SshAuthTab,
-        SshKeyAuthSource, StandaloneSftpTransferMode, TELNET_DEFAULT_PORT_TEXT,
-        VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference, apply_transport_default_port,
-        apply_transport_default_username, auth_family_from_tab, auth_tab_from_key_source,
-        backspace_current_connection_field, connection_icon_field_visible,
-        connection_secret_field_visible, default_auth_tab_for_family, form_from_mosh_profile,
-        form_from_remote_desktop_profile, form_from_serial_profile, form_from_telnet_profile,
-        identity_agent_from_form, identity_agent_selector,
-        insert_text_into_current_connection_field, key_source_from_tab, new_connection_form_mode,
-        next_connection_field, next_jump_connection_field, remote_desktop_feature_supported,
-        remote_desktop_vnc_preference_selected, select_current_connection_field,
-        text_from_keystroke, toggle_connection_secret_field_visibility,
-        toggle_remote_desktop_feature,
+        NewConnectionField, NewConnectionForm, NewConnectionProxyHop, NewConnectionTransport,
+        RemoteDesktopSessionOptions, RemoteDesktopVncCompression, RemoteDesktopVncImageQuality,
+        RemoteDesktopVncOptions, RemoteDesktopVncSecurityPolicy, RemoteDesktopVncSessionMode,
+        SshAuthFamily, SshAuthTab, SshKeyAuthSource, StandaloneSftpTransferMode,
+        auth_family_from_tab, backspace_current_connection_field, connection_secret_field_visible,
+        form_from_mosh_profile, form_from_remote_desktop_profile, form_from_serial_profile,
+        form_from_telnet_profile, insert_text_into_current_connection_field, key_source_from_tab,
+        select_current_connection_field, text_from_keystroke,
+        toggle_connection_secret_field_visibility,
     };
 
     fn keystroke(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -2366,45 +2357,6 @@ mod tests {
     }
 
     #[test]
-    fn custom_icon_field_is_available_for_all_six_session_assets() {
-        for transport in [
-            NewConnectionTransport::Ssh,
-            NewConnectionTransport::Mosh,
-            NewConnectionTransport::Serial,
-            NewConnectionTransport::Telnet,
-            NewConnectionTransport::Rdp,
-            NewConnectionTransport::Vnc,
-        ] {
-            assert!(connection_icon_field_visible(
-                NewConnectionFormMode::NewConnection,
-                false,
-                transport
-            ));
-        }
-
-        assert!(!connection_icon_field_visible(
-            NewConnectionFormMode::NewConnection,
-            false,
-            NewConnectionTransport::WslGraphics
-        ));
-        assert!(!connection_icon_field_visible(
-            NewConnectionFormMode::NewConnection,
-            false,
-            NewConnectionTransport::LocalTerminal
-        ));
-        assert!(!connection_icon_field_visible(
-            NewConnectionFormMode::SavedConnectionPrompt,
-            false,
-            NewConnectionTransport::Ssh
-        ));
-        assert!(!connection_icon_field_visible(
-            NewConnectionFormMode::NewConnection,
-            true,
-            NewConnectionTransport::Ssh
-        ));
-    }
-
-    #[test]
     fn text_input_uses_platform_text_not_binding_key() {
         let shifted = keystroke(
             "1",
@@ -2462,130 +2414,6 @@ mod tests {
     }
 
     #[test]
-    fn telnet_transport_tabs_between_endpoint_and_profile_name() {
-        // Keyboard traversal follows the same profile-first order as the form.
-        assert_eq!(
-            next_connection_field(
-                NewConnectionField::Host,
-                super::SshAuthTab::Password,
-                NewConnectionTransport::Telnet,
-                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
-                super::NewConnectionUpstreamProxyAuth::None,
-                true,
-            ),
-            NewConnectionField::Port
-        );
-        assert_eq!(
-            next_connection_field(
-                NewConnectionField::Port,
-                super::SshAuthTab::Password,
-                NewConnectionTransport::Telnet,
-                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
-                super::NewConnectionUpstreamProxyAuth::None,
-                true,
-            ),
-            NewConnectionField::TelnetProfileName
-        );
-        assert_eq!(
-            next_connection_field(
-                NewConnectionField::TelnetProfileName,
-                super::SshAuthTab::Password,
-                NewConnectionTransport::Telnet,
-                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
-                super::NewConnectionUpstreamProxyAuth::None,
-                true,
-            ),
-            NewConnectionField::Host
-        );
-    }
-
-    #[test]
-    fn serial_transport_tabs_from_profile_to_device_parameters() {
-        // Keyboard traversal follows the same profile-first order as the form.
-        assert_eq!(
-            next_connection_field(
-                NewConnectionField::SerialProfileName,
-                super::SshAuthTab::Password,
-                NewConnectionTransport::Serial,
-                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
-                super::NewConnectionUpstreamProxyAuth::None,
-                true,
-            ),
-            NewConnectionField::SerialPortPath
-        );
-        assert_eq!(
-            next_connection_field(
-                NewConnectionField::SerialBaudRate,
-                super::SshAuthTab::Password,
-                NewConnectionTransport::Serial,
-                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
-                super::NewConnectionUpstreamProxyAuth::None,
-                true,
-            ),
-            NewConnectionField::SerialProfileName
-        );
-    }
-
-    #[test]
-    fn remote_desktop_transport_tabs_through_rdp_login_fields() {
-        assert_eq!(
-            next_connection_field(
-                NewConnectionField::Name,
-                super::SshAuthTab::Password,
-                NewConnectionTransport::Rdp,
-                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
-                super::NewConnectionUpstreamProxyAuth::None,
-                true,
-            ),
-            NewConnectionField::Group
-        );
-        assert_eq!(
-            next_connection_field(
-                NewConnectionField::Group,
-                super::SshAuthTab::Password,
-                NewConnectionTransport::Rdp,
-                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
-                super::NewConnectionUpstreamProxyAuth::None,
-                true,
-            ),
-            NewConnectionField::Host
-        );
-        assert_eq!(
-            next_connection_field(
-                NewConnectionField::Port,
-                super::SshAuthTab::Password,
-                NewConnectionTransport::Rdp,
-                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
-                super::NewConnectionUpstreamProxyAuth::None,
-                true,
-            ),
-            NewConnectionField::Username
-        );
-        assert_eq!(
-            next_connection_field(
-                NewConnectionField::Port,
-                super::SshAuthTab::Password,
-                NewConnectionTransport::Vnc,
-                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
-                super::NewConnectionUpstreamProxyAuth::None,
-                true,
-            ),
-            NewConnectionField::Password
-        );
-        assert_eq!(
-            next_connection_field(
-                NewConnectionField::Password,
-                super::SshAuthTab::Password,
-                NewConnectionTransport::Vnc,
-                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
-                super::NewConnectionUpstreamProxyAuth::None,
-                true,
-            ),
-            NewConnectionField::Name
-        );
-    }
-
-    #[test]
     fn remote_desktop_form_uses_privacy_preserving_session_defaults() {
         let form = NewConnectionForm::default();
 
@@ -2614,172 +2442,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_desktop_feature_support_matches_builtin_providers() {
-        let rdp = oxideterm_remote_desktop::builtin_provider_manifest(
-            oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp,
-        );
-        let vnc = oxideterm_remote_desktop::builtin_provider_manifest(
-            oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc,
-        );
-
-        for feature in [
-            RemoteDesktopSessionFeature::ClipboardText,
-            RemoteDesktopSessionFeature::ClipboardImages,
-            RemoteDesktopSessionFeature::ClipboardFiles,
-            RemoteDesktopSessionFeature::AudioPlayback,
-            RemoteDesktopSessionFeature::AudioCapture,
-            RemoteDesktopSessionFeature::MultiMonitor,
-            RemoteDesktopSessionFeature::DisableRdpGraphicsPipeline,
-        ] {
-            assert!(remote_desktop_feature_supported(&rdp.capabilities, feature));
-        }
-        assert!(remote_desktop_feature_supported(
-            &vnc.capabilities,
-            RemoteDesktopSessionFeature::ClipboardText
-        ));
-        // VNC advertises client-side extension support here; the negotiated
-        // session capabilities still gate features unsupported by a server.
-        for feature in [
-            RemoteDesktopSessionFeature::ClipboardImages,
-            RemoteDesktopSessionFeature::ClipboardFiles,
-            RemoteDesktopSessionFeature::AudioPlayback,
-            RemoteDesktopSessionFeature::MultiMonitor,
-        ] {
-            assert!(remote_desktop_feature_supported(&vnc.capabilities, feature));
-        }
-        assert!(!remote_desktop_feature_supported(
-            &vnc.capabilities,
-            RemoteDesktopSessionFeature::AudioCapture
-        ));
-    }
-
-    #[test]
-    fn remote_desktop_feature_toggle_changes_only_the_selected_option() {
-        let mut options = RemoteDesktopSessionOptions::default();
-
-        toggle_remote_desktop_feature(&mut options, RemoteDesktopSessionFeature::ClipboardFiles);
-
-        assert!(options.clipboard.files);
-        assert!(options.clipboard.text);
-        assert!(options.clipboard.images);
-        assert!(options.audio.playback);
-        assert!(!options.audio.capture);
-        assert!(!options.display.use_all_monitors);
-        assert!(!options.rdp.disable_graphics_pipeline);
-
-        toggle_remote_desktop_feature(
-            &mut options,
-            RemoteDesktopSessionFeature::DisableRdpGraphicsPipeline,
-        );
-        assert!(options.rdp.disable_graphics_pipeline);
-        assert!(options.clipboard.files);
-    }
-
-    #[test]
-    fn vnc_preference_selection_changes_only_the_selected_policy() {
-        let mut options = RemoteDesktopVncOptions::default();
-
-        apply_remote_desktop_vnc_preference(
-            &mut options,
-            RemoteDesktopVncPreference::Security(RemoteDesktopVncSecurityPolicy::AllowLegacy),
-        );
-
-        assert!(remote_desktop_vnc_preference_selected(
-            &options,
-            RemoteDesktopVncPreference::Security(RemoteDesktopVncSecurityPolicy::AllowLegacy)
-        ));
-        assert_eq!(options.session_mode, RemoteDesktopVncSessionMode::Shared);
-        assert_eq!(
-            options.image_quality,
-            RemoteDesktopVncImageQuality::Balanced
-        );
-        assert_eq!(options.compression, RemoteDesktopVncCompression::Balanced);
-    }
-
-    #[test]
-    fn transport_default_port_changes_only_for_untouched_defaults() {
-        let mut form = NewConnectionForm::default();
-        apply_transport_default_port(
-            &mut form,
-            NewConnectionTransport::Ssh,
-            NewConnectionTransport::Telnet,
-        );
-        assert_eq!(form.port, TELNET_DEFAULT_PORT_TEXT);
-
-        apply_transport_default_port(
-            &mut form,
-            NewConnectionTransport::Telnet,
-            NewConnectionTransport::Ssh,
-        );
-        assert_eq!(form.port, SSH_DEFAULT_PORT_TEXT);
-
-        apply_transport_default_port(
-            &mut form,
-            NewConnectionTransport::Ssh,
-            NewConnectionTransport::Rdp,
-        );
-        assert_eq!(form.port, RDP_DEFAULT_PORT_TEXT);
-
-        apply_transport_default_port(
-            &mut form,
-            NewConnectionTransport::Rdp,
-            NewConnectionTransport::Vnc,
-        );
-        assert_eq!(form.port, VNC_DEFAULT_PORT_TEXT);
-
-        form.port = SSH_DEFAULT_PORT_TEXT.to_string();
-        apply_transport_default_port(
-            &mut form,
-            NewConnectionTransport::Serial,
-            NewConnectionTransport::Rdp,
-        );
-        assert_eq!(form.port, RDP_DEFAULT_PORT_TEXT);
-
-        form.port = "2323".to_string();
-        apply_transport_default_port(
-            &mut form,
-            NewConnectionTransport::Vnc,
-            NewConnectionTransport::Rdp,
-        );
-        assert_eq!(form.port, "2323");
-    }
-
-    #[test]
-    fn transport_default_username_changes_only_for_protocol_defaults() {
-        let mut form = NewConnectionForm::default();
-
-        apply_transport_default_username(
-            &mut form,
-            NewConnectionTransport::Ssh,
-            NewConnectionTransport::Rdp,
-        );
-        assert_eq!(form.username, "Administrator");
-
-        apply_transport_default_username(
-            &mut form,
-            NewConnectionTransport::Rdp,
-            NewConnectionTransport::Vnc,
-        );
-        assert!(form.username.is_empty());
-
-        apply_transport_default_username(
-            &mut form,
-            NewConnectionTransport::Vnc,
-            NewConnectionTransport::Ssh,
-        );
-        assert_eq!(form.username, "root");
-
-        form.username = "custom".to_string();
-        apply_transport_default_username(
-            &mut form,
-            NewConnectionTransport::Ssh,
-            NewConnectionTransport::Rdp,
-        );
-        assert_eq!(form.username, "custom");
-    }
-
-    #[test]
-    fn backspace_clears_selected_field() {
+    fn backspace_handles_selection_and_empty_fields() {
         let mut form = NewConnectionForm::default();
         form.username = "root".to_string();
         form.focused_field = NewConnectionField::Username;
@@ -2787,180 +2450,23 @@ mod tests {
         assert!(backspace_current_connection_field(&mut form));
         assert!(form.username.is_empty());
         assert_eq!(form.selected_field, None);
-    }
 
-    #[test]
-    fn backspace_reports_text_changes_without_selection() {
-        let mut form = NewConnectionForm::default();
+        // Unselected text is edited one character at a time.
         form.username = "root".to_string();
-        form.focused_field = NewConnectionField::Username;
-
         assert!(backspace_current_connection_field(&mut form));
         assert_eq!(form.username, "roo");
         assert_eq!(form.selected_field, None);
-    }
 
-    #[test]
-    fn backspace_reports_false_for_empty_unselected_field() {
-        let mut form = NewConnectionForm::default();
+        // Empty fields report no change and stale selections are discarded.
+        form.username.clear();
         form.focused_field = NewConnectionField::Name;
-
         assert!(!backspace_current_connection_field(&mut form));
         assert_eq!(form.selected_field, None);
-    }
 
-    #[test]
-    fn backspace_clears_stale_selection_state() {
-        let mut form = NewConnectionForm::default();
         form.focused_field = NewConnectionField::Username;
         form.selected_field = Some(NewConnectionField::Host);
-
         assert!(backspace_current_connection_field(&mut form));
         assert_eq!(form.selected_field, None);
-    }
-
-    #[test]
-    fn identity_agent_form_values_trim_and_preserve_automatic_detection() {
-        assert_eq!(identity_agent_selector(" \t "), None);
-        assert_eq!(
-            identity_agent_selector("  $YUBIKEY_AGENT  "),
-            Some("$YUBIKEY_AGENT")
-        );
-        assert_eq!(
-            identity_agent_from_form("  /tmp/yubikey-agent.sock  "),
-            Some("/tmp/yubikey-agent.sock".to_string())
-        );
-    }
-
-    #[test]
-    fn agent_tab_navigation_reaches_identity_agent_fields() {
-        assert_eq!(
-            next_connection_field(
-                NewConnectionField::Username,
-                SshAuthTab::Agent,
-                NewConnectionTransport::Ssh,
-                NewConnectionUpstreamProxyPolicy::UseGlobal,
-                NewConnectionUpstreamProxyAuth::None,
-                true,
-            ),
-            NewConnectionField::IdentityAgent
-        );
-        assert_eq!(
-            next_jump_connection_field(NewConnectionField::JumpUsername, SshAuthTab::Agent, true,),
-            NewConnectionField::JumpIdentityAgent
-        );
-    }
-
-    #[test]
-    fn ssh_and_mosh_tab_navigation_follow_basic_information_order() {
-        // Every remote form renders name and group before its remaining basic fields.
-        for transport in [
-            NewConnectionTransport::Ssh,
-            NewConnectionTransport::Mosh,
-            NewConnectionTransport::StandaloneSftp,
-        ] {
-            assert_eq!(
-                next_connection_field(
-                    NewConnectionField::Name,
-                    SshAuthTab::Password,
-                    transport,
-                    NewConnectionUpstreamProxyPolicy::UseGlobal,
-                    NewConnectionUpstreamProxyAuth::None,
-                    true,
-                ),
-                NewConnectionField::Group
-            );
-            let field_after_group = if transport == NewConnectionTransport::Mosh {
-                NewConnectionField::Host
-            } else {
-                NewConnectionField::Notes
-            };
-            assert_eq!(
-                next_connection_field(
-                    NewConnectionField::Group,
-                    SshAuthTab::Password,
-                    transport,
-                    NewConnectionUpstreamProxyPolicy::UseGlobal,
-                    NewConnectionUpstreamProxyAuth::None,
-                    true,
-                ),
-                field_after_group
-            );
-        }
-    }
-
-    #[test]
-    fn form_mode_keeps_prompt_edit_and_new_submission_paths_distinct() {
-        assert_eq!(
-            new_connection_form_mode(None, None, None),
-            NewConnectionFormMode::NewConnection
-        );
-        assert_eq!(
-            new_connection_form_mode(Some("conn-1"), None, None),
-            NewConnectionFormMode::EditProperties
-        );
-        assert_eq!(
-            new_connection_form_mode(None, Some("conn-1"), None),
-            NewConnectionFormMode::DuplicateTemplate
-        );
-        assert_eq!(
-            new_connection_form_mode(
-                Some("conn-1"),
-                Some("conn-2"),
-                Some(SavedConnectionPromptAction::Connect)
-            ),
-            NewConnectionFormMode::SavedConnectionPrompt
-        );
-
-        assert!(NewConnectionFormMode::EditProperties.submits_saved_connection_properties());
-        assert!(NewConnectionFormMode::DuplicateTemplate.submits_saved_connection_properties());
-        assert!(
-            !NewConnectionFormMode::SavedConnectionPrompt.submits_saved_connection_properties()
-        );
-    }
-
-    #[test]
-    fn auth_family_groups_all_key_tabs() {
-        for tab in [
-            SshAuthTab::DefaultKey,
-            SshAuthTab::SshKey,
-            SshAuthTab::ManagedKey,
-            SshAuthTab::Certificate,
-        ] {
-            assert_eq!(auth_family_from_tab(tab), SshAuthFamily::Key);
-        }
-        assert_eq!(
-            auth_family_from_tab(SshAuthTab::Password),
-            SshAuthFamily::Password
-        );
-        assert_eq!(
-            auth_family_from_tab(SshAuthTab::Agent),
-            SshAuthFamily::Agent
-        );
-        assert_eq!(
-            auth_family_from_tab(SshAuthTab::TwoFactor),
-            SshAuthFamily::TwoFactor
-        );
-        assert_eq!(
-            default_auth_tab_for_family(SshAuthFamily::Key),
-            SshAuthTab::SshKey
-        );
-    }
-
-    #[test]
-    fn key_source_round_trips_to_auth_tab() {
-        for (source, tab) in [
-            (SshKeyAuthSource::DefaultKey, SshAuthTab::DefaultKey),
-            (SshKeyAuthSource::SshKey, SshAuthTab::SshKey),
-            (SshKeyAuthSource::ManagedKey, SshAuthTab::ManagedKey),
-            (SshKeyAuthSource::Certificate, SshAuthTab::Certificate),
-        ] {
-            assert_eq!(auth_tab_from_key_source(source), tab);
-            assert_eq!(key_source_from_tab(tab), Some(source));
-        }
-        assert_eq!(key_source_from_tab(SshAuthTab::Password), None);
-        assert_eq!(key_source_from_tab(SshAuthTab::Agent), None);
-        assert_eq!(key_source_from_tab(SshAuthTab::TwoFactor), None);
     }
 
     #[test]

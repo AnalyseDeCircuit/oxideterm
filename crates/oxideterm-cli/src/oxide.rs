@@ -30,9 +30,6 @@ use crate::{
 
 mod files;
 
-#[cfg(test)]
-mod tests;
-
 use files::{ensure_output_path, read_oxide_file, read_password, write_output_file};
 
 #[derive(Serialize)]

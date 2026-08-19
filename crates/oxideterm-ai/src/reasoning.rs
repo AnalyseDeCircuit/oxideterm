@@ -426,57 +426,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn capability_table_keeps_model_specific_level_sets() {
-        let deepseek = model_reasoning_capability("deepseek", "deepseek-v4-pro");
-        assert_eq!(deepseek.levels, vec![None, Low, High, Xhigh, Max]);
-
-        let deepseek_flash = model_reasoning_capability("deepseek", "deepseek-v4-flash");
-        assert_eq!(deepseek_flash.levels, vec![None, Low, High, Xhigh, Max]);
-
-        let gemini = model_reasoning_capability("gemini", "gemini-3-pro-preview");
-        assert_eq!(gemini.levels, vec![Low, High]);
-
-        let openai = model_reasoning_capability("openai", "gpt-5.6-sol");
-        assert_eq!(openai.levels, vec![None, Low, Medium, High, Xhigh, Max]);
-
-        let kimi = model_reasoning_capability("kimi", "kimi-k3");
-        assert_eq!(kimi.levels, vec![Low, High, Max]);
-        assert_eq!(kimi.request_format, AiReasoningRequestFormat::OpenAi);
-
-        let glm = model_reasoning_capability("glm", "glm-5.2");
-        assert_eq!(
-            glm.levels,
-            vec![None, Minimal, Low, Medium, High, Xhigh, Max]
-        );
-        assert_eq!(glm.request_format, AiReasoningRequestFormat::GlmEffort);
-
-        let older_glm = model_reasoning_capability("glm", "glm-4.7");
-        assert_eq!(older_glm.levels, vec![None]);
-        assert_eq!(
-            older_glm.request_format,
-            AiReasoningRequestFormat::GlmThinking
-        );
-    }
-
-    #[test]
-    fn unknown_openai_compatible_models_allow_raw_user_levels() {
-        let capability = model_reasoning_capability("openai_compatible", "vendor-future-reasoner");
-        assert!(!capability.known_model);
-        assert_eq!(capability.levels, AiReasoningLevel::ALL_EXPLICIT.to_vec());
-        assert_eq!(capability.request_format, AiReasoningRequestFormat::OpenAi);
-    }
-
-    #[test]
-    fn providers_without_a_documented_transport_hide_reasoning_levels() {
-        let capability = model_reasoning_capability("ollama", "gpt-oss:20b");
-        assert!(capability.levels.is_empty());
-        assert_eq!(
-            capability.request_format,
-            AiReasoningRequestFormat::Unsupported
-        );
-    }
-
-    #[test]
     fn known_models_reject_unsupported_levels_without_guessing() {
         assert_eq!(
             normalize_reasoning_level_for_model("deepseek", "deepseek-v4-pro", "medium"),

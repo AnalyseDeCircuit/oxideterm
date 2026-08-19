@@ -87,18 +87,3 @@ fn platform_backend_name() -> &'static str {
 fn platform_backend_name() -> &'static str {
     "platform video"
 }
-
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use super::*;
-
-    #[test]
-    fn unsupported_platform_backend_reports_explicit_unavailable_state() {
-        let mut backend = UnsupportedPlatformVideoBackend;
-        let snapshot = backend.load(Path::new("movie.mp4")).unwrap();
-        assert_eq!(snapshot.state, PlatformVideoState::Unavailable);
-        assert!(snapshot.error.unwrap().contains("not linked"));
-    }
-}

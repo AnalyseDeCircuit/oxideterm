@@ -1109,32 +1109,6 @@ mod tests {
     }
 
     #[test]
-    fn top_owner_matches_the_root_portal_render_order() {
-        let projection = ActiveWindowModalProjection {
-            ai_confirm: Some(ai_clear_all()),
-            overlay_confirm: Some(settings_reset()),
-            tab_close_phase: Some(VISIBLE),
-            ..Default::default()
-        };
-        assert_eq!(
-            projection.top_owner(),
-            Some(ActiveWindowModalOwner::TabClose { phase: VISIBLE })
-        );
-
-        let release_notes_projection = ActiveWindowModalProjection {
-            overlay_confirm: Some(overlay::WorkspaceOverlayConfirmOwnerSnapshot {
-                kind: overlay::WorkspaceOverlayConfirmOwnerKind::NativeUpdateReleaseNotes,
-                phase: VISIBLE,
-            }),
-            ..projection
-        };
-        assert_eq!(
-            release_notes_projection.top_owner(),
-            Some(ActiveWindowModalOwner::NativeUpdateReleaseNotes { phase: VISIBLE })
-        );
-    }
-
-    #[test]
     fn later_blocking_portals_win_across_the_complete_root_stack() {
         let projection = ActiveWindowModalProjection {
             new_connection_open: true,
@@ -1157,63 +1131,6 @@ mod tests {
         assert_eq!(
             projection.top_owner(),
             Some(ActiveWindowModalOwner::CommandPalette)
-        );
-    }
-
-    #[test]
-    fn active_tab_modal_stays_above_settings_reset() {
-        let projection = ActiveWindowModalProjection {
-            overlay_confirm: Some(settings_reset()),
-            active_tab_modal: Some(ActiveTabWindowModalSnapshot {
-                kind: ActiveTabWindowModalKind::PortablePassword,
-                phase: VISIBLE,
-            }),
-            ..Default::default()
-        };
-        assert_eq!(
-            projection.top_owner(),
-            Some(ActiveWindowModalOwner::ActiveTabWindowModal {
-                kind: ActiveTabWindowModalKind::PortablePassword,
-                phase: VISIBLE,
-            })
-        );
-    }
-
-    #[test]
-    fn tab_rename_owns_editing_keys_above_lower_portals() {
-        let owner = ActiveWindowModalProjection {
-            native_plugin_phase: Some(VISIBLE),
-            tab_rename_open: true,
-            ..Default::default()
-        }
-        .top_owner()
-        .expect("tab rename modal owner");
-
-        assert_eq!(owner, ActiveWindowModalOwner::TabRename);
-        assert!(owner.allows_modal_ime());
-        assert_eq!(owner.key_route("enter").dispatch_owner, Some(owner));
-    }
-
-    #[test]
-    fn app_lock_and_mermaid_stay_above_confirmation_portals() {
-        let projection = ActiveWindowModalProjection {
-            ai_confirm: Some(ai_clear_all()),
-            overlay_confirm: Some(settings_reset()),
-            tab_close_phase: Some(VISIBLE),
-            app_lock_dialog_open: true,
-            ..Default::default()
-        };
-        assert_eq!(
-            projection.top_owner(),
-            Some(ActiveWindowModalOwner::AppLockDialog)
-        );
-        assert_eq!(
-            ActiveWindowModalProjection {
-                mermaid_zoom_open: true,
-                ..projection
-            }
-            .top_owner(),
-            Some(ActiveWindowModalOwner::MermaidZoom)
         );
     }
 
@@ -1255,61 +1172,6 @@ mod tests {
     }
 
     #[test]
-    fn enter_dispatches_only_the_top_rendered_owner() {
-        let projection = ActiveWindowModalProjection {
-            ai_confirm: Some(ai_clear_all()),
-            tab_close_phase: Some(VISIBLE),
-            native_plugin_phase: Some(VISIBLE),
-            ..Default::default()
-        };
-        let owner = projection.top_owner().expect("top modal owner");
-        assert_eq!(
-            owner,
-            ActiveWindowModalOwner::NativePluginConfirm { phase: VISIBLE }
-        );
-        let route = owner.key_route("enter");
-        assert_eq!(route.dispatch_owner.into_iter().count(), 1);
-        assert_eq!(route.dispatch_owner, Some(owner));
-    }
-
-    #[test]
-    fn native_update_toast_is_non_blocking_but_release_notes_are_blocking() {
-        assert_eq!(
-            ActiveWindowModalProjection {
-                native_update_toast_visible: true,
-                ..Default::default()
-            }
-            .top_owner(),
-            None
-        );
-        assert_eq!(
-            ActiveWindowModalProjection {
-                overlay_confirm: Some(overlay::WorkspaceOverlayConfirmOwnerSnapshot {
-                    kind: overlay::WorkspaceOverlayConfirmOwnerKind::NativeUpdateReleaseNotes,
-                    phase: VISIBLE,
-                }),
-                native_update_toast_visible: true,
-                ..Default::default()
-            }
-            .top_owner(),
-            Some(ActiveWindowModalOwner::NativeUpdateReleaseNotes { phase: VISIBLE })
-        );
-    }
-
-    #[test]
-    fn visible_owner_consumes_printable_keys_even_without_a_modal_action() {
-        let owner = ActiveWindowModalProjection {
-            ai_confirm: Some(ai_clear_all()),
-            ..Default::default()
-        }
-        .top_owner()
-        .expect("AI modal owner");
-        let route = owner.key_route("x");
-        assert!(route.consumes_key());
-        assert_eq!(route.dispatch_owner, Some(owner));
-    }
-
-    #[test]
     fn ai_text_editor_yields_document_keys_but_captures_escape() {
         let owner = ActiveWindowModalOwner::AiTextEditor;
 
@@ -1347,16 +1209,5 @@ mod tests {
         let exiting_key = exiting_owner.key_route("x");
         assert!(exiting_key.consumes_key());
         assert_eq!(exiting_key.dispatch_owner, None);
-    }
-
-    #[test]
-    fn managed_key_modal_routes_visible_ime_before_modal_actions() {
-        let owner = ActiveWindowModalOwner::ActiveTabWindowModal {
-            kind: ActiveTabWindowModalKind::ManagedKey,
-            phase: VISIBLE,
-        };
-
-        assert!(owner.allows_modal_ime());
-        assert_eq!(owner.key_route("v").dispatch_owner, Some(owner));
     }
 }

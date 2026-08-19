@@ -1121,77 +1121,56 @@ mod tests {
     }
 
     #[test]
-    fn detects_sudo_prompts_with_username() {
-        assert_eq!(
-            detect_privilege_prompt("sudo -k true\n[sudo] password for dominical:"),
-            Some(PrivilegePromptMatch::Sudo {
-                username: Some("dominical".to_string()),
-                prompt_text: "[sudo] password for dominical:".to_string(),
-            })
-        );
-    }
+    fn detects_supported_sudo_prompt_labels_without_accepting_unknown_credentials() {
+        let cases = [
+            (
+                "sudo -k true\n[sudo] password for dominical:",
+                Some(PrivilegePromptMatch::Sudo {
+                    username: Some("dominical".to_string()),
+                    prompt_text: "[sudo] password for dominical:".to_string(),
+                }),
+            ),
+            (
+                "sudo yazi\n[sudo] deploy 的密码：",
+                Some(PrivilegePromptMatch::Sudo {
+                    username: Some("deploy".to_string()),
+                    prompt_text: "[sudo] deploy 的密码：".to_string(),
+                }),
+            ),
+            (
+                "sudo true\n[sudo: authenticate] Password:",
+                Some(PrivilegePromptMatch::Sudo {
+                    username: None,
+                    prompt_text: "[sudo: authenticate] Password:".to_string(),
+                }),
+            ),
+            (
+                "sudo true\n[sudo] dominical 的密碼：",
+                Some(PrivilegePromptMatch::Sudo {
+                    username: Some("dominical".to_string()),
+                    prompt_text: "[sudo] dominical 的密碼：".to_string(),
+                }),
+            ),
+            (
+                "sudo true\n[sudo] deploy 的口令：",
+                Some(PrivilegePromptMatch::Sudo {
+                    username: Some("deploy".to_string()),
+                    prompt_text: "[sudo] deploy 的口令：".to_string(),
+                }),
+            ),
+            (
+                "sudo true\n[sudo] deploy 的密 码：",
+                Some(PrivilegePromptMatch::Sudo {
+                    username: Some("deploy".to_string()),
+                    prompt_text: "[sudo] deploy 的密 码：".to_string(),
+                }),
+            ),
+            ("sudo true\n[sudo] deploy 的通行码：", None),
+        ];
 
-    #[test]
-    fn detects_localized_sudo_prompts_with_username() {
-        assert_eq!(
-            detect_privilege_prompt("sudo yazi\n[sudo] deploy 的密码："),
-            Some(PrivilegePromptMatch::Sudo {
-                username: Some("deploy".to_string()),
-                prompt_text: "[sudo] deploy 的密码：".to_string(),
-            })
-        );
-    }
-
-    #[test]
-    fn detects_sudo_rs_authenticate_prompt_without_username() {
-        assert_eq!(
-            detect_privilege_prompt("sudo true\n[sudo: authenticate] Password:"),
-            Some(PrivilegePromptMatch::Sudo {
-                username: None,
-                prompt_text: "[sudo: authenticate] Password:".to_string(),
-            })
-        );
-    }
-
-    #[test]
-    fn detects_traditional_chinese_sudo_prompts_with_username() {
-        assert_eq!(
-            detect_privilege_prompt("sudo true\n[sudo] dominical 的密碼："),
-            Some(PrivilegePromptMatch::Sudo {
-                username: Some("dominical".to_string()),
-                prompt_text: "[sudo] dominical 的密碼：".to_string(),
-            })
-        );
-    }
-
-    #[test]
-    fn detects_chinese_sudo_prompt_with_kouling_label() {
-        assert_eq!(
-            detect_privilege_prompt("sudo true\n[sudo] deploy 的口令："),
-            Some(PrivilegePromptMatch::Sudo {
-                username: Some("deploy".to_string()),
-                prompt_text: "[sudo] deploy 的口令：".to_string(),
-            })
-        );
-    }
-
-    #[test]
-    fn detects_chinese_sudo_prompt_with_spaced_password_label() {
-        assert_eq!(
-            detect_privilege_prompt("sudo true\n[sudo] deploy 的密 码："),
-            Some(PrivilegePromptMatch::Sudo {
-                username: Some("deploy".to_string()),
-                prompt_text: "[sudo] deploy 的密 码：".to_string(),
-            })
-        );
-    }
-
-    #[test]
-    fn rejects_explicit_sudo_marker_without_password_label() {
-        assert_eq!(
-            detect_privilege_prompt("sudo true\n[sudo] deploy 的通行码："),
-            None
-        );
+        for (text, expected) in cases {
+            assert_eq!(detect_privilege_prompt(text), expected);
+        }
     }
 
     #[test]
@@ -1219,55 +1198,53 @@ mod tests {
     }
 
     #[test]
-    fn classifies_generic_password_prompt_after_sudo_command() {
-        assert_eq!(
-            detect_privilege_prompt("❯ sudo yazi\nPassword:"),
-            Some(PrivilegePromptMatch::Sudo {
-                username: None,
-                prompt_text: "Password:".to_string(),
-            })
-        );
-        assert_eq!(
-            detect_privilege_prompt("❯ sudo yazi\n密码："),
-            Some(PrivilegePromptMatch::Sudo {
-                username: None,
-                prompt_text: "密码：".to_string(),
-            })
-        );
-    }
+    fn generic_password_prompts_are_classified_by_command_context() {
+        let cases = [
+            (
+                "❯ sudo yazi\nPassword:",
+                PrivilegePromptMatch::Sudo {
+                    username: None,
+                    prompt_text: "Password:".to_string(),
+                },
+            ),
+            (
+                "❯ sudo yazi\n密码：",
+                PrivilegePromptMatch::Sudo {
+                    username: None,
+                    prompt_text: "密码：".to_string(),
+                },
+            ),
+            (
+                "su - root\nPassword:",
+                PrivilegePromptMatch::Su {
+                    target_user: Some("root".to_string()),
+                    prompt_text: "Password:".to_string(),
+                },
+            ),
+            (
+                "su postgres\n密码：",
+                PrivilegePromptMatch::Su {
+                    target_user: Some("postgres".to_string()),
+                    prompt_text: "密码：".to_string(),
+                },
+            ),
+            (
+                "mysql login\nPassword:",
+                PrivilegePromptMatch::GenericPassword {
+                    prompt_text: "Password:".to_string(),
+                },
+            ),
+            (
+                "vault unlock\n密碼：",
+                PrivilegePromptMatch::GenericPassword {
+                    prompt_text: "密碼：".to_string(),
+                },
+            ),
+        ];
 
-    #[test]
-    fn classifies_generic_password_prompt_after_su_command() {
-        assert_eq!(
-            detect_privilege_prompt("su - root\nPassword:"),
-            Some(PrivilegePromptMatch::Su {
-                target_user: Some("root".to_string()),
-                prompt_text: "Password:".to_string(),
-            })
-        );
-        assert_eq!(
-            detect_privilege_prompt("su postgres\n密码："),
-            Some(PrivilegePromptMatch::Su {
-                target_user: Some("postgres".to_string()),
-                prompt_text: "密码：".to_string(),
-            })
-        );
-    }
-
-    #[test]
-    fn keeps_plain_application_password_prompts_generic() {
-        assert_eq!(
-            detect_privilege_prompt("mysql login\nPassword:"),
-            Some(PrivilegePromptMatch::GenericPassword {
-                prompt_text: "Password:".to_string(),
-            })
-        );
-        assert_eq!(
-            detect_privilege_prompt("vault unlock\n密碼："),
-            Some(PrivilegePromptMatch::GenericPassword {
-                prompt_text: "密碼：".to_string(),
-            })
-        );
+        for (text, expected) in cases {
+            assert_eq!(detect_privilege_prompt(text), Some(expected));
+        }
     }
 
     #[test]
@@ -1415,60 +1392,6 @@ mod tests {
                 ..
             })
         ));
-    }
-
-    #[test]
-    fn tracker_classifies_macos_password_prompt_after_submitted_sudo_command() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-
-        tracker.observe_submitted_command("sudo yazi", start);
-        observe_standard_prompt(
-            &mut tracker,
-            "Password:",
-            false,
-            start + Duration::from_millis(40),
-        );
-
-        assert_eq!(
-            tracker.snapshot(start + Duration::from_millis(40)),
-            Some(PrivilegePromptSnapshot {
-                prompt: PrivilegePromptMatch::Sudo {
-                    username: None,
-                    prompt_text: "Password:".to_string(),
-                },
-                confidence: PrivilegePromptConfidence::CommandContext,
-                retry_count: 0,
-            })
-        );
-    }
-
-    #[test]
-    fn tracker_classifies_first_semantic_password_prompt_with_sudo_context() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-        assert_eq!(
-            tracker.observe_user_input_bytes(b"sudo vim\r", start),
-            PrivilegeInputObservation::Normal
-        );
-        observe_standard_prompt(
-            &mut tracker,
-            "Password:",
-            false,
-            start + Duration::from_millis(40),
-        );
-
-        assert_eq!(
-            tracker.snapshot(start + Duration::from_millis(40)),
-            Some(PrivilegePromptSnapshot {
-                prompt: PrivilegePromptMatch::Sudo {
-                    username: None,
-                    prompt_text: "Password:".to_string(),
-                },
-                confidence: PrivilegePromptConfidence::CommandContext,
-                retry_count: 0,
-            })
-        );
     }
 
     #[test]

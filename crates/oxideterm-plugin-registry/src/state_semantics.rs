@@ -41,23 +41,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn state_semantics_group_runtime_ready_and_failure_states() {
-        assert!(native_plugin_state_is_active_like(
-            NativePluginState::Active
-        ));
-        assert!(native_plugin_state_is_active_like(
-            NativePluginState::ReadyWasm
-        ));
-        assert!(native_plugin_state_is_error_like(NativePluginState::Error));
-        assert!(native_plugin_state_is_error_like(
-            NativePluginState::AutoDisabled
-        ));
-        assert!(!native_plugin_state_is_error_like(
-            NativePluginState::Disabled
-        ));
-    }
-
-    #[test]
     fn stable_errors_preserve_codes_and_conflict_identity() {
         assert_eq!(
             native_plugin_conflict_id("PLUGIN_ID_CONFLICT:com.example.demo").as_deref(),

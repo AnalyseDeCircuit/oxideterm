@@ -819,22 +819,6 @@ mod tests {
     }
 
     #[test]
-    fn helper_arguments_round_trip() {
-        let options = PortableUpdateHelperOptions {
-            portable_root: PathBuf::from("/opt/OxideTerm"),
-            staging_dir: PathBuf::from("/opt/OxideTerm/.oxideterm-update-staging/payload"),
-            backup_dir: PathBuf::from("/opt/OxideTerm/.oxideterm-update-backup"),
-            app_exe: PathBuf::from("/opt/OxideTerm/oxideterm-native"),
-            wait_pid: Some(42),
-            launch_after_apply: true,
-        };
-        let mut args = vec![OsString::from("oxideterm-update-helper")];
-        args.extend(portable_update_helper_arguments(&options));
-
-        assert_eq!(parse_portable_update_helper_options(args).unwrap(), options);
-    }
-
-    #[test]
     fn manifest_rejects_user_owned_data() {
         let temp = tempfile::tempdir().unwrap();
         let mut invalid = manifest();

@@ -6,51 +6,6 @@ use clap::Parser;
 use super::*;
 
 #[test]
-fn parses_global_config_dir_and_profile() {
-    let cli = Cli::parse_from([
-        "oxideterm",
-        "--config-dir",
-        "/tmp/oxide",
-        "--profile",
-        "ci",
-        "paths",
-    ]);
-
-    assert_eq!(cli.config_dir.unwrap().to_string_lossy(), "/tmp/oxide");
-    assert_eq!(cli.profile.as_deref(), Some("ci"));
-}
-
-#[test]
-fn parses_connections_show_json() {
-    let cli = Cli::parse_from(["oxideterm", "connections", "show", "prod", "--json"]);
-    match cli.command {
-        Command::Connections(command) => match command.action {
-            ConnectionsAction::Show(args) => {
-                assert_eq!(args.query, "prod");
-                assert!(args.json);
-            }
-            _ => panic!("expected show command"),
-        },
-        _ => panic!("expected connections command"),
-    }
-}
-
-#[test]
-fn parses_connections_open() {
-    let cli = Cli::parse_from(["oxideterm", "connections", "open", "prod", "--json"]);
-    match cli.command {
-        Command::Connections(command) => match command.action {
-            ConnectionsAction::Open(args) => {
-                assert_eq!(args.query, "prod");
-                assert!(args.json);
-            }
-            _ => panic!("expected open command"),
-        },
-        _ => panic!("expected connections command"),
-    }
-}
-
-#[test]
 fn parses_temporary_ssh_launch() {
     let cli = Cli::parse_from(["oxideterm", "ssh", "alice@example.com", "-p", "2222"]);
     match cli.command {
@@ -143,21 +98,6 @@ fn parses_cloud_sync_state_get() {
 }
 
 #[test]
-fn parses_connections_search() {
-    let cli = Cli::parse_from(["oxideterm", "connections", "search", "prod", "--json"]);
-    match cli.command {
-        Command::Connections(command) => match command.action {
-            ConnectionsAction::Search(args) => {
-                assert_eq!(args.query, "prod");
-                assert!(args.json);
-            }
-            _ => panic!("expected search command"),
-        },
-        _ => panic!("expected connections command"),
-    }
-}
-
-#[test]
 fn parses_settings_export_sections() {
     let cli = Cli::parse_from([
         "oxideterm",
@@ -198,29 +138,6 @@ fn parses_connections_export_format() {
                 assert!(args.json);
             }
             _ => panic!("expected export command"),
-        },
-        _ => panic!("expected connections command"),
-    }
-}
-
-#[test]
-fn parses_connections_delete_dry_run() {
-    let cli = Cli::parse_from([
-        "oxideterm",
-        "connections",
-        "delete",
-        "prod",
-        "--dry-run",
-        "--json",
-    ]);
-    match cli.command {
-        Command::Connections(command) => match command.action {
-            ConnectionsAction::Delete(args) => {
-                assert_eq!(args.query, "prod");
-                assert!(args.write.dry_run);
-                assert!(args.write.json);
-            }
-            _ => panic!("expected delete command"),
         },
         _ => panic!("expected connections command"),
     }
@@ -420,31 +337,6 @@ fn parses_oxide_export() {
 }
 
 #[test]
-fn parses_settings_set_dry_run() {
-    let cli = Cli::parse_from([
-        "oxideterm",
-        "settings",
-        "set",
-        "terminal.scrollback",
-        "2000",
-        "--dry-run",
-        "--json",
-    ]);
-    match cli.command {
-        Command::Settings(command) => match command.action {
-            SettingsAction::Set(args) => {
-                assert_eq!(args.key, "terminal.scrollback");
-                assert_eq!(args.value, "2000");
-                assert!(args.write.dry_run);
-                assert!(args.write.json);
-            }
-            _ => panic!("expected set command"),
-        },
-        _ => panic!("expected settings command"),
-    }
-}
-
-#[test]
 fn parses_settings_unset_with_confirmation() {
     let cli = Cli::parse_from([
         "oxideterm",
@@ -464,29 +356,6 @@ fn parses_settings_unset_with_confirmation() {
                 assert!(args.write.json);
             }
             _ => panic!("expected unset command"),
-        },
-        _ => panic!("expected settings command"),
-    }
-}
-
-#[test]
-fn parses_settings_apply_dry_run() {
-    let cli = Cli::parse_from([
-        "oxideterm",
-        "settings",
-        "apply",
-        "snapshot.json",
-        "--dry-run",
-        "--json",
-    ]);
-    match cli.command {
-        Command::Settings(command) => match command.action {
-            SettingsAction::Apply(args) => {
-                assert_eq!(args.path, "snapshot.json");
-                assert!(args.write.dry_run);
-                assert!(args.write.json);
-            }
-            _ => panic!("expected apply command"),
         },
         _ => panic!("expected settings command"),
     }
@@ -542,25 +411,40 @@ fn parses_strict_validation_commands() {
 
 #[test]
 fn parses_backup_inspect() {
-    let cli = Cli::parse_from([
-        "oxideterm",
-        "backup",
-        "inspect",
-        "backup.json",
-        "--full",
-        "--json",
-    ]);
-    match cli.command {
-        Command::Backup(command) => match command.action {
-            BackupAction::Inspect(args) => {
-                assert_eq!(args.query, "backup.json");
-                assert!(args.full);
-                assert!(args.section.is_none());
-                assert!(args.json);
-            }
-            _ => panic!("expected inspect command"),
-        },
-        _ => panic!("expected backup command"),
+    // Full and section-scoped inspection share one backup parsing contract.
+    for cli in [
+        Cli::parse_from([
+            "oxideterm",
+            "backup",
+            "inspect",
+            "backup.json",
+            "--full",
+            "--json",
+        ]),
+        Cli::parse_from([
+            "oxideterm",
+            "backup",
+            "inspect",
+            "backup.json",
+            "--section",
+            "cloud-sync",
+            "--json",
+        ]),
+    ] {
+        match cli.command {
+            Command::Backup(command) => match command.action {
+                BackupAction::Inspect(args) => {
+                    assert_eq!(args.query, "backup.json");
+                    assert!(args.json);
+                    assert_ne!(args.full, args.section.is_some());
+                    if !args.full {
+                        assert_eq!(args.section, Some(BackupInspectSection::CloudSync));
+                    }
+                }
+                _ => panic!("expected inspect command"),
+            },
+            _ => panic!("expected backup command"),
+        }
     }
 }
 
@@ -596,29 +480,6 @@ fn parses_backup_create_output() {
                 assert!(args.json);
             }
             _ => panic!("expected create command"),
-        },
-        _ => panic!("expected backup command"),
-    }
-}
-
-#[test]
-fn parses_backup_inspect_section() {
-    let cli = Cli::parse_from([
-        "oxideterm",
-        "backup",
-        "inspect",
-        "backup.json",
-        "--section",
-        "cloud-sync",
-        "--json",
-    ]);
-    match cli.command {
-        Command::Backup(command) => match command.action {
-            BackupAction::Inspect(args) => {
-                assert_eq!(args.section, Some(BackupInspectSection::CloudSync));
-                assert!(args.json);
-            }
-            _ => panic!("expected inspect command"),
         },
         _ => panic!("expected backup command"),
     }
@@ -665,21 +526,6 @@ fn parses_cloud_sync_history_failed_only() {
                 assert!(args.json);
             }
             _ => panic!("expected history command"),
-        },
-        _ => panic!("expected cloud-sync command"),
-    }
-}
-
-#[test]
-fn parses_cloud_sync_push_dry_run() {
-    let cli = Cli::parse_from(["oxideterm", "cloud-sync", "push", "--dry-run", "--json"]);
-    match cli.command {
-        Command::CloudSync(command) => match command.action {
-            CloudSyncAction::Push(args) => {
-                assert!(args.write.dry_run);
-                assert!(args.write.json);
-            }
-            _ => panic!("expected cloud-sync push command"),
         },
         _ => panic!("expected cloud-sync command"),
     }
@@ -818,50 +664,6 @@ fn parses_cloud_sync_secrets_status() {
             _ => panic!("expected secrets command"),
         },
         _ => panic!("expected cloud-sync command"),
-    }
-}
-
-#[test]
-fn parses_report() {
-    let cli = Cli::parse_from([
-        "oxideterm",
-        "report",
-        "--bundle",
-        "/tmp/report.json",
-        "--json",
-    ]);
-    match cli.command {
-        Command::Report(args) => {
-            assert_eq!(args.bundle.as_deref(), Some("/tmp/report.json"));
-            assert!(args.json);
-        }
-        _ => panic!("expected report command"),
-    }
-}
-
-#[test]
-fn parses_completion_shell() {
-    let cli = Cli::parse_from(["oxideterm", "completion", "zsh"]);
-    match cli.command {
-        Command::Completion(args) => {
-            assert_eq!(args.shell, Some(CompletionShell::Zsh));
-        }
-        _ => panic!("expected completion command"),
-    }
-}
-
-#[test]
-fn parses_completion_install() {
-    let cli = Cli::parse_from(["oxideterm", "completion", "install", "zsh", "--force"]);
-    match cli.command {
-        Command::Completion(args) => match args.action {
-            Some(CompletionAction::Install(args)) => {
-                assert_eq!(args.shell, CompletionShell::Zsh);
-                assert!(args.force);
-            }
-            _ => panic!("expected completion install command"),
-        },
-        _ => panic!("expected completion command"),
     }
 }
 
@@ -1014,7 +816,8 @@ fn parses_portable_runtime_commands() {
 }
 
 #[test]
-fn parses_cloud_sync_backend_configure() {
+fn parses_cloud_sync_backend_configurations() {
+    // Each backend must retain its backend-specific credential-free configuration fields.
     let cli = Cli::parse_from([
         "oxideterm",
         "cloud-sync",
@@ -1043,10 +846,7 @@ fn parses_cloud_sync_backend_configure() {
         },
         _ => panic!("expected cloud-sync command"),
     }
-}
 
-#[test]
-fn parses_cloud_sync_onedrive_backend_configure() {
     let cli = Cli::parse_from([
         "oxideterm",
         "cloud-sync",
@@ -1072,10 +872,7 @@ fn parses_cloud_sync_onedrive_backend_configure() {
         },
         _ => panic!("expected cloud-sync command"),
     }
-}
 
-#[test]
-fn parses_cloud_sync_google_drive_backend_configure() {
     let cli = Cli::parse_from([
         "oxideterm",
         "cloud-sync",

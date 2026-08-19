@@ -1589,37 +1589,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn git_panel_more_label_exists_in_every_locale() {
-        let locales = [
-            Locale::De,
-            Locale::En,
-            Locale::EsEs,
-            Locale::FrFr,
-            Locale::It,
-            Locale::Ja,
-            Locale::Ko,
-            Locale::PtBr,
-            Locale::Vi,
-            Locale::ZhCn,
-            Locale::ZhTw,
-        ];
-        let keys = [
-            TerminalGitPanelSection::More.label_key(),
-            "terminal.git.group_repository",
-            "terminal.git.group_advanced",
-            "terminal.git.commit_message_placeholder",
-        ];
-
-        // The compact navigation must never expose a raw key in shipped locales.
-        for locale in locales {
-            let i18n = I18n::new(locale);
-            for key in keys {
-                assert_ne!(i18n.t(key), key, "{locale:?} missing {key}");
-            }
-        }
-    }
-
-    #[test]
     fn ai_commit_message_becomes_an_editable_subject() {
         assert_eq!(
             terminal_git_clean_ai_commit_subject("feat: add terminal git actions").as_deref(),

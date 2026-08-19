@@ -79,7 +79,7 @@ pub struct CloudSyncLegacyApplyPlan {
     pub success_copy: CloudSyncApplySuccessCopySpec,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct CloudSyncPreviewSelection {
     pub import_connections: bool,
     pub selected_connection_names: BTreeSet<String>,
@@ -1300,25 +1300,8 @@ mod tests {
         let mut selection = CloudSyncPreviewSelection {
             import_connections: true,
             selected_connection_names: BTreeSet::from(["Prod".to_string()]),
-            selected_connection_ids: BTreeSet::new(),
-            import_quick_commands: false,
-            selected_quick_command_ids: BTreeSet::new(),
-            import_serial_profiles: false,
-            selected_serial_profile_ids: BTreeSet::new(),
-            import_telnet_profiles: false,
-            selected_telnet_profile_ids: BTreeSet::new(),
-            import_mosh_profiles: false,
-            selected_mosh_profile_ids: BTreeSet::new(),
-            import_remote_desktop_profiles: false,
-            selected_remote_desktop_profile_ids: BTreeSet::new(),
-            import_sensitive_credentials: false,
-            import_app_settings: false,
-            selected_app_settings_sections: BTreeSet::new(),
-            import_plugin_settings: false,
-            selected_plugin_ids: BTreeSet::new(),
-            import_forwards: false,
-            selected_forward_ids: BTreeSet::new(),
             conflict_strategy: ConflictStrategy::Rename,
+            ..CloudSyncPreviewSelection::default()
         };
 
         assert_eq!(
@@ -1339,26 +1322,8 @@ mod tests {
         let summary = summary_with_connections(&["Prod"]);
         let selection = CloudSyncPreviewSelection {
             import_connections: true,
-            selected_connection_names: BTreeSet::new(),
-            selected_connection_ids: BTreeSet::new(),
-            import_quick_commands: false,
-            selected_quick_command_ids: BTreeSet::new(),
-            import_serial_profiles: false,
-            selected_serial_profile_ids: BTreeSet::new(),
-            import_telnet_profiles: false,
-            selected_telnet_profile_ids: BTreeSet::new(),
-            import_mosh_profiles: false,
-            selected_mosh_profile_ids: BTreeSet::new(),
-            import_remote_desktop_profiles: false,
-            selected_remote_desktop_profile_ids: BTreeSet::new(),
-            import_sensitive_credentials: false,
-            import_app_settings: false,
-            selected_app_settings_sections: BTreeSet::new(),
-            import_plugin_settings: false,
-            selected_plugin_ids: BTreeSet::new(),
-            import_forwards: false,
-            selected_forward_ids: BTreeSet::new(),
             conflict_strategy: ConflictStrategy::Rename,
+            ..CloudSyncPreviewSelection::default()
         };
 
         assert_eq!(
@@ -1378,27 +1343,9 @@ mod tests {
             ..CloudSyncPreviewSummary::default()
         };
         let mut selection = CloudSyncPreviewSelection {
-            import_connections: false,
-            selected_connection_names: BTreeSet::new(),
-            selected_connection_ids: BTreeSet::new(),
-            import_quick_commands: false,
-            selected_quick_command_ids: BTreeSet::new(),
-            import_serial_profiles: false,
-            selected_serial_profile_ids: BTreeSet::new(),
-            import_telnet_profiles: false,
-            selected_telnet_profile_ids: BTreeSet::new(),
-            import_mosh_profiles: false,
-            selected_mosh_profile_ids: BTreeSet::new(),
-            import_remote_desktop_profiles: false,
-            selected_remote_desktop_profile_ids: BTreeSet::new(),
             import_sensitive_credentials: true,
-            import_app_settings: false,
-            selected_app_settings_sections: BTreeSet::new(),
-            import_plugin_settings: false,
-            selected_plugin_ids: BTreeSet::new(),
-            import_forwards: false,
-            selected_forward_ids: BTreeSet::new(),
             conflict_strategy: ConflictStrategy::Rename,
+            ..CloudSyncPreviewSelection::default()
         };
 
         let options = cloud_sync_legacy_import_options(&summary, &selection);

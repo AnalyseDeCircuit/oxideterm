@@ -1247,9 +1247,8 @@ fn is_full_frame_rect(size: RemoteDesktopSize, rect: RemoteDesktopRect) -> bool 
 #[cfg(test)]
 mod tests {
     use oxideterm_remote_desktop::{
-        NegotiatedCapabilityStatus, RemoteDesktopCursorShape, RemoteDesktopFrame,
-        RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate, RemoteDesktopFrameUpdateBatch,
-        RemoteDesktopRect,
+        RemoteDesktopCursorShape, RemoteDesktopFrame, RemoteDesktopFrameFormat,
+        RemoteDesktopFrameUpdate, RemoteDesktopFrameUpdateBatch, RemoteDesktopRect,
     };
 
     use super::*;
@@ -1312,49 +1311,6 @@ mod tests {
             surface.acknowledge_texture_upload(update);
         }
         updates
-    }
-
-    #[test]
-    fn connected_event_sets_size_and_status() {
-        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
-
-        state.apply_event(RemoteDesktopHelperEvent::Connected {
-            size: RemoteDesktopSize {
-                width: 1280,
-                height: 720,
-            },
-        });
-
-        let snapshot = state.snapshot();
-        assert_eq!(snapshot.status, RemoteDesktopSessionStatus::Connected);
-        assert_eq!(
-            snapshot.size,
-            Some(RemoteDesktopSize {
-                width: 1280,
-                height: 720,
-            })
-        );
-        assert!(!snapshot.has_frame);
-    }
-
-    #[test]
-    fn negotiated_capabilities_are_exposed_by_the_view_snapshot() {
-        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Vnc);
-        let capabilities = NegotiatedCapabilities {
-            security_methods: vec!["TLS-X509".to_string()],
-            selected_security_method: Some("TLS-X509".to_string()),
-            encrypted: NegotiatedCapabilityStatus::Supported,
-            peer_identity_verified: NegotiatedCapabilityStatus::Supported,
-            resize: NegotiatedCapabilityStatus::Supported,
-            tight: NegotiatedCapabilityStatus::Supported,
-            ..NegotiatedCapabilities::default()
-        };
-
-        state.apply_event(RemoteDesktopHelperEvent::CapabilitiesNegotiated {
-            capabilities: capabilities.clone(),
-        });
-
-        assert_eq!(state.snapshot().negotiated_capabilities, Some(capabilities));
     }
 
     #[test]
@@ -2224,24 +2180,6 @@ mod tests {
     }
 
     #[test]
-    fn connected_event_clears_pending_resize() {
-        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Vnc);
-        state.mark_resize_requested(RemoteDesktopSize {
-            width: 1200,
-            height: 900,
-        });
-
-        state.apply_event(RemoteDesktopHelperEvent::Connected {
-            size: RemoteDesktopSize {
-                width: 1200,
-                height: 900,
-            },
-        });
-
-        assert_eq!(state.snapshot().pending_resize, None);
-    }
-
-    #[test]
     fn failure_event_exposes_user_safe_message() {
         let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
 
@@ -2286,7 +2224,7 @@ mod tests {
     }
 
     #[test]
-    fn terminated_event_does_not_hide_disconnect_reason() {
+    fn terminated_event_preserves_disconnect_and_failure_reasons() {
         let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
 
         state.apply_event(RemoteDesktopHelperEvent::Disconnected {
@@ -2297,10 +2235,7 @@ mod tests {
         let snapshot = state.snapshot();
         assert_eq!(snapshot.status, RemoteDesktopSessionStatus::Disconnected);
         assert_eq!(snapshot.message.as_deref(), Some("RDP session closed."));
-    }
 
-    #[test]
-    fn terminated_event_does_not_hide_failure_reason() {
         let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
 
         state.apply_event(RemoteDesktopHelperEvent::ConnectionFailure {

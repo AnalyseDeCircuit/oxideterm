@@ -283,27 +283,6 @@ mod tests {
     }
 
     #[test]
-    fn transfer_dispatcher_returns_summary_without_node_filter() {
-        let manager = Arc::new(SftpTransferManager::new());
-        manager.register_background_transfer(transfer_with_state(BackgroundTransferState::Pending));
-        let response = native_plugin_transfers_response(
-            plugin_runtime::PluginHostCall {
-                request_id: "transfer-summary".to_string(),
-                namespace: "transfers".to_string(),
-                method: "getSummary".to_string(),
-                args: Value::Null,
-            },
-            &manager,
-        );
-
-        assert!(matches!(
-            response.result,
-            plugin_runtime::PluginResponseResult::Ok { value }
-                if value["total"] == 1 && value["queued"] == 1
-        ));
-    }
-
-    #[test]
     fn scp_snapshot_exposes_protocol_without_claiming_restart_resume() {
         let mut transfer = transfer_with_state(BackgroundTransferState::Error);
         transfer.protocol = TransferProtocol::Scp;

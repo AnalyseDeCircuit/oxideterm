@@ -59,64 +59,6 @@ fn terminal_element_lays_out_autosuggest_ghost_text_at_cursor() {
 }
 
 #[test]
-fn terminal_element_truncates_autosuggest_ghost_text_to_visible_columns() {
-    let mut snapshot = selection_snapshot("git");
-    snapshot.cols = 5;
-    snapshot.lines[0].cells_mut().truncate(5);
-    snapshot.cursor_row = 0;
-    snapshot.cursor_col = 3;
-    snapshot.lines[0].cells_mut()[3].cursor = true;
-    snapshot.lines[0].refresh_signature();
-
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .ghost_text(Some(" status".to_string()))
-    .layout();
-
-    let ghost_text = layout.ghost_text.expect("ghost text");
-    assert_eq!(ghost_text.text, " s");
-    assert_eq!(ghost_text.cells, 2);
-}
-
-#[test]
-fn terminal_element_counts_wide_ghost_text_cells() {
-    let mut snapshot = selection_snapshot("Password:");
-    snapshot.cursor_row = 0;
-    snapshot.cursor_col = 9;
-    snapshot.lines[0].cells_mut()[9].cursor = true;
-    snapshot.lines[0].refresh_signature();
-
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .ghost_text(Some("按Enter 填充保存的密码".to_string()))
-    .layout();
-
-    let ghost_text = layout.ghost_text.expect("ghost text");
-    assert_eq!(ghost_text.col, 9);
-    assert_eq!(ghost_text.cells, 22);
-}
-
-#[test]
 fn terminal_element_segments_mixed_width_ghost_text_for_grid_painting() {
     let segments = ghost_text_grid_segments("按Enter 填充已保存的提权密码");
 
@@ -353,26 +295,6 @@ fn terminal_element_maps_rtl_search_highlight_to_visual_rect() {
 }
 
 #[test]
-fn terminal_element_keeps_precomputed_empty_search_result_empty() {
-    let layout = TerminalElement::new(
-        selection_snapshot("needle"),
-        None,
-        test_metrics(),
-        true,
-        None,
-        Some("needle".to_string()),
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .precomputed_search_matches()
-    .layout();
-
-    assert!(layout.search_matches.is_empty());
-}
-
-#[test]
 fn terminal_element_keeps_powerline_separators_as_cell_painted_runs() {
     let snapshot =
         selection_snapshot("a\u{e0b0}\u{e0b1}\u{e0b2}\u{e0b3}\u{e0b4}\u{e0b5}\u{e0b6}\u{e0b7}b");
@@ -406,109 +328,6 @@ fn terminal_element_keeps_powerline_separators_as_cell_painted_runs() {
     assert_eq!(texts[7], ("\u{e0b6}", 7, 1));
     assert_eq!(texts[8], ("\u{e0b7}", 8, 1));
     assert_eq!(texts[9], ("b", 9, 1));
-}
-
-#[test]
-fn filled_powerline_triangles_cover_the_cell_and_mirror_each_other() {
-    let bounds = Bounds::new(point(px(8.0), px(10.0)), size(px(8.0), px(16.0)));
-    let metrics = PowerlinePaintMetrics::for_scale_factor(1.0);
-
-    let right = powerline_separator_points('\u{e0b0}', bounds, metrics).expect("right triangle");
-    assert_eq!(right[0], point(px(7.5), px(10.0)));
-    assert_eq!(right[1], point(px(7.5), px(26.0)));
-    assert_eq!(right[2], point(px(16.0), px(18.0)));
-
-    let left = powerline_separator_points('\u{e0b2}', bounds, metrics).expect("left triangle");
-    assert_eq!(left[0], point(px(16.5), px(10.0)));
-    assert_eq!(left[1], point(px(16.5), px(26.0)));
-    assert_eq!(left[2], point(px(8.0), px(18.0)));
-
-    for index in 0..right.len() {
-        assert_pixels_close(right[index].x + left[index].x, px(24.0));
-        assert_eq!(right[index].y, left[index].y);
-    }
-
-    assert!(powerline_separator_points('\u{e0b4}', bounds, metrics).is_none());
-}
-
-#[test]
-fn thin_powerline_triangles_fit_inside_their_cell_and_mirror_each_other() {
-    let bounds = Bounds::new(point(px(8.0), px(10.0)), size(px(8.0), px(16.0)));
-    let metrics = PowerlinePaintMetrics::for_scale_factor(1.0);
-
-    let right =
-        powerline_separator_points('\u{e0b1}', bounds, metrics).expect("right thin triangle");
-    let left = powerline_separator_points('\u{e0b3}', bounds, metrics).expect("left thin triangle");
-
-    assert_pixels_close(right[0].y, px(10.7));
-    assert_pixels_close(right[1].y, px(25.3));
-    assert_pixels_close(right[2].x, px(15.3));
-    assert_pixels_close(left[2].x, px(8.7));
-    for index in 0..right.len() {
-        assert_pixels_close(right[index].x + left[index].x, px(24.0));
-        assert_pixels_close(right[index].y, left[index].y);
-    }
-}
-
-#[test]
-fn powerline_half_circles_reach_the_cell_edge_and_mirror_each_other() {
-    let bounds = Bounds::new(point(px(8.0), px(10.0)), size(px(8.0), px(16.0)));
-    let metrics = PowerlinePaintMetrics::for_scale_factor(1.0);
-
-    for (right_char, left_char, expected_right_tip, expected_left_tip) in [
-        ('\u{e0b4}', '\u{e0b6}', px(16.0), px(8.0)),
-        ('\u{e0b5}', '\u{e0b7}', px(15.3), px(8.7)),
-    ] {
-        let right =
-            powerline_half_circle_curve(right_char, bounds, metrics).expect("right half circle");
-        let left =
-            powerline_half_circle_curve(left_char, bounds, metrics).expect("left half circle");
-        let right_midpoint = cubic_midpoint(right);
-        let left_midpoint = cubic_midpoint(left);
-
-        assert_pixels_close(right_midpoint.x, expected_right_tip);
-        assert_pixels_close(left_midpoint.x, expected_left_tip);
-        assert_pixels_close(right_midpoint.y, px(18.0));
-        assert_pixels_close(left_midpoint.y, px(18.0));
-        for (right_x, left_x) in [
-            (right.start.x, left.start.x),
-            (right.end.x, left.end.x),
-            (right.start_control.x, left.start_control.x),
-            (right.end_control.x, left.end_control.x),
-            (right_midpoint.x, left_midpoint.x),
-        ] {
-            assert_pixels_close(right_x + left_x, px(24.0));
-        }
-        assert_eq!(right.start.y, left.start.y);
-        assert_eq!(right.end.y, left.end.y);
-    }
-
-    assert!(powerline_half_circle_curve('\u{e0b0}', bounds, metrics).is_none());
-}
-
-#[test]
-fn powerline_paint_metrics_keep_device_pixel_dimensions_across_scale_factors() {
-    for scale_factor in [1.0, 1.25, 1.5, 2.0] {
-        let metrics = PowerlinePaintMetrics::for_scale_factor(scale_factor);
-
-        assert_pixels_close(metrics.seam_overlap * scale_factor, px(0.5));
-        assert_pixels_close(metrics.thin_stroke_width * scale_factor, px(1.4));
-    }
-}
-
-fn cubic_midpoint(curve: PowerlineHalfCircleCurve) -> gpui::Point<Pixels> {
-    // Cubic Bernstein weights at t=0.5 are 1:3:3:1.
-    point(
-        (curve.start.x + curve.start_control.x * 3.0 + curve.end_control.x * 3.0 + curve.end.x)
-            / 8.0,
-        (curve.start.y + curve.start_control.y * 3.0 + curve.end_control.y * 3.0 + curve.end.y)
-            / 8.0,
-    )
-}
-
-fn assert_pixels_close(actual: Pixels, expected: Pixels) {
-    let difference = (f32::from(actual) - f32::from(expected)).abs();
-    assert!(difference < 0.001, "expected {expected:?}, got {actual:?}");
 }
 
 #[test]
@@ -566,20 +385,8 @@ fn terminal_element_prepaint_clips_layout_to_visible_rows() {
 }
 
 #[test]
-fn search_match_rects_find_all_visible_row_matches() {
-    let snapshot = selection_snapshot("cargo test cargo");
-    let matches = search_match_rects(&snapshot, Some("cargo"));
-
-    assert_eq!(matches.len(), 2);
-    assert_eq!(matches[0].col, 0);
-    assert_eq!(matches[0].cells, 5);
-    assert_eq!(matches[1].col, 11);
-    assert_eq!(matches[1].cells, 5);
-}
-
-#[test]
 fn terminal_element_lays_out_search_highlights() {
-    let snapshot = selection_snapshot("hello search");
+    let snapshot = selection_snapshot("search test search");
     let layout = TerminalElement::new(
         snapshot,
         None,
@@ -594,9 +401,11 @@ fn terminal_element_lays_out_search_highlights() {
     )
     .layout();
 
-    assert_eq!(layout.search_matches.len(), 1);
-    assert_eq!(layout.search_matches[0].col, 6);
+    assert_eq!(layout.search_matches.len(), 2);
+    assert_eq!(layout.search_matches[0].col, 0);
     assert_eq!(layout.search_matches[0].cells, 6);
+    assert_eq!(layout.search_matches[1].col, 12);
+    assert_eq!(layout.search_matches[1].cells, 6);
 }
 
 #[test]

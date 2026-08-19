@@ -469,17 +469,13 @@ mod tests {
     }
 
     #[test]
-    fn restore_defaults_to_dry_run_without_yes() {
-        let write = effective_restore_write(write_args(false, false));
-
-        assert!(write.dry_run);
-    }
-
-    #[test]
-    fn restore_yes_allows_real_write() {
-        let write = effective_restore_write(write_args(true, false));
-
-        assert!(!write.dry_run);
+    fn restore_write_requires_yes_for_a_real_write() {
+        for (yes, expected_dry_run) in [(false, true), (true, false)] {
+            assert_eq!(
+                effective_restore_write(write_args(yes, false)).dry_run,
+                expected_dry_run
+            );
+        }
     }
 
     #[test]

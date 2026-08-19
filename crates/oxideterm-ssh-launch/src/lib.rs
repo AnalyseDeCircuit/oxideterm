@@ -174,17 +174,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_user_at_host() {
-        let (username, host) = parse_user_host_target("alice@example.com", None).unwrap();
-        assert_eq!(username, "alice");
-        assert_eq!(host, "example.com");
-    }
+    fn parses_explicit_and_default_user_targets() {
+        // Explicit and inherited usernames must resolve to the same launch target.
+        let cases = [("alice@example.com", None), ("example.com", Some("alice"))];
 
-    #[test]
-    fn parses_host_with_default_username() {
-        let (username, host) = parse_user_host_target("example.com", Some("alice")).unwrap();
-        assert_eq!(username, "alice");
-        assert_eq!(host, "example.com");
+        for (target, default_username) in cases {
+            let (username, host) = parse_user_host_target(target, default_username).unwrap();
+            assert_eq!(username, "alice");
+            assert_eq!(host, "example.com");
+        }
     }
 
     #[test]

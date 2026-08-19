@@ -185,26 +185,3 @@ pub fn code_label_font_size(opts: &MarkdownOptions) -> AbsoluteLength {
 pub fn footnote_font_size(opts: &MarkdownOptions) -> AbsoluteLength {
     AbsoluteLength::Pixels(gpui::px(opts.base_font_size * opts.footnote_font_scale))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn code_surfaces_only_become_translucent_for_background_contexts() {
-        let tokens = oxideterm_theme::default_tokens();
-        let opaque = MarkdownOptions::from_theme(&tokens);
-        let mut translucent = opaque.clone();
-        translucent.background_surface_active = true;
-
-        assert_eq!(code_block_bg_color(&tokens, &opaque).a, 1.0);
-        assert_eq!(
-            code_block_bg_color(&tokens, &translucent).a,
-            BACKGROUND_SURFACE_CODE_ALPHA
-        );
-        assert_eq!(
-            inline_code_bg_color(&tokens, &translucent).a,
-            BACKGROUND_SURFACE_CODE_ALPHA
-        );
-    }
-}

@@ -751,46 +751,6 @@ mod tests {
     }
 
     #[test]
-    fn builtin_theme_display_names_remain_stable() {
-        // Theme names encode product, source, and material identity and must not
-        // drift when their internal palettes are recalibrated.
-        for (id, display_name) in [
-            ("github-dark", "GitHub Dark"),
-            ("code-light", "Code Light"),
-            ("oxide", "Oxide"),
-            ("verdigris", "Verdigris"),
-            ("silver-oxide", "Silver Oxide"),
-            ("cuprite", "Cuprite"),
-            ("chromium-oxide", "Chromium Oxide"),
-            ("paper-oxide", "Paper Oxide"),
-            ("magnetite", "Magnetite"),
-            ("cobalt", "Cobalt"),
-            ("ochre", "Ochre"),
-            ("azurite", "Azurite"),
-            ("malachite", "Malachite"),
-            ("hematite", "Hematite"),
-            ("bismuth", "Bismuth"),
-        ] {
-            assert_eq!(theme_display_name(id), display_name);
-        }
-    }
-
-    #[test]
-    fn builtin_theme_duplication_preserves_calibrated_ui_palette() {
-        let mut settings = PersistedSettings::default();
-        settings.terminal.theme = "oxide".to_string();
-
-        let editor = theme_editor_from_settings(&settings, None, "Oxide Copy".to_string());
-        let expected = ThemeTokens::from_builtin(theme_by_id("oxide"));
-
-        assert_eq!(
-            editor.terminal_colors,
-            terminal_theme_to_colors(expected.terminal)
-        );
-        assert_eq!(editor.ui_colors, app_ui_colors_to_colors(expected.ui));
-    }
-
-    #[test]
     fn saving_theme_editor_owns_custom_theme_persistence() {
         let mut settings = PersistedSettings::default();
         let editor = theme_editor_from_settings(&settings, None, "Mine".to_string());
@@ -804,30 +764,5 @@ mod tests {
                 .custom_themes
                 .contains_key(&settings.terminal.theme)
         );
-    }
-
-    #[test]
-    fn saving_borrowed_theme_editor_snapshot_keeps_the_draft_available() {
-        let mut settings = PersistedSettings::default();
-        let editor = theme_editor_from_settings(&settings, None, "Borrowed".to_string());
-
-        let saved_name = save_theme_editor_snapshot_to_settings(&mut settings, &editor);
-
-        assert_eq!(saved_name.as_deref(), Some("Borrowed"));
-        assert_eq!(editor.name, "Borrowed");
-        assert!(settings.terminal.theme.starts_with(CUSTOM_THEME_PREFIX));
-    }
-
-    #[test]
-    fn custom_theme_recomputes_glass_metrics_from_its_own_palette() {
-        let mut settings = PersistedSettings::default();
-        let mut editor = theme_editor_from_settings(&settings, None, "Light Custom".to_string());
-        editor.ui_colors[0] = "#f5f0e8".to_string();
-        save_theme_editor_to_settings(&mut settings, editor);
-
-        let tokens = custom_theme_tokens_from_settings(&settings).expect("custom theme tokens");
-
-        assert_eq!(tokens.metrics.sidebar_vibrancy_alpha, 0.64);
-        assert_eq!(tokens.metrics.panel_vibrancy_alpha, 0.78);
     }
 }

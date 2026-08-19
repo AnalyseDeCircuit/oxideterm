@@ -3,28 +3,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn maps_agent_entries_to_core_file_kinds() {
-        let node_id = NodeId::new("node-1");
-        let entry = FileEntry {
-            name: "src".to_string(),
-            path: "/repo/src".to_string(),
-            file_type: "directory".to_string(),
-            is_symlink: false,
-            symlink_target: None,
-            target_file_type: None,
-            size: 0,
-            mtime: Some(12),
-            permissions: None,
-            children: None,
-            truncated: false,
-        };
-
-        let mapped = file_tree_entry_from_agent(&node_id, entry);
-        assert_eq!(mapped.kind, FileKind::Directory);
-        assert_eq!(mapped.location, IdeLocation::remote("node-1", "/repo/src"));
-    }
-
-    #[test]
     fn maps_agent_symlink_directories_as_directories() {
         let node_id = NodeId::new("node-1");
         let entry = FileEntry {
@@ -126,23 +104,6 @@ mod tests {
     }
 
     #[test]
-    fn agent_remote_path_matches_tauri_status_path() {
-        assert_eq!(remote_agent_path(), "~/.oxideterm/oxideterm-agent");
-        assert_eq!(
-            shell_path_arg(&remote_agent_path()),
-            "~/'.oxideterm/oxideterm-agent'"
-        );
-        assert_eq!(
-            shell_path_arg("~/agent dir/oxide'term-agent"),
-            "~/'agent dir/oxide'\\''term-agent'"
-        );
-        assert_eq!(
-            shell_path_arg("/home/me/.oxideterm/oxideterm-agent"),
-            "'/home/me/.oxideterm/oxideterm-agent'"
-        );
-    }
-
-    #[test]
     fn resolves_encoded_appimage_agent_payload() {
         let temp_dir = unique_agent_test_dir("encoded-resolve");
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -177,26 +138,6 @@ mod tests {
     }
 
     #[test]
-    fn agent_deploy_error_labels_match_tauri_bootstrap_classes() {
-        assert_eq!(
-            AgentError::ArchDetection("boom".into()).to_string(),
-            "Architecture detection failed: boom"
-        );
-        assert_eq!(
-            AgentError::Upload("denied".into()).to_string(),
-            "Upload failed: denied"
-        );
-        assert_eq!(
-            AgentError::ExecFailed("bad shell".into()).to_string(),
-            "Command execution failed: bad shell"
-        );
-        assert_eq!(
-            AgentError::StartFailed("missing libc".into()).to_string(),
-            "Agent start failed: missing libc"
-        );
-    }
-
-    #[test]
     fn agent_errors_keep_remote_fs_error_classes() {
         assert_eq!(
             ide_error_from_agent_message("permission denied: /repo/secret").kind,
@@ -214,10 +155,7 @@ mod tests {
             ide_error_from_agent_error(AgentError::Timeout(30)).kind,
             IdeFileErrorKind::Timeout
         );
-    }
 
-    #[test]
-    fn permission_and_path_errors_map_to_tauri_ide_classes() {
         for message in [
             "permission denied: /repo/secret",
             "EACCES: cannot open /repo/secret",

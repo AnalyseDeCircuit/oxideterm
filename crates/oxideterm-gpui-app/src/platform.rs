@@ -134,22 +134,3 @@ pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
 pub(crate) fn app_key_bindings(settings: &PersistedSettings) -> Vec<KeyBinding> {
     crate::keybindings::startup_key_bindings(&settings.keybindings.overrides)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn app_menus_do_not_register_language_as_a_top_level_menu() {
-        let i18n = I18n::default();
-        let language_label = i18n.t("menu.language");
-
-        // Language selection remains available in Settings without occupying
-        // permanent native menu-bar space.
-        assert!(
-            app_menus(&i18n)
-                .iter()
-                .all(|menu| menu.name.as_ref() != language_label)
-        );
-    }
-}

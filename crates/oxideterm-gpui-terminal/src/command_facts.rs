@@ -489,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn command_fact_ledger_records_runtime_autosuggest_independently() {
+    fn command_fact_ledger_records_and_exposes_runtime_autosuggest() {
         let mut ledger = CommandFactLedger::default();
 
         ledger.record_runtime_autosuggest_command("  git   status  ");
@@ -499,10 +499,7 @@ mod tests {
         let records = ledger.autosuggest_records();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].command, "git status");
-    }
 
-    #[test]
-    fn command_fact_ledger_exposes_prefix_autosuggest_ghost_text() {
         let mut ledger = CommandFactLedger::default();
         ledger.record_runtime_autosuggest_command("git status");
         ledger.record_runtime_autosuggest_command("git stash list");

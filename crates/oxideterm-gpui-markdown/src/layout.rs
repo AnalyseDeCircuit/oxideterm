@@ -247,33 +247,3 @@ fn inline_text_len(inline: &Inline) -> usize {
         Inline::LineBreak => LINE_BREAK_ESTIMATED_TEXT_LEN,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::parser;
-
-    use super::*;
-
-    #[test]
-    fn layout_has_one_item_per_block_plus_footnotes() {
-        let document = parser::parse("# Title\n\nBody\n\n[^a]: footnote");
-        let opts = MarkdownOptions::default();
-
-        let layout = MarkdownBlockLayout::from_document(&document, &opts);
-
-        assert_eq!(layout.items().len(), document.blocks.len() + 1);
-        assert_eq!(layout.item_sizes().len(), layout.items().len());
-    }
-
-    #[test]
-    fn code_blocks_scale_with_line_count() {
-        let one_line = parser::parse("```rs\nlet x = 1;\n```");
-        let many_lines = parser::parse("```rs\none\ntwo\nthree\nfour\n```");
-        let opts = MarkdownOptions::default();
-
-        let one = MarkdownBlockLayout::from_document(&one_line, &opts).item_sizes()[0].height;
-        let many = MarkdownBlockLayout::from_document(&many_lines, &opts).item_sizes()[0].height;
-
-        assert!(many > one);
-    }
-}

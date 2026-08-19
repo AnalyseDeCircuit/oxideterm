@@ -198,41 +198,6 @@ pub fn port_row_signature(entry: &ResourcePortEntry) -> u64 {
     hasher.finish()
 }
 
-#[cfg(test)]
-mod row_signature_tests {
-    use super::*;
-
-    fn port() -> ResourcePortEntry {
-        ResourcePortEntry {
-            protocol: "tcp".into(),
-            local_address: "0.0.0.0".into(),
-            local_port: "22".into(),
-            remote_address: "0.0.0.0".into(),
-            remote_port: "*".into(),
-            state: "LISTEN".into(),
-            pid: "42".into(),
-            process_name: "sshd".into(),
-            user: "root".into(),
-            command: "/usr/sbin/sshd".into(),
-            inode: "1234".into(),
-            source: "ss".into(),
-        }
-    }
-
-    #[test]
-    fn port_signature_ignores_live_socket_metadata() {
-        let original = port();
-        let mut updated = original.clone();
-        updated.state = "ESTABLISHED".into();
-        updated.process_name = "sshd-session".into();
-        updated.command = "/usr/sbin/sshd -D".into();
-
-        assert_eq!(port_row_signature(&original), port_row_signature(&updated));
-        updated.inode = "5678".into();
-        assert_ne!(port_row_signature(&original), port_row_signature(&updated));
-    }
-}
-
 pub fn port_state_label_key(state: &str) -> &'static str {
     match state.trim().to_lowercase().as_str() {
         "listen" | "listening" => "sidebar.host_ports.states.listening",

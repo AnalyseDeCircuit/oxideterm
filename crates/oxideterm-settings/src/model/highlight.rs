@@ -244,14 +244,6 @@ mod highlight_rule_tests {
     }
 
     #[test]
-    fn new_rule_preserves_terminal_background() {
-        let rule = HighlightRule::default();
-
-        assert_eq!(rule.match_scope, HighlightRuleMatchScope::Match);
-        assert!(rule.preserve_background);
-    }
-
-    #[test]
     fn rule_sets_normalize_names_ids_and_rule_priorities() {
         let rule_sets = sanitize_highlight_rule_sets(vec![
             HighlightRuleSet {

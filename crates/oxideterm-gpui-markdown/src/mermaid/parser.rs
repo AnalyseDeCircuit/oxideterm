@@ -1419,32 +1419,37 @@ mod tests {
     }
 
     #[test]
-    fn parses_pie_chart_title_show_data_and_slices() {
-        let MermaidDiagram::Pie(pie) =
-            parse("pie showData title Work items\n\"Open\" : 12\nClosed : 8.5")
-                .expect("pie chart should parse")
-        else {
-            panic!("expected pie chart");
-        };
+    fn parses_pie_chart_title_forms_and_slices() {
+        // Inline and body title syntax share the same parsed pie-chart contract.
+        let cases = [
+            (
+                "pie showData title Work items\n\"Open\" : 12\nClosed : 8.5",
+                "Work items",
+                "Open",
+                2,
+                Some(8.5),
+            ),
+            (
+                "pie\ntitle Tickets\nshowData\n\"Done\" : 3",
+                "Tickets",
+                "Done",
+                1,
+                None,
+            ),
+        ];
 
-        assert_eq!(pie.title.as_deref(), Some("Work items"));
-        assert!(pie.show_data);
-        assert_eq!(pie.slices.len(), 2);
-        assert_eq!(pie.slices[0].label, "Open");
-        assert_eq!(pie.slices[1].value, 8.5);
-    }
-
-    #[test]
-    fn parses_pie_chart_body_title_and_show_data() {
-        let MermaidDiagram::Pie(pie) =
-            parse("pie\ntitle Tickets\nshowData\n\"Done\" : 3").expect("pie chart should parse")
-        else {
-            panic!("expected pie chart");
-        };
-
-        assert_eq!(pie.title.as_deref(), Some("Tickets"));
-        assert!(pie.show_data);
-        assert_eq!(pie.slices[0].label, "Done");
+        for (source, title, first_label, slice_count, second_value) in cases {
+            let MermaidDiagram::Pie(pie) = parse(source).expect("pie chart should parse") else {
+                panic!("expected pie chart");
+            };
+            assert_eq!(pie.title.as_deref(), Some(title));
+            assert!(pie.show_data);
+            assert_eq!(pie.slices.len(), slice_count);
+            assert_eq!(pie.slices[0].label, first_label);
+            if let Some(value) = second_value {
+                assert_eq!(pie.slices[1].value, value);
+            }
+        }
     }
 
     #[test]
@@ -1501,31 +1506,28 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsafe_graph_class_properties() {
-        let error = parse("flowchart TD\nA --> B\nclassDef red filter:url(bad)").unwrap_err();
+    fn rejects_invalid_or_unsafe_diagram_input() {
+        // Parser rejection cases retain their specific error categories.
+        let cases = [
+            (
+                "flowchart TD\nA --> B\nclassDef red filter:url(bad)",
+                "unsupported graph class property",
+            ),
+            (
+                "flowchart TD\nA --> B\nstyle A filter:url(bad)",
+                "unsupported graph node style property",
+            ),
+            ("pie\nBad : -1", "pie slice value is invalid"),
+            (
+                "gantt\nTask : after missing, 2d",
+                "unknown gantt dependency",
+            ),
+        ];
 
-        assert!(error.contains("unsupported graph class property"));
-    }
-
-    #[test]
-    fn rejects_unsafe_node_style_properties() {
-        let error = parse("flowchart TD\nA --> B\nstyle A filter:url(bad)").unwrap_err();
-
-        assert!(error.contains("unsupported graph node style property"));
-    }
-
-    #[test]
-    fn rejects_invalid_pie_chart_values() {
-        let error = parse("pie\nBad : -1").unwrap_err();
-
-        assert!(error.contains("pie slice value is invalid"));
-    }
-
-    #[test]
-    fn rejects_unknown_gantt_dependency() {
-        let error = parse("gantt\nTask : after missing, 2d").unwrap_err();
-
-        assert!(error.contains("unknown gantt dependency"));
+        for (source, expected_error) in cases {
+            let error = parse(source).unwrap_err();
+            assert!(error.contains(expected_error), "unexpected error: {error}");
+        }
     }
 
     #[test]

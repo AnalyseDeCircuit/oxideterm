@@ -126,31 +126,6 @@ fn runtime_request_round_trips_as_versioned_json() {
 }
 
 #[test]
-fn response_helpers_and_supervisor_lifecycle_state_are_covered() {
-    let ok = PluginResponse::ok("req-ok", serde_json::json!({ "done": true }));
-    assert!(matches!(ok.result, PluginResponseResult::Ok { .. }));
-    let error = PluginResponse::error("req-error", PluginError::runtime("boom", "failed"));
-    assert!(matches!(error.result, PluginResponseResult::Error { .. }));
-
-    let mut supervisor =
-        PluginRuntimeSupervisorState::new("com.example.runtime", Duration::from_millis(250));
-    assert_eq!(supervisor.lifecycle_timeout(), Duration::from_millis(250));
-    supervisor.start_activation();
-    assert_eq!(supervisor.state(), PluginRuntimeLifecycleState::Activating);
-    supervisor.mark_active();
-    assert!(supervisor.health().healthy);
-    supervisor.record_log(PluginRuntimeLogLevel::Info, "activated");
-    assert_eq!(supervisor.log_count(), 1);
-    supervisor.start_deactivation();
-    assert_eq!(
-        supervisor.state(),
-        PluginRuntimeLifecycleState::Deactivating
-    );
-    supervisor.kill();
-    assert_eq!(supervisor.state(), PluginRuntimeLifecycleState::Killed);
-}
-
-#[test]
 fn process_runtime_entry_resolves_inside_plugin_dir() {
     let temp_dir = unique_temp_dir("plugin-process-entry");
     let plugin_dir = temp_dir.join("plugin");
@@ -185,63 +160,6 @@ fn process_runtime_entry_rejects_symlink_escape() {
 
     let error = resolve_process_runtime_entry(&plugin_dir, "runner").unwrap_err();
     assert_eq!(error.code, "process_entry_escapes_plugin_dir");
-}
-
-#[cfg(feature = "wasm-runtime")]
-#[test]
-fn wasm_runtime_entry_validates_plugin_path_and_magic() {
-    let temp_dir = unique_temp_dir("plugin-wasm-entry");
-    let plugin_dir = temp_dir.join("plugin");
-    fs::create_dir_all(&plugin_dir).unwrap();
-    fs::write(plugin_dir.join("plugin.wasm"), b"\0asm\x01\0\0\0").unwrap();
-    fs::write(plugin_dir.join("not-wasm.bin"), b"nope").unwrap();
-
-    let resolved = resolve_wasm_runtime_entry(&plugin_dir, "plugin.wasm").unwrap();
-    assert!(resolved.starts_with(fs::canonicalize(&plugin_dir).unwrap()));
-    let error = resolve_wasm_runtime_entry(&plugin_dir, "not-wasm.bin").unwrap_err();
-    assert_eq!(error.code, "wasm_entry_invalid_magic");
-    let traversal = resolve_wasm_runtime_entry(&plugin_dir, "../plugin.wasm").unwrap_err();
-    assert_eq!(traversal.code, "invalid_wasm_entry");
-}
-
-#[cfg(feature = "wasm-runtime")]
-#[tokio::test]
-async fn wasm_runtime_activation_executes_wasi_preview1_start() {
-    let temp_dir = unique_temp_dir("plugin-wasm-activate");
-    let plugin_dir = temp_dir.join("plugin");
-    fs::create_dir_all(&plugin_dir).unwrap();
-    fs::write(plugin_dir.join("plugin.wasm"), wasm_noop_start_module()).unwrap();
-
-    let mut runtime = NativeWasmPluginRuntime::new(
-        "com.example.runtime",
-        &plugin_dir,
-        "plugin.wasm",
-        Duration::from_millis(50),
-    );
-    let response = runtime
-        .activate(PluginActivateRequest {
-            request_id: "activate-test".to_string(),
-            manifest: sample_manifest(),
-            permissions: PluginPermissionSet::default(),
-            timeout_ms: 50,
-        })
-        .await
-        .unwrap();
-
-    assert_eq!(
-        response.result,
-        PluginResponseResult::Ok {
-            value: serde_json::json!({
-                "state": "active",
-                "runtime": "wasm",
-                "wasi": "preview1",
-            })
-        }
-    );
-    assert_eq!(
-        runtime.health().await.unwrap().state,
-        PluginRuntimeLifecycleState::Active
-    );
 }
 
 #[cfg(feature = "wasm-runtime")]

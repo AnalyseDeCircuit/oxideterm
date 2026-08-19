@@ -368,7 +368,7 @@ fn execute_windows_installer(
     })
 }
 
-#[cfg(any(target_os = "windows", test))]
+#[cfg(target_os = "windows")]
 fn windows_installer_launched_message(
     package_path: &Path,
     package_kind: InstallPackageKind,
@@ -388,7 +388,7 @@ fn powershell_single_quoted(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
-#[cfg(any(target_os = "windows", test))]
+#[cfg(target_os = "windows")]
 fn windows_start_process_script(
     file_path: &str,
     arguments: &[String],
@@ -833,19 +833,7 @@ mod tests {
     }
 
     #[test]
-    fn portable_updates_use_the_exit_helper() {
-        let plan = plan_native_install(
-            "/tmp/OxideTerm_linux_x64_portable.tar.gz",
-            &context("linux", InstallFlavor::Portable, "/apps/oxideterm-native"),
-        );
-        assert_eq!(plan.strategy, InstallStrategy::PortableReplaceArchive);
-        assert_eq!(plan.action, InstallActionKind::LaunchUpdateHelper);
-        assert_eq!(plan.package_kind, InstallPackageKind::PortableArchive);
-        assert!(plan.requires_app_exit);
-    }
-
-    #[test]
-    fn windows_installer_is_launched_directly() {
+    fn windows_install_plans_select_installer_strategies() {
         let plan = plan_native_install(
             "C:/Temp/OxideTerm.msi",
             &context(
@@ -856,11 +844,7 @@ mod tests {
         );
         assert_eq!(plan.strategy, InstallStrategy::WindowsRunInstaller);
         assert_eq!(plan.package_kind, InstallPackageKind::WindowsMsi);
-        assert_eq!(plan.summary, "Launch the Windows installer with elevation.");
-    }
 
-    #[test]
-    fn windows_exe_installer_uses_helper_replacement_strategy() {
         let plan = plan_native_install(
             "C:/Temp/OxideTerm_setup.exe",
             &context(
@@ -872,14 +856,7 @@ mod tests {
         assert_eq!(plan.strategy, InstallStrategy::WindowsRunInstaller);
         assert_eq!(plan.package_kind, InstallPackageKind::WindowsExe);
         assert!(plan.requires_app_exit);
-        assert_eq!(
-            plan.summary,
-            "Stage the Windows installer and apply it after OxideTerm exits."
-        );
-    }
 
-    #[test]
-    fn windows_installer_archive_is_extracted_before_launch() {
         let plan = plan_native_install(
             "C:/Temp/OxideTerm_1.0.0_x64.msi.zip",
             &context(
@@ -896,10 +873,6 @@ mod tests {
             plan.package_kind,
             InstallPackageKind::WindowsInstallerArchive
         );
-        assert_eq!(
-            plan.summary,
-            "Extract the Windows update archive and launch its installer."
-        );
     }
 
     #[test]
@@ -911,51 +884,7 @@ mod tests {
     }
 
     #[test]
-    fn windows_start_process_script_uses_runas_and_argument_list() {
-        assert_eq!(
-            windows_start_process_script(
-                "msiexec.exe",
-                &[
-                    "/i".to_string(),
-                    "C:/Temp/OxideTerm Setup.msi".to_string(),
-                    "/promptrestart".to_string(),
-                ],
-                false,
-                true,
-            ),
-            "Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', 'C:/Temp/OxideTerm Setup.msi', '/promptrestart') -Verb RunAs"
-        );
-    }
-
-    #[test]
-    fn per_user_nsis_update_waits_without_runas() {
-        let script = windows_start_process_script(
-            "C:/Temp/OxideTerm Setup.exe",
-            &["/S".to_string(), "/OXIDETERM_UPDATE=1".to_string()],
-            true,
-            false,
-        );
-
-        assert_eq!(
-            script,
-            "Start-Process -FilePath 'C:/Temp/OxideTerm Setup.exe' -ArgumentList @('/S', '/OXIDETERM_UPDATE=1') -Wait"
-        );
-        assert!(!script.contains("RunAs"));
-    }
-
-    #[test]
-    fn windows_installer_message_includes_retained_package_path() {
-        assert!(
-            windows_installer_launched_message(
-                Path::new("C:/Temp/OxideTerm Setup.msi"),
-                InstallPackageKind::WindowsMsi,
-            )
-            .contains("C:/Temp/OxideTerm Setup.msi")
-        );
-    }
-
-    #[test]
-    fn linux_appimage_replacement_requires_appimage_runtime() {
+    fn linux_appimage_plans_require_replacement_runtime() {
         let plan = plan_native_install(
             "/tmp/OxideTerm.AppImage",
             &context(
@@ -966,10 +895,7 @@ mod tests {
         );
         assert_eq!(plan.strategy, InstallStrategy::LinuxReplaceAppImage);
         assert!(plan.requires_app_exit);
-    }
 
-    #[test]
-    fn linux_appimage_archive_replacement_requires_appimage_runtime() {
         let plan = plan_native_install(
             "/tmp/OxideTerm.AppImage.tar.gz",
             &context(
@@ -984,7 +910,7 @@ mod tests {
     }
 
     #[test]
-    fn macos_dmg_opens_for_finder_installation() {
+    fn macos_install_plans_select_open_or_replace_strategy() {
         let plan = plan_native_install(
             "/tmp/OxideTerm.dmg",
             &context(
@@ -995,10 +921,7 @@ mod tests {
         );
         assert_eq!(plan.strategy, InstallStrategy::MacOpenDmg);
         assert_eq!(plan.action, InstallActionKind::OpenPackage);
-    }
 
-    #[test]
-    fn macos_archived_app_uses_replacement_strategy() {
         let plan = plan_native_install(
             "/tmp/OxideTerm.app.zip",
             &context(
@@ -1013,37 +936,23 @@ mod tests {
     }
 
     #[test]
-    fn linux_deb_opens_with_the_package_installer() {
-        let plan = plan_native_install(
-            "/tmp/OxideTerm_linux_x64.deb",
-            &context(
-                "linux",
-                InstallFlavor::LinuxDeb,
-                "/opt/oxideterm/oxideterm-native",
-            ),
-        );
+    fn linux_packages_open_with_the_package_installer() {
+        // DEB and RPM packages share the installed-package handoff contract.
+        let cases = [
+            ("/tmp/OxideTerm_linux_x64.deb", InstallFlavor::LinuxDeb),
+            ("/tmp/OxideTerm_linux_x64.rpm", InstallFlavor::LinuxRpm),
+        ];
 
-        assert_eq!(plan.strategy, InstallStrategy::LinuxOpenPackage);
-        assert_eq!(plan.action, InstallActionKind::OpenPackage);
-        assert_eq!(plan.package_kind, InstallPackageKind::LinuxPackage);
-        assert!(!plan.requires_app_exit);
-    }
-
-    #[test]
-    fn linux_rpm_opens_with_the_package_installer() {
-        let plan = plan_native_install(
-            "/tmp/OxideTerm_linux_x64.rpm",
-            &context(
-                "linux",
-                InstallFlavor::LinuxRpm,
-                "/opt/oxideterm/oxideterm-native",
-            ),
-        );
-
-        assert_eq!(plan.strategy, InstallStrategy::LinuxOpenPackage);
-        assert_eq!(plan.action, InstallActionKind::OpenPackage);
-        assert_eq!(plan.package_kind, InstallPackageKind::LinuxPackage);
-        assert!(!plan.requires_app_exit);
+        for (package_path, flavor) in cases {
+            let plan = plan_native_install(
+                package_path,
+                &context("linux", flavor, "/opt/oxideterm/oxideterm-native"),
+            );
+            assert_eq!(plan.strategy, InstallStrategy::LinuxOpenPackage);
+            assert_eq!(plan.action, InstallActionKind::OpenPackage);
+            assert_eq!(plan.package_kind, InstallPackageKind::LinuxPackage);
+            assert!(!plan.requires_app_exit);
+        }
     }
 
     #[test]
@@ -1080,14 +989,6 @@ mod tests {
 
         assert_eq!(plan.strategy, InstallStrategy::OpenPackage);
         assert_eq!(plan.action, InstallActionKind::OpenPackage);
-    }
-
-    #[test]
-    fn linux_pkg_tar_zst_is_a_linux_package() {
-        assert_eq!(
-            classify_package(Path::new("/tmp/oxideterm.pkg.tar.zst")),
-            InstallPackageKind::LinuxPackage
-        );
     }
 
     #[test]

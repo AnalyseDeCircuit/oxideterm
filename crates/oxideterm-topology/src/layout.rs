@@ -240,18 +240,36 @@ mod tests {
 
     #[test]
     fn layout_filters_to_tauri_connected_and_connecting_matrix_nodes() {
+        // The layout is the public consumer of the topology visibility policy.
         let snapshot = ConnectionTopologySnapshot::new(
             vec![
-                node("connected", None, ConnectionTopologyStatus::Active),
+                node("active", None, ConnectionTopologyStatus::Active),
+                node("idle", None, ConnectionTopologyStatus::Idle),
+                node("connecting", None, ConnectionTopologyStatus::Connecting),
+                node("reconnecting", None, ConnectionTopologyStatus::Reconnecting),
                 node("down", None, ConnectionTopologyStatus::LinkDown),
+                node("disconnected", None, ConnectionTopologyStatus::Disconnected),
+                node(
+                    "disconnecting",
+                    None,
+                    ConnectionTopologyStatus::Disconnecting,
+                ),
+                node("error", None, ConnectionTopologyStatus::Error),
+                node("unknown", None, ConnectionTopologyStatus::Unknown),
             ],
             Vec::new(),
         );
 
         let layout = ConnectionTopologyLayout::from_snapshot(&snapshot);
-
-        assert_eq!(layout.nodes.len(), 1);
-        assert_eq!(layout.nodes[0].connection_id, "connected");
+        let visible_ids = layout
+            .nodes
+            .iter()
+            .map(|node| node.connection_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            visible_ids,
+            ["active", "connecting", "idle", "reconnecting"]
+        );
     }
 
     fn node(

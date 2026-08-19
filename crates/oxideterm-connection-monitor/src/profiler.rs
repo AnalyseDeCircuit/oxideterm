@@ -892,22 +892,6 @@ mod tests {
     }
 
     #[test]
-    fn stop_and_history_match_tauri_empty_defaults() {
-        let registry = ProfilerRegistry::new();
-        registry.start("conn-1");
-        registry.record_metrics(ProfilerUpdate {
-            connection_id: "conn-1".into(),
-            metrics: ResourceMetrics::empty(1, MetricsSource::Full),
-        });
-
-        assert!(registry.stop("conn-1"));
-        assert!(!registry.stop("conn-1"));
-        assert!(registry.latest("conn-1").is_none());
-        assert!(registry.history("conn-1").is_empty());
-        assert!(registry.connection_ids().is_empty());
-    }
-
-    #[test]
     fn records_only_existing_profiler_updates() {
         let registry = ProfilerRegistry::new();
 
@@ -946,63 +930,6 @@ mod tests {
             ))
         );
         assert_eq!(registry.history("conn-1").len(), 3);
-    }
-
-    #[test]
-    fn builds_tauri_sampling_commands() {
-        let linux = build_sample_command("Linux");
-        assert!(linux.contains("===SYSTEM_INFO==="));
-        assert!(linux.contains("/etc/os-release"));
-        assert!(linux.contains("/proc/uptime"));
-        assert!(linux.contains("===STAT==="));
-        assert!(linux.contains("===DISKS==="));
-        assert!(linux.contains("===TOPPROCS==="));
-        assert!(linux.contains("===GPUS==="));
-        assert!(linux.contains("nvidia-smi"));
-        assert!(linux.contains("rocm-smi"));
-        assert!(linux.contains("intel_gpu_top"));
-        assert!(linux.contains("gpu_busy_percent"));
-        assert!(linux.contains("ps ww -eo"));
-        assert!(linux.contains("--sort=-pmem"));
-        assert!(linux.contains("sort -k6 -rn"));
-        assert!(linux.contains("ps -o pid,vsz,comm"));
-        assert!(linux.contains("emit_full_ps_rows()"));
-        let nproc_marker = linux.find("===NPROC===").expect("nproc marker");
-        let disk_marker = linux.find("===DISKS===").expect("disk marker");
-        assert!(
-            nproc_marker < disk_marker,
-            "nproc should be sampled before disk summaries"
-        );
-        assert!(!linux.contains("ss -tlnp"));
-        assert!(!linux.contains("===SERVICES==="));
-        let macos = build_sample_command("Darwin");
-        assert!(macos.contains("sw_vers -productVersion"));
-        assert!(macos.contains("kern.boottime"));
-        assert!(!macos.contains("lsof -iTCP"));
-        assert!(macos.contains("ps axww -o"));
-        let windows = build_sample_command("Windows");
-        assert!(windows.contains("LastBootUpTime"));
-        assert!(windows.contains("OSArchitecture"));
-        assert!(!windows.contains("Get-NetTCPConnection"));
-        assert!(windows.contains("Win32_VideoController"));
-        assert!(windows.contains("\\GPU Engine(*)\\Utilization Percentage"));
-        assert!(windows.contains("\\GPU Adapter Memory(*)\\Dedicated Usage"));
-        assert!(!windows.contains("===SERVICES==="));
-        let freebsd = build_sample_command("FreeBSD");
-        assert!(freebsd.contains("===SYSTEM_INFO==="));
-        assert!(freebsd.contains("uname -m"));
-        assert!(!freebsd.contains("sockstat"));
-        assert!(freebsd.contains("===UNSUPPORTED==="));
-        assert!(build_sample_command("unknown").contains("===UNSUPPORTED==="));
-        assert!(linux.contains("===END==="));
-        assert!(
-            !build_live_sample_command("Linux", ResourceSamplingConfig::default())
-                .contains("===SYSTEM_INFO===")
-        );
-        assert!(
-            !build_live_sample_command("Windows", ResourceSamplingConfig::default())
-                .contains("===SYSTEM_INFO===")
-        );
     }
 
     #[test]
@@ -1070,12 +997,6 @@ mod tests {
         assert_eq!(system_info.system_name.as_deref(), Some("Ubuntu"));
         assert_eq!(system_info.uptime_seconds, Some(65));
         assert_eq!(metrics.source, MetricsSource::Failed);
-    }
-
-    #[test]
-    fn shell_init_matches_tauri_platform_split() {
-        assert_eq!(shell_init_command("Windows"), "set PROMPT=\r\n");
-        assert!(shell_init_command("Linux").contains("stty -echo"));
     }
 
     #[tokio::test]

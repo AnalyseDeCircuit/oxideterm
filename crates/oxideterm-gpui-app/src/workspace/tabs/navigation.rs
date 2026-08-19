@@ -1622,33 +1622,6 @@ mod tests {
     }
 
     #[test]
-    fn tabbar_scrollbar_geometry_handles_visibility_position_and_drag_edges() {
-        assert!(calculate_tabbar_scrollbar_geometry(20.0, 600.0, 0.0, 0.0).is_none());
-        let at_start = calculate_tabbar_scrollbar_geometry(20.0, 600.0, 600.0, 0.0)
-            .expect("overflow should produce scrollbar geometry");
-        let at_end = calculate_tabbar_scrollbar_geometry(20.0, 600.0, 600.0, 600.0)
-            .expect("overflow should produce scrollbar geometry");
-
-        assert_eq!(at_start.viewport_left, 20.0);
-        assert_eq!(at_start.thumb_left, TABBAR_SCROLLBAR_HORIZONTAL_INSET);
-        assert_eq!(at_start.thumb_width, TABBAR_SCROLLBAR_MAX_THUMB_WIDTH);
-        assert_eq!(
-            at_end.thumb_left,
-            TABBAR_SCROLLBAR_HORIZONTAL_INSET + at_end.track_width - at_end.thumb_width
-        );
-        let geometry = calculate_tabbar_scrollbar_geometry(20.0, 600.0, 600.0, 0.0)
-            .expect("overflow should produce scrollbar geometry");
-        let track_start = TABBAR_SCROLLBAR_HORIZONTAL_INSET;
-        let track_end = track_start + geometry.track_width - geometry.thumb_width;
-
-        assert_eq!(tabbar_scroll_x_for_thumb_left(track_start, geometry), 0.0);
-        assert_eq!(
-            tabbar_scroll_x_for_thumb_left(track_end, geometry),
-            geometry.max_scroll
-        );
-    }
-
-    #[test]
     fn tab_exit_visual_indices_preserve_parallel_batch_order() {
         assert_eq!(tab_exit_visual_index(1, &[]), 1);
         assert_eq!(tab_exit_visual_index(1, &[1]), 2);

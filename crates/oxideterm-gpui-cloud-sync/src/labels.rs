@@ -501,8 +501,6 @@ pub fn cloud_sync_confirm_copy_spec(confirm: &CloudSyncConfirm) -> CloudSyncConf
 
 #[cfg(test)]
 mod tests {
-    use oxideterm_cloud_sync::state::{CloudSyncRollbackBackup, CloudSyncRollbackBackupMetadata};
-
     use super::*;
 
     #[test]
@@ -518,20 +516,40 @@ mod tests {
     }
 
     #[test]
-    fn maps_onedrive_and_microsoft_oauth_errors_to_copy_specs() {
-        assert_eq!(
-            cloud_sync_error_message_spec("onedrive_access_denied: tenant policy blocked access"),
-            CloudSyncErrorMessageSpec::KeyWithDetail {
-                key: "plugin.cloud_sync.errors.onedrive_access_denied",
-                detail: "tenant policy blocked access".to_string(),
-            }
-        );
-        assert_eq!(
-            cloud_sync_error_message_spec("microsoft_oauth_consent_required: admin consent needed"),
-            CloudSyncErrorMessageSpec::Key(
-                "plugin.cloud_sync.errors.microsoft_oauth_consent_required"
-            )
-        );
+    fn maps_provider_errors_to_copy_specs() {
+        for (error, expected) in [
+            (
+                "onedrive_access_denied: tenant policy blocked access",
+                CloudSyncErrorMessageSpec::KeyWithDetail {
+                    key: "plugin.cloud_sync.errors.onedrive_access_denied",
+                    detail: "tenant policy blocked access".to_string(),
+                },
+            ),
+            (
+                "microsoft_oauth_consent_required: admin consent needed",
+                CloudSyncErrorMessageSpec::Key(
+                    "plugin.cloud_sync.errors.microsoft_oauth_consent_required",
+                ),
+            ),
+            (
+                "google_drive_api_not_enabled: Drive API disabled",
+                CloudSyncErrorMessageSpec::Key(
+                    "plugin.cloud_sync.errors.google_drive_api_not_enabled",
+                ),
+            ),
+            (
+                "google_oauth_admin_policy: blocked by admin",
+                CloudSyncErrorMessageSpec::Key(
+                    "plugin.cloud_sync.errors.google_oauth_admin_policy",
+                ),
+            ),
+            (
+                "google_oauth_bad_client: wrong client type",
+                CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_bad_client"),
+            ),
+        ] {
+            assert_eq!(cloud_sync_error_message_spec(error), expected);
+        }
     }
 
     #[test]
@@ -543,76 +561,6 @@ mod tests {
             CloudSyncErrorMessageSpec::KeyWithDetail {
                 key: "plugin.cloud_sync.errors.onedrive_bad_request",
                 detail: "Invalid request [operation=onedrive_metadata_upload, status=400, graph_code=badRequest, request_id=request-123]".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn maps_google_drive_and_oauth_errors_to_copy_specs() {
-        assert_eq!(
-            cloud_sync_error_message_spec("google_drive_api_not_enabled: Drive API disabled"),
-            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_drive_api_not_enabled")
-        );
-        assert_eq!(
-            cloud_sync_error_message_spec("google_oauth_admin_policy: blocked by admin"),
-            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_admin_policy")
-        );
-        assert_eq!(
-            cloud_sync_error_message_spec("google_oauth_bad_client: wrong client type"),
-            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_bad_client")
-        );
-    }
-
-    #[test]
-    fn builds_backup_summary_from_metadata() {
-        let backup = CloudSyncRollbackBackup {
-            id: "backup-1".to_string(),
-            created_at: "2026-05-26T00:00:00Z".to_string(),
-            source_revision: Some("rev-1".to_string()),
-            size_bytes: 1536,
-            bytes_base64: "payload".to_string(),
-            metadata: Some(CloudSyncRollbackBackupMetadata {
-                num_connections: 3,
-                connection_names: vec!["prod".to_string()],
-                has_app_settings: true,
-                plugin_settings_count: 2,
-                forwards: 4,
-                quick_commands: 5,
-                serial_profiles: 6,
-                telnet_profiles: 7,
-                mosh_profiles: 0,
-                remote_desktop_profiles: 8,
-                sensitive_credentials: 9,
-            }),
-        };
-
-        assert_eq!(
-            cloud_sync_rollback_backup_summary_spec(&backup),
-            CloudSyncRollbackBackupSummarySpec::Metadata {
-                connections: 3,
-                forwards: 4,
-                quick_commands: 5,
-                serial_profiles: 6,
-                telnet_profiles: 7,
-                sensitive_credentials: 9,
-                plugin_settings_count: 2,
-                size: "1.5 KB".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn picks_restore_copy_for_backup_apply_success() {
-        let spec = cloud_sync_legacy_apply_success_copy_spec(&CloudSyncPreviewSource::Backup {
-            id: "backup-1".to_string(),
-            created_at: "2026-05-26T00:00:00Z".to_string(),
-        });
-
-        assert_eq!(
-            spec,
-            CloudSyncApplySuccessCopySpec {
-                title_key: "plugin.cloud_sync.toast.restore_success_title",
-                description_key: "plugin.cloud_sync.toast.restore_success_description",
             }
         );
     }

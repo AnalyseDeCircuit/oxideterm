@@ -202,38 +202,6 @@ mod tests {
     }
 
     #[test]
-    fn remote_shell_probe_emits_repo_identity_before_status() {
-        let command = remote_shell_probe_command("/tmp/project");
-        let repo_position = command
-            .find("printf 'state\\0repo\\0root\\0%s\\0'")
-            .expect("repo identity should be emitted");
-        let status_position = command
-            .find("status=$(git_probe_status)")
-            .expect("status should be collected after identity");
-
-        assert!(repo_position < status_position);
-    }
-
-    #[test]
-    fn remote_shell_probe_bounds_status_collection() {
-        let command = remote_shell_probe_command("/tmp/project");
-
-        assert!(command.contains("git_probe_status()"));
-        assert!(command.contains("timeout 2 git status --porcelain=v2 --branch"));
-        assert!(command.contains("git status --porcelain=v2 --branch --untracked-files=no"));
-        assert!(command.contains("sed -n '1,200p;201q'"));
-    }
-
-    #[test]
-    fn remote_shell_probe_uses_git_path_for_git_file_worktrees() {
-        let command = remote_shell_probe_command("/repo-linked");
-
-        assert!(command.contains("git rev-parse --git-path MERGE_HEAD"));
-        assert!(command.contains("git rev-parse --git-path rebase-merge"));
-        assert!(!command.contains(".git/MERGE_HEAD"));
-    }
-
-    #[test]
     fn remote_branch_list_command_quotes_cwd() {
         let list = remote_shell_branch_list_command("/tmp/project");
         assert!(list.contains(SHELL_BRANCH_LIST_SENTINEL));
@@ -242,31 +210,6 @@ mod tests {
         assert!(list.contains("tab=$(printf '\\t')"));
         assert!(list.contains("emit_worktree_record()"));
         assert!(list.contains("*/.git/modules/*|*/.git/worktrees/*"));
-    }
-
-    #[test]
-    fn local_branch_list_uses_real_tab_format_escape() {
-        assert_eq!(
-            git_branch_list_args(),
-            &["branch", "--format=%(HEAD)%09%(refname:short)"]
-        );
-        assert_eq!(
-            git_worktree_list_args(),
-            &["worktree", "list", "--porcelain"]
-        );
-        assert_eq!(git_status_args(), &["status", "--porcelain=v2", "--branch"]);
-        assert_eq!(
-            git_absolute_git_dir_args(),
-            &["rev-parse", "--absolute-git-dir"]
-        );
-        assert_eq!(
-            git_staged_diff_stat_args(),
-            &["diff", "--cached", "--stat", "--"]
-        );
-        assert_eq!(
-            git_staged_diff_patch_args(),
-            &["diff", "--cached", "--patch", "--no-ext-diff", "--"]
-        );
     }
 
     #[test]

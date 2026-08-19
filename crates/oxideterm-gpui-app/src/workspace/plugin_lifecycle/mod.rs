@@ -72,10 +72,7 @@ use oxideterm_plugin_host_api::{
 };
 #[cfg(test)]
 use oxideterm_plugin_host_api::{
-    forwarding::{
-        native_plugin_forward_check_capability, native_plugin_forward_create_request,
-        native_plugin_forward_rule_snapshot,
-    },
+    forwarding::{native_plugin_forward_check_capability, native_plugin_forward_create_request},
     sftp::{
         native_plugin_sftp_check_capability, native_plugin_sftp_node_id_arg,
         native_plugin_sftp_path_arg,

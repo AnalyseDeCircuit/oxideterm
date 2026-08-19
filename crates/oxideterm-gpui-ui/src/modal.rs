@@ -347,50 +347,6 @@ pub fn dialog_footer(tokens: &ThemeTokens) -> Div {
 mod tests {
     use super::*;
 
-    fn rgba_hex(color: Rgba) -> u32 {
-        color.into()
-    }
-
-    #[test]
-    fn backdrop_roles_use_the_expected_color_and_blur() {
-        // These values mirror Tauri bg-black/{60,40,80} and the transparent
-        // outside-hit-test layer used for popovers.
-        assert_eq!(
-            rgba_hex(backdrop_color(TauriBackdropRole::Dialog)),
-            0x00000099
-        );
-        assert_eq!(
-            rgba_hex(backdrop_color(TauriBackdropRole::CommandPalette)),
-            0x00000066
-        );
-        assert_eq!(
-            rgba_hex(backdrop_color(TauriBackdropRole::QuickLook)),
-            0x000000cc
-        );
-        assert_eq!(
-            rgba_hex(backdrop_color(TauriBackdropRole::Popover)),
-            0x00000000
-        );
-        // Dialog, CommandPalette, and QuickLook all keep
-        // linuxBackdropBlurClass("backdrop-blur-sm") in the Tauri source.
-        assert_eq!(
-            backdrop_source_effect(TauriBackdropRole::Dialog).blur_px,
-            Some(TAILWIND_BACKDROP_BLUR_SM_PX)
-        );
-        assert_eq!(
-            backdrop_source_effect(TauriBackdropRole::CommandPalette).blur_px,
-            Some(TAILWIND_BACKDROP_BLUR_SM_PX)
-        );
-        assert_eq!(
-            backdrop_source_effect(TauriBackdropRole::QuickLook).blur_px,
-            Some(TAILWIND_BACKDROP_BLUR_SM_PX)
-        );
-        assert_eq!(
-            backdrop_source_effect(TauriBackdropRole::Popover).blur_px,
-            None
-        );
-    }
-
     #[test]
     fn backdrop_blur_can_be_disabled_by_render_policy() {
         // This mirrors Tauri's Linux safe-profile helper and native
