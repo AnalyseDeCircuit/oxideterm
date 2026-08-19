@@ -973,15 +973,21 @@ fn split_ssh_words(line: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut current = String::new();
     let mut in_quotes = false;
-    let mut escaped = false;
-    for ch in line.chars() {
-        if escaped {
-            current.push(ch);
-            escaped = false;
-            continue;
-        }
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
         match ch {
-            '\\' => escaped = true,
+            '\\' => {
+                // OpenSSH escaping is meaningful only for token delimiters here.
+                // Preserve Windows drive and UNC path separators verbatim.
+                if chars
+                    .peek()
+                    .is_some_and(|next| next.is_whitespace() || matches!(*next, '"' | '#'))
+                {
+                    current.push(chars.next().expect("peeked SSH config character"));
+                } else {
+                    current.push('\\');
+                }
+            }
             '"' => in_quotes = !in_quotes,
             ch if ch.is_whitespace() && !in_quotes => {
                 if !current.is_empty() {
@@ -1060,6 +1066,14 @@ mod tests {
         assert_eq!(
             split_ssh_words(strip_comment("HostName \"dev box\" # comment")),
             vec!["HostName", "dev box"]
+        );
+        assert_eq!(
+            split_ssh_words(r"IdentityFile C:\Users\alice\.ssh\id_ed25519"),
+            vec!["IdentityFile", r"C:\Users\alice\.ssh\id_ed25519"]
+        );
+        assert_eq!(
+            split_ssh_words(r"IdentityFile C:\Users\alice\My\ Key"),
+            vec!["IdentityFile", r"C:\Users\alice\My Key"]
         );
     }
 
