@@ -158,6 +158,7 @@ pub(in crate::workspace) enum NewConnectionSelect {
     UpstreamProxyProtocol,
     UpstreamProxyAuth,
     RemoteDesktopSshGateway,
+    LocalShell,
     SerialPort,
     SerialDataBits,
     SerialStopBits,

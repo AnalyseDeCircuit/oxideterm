@@ -126,6 +126,7 @@ pub enum SelectAnchorId {
     NewConnectionUpstreamProxyPolicy,
     NewConnectionUpstreamProxyProtocol,
     NewConnectionUpstreamProxyAuth,
+    NewConnectionLocalShell,
     NewConnectionSerialPort,
     NewConnectionSerialDataBits,
     NewConnectionSerialStopBits,
@@ -233,6 +234,7 @@ impl SelectAnchorId {
                 | Self::NewConnectionUpstreamProxyPolicy
                 | Self::NewConnectionUpstreamProxyProtocol
                 | Self::NewConnectionUpstreamProxyAuth
+                | Self::NewConnectionLocalShell
                 | Self::NewConnectionSerialPort
                 | Self::NewConnectionSerialDataBits
                 | Self::NewConnectionSerialStopBits

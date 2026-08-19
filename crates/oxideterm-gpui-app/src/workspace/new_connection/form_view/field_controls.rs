@@ -53,7 +53,7 @@ impl ConnectionFormSection {
             Self::RemoteFeatures => "modals.new_connection.remote_desktop_features_title",
             Self::SerialParameters => "modals.new_connection.serial_section_title",
             Self::MoshOptions => "mosh.form.advanced",
-            Self::LocalShell => "settings_view.local_terminal.select_shell",
+            Self::LocalShell => "settings_view.local_terminal.available_shells",
         }
     }
 
@@ -422,6 +422,7 @@ impl WorkspaceApp {
             NewConnectionSelect::UpstreamProxyAuth => {
                 SelectAnchorId::NewConnectionUpstreamProxyAuth
             }
+            NewConnectionSelect::LocalShell => SelectAnchorId::NewConnectionLocalShell,
             NewConnectionSelect::SerialPort => SelectAnchorId::NewConnectionSerialPort,
             NewConnectionSelect::SerialDataBits => SelectAnchorId::NewConnectionSerialDataBits,
             NewConnectionSelect::SerialStopBits => SelectAnchorId::NewConnectionSerialStopBits,
@@ -1202,6 +1203,7 @@ impl WorkspaceApp {
                     | NewConnectionSelect::UpstreamProxyPolicy
                     | NewConnectionSelect::UpstreamProxyProtocol
                     | NewConnectionSelect::UpstreamProxyAuth
+                    | NewConnectionSelect::LocalShell
                     | NewConnectionSelect::SerialPort
                     | NewConnectionSelect::SerialDataBits
                     | NewConnectionSelect::SerialStopBits
@@ -2303,14 +2305,12 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_local_terminal_form_branch(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = self.tokens.ui;
         let selected_shell_id = self
             .connection_form_state(cx)
             .form
             .as_ref()
             .and_then(|form| form.local_shell_id.as_deref());
         let resolved_shell = self.resolved_local_shell(selected_shell_id);
-        let resolved_shell_id = resolved_shell.as_ref().map(|shell| shell.id.as_str());
         let default_shell_id = self
             .settings_store
             .settings()
@@ -2318,111 +2318,50 @@ impl WorkspaceApp {
             .default_shell_id
             .as_deref();
         let shells = self.effective_local_shells_for_settings(self.settings_store.settings());
-
-        let mut shell_list = div()
-            .w_full()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg_panel))
+        let selected_label = resolved_shell
+            .as_ref()
+            .map(|shell| {
+                if default_shell_id == Some(shell.id.as_str()) {
+                    format!(
+                        "{} · {}",
+                        shell.label,
+                        self.i18n.t("settings_view.local_terminal.default")
+                    )
+                } else {
+                    shell.label.clone()
+                }
+            })
+            .unwrap_or_else(|| self.i18n.t("settings_view.local_terminal.select_shell"));
+        let selected_path = resolved_shell.as_ref().map(|shell| {
+            format!(
+                "{}: {}",
+                self.i18n.t("settings_view.local_terminal.path"),
+                shell.path.display()
+            )
+        });
+        let shell_field = div()
             .flex()
             .flex_col()
-            .overflow_hidden();
-        for (index, shell) in shells.into_iter().enumerate() {
-            let shell_id = shell.id.clone();
-            let selected = resolved_shell_id == Some(shell.id.as_str());
-            let is_default = default_shell_id == Some(shell.id.as_str());
-            shell_list = shell_list.child(
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .when(index > 0, |row| {
-                        row.border_t_1().border_color(rgb(theme.border))
-                    })
-                    .bg(if selected {
-                        rgba((theme.accent << 8) | 0x14)
-                    } else {
-                        rgba((theme.bg_panel << 8) | 0x00)
-                    })
-                    .hover(move |row| row.bg(rgb(theme.bg_hover)))
-                    .px(px(self.tokens.spacing.three))
-                    .py(px(10.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(self.tokens.spacing.three))
-                    .cursor_pointer()
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Terminal,
-                        17.0,
-                        rgb(if selected {
-                            theme.accent
-                        } else {
-                            theme.text_muted
-                        }),
-                    ))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap(px(2.0))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(8.0))
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(theme.text))
-                                    .child(shell.label)
-                                    .when(is_default, |label| {
-                                        label.child(self.text_badge(
-                                            self.i18n.t("settings_view.local_terminal.default"),
-                                            theme.warning,
-                                        ))
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(theme.text_muted))
-                                    .child(shell.path.display().to_string()),
-                            ),
-                    )
-                    .when(selected, |row| {
-                        row.child(Self::render_lucide_icon(
-                            LucideIcon::Check,
-                            16.0,
-                            rgb(theme.accent),
-                        ))
-                    })
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.update_connection_form_state(cx, |state| {
-                                if let Some(form) = state.form.as_mut() {
-                                    form.local_shell_id = Some(shell_id.clone());
-                                    form.field_focused = false;
-                                    clear_connection_selection(form);
-                                    form.error = None;
-                                }
-                            });
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    ),
-            );
-        }
+            .gap(px(self.tokens.spacing.two))
+            .child(form_field(
+                &self.tokens,
+                self.i18n.t("settings_view.local_terminal.select_shell"),
+                self.render_new_connection_select_control(
+                    NewConnectionSelect::LocalShell,
+                    selected_label,
+                    resolved_shell.is_none(),
+                    shells.is_empty(),
+                    cx,
+                ),
+            ))
+            .when_some(selected_path, |field, path| {
+                field.child(self.render_connection_hint(path))
+            })
+            .into_any_element();
 
-        // Local terminals have one meaningful choice and inherit all other
-        // behavior from application settings, so keep one collapsible section.
-        self.render_connection_form_section(
-            ConnectionFormSection::LocalShell,
-            shell_list.into_any_element(),
-            cx,
-        )
+        // Match the shared connection form hierarchy while keeping the one-shot
+        // local terminal choice compact and backed by application settings.
+        self.render_connection_form_section(ConnectionFormSection::LocalShell, shell_field, cx)
     }
 
     pub(super) fn render_wsl_graphics_form_branch(&self, _cx: &mut Context<Self>) -> AnyElement {

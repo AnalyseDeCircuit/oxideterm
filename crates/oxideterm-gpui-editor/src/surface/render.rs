@@ -659,11 +659,11 @@ impl TextEditorView {
             row = row.child(
                 div()
                     .absolute()
-                    .top(px(line_height * 0.12))
+                    // Keep adjacent visual rows connected like a native editor selection.
+                    .top(px(0.0))
                     .left(px(left))
                     .w(px(width))
-                    .h(px(line_height * 0.76))
-                    .rounded(px(CM_SELECTION_RADIUS))
+                    .h(px(line_height))
                     .bg(rgba(
                         (self.appearance.accent_hex << 8) | CM_SELECTION_ACCENT_ALPHA,
                     )),
