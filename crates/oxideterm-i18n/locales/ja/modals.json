@@ -359,6 +359,8 @@
       "local_terminal_detail": "このセッションはすぐに開かれ、保存済み接続には追加されません。",
       "local_terminal_open": "ターミナルを開く",
       "transport_ssh": "SSH ホスト",
+      "advanced_group": "高度な接続",
+      "transport_standalone_sftp": "独立 SFTP",
       "transport_telnet": "Telnet",
       "transport_serial": "シリアル",
       "transport_rdp": "RDP",

@@ -359,6 +359,8 @@
       "local_terminal_detail": "Cette session s’ouvre immédiatement et n’est pas ajoutée aux connexions enregistrées.",
       "local_terminal_open": "Ouvrir le terminal",
       "transport_ssh": "Hôte SSH",
+      "advanced_group": "Connexions avancées",
+      "transport_standalone_sftp": "SFTP indépendant",
       "transport_telnet": "Telnet",
       "transport_serial": "Série",
       "transport_rdp": "RDP",

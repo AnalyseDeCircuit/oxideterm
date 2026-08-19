@@ -811,10 +811,18 @@ mod tests {
     fn terminal_input_broadcast_does_not_reenter_the_caller_entity(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_window, _cx| BroadcastRouteTestRoot);
         let source = cx.update(|window, cx| {
-            cx.new(|cx| TerminalPane::new(window, cx).expect("source terminal pane"))
+            cx.new(|cx| {
+                // Playback panes exercise the real input route without spawning a PTY thread
+                // outside GPUI's deterministic test scheduler.
+                TerminalPane::new_recording_playback(80, 24, Default::default(), window, cx)
+                    .expect("source terminal pane")
+            })
         });
         let target = cx.update(|window, cx| {
-            cx.new(|cx| TerminalPane::new(window, cx).expect("target terminal pane"))
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(80, 24, Default::default(), window, cx)
+                    .expect("target terminal pane")
+            })
         });
         let delivered = Arc::new(std::sync::Mutex::new(Vec::<Vec<u8>>::new()));
         let delivered_for_interceptor = Arc::clone(&delivered);

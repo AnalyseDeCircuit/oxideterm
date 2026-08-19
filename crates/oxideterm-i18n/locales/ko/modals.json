@@ -359,6 +359,8 @@
       "local_terminal_detail": "이 세션은 즉시 열리며 저장된 연결에 추가되지 않습니다.",
       "local_terminal_open": "터미널 열기",
       "transport_ssh": "SSH 호스트",
+      "advanced_group": "고급 연결",
+      "transport_standalone_sftp": "독립 SFTP",
       "transport_telnet": "Telnet",
       "transport_serial": "시리얼",
       "transport_rdp": "RDP",

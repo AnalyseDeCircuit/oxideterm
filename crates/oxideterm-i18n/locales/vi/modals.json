@@ -359,6 +359,8 @@
       "local_terminal_detail": "Phiên này được mở ngay và không được thêm vào các kết nối đã lưu.",
       "local_terminal_open": "Mở terminal",
       "transport_ssh": "Máy chủ SSH",
+      "advanced_group": "Kết nối nâng cao",
+      "transport_standalone_sftp": "SFTP độc lập",
       "transport_telnet": "Telnet",
       "transport_serial": "Serial",
       "transport_rdp": "RDP",
