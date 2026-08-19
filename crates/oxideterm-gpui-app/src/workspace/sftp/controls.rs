@@ -117,6 +117,12 @@ impl WorkspaceApp {
             cx.listener(move |this, _event, _window, cx| {
                 match pane {
                     SftpPane::Local => {
+                        if this.sftp_pair_primary_remote_id(cx).is_some() {
+                            this.request_sftp_pair_primary_load(cx);
+                            cx.stop_propagation();
+                            cx.notify();
+                            return;
+                        }
                         // Local refresh only re-reads the visible directory and
                         // must not disturb the node-owned remote SFTP session.
                         let path = this.sftp_view.read(cx).local_path.clone();

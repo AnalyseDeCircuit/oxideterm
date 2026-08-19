@@ -11,6 +11,7 @@ struct ConnectionFormModalSnapshot {
     password_present: bool,
     remote_desktop_profile_id: Option<String>,
     mosh_profile_id: Option<String>,
+    standalone_sftp_profile_id: Option<String>,
     serial_profile_id: Option<String>,
     telnet_profile_id: Option<String>,
     saved_password_keychain_id: Option<String>,
@@ -44,6 +45,8 @@ struct ConnectionFormModalSnapshot {
     mosh_udp_host: String,
     mosh_udp_port: String,
     mosh_locale: String,
+    sftp_initial_remote_path: String,
+    connect_timeout_seconds: u64,
 }
 
 impl ConnectionFormModalSnapshot {
@@ -58,6 +61,7 @@ impl ConnectionFormModalSnapshot {
             password_present: !form.password.is_empty(),
             remote_desktop_profile_id: form.remote_desktop_profile_id.clone(),
             mosh_profile_id: form.mosh_profile_id.clone(),
+            standalone_sftp_profile_id: form.standalone_sftp_profile_id.clone(),
             serial_profile_id: form.serial_profile_id.clone(),
             telnet_profile_id: form.telnet_profile_id.clone(),
             saved_password_keychain_id: form.saved_password_keychain_id.clone(),
@@ -92,6 +96,8 @@ impl ConnectionFormModalSnapshot {
             mosh_udp_host: form.mosh_udp_host.clone(),
             mosh_udp_port: form.mosh_udp_port.clone(),
             mosh_locale: form.mosh_locale.clone(),
+            sftp_initial_remote_path: form.sftp_initial_remote_path.clone(),
+            connect_timeout_seconds: form.connect_timeout_seconds,
         }
     }
 }
@@ -128,9 +134,13 @@ impl WorkspaceApp {
         let mosh_edit_mode = form.mosh_profile_id.is_some();
         let serial_edit_mode = form.serial_profile_id.is_some();
         let telnet_edit_mode = form.telnet_profile_id.is_some();
+        let standalone_sftp_edit_mode = form.standalone_sftp_profile_id.is_some();
         // Saved non-SSH profiles edit persisted assets without acquiring a runtime owner.
-        let saved_profile_edit_mode =
-            remote_desktop_edit_mode || mosh_edit_mode || serial_edit_mode || telnet_edit_mode;
+        let saved_profile_edit_mode = remote_desktop_edit_mode
+            || mosh_edit_mode
+            || serial_edit_mode
+            || telnet_edit_mode
+            || standalone_sftp_edit_mode;
         let drill_down_mode = self
             .connection_form_state(cx)
             .drill_down_parent_node_id
@@ -157,6 +167,18 @@ impl WorkspaceApp {
             && !edit_properties_mode
             && !drill_down_mode
             && form.transport == NewConnectionTransport::Mosh;
+        let standalone_sftp_mode = !prompt_mode
+            && !duplicate_mode
+            && !edit_properties_mode
+            && !drill_down_mode
+            && form.transport == NewConnectionTransport::StandaloneSftp;
+        if standalone_sftp_mode {
+            return self.render_standalone_sftp_connection_modal(
+                window,
+                !saved_profile_edit_mode,
+                cx,
+            );
+        }
         let remote_desktop_protocol =
             if !prompt_mode && !duplicate_mode && !edit_properties_mode && !drill_down_mode {
                 match form.transport {
@@ -182,7 +204,8 @@ impl WorkspaceApp {
             && !local_transport_mode
             && !remote_desktop_mode
             && !wsl_graphics_mode
-            && !mosh_mode;
+            && !mosh_mode
+            && !standalone_sftp_mode;
         let shows_transport_selector = !prompt_mode
             && !duplicate_mode
             && !edit_properties_mode
@@ -205,6 +228,8 @@ impl WorkspaceApp {
             self.i18n.t("sessionManager.edit_properties.title")
         } else if mosh_mode {
             self.i18n.t("mosh.form.title")
+        } else if standalone_sftp_mode {
+            self.i18n.t("sftp.standalone.form_title")
         } else {
             self.i18n.t("ssh.form.title")
         };
@@ -235,6 +260,8 @@ impl WorkspaceApp {
             self.i18n.t("modals.new_connection.telnet_description")
         } else if mosh_mode {
             self.i18n.t("mosh.form.description")
+        } else if standalone_sftp_mode {
+            self.i18n.t("sftp.standalone.form_description")
         } else if serial_mode {
             self.i18n.t("modals.new_connection.serial_description")
         } else if remote_desktop_protocol
@@ -396,8 +423,27 @@ impl WorkspaceApp {
                                                 && !remote_desktop_mode,
                                             |content| {
                                                 content
+                                .when(standalone_sftp_mode, |content| {
+                                    content.child(
+                                        div()
+                                            .p_3()
+                                            .rounded(px(self.tokens.radii.md))
+                                            .border_1()
+                                            .border_color(rgba(
+                                                (theme.warning << 8)
+                                                    | TAURI_PROMPT_FEEDBACK_BORDER_ALPHA,
+                                            ))
+                                            .bg(rgba(
+                                                (theme.warning << 8)
+                                                    | TAURI_PROMPT_FEEDBACK_ALPHA,
+                                            ))
+                                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                                            .text_color(rgb(theme.text))
+                                            .child(self.i18n.t("sftp.standalone.usage_notice")),
+                                    )
+                                })
                                 .when(
-                                    (ssh_submission_mode || mosh_mode)
+                                    (ssh_submission_mode || mosh_mode || standalone_sftp_mode)
                                         && !prompt_mode
                                         && !drill_down_mode,
                                     |content| {
@@ -414,7 +460,10 @@ impl WorkspaceApp {
                                             cx,
                                         ))
                                         .child(self.render_connection_group_select(
-                                            if edit_properties_mode || mosh_edit_mode {
+                                            if edit_properties_mode
+                                                || mosh_edit_mode
+                                                || standalone_sftp_edit_mode
+                                            {
                                                 self.i18n.t("sessionManager.edit_properties.group")
                                             } else {
                                                 self.i18n.t("ssh.form.group")
@@ -430,9 +479,18 @@ impl WorkspaceApp {
                                                 .gap(px(self.tokens.metrics.form_host_port_gap))
                                                 .child(div().flex_1().child(
                                                     self.render_connection_field(
-                                                        self.i18n.t("ssh.form.host"),
+                                                        if standalone_sftp_mode {
+                                                            self.i18n.t("sftp.standalone.host")
+                                                        } else {
+                                                            self.i18n.t("ssh.form.host")
+                                                        },
                                                         &form.host,
-                                                        self.i18n.t("ssh.form.host_placeholder"),
+                                                        if standalone_sftp_mode {
+                                                            self.i18n
+                                                                .t("sftp.standalone.host_placeholder")
+                                                        } else {
+                                                            self.i18n.t("ssh.form.host_placeholder")
+                                                        },
                                                         NewConnectionField::Host,
                                                         false,
                                                         cx,
@@ -442,7 +500,11 @@ impl WorkspaceApp {
                                                     div()
                                                         .w(px(self.tokens.metrics.form_port_width))
                                                         .child(self.render_connection_field(
-                                                            self.i18n.t("ssh.form.port"),
+                                                            if standalone_sftp_mode {
+                                                                self.i18n.t("sftp.standalone.port")
+                                                            } else {
+                                                                self.i18n.t("ssh.form.port")
+                                                            },
                                                             &form.port,
                                                             SSH_DEFAULT_PORT_TEXT.to_string(),
                                                             NewConnectionField::Port,
@@ -541,6 +603,7 @@ impl WorkspaceApp {
                                             AuthSelectorContext::DrillDown
                                         } else if mode == NewConnectionFormMode::EditProperties
                                             || mosh_edit_mode
+                                            || standalone_sftp_edit_mode
                                         {
                                             AuthSelectorContext::EditProperties
                                         } else {
@@ -604,7 +667,7 @@ impl WorkspaceApp {
                                             NewConnectionField::Password,
                                             cx,
                                         ))
-                                    } else if mosh_edit_mode {
+                                    } else if mosh_edit_mode || standalone_sftp_edit_mode {
                                         content
                                             .child(self.render_connection_secret_field(
                                                 self.i18n.t("ssh.form.password"),
@@ -641,7 +704,9 @@ impl WorkspaceApp {
                                 .when(
                                     form.auth_tab == SshAuthTab::DefaultKey
                                         && !prompt_mode
-                                        && !edit_properties_mode,
+                                        && !edit_properties_mode
+                                        && !mosh_edit_mode
+                                        && !standalone_sftp_edit_mode,
                                     |content| {
                                         content
                                             .child(self.render_connection_hint(
@@ -659,12 +724,16 @@ impl WorkspaceApp {
                                     form.auth_tab == SshAuthTab::SshKey
                                         || ((prompt_mode
                                             || edit_properties_mode
-                                            || mosh_edit_mode)
+                                            || mosh_edit_mode
+                                            || standalone_sftp_edit_mode)
                                             && form.auth_tab == SshAuthTab::DefaultKey),
                                     |content| {
                                         let key_label = if drill_down_mode {
                                             self.i18n.t("ssh.drill_down.key_path")
-                                        } else if edit_properties_mode || mosh_edit_mode {
+                                        } else if edit_properties_mode
+                                            || mosh_edit_mode
+                                            || standalone_sftp_edit_mode
+                                        {
                                             self.i18n.t("sessionManager.edit_properties.key_path")
                                         } else {
                                             self.i18n.t("ssh.form.key_file")
@@ -704,13 +773,18 @@ impl WorkspaceApp {
                                                 NewConnectionField::Passphrase,
                                                 cx,
                                             ))
-                                            .when(edit_properties_mode || mosh_edit_mode, |content| {
-                                                content.child(self.render_connection_hint(
-                                                    self.i18n.t(
-                                                        "sessionManager.edit_properties.passphrase_hint",
-                                                    ),
-                                                ))
-                                            })
+                                            .when(
+                                                edit_properties_mode
+                                                    || mosh_edit_mode
+                                                    || standalone_sftp_edit_mode,
+                                                |content| {
+                                                    content.child(self.render_connection_hint(
+                                                        self.i18n.t(
+                                                            "sessionManager.edit_properties.passphrase_hint",
+                                                        ),
+                                                    ))
+                                                },
+                                            )
                                     },
                                 )
                                 .when(form.auth_tab == SshAuthTab::ManagedKey, |content| {
@@ -782,13 +856,18 @@ impl WorkspaceApp {
                                             NewConnectionField::Passphrase,
                                             cx,
                                         ))
-                                        .when(edit_properties_mode || mosh_edit_mode, |content| {
-                                            content.child(self.render_connection_hint(
-                                                self.i18n.t(
-                                                    "sessionManager.edit_properties.passphrase_hint",
-                                                ),
-                                            ))
-                                        })
+                                        .when(
+                                            edit_properties_mode
+                                                || mosh_edit_mode
+                                                || standalone_sftp_edit_mode,
+                                            |content| {
+                                                content.child(self.render_connection_hint(
+                                                    self.i18n.t(
+                                                        "sessionManager.edit_properties.passphrase_hint",
+                                                    ),
+                                                ))
+                                            },
+                                        )
                                 })
                                 .when(form.auth_tab == SshAuthTab::Agent, |content| {
                                     let content = content
@@ -848,7 +927,7 @@ impl WorkspaceApp {
                                     },
                                 )
                                 .into_any_element();
-                                    if (ssh_submission_mode || mosh_mode)
+                                    if (ssh_submission_mode || mosh_mode || standalone_sftp_mode)
                                         && !prompt_mode
                                         && !drill_down_mode
                                     {
@@ -861,7 +940,12 @@ impl WorkspaceApp {
                                         authentication
                                     }
                                 })
-                                .when(!prompt_mode && !drill_down_mode && !mosh_mode, |content| {
+                                .when(
+                                    !prompt_mode
+                                        && !drill_down_mode
+                                        && !mosh_mode
+                                        && !standalone_sftp_mode,
+                                    |content| {
                                     let route_body = div()
                                         .flex()
                                         .flex_col()
@@ -870,14 +954,15 @@ impl WorkspaceApp {
                                             form.proxy_command_enabled,
                                             &form.proxy_command,
                                             form.proxy_command_configured,
+                                            false,
                                             cx,
                                         ))
                                         // ProxyCommand replaces the regular route without erasing
                                         // its saved upstream-proxy or jump-server configuration.
                                         .when(!form.proxy_command_enabled, |route| {
                                             route
-                                                .child(self.render_upstream_proxy_policy_section(cx))
-                                                .child(self.render_proxy_chain_section(cx))
+                                                .child(self.render_upstream_proxy_policy_section(false, cx))
+                                                .child(self.render_proxy_chain_section(false, cx))
                                         })
                                         .into_any_element();
                                     let ssh_options_body = self.render_connection_ssh_options(
@@ -917,6 +1002,42 @@ impl WorkspaceApp {
                                         .child(self.render_connection_form_section(
                                             ConnectionFormSection::Terminal,
                                             terminal_body,
+                                            cx,
+                                        ))
+                                    },
+                                )
+                                .when(standalone_sftp_mode, |content| {
+                                    let route_body = div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(self.tokens.metrics.modal_section_gap))
+                                        .child(self.render_proxy_command_section(
+                                            form.proxy_command_enabled,
+                                            &form.proxy_command,
+                                            form.proxy_command_configured,
+                                            false,
+                                            cx,
+                                        ))
+                                        .when(!form.proxy_command_enabled, |route| {
+                                            route
+                                                .child(self.render_upstream_proxy_policy_section(false, cx))
+                                                .child(self.render_proxy_chain_section(false, cx))
+                                        })
+                                        .into_any_element();
+                                    let sftp_options = self.render_standalone_sftp_options(
+                                        &form.sftp_initial_remote_path,
+                                        form.connect_timeout_seconds,
+                                        cx,
+                                    );
+                                    content
+                                        .child(self.render_connection_form_section(
+                                            ConnectionFormSection::Route,
+                                            route_body,
+                                            cx,
+                                        ))
+                                        .child(self.render_connection_form_section(
+                                            ConnectionFormSection::SftpOptions,
+                                            sftp_options,
                                             cx,
                                         ))
                                 })
@@ -1044,7 +1165,7 @@ impl WorkspaceApp {
                             !edit_properties_mode
                                 && self.connection_form_state(cx).saved_connection_prompt_action.is_none()
                                 && !drill_down_mode
-                                && ssh_submission_mode,
+                                && (ssh_submission_mode || standalone_sftp_mode),
                             |footer| {
                                 footer.child(self.render_connection_button(
                                     self.i18n.t("ssh.form.test"),
@@ -1074,6 +1195,8 @@ impl WorkspaceApp {
                                     .child(self.render_connection_button(
                                         if local_transport_mode {
                                             self.i18n.t("modals.new_connection.local_open")
+                                        } else if standalone_sftp_mode {
+                                            self.i18n.t("sftp.standalone.open")
                                         } else if drill_down_mode {
                                             self.i18n.t("ssh.drill_down.connect")
                                         } else {
@@ -1087,6 +1210,8 @@ impl WorkspaceApp {
                                     .child(self.render_connection_button(
                                         if local_transport_mode {
                                             self.i18n.t("modals.new_connection.local_save_and_open")
+                                        } else if standalone_sftp_mode {
+                                            self.i18n.t("sftp.standalone.save_and_open")
                                         } else if form.pending && drill_down_mode {
                                             self.i18n.t("ssh.drill_down.connecting")
                                         } else {

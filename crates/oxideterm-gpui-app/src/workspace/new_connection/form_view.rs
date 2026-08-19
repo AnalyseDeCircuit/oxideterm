@@ -8,8 +8,8 @@ use super::{
     ConnectionFormState,
     form_state::{
         CONNECTION_NOTES_LINE_HEIGHT, CONNECTION_NOTES_MIN_HEIGHT,
-        CONNECTION_NOTES_VERTICAL_PADDING, NewConnectionField, NewConnectionForm,
-        NewConnectionFormMode, NewConnectionProxyHop, NewConnectionSelect,
+        CONNECTION_NOTES_VERTICAL_PADDING, ConnectionRouteTarget, NewConnectionField,
+        NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop, NewConnectionSelect,
         NewConnectionSubmitAction, NewConnectionTransport, NewConnectionUpstreamProxyAuth,
         NewConnectionUpstreamProxyPolicy, RDP_DEFAULT_PORT_TEXT, RemoteDesktopSessionFeature,
         RemoteDesktopVncPreference, SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction,
@@ -21,7 +21,7 @@ use super::{
         connection_icon_field_visible, connection_secret_field_visible, current_connection_field,
         default_auth_tab_for_family, insert_text_into_current_connection_field,
         key_source_from_tab, new_connection_form_mode, next_connection_field,
-        next_jump_connection_field, remote_desktop_feature_selected,
+        next_jump_connection_field, next_standalone_sftp_field, remote_desktop_feature_selected,
         remote_desktop_feature_supported, remote_desktop_vnc_preference_selected,
         select_current_connection_field, text_from_keystroke,
         toggle_connection_secret_field_visibility, toggle_remote_desktop_feature,
@@ -40,7 +40,7 @@ use gpui::Div;
 use oxideterm_connections::{
     ConnectionTerminalBackspaceSequence, ConnectionTerminalDeleteSequence,
     ConnectionTerminalEncoding, ConnectionX11ForwardingMode, MoshIpFamily, MoshPredictionMode,
-    SavedUpstreamProxyProtocol,
+    SavedUpstreamProxyProtocol, StandaloneSftpTransferMode,
 };
 use oxideterm_gpui_settings_view::{
     terminal_backspace_sequence_label, terminal_delete_sequence_label, terminal_encoding_label,
@@ -74,6 +74,7 @@ use oxideterm_settings_model::{settings_multiline_line_ranges, settings_multilin
 mod field_controls;
 mod form_modal;
 mod proxy_chain_view;
+mod standalone_sftp_modal;
 
 use field_controls::{AuthSelectorContext, ConnectionFormSection, serial_port_display_label};
 
@@ -213,6 +214,11 @@ impl WorkspaceApp {
                     | NewConnectionField::Username
                     | NewConnectionField::Group
                     | NewConnectionField::Notes
+                    | NewConnectionField::InitialRemotePath
+                    | NewConnectionField::StandaloneSftpSecondaryHost
+                    | NewConnectionField::StandaloneSftpSecondaryUsername
+                    | NewConnectionField::StandaloneSftpSecondaryInitialRemotePath
+                    | NewConnectionField::StandaloneSftpSecondaryIdentityAgent
                     | NewConnectionField::ProxyCommand
                     | NewConnectionField::Color
                     | NewConnectionField::IdentityAgent
@@ -273,6 +279,8 @@ impl WorkspaceApp {
                             jump_form.auth_tab,
                             !modifiers.shift,
                         )
+                    } else if form.transport == NewConnectionTransport::StandaloneSftp {
+                        next_standalone_sftp_field(form, !modifiers.shift)
                     } else {
                         next_connection_field(
                             form.focused_field,

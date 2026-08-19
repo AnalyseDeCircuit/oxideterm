@@ -359,6 +359,8 @@
       "local_terminal_detail": "此会话将立即打开，不会添加到已保存连接。",
       "local_terminal_open": "打开终端",
       "transport_ssh": "SSH 主机",
+      "advanced_group": "高级连接",
+      "transport_standalone_sftp": "独立 SFTP",
       "transport_telnet": "Telnet",
       "transport_serial": "串口",
       "transport_rdp": "RDP",

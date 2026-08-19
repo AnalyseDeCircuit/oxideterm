@@ -3,7 +3,7 @@ use super::*;
 pub(in crate::workspace::sftp) struct SftpTransferLaunch {
     id: u64,
     transfer_id: String,
-    node_id: NodeId,
+    remote_id: SftpRemoteId,
     direction: SftpTransferDirection,
     is_directory: bool,
     local_path: String,
@@ -86,25 +86,24 @@ impl SftpWorkspaceEntity {
 
     pub(in crate::workspace::sftp) fn begin_incomplete_transfer_load(
         &mut self,
-        node_id: NodeId,
+        remote_id: SftpRemoteId,
     ) -> bool {
         if self.incomplete_load_inflight {
-            if self.incomplete_load_node.as_ref() != Some(&node_id) {
-                self.incomplete_load_pending_node = Some(node_id);
+            if self.incomplete_load_remote.as_ref() != Some(&remote_id) {
+                self.incomplete_load_pending_remote = Some(remote_id);
             }
             return false;
         }
         self.incomplete_load_inflight = true;
-        self.incomplete_load_node = Some(node_id);
+        self.incomplete_load_remote = Some(remote_id);
         true
     }
 
-    fn take_incomplete_transfer_for_resume(
+    fn take_incomplete_progress_for_resume(
         &mut self,
-        node_id: NodeId,
         transfer_id: &str,
         cx: &mut Context<Self>,
-    ) -> Option<SftpTransferLaunch> {
+    ) -> Option<StoredTransferProgress> {
         let index = self
             .incomplete_transfers
             .iter()
@@ -116,27 +115,26 @@ impl SftpWorkspaceEntity {
         if self.incomplete_transfers.is_empty() {
             self.show_incomplete = false;
         }
-        let launch = self.prepare_resumed_transfer(node_id, progress, true);
         cx.notify();
-        Some(launch)
+        Some(progress)
     }
 
     pub(in crate::workspace::sftp) fn prepare_reconnect_resume(
         &mut self,
-        node_id: NodeId,
+        remote_id: SftpRemoteId,
         progress: StoredTransferProgress,
         show_in_current_view: bool,
     ) -> Option<SftpTransferLaunch> {
         if !progress.is_incomplete() || !progress.protocol.supports_restart_resume() {
             return None;
         }
-        let launch = self.prepare_resumed_transfer(node_id, progress, show_in_current_view);
+        let launch = self.prepare_resumed_transfer(remote_id, progress, show_in_current_view);
         Some(launch)
     }
 
     fn prepare_resumed_transfer(
         &mut self,
-        node_id: NodeId,
+        remote_id: SftpRemoteId,
         progress: StoredTransferProgress,
         show_in_current_view: bool,
     ) -> SftpTransferLaunch {
@@ -175,7 +173,7 @@ impl SftpWorkspaceEntity {
                 id,
                 transfer_id: transfer_id.clone(),
                 batch_id: None,
-                node_id: node_id.clone(),
+                remote_id: remote_id.clone(),
                 name: if is_directory {
                     format!("{name}/")
                 } else {
@@ -196,7 +194,7 @@ impl SftpWorkspaceEntity {
         SftpTransferLaunch {
             id,
             transfer_id,
-            node_id,
+            remote_id,
             direction,
             is_directory,
             local_path,
@@ -251,9 +249,9 @@ impl SftpWorkspaceEntity {
 
     pub(in crate::workspace::sftp) fn upsert_background_transfer_snapshot(
         &mut self,
+        remote_id: SftpRemoteId,
         snapshot: BackgroundTransferSnapshot,
     ) {
-        let node_id = NodeId::new(snapshot.node_id);
         let direction = match snapshot.direction {
             BackgroundTransferDirection::Upload => SftpTransferDirection::Upload,
             BackgroundTransferDirection::Download => SftpTransferDirection::Download,
@@ -265,7 +263,7 @@ impl SftpWorkspaceEntity {
             .iter_mut()
             .find(|item| item.transfer_id == snapshot.id)
         {
-            item.node_id = node_id;
+            item.remote_id = remote_id;
             item.name = snapshot.name;
             item.local_path = snapshot.local_path;
             item.remote_path = snapshot.remote_path;
@@ -288,7 +286,7 @@ impl SftpWorkspaceEntity {
             id,
             transfer_id: snapshot.id,
             batch_id: None,
-            node_id,
+            remote_id,
             name: snapshot.name,
             local_path: snapshot.local_path,
             remote_path: snapshot.remote_path,
@@ -302,15 +300,15 @@ impl SftpWorkspaceEntity {
         });
     }
 
-    fn interrupt_transfers_by_node(
+    fn interrupt_transfers_by_remote(
         &mut self,
-        node_id: &NodeId,
+        remote_id: &SftpRemoteId,
         error: &str,
         cx: &mut Context<Self>,
     ) -> bool {
         let mut changed = false;
         for transfer in &mut self.transfers {
-            if &transfer.node_id == node_id
+            if &transfer.remote_id == remote_id
                 && matches!(
                     transfer.state,
                     SftpTransferState::Active
@@ -338,7 +336,7 @@ impl WorkspaceApp {
             self.start_sftp_path_edit(SftpPane::Remote, cx);
             return;
         }
-        let Some(node_id) = self.visible_sftp_node_id(cx) else {
+        let Some(remote_id) = self.visible_sftp_remote_id(cx) else {
             return;
         };
         let conflict_action = self.settings_store.settings().sftp.conflict_action;
@@ -348,44 +346,74 @@ impl WorkspaceApp {
         }) else {
             return;
         };
-        self.execute_sftp_pending_transfers(node_id, pending_transfers, resolved_actions, cx);
+        self.execute_sftp_pending_transfers(remote_id, pending_transfers, resolved_actions, cx);
     }
 
     pub(in crate::workspace::sftp) fn spawn_sftp_incomplete_load_with_sender(
         &self,
-        node_id: NodeId,
+        remote_id: SftpRemoteId,
         tx: delivery::ActiveDeliverySender<SftpWorkerResult>,
     ) {
-        let router = self.node_router.clone();
+        let Some(backend) = self.sftp_remote_backend(&remote_id) else {
+            return;
+        };
         let progress_store = self.sftp_progress_store.clone();
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
             let result = async {
-                let resolved = router
-                    .resolve_connection(&node_id)
+                let standalone_endpoint_id =
+                    remote_id.standalone_endpoint_id().map(ToOwned::to_owned);
+                let connection_id = match &backend {
+                    SftpRemoteBackend::Node { router, node_id } => {
+                        router
+                            .resolve_connection(node_id)
+                            .await
+                            .map_err(|error| error.to_string())?
+                            .connection_id
+                    }
+                    SftpRemoteBackend::Standalone { handle } => handle.connection_id().to_string(),
+                };
+                let mut transfers = progress_store
+                    .list_incomplete(&connection_id)
                     .await
                     .map_err(|error| error.to_string())?;
-                progress_store
-                    .list_incomplete(&resolved.connection_id)
-                    .await
-                    .map_err(|error| error.to_string())
+                if let Some(endpoint_id) = standalone_endpoint_id {
+                    let relay_transfers = progress_store
+                        .list_all_incomplete()
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    for progress in relay_transfers {
+                        let belongs_to_endpoint = progress
+                            .remote_relay
+                            .as_ref()
+                            .is_some_and(|relay| relay.contains_endpoint(&endpoint_id));
+                        if belongs_to_endpoint
+                            && !transfers
+                                .iter()
+                                .any(|item| item.transfer_id == progress.transfer_id)
+                        {
+                            transfers.push(progress);
+                        }
+                    }
+                }
+                Ok(transfers)
             }
             .await;
-            let _ = tx.send(SftpWorkerResult::IncompleteTransfersLoaded { node_id, result });
+            let _ = tx.send(SftpWorkerResult::IncompleteTransfersLoaded { remote_id, result });
         });
     }
 
     pub(in crate::workspace::sftp) fn spawn_sftp_background_transfer_load_with_sender(
         &self,
-        node_id: NodeId,
+        remote_id: SftpRemoteId,
         tx: delivery::ActiveDeliverySender<SftpWorkerResult>,
     ) {
         let manager = self.sftp_transfer_manager.clone();
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
-            let snapshots = manager.list_background_transfers(Some(&node_id.0));
+            let snapshots = manager.list_background_transfers(Some(&remote_id.storage_key()));
             let _ = tx.send(SftpWorkerResult::BackgroundTransfersLoaded {
-                node_id,
+                remote_id,
                 result: Ok(snapshots),
             });
         });
@@ -396,15 +424,119 @@ impl WorkspaceApp {
         transfer_id: String,
         cx: &mut Context<Self>,
     ) {
-        let Some(node_id) = self.visible_sftp_node_id(cx) else {
+        let Some(remote_id) = self.visible_sftp_remote_id(cx) else {
             return;
         };
-        let Some(launch) = self.sftp_view.update(cx, |sftp, cx| {
-            sftp.take_incomplete_transfer_for_resume(node_id, &transfer_id, cx)
+        let Some(progress) = self.sftp_view.update(cx, |sftp, cx| {
+            sftp.take_incomplete_progress_for_resume(&transfer_id, cx)
         }) else {
             return;
         };
-        self.spawn_sftp_transfer_launch(launch, cx);
+        let relay = progress.remote_relay.clone();
+        let Some(launch) = self.sftp_view.update(cx, |sftp, _cx| {
+            sftp.prepare_reconnect_resume(remote_id, progress, true)
+        }) else {
+            return;
+        };
+        let Some(relay) = relay else {
+            self.spawn_sftp_transfer_launch(launch, cx);
+            return;
+        };
+        if launch.is_directory {
+            return;
+        }
+        let (primary_remote_id, secondary_remote_id) = match launch.direction {
+            SftpTransferDirection::Upload => (
+                SftpRemoteId::from_standalone_endpoint_id(relay.source_endpoint_id),
+                SftpRemoteId::from_standalone_endpoint_id(relay.destination_endpoint_id),
+            ),
+            SftpTransferDirection::Download => (
+                SftpRemoteId::from_standalone_endpoint_id(relay.destination_endpoint_id),
+                SftpRemoteId::from_standalone_endpoint_id(relay.source_endpoint_id),
+            ),
+        };
+        self.spawn_sftp_pair_transfer_task(
+            launch.id,
+            launch.transfer_id,
+            launch.direction,
+            false,
+            launch.local_path,
+            launch.remote_path,
+            LocalDownloadDisposition::ResumeVerified,
+            launch.resume_progress,
+            primary_remote_id,
+            secondary_remote_id,
+            cx,
+        );
+    }
+
+    pub(in crate::workspace) fn discard_sftp_incomplete_transfer(
+        &mut self,
+        transfer_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(progress) = self
+            .sftp_view
+            .read(cx)
+            .incomplete_transfers
+            .iter()
+            .find(|progress| progress.transfer_id == transfer_id)
+            .cloned()
+        else {
+            return;
+        };
+        let Some(relay) = progress.remote_relay.as_ref() else {
+            return;
+        };
+        let profile_revision_matches = self
+            .connection_store
+            .get_standalone_sftp_profile(&relay.profile_id)
+            .is_some_and(|profile| profile.updated_at.to_rfc3339() == relay.profile_revision);
+        if !profile_revision_matches {
+            let tx = self.sftp_view.read(cx).worker_sender();
+            let _ = tx.send(SftpWorkerResult::IncompleteTransferDiscarded {
+                transfer_id,
+                result: Err(self
+                    .i18n
+                    .t("sftp.errors.relay_config_changed_cleanup_skipped")),
+            });
+            return;
+        }
+        let destination_remote_id =
+            SftpRemoteId::from_standalone_endpoint_id(relay.destination_endpoint_id.clone());
+        let cleanup_owner = format!("discard-{}", progress.transfer_id);
+        let tx = self.sftp_view.read(cx).worker_sender();
+        let Some((backend, lease)) =
+            self.acquire_sftp_transfer_backend(&destination_remote_id, &cleanup_owner)
+        else {
+            let _ = tx.send(SftpWorkerResult::IncompleteTransferDiscarded {
+                transfer_id,
+                result: Err("SFTP destination endpoint is no longer available".to_string()),
+            });
+            return;
+        };
+        let progress_store = self.sftp_progress_store.clone();
+        self.forwarding_runtime.spawn(async move {
+            // The cleanup lease owns the destination connection until the exact
+            // transfer-owned staging sibling has been removed or rejected.
+            let _lease = lease;
+            let result = async {
+                let destination = backend.acquire_transfer_sftp().await?;
+                destination
+                    .discard_remote_relay_progress(&progress)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                progress_store
+                    .delete(&progress.transfer_id)
+                    .await
+                    .map_err(|error| error.to_string())
+            }
+            .await;
+            let _ = tx.send(SftpWorkerResult::IncompleteTransferDiscarded {
+                transfer_id,
+                result,
+            });
+        });
     }
 
     pub(in crate::workspace) fn request_sftp_transfer_resume_for_node(
@@ -431,7 +563,7 @@ impl WorkspaceApp {
                     progress.ok_or_else(|| "Transfer not found in progress store".to_string())
                 });
             let _ = tx.send(SftpWorkerResult::ResumeIncompleteTransferLoaded {
-                node_id,
+                remote_id: SftpRemoteId::Node(node_id),
                 transfer_id,
                 result,
             });
@@ -447,6 +579,210 @@ impl WorkspaceApp {
         self.spawn_sftp_transfer_launch_with_sender(launch, tx);
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::workspace::sftp) fn spawn_sftp_pair_transfer_task(
+        &self,
+        id: u64,
+        transfer_id: String,
+        direction: SftpTransferDirection,
+        is_directory: bool,
+        local_path: String,
+        remote_path: String,
+        download_disposition: LocalDownloadDisposition,
+        resume_progress: Option<StoredTransferProgress>,
+        primary_remote_id: SftpRemoteId,
+        secondary_remote_id: SftpRemoteId,
+        cx: &App,
+    ) {
+        let tx = self.sftp_view.read(cx).worker_sender();
+        let source_remote_id = match direction {
+            SftpTransferDirection::Upload => primary_remote_id.clone(),
+            SftpTransferDirection::Download => secondary_remote_id.clone(),
+        };
+        let destination_remote_id = match direction {
+            SftpTransferDirection::Upload => secondary_remote_id.clone(),
+            SftpTransferDirection::Download => primary_remote_id.clone(),
+        };
+        let (source_path, destination_path) = match direction {
+            SftpTransferDirection::Upload => (local_path, remote_path),
+            SftpTransferDirection::Download => (remote_path, local_path),
+        };
+        let disposition = match download_disposition {
+            LocalDownloadDisposition::ReplaceExisting => RemoteRelayDisposition::ReplaceExisting,
+            LocalDownloadDisposition::CreateNew | LocalDownloadDisposition::ResumeVerified => {
+                RemoteRelayDisposition::CreateNew
+            }
+        };
+        let Some((source_backend, source_lease)) =
+            self.acquire_sftp_transfer_backend(&source_remote_id, &transfer_id)
+        else {
+            let _ = tx.send(SftpWorkerResult::TransferComplete {
+                remote_id: secondary_remote_id,
+                transfer_id,
+                id,
+                result: Err("SFTP source endpoint is no longer available".to_string()),
+                refresh_remote: false,
+                refresh_local: false,
+            });
+            return;
+        };
+        let Some((destination_backend, destination_lease)) =
+            self.acquire_sftp_transfer_backend(&destination_remote_id, &transfer_id)
+        else {
+            let _ = tx.send(SftpWorkerResult::TransferComplete {
+                remote_id: secondary_remote_id,
+                transfer_id,
+                id,
+                result: Err("SFTP destination endpoint is no longer available".to_string()),
+                refresh_remote: false,
+                refresh_local: false,
+            });
+            return;
+        };
+        let manager = self.sftp_transfer_manager.clone();
+        let progress_store = self.sftp_progress_store.clone();
+        let runtime = self.forwarding_runtime.clone();
+        let transfer_storage_key = format!(
+            "relay:{}:{}",
+            source_remote_id.storage_key(),
+            destination_remote_id.storage_key()
+        );
+        let _control = manager.register_for_node(&transfer_id, transfer_storage_key);
+        let profile_id = primary_remote_id
+            .standalone_endpoint_id()
+            .map(ToOwned::to_owned);
+        let profile_revision = profile_id.as_deref().and_then(|profile_id| {
+            self.connection_store
+                .get_standalone_sftp_profile(profile_id)
+                .map(|profile| profile.updated_at.to_rfc3339())
+        });
+        let relay_context =
+            profile_id
+                .zip(profile_revision)
+                .and_then(|(profile_id, profile_revision)| {
+                    Some(RemoteRelayProgressContext {
+                        profile_id,
+                        profile_revision,
+                        source_endpoint_id: source_remote_id.standalone_endpoint_id()?.to_string(),
+                        destination_endpoint_id: destination_remote_id
+                            .standalone_endpoint_id()?
+                            .to_string(),
+                    })
+                });
+        runtime.spawn(async move {
+            // Both leases outlive the tab and are released together when the relay finishes.
+            let _source_lease = source_lease;
+            let _destination_lease = destination_lease;
+            let _control_guard = SftpTransferGuard::new(Some(&manager), transfer_id.clone());
+            let _permit = manager.acquire_permit().await;
+            let source = match source_backend.acquire_transfer_sftp().await {
+                Ok(source) => source,
+                Err(error) => {
+                    let _ = tx.send(SftpWorkerResult::TransferComplete {
+                        remote_id: secondary_remote_id,
+                        transfer_id,
+                        id,
+                        result: Err(error),
+                        refresh_remote: false,
+                        refresh_local: false,
+                    });
+                    return;
+                }
+            };
+            let destination = match destination_backend.acquire_transfer_sftp().await {
+                Ok(destination) => destination,
+                Err(error) => {
+                    let _ = tx.send(SftpWorkerResult::TransferComplete {
+                        remote_id: secondary_remote_id,
+                        transfer_id,
+                        id,
+                        result: Err(error),
+                        refresh_remote: false,
+                        refresh_local: false,
+                    });
+                    return;
+                }
+            };
+            let _ = tx.send(SftpWorkerResult::TransferProtocolResolved {
+                id,
+                protocol: RemoteTransferProtocol::Sftp,
+            });
+            let (progress_tx, mut progress_rx) =
+                tokio::sync::mpsc::channel::<TransferProgress>(100);
+            let progress_delivery = tx.clone();
+            let progress_id = id;
+            tokio::spawn(async move {
+                while let Some(progress) = progress_rx.recv().await {
+                    let _ = progress_delivery.send(SftpWorkerResult::TransferProgress {
+                        id: progress_id,
+                        transferred: progress.transferred_bytes,
+                        total: progress.total_bytes,
+                        speed: progress.speed,
+                    });
+                }
+            });
+            let result = if is_directory && resume_progress.is_some() {
+                Err(SftpError::TransferError(
+                    "Remote directory relay restart resume is not available".to_string(),
+                ))
+            } else if is_directory {
+                source
+                    .relay_dir_to(
+                        &destination,
+                        &source_path,
+                        &destination_path,
+                        disposition,
+                        &transfer_id,
+                        Some(progress_tx),
+                        Some(manager),
+                    )
+                    .await
+                    .map(|_| ())
+            } else {
+                let Some(relay_context) = relay_context else {
+                    let _ = tx.send(SftpWorkerResult::TransferComplete {
+                        remote_id: secondary_remote_id,
+                        transfer_id,
+                        id,
+                        result: Err("Saved SFTP endpoint configuration is unavailable".to_string()),
+                        refresh_remote: false,
+                        refresh_local: false,
+                    });
+                    return;
+                };
+                let transfer_type = match direction {
+                    SftpTransferDirection::Upload => RemoteTransferType::Upload,
+                    SftpTransferDirection::Download => RemoteTransferType::Download,
+                };
+                source
+                    .relay_file_to(
+                        &destination,
+                        &source_path,
+                        &destination_path,
+                        disposition,
+                        &transfer_id,
+                        Some(progress_tx),
+                        Some(manager),
+                        progress_store,
+                        relay_context,
+                        resume_progress,
+                        transfer_type,
+                    )
+                    .await
+                    .map(|_| ())
+            }
+            .map_err(|error| error.to_string());
+            let _ = tx.send(SftpWorkerResult::TransferComplete {
+                remote_id: secondary_remote_id,
+                transfer_id,
+                id,
+                result,
+                refresh_remote: true,
+                refresh_local: true,
+            });
+        });
+    }
+
     pub(in crate::workspace::sftp) fn spawn_sftp_transfer_launch_with_sender(
         &self,
         launch: SftpTransferLaunch,
@@ -455,7 +791,7 @@ impl WorkspaceApp {
         self.spawn_sftp_transfer_task_with_sender(
             launch.id,
             launch.transfer_id,
-            launch.node_id,
+            launch.remote_id,
             launch.direction,
             launch.is_directory,
             launch.local_path,
@@ -471,7 +807,7 @@ impl WorkspaceApp {
         &self,
         id: u64,
         transfer_id: String,
-        node_id: NodeId,
+        remote_id: SftpRemoteId,
         direction: SftpTransferDirection,
         is_directory: bool,
         local_path: String,
@@ -485,7 +821,7 @@ impl WorkspaceApp {
         self.spawn_sftp_transfer_task_with_sender(
             id,
             transfer_id,
-            node_id,
+            remote_id,
             direction,
             is_directory,
             local_path,
@@ -501,7 +837,7 @@ impl WorkspaceApp {
         &self,
         id: u64,
         transfer_id: String,
-        node_id: NodeId,
+        remote_id: SftpRemoteId,
         direction: SftpTransferDirection,
         is_directory: bool,
         local_path: String,
@@ -515,14 +851,29 @@ impl WorkspaceApp {
         let scp_unavailable_error = self.i18n.t("sftp.errors.scp_unavailable");
         let transfer_protocol_unavailable_error =
             self.i18n.t("sftp.errors.transfer_protocol_unavailable");
-        let router = self.node_router.clone();
+        let Some((backend, standalone_lease)) =
+            self.acquire_sftp_transfer_backend(&remote_id, &transfer_id)
+        else {
+            let _ = tx.send(SftpWorkerResult::TransferComplete {
+                remote_id,
+                transfer_id,
+                id,
+                result: Err("SFTP endpoint is no longer available".to_string()),
+                refresh_remote: false,
+                refresh_local: false,
+            });
+            return;
+        };
         let manager = self.sftp_transfer_manager.clone();
         let progress_store = self.sftp_progress_store.clone();
         let runtime = self.forwarding_runtime.clone();
         // The runtime owns cancellation from enqueue through completion, even
         // while no SFTP tab is visible or a jump-chain reconnect is in flight.
-        let _control = manager.register_for_node(&transfer_id, node_id.0.clone());
+        let remote_storage_key = remote_id.storage_key();
+        let _control = manager.register_for_node(&transfer_id, remote_storage_key.clone());
         runtime.spawn(async move {
+            // The transfer lease keeps an independent SFTP endpoint alive after tab closure.
+            let _standalone_lease = standalone_lease;
             let _control_guard =
                 SftpTransferGuard::new(Some(&manager), transfer_id.clone());
             let _permit = manager.acquire_permit().await;
@@ -531,7 +882,7 @@ impl WorkspaceApp {
                     let _ = progress_store.delete(&transfer_id).await;
                 }
                 let _ = tx.send(SftpWorkerResult::TransferComplete {
-                    node_id,
+                    remote_id,
                     transfer_id,
                     id,
                     result: Err(error.to_string()),
@@ -540,12 +891,12 @@ impl WorkspaceApp {
                 });
                 return;
             }
-            let resolved = match router.resolve_connection(&node_id).await {
-                Ok(resolved) => resolved,
+            let resolved_handle = match backend.resolve_connection().await {
+                Ok(handle) => handle,
                 Err(error) => {
                     let error = error.to_string();
                     let _ = tx.send(SftpWorkerResult::TransferComplete {
-                        node_id,
+                        remote_id,
                         transfer_id,
                         id,
                         result: Err(error),
@@ -555,7 +906,7 @@ impl WorkspaceApp {
                     return;
                 }
             };
-            let resolved_connection_id = resolved.connection_id.clone();
+            let resolved_connection_id = resolved_handle.connection_id().to_string();
             let protocol = match resume_progress
                 .as_ref()
                 .map(|progress| progress.protocol)
@@ -568,11 +919,11 @@ impl WorkspaceApp {
                     }
                     oxideterm_settings::FileTransferProtocolPreference::Scp => {
                         let capabilities = manager
-                            .scp_capabilities(&resolved.connection_id, &resolved.handle)
+                            .scp_capabilities(&resolved_connection_id, &resolved_handle)
                             .await;
                         if !capabilities.supports_scp {
                             let _ = tx.send(SftpWorkerResult::TransferComplete {
-                                node_id,
+                                remote_id,
                                 transfer_id,
                                 id,
                                 result: Err(scp_unavailable_error),
@@ -584,15 +935,15 @@ impl WorkspaceApp {
                         RemoteTransferProtocol::Scp
                     }
                     oxideterm_settings::FileTransferProtocolPreference::Auto => {
-                        if router.acquire_sftp(&node_id).await.is_ok() {
+                        if backend.acquire_sftp().await.is_ok() {
                             RemoteTransferProtocol::Sftp
                         } else {
                             let capabilities = manager
-                                .scp_capabilities(&resolved.connection_id, &resolved.handle)
+                                .scp_capabilities(&resolved_connection_id, &resolved_handle)
                                 .await;
                             if !capabilities.supports_scp {
                                 let _ = tx.send(SftpWorkerResult::TransferComplete {
-                                    node_id,
+                                    remote_id,
                                     transfer_id,
                                     id,
                                     result: Err(transfer_protocol_unavailable_error),
@@ -697,7 +1048,7 @@ impl WorkspaceApp {
                     };
                 let mut snapshot = BackgroundTransferSnapshot::new(
                     transfer_id.clone(),
-                    node_id.0.clone(),
+                    remote_storage_key,
                     name,
                     local_path.clone(),
                     remote_path.clone(),
@@ -773,7 +1124,7 @@ impl WorkspaceApp {
                 let item_count = if protocol == RemoteTransferProtocol::Scp {
                     let result = match (direction, is_directory) {
                         (SftpTransferDirection::Upload, false) => scp_upload_file(
-                            &resolved.handle,
+                            &resolved_handle,
                             &local_path,
                             &remote_path,
                             &transfer_id,
@@ -782,7 +1133,7 @@ impl WorkspaceApp {
                         )
                         .await,
                         (SftpTransferDirection::Download, false) => scp_download_file(
-                            &resolved.handle,
+                            &resolved_handle,
                             &remote_path,
                             &local_path,
                             download_disposition,
@@ -792,7 +1143,7 @@ impl WorkspaceApp {
                         )
                         .await,
                         (SftpTransferDirection::Upload, true) => scp_upload_directory(
-                            &resolved.handle,
+                            &resolved_handle,
                             &local_path,
                             &remote_path,
                             &transfer_id,
@@ -801,7 +1152,7 @@ impl WorkspaceApp {
                         )
                         .await,
                         (SftpTransferDirection::Download, true) => scp_download_directory(
-                            &resolved.handle,
+                            &resolved_handle,
                             &remote_path,
                             &local_path,
                             &transfer_id,
@@ -824,8 +1175,8 @@ impl WorkspaceApp {
                         // resume, otherwise a failed tar task can unexpectedly
                         // restart as tar again instead of its persisted strategy.
                         {
-                            let shared = router
-                                .acquire_sftp(&node_id)
+                            let shared = backend
+                                .acquire_sftp()
                                 .await
                                 .map_err(|error| error.to_string())?;
                             let shared = shared.lock().await;
@@ -833,12 +1184,13 @@ impl WorkspaceApp {
                                 let _ = shared.mkdir(&prefix).await;
                             }
                         }
-                        let (resolved, capabilities) = sftp_tar_capabilities_for_node(
-                            &router, &manager, &node_id,
+                        let capabilities = sftp_tar_capabilities_for_handle(
+                            &manager,
+                            &resolved_handle,
                         )
-                        .await?;
+                        .await;
                         tar_upload_directory(
-                            &resolved.handle,
+                            &resolved_handle,
                             &local_path,
                             &remote_path,
                             &transfer_id,
@@ -854,8 +1206,8 @@ impl WorkspaceApp {
                         true,
                         Some(RemoteTransferStrategy::DirectoryRecursive),
                     ) => {
-                        let sftp = router
-                            .acquire_transfer_sftp(&node_id)
+                        let sftp = backend
+                            .acquire_transfer_sftp()
                             .await
                             .map_err(|error| error.to_string())?;
                         sftp.upload_dir(
@@ -869,14 +1221,15 @@ impl WorkspaceApp {
                         .map_err(|error| error.to_string())?
                     }
                     (SftpTransferDirection::Upload, true, _) => {
-                        let (resolved, capabilities) = sftp_tar_capabilities_for_node(
-                            &router, &manager, &node_id,
+                        let capabilities = sftp_tar_capabilities_for_handle(
+                            &manager,
+                            &resolved_handle,
                         )
-                        .await?;
+                        .await;
                         if capabilities.supports_tar {
                             {
-                                let shared = router
-                                    .acquire_sftp(&node_id)
+                                let shared = backend
+                                    .acquire_sftp()
                                     .await
                                     .map_err(|error| error.to_string())?;
                                 let shared = shared.lock().await;
@@ -889,7 +1242,7 @@ impl WorkspaceApp {
                                 RemoteTransferStrategy::DirectoryTar,
                             );
                             let tar_result = tar_upload_directory(
-                                &resolved.handle,
+                                &resolved_handle,
                                 &local_path,
                                 &remote_path,
                                 &transfer_id,
@@ -909,8 +1262,8 @@ impl WorkspaceApp {
                                         &transfer_id,
                                         RemoteTransferStrategy::DirectoryRecursive,
                                     );
-                                    let sftp = router
-                                        .acquire_transfer_sftp(&node_id)
+                                    let sftp = backend
+                                        .acquire_transfer_sftp()
                                         .await
                                         .map_err(|error| error.to_string())?;
                                     sftp.upload_dir(
@@ -934,8 +1287,8 @@ impl WorkspaceApp {
                                 &transfer_id,
                                 RemoteTransferStrategy::DirectoryRecursive,
                             );
-                            let sftp = router
-                                .acquire_transfer_sftp(&node_id)
+                            let sftp = backend
+                                .acquire_transfer_sftp()
                                 .await
                                 .map_err(|error| error.to_string())?;
                             sftp.upload_dir(
@@ -950,8 +1303,8 @@ impl WorkspaceApp {
                         }
                     }
                     (SftpTransferDirection::Upload, false, _) => {
-                        let sftp = router
-                            .acquire_transfer_sftp(&node_id)
+                        let sftp = backend
+                            .acquire_transfer_sftp()
                             .await
                             .map_err(|error| error.to_string())?;
                         sftp.upload_with_resume(
@@ -971,12 +1324,13 @@ impl WorkspaceApp {
                         true,
                         Some(RemoteTransferStrategy::DirectoryTar),
                     ) => {
-                        let (resolved, capabilities) = sftp_tar_capabilities_for_node(
-                            &router, &manager, &node_id,
+                        let capabilities = sftp_tar_capabilities_for_handle(
+                            &manager,
+                            &resolved_handle,
                         )
-                        .await?;
+                        .await;
                         tar_download_directory(
-                            &resolved.handle,
+                            &resolved_handle,
                             &remote_path,
                             &local_path,
                             &transfer_id,
@@ -992,8 +1346,8 @@ impl WorkspaceApp {
                         true,
                         Some(RemoteTransferStrategy::DirectoryRecursive),
                     ) => {
-                        let sftp = router
-                            .acquire_transfer_sftp(&node_id)
+                        let sftp = backend
+                            .acquire_transfer_sftp()
                             .await
                             .map_err(|error| error.to_string())?;
                         sftp.download_dir(
@@ -1007,17 +1361,18 @@ impl WorkspaceApp {
                         .map_err(|error| error.to_string())?
                     }
                     (SftpTransferDirection::Download, true, _) => {
-                        let (resolved, capabilities) = sftp_tar_capabilities_for_node(
-                            &router, &manager, &node_id,
+                        let capabilities = sftp_tar_capabilities_for_handle(
+                            &manager,
+                            &resolved_handle,
                         )
-                        .await?;
+                        .await;
                         if capabilities.supports_tar {
                             manager.update_background_transfer_strategy(
                                 &transfer_id,
                                 RemoteTransferStrategy::DirectoryTar,
                             );
                             let tar_result = tar_download_directory(
-                                &resolved.handle,
+                                &resolved_handle,
                                 &remote_path,
                                 &local_path,
                                 &transfer_id,
@@ -1037,8 +1392,8 @@ impl WorkspaceApp {
                                         &transfer_id,
                                         RemoteTransferStrategy::DirectoryRecursive,
                                     );
-                                    let sftp = router
-                                        .acquire_transfer_sftp(&node_id)
+                                    let sftp = backend
+                                        .acquire_transfer_sftp()
                                         .await
                                         .map_err(|error| error.to_string())?;
                                     sftp.download_dir(
@@ -1062,8 +1417,8 @@ impl WorkspaceApp {
                                 &transfer_id,
                                 RemoteTransferStrategy::DirectoryRecursive,
                             );
-                            let sftp = router
-                                .acquire_transfer_sftp(&node_id)
+                            let sftp = backend
+                                .acquire_transfer_sftp()
                                 .await
                                 .map_err(|error| error.to_string())?;
                             sftp.download_dir(
@@ -1078,8 +1433,8 @@ impl WorkspaceApp {
                         }
                     }
                     (SftpTransferDirection::Download, false, _) => {
-                        let sftp = router
-                            .acquire_transfer_sftp(&node_id)
+                        let sftp = backend
+                            .acquire_transfer_sftp()
                             .await
                             .map_err(|error| error.to_string())?;
                         sftp.download_with_resume(
@@ -1138,7 +1493,7 @@ impl WorkspaceApp {
             }
 
             let _ = tx.send(SftpWorkerResult::TransferComplete {
-                node_id: node_id.clone(),
+                remote_id,
                 transfer_id,
                 id,
                 result: result.map(|_| ()),
@@ -1213,7 +1568,7 @@ impl WorkspaceApp {
             .interrupt_node(&node_id.0, error.clone());
         let mut changed = !transfer_ids_to_interrupt.is_empty();
         changed |= self.sftp_view.update(cx, |sftp, cx| {
-            sftp.interrupt_transfers_by_node(node_id, &error, cx)
+            sftp.interrupt_transfers_by_remote(&SftpRemoteId::Node(node_id.clone()), &error, cx)
         });
         for transfer_id in transfer_ids_to_interrupt {
             let progress_store = self.sftp_progress_store.clone();
@@ -1229,17 +1584,11 @@ impl WorkspaceApp {
     }
 }
 
-async fn sftp_tar_capabilities_for_node(
-    router: &NodeRouter,
+async fn sftp_tar_capabilities_for_handle(
     manager: &SftpTransferManager,
-    node_id: &NodeId,
-) -> Result<(oxideterm_ssh::ResolvedConnection, TarCapabilities), String> {
-    let resolved = router
-        .resolve_connection(node_id)
+    handle: &SshConnectionHandle,
+) -> TarCapabilities {
+    manager
+        .tar_capabilities(handle.connection_id(), handle)
         .await
-        .map_err(|error| error.to_string())?;
-    let capabilities = manager
-        .tar_capabilities(&resolved.connection_id, &resolved.handle)
-        .await;
-    Ok((resolved, capabilities))
 }

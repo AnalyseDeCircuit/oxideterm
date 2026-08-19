@@ -223,13 +223,16 @@ pub(in crate::workspace::sftp) fn normalize_external_dropped_path(
     Some(std::path::PathBuf::from(raw.trim_end_matches(['/', '\\'])))
 }
 
-pub(in crate::workspace::sftp) fn new_sftp_transfer_id(node_id: &NodeId, name: &str) -> String {
+pub(in crate::workspace::sftp) fn new_sftp_transfer_id(
+    remote_id: &SftpRemoteId,
+    name: &str,
+) -> String {
     let timestamp_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or_default();
     let safe_name = name.replace(['/', '\\', ':'], "_");
-    format!("{}-{timestamp_ms}-{safe_name}", node_id.0)
+    format!("{}-{timestamp_ms}-{safe_name}", remote_id.storage_key())
 }
 
 pub(in crate::workspace::sftp) fn unique_sftp_conflict_name(
@@ -462,39 +465,40 @@ fn sftp_editor_language_name_id(language: &str) -> Option<LanguageId> {
 }
 
 pub(in crate::workspace::sftp) async fn load_remote_sftp_listing(
-    router: NodeRouter,
-    node_id: &NodeId,
+    backend: SftpRemoteBackend,
     path: &str,
 ) -> Result<RemoteSftpListing, String> {
-    load_remote_sftp_listing_inner(router, node_id, path, true).await
+    load_remote_sftp_listing_inner(backend, path, true).await
 }
 
 pub(in crate::workspace::sftp) async fn load_remote_sftp_completion_listing(
-    router: NodeRouter,
-    node_id: &NodeId,
+    backend: SftpRemoteBackend,
     path: &str,
 ) -> Result<RemoteSftpListing, String> {
     // Typeahead is observational and must not replace the visible SFTP cwd.
-    load_remote_sftp_listing_inner(router, node_id, path, false).await
+    load_remote_sftp_listing_inner(backend, path, false).await
 }
 
 async fn load_remote_sftp_listing_inner(
-    router: NodeRouter,
-    node_id: &NodeId,
+    backend: SftpRemoteBackend,
     path: &str,
     update_ready_path: bool,
 ) -> Result<RemoteSftpListing, String> {
-    let transfer = router
-        .acquire_transfer_sftp_with_meta(node_id)
+    let transfer = backend
+        .acquire_transfer_sftp()
         .await
         .map_err(|error| error.to_string())?;
-    match list_remote_sftp_once(&transfer.session, path).await {
+    match list_remote_sftp_once(&transfer, path).await {
         Ok(listing) => {
-            if update_ready_path {
+            if update_ready_path && let SftpRemoteBackend::Node { router, node_id } = &backend {
+                let connection = router
+                    .resolve_connection(node_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
                 router
                     .mark_sftp_ready_from_listing(
                         node_id,
-                        &transfer.connection_id,
+                        connection.handle.connection_id(),
                         Some(listing.cwd.clone()),
                     )
                     .map_err(|error| error.to_string())?;
@@ -505,18 +509,22 @@ async fn load_remote_sftp_listing_inner(
             // Retry directory listing on a new transfer channel. The shared
             // SFTP owner is not part of this path, so a slow list cannot block
             // preview/save operations that already use their own channels.
-            let transfer = router
-                .acquire_transfer_sftp_with_meta(node_id)
+            let transfer = backend
+                .acquire_transfer_sftp()
                 .await
                 .map_err(|route_error| route_error.to_string())?;
-            let listing = list_remote_sftp_once(&transfer.session, path)
+            let listing = list_remote_sftp_once(&transfer, path)
                 .await
                 .map_err(|retry_error| retry_error.to_string())?;
-            if update_ready_path {
+            if update_ready_path && let SftpRemoteBackend::Node { router, node_id } = &backend {
+                let connection = router
+                    .resolve_connection(node_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
                 router
                     .mark_sftp_ready_from_listing(
                         node_id,
-                        &transfer.connection_id,
+                        connection.handle.connection_id(),
                         Some(listing.cwd.clone()),
                     )
                     .map_err(|error| error.to_string())?;
@@ -528,12 +536,11 @@ async fn load_remote_sftp_listing_inner(
 }
 
 pub(in crate::workspace::sftp) async fn load_remote_sftp_preview(
-    router: NodeRouter,
-    node_id: &NodeId,
+    backend: SftpRemoteBackend,
     path: &str,
 ) -> Result<PreviewContent, String> {
-    let sftp = router
-        .acquire_transfer_sftp(node_id)
+    let sftp = backend
+        .acquire_transfer_sftp()
         .await
         .map_err(|error| error.to_string())?;
     match load_remote_sftp_preview_once(&sftp, path).await {
@@ -541,8 +548,8 @@ pub(in crate::workspace::sftp) async fn load_remote_sftp_preview(
         Err(error) if error.is_channel_recoverable() => {
             // Preview can be slow and must not hold the shared directory-owner
             // SFTP mutex; retry once with a fresh short-lived SFTP channel.
-            let sftp = router
-                .acquire_transfer_sftp(node_id)
+            let sftp = backend
+                .acquire_transfer_sftp()
                 .await
                 .map_err(|route_error| route_error.to_string())?;
             load_remote_sftp_preview_once(&sftp, path)
@@ -561,13 +568,12 @@ async fn load_remote_sftp_preview_once(
 }
 
 pub(in crate::workspace::sftp) async fn load_remote_sftp_preview_hex(
-    router: NodeRouter,
-    node_id: &NodeId,
+    backend: SftpRemoteBackend,
     path: &str,
     offset: u64,
 ) -> Result<PreviewContent, String> {
-    let sftp = router
-        .acquire_transfer_sftp(node_id)
+    let sftp = backend
+        .acquire_transfer_sftp()
         .await
         .map_err(|error| error.to_string())?;
     match load_remote_sftp_preview_hex_once(&sftp, path, offset).await {
@@ -575,8 +581,8 @@ pub(in crate::workspace::sftp) async fn load_remote_sftp_preview_hex(
         Err(error) if error.is_channel_recoverable() => {
             // Hex preview uses its own channel for the same reason as text
             // preview: large reads should not block directory navigation.
-            let sftp = router
-                .acquire_transfer_sftp(node_id)
+            let sftp = backend
+                .acquire_transfer_sftp()
                 .await
                 .map_err(|route_error| route_error.to_string())?;
             load_remote_sftp_preview_hex_once(&sftp, path, offset)
@@ -596,8 +602,7 @@ async fn load_remote_sftp_preview_hex_once(
 }
 
 pub(in crate::workspace::sftp) async fn save_remote_sftp_preview(
-    router: NodeRouter,
-    node_id: &NodeId,
+    backend: SftpRemoteBackend,
     path: &str,
     content: &str,
     encoding: &str,
@@ -610,8 +615,8 @@ pub(in crate::workspace::sftp) async fn save_remote_sftp_preview(
     };
     let remote_content = restore_text_line_endings(content, line_ending);
     let encoded = encode_to_encoding(&remote_content, target_encoding);
-    let sftp = router
-        .acquire_transfer_sftp(node_id)
+    let sftp = backend
+        .acquire_transfer_sftp()
         .await
         .map_err(|error| error.to_string())?;
     // Saving uses a short-lived SFTP channel so a large write/stat round trip

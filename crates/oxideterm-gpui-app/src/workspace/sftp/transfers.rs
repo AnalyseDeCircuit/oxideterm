@@ -7,7 +7,7 @@ fn sftp_transfer_queue_row_signature(transfer: &SftpTransferItem) -> u64 {
     transfer.id.hash(&mut hasher);
     transfer.transfer_id.hash(&mut hasher);
     transfer.batch_id.hash(&mut hasher);
-    transfer.node_id.hash(&mut hasher);
+    transfer.remote_id.hash(&mut hasher);
     transfer.name.hash(&mut hasher);
     transfer.local_path.hash(&mut hasher);
     transfer.remote_path.hash(&mut hasher);
@@ -51,6 +51,7 @@ struct SftpTransferRowLabels {
     resume_tooltip: String,
     cancel_tooltip: String,
     remove_tooltip: String,
+    discard_tooltip: String,
     reveal_tooltip: String,
     loading: String,
 }
@@ -69,6 +70,7 @@ enum SftpTransferRowAction {
     SetState { id: u64, state: SftpTransferState },
     CancelOrRemove { id: u64 },
     ResumeIncomplete { transfer_id: String },
+    DiscardIncomplete { transfer_id: String },
     RevealLocalPath { path: String },
 }
 
@@ -155,6 +157,11 @@ impl SftpTransferRowRenderer {
                         }
                         SftpTransferRowAction::ResumeIncomplete { transfer_id } => {
                             cx.emit(SftpWorkspaceEvent::ResumeIncompleteTransferRequested {
+                                transfer_id: transfer_id.clone(),
+                            });
+                        }
+                        SftpTransferRowAction::DiscardIncomplete { transfer_id } => {
+                            cx.emit(SftpWorkspaceEvent::DiscardIncompleteTransferRequested {
                                 transfer_id: transfer_id.clone(),
                             });
                         }
@@ -630,6 +637,16 @@ impl SftpTransferRowRenderer {
                                 transfer_id: transfer_id.clone(),
                             },
                         ))
+                        .when(transfer.remote_relay.is_some(), |row| {
+                            row.child(self.action_button(
+                                format!("sftp-incomplete-discard-{transfer_id}"),
+                                LucideIcon::Trash2,
+                                self.labels.discard_tooltip.clone(),
+                                SftpTransferRowAction::DiscardIncomplete {
+                                    transfer_id: transfer_id.clone(),
+                                },
+                            ))
+                        })
                     }),
             )
             .into_any_element()
@@ -675,6 +692,7 @@ impl WorkspaceApp {
                 resume_tooltip: self.i18n.t("sftp.queue.resume_tooltip"),
                 cancel_tooltip: self.i18n.t("sftp.queue.cancel_tooltip"),
                 remove_tooltip: self.i18n.t("sftp.queue.remove_tooltip"),
+                discard_tooltip: self.i18n.t("sftp.queue.discard_tooltip"),
                 reveal_tooltip: self.i18n.t("fileManager.revealInFileManager"),
                 loading: self.i18n.t("sftp.queue.loading"),
             },
@@ -692,7 +710,7 @@ impl WorkspaceApp {
                 .transfers
                 .iter()
                 .rev()
-                .filter(|transfer| &transfer.node_id == node_id)
+                .filter(|transfer| transfer.remote_id.node_id() == Some(node_id))
                 .cloned()
                 .collect::<Vec<_>>();
             let transfer_count = transfers.len();

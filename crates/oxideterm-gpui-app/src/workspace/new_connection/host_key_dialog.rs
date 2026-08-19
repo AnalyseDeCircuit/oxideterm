@@ -76,6 +76,55 @@ impl WorkspaceApp {
             return;
         }
 
+        let routed_standalone_sftp = challenge
+            .config
+            .proxy_chain
+            .as_ref()
+            .is_some_and(|chain| !chain.is_empty())
+            && matches!(
+                &challenge.intent,
+                SshConnectionIntent::StandaloneSftp { .. }
+                    | SshConnectionIntent::StandaloneSftpSecondary { .. }
+                    | SshConnectionIntent::TestStandaloneSftp
+            );
+        if routed_standalone_sftp {
+            if challenge.config.host == challenge.host && challenge.config.port == challenge.port {
+                challenge.config.strict_host_key_checking = true;
+                challenge.config.trust_host_key = Some(persist);
+                challenge.config.expected_host_key_fingerprint = Some(fingerprint);
+            } else if let Some(hop) = challenge.config.proxy_chain.as_mut().and_then(|chain| {
+                chain
+                    .iter_mut()
+                    .find(|hop| hop.host == challenge.host && hop.port == challenge.port)
+            }) {
+                hop.strict_host_key_checking = true;
+                hop.trust_host_key = Some(persist);
+                hop.expected_host_key_fingerprint = Some(fingerprint);
+            } else {
+                let message = self.i18n.t("sftp.standalone.route_host_key_unavailable");
+                let reported_to_form = self.connection_flow.update(cx, |connection_flow, cx| {
+                    connection_flow.set_form_feedback(None, Some(message.clone()), cx)
+                });
+                if !reported_to_form {
+                    self.session_manager.update(cx, |session_manager, cx| {
+                        session_manager.set_status(Some(message), cx);
+                    });
+                }
+                cx.notify();
+                return;
+            }
+            let message = self.i18n.t("ssh.form.checking_host_key");
+            self.update_connection_form_state(cx, |state| {
+                if let Some(form) = state.form.as_mut() {
+                    form.pending = true;
+                    form.error = Some(message);
+                }
+            });
+            self.start_ssh_preflight(challenge.config, challenge.title, challenge.intent, cx);
+            cx.notify();
+            return;
+        }
+
         challenge.config.strict_host_key_checking = true;
         challenge.config.trust_host_key = Some(persist);
         challenge.config.expected_host_key_fingerprint = Some(fingerprint);
@@ -90,6 +139,9 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn cancel_host_key_challenge(&mut self, cx: &mut Context<Self>) {
         if let Some(intent) = self.connection_flow.read(cx).host_key_challenge_intent() {
+            if let Some(token) = intent.standalone_sftp_pair_launch_token() {
+                self.pending_standalone_sftp_pair_launches.remove(token);
+            }
             self.fail_public_mcp_mosh_open_for_intent(
                 &intent,
                 "The host-key confirmation was cancelled",

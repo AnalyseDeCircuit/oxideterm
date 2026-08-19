@@ -262,9 +262,17 @@ impl WorkspaceApp {
     ) {
         match pane {
             SftpPane::Local => {
+                if self.sftp_pair_primary_remote_id(cx).is_some() {
+                    self.sftp_view.update(cx, |sftp, cx| {
+                        sftp.apply_pair_primary_path(path);
+                        cx.notify();
+                    });
+                    self.request_sftp_pair_primary_load(cx);
+                    return;
+                }
                 self.sftp_view.update(cx, |sftp, cx| {
-                    if let Some(node_id) = sftp.current_node_id.clone() {
-                        sftp.local_path_by_node.insert(node_id, path.clone());
+                    if let Some(remote_id) = sftp.current_remote_id.clone() {
+                        sftp.local_path_by_remote.insert(remote_id, path.clone());
                     }
                     sftp.apply_local_path(path);
                     cx.notify();
@@ -328,6 +336,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match input {
+            SftpInput::LocalPath if self.sftp_pair_primary_remote_id(cx).is_some() => {
+                self.refresh_sftp_pair_primary_path_completion(cx)
+            }
             SftpInput::LocalPath => self.refresh_sftp_local_path_completion(cx),
             SftpInput::RemotePath => self.refresh_sftp_remote_path_completion(cx),
             SftpInput::LocalFilter | SftpInput::RemoteFilter | SftpInput::DialogValue => {}
@@ -392,7 +403,7 @@ impl WorkspaceApp {
             return;
         }
 
-        let Some(node_id) = self.sftp_view.read(cx).current_node_id.clone() else {
+        let Some(remote_id) = self.sftp_view.read(cx).current_remote_id.clone() else {
             self.sftp_view.update(cx, |sftp, cx| {
                 sftp.remote_path_completion
                     .apply_entries(generation, &parent_path, Vec::new());
@@ -400,12 +411,14 @@ impl WorkspaceApp {
             });
             return;
         };
+        let Some(backend) = self.sftp_remote_backend(&remote_id) else {
+            return;
+        };
         let tx = self.sftp_view.read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
-        let router = self.node_router.clone();
         runtime.spawn(async move {
-            // Completion borrows a transfer SFTP channel from the node-owned router.
-            let result = load_remote_sftp_completion_listing(router, &node_id, &parent_path)
+            // Completion borrows a short-lived channel from the selected remote owner.
+            let result = load_remote_sftp_completion_listing(backend, &parent_path)
                 .await
                 .map(|listing| {
                     listing
@@ -416,7 +429,46 @@ impl WorkspaceApp {
                 });
             let _ = tx.send(SftpWorkerResult::RemotePathCompletion {
                 generation,
-                node_id,
+                remote_id,
+                parent_path,
+                result,
+            });
+        });
+    }
+
+    fn refresh_sftp_pair_primary_path_completion(&mut self, cx: &mut Context<Self>) {
+        let path_input = self.sftp_view.read(cx).local_path_input.clone();
+        let Some(request) = remote_path_completion_request(&path_input) else {
+            self.sftp_view
+                .update(cx, |sftp, _cx| sftp.local_path_completion.dismiss());
+            return;
+        };
+        let request = self
+            .sftp_view
+            .update(cx, |sftp, _cx| sftp.local_path_completion.request(request));
+        let Some((generation, parent_path)) = request else {
+            return;
+        };
+        let Some(remote_id) = self.sftp_pair_primary_remote_id(cx) else {
+            return;
+        };
+        let Some(backend) = self.sftp_remote_backend(&remote_id) else {
+            return;
+        };
+        let tx = self.sftp_view.read(cx).worker_sender();
+        self.forwarding_runtime.spawn(async move {
+            let result = load_remote_sftp_completion_listing(backend, &parent_path)
+                .await
+                .map(|listing| {
+                    listing
+                        .files
+                        .into_iter()
+                        .map(sftp_path_completion_candidate)
+                        .collect()
+                });
+            let _ = tx.send(SftpWorkerResult::PairPrimaryPathCompletion {
+                generation,
+                remote_id,
                 parent_path,
                 result,
             });
@@ -580,6 +632,9 @@ impl WorkspaceApp {
         let path = {
             let sftp = self.sftp_view.read(cx);
             match pane {
+                SftpPane::Local if sftp.pair_primary_remote_id.is_some() => {
+                    normalize_remote_path(&sftp.local_path_input)
+                }
                 SftpPane::Local => sftp.local_path_input.trim().to_string(),
                 SftpPane::Remote => normalize_remote_path(&sftp.remote_path_input),
             }
@@ -596,16 +651,27 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let next = match (pane, target) {
-            (SftpPane::Local, "~") => home_path(),
-            (SftpPane::Remote, "~") => {
+            (SftpPane::Local, "~") if self.sftp_pair_primary_remote_id(cx).is_some() => {
                 let sftp = self.sftp_view.read(cx);
-                sftp.current_node_id
+                sftp.pair_primary_remote_id
                     .as_ref()
-                    .and_then(|node_id| sftp.remote_home_by_node.get(node_id))
+                    .and_then(|remote_id| sftp.remote_home_by_remote.get(remote_id))
                     .cloned()
                     .unwrap_or_else(|| "/".to_string())
             }
-            (SftpPane::Local, "..") => parent_path(&self.sftp_view.read(cx).local_path, false),
+            (SftpPane::Local, "~") => home_path(),
+            (SftpPane::Remote, "~") => {
+                let sftp = self.sftp_view.read(cx);
+                sftp.current_remote_id
+                    .as_ref()
+                    .and_then(|remote_id| sftp.remote_home_by_remote.get(remote_id))
+                    .cloned()
+                    .unwrap_or_else(|| "/".to_string())
+            }
+            (SftpPane::Local, "..") => parent_path(
+                &self.sftp_view.read(cx).local_path,
+                self.sftp_pair_primary_remote_id(cx).is_some(),
+            ),
             (SftpPane::Remote, "..") => parent_path(&self.sftp_view.read(cx).remote_path, true),
             _ => target.to_string(),
         };
@@ -793,6 +859,18 @@ impl SftpWorkspaceEntity {
         self.local_last_selected = None;
         self.focused_input = None;
         self.clear_context_menu_immediately();
+    }
+
+    pub(in crate::workspace::sftp) fn apply_pair_primary_path(&mut self, path: String) {
+        self.local_path_completion.dismiss();
+        self.local_path = normalize_remote_path(&path);
+        self.local_path_input.clone_from(&self.local_path);
+        self.editing_local_path = false;
+        self.local_selected.clear();
+        self.local_last_selected = None;
+        self.focused_input = None;
+        self.clear_context_menu_immediately();
+        self.pair_primary_loading = true;
     }
 
     fn apply_remote_path(&mut self, path: String) {

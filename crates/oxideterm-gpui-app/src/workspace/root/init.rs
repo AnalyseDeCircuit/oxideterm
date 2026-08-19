@@ -311,6 +311,11 @@ impl WorkspaceApp {
                     sftp::SftpWorkspaceEvent::ResumeIncompleteTransferRequested { transfer_id } => {
                         workspace.resume_sftp_incomplete_transfer(transfer_id.clone(), cx);
                     }
+                    sftp::SftpWorkspaceEvent::DiscardIncompleteTransferRequested {
+                        transfer_id,
+                    } => {
+                        workspace.discard_sftp_incomplete_transfer(transfer_id.clone(), cx);
+                    }
                     sftp::SftpWorkspaceEvent::TooltipRequested { id, label, x, y } => {
                         workspace.queue_workspace_tooltip(id, label, *x, *y, cx);
                     }
@@ -347,12 +352,12 @@ impl WorkspaceApp {
                     }
                     sftp::SftpWorkspaceEvent::RemoteLoadReady {
                         surface_id,
-                        node_id,
+                        remote_id,
                         delivery,
                     } => {
                         workspace.request_visible_sftp_remote_load(
                             *surface_id,
-                            node_id.clone(),
+                            remote_id.clone(),
                             delivery.clone(),
                             cx,
                         );
@@ -787,6 +792,9 @@ impl WorkspaceApp {
             _file_manager_observation: file_manager_observation,
             _file_manager_subscription: file_manager_subscription,
             sftp_tab_nodes: HashMap::new(),
+            standalone_sftp_tabs: HashMap::new(),
+            standalone_sftp_sessions: HashMap::new(),
+            pending_standalone_sftp_pair_launches: HashMap::new(),
             embedded_sftp_node_id: None,
             sftp_presentation_request: None,
             ide_workspace,

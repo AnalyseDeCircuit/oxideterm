@@ -268,7 +268,7 @@ impl WorkspaceApp {
         name: &str,
         cx: &mut Context<Self>,
     ) {
-        let Some(node_id) = self.visible_sftp_node_id(cx) else {
+        let Some(remote_id) = self.visible_sftp_remote_id(cx) else {
             return;
         };
         let Some((remote_path, local_path, size)) = ({
@@ -287,7 +287,7 @@ impl WorkspaceApp {
         }) else {
             return;
         };
-        let transfer_id = new_sftp_transfer_id(&node_id, name);
+        let transfer_id = new_sftp_transfer_id(&remote_id, name);
         let protocol =
             configured_transfer_protocol(self.settings_store.settings().sftp.transfer_protocol);
         let id = self.sftp_view.update(cx, |sftp, cx| {
@@ -297,7 +297,7 @@ impl WorkspaceApp {
                 id,
                 transfer_id: transfer_id.clone(),
                 batch_id: None,
-                node_id: node_id.clone(),
+                remote_id: remote_id.clone(),
                 name: name.to_string(),
                 local_path: local_path.clone(),
                 remote_path: remote_path.clone(),
@@ -315,7 +315,7 @@ impl WorkspaceApp {
         self.spawn_sftp_transfer_task(
             id,
             transfer_id,
-            node_id,
+            remote_id,
             SftpTransferDirection::Download,
             false,
             local_path,
@@ -410,14 +410,16 @@ impl WorkspaceApp {
     }
 
     fn spawn_remote_sftp_preview(&self, path: String, generation: u64, cx: &App) {
-        let Some(node_id) = self.visible_sftp_node_id(cx) else {
+        let Some(remote_id) = self.visible_sftp_remote_id(cx) else {
             return;
         };
-        let router = self.node_router.clone();
+        let Some(backend) = self.sftp_remote_backend(&remote_id) else {
+            return;
+        };
         let tx = self.sftp_view.read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
-            let result = load_remote_sftp_preview(router, &node_id, &path).await;
+            let result = load_remote_sftp_preview(backend, &path).await;
             let _ = tx.send(SftpWorkerResult::PreviewLoaded {
                 generation,
                 path,
@@ -456,15 +458,17 @@ impl WorkspaceApp {
     }
 
     fn spawn_remote_sftp_preview_hex(&self, path: String, offset: u64, generation: u64, cx: &App) {
-        let Some(node_id) = self.visible_sftp_node_id(cx) else {
+        let Some(remote_id) = self.visible_sftp_remote_id(cx) else {
             return;
         };
-        let router = self.node_router.clone();
+        let Some(backend) = self.sftp_remote_backend(&remote_id) else {
+            return;
+        };
         let tx = self.sftp_view.read(cx).worker_sender();
         let error_prefix = self.i18n.t("sftp.toast.load_more_failed");
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
-            let result = load_remote_sftp_preview_hex(router, &node_id, &path, offset).await;
+            let result = load_remote_sftp_preview_hex(backend, &path, offset).await;
             let _ = tx.send(SftpWorkerResult::PreviewHexLoaded {
                 generation,
                 path,
@@ -484,16 +488,17 @@ impl WorkspaceApp {
         tx: delivery::ActiveDeliverySender<SftpWorkerResult>,
         cx: &App,
     ) -> bool {
-        let Some(node_id) = self.visible_sftp_node_id(cx) else {
+        let Some(remote_id) = self.visible_sftp_remote_id(cx) else {
             return false;
         };
-        let router = self.node_router.clone();
+        let Some(backend) = self.sftp_remote_backend(&remote_id) else {
+            return false;
+        };
         let network_error_message = self.i18n.t("sftp.preview.network_error");
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
             let result = save_remote_sftp_preview(
-                router,
-                &node_id,
+                backend,
                 &path,
                 content.as_ref(),
                 encoding.as_ref(),

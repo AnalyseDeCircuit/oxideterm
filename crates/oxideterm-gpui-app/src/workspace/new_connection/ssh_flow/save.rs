@@ -6,7 +6,10 @@ use crate::workspace::{
     WorkspaceNotificationKind, WorkspaceNotificationScope, WorkspaceNotificationSeverity,
 };
 use gpui::App;
-use oxideterm_connections::{ConnectionStore, SavedAuth, SavedConnection, SavedProxyHop};
+use oxideterm_connections::{
+    ConnectionStore, SavedAuth, SavedConnection, SavedProxyHop, StandaloneSftpEndpoint,
+    StandaloneSftpTransferMode,
+};
 use oxideterm_gpui_terminal::TerminalNoticeVariant;
 
 struct PreparedMoshConnect {
@@ -42,6 +45,270 @@ fn mosh_password_draft_is_persistent(form: &NewConnectionForm) -> bool {
 fn saved_profile_notes(notes: &str) -> Option<String> {
     let notes = notes.trim();
     (!notes.is_empty()).then(|| notes.to_string())
+}
+
+fn standalone_sftp_secondary_target_matches(
+    form: &StandaloneSftpSecondaryForm,
+    endpoint: &StandaloneSftpEndpoint,
+) -> bool {
+    form.host.trim() == endpoint.host
+        && form.port.trim().parse::<u16>().ok() == Some(endpoint.port)
+        && form.username.trim() == endpoint.username
+}
+
+fn standalone_sftp_secondary_auth_matches(
+    form: &StandaloneSftpSecondaryForm,
+    auth: &SavedAuth,
+) -> bool {
+    form.auth_tab == ssh_auth_tab_from_saved_auth(auth)
+        && form.key_path.trim() == auth.key_path().unwrap_or_default()
+        && form.cert_path.trim() == auth.cert_path().unwrap_or_default()
+        && form.managed_key_id.trim() == auth.managed_key_id().unwrap_or_default()
+}
+
+fn saved_standalone_sftp_proxy_hop_from_form(
+    hop: &mut NewConnectionProxyHop,
+) -> anyhow::Result<SavedProxyHop> {
+    let host = hop.host.trim().to_string();
+    let username = hop.username.trim().to_string();
+    if host.is_empty() || username.is_empty() {
+        anyhow::bail!("Proxy host and username are required");
+    }
+    let port = hop
+        .port
+        .trim()
+        .parse::<u16>()
+        .ok()
+        .filter(|port| *port > 0)
+        .ok_or_else(|| anyhow::anyhow!("Proxy port is invalid"))?;
+    let auth = match hop.auth_tab {
+        SshAuthTab::Password => SavedAuth::Password {
+            keychain_id: None,
+            plaintext_password: Some(SecretString::from(std::mem::take(&mut hop.password))),
+        },
+        SshAuthTab::Agent => SavedAuth::Agent,
+        SshAuthTab::DefaultKey => SavedAuth::Key {
+            key_path: String::new(),
+            has_passphrase: !hop.passphrase.is_empty(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: (!hop.passphrase.is_empty())
+                .then(|| SecretString::from(std::mem::take(&mut hop.passphrase))),
+        },
+        SshAuthTab::SshKey => SavedAuth::Key {
+            key_path: hop.key_path.trim().to_string(),
+            has_passphrase: !hop.passphrase.is_empty(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: (!hop.passphrase.is_empty())
+                .then(|| SecretString::from(std::mem::take(&mut hop.passphrase))),
+        },
+        SshAuthTab::ManagedKey => SavedAuth::ManagedKey {
+            key_id: hop.managed_key_id.trim().to_string(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: (!hop.passphrase.is_empty())
+                .then(|| SecretString::from(std::mem::take(&mut hop.passphrase))),
+        },
+        SshAuthTab::Certificate => SavedAuth::Certificate {
+            key_path: hop.key_path.trim().to_string(),
+            cert_path: hop.cert_path.trim().to_string(),
+            has_passphrase: !hop.passphrase.is_empty(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: (!hop.passphrase.is_empty())
+                .then(|| SecretString::from(std::mem::take(&mut hop.passphrase))),
+        },
+        SshAuthTab::TwoFactor => SavedAuth::KeyboardInteractive,
+    };
+    Ok(SavedProxyHop {
+        host,
+        port,
+        username,
+        auth,
+        agent_forwarding: hop.agent_forwarding,
+        identity_agent: identity_agent_from_form(&hop.identity_agent),
+        agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
+        legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+    })
+}
+
+fn saved_standalone_sftp_secondary_route_from_form(
+    connection_store: &ConnectionStore,
+    form: &mut StandaloneSftpSecondaryForm,
+    existing: Option<&StandaloneSftpEndpoint>,
+    missing_credentials_message: &str,
+) -> anyhow::Result<(
+    Vec<SavedProxyHop>,
+    SavedUpstreamProxyPolicy,
+    Option<SavedProxyCommand>,
+)> {
+    let saved_auth_copies = saved_proxy_hop_auth_copies(
+        connection_store,
+        &form.proxy_hops,
+        missing_credentials_message,
+    )?;
+    let edit_sources = form
+        .proxy_hops
+        .iter()
+        .map(|hop| EditedProxyHopSource {
+            persisted_proxy_hop_index: hop.persisted_proxy_hop_index,
+            has_explicit_secret_draft: hop.has_explicit_secret_draft(),
+        })
+        .collect();
+    let mut proxy_chain = form
+        .proxy_hops
+        .iter_mut()
+        .map(saved_standalone_sftp_proxy_hop_from_form)
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    preserve_edited_proxy_hop_auth(
+        &mut proxy_chain,
+        existing.map_or(&[], |endpoint| endpoint.proxy_chain.as_slice()),
+        edit_sources,
+        saved_auth_copies,
+        missing_credentials_message,
+    )?;
+
+    let upstream_proxy = match form.upstream_proxy_policy {
+        NewConnectionUpstreamProxyPolicy::UseGlobal => SavedUpstreamProxyPolicy::UseGlobal,
+        NewConnectionUpstreamProxyPolicy::Direct => SavedUpstreamProxyPolicy::Direct,
+        NewConnectionUpstreamProxyPolicy::Custom => {
+            let host = form.upstream_proxy_host.trim().to_string();
+            if host.is_empty() {
+                anyhow::bail!("Upstream proxy host is required");
+            }
+            let port = form
+                .upstream_proxy_port
+                .trim()
+                .parse::<u16>()
+                .ok()
+                .filter(|port| *port > 0)
+                .ok_or_else(|| anyhow::anyhow!("Upstream proxy port is invalid"))?;
+            let auth = match form.upstream_proxy_auth {
+                NewConnectionUpstreamProxyAuth::None => SavedUpstreamProxyAuth::None,
+                NewConnectionUpstreamProxyAuth::Password => {
+                    let username = form.upstream_proxy_username.trim().to_string();
+                    if username.is_empty() {
+                        anyhow::bail!("Upstream proxy username is required");
+                    }
+                    SavedUpstreamProxyAuth::Password {
+                        username,
+                        keychain_id: form.upstream_proxy_password_keychain_id.clone(),
+                        plaintext_password: (!form.upstream_proxy_password.is_empty()).then(|| {
+                            SecretString::from(std::mem::take(&mut form.upstream_proxy_password))
+                        }),
+                    }
+                }
+            };
+            SavedUpstreamProxyPolicy::Custom {
+                proxy: SavedUpstreamProxyConfig {
+                    protocol: form.upstream_proxy_protocol,
+                    host,
+                    port,
+                    auth,
+                    remote_dns: form.upstream_proxy_remote_dns,
+                    no_proxy: form.upstream_proxy_no_proxy.trim().to_string(),
+                },
+            }
+        }
+    };
+    let proxy_command = if form.proxy_command_enabled {
+        if form.proxy_command.trim().is_empty() && form.proxy_command_keychain_id.is_none() {
+            anyhow::bail!("ProxyCommand value is required");
+        }
+        Some(SavedProxyCommand {
+            keychain_id: form.proxy_command_keychain_id.clone(),
+            plaintext_command: (!form.proxy_command.trim().is_empty())
+                .then(|| SecretString::from(std::mem::take(&mut form.proxy_command))),
+        })
+    } else {
+        None
+    };
+    Ok((proxy_chain, upstream_proxy, proxy_command))
+}
+
+fn saved_standalone_sftp_secondary_endpoint_from_form(
+    connection_store: &ConnectionStore,
+    form: &mut StandaloneSftpSecondaryForm,
+    existing: Option<&StandaloneSftpEndpoint>,
+    missing_credentials_message: &str,
+) -> anyhow::Result<StandaloneSftpEndpoint> {
+    let host = form.host.trim().to_string();
+    let username = form.username.trim().to_string();
+    if host.is_empty() {
+        anyhow::bail!("Second SFTP host is required");
+    }
+    if username.is_empty() {
+        anyhow::bail!("Second SFTP username is required");
+    }
+    let port = form
+        .port
+        .trim()
+        .parse::<u16>()
+        .ok()
+        .filter(|port| *port > 0)
+        .ok_or_else(|| anyhow::anyhow!("Second SFTP port is invalid"))?;
+    let can_preserve_auth = existing.is_some_and(|endpoint| {
+        standalone_sftp_secondary_target_matches(form, endpoint)
+            && standalone_sftp_secondary_auth_matches(form, &endpoint.auth)
+            && form.password.is_empty()
+            && form.passphrase.is_empty()
+    });
+    let auth = if can_preserve_auth {
+        existing.expect("checked above").auth.clone()
+    } else {
+        match form.auth_tab {
+            SshAuthTab::Password => SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: (form.save_password && !form.password.is_empty())
+                    .then(|| SecretString::from(std::mem::take(&mut form.password))),
+            },
+            SshAuthTab::Agent => SavedAuth::Agent,
+            SshAuthTab::DefaultKey => SavedAuth::Key {
+                key_path: String::new(),
+                has_passphrase: !form.passphrase.is_empty(),
+                passphrase_keychain_id: None,
+                plaintext_passphrase: (!form.passphrase.is_empty())
+                    .then(|| SecretString::from(std::mem::take(&mut form.passphrase))),
+            },
+            SshAuthTab::SshKey => SavedAuth::Key {
+                key_path: form.key_path.trim().to_string(),
+                has_passphrase: !form.passphrase.is_empty(),
+                passphrase_keychain_id: None,
+                plaintext_passphrase: (!form.passphrase.is_empty())
+                    .then(|| SecretString::from(std::mem::take(&mut form.passphrase))),
+            },
+            SshAuthTab::ManagedKey => SavedAuth::ManagedKey {
+                key_id: form.managed_key_id.trim().to_string(),
+                passphrase_keychain_id: None,
+                plaintext_passphrase: (!form.passphrase.is_empty())
+                    .then(|| SecretString::from(std::mem::take(&mut form.passphrase))),
+            },
+            SshAuthTab::Certificate => SavedAuth::Certificate {
+                key_path: form.key_path.trim().to_string(),
+                cert_path: form.cert_path.trim().to_string(),
+                has_passphrase: !form.passphrase.is_empty(),
+                passphrase_keychain_id: None,
+                plaintext_passphrase: (!form.passphrase.is_empty())
+                    .then(|| SecretString::from(std::mem::take(&mut form.passphrase))),
+            },
+            SshAuthTab::TwoFactor => SavedAuth::KeyboardInteractive,
+        }
+    };
+    let (proxy_chain, upstream_proxy, proxy_command) =
+        saved_standalone_sftp_secondary_route_from_form(
+            connection_store,
+            form,
+            existing,
+            missing_credentials_message,
+        )?;
+    let mut endpoint = StandaloneSftpEndpoint::new(host, port, username, auth);
+    endpoint.proxy_chain = proxy_chain;
+    endpoint.upstream_proxy = upstream_proxy;
+    endpoint.proxy_command = proxy_command;
+    endpoint.connect_timeout_seconds = form.connect_timeout_seconds;
+    endpoint.identity_agent = identity_agent_from_form(&form.identity_agent);
+    endpoint.legacy_ssh_compatibility = form.legacy_ssh_compatibility;
+    endpoint.initial_remote_path = (!form.initial_remote_path.trim().is_empty())
+        .then(|| form.initial_remote_path.trim().to_string());
+    endpoint.validate()?;
+    Ok(endpoint)
 }
 
 fn saved_mosh_auth_from_form(form: &mut NewConnectionForm) -> SavedAuth {
@@ -422,6 +689,8 @@ impl WorkspaceApp {
         }) {
             return;
         }
+        // Closing the form drops any unconsumed second-endpoint credentials immediately.
+        self.pending_standalone_sftp_pair_launches.clear();
         self.focus_active_pane(window, cx);
         cx.notify();
     }
@@ -505,6 +774,12 @@ impl WorkspaceApp {
             && mode == NewConnectionFormMode::NewConnection
         {
             self.submit_mosh_connection_form(action, window, cx);
+            return;
+        }
+        if transport == Some(NewConnectionTransport::StandaloneSftp)
+            && drill_down_parent_id.is_none()
+        {
+            self.submit_standalone_sftp_connection_form(action, window, cx);
             return;
         }
         if transport
@@ -1304,6 +1579,234 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(super) fn submit_standalone_sftp_connection_form(
+        &mut self,
+        action: NewConnectionSubmitAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if action == NewConnectionSubmitAction::Connect {
+            let initial_remote_path =
+                self.connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .and_then(|form| {
+                        let path = form.sftp_initial_remote_path.trim();
+                        (!path.is_empty()).then(|| path.to_string())
+                    });
+            self.start_new_connection_flow(
+                SshConnectionIntent::StandaloneSftp {
+                    saved_profile_id: None,
+                    initial_remote_path,
+                    pair_launch_token: None,
+                },
+                window,
+                cx,
+            );
+            return;
+        }
+
+        let prepared = self.with_connection_form_mut(cx, |this, form, cx| {
+            let form = form?;
+            if form.name.trim().is_empty()
+                && !form.host.trim().is_empty()
+                && !form.username.trim().is_empty()
+            {
+                form.name = format!("{}@{}", form.username.trim(), form.host.trim());
+            }
+            let existing_profile = form
+                .standalone_sftp_profile_id
+                .as_deref()
+                .and_then(|id| this.connection_store.get_standalone_sftp_profile(id))
+                .cloned();
+            let existing_auth = existing_profile
+                .as_ref()
+                .map(|profile| profile.auth.clone());
+            let base_request = if existing_auth.is_some() {
+                save_request_from_form_with_existing_auth(
+                    form,
+                    form.standalone_sftp_profile_id.clone(),
+                    existing_auth.as_ref(),
+                )
+            } else {
+                save_request_from_form_with_proxy_hop_prefix(
+                    form,
+                    &mut [],
+                    form.standalone_sftp_profile_id.clone(),
+                )
+            };
+            let base_request = match base_request {
+                Ok(request) => request,
+                Err(error) => {
+                    form.error = Some(error.to_string());
+                    cx.notify();
+                    return None;
+                }
+            };
+            let auth_override = (action == NewConnectionSubmitAction::SaveAndConnect
+                && form.auth_tab == SshAuthTab::Password
+                && !form.save_password)
+                .then(|| AuthMethod::password_secret(take_zeroizing_secret(&mut form.password)));
+            let secondary_endpoint =
+                if form.standalone_sftp_transfer_mode == StandaloneSftpTransferMode::RemoteRemote {
+                    match saved_standalone_sftp_secondary_endpoint_from_form(
+                        &this.connection_store,
+                        &mut form.standalone_sftp_secondary,
+                        existing_profile
+                            .as_ref()
+                            .and_then(|profile| profile.secondary_endpoint.as_ref()),
+                        &this.i18n.t("sessions.saved_next_hop.missing_credentials"),
+                    ) {
+                        Ok(endpoint) => Some(endpoint),
+                        Err(error) => {
+                            form.error = Some(error.to_string());
+                            cx.notify();
+                            return None;
+                        }
+                    }
+                } else {
+                    None
+                };
+            let secondary_auth_override = (action == NewConnectionSubmitAction::SaveAndConnect
+                && form.standalone_sftp_transfer_mode == StandaloneSftpTransferMode::RemoteRemote
+                && form.standalone_sftp_secondary.auth_tab == SshAuthTab::Password
+                && !form.standalone_sftp_secondary.save_password)
+                .then(|| {
+                    AuthMethod::password_secret(take_zeroizing_secret(
+                        &mut form.standalone_sftp_secondary.password,
+                    ))
+                });
+            let request = SaveStandaloneSftpProfileRequest {
+                id: base_request.id,
+                name: base_request.name,
+                group: base_request.group,
+                notes: base_request.notes,
+                icon: base_request.icon,
+                color: base_request.color,
+                icon_background_color: base_request.icon_background_color,
+                host: base_request.host,
+                port: base_request.port,
+                username: base_request.username,
+                auth: base_request.auth,
+                connect_timeout_seconds: base_request.connect_timeout_seconds,
+                proxy_chain: base_request.proxy_chain,
+                upstream_proxy: base_request.upstream_proxy,
+                proxy_command: base_request.proxy_command,
+                identity_agent: base_request.identity_agent,
+                legacy_ssh_compatibility: base_request.legacy_ssh_compatibility,
+                initial_remote_path: (!form.sftp_initial_remote_path.trim().is_empty())
+                    .then(|| form.sftp_initial_remote_path.trim().to_string()),
+                transfer_mode: form.standalone_sftp_transfer_mode,
+                secondary_endpoint,
+            };
+            form.pending = true;
+            form.error = None;
+            Some((request, auth_override, secondary_auth_override))
+        });
+        let Some((request, auth_override, secondary_auth_override)) = prepared else {
+            return;
+        };
+
+        let (profile, runtime_secrets) = match self
+            .connection_store
+            .upsert_standalone_sftp_profile_with_runtime_secrets(request)
+        {
+            Ok(saved) => saved,
+            Err(error) => {
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.pending = false;
+                        form.error = Some(format!(
+                            "{}: {error}",
+                            self.i18n.t("sftp.standalone.save_failed")
+                        ));
+                    }
+                });
+                cx.notify();
+                return;
+            }
+        };
+        self.queue_cloud_sync_dirty_refresh(cx);
+        if action == NewConnectionSubmitAction::Save {
+            self.update_connection_form_state(cx, ConnectionFormState::clear);
+            self.close_new_connection_select(cx);
+            cx.notify();
+            return;
+        }
+
+        let mut runtime_secrets = runtime_secrets;
+        let secondary_runtime_secrets = runtime_secrets.secondary_endpoint.take();
+        let Some(config) = ssh_config_from_standalone_sftp_profile_with_runtime_secrets(
+            &self.connection_store,
+            self.settings_store.settings(),
+            &profile,
+            runtime_secrets,
+            auth_override,
+        ) else {
+            self.update_connection_form_state(cx, |state| {
+                if let Some(form) = state.form.as_mut() {
+                    form.pending = false;
+                    form.error = Some(self.i18n.t("sftp.standalone.missing_credentials"));
+                }
+            });
+            cx.notify();
+            return;
+        };
+        let secondary_config = match (
+            profile.secondary_endpoint.as_ref(),
+            secondary_runtime_secrets,
+        ) {
+            (Some(endpoint), Some(secrets)) => {
+                ssh_config_from_standalone_sftp_endpoint_with_runtime_secrets(
+                    &self.connection_store,
+                    self.settings_store.settings(),
+                    &profile.name,
+                    endpoint,
+                    secrets,
+                    secondary_auth_override,
+                )
+            }
+            (None, None) => None,
+            _ => None,
+        };
+        if profile.transfer_mode == StandaloneSftpTransferMode::RemoteRemote
+            && secondary_config.is_none()
+        {
+            self.update_connection_form_state(cx, |state| {
+                if let Some(form) = state.form.as_mut() {
+                    form.pending = false;
+                    form.error = Some(self.i18n.t("sftp.standalone.missing_credentials"));
+                }
+            });
+            cx.notify();
+            return;
+        }
+        let pair_launch_token = secondary_config.map(|secondary_config| {
+            let token = uuid::Uuid::new_v4().to_string();
+            self.pending_standalone_sftp_pair_launches.insert(
+                token.clone(),
+                PendingStandaloneSftpPairLaunch {
+                    saved_profile_id: profile.id.clone(),
+                    title: profile.name.clone(),
+                    primary_initial_remote_path: profile.initial_remote_path.clone(),
+                    secondary_initial_remote_path: profile
+                        .secondary_endpoint
+                        .as_ref()
+                        .and_then(|endpoint| endpoint.initial_remote_path.clone()),
+                    primary_config: None,
+                    secondary_config: Some(secondary_config),
+                },
+            );
+            token
+        });
+        let intent = SshConnectionIntent::StandaloneSftp {
+            saved_profile_id: Some(profile.id.clone()),
+            initial_remote_path: profile.initial_remote_path.clone(),
+            pair_launch_token,
+        };
+        self.start_new_connection_config_flow(config, profile.name, intent, window, cx);
+    }
+
     pub(super) fn submit_remote_desktop_connection_form(
         &mut self,
         action: NewConnectionSubmitAction,
@@ -1524,12 +2027,14 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if intent == SshConnectionIntent::Test
-            && self
-                .connection_form_state(cx)
-                .form
-                .as_ref()
-                .is_some_and(|form| form.auth_tab == SshAuthTab::TwoFactor)
+        if matches!(
+            intent,
+            SshConnectionIntent::Test | SshConnectionIntent::TestStandaloneSftp
+        ) && self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .is_some_and(|form| form.auth_tab == SshAuthTab::TwoFactor)
         {
             self.update_connection_form_state(cx, |state| {
                 if let Some(form) = state.form.as_mut() {
@@ -1539,7 +2044,10 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        let secret_handoff = if intent == SshConnectionIntent::Test {
+        let secret_handoff = if matches!(
+            intent,
+            SshConnectionIntent::Test | SshConnectionIntent::TestStandaloneSftp
+        ) {
             RuntimeSecretHandoff::CopyForTest
         } else {
             RuntimeSecretHandoff::Move
@@ -1590,7 +2098,14 @@ impl WorkspaceApp {
             }
         });
 
-        if config.proxy_chain.is_some() {
+        if config.proxy_chain.is_some()
+            && !matches!(
+                intent,
+                SshConnectionIntent::StandaloneSftp { .. }
+                    | SshConnectionIntent::StandaloneSftpSecondary { .. }
+                    | SshConnectionIntent::TestStandaloneSftp
+            )
+        {
             self.start_proxy_session_tree_connect(config, title, intent, None, window, cx);
             cx.notify();
             return;
@@ -2069,6 +2584,132 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(in crate::workspace) fn open_saved_standalone_sftp_profile(
+        &mut self,
+        id: &str,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(profile) = self
+            .connection_store
+            .get_standalone_sftp_profile(id)
+            .cloned()
+        else {
+            return;
+        };
+        if self.standalone_sftp_sessions.contains_key(id) {
+            let secondary_endpoint_id = format!("{id}:secondary");
+            if profile.transfer_mode == StandaloneSftpTransferMode::RemoteRemote
+                && self
+                    .standalone_sftp_sessions
+                    .contains_key(&secondary_endpoint_id)
+            {
+                self.open_standalone_sftp_pair_tab_surface(
+                    id.to_string(),
+                    secondary_endpoint_id,
+                    profile.name,
+                    profile.initial_remote_path,
+                    profile
+                        .secondary_endpoint
+                        .and_then(|endpoint| endpoint.initial_remote_path),
+                    cx,
+                );
+            } else {
+                self.open_standalone_sftp_tab_surface(
+                    id.to_string(),
+                    profile.name,
+                    profile.initial_remote_path,
+                    cx,
+                );
+            }
+            return;
+        }
+        let mut runtime_secrets = match self
+            .connection_store
+            .load_standalone_sftp_profile_runtime_secrets(id)
+        {
+            Ok(secrets) => secrets,
+            Err(error) => {
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(Some(error.to_string()), cx);
+                });
+                return;
+            }
+        };
+        let secondary_runtime_secrets = runtime_secrets.secondary_endpoint.take();
+        let Some(config) = ssh_config_from_standalone_sftp_profile_with_runtime_secrets(
+            &self.connection_store,
+            self.settings_store.settings(),
+            &profile,
+            runtime_secrets,
+            None,
+        ) else {
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager
+                    .set_status(Some(self.i18n.t("sftp.standalone.missing_credentials")), cx);
+            });
+            return;
+        };
+        let secondary_config = match (
+            profile.secondary_endpoint.as_ref(),
+            secondary_runtime_secrets,
+        ) {
+            (Some(endpoint), Some(secrets)) => {
+                ssh_config_from_standalone_sftp_endpoint_with_runtime_secrets(
+                    &self.connection_store,
+                    self.settings_store.settings(),
+                    &profile.name,
+                    endpoint,
+                    secrets,
+                    None,
+                )
+            }
+            (None, None) => None,
+            _ => None,
+        };
+        if profile.transfer_mode == StandaloneSftpTransferMode::RemoteRemote
+            && secondary_config.is_none()
+        {
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager
+                    .set_status(Some(self.i18n.t("sftp.standalone.missing_credentials")), cx);
+            });
+            return;
+        }
+        let pair_launch_token = secondary_config.map(|secondary_config| {
+            let token = uuid::Uuid::new_v4().to_string();
+            self.pending_standalone_sftp_pair_launches.insert(
+                token.clone(),
+                PendingStandaloneSftpPairLaunch {
+                    saved_profile_id: profile.id.clone(),
+                    title: profile.name.clone(),
+                    primary_initial_remote_path: profile.initial_remote_path.clone(),
+                    secondary_initial_remote_path: profile
+                        .secondary_endpoint
+                        .as_ref()
+                        .and_then(|endpoint| endpoint.initial_remote_path.clone()),
+                    primary_config: None,
+                    secondary_config: Some(secondary_config),
+                },
+            );
+            token
+        });
+        self.session_manager.update(cx, |session_manager, cx| {
+            session_manager.set_status(Some(self.i18n.t("ssh.form.checking_host_key")), cx);
+        });
+        self.start_ssh_preflight(
+            config,
+            profile.name,
+            SshConnectionIntent::StandaloneSftp {
+                saved_profile_id: Some(profile.id),
+                initial_remote_path: profile.initial_remote_path,
+                pair_launch_token,
+            },
+            cx,
+        );
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn open_saved_mosh_profile(
         &mut self,
         id: &str,
@@ -2134,24 +2775,58 @@ impl WorkspaceApp {
         let upstream_proxy = config.upstream_proxy.take();
         let worker_config = config;
         let worker_title = title;
+        let routed_standalone_sftp = worker_config
+            .proxy_chain
+            .as_ref()
+            .is_some_and(|chain| !chain.is_empty())
+            && matches!(
+                &intent,
+                SshConnectionIntent::StandaloneSftp { .. }
+                    | SshConnectionIntent::StandaloneSftpSecondary { .. }
+                    | SshConnectionIntent::TestStandaloneSftp
+            );
+        let prompt_handler = Arc::new(NativeSshPromptHandler::new(tx.clone()));
+        let managed_key_resolver = managed_key_resolver_from_store(&self.connection_store);
         std::thread::spawn(move || {
-            let status = match tokio::runtime::Runtime::new() {
-                Ok(runtime) => runtime.block_on(check_host_key_with_route(
-                    &host,
+            let (checked_host, checked_port, status) = match tokio::runtime::Runtime::new() {
+                Ok(runtime) if routed_standalone_sftp => {
+                    // Routed preflight authenticates through the chain; retain the original
+                    // zeroizing config so the accepted connection can start afterwards.
+                    let mut route_config = worker_config.clone();
+                    route_config.upstream_proxy = upstream_proxy.clone();
+                    runtime.block_on(
+                        SshTransportClient::new(route_config)
+                            .with_prompt_handler(prompt_handler)
+                            .with_managed_key_resolver(managed_key_resolver)
+                            .preflight_route_host_keys(),
+                    )
+                }
+                Ok(runtime) => (
+                    host.clone(),
                     port,
-                    connect_timeout_seconds,
-                    upstream_proxy.as_ref(),
-                    worker_config.proxy_command.as_ref(),
-                )),
-                Err(error) => HostKeyStatus::Error {
-                    message: format!("failed to initialize SSH runtime: {error}"),
-                },
+                    runtime.block_on(check_host_key_with_route(
+                        &host,
+                        port,
+                        connect_timeout_seconds,
+                        upstream_proxy.as_ref(),
+                        worker_config.proxy_command.as_ref(),
+                    )),
+                ),
+                Err(error) => (
+                    host.clone(),
+                    port,
+                    HostKeyStatus::Error {
+                        message: format!("failed to initialize SSH runtime: {error}"),
+                    },
+                ),
             };
             let _ = tx.send(SshConnectionWorkerResult::Preflight {
                 config: worker_config,
                 upstream_proxy,
                 title: worker_title,
                 intent,
+                host: checked_host,
+                port: checked_port,
                 status,
             });
         });

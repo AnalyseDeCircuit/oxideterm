@@ -222,9 +222,9 @@ use oxideterm_settings_model::{
 };
 use oxideterm_sftp::{
     BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
-    BackgroundTransferState, LazyProgressStore, ProgressStore, SftpTransferGuard,
-    SftpTransferManager, StoredTransferProgress, TransferStrategy, tar_download_directory,
-    tar_upload_directory,
+    BackgroundTransferState, LazyProgressStore, ProgressStore, RemoteRelayDisposition,
+    SftpTransferGuard, SftpTransferManager, StoredTransferProgress, TransferStrategy,
+    tar_download_directory, tar_upload_directory,
 };
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ConnectionState, ConnectionTraceEvent,
@@ -235,8 +235,8 @@ use oxideterm_ssh::{
     PhaseResult, ProbeConnectionStatus, ProxyHopConfig, ReconnectForwardRuleSnapshot,
     ReconnectNodeConnectionSnapshot, ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot,
     ReconnectOrchestratorStore, ReconnectPhase, ReconnectProgress, ReconnectSnapshot,
-    SshAlgorithmDiagnosticKind, SshConfig, SshConnectionRegistry, SshTransportClient,
-    TerminalEndpoint,
+    SshAlgorithmDiagnosticKind, SshConfig, SshConnectionHandle, SshConnectionRegistry,
+    SshTransportClient, TerminalEndpoint,
 };
 use oxideterm_ssh_launch::TemporarySshLaunch;
 use oxideterm_terminal::{
@@ -861,6 +861,10 @@ pub(crate) struct WorkspaceApp {
     _file_manager_observation: Subscription,
     _file_manager_subscription: Subscription,
     sftp_tab_nodes: HashMap<TabId, NodeId>,
+    standalone_sftp_tabs: HashMap<TabId, sftp::StandaloneSftpTabBinding>,
+    standalone_sftp_sessions: HashMap<String, sftp::StandaloneSftpRuntime>,
+    pending_standalone_sftp_pair_launches:
+        HashMap<String, new_connection::PendingStandaloneSftpPairLaunch>,
     embedded_sftp_node_id: Option<NodeId>,
     sftp_presentation_request: Option<sftp::SftpPresentationRequest>,
     ide_workspace: Entity<ide::IdeWorkspaceEntity>,

@@ -2972,6 +2972,51 @@ fn new_connection_field_value(
         NewConnectionField::MoshUdpHost => &form.mosh_udp_host,
         NewConnectionField::MoshUdpPort => &form.mosh_udp_port,
         NewConnectionField::MoshLocale => &form.mosh_locale,
+        NewConnectionField::InitialRemotePath => &form.sftp_initial_remote_path,
+        NewConnectionField::StandaloneSftpSecondaryHost => &form.standalone_sftp_secondary.host,
+        NewConnectionField::StandaloneSftpSecondaryPort => &form.standalone_sftp_secondary.port,
+        NewConnectionField::StandaloneSftpSecondaryUsername => {
+            &form.standalone_sftp_secondary.username
+        }
+        NewConnectionField::StandaloneSftpSecondaryPassword => {
+            &form.standalone_sftp_secondary.password
+        }
+        NewConnectionField::StandaloneSftpSecondaryKeyPath => {
+            &form.standalone_sftp_secondary.key_path
+        }
+        NewConnectionField::StandaloneSftpSecondaryManagedKeyId => {
+            &form.standalone_sftp_secondary.managed_key_id
+        }
+        NewConnectionField::StandaloneSftpSecondaryCertPath => {
+            &form.standalone_sftp_secondary.cert_path
+        }
+        NewConnectionField::StandaloneSftpSecondaryPassphrase => {
+            &form.standalone_sftp_secondary.passphrase
+        }
+        NewConnectionField::StandaloneSftpSecondaryIdentityAgent => {
+            &form.standalone_sftp_secondary.identity_agent
+        }
+        NewConnectionField::StandaloneSftpSecondaryInitialRemotePath => {
+            &form.standalone_sftp_secondary.initial_remote_path
+        }
+        NewConnectionField::StandaloneSftpSecondaryProxyCommand => {
+            &form.standalone_sftp_secondary.proxy_command
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyHost => {
+            &form.standalone_sftp_secondary.upstream_proxy_host
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyPort => {
+            &form.standalone_sftp_secondary.upstream_proxy_port
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyNoProxy => {
+            &form.standalone_sftp_secondary.upstream_proxy_no_proxy
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyUsername => {
+            &form.standalone_sftp_secondary.upstream_proxy_username
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyPassword => {
+            &form.standalone_sftp_secondary.upstream_proxy_password
+        }
         NewConnectionField::JumpHost => &form.jump_server_form.as_ref()?.host,
         NewConnectionField::JumpPort => &form.jump_server_form.as_ref()?.port,
         NewConnectionField::JumpUsername => &form.jump_server_form.as_ref()?.username,
@@ -3018,6 +3063,51 @@ fn connection_field_value_mut(
         NewConnectionField::MoshUdpHost => &mut form.mosh_udp_host,
         NewConnectionField::MoshUdpPort => &mut form.mosh_udp_port,
         NewConnectionField::MoshLocale => &mut form.mosh_locale,
+        NewConnectionField::InitialRemotePath => &mut form.sftp_initial_remote_path,
+        NewConnectionField::StandaloneSftpSecondaryHost => &mut form.standalone_sftp_secondary.host,
+        NewConnectionField::StandaloneSftpSecondaryPort => &mut form.standalone_sftp_secondary.port,
+        NewConnectionField::StandaloneSftpSecondaryUsername => {
+            &mut form.standalone_sftp_secondary.username
+        }
+        NewConnectionField::StandaloneSftpSecondaryPassword => {
+            &mut form.standalone_sftp_secondary.password
+        }
+        NewConnectionField::StandaloneSftpSecondaryKeyPath => {
+            &mut form.standalone_sftp_secondary.key_path
+        }
+        NewConnectionField::StandaloneSftpSecondaryManagedKeyId => {
+            &mut form.standalone_sftp_secondary.managed_key_id
+        }
+        NewConnectionField::StandaloneSftpSecondaryCertPath => {
+            &mut form.standalone_sftp_secondary.cert_path
+        }
+        NewConnectionField::StandaloneSftpSecondaryPassphrase => {
+            &mut form.standalone_sftp_secondary.passphrase
+        }
+        NewConnectionField::StandaloneSftpSecondaryIdentityAgent => {
+            &mut form.standalone_sftp_secondary.identity_agent
+        }
+        NewConnectionField::StandaloneSftpSecondaryInitialRemotePath => {
+            &mut form.standalone_sftp_secondary.initial_remote_path
+        }
+        NewConnectionField::StandaloneSftpSecondaryProxyCommand => {
+            &mut form.standalone_sftp_secondary.proxy_command
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyHost => {
+            &mut form.standalone_sftp_secondary.upstream_proxy_host
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyPort => {
+            &mut form.standalone_sftp_secondary.upstream_proxy_port
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyNoProxy => {
+            &mut form.standalone_sftp_secondary.upstream_proxy_no_proxy
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyUsername => {
+            &mut form.standalone_sftp_secondary.upstream_proxy_username
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyPassword => {
+            &mut form.standalone_sftp_secondary.upstream_proxy_password
+        }
         NewConnectionField::JumpHost => {
             &mut form
                 .jump_server_form

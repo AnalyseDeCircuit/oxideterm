@@ -1,4 +1,5 @@
 use super::*;
+use crate::workspace::sftp::{SftpRemoteId, SftpSurfaceId};
 
 fn is_terminal_tab_kind(kind: &TabKind) -> bool {
     // Terminal focus and display behavior is transport-neutral.
@@ -191,12 +192,36 @@ impl WorkspaceApp {
             }
             Some(TabKind::Sftp) => {
                 self.active_surface = ActiveSurface::Terminal;
-                if let Some(active_tab_id) = self.active_tab_id(cx)
-                    && let Some(node_id) = self.sftp_tab_nodes.get(&active_tab_id).cloned()
-                {
-                    self.active_ssh_node_id = Some(node_id.clone());
-                    self.expanded_ssh_nodes.insert(node_id.clone());
-                    self.activate_sftp_view_for_node(active_tab_id, &node_id, cx);
+                if let Some(active_tab_id) = self.active_tab_id(cx) {
+                    if let Some(node_id) = self.sftp_tab_nodes.get(&active_tab_id).cloned() {
+                        self.active_ssh_node_id = Some(node_id.clone());
+                        self.expanded_ssh_nodes.insert(node_id.clone());
+                        self.activate_sftp_view_for_node(active_tab_id, &node_id, cx);
+                    } else if let Some(binding) =
+                        self.standalone_sftp_tabs.get(&active_tab_id).cloned()
+                    {
+                        self.active_ssh_node_id = None;
+                        let pair_mode = binding.secondary_endpoint_id.is_some();
+                        self.sftp_view.update(cx, |sftp, cx| {
+                            if let Some(secondary_endpoint_id) = binding.secondary_endpoint_id {
+                                sftp.activate_pair_view(
+                                    SftpSurfaceId::Tab(active_tab_id),
+                                    SftpRemoteId::Standalone(binding.primary_endpoint_id),
+                                    SftpRemoteId::Standalone(secondary_endpoint_id),
+                                    None,
+                                );
+                            } else {
+                                sftp.activate_view(
+                                    SftpSurfaceId::Tab(active_tab_id),
+                                    SftpRemoteId::Standalone(binding.primary_endpoint_id),
+                                );
+                            }
+                            cx.notify();
+                        });
+                        if pair_mode {
+                            self.request_sftp_pair_primary_load(cx);
+                        }
+                    }
                 }
             }
             Some(TabKind::Ide) => {
@@ -962,6 +987,24 @@ impl WorkspaceApp {
         // Tauri keeps node SFTP alive when the SFTP tab is closed; the tab is
         // only a view over the node-owned ConnectionEntry session.
         self.sftp_tab_nodes.remove(&tab.id);
+        if let Some(binding) = self.standalone_sftp_tabs.remove(&tab.id) {
+            let endpoint_ids =
+                std::iter::once(binding.primary_endpoint_id).chain(binding.secondary_endpoint_id);
+            for endpoint_id in endpoint_ids {
+                if self
+                    .standalone_sftp_tabs
+                    .values()
+                    .any(|open_binding| open_binding.contains_endpoint(&endpoint_id))
+                {
+                    continue;
+                }
+                if let Some(runtime) = self.standalone_sftp_sessions.remove(&endpoint_id) {
+                    // The tab releases only its consumer; active transfers retain separate leases.
+                    self.ssh_registry
+                        .release(&runtime.connection_id, &runtime.consumer);
+                }
+            }
+        }
         self.ide_workspace.update(cx, |workspace, cx| {
             // The IDE owner records a real project close and releases only this
             // surface's node consumer; shared node users remain registered.

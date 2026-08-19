@@ -14,16 +14,39 @@ impl WorkspaceApp {
             > + Send
             + 'static,
     {
-        let Some(node_id) = self.visible_sftp_node_id(cx) else {
+        self.spawn_sftp_pane_remote_mutation(SftpPane::Remote, operation, toast, cx);
+    }
+
+    fn spawn_sftp_pane_remote_mutation<F>(
+        &self,
+        pane: SftpPane,
+        operation: F,
+        toast: Option<SftpMutationToast>,
+        cx: &App,
+    ) where
+        F: FnOnce(
+                SftpSession,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<(), String>> + Send>,
+            > + Send
+            + 'static,
+    {
+        let remote_id = match pane {
+            SftpPane::Local => self.sftp_pair_primary_remote_id(cx),
+            SftpPane::Remote => self.visible_sftp_remote_id(cx),
+        };
+        let Some(remote_id) = remote_id else {
             return;
         };
-        let router = self.node_router.clone();
+        let Some(backend) = self.sftp_remote_backend(&remote_id) else {
+            return;
+        };
         let tx = self.sftp_view.read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
             let result = async {
-                let sftp = router
-                    .acquire_transfer_sftp(&node_id)
+                let sftp = backend
+                    .acquire_transfer_sftp()
                     .await
                     .map_err(|error| error.to_string())?;
                 operation(sftp).await
@@ -31,8 +54,8 @@ impl WorkspaceApp {
             .await;
             let _ = tx.send(SftpWorkerResult::RemoteMutationComplete {
                 result,
-                refresh_remote: true,
-                refresh_local: false,
+                refresh_remote: pane == SftpPane::Remote,
+                refresh_local: pane == SftpPane::Local,
                 toast,
             });
         });
@@ -101,6 +124,43 @@ impl WorkspaceApp {
                     .input_value(SftpInput::DialogValue)
                     .trim()
                     .to_string();
+                if pane == SftpPane::Local
+                    && self.sftp_pair_primary_remote_id(cx).is_some()
+                    && !new_name.is_empty()
+                {
+                    let old_path = {
+                        let sftp = self.sftp_view.read(cx);
+                        sftp.local_files
+                            .iter()
+                            .find(|file| file.name == old_name)
+                            .map(|file| file.path.clone())
+                            .unwrap_or_else(|| join_sftp_path(&sftp.local_path, &old_name))
+                    };
+                    let new_path = join_sftp_path(&parent_path(&old_path, true), &new_name);
+                    let toast = SftpMutationToast {
+                        success_title: self.i18n.t("sftp.toast.renamed"),
+                        success_description: Some(sftp_i18n_rename_detail(
+                            self.i18n.t("sftp.toast.renamed_detail"),
+                            &old_name,
+                            &new_name,
+                        )),
+                        error_title: self.i18n.t("sftp.toast.rename_failed"),
+                    };
+                    self.spawn_sftp_pane_remote_mutation(
+                        pane,
+                        move |sftp| {
+                            Box::pin(async move {
+                                sftp.rename(&old_path, &new_path)
+                                    .await
+                                    .map_err(|error| error.to_string())
+                            })
+                        },
+                        Some(toast),
+                        cx,
+                    );
+                    self.close_sftp_dialog(cx);
+                    return;
+                }
                 if !new_name.is_empty() {
                     match pane {
                         SftpPane::Local => {
@@ -177,6 +237,29 @@ impl WorkspaceApp {
                     .input_value(SftpInput::DialogValue)
                     .trim()
                     .to_string();
+                if pane == SftpPane::Local
+                    && self.sftp_pair_primary_remote_id(cx).is_some()
+                    && !name.is_empty()
+                {
+                    let path = join_sftp_path(&self.sftp_view.read(cx).local_path, &name);
+                    let toast = SftpMutationToast {
+                        success_title: self.i18n.t("sftp.toast.folder_created"),
+                        success_description: Some(name),
+                        error_title: self.i18n.t("sftp.toast.create_folder_failed"),
+                    };
+                    self.spawn_sftp_pane_remote_mutation(
+                        pane,
+                        move |sftp| {
+                            Box::pin(async move {
+                                sftp.mkdir(&path).await.map_err(|error| error.to_string())
+                            })
+                        },
+                        Some(toast),
+                        cx,
+                    );
+                    self.close_sftp_dialog(cx);
+                    return;
+                }
                 if !name.is_empty() {
                     match pane {
                         SftpPane::Local => {
@@ -229,6 +312,44 @@ impl WorkspaceApp {
                 }
             }
             SftpDialog::Delete { pane, files } => {
+                if pane == SftpPane::Local && self.sftp_pair_primary_remote_id(cx).is_some() {
+                    let local_files = self.sftp_view.read(cx).local_files.clone();
+                    let targets = files
+                        .iter()
+                        .filter_map(|name| {
+                            local_files
+                                .iter()
+                                .find(|file| file.name == *name)
+                                .map(|file| file.path.clone())
+                        })
+                        .collect::<Vec<_>>();
+                    let count = targets.len();
+                    let toast = SftpMutationToast {
+                        success_title: self.i18n.t("sftp.toast.deleted"),
+                        success_description: Some(sftp_i18n_count(
+                            self.i18n.t("sftp.toast.deleted_count"),
+                            count,
+                        )),
+                        error_title: self.i18n.t("sftp.toast.delete_failed"),
+                    };
+                    self.spawn_sftp_pane_remote_mutation(
+                        pane,
+                        move |sftp| {
+                            Box::pin(async move {
+                                for path in targets {
+                                    sftp.delete_recursive(&path)
+                                        .await
+                                        .map_err(|error| error.to_string())?;
+                                }
+                                Ok(())
+                            })
+                        },
+                        Some(toast),
+                        cx,
+                    );
+                    self.close_sftp_dialog(cx);
+                    return;
+                }
                 match pane {
                     SftpPane::Local => {
                         let local_path = self.sftp_view.read(cx).local_path.clone();
@@ -286,11 +407,14 @@ impl WorkspaceApp {
                                     .map(|file| file.path.clone())
                             })
                             .collect::<Vec<_>>();
-                        let Some(node_id) = self.visible_sftp_node_id(cx) else {
+                        let Some(remote_id) = self.visible_sftp_remote_id(cx) else {
                             self.close_sftp_dialog(cx);
                             return;
                         };
-                        let router = self.node_router.clone();
+                        let Some(backend) = self.sftp_remote_backend(&remote_id) else {
+                            self.close_sftp_dialog(cx);
+                            return;
+                        };
                         let tx = self.sftp_view.read(cx).worker_sender();
                         let runtime = self.forwarding_runtime.clone();
                         let success_title = self.i18n.t("sftp.toast.deleted");
@@ -298,8 +422,8 @@ impl WorkspaceApp {
                         let error_title = self.i18n.t("sftp.toast.delete_failed");
                         runtime.spawn(async move {
                             let result = async {
-                                let sftp = router
-                                    .acquire_transfer_sftp(&node_id)
+                                let sftp = backend
+                                    .acquire_transfer_sftp()
                                     .await
                                     .map_err(|error| error.to_string())?;
                                 let mut deleted = 0_u64;

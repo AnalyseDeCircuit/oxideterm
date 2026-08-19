@@ -574,12 +574,20 @@ impl ConnectionFlowEntity {
         if let Some(form) = self.form.form.as_mut() {
             if commit {
                 if let Some(jump_server) = form.jump_server_form.take() {
-                    form.proxy_hops.push(jump_server);
+                    match form.jump_server_target {
+                        super::ConnectionRouteTarget::Primary => {
+                            form.proxy_hops.push(jump_server);
+                            form.proxy_chain_expanded = true;
+                        }
+                        super::ConnectionRouteTarget::StandaloneSftpSecondary => {
+                            form.standalone_sftp_secondary.proxy_hops.push(jump_server);
+                            form.standalone_sftp_secondary.proxy_chain_expanded = true;
+                        }
+                    }
                     if form.auth_tab == super::SshAuthTab::TwoFactor {
                         form.auth_tab = super::SshAuthTab::Password;
                         form.focused_field = super::NewConnectionField::Password;
                     }
-                    form.proxy_chain_expanded = true;
                     form.field_focused = false;
                     form.selected_field = None;
                     form.error = None;

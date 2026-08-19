@@ -219,12 +219,17 @@ impl WorkspaceApp {
                     ));
                 }
             }
-            NewConnectionSelect::KeyAuthSource | NewConnectionSelect::JumpKeyAuthSource => {
+            NewConnectionSelect::KeyAuthSource
+            | NewConnectionSelect::StandaloneSftpSecondaryKeyAuthSource
+            | NewConnectionSelect::JumpKeyAuthSource => {
                 let context = match select_id {
                     NewConnectionSelect::KeyAuthSource => {
                         self.current_main_auth_selector_context(cx)
                     }
                     NewConnectionSelect::JumpKeyAuthSource => AuthSelectorContext::Jump,
+                    NewConnectionSelect::StandaloneSftpSecondaryKeyAuthSource => {
+                        AuthSelectorContext::StandaloneSftpSecondary
+                    }
                     _ => unreachable!("matched only key auth source selects"),
                 };
                 let active_tab = self
@@ -233,6 +238,9 @@ impl WorkspaceApp {
                     .as_ref()
                     .and_then(|form| match select_id {
                         NewConnectionSelect::KeyAuthSource => Some(form.auth_tab),
+                        NewConnectionSelect::StandaloneSftpSecondaryKeyAuthSource => {
+                            Some(form.standalone_sftp_secondary.auth_tab)
+                        }
                         NewConnectionSelect::JumpKeyAuthSource => form
                             .jump_server_form
                             .as_ref()
@@ -255,13 +263,18 @@ impl WorkspaceApp {
                     ));
                 }
             }
-            NewConnectionSelect::ManagedKey | NewConnectionSelect::JumpManagedKey => {
+            NewConnectionSelect::ManagedKey
+            | NewConnectionSelect::StandaloneSftpSecondaryManagedKey
+            | NewConnectionSelect::JumpManagedKey => {
                 let current_key_id = self
                     .connection_form_state(cx)
                     .form
                     .as_ref()
                     .and_then(|form| match select_id {
                         NewConnectionSelect::ManagedKey => Some(form.managed_key_id.as_str()),
+                        NewConnectionSelect::StandaloneSftpSecondaryManagedKey => {
+                            Some(form.standalone_sftp_secondary.managed_key_id.as_str())
+                        }
                         NewConnectionSelect::JumpManagedKey => form
                             .jump_server_form
                             .as_ref()
@@ -285,12 +298,21 @@ impl WorkspaceApp {
                     ));
                 }
             }
-            NewConnectionSelect::UpstreamProxyPolicy => {
+            NewConnectionSelect::UpstreamProxyPolicy
+            | NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyPolicy => {
+                let secondary =
+                    select_id == NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyPolicy;
                 let selected = self
                     .connection_form_state(cx)
                     .form
                     .as_ref()
-                    .map(|form| form.upstream_proxy_policy)
+                    .map(|form| {
+                        if secondary {
+                            form.standalone_sftp_secondary.upstream_proxy_policy
+                        } else {
+                            form.upstream_proxy_policy
+                        }
+                    })
                     .unwrap_or(NewConnectionUpstreamProxyPolicy::UseGlobal);
                 for (policy, label_key) in [
                     (
@@ -312,18 +334,27 @@ impl WorkspaceApp {
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_new_connection_select(cx);
-                            this.set_new_connection_upstream_proxy_policy(policy, cx);
+                            this.set_new_connection_upstream_proxy_policy(policy, secondary, cx);
                             cx.stop_propagation();
                         }),
                     ));
                 }
             }
-            NewConnectionSelect::UpstreamProxyProtocol => {
+            NewConnectionSelect::UpstreamProxyProtocol
+            | NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyProtocol => {
+                let secondary =
+                    select_id == NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyProtocol;
                 let selected = self
                     .connection_form_state(cx)
                     .form
                     .as_ref()
-                    .map(|form| form.upstream_proxy_protocol)
+                    .map(|form| {
+                        if secondary {
+                            form.standalone_sftp_secondary.upstream_proxy_protocol
+                        } else {
+                            form.upstream_proxy_protocol
+                        }
+                    })
                     .unwrap_or(SavedUpstreamProxyProtocol::Socks5);
                 for (protocol, label_key) in [
                     (
@@ -341,18 +372,29 @@ impl WorkspaceApp {
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_new_connection_select(cx);
-                            this.set_new_connection_upstream_proxy_protocol(protocol, cx);
+                            this.set_new_connection_upstream_proxy_protocol(
+                                protocol, secondary, cx,
+                            );
                             cx.stop_propagation();
                         }),
                     ));
                 }
             }
-            NewConnectionSelect::UpstreamProxyAuth => {
+            NewConnectionSelect::UpstreamProxyAuth
+            | NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyAuth => {
+                let secondary =
+                    select_id == NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyAuth;
                 let selected = self
                     .connection_form_state(cx)
                     .form
                     .as_ref()
-                    .map(|form| form.upstream_proxy_auth)
+                    .map(|form| {
+                        if secondary {
+                            form.standalone_sftp_secondary.upstream_proxy_auth
+                        } else {
+                            form.upstream_proxy_auth
+                        }
+                    })
                     .unwrap_or(NewConnectionUpstreamProxyAuth::None);
                 for (auth, label_key) in [
                     (
@@ -370,7 +412,7 @@ impl WorkspaceApp {
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_new_connection_select(cx);
-                            this.set_new_connection_upstream_proxy_auth(auth, cx);
+                            this.set_new_connection_upstream_proxy_auth(auth, secondary, cx);
                             cx.stop_propagation();
                         }),
                     ));
@@ -1118,22 +1160,41 @@ impl WorkspaceApp {
         true
     }
 
-    pub(super) fn render_proxy_chain_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_proxy_chain_section(
+        &self,
+        secondary: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let (hop_count, expanded) = self
             .connection_form_state(cx)
             .form
             .as_ref()
-            .map(|form| (form.proxy_hops.len(), form.proxy_chain_expanded))
+            .map(|form| {
+                if secondary {
+                    (
+                        form.standalone_sftp_secondary.proxy_hops.len(),
+                        form.standalone_sftp_secondary.proxy_chain_expanded,
+                    )
+                } else {
+                    (form.proxy_hops.len(), form.proxy_chain_expanded)
+                }
+            })
             .unwrap_or_default();
         let mut list = div()
-            .id("new-connection-proxy-chain-scroll")
+            .id(if secondary {
+                "new-connection-secondary-proxy-chain-scroll"
+            } else {
+                "new-connection-proxy-chain-scroll"
+            })
             .flex()
             .flex_col()
             .gap_2()
             .max_h(px(TAURI_PROXY_CHAIN_MAX_HEIGHT))
-            .selectable_overflow_y_scroll(
-                &self.selectable_text_scroll_handle("new-connection-proxy-chain-scroll"),
-            );
+            .selectable_overflow_y_scroll(&self.selectable_text_scroll_handle(if secondary {
+                "new-connection-secondary-proxy-chain-scroll"
+            } else {
+                "new-connection-proxy-chain-scroll"
+            }));
         if hop_count == 0 {
             list = list.child(
                 div()
@@ -1149,7 +1210,12 @@ impl WorkspaceApp {
                 .form
                 .as_ref()
                 .map(|form| {
-                    form.proxy_hops
+                    let proxy_hops = if secondary {
+                        &form.standalone_sftp_secondary.proxy_hops
+                    } else {
+                        &form.proxy_hops
+                    };
+                    proxy_hops
                         .iter()
                         .map(|hop| ProxyHopSummarySnapshot {
                             saved_connection_name: self
@@ -1165,7 +1231,7 @@ impl WorkspaceApp {
                 })
                 .unwrap_or_default();
             for (index, hop) in summaries.iter().enumerate() {
-                list = list.child(self.render_proxy_hop_summary(index, hop, cx));
+                list = list.child(self.render_proxy_hop_summary(index, hop, secondary, cx));
             }
         }
 
@@ -1194,9 +1260,9 @@ impl WorkspaceApp {
                             .items_center()
                             .gap_2()
                             .when(hop_count > 0, |row| {
-                                row.child(self.render_proxy_chain_toggle(expanded, cx))
+                                row.child(self.render_proxy_chain_toggle(expanded, secondary, cx))
                             })
-                            .child(self.render_add_jump_button(cx)),
+                            .child(self.render_add_jump_button(secondary, cx)),
                     ),
             )
             .child(if expanded {
@@ -1219,14 +1285,26 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_proxy_chain_toggle(&self, expanded: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn render_proxy_chain_toggle(
+        &self,
+        expanded: bool,
+        secondary: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         // Proxy-chain expand/collapse is an icon-only toolbar action in the
         // Tauri form. Use the shared primitive so hover and future focus state
         // stay aligned with other new-connection toolbar controls.
         oxideterm_gpui_ui::button::icon_button(
             &self.tokens,
             self.render_animated_chevron(
-                ("proxy-chain-chevron", expanded as usize),
+                (
+                    if secondary {
+                        "secondary-proxy-chain-chevron"
+                    } else {
+                        "proxy-chain-chevron"
+                    },
+                    expanded as usize,
+                ),
                 expanded,
                 16.0,
                 rgb(self.tokens.ui.text),
@@ -1241,10 +1319,15 @@ impl WorkspaceApp {
         )
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(|this, _event, _window, cx| {
+            cx.listener(move |this, _event, _window, cx| {
                 this.update_connection_form_state(cx, |state| {
                     if let Some(form) = state.form.as_mut() {
-                        form.proxy_chain_expanded = !form.proxy_chain_expanded;
+                        if secondary {
+                            let route = &mut form.standalone_sftp_secondary;
+                            route.proxy_chain_expanded = !route.proxy_chain_expanded;
+                        } else {
+                            form.proxy_chain_expanded = !form.proxy_chain_expanded;
+                        }
                         form.field_focused = false;
                     }
                 });
@@ -1255,7 +1338,7 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    fn render_add_jump_button(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_add_jump_button(&self, secondary: bool, cx: &mut Context<Self>) -> AnyElement {
         // The outer "add jump" command is the same small outline action
         // pattern used by settings toolbars, so keep its chrome shared.
         self.workspace_toolbar_action_button(
@@ -1278,10 +1361,15 @@ impl WorkspaceApp {
                 hover_background: Some(rgb(self.tokens.ui.bg_hover)),
                 ..ToolbarButtonOptions::default()
             },
-            cx.listener(|this, _event, window, cx| {
+            cx.listener(move |this, _event, window, cx| {
                 this.update_connection_form_state(cx, |state| {
                     if let Some(form) = state.form.as_mut() {
                         form.jump_server_form = Some(NewConnectionProxyHop::new());
+                        form.jump_server_target = if secondary {
+                            ConnectionRouteTarget::StandaloneSftpSecondary
+                        } else {
+                            ConnectionRouteTarget::Primary
+                        };
                         form.field_focused = true;
                         form.focused_field = NewConnectionField::JumpHost;
                         form.selected_field = None;
@@ -1346,6 +1434,7 @@ impl WorkspaceApp {
         &self,
         index: usize,
         hop: &ProxyHopSummarySnapshot,
+        secondary: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let hop_title = hop
@@ -1430,7 +1519,7 @@ impl WorkspaceApp {
                                         .text_color(rgb(self.tokens.ui.text_muted))
                                         .child(format!("{}. {}", index + 1, hop_title)),
                                 )
-                                .child(self.render_remove_jump_button(index, cx)),
+                                .child(self.render_remove_jump_button(index, secondary, cx)),
                         )
                         .child(self.render_proxy_hop_line(
                             self.i18n.t("ssh.form.proxy_chain_host"),
@@ -1489,7 +1578,12 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_remove_jump_button(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn render_remove_jump_button(
+        &self,
+        index: usize,
+        secondary: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         self.workspace_icon_action_button(
             LucideIcon::Trash2,
             14.0,
@@ -1500,10 +1594,15 @@ impl WorkspaceApp {
             },
             move |this, _event, _window, cx| {
                 this.update_connection_form_state(cx, |state| {
-                    if let Some(form) = state.form.as_mut()
-                        && index < form.proxy_hops.len()
-                    {
-                        form.proxy_hops.remove(index);
+                    if let Some(form) = state.form.as_mut() {
+                        let proxy_hops = if secondary {
+                            &mut form.standalone_sftp_secondary.proxy_hops
+                        } else {
+                            &mut form.proxy_hops
+                        };
+                        if index < proxy_hops.len() {
+                            proxy_hops.remove(index);
+                        }
                     }
                 });
                 cx.stop_propagation();

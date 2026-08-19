@@ -20,9 +20,15 @@ impl WorkspaceApp {
             8.0,
         );
         let selected_count = self.sftp_selected_names(menu.pane, cx).len();
-        let remote_loading = self.sftp_view.read(cx).remote_loading;
-        let pane_loading = menu.pane == SftpPane::Remote && remote_loading;
-        let transfer_loading = remote_loading;
+        let (remote_loading, pair_primary_loading) = {
+            let sftp = self.sftp_view.read(cx);
+            (sftp.remote_loading, sftp.pair_primary_loading)
+        };
+        let pane_loading = match menu.pane {
+            SftpPane::Local => pair_primary_loading,
+            SftpPane::Remote => remote_loading,
+        };
+        let transfer_loading = remote_loading || pair_primary_loading;
         let direction = if menu.pane == SftpPane::Local {
             SftpTransferDirection::Upload
         } else {

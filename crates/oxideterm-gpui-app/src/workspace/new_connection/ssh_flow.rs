@@ -9,8 +9,10 @@ use oxideterm_connections::{
     DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS, MoshIpFamily as SavedMoshIpFamily, MoshPredictionMode,
     MoshUdpPortSelection as SavedMoshUdpPortSelection, SaveConnectionRequest,
     SaveMoshProfileRequest, SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest,
-    SaveTelnetProfileRequest, SavedConnectionRuntimeSecrets, SavedMoshProfileRuntimeSecrets,
-    SavedProxyCommand, SavedUpstreamProxyProtocol, SecretString, first_available_default_key_path,
+    SaveStandaloneSftpProfileRequest, SaveTelnetProfileRequest, SavedConnectionRuntimeSecrets,
+    SavedMoshProfileRuntimeSecrets, SavedProxyCommand, SavedUpstreamProxyAuth,
+    SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol, SecretString,
+    first_available_default_key_path,
 };
 use oxideterm_mosh::{MoshBootstrapConfig, MoshBootstrapContext};
 use oxideterm_remote_desktop::{
@@ -34,7 +36,8 @@ use super::{
         NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
         NewConnectionSubmitAction, NewConnectionTransport, NewConnectionUpstreamProxyAuth,
         NewConnectionUpstreamProxyPolicy, SavedConnectionPromptAction, SshAuthTab,
-        identity_agent_from_form, identity_agent_selector,
+        StandaloneSftpSecondaryForm, identity_agent_from_form, identity_agent_selector,
+        ssh_auth_tab_from_saved_auth,
     },
     host_key_dialog::HostKeyChallenge,
 };
@@ -52,6 +55,8 @@ use oxideterm_session_adapter::{
     proxy_chain_config_from_saved_connection, proxy_command_from_value,
     ssh_config_from_saved_connection, ssh_config_from_saved_connection_with_auth,
     ssh_config_from_saved_connection_with_runtime_secrets,
+    ssh_config_from_standalone_sftp_endpoint_with_runtime_secrets,
+    ssh_config_from_standalone_sftp_profile_with_runtime_secrets,
 };
 use oxideterm_terminal::{MoshTerminalConfig, SerialSessionConfig, TelnetSessionConfig};
 
@@ -137,6 +142,7 @@ impl Default for SshTerminalConnectionOptions {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SshConnectionIntent {
     Test,
+    TestStandaloneSftp,
     Connect(SshTerminalConnectionOptions),
     ConnectSaved(String),
     DrillDown {
@@ -145,6 +151,39 @@ pub(in crate::workspace) enum SshConnectionIntent {
         terminal_options: SshTerminalConnectionOptions,
     },
     Mosh(MoshConnectionOptions),
+    StandaloneSftp {
+        saved_profile_id: Option<String>,
+        initial_remote_path: Option<String>,
+        pair_launch_token: Option<String>,
+    },
+    StandaloneSftpSecondary {
+        pair_launch_token: String,
+    },
+}
+
+impl SshConnectionIntent {
+    pub(in crate::workspace) fn standalone_sftp_pair_launch_token(&self) -> Option<&str> {
+        match self {
+            Self::StandaloneSftp {
+                pair_launch_token: Some(token),
+                ..
+            }
+            | Self::StandaloneSftpSecondary {
+                pair_launch_token: token,
+            } => Some(token),
+            _ => None,
+        }
+    }
+}
+
+/// Owns both secret-bearing endpoint configs only until host-key checks finish.
+pub(in crate::workspace) struct PendingStandaloneSftpPairLaunch {
+    pub(in crate::workspace) saved_profile_id: String,
+    pub(in crate::workspace) title: String,
+    pub(in crate::workspace) primary_initial_remote_path: Option<String>,
+    pub(in crate::workspace) secondary_initial_remote_path: Option<String>,
+    pub(in crate::workspace) primary_config: Option<SshConfig>,
+    pub(in crate::workspace) secondary_config: Option<SshConfig>,
 }
 
 /// Non-secret Mosh launch settings travel through SSH host-key preflight.
@@ -167,6 +206,8 @@ pub(in crate::workspace) enum SshConnectionWorkerResult {
         upstream_proxy: Option<UpstreamProxyConfig>,
         title: String,
         intent: SshConnectionIntent,
+        host: String,
+        port: u16,
         status: HostKeyStatus,
     },
     SessionTreePreflight {
@@ -177,6 +218,31 @@ pub(in crate::workspace) enum SshConnectionWorkerResult {
     },
     Test {
         result: StdResult<(), String>,
+    },
+    StandaloneSftpConnected {
+        endpoint_id: String,
+        saved_profile_id: Option<String>,
+        title: String,
+        initial_remote_path: Option<String>,
+        consumer: ConnectionConsumer,
+        result: StdResult<oxideterm_ssh::SshConnectionHandle, String>,
+    },
+    StandaloneSftpPairConnected {
+        saved_profile_id: String,
+        title: String,
+        primary_endpoint_id: String,
+        secondary_endpoint_id: String,
+        primary_initial_remote_path: Option<String>,
+        secondary_initial_remote_path: Option<String>,
+        primary_consumer: ConnectionConsumer,
+        secondary_consumer: ConnectionConsumer,
+        result: StdResult<
+            (
+                oxideterm_ssh::SshConnectionHandle,
+                oxideterm_ssh::SshConnectionHandle,
+            ),
+            String,
+        >,
     },
     KeyboardInteractivePrompt {
         request: KeyboardInteractivePromptRequest,

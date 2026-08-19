@@ -118,6 +118,8 @@ pub enum SelectAnchorId {
     NewConnectionGroup,
     NewConnectionKeyAuthSource,
     NewConnectionManagedKey,
+    NewConnectionStandaloneSftpSecondaryKeyAuthSource,
+    NewConnectionStandaloneSftpSecondaryManagedKey,
     NewConnectionJumpSavedConnection,
     NewConnectionRemoteDesktopSshGateway,
     NewConnectionJumpKeyAuthSource,
@@ -126,6 +128,9 @@ pub enum SelectAnchorId {
     NewConnectionUpstreamProxyPolicy,
     NewConnectionUpstreamProxyProtocol,
     NewConnectionUpstreamProxyAuth,
+    NewConnectionStandaloneSftpSecondaryUpstreamProxyPolicy,
+    NewConnectionStandaloneSftpSecondaryUpstreamProxyProtocol,
+    NewConnectionStandaloneSftpSecondaryUpstreamProxyAuth,
     NewConnectionLocalShell,
     NewConnectionSerialPort,
     NewConnectionSerialDataBits,
@@ -226,6 +231,8 @@ impl SelectAnchorId {
             Self::NewConnectionGroup
                 | Self::NewConnectionKeyAuthSource
                 | Self::NewConnectionManagedKey
+                | Self::NewConnectionStandaloneSftpSecondaryKeyAuthSource
+                | Self::NewConnectionStandaloneSftpSecondaryManagedKey
                 | Self::NewConnectionJumpSavedConnection
                 | Self::NewConnectionRemoteDesktopSshGateway
                 | Self::NewConnectionJumpKeyAuthSource
@@ -234,6 +241,9 @@ impl SelectAnchorId {
                 | Self::NewConnectionUpstreamProxyPolicy
                 | Self::NewConnectionUpstreamProxyProtocol
                 | Self::NewConnectionUpstreamProxyAuth
+                | Self::NewConnectionStandaloneSftpSecondaryUpstreamProxyPolicy
+                | Self::NewConnectionStandaloneSftpSecondaryUpstreamProxyProtocol
+                | Self::NewConnectionStandaloneSftpSecondaryUpstreamProxyAuth
                 | Self::NewConnectionLocalShell
                 | Self::NewConnectionSerialPort
                 | Self::NewConnectionSerialDataBits

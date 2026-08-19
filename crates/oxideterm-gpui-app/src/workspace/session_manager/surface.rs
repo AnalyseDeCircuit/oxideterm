@@ -276,6 +276,13 @@ impl WorkspaceApp {
                     .replace("{{name}}", name),
                 self.i18n.t("sessionManager.mosh_profiles.delete"),
             ),
+            SessionManagerDeleteConfirm::StandaloneSftpProfile { name, .. } => (
+                self.i18n
+                    .t("sessionManager.standalone_sftp_profiles.confirm_delete")
+                    .replace("{{name}}", name),
+                self.i18n
+                    .t("sessionManager.standalone_sftp_profiles.delete"),
+            ),
             SessionManagerDeleteConfirm::RemoteDesktopProfile { name, .. } => (
                 self.i18n
                     .t("sessionManager.remote_desktop_profiles.confirm_delete")

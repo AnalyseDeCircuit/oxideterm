@@ -286,6 +286,10 @@ pub(super) enum SessionManagerDeleteConfirm {
         id: String,
         name: String,
     },
+    StandaloneSftpProfile {
+        id: String,
+        name: String,
+    },
     RemoteDesktopProfile {
         id: String,
         name: String,
@@ -304,6 +308,7 @@ pub(super) enum SessionManagerSelectionTarget {
     Serial(String),
     Telnet(String),
     Mosh(String),
+    StandaloneSftp(String),
     RemoteDesktop(String),
 }
 
@@ -313,6 +318,7 @@ pub(super) enum SessionManagerRowActionTarget {
     Serial(String),
     Telnet(String),
     Mosh(String),
+    StandaloneSftp(String),
     RemoteDesktop(String),
     GroupRoot,
     Group(String),

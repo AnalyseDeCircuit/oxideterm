@@ -45,8 +45,8 @@ fn remote_list_result_is_superseded(
 }
 
 struct SftpRemoteListOutcome {
-    bind_session: Option<(NodeId, String, String)>,
-    load_transfer_state_for: Option<NodeId>,
+    bind_session: Option<(SftpRemoteId, String, String)>,
+    load_transfer_state_for: Option<SftpRemoteId>,
     changed: bool,
 }
 
@@ -73,10 +73,10 @@ impl SftpWorkspaceEntity {
     fn start_remote_load(
         &mut self,
         surface_id: SftpSurfaceId,
-        node_id: &NodeId,
+        remote_id: &SftpRemoteId,
     ) -> Option<(String, u64)> {
         if self.current_surface_id != Some(surface_id)
-            || self.current_node_id.as_ref() != Some(node_id)
+            || self.current_remote_id.as_ref() != Some(remote_id)
         {
             return None;
         }
@@ -89,37 +89,39 @@ impl SftpWorkspaceEntity {
     pub(in crate::workspace) fn activate_view(
         &mut self,
         surface_id: SftpSurfaceId,
-        node_id: NodeId,
+        remote_id: SftpRemoteId,
     ) {
+        self.pair_primary_remote_id = None;
+        self.pair_primary_loading = false;
         self.current_surface_id = Some(surface_id);
-        if self.current_node_id.as_ref() == Some(&node_id) {
+        if self.current_remote_id.as_ref() == Some(&remote_id) {
             // Returning to a hidden view consumes any pending load directly;
             // no workspace heartbeat is involved.
             self.request_remote_load();
             return;
         }
 
-        if let Some(previous_node_id) = self.current_node_id.take() {
-            self.local_path_by_node
-                .insert(previous_node_id.clone(), self.local_path.clone());
+        if let Some(previous_remote_id) = self.current_remote_id.take() {
+            self.local_path_by_remote
+                .insert(previous_remote_id.clone(), self.local_path.clone());
             if !self.remote_path.is_empty() {
-                self.remote_path_by_node
-                    .insert(previous_node_id, self.remote_path.clone());
+                self.remote_path_by_remote
+                    .insert(previous_remote_id, self.remote_path.clone());
             }
         }
 
-        self.current_node_id = Some(node_id.clone());
+        self.current_remote_id = Some(remote_id.clone());
         self.view_generation = self.view_generation.wrapping_add(1);
         let local_path = self
-            .local_path_by_node
-            .get(&node_id)
+            .local_path_by_remote
+            .get(&remote_id)
             .cloned()
             .unwrap_or_else(default_download_path);
         self.apply_local_path(local_path);
 
         let remembered_remote = self
-            .remote_path_by_node
-            .get(&node_id)
+            .remote_path_by_remote
+            .get(&remote_id)
             .cloned()
             .unwrap_or_default();
         self.remote_path = remembered_remote.clone();
@@ -139,26 +141,49 @@ impl SftpWorkspaceEntity {
         self.init_error = None;
     }
 
+    pub(in crate::workspace) fn activate_pair_view(
+        &mut self,
+        surface_id: SftpSurfaceId,
+        primary_remote_id: SftpRemoteId,
+        secondary_remote_id: SftpRemoteId,
+        primary_initial_path: Option<String>,
+    ) {
+        self.activate_view(surface_id, secondary_remote_id);
+        self.pair_primary_remote_id = Some(primary_remote_id.clone());
+        let path = primary_initial_path
+            .filter(|path| !path.trim().is_empty())
+            .or_else(|| self.local_path_by_remote.get(&primary_remote_id).cloned())
+            .unwrap_or_default();
+        self.local_path = path.clone();
+        self.local_path_input = path;
+        self.local_files.clear();
+        self.local_selected.clear();
+        self.local_last_selected = None;
+        self.pair_primary_loading = true;
+    }
+
     pub(in crate::workspace) fn deactivate_view(
         &mut self,
         surface_id: SftpSurfaceId,
-        node_id: &NodeId,
+        remote_id: &SftpRemoteId,
         cx: &mut Context<Self>,
     ) -> bool {
         if self.current_surface_id != Some(surface_id)
-            || self.current_node_id.as_ref() != Some(node_id)
+            || self.current_remote_id.as_ref() != Some(remote_id)
         {
             return false;
         }
 
-        self.local_path_by_node
-            .insert(node_id.clone(), self.local_path.clone());
+        self.local_path_by_remote
+            .insert(remote_id.clone(), self.local_path.clone());
         if !self.remote_path.is_empty() {
-            self.remote_path_by_node
-                .insert(node_id.clone(), self.remote_path.clone());
+            self.remote_path_by_remote
+                .insert(remote_id.clone(), self.remote_path.clone());
         }
         self.current_surface_id = None;
-        self.current_node_id = None;
+        self.current_remote_id = None;
+        self.pair_primary_remote_id = None;
+        self.pair_primary_loading = false;
         self.view_generation = self.view_generation.wrapping_add(1);
         self.remote_load_pending = false;
         self.remote_load_retry_count = 0;
@@ -178,8 +203,7 @@ impl SftpWorkspaceEntity {
         self.drag_autoscroll_scheduled = false;
         self.clear_context_menu_immediately();
         self.begin_dialog_exit(Duration::ZERO, cx);
-        // Transfer tasks are node-owned and intentionally survive removal of
-        // this UI projection; their existing completion path remains active.
+        // Transfer tasks own their remote consumer and survive removal of this UI projection.
         cx.notify();
         true
     }
@@ -187,7 +211,7 @@ impl SftpWorkspaceEntity {
     fn apply_remote_list(
         &mut self,
         surface_id: SftpSurfaceId,
-        node_id: NodeId,
+        remote_id: SftpRemoteId,
         view_generation: u64,
         session_id: String,
         path: String,
@@ -196,7 +220,7 @@ impl SftpWorkspaceEntity {
     ) -> SftpRemoteListOutcome {
         self.set_remote_load_state(self.remote_load_state().complete());
         if self.current_surface_id != Some(surface_id)
-            || self.current_node_id.as_ref() != Some(&node_id)
+            || self.current_remote_id.as_ref() != Some(&remote_id)
             || self.view_generation != view_generation
         {
             return SftpRemoteListOutcome {
@@ -216,10 +240,10 @@ impl SftpWorkspaceEntity {
         match result {
             Ok(listing) => {
                 let cwd = listing.cwd;
-                self.remote_path_by_node
-                    .insert(node_id.clone(), cwd.clone());
-                self.remote_home_by_node
-                    .entry(node_id.clone())
+                self.remote_path_by_remote
+                    .insert(remote_id.clone(), cwd.clone());
+                self.remote_home_by_remote
+                    .entry(remote_id.clone())
                     .or_insert_with(|| cwd.clone());
                 self.remote_load_retry_count = 0;
                 self.remote_load_retry_task = None;
@@ -240,8 +264,8 @@ impl SftpWorkspaceEntity {
                 }
                 self.init_error = None;
                 SftpRemoteListOutcome {
-                    bind_session: Some((node_id.clone(), session_id, cwd)),
-                    load_transfer_state_for: Some(node_id),
+                    bind_session: Some((remote_id.clone(), session_id, cwd)),
+                    load_transfer_state_for: Some(remote_id),
                     changed: true,
                 }
             }
@@ -253,7 +277,7 @@ impl SftpWorkspaceEntity {
                     let attempt = self.remote_load_retry_count;
                     self.schedule_remote_load_retry(
                         surface_id,
-                        node_id,
+                        remote_id,
                         view_generation,
                         path,
                         attempt,
@@ -265,7 +289,8 @@ impl SftpWorkspaceEntity {
                     self.remote_load_retry_count = 0;
                     self.remote_load_retry_task = None;
                     if oxideterm_sftp::error_is_permission_denied(&error) {
-                        if let Some(previous_path) = self.remote_path_by_node.get(&node_id).cloned()
+                        if let Some(previous_path) =
+                            self.remote_path_by_remote.get(&remote_id).cloned()
                         {
                             self.remote_path.clone_from(&previous_path);
                             self.remote_path_input = previous_path;
@@ -273,7 +298,8 @@ impl SftpWorkspaceEntity {
                     } else if oxideterm_sftp::error_is_not_found(&error) {
                         self.remote_path = "/".to_string();
                         self.remote_path_input = "/".to_string();
-                        self.remote_path_by_node.insert(node_id, "/".to_string());
+                        self.remote_path_by_remote
+                            .insert(remote_id, "/".to_string());
                         if path != "/" {
                             self.request_remote_load();
                         }
@@ -292,7 +318,7 @@ impl SftpWorkspaceEntity {
     fn schedule_remote_load_retry(
         &mut self,
         surface_id: SftpSurfaceId,
-        node_id: NodeId,
+        remote_id: SftpRemoteId,
         view_generation: u64,
         path: String,
         attempt: u8,
@@ -304,7 +330,7 @@ impl SftpWorkspaceEntity {
             let _ = entity.update(cx, |sftp, cx| {
                 sftp.remote_load_retry_task = None;
                 if sftp.current_surface_id == Some(surface_id)
-                    && sftp.current_node_id.as_ref() == Some(&node_id)
+                    && sftp.current_remote_id.as_ref() == Some(&remote_id)
                     && sftp.view_generation == view_generation
                     && sftp.remote_path == path
                     && !sftp.remote_load_inflight
@@ -314,7 +340,7 @@ impl SftpWorkspaceEntity {
                     sftp.request_remote_load();
                     cx.emit(SftpWorkspaceEvent::RemoteLoadReady {
                         surface_id,
-                        node_id,
+                        remote_id,
                         delivery: sftp.worker_tx.clone(),
                     });
                     cx.notify();
@@ -332,15 +358,15 @@ impl SftpWorkspaceEntity {
         match result {
             SftpWorkerResult::StartRemoteLoad {
                 surface_id,
-                node_id,
+                remote_id,
             } => {
-                let Some((path, view_generation)) = self.start_remote_load(surface_id, &node_id)
+                let Some((path, view_generation)) = self.start_remote_load(surface_id, &remote_id)
                 else {
                     return false;
                 };
                 effects.push_back(SftpWorkspaceEffect::StartRemoteLoad {
                     surface_id,
-                    node_id,
+                    remote_id,
                     path,
                     view_generation,
                 });
@@ -348,7 +374,7 @@ impl SftpWorkspaceEntity {
             }
             SftpWorkerResult::RemoteList {
                 surface_id,
-                node_id,
+                remote_id,
                 view_generation,
                 session_id,
                 path,
@@ -356,37 +382,89 @@ impl SftpWorkspaceEntity {
             } => {
                 let outcome = self.apply_remote_list(
                     surface_id,
-                    node_id,
+                    remote_id,
                     view_generation,
                     session_id,
                     path,
                     result,
                     cx,
                 );
-                if let Some((node_id, session_id, cwd)) = outcome.bind_session {
+                if let Some((remote_id, session_id, cwd)) = outcome.bind_session {
                     effects.push_back(SftpWorkspaceEffect::BindSession {
-                        node_id,
+                        remote_id,
                         session_id,
                         cwd,
                     });
                 }
-                if let Some(node_id) = outcome.load_transfer_state_for {
+                if let Some(remote_id) = outcome.load_transfer_state_for {
                     effects.push_back(SftpWorkspaceEffect::LoadBackgroundTransfers {
-                        node_id: node_id.clone(),
+                        remote_id: remote_id.clone(),
                     });
-                    if self.begin_incomplete_transfer_load(node_id.clone()) {
-                        effects.push_back(SftpWorkspaceEffect::LoadIncompleteTransfers { node_id });
+                    if self.begin_incomplete_transfer_load(remote_id.clone()) {
+                        effects
+                            .push_back(SftpWorkspaceEffect::LoadIncompleteTransfers { remote_id });
                     }
                 }
                 self.push_remote_load_pending_effect(effects);
                 outcome.changed
             }
+            SftpWorkerResult::PairPrimaryList {
+                surface_id,
+                remote_id,
+                view_generation,
+                path,
+                result,
+            } => {
+                if self.current_surface_id != Some(surface_id)
+                    || self.pair_primary_remote_id.as_ref() != Some(&remote_id)
+                    || self.view_generation != view_generation
+                    || self.local_path != path
+                {
+                    return false;
+                }
+                self.pair_primary_loading = false;
+                match result {
+                    Ok(listing) => {
+                        let cwd = listing.cwd;
+                        self.local_path_by_remote
+                            .insert(remote_id.clone(), cwd.clone());
+                        self.remote_home_by_remote
+                            .entry(remote_id)
+                            .or_insert_with(|| cwd.clone());
+                        self.local_path.clone_from(&cwd);
+                        self.local_path_input = cwd;
+                        self.local_files = listing.files;
+                        self.local_selected.clear();
+                        self.local_last_selected = None;
+                        self.init_error = None;
+                    }
+                    Err(error) => {
+                        self.init_error = Some(format!("{path}: {error}"));
+                    }
+                }
+                true
+            }
             SftpWorkerResult::RemotePathCompletion {
                 generation,
-                node_id,
+                remote_id,
                 parent_path,
                 result,
-            } => self.apply_remote_path_completion(generation, &node_id, &parent_path, result),
+            } => self.apply_remote_path_completion(generation, &remote_id, &parent_path, result),
+            SftpWorkerResult::PairPrimaryPathCompletion {
+                generation,
+                remote_id,
+                parent_path,
+                result,
+            } => {
+                if self.pair_primary_remote_id.as_ref() != Some(&remote_id) {
+                    return false;
+                }
+                self.local_path_completion.apply_entries(
+                    generation,
+                    &parent_path,
+                    result.unwrap_or_default(),
+                )
+            }
             SftpWorkerResult::TransferProgress {
                 id,
                 transferred,
@@ -397,7 +475,7 @@ impl SftpWorkspaceEntity {
                 self.apply_transfer_protocol(id, protocol)
             }
             SftpWorkerResult::TransferComplete {
-                node_id,
+                remote_id,
                 transfer_id,
                 id,
                 result,
@@ -406,7 +484,7 @@ impl SftpWorkspaceEntity {
             } => {
                 let success = result.is_ok();
                 effects.push_back(SftpWorkspaceEffect::TransferFinishedForReconnect {
-                    node_id: node_id.clone(),
+                    remote_id: remote_id.clone(),
                     transfer_id,
                     success,
                 });
@@ -424,33 +502,39 @@ impl SftpWorkspaceEntity {
                 {
                     effects.push_back(SftpWorkspaceEffect::TransferBatchCompleted(batch));
                 }
-                if self.current_node_id.as_ref() == Some(&node_id) {
+                if self.current_remote_id.as_ref() == Some(&remote_id) {
                     if should_refresh && refresh_remote {
                         self.request_remote_load();
                         self.push_remote_load_pending_effect(effects);
                     }
                     if should_refresh && refresh_local {
-                        effects.push_back(SftpWorkspaceEffect::ReloadLocalDirectory {
-                            view_generation: self.view_generation,
-                            path: self.local_path.clone(),
-                        });
+                        if self.pair_primary_remote_id.is_some() {
+                            effects.push_back(SftpWorkspaceEffect::ReloadPairPrimaryDirectory);
+                        } else {
+                            effects.push_back(SftpWorkspaceEffect::ReloadLocalDirectory {
+                                view_generation: self.view_generation,
+                                path: self.local_path.clone(),
+                            });
+                        }
                     }
-                    if self.begin_incomplete_transfer_load(node_id.clone()) {
-                        effects.push_back(SftpWorkspaceEffect::LoadIncompleteTransfers { node_id });
+                    if self.begin_incomplete_transfer_load(remote_id.clone()) {
+                        effects
+                            .push_back(SftpWorkspaceEffect::LoadIncompleteTransfers { remote_id });
                     }
                 }
                 true
             }
             SftpWorkerResult::ResumeIncompleteTransferLoaded {
-                node_id,
+                remote_id,
                 transfer_id,
                 result,
             } => {
                 let launch = match result {
                     Ok(progress) if progress.is_incomplete() => {
-                        let show_in_current_view = self.current_node_id.as_ref() == Some(&node_id);
+                        let show_in_current_view =
+                            self.current_remote_id.as_ref() == Some(&remote_id);
                         self.prepare_reconnect_resume(
-                            node_id.clone(),
+                            remote_id.clone(),
                             progress,
                             show_in_current_view,
                         )
@@ -461,7 +545,7 @@ impl SftpWorkspaceEntity {
                     effects.push_back(SftpWorkspaceEffect::StartTransfer(launch));
                 } else {
                     effects.push_back(SftpWorkspaceEffect::TransferFinishedForReconnect {
-                        node_id,
+                        remote_id,
                         transfer_id,
                         success: false,
                     });
@@ -501,28 +585,56 @@ impl SftpWorkspaceEntity {
                     self.push_remote_load_pending_effect(effects);
                 }
                 if refresh_local {
-                    effects.push_back(SftpWorkspaceEffect::ReloadLocalDirectory {
-                        view_generation: self.view_generation,
-                        path: self.local_path.clone(),
-                    });
+                    if self.pair_primary_remote_id.is_some() {
+                        effects.push_back(SftpWorkspaceEffect::ReloadPairPrimaryDirectory);
+                    } else {
+                        effects.push_back(SftpWorkspaceEffect::ReloadLocalDirectory {
+                            view_generation: self.view_generation,
+                            path: self.local_path.clone(),
+                        });
+                    }
                 }
                 true
             }
-            SftpWorkerResult::IncompleteTransfersLoaded { node_id, result } => {
-                let (changed, next_load) = self.apply_incomplete_transfers(&node_id, result);
-                if let Some(node_id) = next_load {
-                    effects.push_back(SftpWorkspaceEffect::LoadIncompleteTransfers { node_id });
+            SftpWorkerResult::IncompleteTransfersLoaded { remote_id, result } => {
+                let (changed, next_load) = self.apply_incomplete_transfers(&remote_id, result);
+                if let Some(remote_id) = next_load {
+                    effects.push_back(SftpWorkspaceEffect::LoadIncompleteTransfers { remote_id });
                 }
                 changed
             }
-            SftpWorkerResult::BackgroundTransfersLoaded { node_id, result } => {
-                if self.current_node_id.as_ref() != Some(&node_id) {
+            SftpWorkerResult::IncompleteTransferDiscarded {
+                transfer_id,
+                result,
+            } => {
+                match result {
+                    Ok(()) => {
+                        self.incomplete_transfers
+                            .retain(|progress| progress.transfer_id != transfer_id);
+                        if self.incomplete_transfers.is_empty() {
+                            self.show_incomplete = false;
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(progress) = self
+                            .incomplete_transfers
+                            .iter_mut()
+                            .find(|progress| progress.transfer_id == transfer_id)
+                        {
+                            progress.error = Some(error);
+                        }
+                    }
+                }
+                true
+            }
+            SftpWorkerResult::BackgroundTransfersLoaded { remote_id, result } => {
+                if self.current_remote_id.as_ref() != Some(&remote_id) {
                     return false;
                 }
                 match result {
                     Ok(snapshots) => {
                         for snapshot in snapshots {
-                            self.upsert_background_transfer_snapshot(snapshot);
+                            self.upsert_background_transfer_snapshot(remote_id.clone(), snapshot);
                         }
                     }
                     Err(error) => {
@@ -580,24 +692,136 @@ impl SftpWorkspaceEntity {
     fn push_remote_load_pending_effect(&self, effects: &mut VecDeque<SftpWorkspaceEffect>) {
         if self.remote_load_pending
             && !self.remote_load_inflight
-            && let (Some(surface_id), Some(node_id)) =
-                (self.current_surface_id, self.current_node_id.clone())
+            && let (Some(surface_id), Some(remote_id)) =
+                (self.current_surface_id, self.current_remote_id.clone())
         {
             effects.push_back(SftpWorkspaceEffect::RemoteLoadPending {
                 surface_id,
-                node_id,
+                remote_id,
             });
         }
     }
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace::sftp) fn sftp_remote_backend(
+        &self,
+        remote_id: &SftpRemoteId,
+    ) -> Option<SftpRemoteBackend> {
+        match remote_id {
+            SftpRemoteId::Node(node_id) => Some(SftpRemoteBackend::Node {
+                router: self.node_router.clone(),
+                node_id: node_id.clone(),
+            }),
+            SftpRemoteId::Standalone(profile_id) => self
+                .standalone_sftp_sessions
+                .get(profile_id)
+                .map(|runtime| SftpRemoteBackend::Standalone {
+                    handle: runtime.handle.clone(),
+                }),
+        }
+    }
+
+    pub(in crate::workspace::sftp) fn acquire_sftp_transfer_backend(
+        &self,
+        remote_id: &SftpRemoteId,
+        transfer_id: &str,
+    ) -> Option<(SftpRemoteBackend, Option<StandaloneSftpConsumerLease>)> {
+        match remote_id {
+            SftpRemoteId::Node(node_id) => Some((
+                SftpRemoteBackend::Node {
+                    router: self.node_router.clone(),
+                    node_id: node_id.clone(),
+                },
+                None,
+            )),
+            SftpRemoteId::Standalone(profile_id) => {
+                let runtime = self.standalone_sftp_sessions.get(profile_id)?;
+                let consumer = ConnectionConsumer::Sftp(format!(
+                    "standalone-transfer:{profile_id}:{transfer_id}"
+                ));
+                let handle = self
+                    .ssh_registry
+                    .acquire_consumer_for_connection(&runtime.connection_id, consumer.clone())?;
+                let lease = StandaloneSftpConsumerLease {
+                    registry: self.ssh_registry.clone(),
+                    connection_id: runtime.connection_id.clone(),
+                    consumer,
+                };
+                Some((SftpRemoteBackend::Standalone { handle }, Some(lease)))
+            }
+        }
+    }
+
+    pub(in crate::workspace::sftp) fn sftp_remote_id_for_tab(
+        &self,
+        tab_id: TabId,
+    ) -> Option<SftpRemoteId> {
+        self.sftp_tab_nodes
+            .get(&tab_id)
+            .cloned()
+            .map(SftpRemoteId::Node)
+            .or_else(|| {
+                self.standalone_sftp_tabs.get(&tab_id).map(|binding| {
+                    SftpRemoteId::Standalone(
+                        binding
+                            .secondary_endpoint_id
+                            .as_ref()
+                            .unwrap_or(&binding.primary_endpoint_id)
+                            .clone(),
+                    )
+                })
+            })
+    }
+
+    pub(in crate::workspace::sftp) fn sftp_pair_primary_remote_id(
+        &self,
+        cx: &App,
+    ) -> Option<SftpRemoteId> {
+        self.sftp_view.read(cx).pair_primary_remote_id.clone()
+    }
+
     pub(in crate::workspace::sftp) fn request_sftp_remote_load(&mut self, cx: &mut Context<Self>) {
         self.sftp_view.update(cx, |sftp, cx| {
             sftp.request_remote_load();
             cx.notify();
         });
         self.maybe_start_sftp_remote_load(cx);
+    }
+
+    pub(in crate::workspace) fn request_sftp_pair_primary_load(&mut self, cx: &mut Context<Self>) {
+        let Some((surface_id, remote_id, path, view_generation, delivery)) = ({
+            let sftp = self.sftp_view.read(cx);
+            match (sftp.current_surface_id, sftp.pair_primary_remote_id.clone()) {
+                (Some(surface_id), Some(remote_id)) => Some((
+                    surface_id,
+                    remote_id,
+                    sftp.local_path.clone(),
+                    sftp.view_generation,
+                    sftp.worker_sender(),
+                )),
+                _ => None,
+            }
+        }) else {
+            return;
+        };
+        let Some(backend) = self.sftp_remote_backend(&remote_id) else {
+            return;
+        };
+        self.sftp_view.update(cx, |sftp, cx| {
+            sftp.pair_primary_loading = true;
+            cx.notify();
+        });
+        self.forwarding_runtime.spawn(async move {
+            let result = load_remote_sftp_listing(backend, &path).await;
+            let _ = delivery.send(SftpWorkerResult::PairPrimaryList {
+                surface_id,
+                remote_id,
+                view_generation,
+                path,
+                result,
+            });
+        });
     }
 
     pub(in crate::workspace) fn open_sftp_tab(
@@ -689,6 +913,138 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    /// Opens the dedicated independent-SFTP surface without consulting sidebar preferences.
+    pub(in crate::workspace) fn open_standalone_sftp_tab_surface(
+        &mut self,
+        endpoint_id: String,
+        endpoint_title: String,
+        initial_remote_path: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let title = format!(
+            "{} · {}",
+            self.i18n.t("sidebar.panels.sftp"),
+            endpoint_title
+        );
+        let tab_id = if let Some((tab_id, _)) = self
+            .standalone_sftp_tabs
+            .iter()
+            .find(|(_, binding)| binding.primary_endpoint_id == endpoint_id)
+        {
+            *tab_id
+        } else {
+            let tab_id = self.alloc_tab_id(cx);
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::Sftp,
+                    title,
+                    title_source: TabTitleSource::Static,
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
+            self.standalone_sftp_tabs.insert(
+                tab_id,
+                StandaloneSftpTabBinding {
+                    primary_endpoint_id: endpoint_id.clone(),
+                    secondary_endpoint_id: None,
+                    secondary_initial_remote_path: None,
+                },
+            );
+            tab_id
+        };
+
+        if self.focus_detached_tab_window(tab_id, cx) {
+            return;
+        }
+        self.set_main_window_active_tab(Some(tab_id), cx);
+        self.active_surface = ActiveSurface::Terminal;
+        self.active_ssh_node_id = None;
+        self.sftp_view.update(cx, |sftp, cx| {
+            sftp.activate_view(
+                SftpSurfaceId::Tab(tab_id),
+                SftpRemoteId::Standalone(endpoint_id),
+            );
+            cx.notify();
+        });
+        if let Some(path) = initial_remote_path.filter(|path| !path.trim().is_empty()) {
+            self.set_sftp_path(SftpPane::Remote, path, cx);
+        }
+        self.request_sftp_remote_load(cx);
+        cx.notify();
+    }
+
+    /// Opens one tab that owns two independent standalone SFTP endpoint consumers.
+    pub(in crate::workspace) fn open_standalone_sftp_pair_tab_surface(
+        &mut self,
+        primary_endpoint_id: String,
+        secondary_endpoint_id: String,
+        endpoint_title: String,
+        primary_initial_remote_path: Option<String>,
+        secondary_initial_remote_path: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let title = format!(
+            "{} · {}",
+            self.i18n.t("sidebar.panels.sftp"),
+            endpoint_title
+        );
+        let tab_id = if let Some((tab_id, _)) =
+            self.standalone_sftp_tabs.iter().find(|(_, binding)| {
+                binding.primary_endpoint_id == primary_endpoint_id
+                    && binding.secondary_endpoint_id.as_deref()
+                        == Some(secondary_endpoint_id.as_str())
+            }) {
+            *tab_id
+        } else {
+            let tab_id = self.alloc_tab_id(cx);
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::Sftp,
+                    title,
+                    title_source: TabTitleSource::Static,
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
+            self.standalone_sftp_tabs.insert(
+                tab_id,
+                StandaloneSftpTabBinding {
+                    primary_endpoint_id: primary_endpoint_id.clone(),
+                    secondary_endpoint_id: Some(secondary_endpoint_id.clone()),
+                    secondary_initial_remote_path: secondary_initial_remote_path.clone(),
+                },
+            );
+            tab_id
+        };
+
+        if self.focus_detached_tab_window(tab_id, cx) {
+            return;
+        }
+        self.set_main_window_active_tab(Some(tab_id), cx);
+        self.active_surface = ActiveSurface::Terminal;
+        self.active_ssh_node_id = None;
+        self.sftp_view.update(cx, |sftp, cx| {
+            sftp.activate_pair_view(
+                SftpSurfaceId::Tab(tab_id),
+                SftpRemoteId::Standalone(primary_endpoint_id),
+                SftpRemoteId::Standalone(secondary_endpoint_id),
+                primary_initial_remote_path,
+            );
+            cx.notify();
+        });
+        if let Some(path) = secondary_initial_remote_path.filter(|path| !path.trim().is_empty()) {
+            self.set_sftp_path(SftpPane::Remote, path, cx);
+        }
+        self.request_sftp_pair_primary_load(cx);
+        self.request_sftp_remote_load(cx);
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn open_sftp_tab_at_remote_path(
         &mut self,
         node_id: NodeId,
@@ -730,7 +1086,7 @@ impl WorkspaceApp {
         self.active_ssh_node_id = Some(node_id.clone());
         self.expanded_ssh_nodes.insert(node_id.clone());
         self.sftp_view.update(cx, |sftp, cx| {
-            sftp.activate_view(SftpSurfaceId::Sidebar, node_id);
+            sftp.activate_view(SftpSurfaceId::Sidebar, SftpRemoteId::Node(node_id));
             cx.notify();
         });
         if let Some(path) = remote_path.filter(|path| !path.trim().is_empty()) {
@@ -763,7 +1119,11 @@ impl WorkspaceApp {
             self.sftp_presentation_request = None;
         }
         let deactivated = self.sftp_view.update(cx, |sftp, cx| {
-            sftp.deactivate_view(SftpSurfaceId::Sidebar, node_id, cx)
+            sftp.deactivate_view(
+                SftpSurfaceId::Sidebar,
+                &SftpRemoteId::Node(node_id.clone()),
+                cx,
+            )
         });
         if deactivated {
             self.ime_marked_text = None;
@@ -793,11 +1153,11 @@ impl WorkspaceApp {
         let already_active = {
             let sftp = self.sftp_view.read(cx);
             sftp.current_surface_id == Some(SftpSurfaceId::Sidebar)
-                && sftp.current_node_id.as_ref() == Some(&node_id)
+                && sftp.current_remote_id.as_ref() == Some(&SftpRemoteId::Node(node_id.clone()))
         };
         if !already_active {
             self.sftp_view.update(cx, |sftp, cx| {
-                sftp.activate_view(SftpSurfaceId::Sidebar, node_id);
+                sftp.activate_view(SftpSurfaceId::Sidebar, SftpRemoteId::Node(node_id));
                 cx.notify();
             });
         }
@@ -813,7 +1173,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.sftp_view.update(cx, |sftp, cx| {
-            sftp.activate_view(SftpSurfaceId::Tab(tab_id), node_id.clone());
+            sftp.activate_view(
+                SftpSurfaceId::Tab(tab_id),
+                SftpRemoteId::Node(node_id.clone()),
+            );
             cx.notify();
         });
         self.maybe_start_sftp_remote_load(cx);
@@ -823,58 +1186,60 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        let (surface_id, node_id) = {
+        let (surface_id, remote_id) = {
             let sftp = self.sftp_view.read(cx);
             let Some(surface_id) = sftp.current_surface_id else {
                 return false;
             };
-            let Some(node_id) = sftp.current_node_id.clone() else {
+            let Some(remote_id) = sftp.current_remote_id.clone() else {
                 return false;
             };
-            (surface_id, node_id)
+            (surface_id, remote_id)
         };
-        if !self.sftp_surface_is_visible(surface_id, &node_id, cx) {
+        if !self.sftp_surface_is_visible(surface_id, &remote_id, cx) {
             return false;
         }
-        let Some((path, view_generation)) = self
-            .sftp_view
-            .update(cx, |sftp, _cx| sftp.start_remote_load(surface_id, &node_id))
-        else {
+        let Some((path, view_generation)) = self.sftp_view.update(cx, |sftp, _cx| {
+            sftp.start_remote_load(surface_id, &remote_id)
+        }) else {
             return false;
         };
         let delivery = self.sftp_view.read(cx).worker_sender();
-        self.spawn_sftp_remote_load(surface_id, node_id, path, view_generation, delivery);
+        self.spawn_sftp_remote_load(surface_id, remote_id, path, view_generation, delivery);
         true
     }
 
     fn spawn_sftp_remote_load(
         &self,
         surface_id: SftpSurfaceId,
-        node_id: NodeId,
+        remote_id: SftpRemoteId,
         path: String,
         view_generation: u64,
         tx: delivery::ActiveDeliverySender<SftpWorkerResult>,
     ) {
-        let session_id = format!("node:{}:sftp", node_id.0);
+        let session_id = format!("{}:sftp", remote_id.storage_key());
         let runtime = self.forwarding_runtime.clone();
-        let router = self.node_router.clone();
-        let owner_router = router.clone();
-        let owner_node_id = node_id.clone();
-        runtime.spawn(async move {
-            // Opening a visible SFTP surface creates the concrete shared channel
-            // that owns AI file capabilities. Listing remains on its independent
-            // transfer channel, so capability registration never blocks it.
-            let _ = owner_router.acquire_sftp(&owner_node_id).await;
-        });
-        runtime.spawn(async move {
-            // Tauri node_sftp_* calls do not synchronously borrow a terminal
-            // session before starting SFTP work. The worker waits on the
-            // node-owned connection and then opens the real SFTP subsystem
-            // channel from ConnectionEntry.
-            let result = load_remote_sftp_listing(router, &node_id, &path).await;
+        let Some(backend) = self.sftp_remote_backend(&remote_id) else {
             let _ = tx.send(SftpWorkerResult::RemoteList {
                 surface_id,
-                node_id,
+                remote_id,
+                view_generation,
+                session_id,
+                path,
+                result: Err("SFTP endpoint is no longer available".to_string()),
+            });
+            return;
+        };
+        let owner_backend = backend.clone();
+        runtime.spawn(async move {
+            // The visible surface creates one shared SFTP channel through its explicit owner.
+            let _ = owner_backend.acquire_sftp().await;
+        });
+        runtime.spawn(async move {
+            let result = load_remote_sftp_listing(backend, &path).await;
+            let _ = tx.send(SftpWorkerResult::RemoteList {
+                surface_id,
+                remote_id,
                 view_generation,
                 session_id,
                 path,
@@ -892,61 +1257,67 @@ impl WorkspaceApp {
         for effect in effect_batch.take() {
             match effect {
                 SftpWorkspaceEffect::BindSession {
-                    node_id,
+                    remote_id,
                     session_id,
                     cwd,
                 } => {
-                    if let Ok(event) =
-                        self.node_router
-                            .bind_sftp_session(&node_id, session_id, Some(cwd))
+                    if let Some(node_id) = remote_id.node_id()
+                        && let Ok(event) =
+                            self.node_router
+                                .bind_sftp_session(node_id, session_id, Some(cwd))
                     {
                         // Binding only reports node-owned readiness. It never
                         // grants SFTP authority to start or stop the SSH link.
                         self.emit_node_event(event);
                     }
                 }
-                SftpWorkspaceEffect::LoadBackgroundTransfers { node_id } => {
-                    self.spawn_sftp_background_transfer_load_with_sender(node_id, delivery.clone());
+                SftpWorkspaceEffect::LoadBackgroundTransfers { remote_id } => {
+                    self.spawn_sftp_background_transfer_load_with_sender(
+                        remote_id,
+                        delivery.clone(),
+                    );
                 }
-                SftpWorkspaceEffect::LoadIncompleteTransfers { node_id } => {
-                    self.spawn_sftp_incomplete_load_with_sender(node_id, delivery.clone());
+                SftpWorkspaceEffect::LoadIncompleteTransfers { remote_id } => {
+                    self.spawn_sftp_incomplete_load_with_sender(remote_id, delivery.clone());
                 }
                 SftpWorkspaceEffect::RemoteLoadPending {
                     surface_id,
-                    node_id,
+                    remote_id,
                 } => {
-                    if self.sftp_surface_is_visible(surface_id, &node_id, cx) {
+                    if self.sftp_surface_is_visible(surface_id, &remote_id, cx) {
                         let _ = delivery.send(SftpWorkerResult::StartRemoteLoad {
                             surface_id,
-                            node_id,
+                            remote_id,
                         });
                     }
                 }
                 SftpWorkspaceEffect::StartRemoteLoad {
                     surface_id,
-                    node_id,
+                    remote_id,
                     path,
                     view_generation,
                 } => {
                     self.spawn_sftp_remote_load(
                         surface_id,
-                        node_id,
+                        remote_id,
                         path,
                         view_generation,
                         delivery.clone(),
                     );
                 }
                 SftpWorkspaceEffect::TransferFinishedForReconnect {
-                    node_id,
+                    remote_id,
                     transfer_id,
                     success,
                 } => {
-                    self.on_sftp_transfer_finished_for_reconnect(
-                        &node_id,
-                        &transfer_id,
-                        success,
-                        cx,
-                    );
+                    if let Some(node_id) = remote_id.node_id() {
+                        self.on_sftp_transfer_finished_for_reconnect(
+                            node_id,
+                            &transfer_id,
+                            success,
+                            cx,
+                        );
+                    }
                 }
                 SftpWorkspaceEffect::TransferBatchCompleted(batch) => {
                     self.show_sftp_transfer_batch_toast(batch, cx);
@@ -973,6 +1344,9 @@ impl WorkspaceApp {
                         });
                     }
                 }
+                SftpWorkspaceEffect::ReloadPairPrimaryDirectory => {
+                    self.request_sftp_pair_primary_load(cx);
+                }
             }
         }
         cx.notify();
@@ -981,14 +1355,14 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn request_visible_sftp_remote_load(
         &self,
         surface_id: SftpSurfaceId,
-        node_id: NodeId,
+        remote_id: SftpRemoteId,
         delivery: delivery::ActiveDeliverySender<SftpWorkerResult>,
         cx: &App,
     ) {
-        if self.sftp_surface_is_visible(surface_id, &node_id, cx) {
+        if self.sftp_surface_is_visible(surface_id, &remote_id, cx) {
             let _ = delivery.send(SftpWorkerResult::StartRemoteLoad {
                 surface_id,
-                node_id,
+                remote_id,
             });
         }
     }
@@ -996,7 +1370,7 @@ impl WorkspaceApp {
     fn sftp_surface_is_visible(
         &self,
         surface_id: SftpSurfaceId,
-        node_id: &NodeId,
+        remote_id: &SftpRemoteId,
         cx: &App,
     ) -> bool {
         match surface_id {
@@ -1006,9 +1380,12 @@ impl WorkspaceApp {
                         .tabs(cx)
                         .iter()
                         .any(|tab| tab.id == tab_id && tab.kind == TabKind::Sftp)
-                    && self.sftp_tab_nodes.get(&tab_id) == Some(node_id)
+                    && self.sftp_remote_id_for_tab(tab_id).as_ref() == Some(remote_id)
             }
             SftpSurfaceId::Sidebar => {
+                let Some(node_id) = remote_id.node_id() else {
+                    return false;
+                };
                 !self.sidebar_collapsed
                     && self.effective_sidebar_panel_section() == SidebarSection::Sessions
                     && self.embedded_sftp_node_id.as_ref() == Some(node_id)
@@ -1016,12 +1393,19 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace::sftp) fn visible_sftp_node_id(&self, cx: &App) -> Option<NodeId> {
+    pub(in crate::workspace::sftp) fn visible_sftp_remote_id(
+        &self,
+        cx: &App,
+    ) -> Option<SftpRemoteId> {
         let sftp = self.sftp_view.read(cx);
         let surface_id = sftp.current_surface_id?;
-        let node_id = sftp.current_node_id.clone()?;
-        self.sftp_surface_is_visible(surface_id, &node_id, cx)
-            .then_some(node_id)
+        let remote_id = sftp.current_remote_id.clone()?;
+        self.sftp_surface_is_visible(surface_id, &remote_id, cx)
+            .then_some(remote_id)
+    }
+
+    pub(in crate::workspace::sftp) fn visible_sftp_node_id(&self, cx: &App) -> Option<NodeId> {
+        self.visible_sftp_remote_id(cx)?.node_id().cloned()
     }
 
     pub(in crate::workspace) fn apply_sftp_ready_event(
@@ -1032,7 +1416,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.sftp_view.update(cx, |sftp, cx| {
-            if sftp.current_node_id.as_ref() != Some(node_id) {
+            if sftp.current_remote_id.as_ref() != Some(&SftpRemoteId::Node(node_id.clone())) {
                 return;
             }
             sftp.apply_router_sftp_ready(ready, cwd);
@@ -1058,11 +1442,11 @@ impl SftpWorkspaceEntity {
     fn apply_remote_path_completion(
         &mut self,
         generation: u64,
-        node_id: &NodeId,
+        remote_id: &SftpRemoteId,
         parent_path: &str,
         result: Result<Vec<PathCompletionCandidate>, String>,
     ) -> bool {
-        if self.current_node_id.as_ref() != Some(node_id) {
+        if self.current_remote_id.as_ref() != Some(remote_id) {
             return false;
         }
         self.remote_path_completion.apply_entries(
@@ -1096,15 +1480,15 @@ impl SftpWorkspaceEntity {
 
     fn apply_incomplete_transfers(
         &mut self,
-        node_id: &NodeId,
+        remote_id: &SftpRemoteId,
         result: Result<Vec<StoredTransferProgress>, String>,
-    ) -> (bool, Option<NodeId>) {
-        if self.incomplete_load_node.as_ref() != Some(node_id) {
+    ) -> (bool, Option<SftpRemoteId>) {
+        if self.incomplete_load_remote.as_ref() != Some(remote_id) {
             return (false, None);
         }
         self.incomplete_load_inflight = false;
-        self.incomplete_load_node = None;
-        if self.current_node_id.as_ref() == Some(node_id) {
+        self.incomplete_load_remote = None;
+        if self.current_remote_id.as_ref() == Some(remote_id) {
             match result {
                 Ok(transfers) => {
                     self.incomplete_transfers = transfers
@@ -1125,12 +1509,12 @@ impl SftpWorkspaceEntity {
             }
         }
         let next_load = self
-            .incomplete_load_pending_node
+            .incomplete_load_pending_remote
             .take()
-            .filter(|pending| self.current_node_id.as_ref() == Some(pending));
-        if let Some(node_id) = next_load.as_ref() {
+            .filter(|pending| self.current_remote_id.as_ref() == Some(pending));
+        if let Some(remote_id) = next_load.as_ref() {
             self.incomplete_load_inflight = true;
-            self.incomplete_load_node = Some(node_id.clone());
+            self.incomplete_load_remote = Some(remote_id.clone());
         }
         (true, next_load)
     }
@@ -1438,7 +1822,7 @@ mod tests {
             id: 1,
             transfer_id: "tx-1".to_string(),
             batch_id: None,
-            node_id: NodeId::new("node-1"),
+            remote_id: SftpRemoteId::Node(NodeId::new("node-1")),
             name: "file.txt".to_string(),
             local_path: "/tmp/file.txt".to_string(),
             remote_path: "/home/file.txt".to_string(),

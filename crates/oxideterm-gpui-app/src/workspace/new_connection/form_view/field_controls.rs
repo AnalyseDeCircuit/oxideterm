@@ -4,6 +4,9 @@ use oxideterm_settings_model::parse_rgb24_hex;
 
 const NEW_CONNECTION_TRANSPORT_ROW_HEIGHT: f32 = 36.0;
 const NEW_CONNECTION_TRANSPORT_ROW_GAP: f32 = 4.0;
+const NEW_CONNECTION_ADVANCED_GROUP_HEIGHT: f32 = 28.0;
+const NEW_CONNECTION_ADVANCED_GROUP_OFFSET: f32 =
+    NEW_CONNECTION_ADVANCED_GROUP_HEIGHT + NEW_CONNECTION_TRANSPORT_ROW_GAP;
 const SSH_CONNECT_TIMEOUT_OPTIONS_SECONDS: [u64; 5] = [10, 30, 60, 120, 300];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -11,6 +14,7 @@ pub(super) enum ConnectionFormSection {
     Basic,
     Authentication,
     Route,
+    StandaloneSftpSecondaryRoute,
     SshOptions,
     Terminal,
     Appearance,
@@ -19,6 +23,7 @@ pub(super) enum ConnectionFormSection {
     RemoteFeatures,
     SerialParameters,
     MoshOptions,
+    SftpOptions,
     LocalShell,
 }
 
@@ -28,6 +33,9 @@ impl ConnectionFormSection {
             Self::Basic => "new-connection-basic-section",
             Self::Authentication => "new-connection-authentication-section",
             Self::Route => "new-connection-route-section",
+            Self::StandaloneSftpSecondaryRoute => {
+                "new-connection-standalone-sftp-secondary-route-section"
+            }
             Self::SshOptions => "new-connection-ssh-options-section",
             Self::Terminal => "new-connection-terminal-section",
             Self::Appearance => "new-connection-appearance-section",
@@ -36,6 +44,7 @@ impl ConnectionFormSection {
             Self::RemoteFeatures => "new-connection-remote-features-section",
             Self::SerialParameters => "new-connection-serial-parameters-section",
             Self::MoshOptions => "new-connection-mosh-options-section",
+            Self::SftpOptions => "new-connection-sftp-options-section",
             Self::LocalShell => "new-connection-local-shell-section",
         }
     }
@@ -45,6 +54,7 @@ impl ConnectionFormSection {
             Self::Basic => "ssh.form.basic_information",
             Self::Authentication => "ssh.form.authentication",
             Self::Route => "ssh.form.connection_route",
+            Self::StandaloneSftpSecondaryRoute => "ssh.form.connection_route",
             Self::SshOptions => "ssh.form.ssh_options",
             Self::Terminal => "ssh.form.terminal_options",
             Self::Appearance => "ssh.form.appearance",
@@ -53,6 +63,7 @@ impl ConnectionFormSection {
             Self::RemoteFeatures => "modals.new_connection.remote_desktop_features_title",
             Self::SerialParameters => "modals.new_connection.serial_section_title",
             Self::MoshOptions => "mosh.form.advanced",
+            Self::SftpOptions => "sftp.standalone.options_title",
             Self::LocalShell => "settings_view.local_terminal.available_shells",
         }
     }
@@ -62,6 +73,7 @@ impl ConnectionFormSection {
             Self::Basic => "ssh.form.basic_information_hint",
             Self::Authentication => "ssh.form.authentication_hint",
             Self::Route => "ssh.form.connection_route_hint",
+            Self::StandaloneSftpSecondaryRoute => "ssh.form.connection_route_hint",
             Self::SshOptions => "ssh.form.ssh_options_hint",
             Self::Terminal => "ssh.form.terminal_options_hint",
             Self::Appearance => "ssh.form.appearance_hint",
@@ -70,6 +82,7 @@ impl ConnectionFormSection {
             Self::RemoteFeatures => "modals.new_connection.remote_desktop_features_hint",
             Self::SerialParameters => "modals.new_connection.serial_connect_hint",
             Self::MoshOptions => "mosh.form.capability_hint",
+            Self::SftpOptions => "sftp.standalone.options_hint",
             Self::LocalShell => "modals.new_connection.local_terminal_detail",
         }
     }
@@ -85,6 +98,9 @@ fn connection_form_section_expanded_for_form(
         ConnectionFormSection::Basic => form.basic_section_expanded,
         ConnectionFormSection::Authentication => form.authentication_section_expanded,
         ConnectionFormSection::Route => form.route_section_expanded,
+        ConnectionFormSection::StandaloneSftpSecondaryRoute => {
+            form.standalone_sftp_secondary_route_section_expanded
+        }
         ConnectionFormSection::SshOptions => form.ssh_options_section_expanded,
         ConnectionFormSection::Terminal => form.terminal_section_expanded,
         ConnectionFormSection::Appearance => form.appearance_section_expanded,
@@ -93,6 +109,7 @@ fn connection_form_section_expanded_for_form(
         ConnectionFormSection::RemoteFeatures => form.remote_features_section_expanded,
         ConnectionFormSection::SerialParameters => form.serial_parameters_section_expanded,
         ConnectionFormSection::MoshOptions => form.mosh_options_section_expanded,
+        ConnectionFormSection::SftpOptions => form.sftp_options_section_expanded,
         ConnectionFormSection::LocalShell => form.local_shell_section_expanded,
     };
     override_value.unwrap_or(true)
@@ -215,21 +232,37 @@ fn new_connection_transport_index(transport: NewConnectionTransport) -> usize {
                 6
             }
         }
+        NewConnectionTransport::StandaloneSftp => {
+            if cfg!(target_os = "windows") {
+                8
+            } else {
+                7
+            }
+        }
     }
+}
+
+fn new_connection_transport_visual_offset(transport: NewConnectionTransport) -> f32 {
+    let row_stride = NEW_CONNECTION_TRANSPORT_ROW_HEIGHT + NEW_CONNECTION_TRANSPORT_ROW_GAP;
+    let advanced_offset = if transport == NewConnectionTransport::StandaloneSftp {
+        NEW_CONNECTION_ADVANCED_GROUP_OFFSET
+    } else {
+        0.0
+    };
+    new_connection_transport_index(transport) as f32 * row_stride + advanced_offset
 }
 
 fn new_connection_transport_vertical_offset(
     source: NewConnectionTransport,
     target: NewConnectionTransport,
 ) -> f32 {
-    let row_stride = NEW_CONNECTION_TRANSPORT_ROW_HEIGHT + NEW_CONNECTION_TRANSPORT_ROW_GAP;
-    (new_connection_transport_index(source) as f32 - new_connection_transport_index(target) as f32)
-        * row_stride
+    new_connection_transport_visual_offset(source) - new_connection_transport_visual_offset(target)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum AuthSelectorContext {
     Standard,
+    StandaloneSftpSecondary,
     EditProperties,
     Prompt,
     DrillDown,
@@ -245,7 +278,16 @@ fn connection_secret_field_value(
     match field {
         NewConnectionField::Password => Some(&form.password),
         NewConnectionField::Passphrase => Some(&form.passphrase),
+        NewConnectionField::StandaloneSftpSecondaryPassword => {
+            Some(&form.standalone_sftp_secondary.password)
+        }
+        NewConnectionField::StandaloneSftpSecondaryPassphrase => {
+            Some(&form.standalone_sftp_secondary.passphrase)
+        }
         NewConnectionField::UpstreamProxyPassword => Some(&form.upstream_proxy_password),
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyPassword => {
+            Some(&form.standalone_sftp_secondary.upstream_proxy_password)
+        }
         NewConnectionField::JumpPassword => form
             .jump_server_form
             .as_ref()
@@ -256,6 +298,14 @@ fn connection_secret_field_value(
             .map(|jump_form| jump_form.passphrase.as_str()),
         _ => None,
     }
+}
+
+fn toggle_primary_sftp_password_persistence(form: &mut NewConnectionForm) {
+    form.save_password = !form.save_password;
+}
+
+fn toggle_secondary_sftp_password_persistence(form: &mut NewConnectionForm) {
+    form.standalone_sftp_secondary.save_password = !form.standalone_sftp_secondary.save_password;
 }
 
 impl WorkspaceApp {
@@ -348,6 +398,10 @@ impl WorkspaceApp {
                                     ConnectionFormSection::Route => {
                                         form.route_section_expanded = override_value;
                                     }
+                                    ConnectionFormSection::StandaloneSftpSecondaryRoute => {
+                                        form.standalone_sftp_secondary_route_section_expanded =
+                                            override_value;
+                                    }
                                     ConnectionFormSection::SshOptions => {
                                         form.ssh_options_section_expanded = override_value;
                                     }
@@ -371,6 +425,9 @@ impl WorkspaceApp {
                                     }
                                     ConnectionFormSection::MoshOptions => {
                                         form.mosh_options_section_expanded = override_value;
+                                    }
+                                    ConnectionFormSection::SftpOptions => {
+                                        form.sftp_options_section_expanded = override_value;
                                     }
                                     ConnectionFormSection::LocalShell => {
                                         form.local_shell_section_expanded = override_value;
@@ -403,6 +460,12 @@ impl WorkspaceApp {
             NewConnectionSelect::Group => SelectAnchorId::NewConnectionGroup,
             NewConnectionSelect::KeyAuthSource => SelectAnchorId::NewConnectionKeyAuthSource,
             NewConnectionSelect::ManagedKey => SelectAnchorId::NewConnectionManagedKey,
+            NewConnectionSelect::StandaloneSftpSecondaryKeyAuthSource => {
+                SelectAnchorId::NewConnectionStandaloneSftpSecondaryKeyAuthSource
+            }
+            NewConnectionSelect::StandaloneSftpSecondaryManagedKey => {
+                SelectAnchorId::NewConnectionStandaloneSftpSecondaryManagedKey
+            }
             NewConnectionSelect::JumpSavedConnection => {
                 SelectAnchorId::NewConnectionJumpSavedConnection
             }
@@ -421,6 +484,15 @@ impl WorkspaceApp {
             }
             NewConnectionSelect::UpstreamProxyAuth => {
                 SelectAnchorId::NewConnectionUpstreamProxyAuth
+            }
+            NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyPolicy => {
+                SelectAnchorId::NewConnectionStandaloneSftpSecondaryUpstreamProxyPolicy
+            }
+            NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyProtocol => {
+                SelectAnchorId::NewConnectionStandaloneSftpSecondaryUpstreamProxyProtocol
+            }
+            NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyAuth => {
+                SelectAnchorId::NewConnectionStandaloneSftpSecondaryUpstreamProxyAuth
             }
             NewConnectionSelect::LocalShell => SelectAnchorId::NewConnectionLocalShell,
             NewConnectionSelect::SerialPort => SelectAnchorId::NewConnectionSerialPort,
@@ -1011,6 +1083,35 @@ impl WorkspaceApp {
         jump_form: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let select_id = if jump_form {
+            NewConnectionSelect::JumpManagedKey
+        } else {
+            NewConnectionSelect::ManagedKey
+        };
+        self.render_managed_key_select_for_target(label, selected_id, select_id, cx)
+    }
+
+    pub(super) fn render_standalone_sftp_secondary_managed_key_select(
+        &self,
+        label: String,
+        selected_id: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_managed_key_select_for_target(
+            label,
+            selected_id,
+            NewConnectionSelect::StandaloneSftpSecondaryManagedKey,
+            cx,
+        )
+    }
+
+    fn render_managed_key_select_for_target(
+        &self,
+        label: String,
+        selected_id: &str,
+        select_id: NewConnectionSelect,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let keys = self.connection_store.managed_ssh_keys();
         let selected_label = if selected_id.trim().is_empty() {
             self.i18n.t("ssh.form.managed_key_placeholder")
@@ -1019,11 +1120,6 @@ impl WorkspaceApp {
                 .find(|key| key.id == selected_id)
                 .map(|key| key.name.clone())
                 .unwrap_or_else(|| selected_id.to_string())
-        };
-        let select_id = if jump_form {
-            NewConnectionSelect::JumpManagedKey
-        } else {
-            NewConnectionSelect::ManagedKey
         };
         let trigger = self
             .new_connection_select_trigger(
@@ -1209,6 +1305,11 @@ impl WorkspaceApp {
                         form.managed_key_id = key_id;
                         form.focused_field = NewConnectionField::ManagedKeyId;
                     }
+                    NewConnectionSelect::StandaloneSftpSecondaryManagedKey => {
+                        form.standalone_sftp_secondary.managed_key_id = key_id;
+                        form.focused_field =
+                            NewConnectionField::StandaloneSftpSecondaryManagedKeyId;
+                    }
                     NewConnectionSelect::JumpManagedKey => {
                         let Some(jump_form) = form.jump_server_form.as_mut() else {
                             return;
@@ -1218,12 +1319,16 @@ impl WorkspaceApp {
                     }
                     NewConnectionSelect::Group
                     | NewConnectionSelect::KeyAuthSource
+                    | NewConnectionSelect::StandaloneSftpSecondaryKeyAuthSource
                     | NewConnectionSelect::JumpSavedConnection
                     | NewConnectionSelect::RemoteDesktopSshGateway
                     | NewConnectionSelect::JumpKeyAuthSource
                     | NewConnectionSelect::UpstreamProxyPolicy
                     | NewConnectionSelect::UpstreamProxyProtocol
                     | NewConnectionSelect::UpstreamProxyAuth
+                    | NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyPolicy
+                    | NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyProtocol
+                    | NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyAuth
                     | NewConnectionSelect::LocalShell
                     | NewConnectionSelect::SerialPort
                     | NewConnectionSelect::SerialDataBits
@@ -1319,6 +1424,7 @@ impl WorkspaceApp {
         enabled: bool,
         command: &str,
         configured: bool,
+        secondary: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
@@ -1328,7 +1434,14 @@ impl WorkspaceApp {
             .child(self.render_connection_checkbox(
                 self.i18n.t("ssh.form.proxy_command_enable"),
                 enabled,
-                |form| form.proxy_command_enabled = !form.proxy_command_enabled,
+                move |form| {
+                    if secondary {
+                        let route = &mut form.standalone_sftp_secondary;
+                        route.proxy_command_enabled = !route.proxy_command_enabled;
+                    } else {
+                        form.proxy_command_enabled = !form.proxy_command_enabled;
+                    }
+                },
                 cx,
             ))
             .when(enabled, |content| {
@@ -1341,7 +1454,11 @@ impl WorkspaceApp {
                         } else {
                             "ssh.form.proxy_command_placeholder"
                         }),
-                        NewConnectionField::ProxyCommand,
+                        if secondary {
+                            NewConnectionField::StandaloneSftpSecondaryProxyCommand
+                        } else {
+                            NewConnectionField::ProxyCommand
+                        },
                         false,
                         cx,
                     ))
@@ -1355,6 +1472,8 @@ impl WorkspaceApp {
             field,
             NewConnectionField::KeyPath
                 | NewConnectionField::CertPath
+                | NewConnectionField::StandaloneSftpSecondaryKeyPath
+                | NewConnectionField::StandaloneSftpSecondaryCertPath
                 | NewConnectionField::JumpKeyPath
                 | NewConnectionField::JumpCertPath
         ) {
@@ -1517,9 +1636,9 @@ impl WorkspaceApp {
             }
             AuthSelectorContext::DrillDown => self.i18n.t("ssh.drill_down.auth_method"),
             AuthSelectorContext::Jump => self.i18n.t("ssh.form.proxy_jump_auth"),
-            AuthSelectorContext::Standard | AuthSelectorContext::Prompt => {
-                self.i18n.t("ssh.form.authentication")
-            }
+            AuthSelectorContext::Standard
+            | AuthSelectorContext::StandaloneSftpSecondary
+            | AuthSelectorContext::Prompt => self.i18n.t("ssh.form.authentication"),
         };
         let choices = Self::auth_family_choices(context);
         let active_index = choices
@@ -1634,6 +1753,182 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    pub(super) fn render_standalone_sftp_endpoint_auth(
+        &self,
+        active_tab: SshAuthTab,
+        secondary: bool,
+        key_path: &str,
+        managed_key_id: &str,
+        cert_path: &str,
+        identity_agent: &str,
+        agent_available: Option<bool>,
+        saved_credential_present: bool,
+        save_password: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let context = if secondary {
+            AuthSelectorContext::StandaloneSftpSecondary
+        } else {
+            AuthSelectorContext::Standard
+        };
+        let password_field = if secondary {
+            NewConnectionField::StandaloneSftpSecondaryPassword
+        } else {
+            NewConnectionField::Password
+        };
+        let key_path_field = if secondary {
+            NewConnectionField::StandaloneSftpSecondaryKeyPath
+        } else {
+            NewConnectionField::KeyPath
+        };
+        let cert_path_field = if secondary {
+            NewConnectionField::StandaloneSftpSecondaryCertPath
+        } else {
+            NewConnectionField::CertPath
+        };
+        let passphrase_field = if secondary {
+            NewConnectionField::StandaloneSftpSecondaryPassphrase
+        } else {
+            NewConnectionField::Passphrase
+        };
+        let identity_agent_field = if secondary {
+            NewConnectionField::StandaloneSftpSecondaryIdentityAgent
+        } else {
+            NewConnectionField::IdentityAgent
+        };
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.modal_section_gap))
+            .child(self.render_auth_selector(active_tab, context, false, cx))
+            .when(active_tab == SshAuthTab::Password, |content| {
+                content
+                    .child(self.render_connection_secret_field(
+                        self.i18n.t("ssh.form.password"),
+                        String::new(),
+                        password_field,
+                        cx,
+                    ))
+                    .when(saved_credential_present, |content| {
+                        content.child(self.render_connection_hint(
+                            self.i18n.t("sessionManager.edit_properties.password_hint"),
+                        ))
+                    })
+                    .when(!saved_credential_present, |content| {
+                        content.child(self.render_connection_checkbox(
+                            self.i18n.t("ssh.form.save_password"),
+                            save_password,
+                            if secondary {
+                                toggle_secondary_sftp_password_persistence
+                            } else {
+                                toggle_primary_sftp_password_persistence
+                            },
+                            cx,
+                        ))
+                    })
+            })
+            .when(active_tab == SshAuthTab::DefaultKey, |content| {
+                content
+                    .child(self.render_connection_hint(self.i18n.t("ssh.form.default_key_desc")))
+                    .child(self.render_connection_secret_field(
+                        self.i18n.t("ssh.form.passphrase"),
+                        self.i18n.t("ssh.form.passphrase_placeholder"),
+                        passphrase_field,
+                        cx,
+                    ))
+            })
+            .when(active_tab == SshAuthTab::SshKey, |content| {
+                content
+                    .child(self.render_connection_field_with_browse(
+                        self.i18n.t("ssh.form.key_file"),
+                        key_path,
+                        "~/.ssh/id_ed25519".to_string(),
+                        key_path_field,
+                        cx,
+                    ))
+                    .child(self.render_connection_secret_field(
+                        self.i18n.t("ssh.form.passphrase"),
+                        self.i18n.t("ssh.form.passphrase_placeholder"),
+                        passphrase_field,
+                        cx,
+                    ))
+            })
+            .when(active_tab == SshAuthTab::ManagedKey, |content| {
+                let managed_key = if secondary {
+                    self.render_standalone_sftp_secondary_managed_key_select(
+                        self.i18n.t("ssh.form.managed_key"),
+                        managed_key_id,
+                        cx,
+                    )
+                } else {
+                    self.render_managed_key_select(
+                        self.i18n.t("ssh.form.managed_key"),
+                        managed_key_id,
+                        false,
+                        cx,
+                    )
+                };
+                content
+                    .child(managed_key)
+                    .child(self.render_connection_secret_field(
+                        self.i18n.t("ssh.form.passphrase"),
+                        self.i18n.t("ssh.form.passphrase_placeholder"),
+                        passphrase_field,
+                        cx,
+                    ))
+                    .child(self.render_connection_hint(self.i18n.t("ssh.form.managed_key_hint")))
+            })
+            .when(active_tab == SshAuthTab::Certificate, |content| {
+                content
+                    .child(self.render_connection_hint(self.i18n.t("ssh.form.certificate_note")))
+                    .child(self.render_connection_field_with_browse(
+                        self.i18n.t("ssh.form.private_key"),
+                        key_path,
+                        "~/.ssh/id_ed25519".to_string(),
+                        key_path_field,
+                        cx,
+                    ))
+                    .child(self.render_connection_field_with_browse(
+                        self.i18n.t("ssh.form.certificate"),
+                        cert_path,
+                        "~/.ssh/id_ed25519-cert.pub".to_string(),
+                        cert_path_field,
+                        cx,
+                    ))
+                    .child(self.render_connection_secret_field(
+                        self.i18n.t("ssh.form.passphrase"),
+                        self.i18n.t("ssh.form.passphrase_placeholder"),
+                        passphrase_field,
+                        cx,
+                    ))
+            })
+            .when(active_tab == SshAuthTab::Agent, |content| {
+                content
+                    .child(self.render_connection_hint(self.i18n.t("ssh.form.agent_desc")))
+                    .child(self.render_connection_field(
+                        self.i18n.t("ssh.form.agent_endpoint"),
+                        identity_agent,
+                        self.i18n.t("ssh.form.agent_endpoint_placeholder"),
+                        identity_agent_field,
+                        false,
+                        cx,
+                    ))
+                    .child(self.render_connection_hint(self.i18n.t("ssh.form.agent_endpoint_hint")))
+                    .child(self.render_agent_status(agent_available))
+            })
+            .when(active_tab == SshAuthTab::TwoFactor, |content| {
+                content
+                    .child(self.render_connection_hint(self.i18n.t("ssh.form.two_factor_desc")))
+                    .child(self.render_connection_hint(self.i18n.t("ssh.form.two_factor_hint")))
+                    .child(self.render_connection_hint_with_color(
+                        self.i18n.t("ssh.form.two_factor_warning"),
+                        self.tokens.ui.warning,
+                    ))
+            })
+            .into_any_element()
+    }
+
     fn auth_family_choices(
         context: AuthSelectorContext,
     ) -> &'static [(SshAuthFamily, &'static str)] {
@@ -1653,7 +1948,7 @@ impl WorkspaceApp {
                 (SshAuthFamily::Key, "ssh.auth.key"),
                 (SshAuthFamily::Agent, "ssh.auth.agent"),
             ],
-            AuthSelectorContext::Standard => &[
+            AuthSelectorContext::Standard | AuthSelectorContext::StandaloneSftpSecondary => &[
                 (SshAuthFamily::Password, "ssh.auth.password"),
                 (SshAuthFamily::Key, "ssh.auth.key"),
                 (SshAuthFamily::Agent, "ssh.auth.agent"),
@@ -1666,6 +1961,9 @@ impl WorkspaceApp {
         match context {
             AuthSelectorContext::Standard => {
                 crate::workspace::selection_motion::NEW_CONNECTION_AUTH_SELECTOR_ID
+            }
+            AuthSelectorContext::StandaloneSftpSecondary => {
+                "standalone-sftp-secondary-auth-selector"
             }
             AuthSelectorContext::EditProperties => {
                 crate::workspace::selection_motion::EDIT_CONNECTION_AUTH_SELECTOR_ID
@@ -1686,7 +1984,9 @@ impl WorkspaceApp {
         context: AuthSelectorContext,
     ) -> &'static [SshKeyAuthSource] {
         match context {
-            AuthSelectorContext::Standard | AuthSelectorContext::Jump => &[
+            AuthSelectorContext::Standard
+            | AuthSelectorContext::StandaloneSftpSecondary
+            | AuthSelectorContext::Jump => &[
                 SshKeyAuthSource::DefaultKey,
                 SshKeyAuthSource::SshKey,
                 SshKeyAuthSource::ManagedKey,
@@ -1752,7 +2052,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let source = Self::normalized_key_source_for_context(active_tab, context);
-        let select_id = if jump_form {
+        let select_id = if context == AuthSelectorContext::StandaloneSftpSecondary {
+            NewConnectionSelect::StandaloneSftpSecondaryKeyAuthSource
+        } else if jump_form {
             NewConnectionSelect::JumpKeyAuthSource
         } else {
             NewConnectionSelect::KeyAuthSource
@@ -1800,7 +2102,9 @@ impl WorkspaceApp {
     ) {
         self.update_connection_form_state(cx, |state| {
             if let Some(form) = state.form.as_mut() {
-                let current_tab = if jump_form {
+                let current_tab = if context == AuthSelectorContext::StandaloneSftpSecondary {
+                    form.standalone_sftp_secondary.auth_tab
+                } else if jump_form {
                     form.jump_server_form
                         .as_ref()
                         .map(|jump_form| jump_form.auth_tab)
@@ -1809,14 +2113,20 @@ impl WorkspaceApp {
                     form.auth_tab
                 };
                 let next_tab = Self::auth_tab_for_family_selection(family, current_tab, context);
-                if jump_form {
+                if context == AuthSelectorContext::StandaloneSftpSecondary {
+                    form.standalone_sftp_secondary.auth_tab = next_tab;
+                } else if jump_form {
                     if let Some(jump_form) = form.jump_server_form.as_mut() {
                         jump_form.auth_tab = next_tab;
                     }
                 } else {
                     form.auth_tab = next_tab;
                 }
-                form.focused_field = Self::focus_field_for_auth_tab(next_tab, jump_form);
+                form.focused_field = Self::focus_field_for_auth_tab(
+                    next_tab,
+                    jump_form,
+                    context == AuthSelectorContext::StandaloneSftpSecondary,
+                );
                 form.field_focused = false;
                 clear_connection_selection(form);
                 form.error = None;
@@ -1862,6 +2172,9 @@ impl WorkspaceApp {
             if let Some(form) = state.form.as_mut() {
                 match select_id {
                     NewConnectionSelect::KeyAuthSource => form.auth_tab = tab,
+                    NewConnectionSelect::StandaloneSftpSecondaryKeyAuthSource => {
+                        form.standalone_sftp_secondary.auth_tab = tab;
+                    }
                     NewConnectionSelect::JumpKeyAuthSource => {
                         let Some(jump_form) = form.jump_server_form.as_mut() else {
                             return;
@@ -1873,6 +2186,7 @@ impl WorkspaceApp {
                 form.focused_field = Self::focus_field_for_auth_tab(
                     tab,
                     select_id == NewConnectionSelect::JumpKeyAuthSource,
+                    select_id == NewConnectionSelect::StandaloneSftpSecondaryKeyAuthSource,
                 );
                 form.field_focused = false;
                 clear_connection_selection(form);
@@ -1883,8 +2197,24 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn focus_field_for_auth_tab(tab: SshAuthTab, jump_form: bool) -> NewConnectionField {
-        if jump_form {
+    fn focus_field_for_auth_tab(
+        tab: SshAuthTab,
+        jump_form: bool,
+        standalone_sftp_secondary: bool,
+    ) -> NewConnectionField {
+        if standalone_sftp_secondary {
+            match tab {
+                SshAuthTab::Password => NewConnectionField::StandaloneSftpSecondaryPassword,
+                SshAuthTab::SshKey | SshAuthTab::Certificate => {
+                    NewConnectionField::StandaloneSftpSecondaryKeyPath
+                }
+                SshAuthTab::ManagedKey => NewConnectionField::StandaloneSftpSecondaryManagedKeyId,
+                SshAuthTab::DefaultKey => NewConnectionField::StandaloneSftpSecondaryPassphrase,
+                SshAuthTab::Agent | SshAuthTab::TwoFactor => {
+                    NewConnectionField::StandaloneSftpSecondaryHost
+                }
+            }
+        } else if jump_form {
             match tab {
                 SshAuthTab::Password => NewConnectionField::JumpPassword,
                 SshAuthTab::SshKey | SshAuthTab::Certificate => NewConnectionField::JumpKeyPath,
@@ -2120,48 +2450,54 @@ impl WorkspaceApp {
 
     pub(super) fn render_transport_selector(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let active_transport = self
+        let (active_transport, advanced_connections_expanded) = self
             .connection_form_state(cx)
             .form
             .as_ref()
-            .map(|form| form.transport)
-            .unwrap_or(NewConnectionTransport::Ssh);
+            .map(|form| (form.transport, form.advanced_connections_expanded))
+            .unwrap_or((NewConnectionTransport::Ssh, false));
         let mut choices = vec![
             (
                 NewConnectionTransport::Ssh,
                 self.i18n.t("modals.new_connection.transport_ssh"),
                 NewConnectionField::Name,
                 LucideIcon::Server,
+                false,
             ),
             (
                 NewConnectionTransport::Mosh,
                 self.i18n.t("modals.new_connection.transport_mosh"),
                 NewConnectionField::Name,
                 LucideIcon::Wifi,
+                false,
             ),
             (
                 NewConnectionTransport::Telnet,
                 self.i18n.t("modals.new_connection.transport_telnet"),
                 NewConnectionField::Host,
                 LucideIcon::Network,
+                false,
             ),
             (
                 NewConnectionTransport::Serial,
                 self.i18n.t("modals.new_connection.transport_serial"),
                 NewConnectionField::SerialPortPath,
                 LucideIcon::Radio,
+                false,
             ),
             (
                 NewConnectionTransport::Rdp,
                 self.i18n.t("modals.new_connection.transport_rdp"),
                 NewConnectionField::Host,
                 LucideIcon::Monitor,
+                false,
             ),
             (
                 NewConnectionTransport::Vnc,
                 self.i18n.t("modals.new_connection.transport_vnc"),
                 NewConnectionField::Host,
                 LucideIcon::Monitor,
+                false,
             ),
         ];
         if cfg!(target_os = "windows") {
@@ -2170,6 +2506,7 @@ impl WorkspaceApp {
                 self.i18n.t("modals.new_connection.transport_wsl_graphics"),
                 NewConnectionField::Name,
                 LucideIcon::AppWindow,
+                false,
             ));
         }
         // Local terminals are one-shot launch targets, so keep them after saved transports.
@@ -2179,9 +2516,19 @@ impl WorkspaceApp {
                 .t("modals.new_connection.transport_local_terminal"),
             NewConnectionField::Name,
             LucideIcon::Terminal,
+            false,
+        ));
+        choices.push((
+            NewConnectionTransport::StandaloneSftp,
+            self.i18n
+                .t("modals.new_connection.transport_standalone_sftp"),
+            NewConnectionField::Name,
+            LucideIcon::FolderSync,
+            true,
         ));
         let mut sidebar = div()
             .w(px(NEW_CONNECTION_TYPE_SIDEBAR_WIDTH))
+            .h_full()
             .flex_none()
             .flex()
             .flex_col()
@@ -2190,7 +2537,52 @@ impl WorkspaceApp {
             .border_color(rgba((theme.border << 8) | 0x80))
             .pr(px(self.tokens.spacing.three));
 
-        for (transport, label, focus_field, icon) in choices {
+        for (transport, label, focus_field, icon, advanced) in choices {
+            if advanced {
+                sidebar = sidebar.child(div().flex_1()).child(
+                    div()
+                        .id("new-connection-advanced-group")
+                        .h(px(NEW_CONNECTION_ADVANCED_GROUP_HEIGHT))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .px(px(self.tokens.spacing.two))
+                        .border_t_1()
+                        .border_color(rgba((theme.border << 8) | 0x80))
+                        .cursor_pointer()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(theme.text_muted))
+                        .child(self.i18n.t("modals.new_connection.advanced_group"))
+                        .child(self.render_animated_chevron(
+                            (
+                                "new-connection-advanced-group-chevron",
+                                advanced_connections_expanded as usize,
+                            ),
+                            advanced_connections_expanded,
+                            14.0,
+                            rgb(theme.text_muted),
+                        ))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.update_connection_form_state(cx, |state| {
+                                    if let Some(form) = state.form.as_mut() {
+                                        form.advanced_connections_expanded =
+                                            !form.advanced_connections_expanded;
+                                        form.field_focused = false;
+                                        clear_connection_selection(form);
+                                    }
+                                });
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        ),
+                );
+                if !advanced_connections_expanded {
+                    continue;
+                }
+            }
             let active = active_transport == transport;
             let transport_index = new_connection_transport_index(transport);
             let row_text = if active {
@@ -2288,7 +2680,12 @@ impl WorkspaceApp {
                         let mut selection_offset = None;
                         this.update_connection_form_state(cx, |state| {     if let Some(form) = state.form.as_mut() {
                             let previous_transport = form.transport;
-                            if previous_transport != transport {
+                            if previous_transport != transport
+                                && previous_transport != NewConnectionTransport::StandaloneSftp
+                                && transport != NewConnectionTransport::StandaloneSftp
+                            {
+                                // The advanced group is pinned below a flexible spacer, so its
+                                // absolute row offset cannot use the fixed-list slide animation.
                                 selection_offset = Some(new_connection_transport_vertical_offset(
                                     previous_transport,
                                     transport,
@@ -3610,27 +4007,30 @@ impl WorkspaceApp {
             timeout_options.push(connect_timeout_seconds);
             timeout_options.sort_unstable();
         }
-        let timeout_tabs = timeout_options.into_iter().map(|seconds| {
-            segmented_tab(
-                &self.tokens,
-                self.i18n
-                    .t("ssh.form.connect_timeout_value")
-                    .replace("{{seconds}}", &seconds.to_string()),
-                connect_timeout_seconds == seconds,
-            )
-            .id(SharedString::from(format!("ssh-connect-timeout-{seconds}")))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.update_connection_form_state(cx, |state| {
-                        if let Some(form) = state.form.as_mut() {
-                            form.connect_timeout_seconds = seconds;
-                        }
-                    });
-                    cx.notify();
-                }),
-            )
-        });
+        let timeout_tabs = timeout_options
+            .into_iter()
+            .map(|seconds| {
+                segmented_tab(
+                    &self.tokens,
+                    self.i18n
+                        .t("ssh.form.connect_timeout_value")
+                        .replace("{{seconds}}", &seconds.to_string()),
+                    connect_timeout_seconds == seconds,
+                )
+                .id(SharedString::from(format!("ssh-connect-timeout-{seconds}")))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.update_connection_form_state(cx, |state| {
+                            if let Some(form) = state.form.as_mut() {
+                                form.connect_timeout_seconds = seconds;
+                            }
+                        });
+                        cx.notify();
+                    }),
+                )
+            })
+            .collect::<Vec<_>>();
         let x11_mode_options = [
             (
                 ConnectionX11ForwardingMode::Untrusted,
@@ -3751,6 +4151,101 @@ impl WorkspaceApp {
                 |form| form.legacy_ssh_compatibility = !form.legacy_ssh_compatibility,
                 cx,
             ))
+            .into_any_element()
+    }
+
+    pub(super) fn render_standalone_sftp_options(
+        &self,
+        initial_remote_path: &str,
+        connect_timeout_seconds: u64,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_standalone_sftp_endpoint_options(
+            initial_remote_path,
+            connect_timeout_seconds,
+            false,
+            cx,
+        )
+    }
+
+    pub(super) fn render_standalone_sftp_secondary_options(
+        &self,
+        initial_remote_path: &str,
+        connect_timeout_seconds: u64,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_standalone_sftp_endpoint_options(
+            initial_remote_path,
+            connect_timeout_seconds,
+            true,
+            cx,
+        )
+    }
+
+    fn render_standalone_sftp_endpoint_options(
+        &self,
+        initial_remote_path: &str,
+        connect_timeout_seconds: u64,
+        secondary: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut timeout_options = SSH_CONNECT_TIMEOUT_OPTIONS_SECONDS.to_vec();
+        if !timeout_options.contains(&connect_timeout_seconds) {
+            timeout_options.push(connect_timeout_seconds);
+            timeout_options.sort_unstable();
+        }
+        let timeout_tabs = timeout_options
+            .into_iter()
+            .map(|seconds| {
+                segmented_tab(
+                    &self.tokens,
+                    self.i18n
+                        .t("ssh.form.connect_timeout_value")
+                        .replace("{{seconds}}", &seconds.to_string()),
+                    connect_timeout_seconds == seconds,
+                )
+                .id(SharedString::from(format!(
+                    "standalone-sftp-{}-connect-timeout-{seconds}",
+                    if secondary { "secondary" } else { "primary" }
+                )))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.update_connection_form_state(cx, |state| {
+                            if let Some(form) = state.form.as_mut() {
+                                if secondary {
+                                    form.standalone_sftp_secondary.connect_timeout_seconds =
+                                        seconds;
+                                } else {
+                                    form.connect_timeout_seconds = seconds;
+                                }
+                            }
+                        });
+                        cx.notify();
+                    }),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.modal_section_gap))
+            .child(self.render_connection_field(
+                self.i18n.t("sftp.standalone.initial_path"),
+                initial_remote_path,
+                self.i18n.t("sftp.standalone.initial_path_placeholder"),
+                if secondary {
+                    NewConnectionField::StandaloneSftpSecondaryInitialRemotePath
+                } else {
+                    NewConnectionField::InitialRemotePath
+                },
+                false,
+                cx,
+            ))
+            .child(self.render_connection_hint(self.i18n.t("sftp.standalone.initial_path_hint")))
+            .child(self.render_connection_hint(self.i18n.t("ssh.form.connect_timeout")))
+            .child(segmented_tabs(&self.tokens).children(timeout_tabs))
             .into_any_element()
     }
 
@@ -3928,20 +4423,35 @@ impl WorkspaceApp {
 
     pub(super) fn render_upstream_proxy_policy_section(
         &self,
+        secondary: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some((policy, protocol, host, port, no_proxy, remote_dns, auth, username)) =
             self.connection_form_state(cx).form.as_ref().map(|form| {
-                (
-                    form.upstream_proxy_policy,
-                    form.upstream_proxy_protocol,
-                    form.upstream_proxy_host.clone(),
-                    form.upstream_proxy_port.clone(),
-                    form.upstream_proxy_no_proxy.clone(),
-                    form.upstream_proxy_remote_dns,
-                    form.upstream_proxy_auth,
-                    form.upstream_proxy_username.clone(),
-                )
+                if secondary {
+                    let route = &form.standalone_sftp_secondary;
+                    (
+                        route.upstream_proxy_policy,
+                        route.upstream_proxy_protocol,
+                        route.upstream_proxy_host.clone(),
+                        route.upstream_proxy_port.clone(),
+                        route.upstream_proxy_no_proxy.clone(),
+                        route.upstream_proxy_remote_dns,
+                        route.upstream_proxy_auth,
+                        route.upstream_proxy_username.clone(),
+                    )
+                } else {
+                    (
+                        form.upstream_proxy_policy,
+                        form.upstream_proxy_protocol,
+                        form.upstream_proxy_host.clone(),
+                        form.upstream_proxy_port.clone(),
+                        form.upstream_proxy_no_proxy.clone(),
+                        form.upstream_proxy_remote_dns,
+                        form.upstream_proxy_auth,
+                        form.upstream_proxy_username.clone(),
+                    )
+                }
             })
         else {
             return div().into_any_element();
@@ -3958,7 +4468,11 @@ impl WorkspaceApp {
                 &self.tokens,
                 self.i18n.t("modals.upstream_proxy.policy"),
                 self.render_new_connection_select_control(
-                    NewConnectionSelect::UpstreamProxyPolicy,
+                    if secondary {
+                        NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyPolicy
+                    } else {
+                        NewConnectionSelect::UpstreamProxyPolicy
+                    },
                     self.upstream_proxy_policy_label(policy),
                     false,
                     false,
@@ -3976,7 +4490,11 @@ impl WorkspaceApp {
                                 &self.tokens,
                                 self.i18n.t("settings_view.network.protocol"),
                                 self.render_new_connection_select_control(
-                                    NewConnectionSelect::UpstreamProxyProtocol,
+                                    if secondary {
+                                        NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyProtocol
+                                    } else {
+                                        NewConnectionSelect::UpstreamProxyProtocol
+                                    },
                                     self.upstream_proxy_protocol_label(protocol),
                                     false,
                                     false,
@@ -3988,7 +4506,11 @@ impl WorkspaceApp {
                                     self.i18n.t("settings_view.network.port"),
                                     &port,
                                     "1080".to_string(),
-                                    NewConnectionField::UpstreamProxyPort,
+                                    if secondary {
+                                        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyPort
+                                    } else {
+                                        NewConnectionField::UpstreamProxyPort
+                                    },
                                     false,
                                     cx,
                                 ),
@@ -3998,7 +4520,11 @@ impl WorkspaceApp {
                         self.i18n.t("settings_view.network.host"),
                         &host,
                         "127.0.0.1".to_string(),
-                        NewConnectionField::UpstreamProxyHost,
+                        if secondary {
+                            NewConnectionField::StandaloneSftpSecondaryUpstreamProxyHost
+                        } else {
+                            NewConnectionField::UpstreamProxyHost
+                        },
                         false,
                         cx,
                     ))
@@ -4006,21 +4532,37 @@ impl WorkspaceApp {
                         self.i18n.t("settings_view.network.no_proxy"),
                         &no_proxy,
                         "localhost,127.0.0.1,*.internal".to_string(),
-                        NewConnectionField::UpstreamProxyNoProxy,
+                        if secondary {
+                            NewConnectionField::StandaloneSftpSecondaryUpstreamProxyNoProxy
+                        } else {
+                            NewConnectionField::UpstreamProxyNoProxy
+                        },
                         false,
                         cx,
                     ))
                     .child(self.render_connection_checkbox(
                         self.i18n.t("settings_view.network.remote_dns"),
                         remote_dns,
-                        |form| form.upstream_proxy_remote_dns = !form.upstream_proxy_remote_dns,
+                        move |form| {
+                            if secondary {
+                                let route = &mut form.standalone_sftp_secondary;
+                                route.upstream_proxy_remote_dns =
+                                    !route.upstream_proxy_remote_dns;
+                            } else {
+                                form.upstream_proxy_remote_dns = !form.upstream_proxy_remote_dns;
+                            }
+                        },
                         cx,
                     ))
                     .child(form_field(
                         &self.tokens,
                         self.i18n.t("settings_view.network.auth"),
                         self.render_new_connection_select_control(
-                            NewConnectionSelect::UpstreamProxyAuth,
+                            if secondary {
+                                NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyAuth
+                            } else {
+                                NewConnectionSelect::UpstreamProxyAuth
+                            },
                             self.upstream_proxy_auth_label(auth),
                             false,
                             false,
@@ -4035,14 +4577,22 @@ impl WorkspaceApp {
                                     self.i18n.t("settings_view.network.username"),
                                     &username,
                                     String::new(),
-                                    NewConnectionField::UpstreamProxyUsername,
+                                    if secondary {
+                                        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyUsername
+                                    } else {
+                                        NewConnectionField::UpstreamProxyUsername
+                                    },
                                     false,
                                     cx,
                                 ))
                                 .child(self.render_connection_secret_field(
                                     self.i18n.t("settings_view.network.password"),
                                     String::new(),
-                                    NewConnectionField::UpstreamProxyPassword,
+                                    if secondary {
+                                        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyPassword
+                                    } else {
+                                        NewConnectionField::UpstreamProxyPassword
+                                    },
                                     cx,
                                 ))
                                 .child(self.render_connection_hint(
@@ -4162,11 +4712,16 @@ impl WorkspaceApp {
     pub(super) fn set_new_connection_upstream_proxy_policy(
         &mut self,
         policy: NewConnectionUpstreamProxyPolicy,
+        secondary: bool,
         cx: &mut Context<Self>,
     ) {
         self.update_connection_form_state(cx, |state| {
             if let Some(form) = state.form.as_mut() {
-                form.upstream_proxy_policy = policy;
+                if secondary {
+                    form.standalone_sftp_secondary.upstream_proxy_policy = policy;
+                } else {
+                    form.upstream_proxy_policy = policy;
+                }
                 form.field_focused = false;
                 clear_connection_selection(form);
                 form.error = None;
@@ -4179,11 +4734,16 @@ impl WorkspaceApp {
     pub(super) fn set_new_connection_upstream_proxy_protocol(
         &mut self,
         protocol: SavedUpstreamProxyProtocol,
+        secondary: bool,
         cx: &mut Context<Self>,
     ) {
         self.update_connection_form_state(cx, |state| {
             if let Some(form) = state.form.as_mut() {
-                form.upstream_proxy_protocol = protocol;
+                if secondary {
+                    form.standalone_sftp_secondary.upstream_proxy_protocol = protocol;
+                } else {
+                    form.upstream_proxy_protocol = protocol;
+                }
                 form.field_focused = false;
                 clear_connection_selection(form);
                 form.error = None;
@@ -4196,17 +4756,28 @@ impl WorkspaceApp {
     pub(super) fn set_new_connection_upstream_proxy_auth(
         &mut self,
         auth: NewConnectionUpstreamProxyAuth,
+        secondary: bool,
         cx: &mut Context<Self>,
     ) {
         self.update_connection_form_state(cx, |state| {
             if let Some(form) = state.form.as_mut() {
-                if auth == NewConnectionUpstreamProxyAuth::None {
-                    // Hidden password fields should not retain a draft secret after
-                    // switching the custom proxy back to unauthenticated mode.
-                    form.upstream_proxy_password.clear();
-                    form.upstream_proxy_password_keychain_id = None;
+                if secondary {
+                    let route = &mut form.standalone_sftp_secondary;
+                    if auth == NewConnectionUpstreamProxyAuth::None {
+                        // Hidden password drafts remain owned by this endpoint and are scrubbed.
+                        zeroize::Zeroize::zeroize(&mut route.upstream_proxy_password);
+                        route.upstream_proxy_password_keychain_id = None;
+                    }
+                    route.upstream_proxy_auth = auth;
+                } else {
+                    if auth == NewConnectionUpstreamProxyAuth::None {
+                        // Hidden password fields should not retain a draft secret after
+                        // switching the custom proxy back to unauthenticated mode.
+                        zeroize::Zeroize::zeroize(&mut form.upstream_proxy_password);
+                        form.upstream_proxy_password_keychain_id = None;
+                    }
+                    form.upstream_proxy_auth = auth;
                 }
-                form.upstream_proxy_auth = auth;
                 form.field_focused = false;
                 clear_connection_selection(form);
                 form.error = None;
@@ -4220,7 +4791,7 @@ impl WorkspaceApp {
         &self,
         label: String,
         checked: bool,
-        toggle: fn(&mut NewConnectionForm),
+        toggle: impl Fn(&mut NewConnectionForm) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         checkbox(&self.tokens, label, checked)
@@ -4270,7 +4841,20 @@ impl WorkspaceApp {
                     this.close_new_connection_form(window, cx);
                 }
                 ConnectionButtonAction::Test => {
-                    this.start_new_connection_flow(SshConnectionIntent::Test, window, cx);
+                    let intent =
+                        if this
+                            .connection_form_state(cx)
+                            .form
+                            .as_ref()
+                            .is_some_and(|form| {
+                                form.transport == NewConnectionTransport::StandaloneSftp
+                            })
+                        {
+                            SshConnectionIntent::TestStandaloneSftp
+                        } else {
+                            SshConnectionIntent::Test
+                        };
+                    this.start_new_connection_flow(intent, window, cx);
                 }
                 ConnectionButtonAction::Connect => {
                     this.submit_new_connection_form_with_action(

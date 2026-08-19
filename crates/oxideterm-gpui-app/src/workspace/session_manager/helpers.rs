@@ -404,6 +404,153 @@ pub(in crate::workspace) fn form_from_saved_connection(
     form
 }
 
+pub(super) fn form_from_standalone_sftp_profile(
+    profile: &oxideterm_connections::StandaloneSftpProfile,
+) -> NewConnectionForm {
+    // Edit mode restores only non-secret metadata and protected-store references.
+    let upstream_proxy_form = upstream_proxy_form_fields(&profile.upstream_proxy);
+    let mut form = NewConnectionForm::default();
+    form.transport = crate::workspace::new_connection::NewConnectionTransport::StandaloneSftp;
+    // Editing keeps the selected advanced transport discoverable in the shared selector.
+    form.advanced_connections_expanded = true;
+    form.standalone_sftp_profile_id = Some(profile.id.clone());
+    form.standalone_sftp_transfer_mode = profile.transfer_mode;
+    form.name = profile.name.clone();
+    form.host = profile.host.clone();
+    form.port = profile.port.to_string();
+    form.username = profile.username.clone();
+    form.auth_tab = ssh_auth_tab_from_saved_auth(&profile.auth);
+    form.saved_password_keychain_id = match &profile.auth {
+        SavedAuth::Password { keychain_id, .. } => keychain_id.clone(),
+        _ => None,
+    };
+    form.password_loaded = true;
+    form.save_password = match &profile.auth {
+        SavedAuth::Password { keychain_id, .. } => keychain_id.is_some(),
+        SavedAuth::Key {
+            has_passphrase,
+            passphrase_keychain_id,
+            ..
+        }
+        | SavedAuth::Certificate {
+            has_passphrase,
+            passphrase_keychain_id,
+            ..
+        } => *has_passphrase || passphrase_keychain_id.is_some(),
+        SavedAuth::ManagedKey {
+            passphrase_keychain_id,
+            ..
+        } => passphrase_keychain_id.is_some(),
+        SavedAuth::KeyboardInteractive | SavedAuth::Agent => false,
+    };
+    form.key_path = profile.auth.key_path().unwrap_or_default().to_string();
+    form.managed_key_id = profile
+        .auth
+        .managed_key_id()
+        .unwrap_or_default()
+        .to_string();
+    form.cert_path = profile.auth.cert_path().unwrap_or_default().to_string();
+    form.group = group_label_for_form(profile.group.as_deref());
+    form.notes = profile.notes.clone().unwrap_or_default();
+    form.icon = profile.icon.clone().unwrap_or_default();
+    form.color = profile.color.clone().unwrap_or_default();
+    form.icon_background_color = profile.icon_background_color.clone().unwrap_or_default();
+    form.sftp_initial_remote_path = profile.initial_remote_path.clone().unwrap_or_default();
+    form.proxy_hops = profile
+        .proxy_chain
+        .iter()
+        .enumerate()
+        .map(|(index, hop)| proxy_hop_form_from_saved_proxy_hop(index, hop))
+        .collect();
+    form.proxy_chain_expanded = !form.proxy_hops.is_empty();
+    form.proxy_command_enabled = profile.proxy_command.is_some();
+    form.proxy_command_keychain_id = profile
+        .proxy_command
+        .as_ref()
+        .and_then(|command| command.keychain_id.clone());
+    form.upstream_proxy_policy = upstream_proxy_form.policy;
+    form.upstream_proxy_protocol = upstream_proxy_form.protocol;
+    form.upstream_proxy_host = upstream_proxy_form.host;
+    form.upstream_proxy_port = upstream_proxy_form.port;
+    form.upstream_proxy_auth = upstream_proxy_form.auth;
+    form.upstream_proxy_username = upstream_proxy_form.username;
+    form.upstream_proxy_password_keychain_id = upstream_proxy_form.password_keychain_id;
+    form.upstream_proxy_remote_dns = upstream_proxy_form.remote_dns;
+    form.upstream_proxy_no_proxy = upstream_proxy_form.no_proxy;
+    form.identity_agent = profile.identity_agent.clone().unwrap_or_default();
+    form.agent_available =
+        oxideterm_ssh::ssh_agent_available(identity_agent_selector(&form.identity_agent));
+    form.legacy_ssh_compatibility = profile.legacy_ssh_compatibility;
+    form.connect_timeout_seconds = profile.connect_timeout_seconds;
+    if let Some(endpoint) = profile.secondary_endpoint.as_ref() {
+        let secondary_upstream_proxy_form = upstream_proxy_form_fields(&endpoint.upstream_proxy);
+        let secondary = &mut form.standalone_sftp_secondary;
+        secondary.host = endpoint.host.clone();
+        secondary.port = endpoint.port.to_string();
+        secondary.username = endpoint.username.clone();
+        secondary.auth_tab = ssh_auth_tab_from_saved_auth(&endpoint.auth);
+        secondary.password_keychain_id = match &endpoint.auth {
+            SavedAuth::Password { keychain_id, .. } => keychain_id.clone(),
+            _ => None,
+        };
+        secondary.save_password = match &endpoint.auth {
+            SavedAuth::Password { keychain_id, .. } => keychain_id.is_some(),
+            SavedAuth::Key {
+                has_passphrase,
+                passphrase_keychain_id,
+                ..
+            }
+            | SavedAuth::Certificate {
+                has_passphrase,
+                passphrase_keychain_id,
+                ..
+            } => *has_passphrase || passphrase_keychain_id.is_some(),
+            SavedAuth::ManagedKey {
+                passphrase_keychain_id,
+                ..
+            } => passphrase_keychain_id.is_some(),
+            SavedAuth::KeyboardInteractive | SavedAuth::Agent => false,
+        };
+        secondary.key_path = endpoint.auth.key_path().unwrap_or_default().to_string();
+        secondary.managed_key_id = endpoint
+            .auth
+            .managed_key_id()
+            .unwrap_or_default()
+            .to_string();
+        secondary.cert_path = endpoint.auth.cert_path().unwrap_or_default().to_string();
+        secondary.identity_agent = endpoint.identity_agent.clone().unwrap_or_default();
+        secondary.agent_available =
+            oxideterm_ssh::ssh_agent_available(identity_agent_selector(&secondary.identity_agent));
+        secondary.legacy_ssh_compatibility = endpoint.legacy_ssh_compatibility;
+        secondary.connect_timeout_seconds = endpoint.connect_timeout_seconds;
+        secondary.initial_remote_path = endpoint.initial_remote_path.clone().unwrap_or_default();
+        secondary.proxy_hops = endpoint
+            .proxy_chain
+            .iter()
+            .enumerate()
+            .map(|(index, hop)| proxy_hop_form_from_saved_proxy_hop(index, hop))
+            .collect();
+        secondary.proxy_chain_expanded = !secondary.proxy_hops.is_empty();
+        secondary.proxy_command_enabled = endpoint.proxy_command.is_some();
+        secondary.proxy_command_keychain_id = endpoint
+            .proxy_command
+            .as_ref()
+            .and_then(|command| command.keychain_id.clone());
+        secondary.upstream_proxy_policy = secondary_upstream_proxy_form.policy;
+        secondary.upstream_proxy_protocol = secondary_upstream_proxy_form.protocol;
+        secondary.upstream_proxy_host = secondary_upstream_proxy_form.host;
+        secondary.upstream_proxy_port = secondary_upstream_proxy_form.port;
+        secondary.upstream_proxy_auth = secondary_upstream_proxy_form.auth;
+        secondary.upstream_proxy_username = secondary_upstream_proxy_form.username;
+        secondary.upstream_proxy_password_keychain_id =
+            secondary_upstream_proxy_form.password_keychain_id;
+        secondary.upstream_proxy_remote_dns = secondary_upstream_proxy_form.remote_dns;
+        secondary.upstream_proxy_no_proxy = secondary_upstream_proxy_form.no_proxy;
+    }
+    form.focused_field = NewConnectionField::Name;
+    form
+}
+
 pub(in crate::workspace) fn restore_saved_proxy_chain_in_form(
     form: &mut NewConnectionForm,
     connection: &SavedConnection,

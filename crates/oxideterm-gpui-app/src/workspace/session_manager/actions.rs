@@ -50,6 +50,16 @@ impl WorkspaceApp {
                 })
             })
             .count();
+        let standalone_sftp_count = self
+            .connection_store
+            .standalone_sftp_profiles()
+            .iter()
+            .filter(|profile| {
+                profile.group.as_deref().is_some_and(|candidate| {
+                    candidate == group || candidate.starts_with(&format!("{group}/"))
+                })
+            })
+            .count();
         let remote_desktop_count = self
             .connection_store
             .remote_desktop_profiles()
@@ -60,7 +70,12 @@ impl WorkspaceApp {
                 })
             })
             .count();
-        connection_count + serial_count + telnet_count + mosh_count + remote_desktop_count
+        connection_count
+            + serial_count
+            + telnet_count
+            + mosh_count
+            + standalone_sftp_count
+            + remote_desktop_count
     }
 
     pub(super) fn session_group_tree(&self) -> (Vec<String>, HashMap<String, Vec<String>>) {
@@ -84,6 +99,11 @@ impl WorkspaceApp {
             }
         }
         for profile in self.connection_store.mosh_profiles() {
+            if let Some(group) = profile.group.as_deref() {
+                add_group_path_segments(group, &mut paths);
+            }
+        }
+        for profile in self.connection_store.standalone_sftp_profiles() {
             if let Some(group) = profile.group.as_deref() {
                 add_group_path_segments(group, &mut paths);
             }
@@ -618,6 +638,25 @@ impl WorkspaceApp {
         });
     }
 
+    pub(super) fn request_delete_standalone_sftp_profile(
+        &mut self,
+        id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(profile) = self.connection_store.get_standalone_sftp_profile(id) else {
+            return;
+        };
+        let confirm = SessionManagerDeleteConfirm::StandaloneSftpProfile {
+            id: profile.id.clone(),
+            name: profile.name.clone(),
+        };
+        self.session_manager.update(cx, |session_manager, cx| {
+            close_session_menu_state(session_manager);
+            session_manager.delete_confirm = Some(confirm);
+            cx.notify();
+        });
+    }
+
     pub(super) fn request_delete_remote_desktop_profile(
         &mut self,
         id: &str,
@@ -694,6 +733,9 @@ impl WorkspaceApp {
             }
             SessionManagerDeleteConfirm::MoshProfile { id, .. } => {
                 self.delete_mosh_profile(&id, cx)
+            }
+            SessionManagerDeleteConfirm::StandaloneSftpProfile { id, .. } => {
+                self.delete_standalone_sftp_profile(&id, cx)
             }
             SessionManagerDeleteConfirm::RemoteDesktopProfile { id, .. } => {
                 self.delete_remote_desktop_profile(&id, cx)
@@ -782,6 +824,40 @@ impl WorkspaceApp {
                 session_manager
                     .selected_items
                     .remove(&SessionManagerSelectionTarget::Mosh(id.to_string()));
+            }
+            session_manager.set_status(Some(status), cx)
+        });
+        if changed {
+            self.queue_cloud_sync_dirty_refresh(cx);
+        }
+    }
+
+    pub(super) fn delete_standalone_sftp_profile(&mut self, id: &str, cx: &mut Context<Self>) {
+        let (status, changed) = match self.connection_store.delete_standalone_sftp_profile(id) {
+            Ok(true) => (
+                self.i18n
+                    .t("sessionManager.standalone_sftp_profiles.delete"),
+                true,
+            ),
+            Ok(false) => (
+                self.i18n
+                    .t("sessionManager.standalone_sftp_profiles.delete_failed"),
+                false,
+            ),
+            Err(error) => (
+                format!(
+                    "{}: {error}",
+                    self.i18n
+                        .t("sessionManager.standalone_sftp_profiles.delete_failed")
+                ),
+                false,
+            ),
+        };
+        self.session_manager.update(cx, |session_manager, cx| {
+            if changed {
+                session_manager.selected_items.remove(
+                    &SessionManagerSelectionTarget::StandaloneSftp(id.to_string()),
+                );
             }
             session_manager.set_status(Some(status), cx)
         });
@@ -1055,6 +1131,25 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(super) fn open_saved_standalone_sftp_profile_editor(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(saved) = self
+            .connection_store
+            .get_standalone_sftp_profile(id)
+            .cloned()
+        else {
+            return;
+        };
+        self.open_new_connection_form(window, cx);
+        let form = form_from_standalone_sftp_profile(&saved);
+        self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
+        cx.notify();
+    }
+
     pub(super) fn delete_selected_session_items(
         &mut self,
         targets: Vec<SessionManagerSelectionTarget>,
@@ -1103,6 +1198,15 @@ impl WorkspaceApp {
                     if self
                         .connection_store
                         .delete_mosh_profile(&id)
+                        .unwrap_or(false)
+                    {
+                        deleted += 1;
+                    }
+                }
+                SessionManagerSelectionTarget::StandaloneSftp(id) => {
+                    if self
+                        .connection_store
+                        .delete_standalone_sftp_profile(&id)
                         .unwrap_or(false)
                     {
                         deleted += 1;
@@ -1212,6 +1316,7 @@ impl WorkspaceApp {
         let mut serial_profile_ids = Vec::new();
         let mut telnet_profile_ids = Vec::new();
         let mut mosh_profile_ids = Vec::new();
+        let mut standalone_sftp_profile_ids = Vec::new();
         let mut remote_desktop_ids = Vec::new();
         for target in targets {
             match target {
@@ -1219,6 +1324,9 @@ impl WorkspaceApp {
                 SessionManagerSelectionTarget::Serial(id) => serial_profile_ids.push(id),
                 SessionManagerSelectionTarget::Telnet(id) => telnet_profile_ids.push(id),
                 SessionManagerSelectionTarget::Mosh(id) => mosh_profile_ids.push(id),
+                SessionManagerSelectionTarget::StandaloneSftp(id) => {
+                    standalone_sftp_profile_ids.push(id)
+                }
                 SessionManagerSelectionTarget::RemoteDesktop(id) => remote_desktop_ids.push(id),
             }
         }
@@ -1227,6 +1335,7 @@ impl WorkspaceApp {
             &serial_profile_ids,
             &telnet_profile_ids,
             &mosh_profile_ids,
+            &standalone_sftp_profile_ids,
             &remote_desktop_ids,
             group,
         ) {

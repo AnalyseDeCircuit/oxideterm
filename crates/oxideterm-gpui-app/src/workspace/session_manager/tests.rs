@@ -302,6 +302,15 @@ pub(super) fn saved_profile_selection_is_typed_separately_from_ssh_ids() {
     );
     mosh.id = "shared-id".to_string();
     let mosh = SessionManagerDisplayItem::Mosh(mosh);
+    let mut standalone_sftp = oxideterm_connections::StandaloneSftpProfile::new(
+        "SFTP files",
+        "sftp.example.test",
+        22,
+        "operator",
+        SavedAuth::Agent,
+    );
+    standalone_sftp.id = "shared-id".to_string();
+    let standalone_sftp = SessionManagerDisplayItem::StandaloneSftp(standalone_sftp);
     let remote = SessionManagerDisplayItem::RemoteDesktop(RemoteDesktopProfile {
         id: "shared-id".to_string(),
         name: "Remote desktop".to_string(),
@@ -345,6 +354,12 @@ pub(super) fn saved_profile_selection_is_typed_separately_from_ssh_ids() {
     assert_eq!(
         mosh.selection_target(),
         Some(SessionManagerSelectionTarget::Mosh("shared-id".to_string()))
+    );
+    assert_eq!(
+        standalone_sftp.selection_target(),
+        Some(SessionManagerSelectionTarget::StandaloneSftp(
+            "shared-id".to_string()
+        ))
     );
     assert_eq!(
         remote.selection_target(),

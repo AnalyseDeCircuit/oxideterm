@@ -4,7 +4,7 @@ use super::*;
 struct SftpTransferLaunch {
     id: u64,
     transfer_id: String,
-    node_id: NodeId,
+    remote_id: SftpRemoteId,
     direction: SftpTransferDirection,
     is_directory: bool,
     local_path: String,
@@ -155,7 +155,7 @@ impl SftpWorkspaceEntity {
 
     fn prepare_transfer_launches(
         &mut self,
-        node_id: NodeId,
+        remote_id: SftpRemoteId,
         pending_transfers: Vec<SftpPendingTransfer>,
         resolved_actions: HashMap<String, SftpConflictResolution>,
         configured_protocol: RemoteTransferProtocol,
@@ -205,7 +205,7 @@ impl SftpWorkspaceEntity {
         for (transfer, target_name) in planned_transfers {
             let id = self.next_transfer_id;
             self.next_transfer_id += 1;
-            let transfer_id = new_sftp_transfer_id(&node_id, &transfer.name);
+            let transfer_id = new_sftp_transfer_id(&remote_id, &transfer.name);
             let is_directory = transfer.source.file_type == SftpFileType::Directory;
             let local_path = match direction {
                 SftpTransferDirection::Upload => transfer.source.path.clone(),
@@ -226,7 +226,7 @@ impl SftpWorkspaceEntity {
                 id,
                 transfer_id: transfer_id.clone(),
                 batch_id: Some(batch_id),
-                node_id: node_id.clone(),
+                remote_id: remote_id.clone(),
                 name: if is_directory {
                     format!("{target_name}/")
                 } else {
@@ -245,7 +245,7 @@ impl SftpWorkspaceEntity {
             launches.push(SftpTransferLaunch {
                 id,
                 transfer_id,
-                node_id: node_id.clone(),
+                remote_id: remote_id.clone(),
                 direction,
                 is_directory,
                 local_path,
@@ -346,7 +346,7 @@ impl WorkspaceApp {
         file: SftpFileEntry,
         cx: &mut Context<Self>,
     ) {
-        let Some(node_id) = self.visible_sftp_node_id(cx) else {
+        let Some(remote_id) = self.visible_sftp_remote_id(cx) else {
             self.push_sftp_toast(
                 self.i18n.t("sftp.toast.extract_failed"),
                 None,
@@ -378,7 +378,9 @@ impl WorkspaceApp {
             }
         };
 
-        let router = self.node_router.clone();
+        let Some(backend) = self.sftp_remote_backend(&remote_id) else {
+            return;
+        };
         let tx = self.sftp_view.read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
         let toast = SftpMutationToast {
@@ -388,12 +390,8 @@ impl WorkspaceApp {
         };
         runtime.spawn(async move {
             let result = async {
-                let resolved = router
-                    .resolve_connection(&node_id)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let output = resolved
-                    .handle
+                let handle = backend.resolve_connection().await?;
+                let output = handle
                     .run_command_capture(&command, std::time::Duration::from_secs(300), 64 * 1024)
                     .await
                     .map_err(|error| error.to_string())?;
@@ -432,7 +430,7 @@ impl WorkspaceApp {
         selected_names: Vec<String>,
         cx: &mut Context<Self>,
     ) {
-        let Some(node_id) = self.visible_sftp_node_id(cx) else {
+        let Some(remote_id) = self.visible_sftp_remote_id(cx) else {
             return;
         };
         if selected_names.is_empty() {
@@ -468,7 +466,7 @@ impl WorkspaceApp {
                 )
             })
             .collect::<HashMap<_, _>>();
-        self.execute_sftp_pending_transfers(node_id, pending_transfers, resolved_actions, cx);
+        self.execute_sftp_pending_transfers(remote_id, pending_transfers, resolved_actions, cx);
         self.clear_sftp_selection(pane, cx);
     }
 
@@ -477,15 +475,24 @@ impl WorkspaceApp {
         paths: &[std::path::PathBuf],
         cx: &mut Context<Self>,
     ) {
-        let Some(node_id) = self.visible_sftp_node_id(cx) else {
+        let Some(remote_id) = self.visible_sftp_remote_id(cx) else {
             return;
         };
-        self.queue_sftp_external_upload_paths_for_node(node_id, paths, cx);
+        self.queue_sftp_external_upload_paths_for_remote(remote_id, paths, cx);
     }
 
     pub(in crate::workspace::sftp) fn queue_sftp_external_upload_paths_for_node(
         &mut self,
         node_id: NodeId,
+        paths: &[std::path::PathBuf],
+        cx: &mut Context<Self>,
+    ) {
+        self.queue_sftp_external_upload_paths_for_remote(SftpRemoteId::Node(node_id), paths, cx);
+    }
+
+    fn queue_sftp_external_upload_paths_for_remote(
+        &mut self,
+        remote_id: SftpRemoteId,
         paths: &[std::path::PathBuf],
         cx: &mut Context<Self>,
     ) {
@@ -556,21 +563,25 @@ impl WorkspaceApp {
                 )
             })
             .collect::<HashMap<_, _>>();
-        self.execute_sftp_pending_transfers(node_id, pending_transfers, resolved_actions, cx);
+        self.execute_sftp_pending_transfers(remote_id, pending_transfers, resolved_actions, cx);
     }
 
     pub(in crate::workspace::sftp) fn execute_sftp_pending_transfers(
         &mut self,
-        node_id: NodeId,
+        remote_id: SftpRemoteId,
         pending_transfers: Vec<SftpPendingTransfer>,
         resolved_actions: HashMap<String, SftpConflictResolution>,
         cx: &mut Context<Self>,
     ) {
-        let configured_protocol =
-            configured_transfer_protocol(self.settings_store.settings().sftp.transfer_protocol);
+        let pair_primary_remote_id = self.sftp_pair_primary_remote_id(cx);
+        let configured_protocol = if pair_primary_remote_id.is_some() {
+            RemoteTransferProtocol::Sftp
+        } else {
+            configured_transfer_protocol(self.settings_store.settings().sftp.transfer_protocol)
+        };
         let launches = self.sftp_view.update(cx, |sftp, cx| {
             sftp.prepare_transfer_launches(
-                node_id,
+                remote_id.clone(),
                 pending_transfers,
                 resolved_actions,
                 configured_protocol,
@@ -578,11 +589,27 @@ impl WorkspaceApp {
             )
         });
         for launch in launches {
+            if let Some(primary_remote_id) = pair_primary_remote_id.clone() {
+                self.spawn_sftp_pair_transfer_task(
+                    launch.id,
+                    launch.transfer_id,
+                    launch.direction,
+                    launch.is_directory,
+                    launch.local_path,
+                    launch.remote_path,
+                    launch.download_disposition,
+                    None,
+                    primary_remote_id,
+                    remote_id.clone(),
+                    cx,
+                );
+                continue;
+            }
             // The entity owns queue state; the workspace retains only the runtime launch adapter.
             self.spawn_sftp_transfer_task(
                 launch.id,
                 launch.transfer_id,
-                launch.node_id,
+                launch.remote_id,
                 launch.direction,
                 launch.is_directory,
                 launch.local_path,
@@ -600,7 +627,7 @@ impl WorkspaceApp {
         resolution: SftpConflictResolution,
         cx: &mut Context<Self>,
     ) {
-        let Some(node_id) = self.visible_sftp_node_id(cx) else {
+        let Some(remote_id) = self.visible_sftp_remote_id(cx) else {
             self.cancel_sftp_transfer_conflicts(cx);
             return;
         };
@@ -615,7 +642,7 @@ impl WorkspaceApp {
             } => {
                 self.close_sftp_dialog(cx);
                 self.execute_sftp_pending_transfers(
-                    node_id,
+                    remote_id,
                     pending_transfers,
                     resolved_actions,
                     cx,

@@ -4,8 +4,8 @@ use oxideterm_connections::{
     AuthType, ConnectionInfo, ConnectionTerminalOptions, ConnectionX11ForwardingOptions,
     DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS, MoshIpFamily, MoshPredictionMode, MoshProfile,
     MoshUdpPortSelection, RemoteDesktopProfile, SavedAuth, SavedConnection,
-    SavedUpstreamProxyProtocol, SerialProfile, TelnetProfile, TransportUsernameTransition,
-    transport_port_replacement, transport_username_transition,
+    SavedUpstreamProxyProtocol, SerialProfile, StandaloneSftpTransferMode, TelnetProfile,
+    TransportUsernameTransition, transport_port_replacement, transport_username_transition,
 };
 pub(in crate::workspace) use oxideterm_connections::{
     ConnectionTransport as NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
@@ -151,12 +151,17 @@ pub(in crate::workspace) enum NewConnectionSelect {
     Group,
     KeyAuthSource,
     ManagedKey,
+    StandaloneSftpSecondaryKeyAuthSource,
+    StandaloneSftpSecondaryManagedKey,
     JumpSavedConnection,
     JumpKeyAuthSource,
     JumpManagedKey,
     UpstreamProxyPolicy,
     UpstreamProxyProtocol,
     UpstreamProxyAuth,
+    StandaloneSftpSecondaryUpstreamProxyPolicy,
+    StandaloneSftpSecondaryUpstreamProxyProtocol,
+    StandaloneSftpSecondaryUpstreamProxyAuth,
     RemoteDesktopSshGateway,
     LocalShell,
     SerialPort,
@@ -184,6 +189,13 @@ pub(in crate::workspace) enum NewConnectionUpstreamProxyAuth {
     Password,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(in crate::workspace) enum ConnectionRouteTarget {
+    #[default]
+    Primary,
+    StandaloneSftpSecondary,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(in crate::workspace) enum NewConnectionField {
     Name,
@@ -198,6 +210,23 @@ pub(in crate::workspace) enum NewConnectionField {
     IdentityAgent,
     Group,
     Notes,
+    InitialRemotePath,
+    StandaloneSftpSecondaryHost,
+    StandaloneSftpSecondaryPort,
+    StandaloneSftpSecondaryUsername,
+    StandaloneSftpSecondaryPassword,
+    StandaloneSftpSecondaryKeyPath,
+    StandaloneSftpSecondaryManagedKeyId,
+    StandaloneSftpSecondaryCertPath,
+    StandaloneSftpSecondaryPassphrase,
+    StandaloneSftpSecondaryIdentityAgent,
+    StandaloneSftpSecondaryInitialRemotePath,
+    StandaloneSftpSecondaryProxyCommand,
+    StandaloneSftpSecondaryUpstreamProxyHost,
+    StandaloneSftpSecondaryUpstreamProxyPort,
+    StandaloneSftpSecondaryUpstreamProxyNoProxy,
+    StandaloneSftpSecondaryUpstreamProxyUsername,
+    StandaloneSftpSecondaryUpstreamProxyPassword,
     PostConnectCommand,
     ProxyCommand,
     Color,
@@ -487,6 +516,145 @@ impl Drop for NewConnectionProxyHop {
     }
 }
 
+pub(in crate::workspace) struct StandaloneSftpSecondaryForm {
+    pub(in crate::workspace) host: String,
+    pub(in crate::workspace) port: String,
+    pub(in crate::workspace) username: String,
+    pub(in crate::workspace) auth_tab: SshAuthTab,
+    pub(in crate::workspace) password: String,
+    pub(in crate::workspace) password_keychain_id: Option<String>,
+    pub(in crate::workspace) password_visible: bool,
+    pub(in crate::workspace) key_path: String,
+    pub(in crate::workspace) managed_key_id: String,
+    pub(in crate::workspace) cert_path: String,
+    pub(in crate::workspace) passphrase: String,
+    pub(in crate::workspace) passphrase_visible: bool,
+    pub(in crate::workspace) save_password: bool,
+    pub(in crate::workspace) identity_agent: String,
+    pub(in crate::workspace) agent_available: Option<bool>,
+    pub(in crate::workspace) legacy_ssh_compatibility: bool,
+    pub(in crate::workspace) connect_timeout_seconds: u64,
+    pub(in crate::workspace) initial_remote_path: String,
+    pub(in crate::workspace) proxy_hops: Vec<NewConnectionProxyHop>,
+    pub(in crate::workspace) proxy_chain_expanded: bool,
+    pub(in crate::workspace) proxy_command_enabled: bool,
+    pub(in crate::workspace) proxy_command: String,
+    pub(in crate::workspace) proxy_command_keychain_id: Option<String>,
+    pub(in crate::workspace) upstream_proxy_policy: NewConnectionUpstreamProxyPolicy,
+    pub(in crate::workspace) upstream_proxy_protocol: SavedUpstreamProxyProtocol,
+    pub(in crate::workspace) upstream_proxy_host: String,
+    pub(in crate::workspace) upstream_proxy_port: String,
+    pub(in crate::workspace) upstream_proxy_auth: NewConnectionUpstreamProxyAuth,
+    pub(in crate::workspace) upstream_proxy_username: String,
+    pub(in crate::workspace) upstream_proxy_password: String,
+    pub(in crate::workspace) upstream_proxy_password_keychain_id: Option<String>,
+    pub(in crate::workspace) upstream_proxy_remote_dns: bool,
+    pub(in crate::workspace) upstream_proxy_no_proxy: String,
+}
+
+impl Default for StandaloneSftpSecondaryForm {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            port: SSH_DEFAULT_PORT_TEXT.to_string(),
+            username: "root".to_string(),
+            auth_tab: SshAuthTab::Password,
+            password: String::new(),
+            password_keychain_id: None,
+            password_visible: false,
+            key_path: String::new(),
+            managed_key_id: String::new(),
+            cert_path: String::new(),
+            passphrase: String::new(),
+            passphrase_visible: false,
+            save_password: false,
+            identity_agent: String::new(),
+            agent_available: None,
+            legacy_ssh_compatibility: false,
+            connect_timeout_seconds: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
+            initial_remote_path: String::new(),
+            proxy_hops: Vec::new(),
+            proxy_chain_expanded: false,
+            proxy_command_enabled: false,
+            proxy_command: String::new(),
+            proxy_command_keychain_id: None,
+            upstream_proxy_policy: NewConnectionUpstreamProxyPolicy::UseGlobal,
+            upstream_proxy_protocol: SavedUpstreamProxyProtocol::Socks5,
+            upstream_proxy_host: "127.0.0.1".to_string(),
+            upstream_proxy_port: "1080".to_string(),
+            upstream_proxy_auth: NewConnectionUpstreamProxyAuth::None,
+            upstream_proxy_username: String::new(),
+            upstream_proxy_password: String::new(),
+            upstream_proxy_password_keychain_id: None,
+            upstream_proxy_remote_dns: true,
+            upstream_proxy_no_proxy: String::new(),
+        }
+    }
+}
+
+impl fmt::Debug for StandaloneSftpSecondaryForm {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StandaloneSftpSecondaryForm")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("auth_tab", &self.auth_tab)
+            .field("password", &"[redacted secret]")
+            .field("password_keychain_id", &self.password_keychain_id)
+            .field("key_path", &self.key_path)
+            .field("managed_key_id", &self.managed_key_id)
+            .field("cert_path", &self.cert_path)
+            .field("passphrase", &"[redacted secret]")
+            .field("save_password", &self.save_password)
+            .field(
+                "identity_agent_configured",
+                &identity_agent_selector(&self.identity_agent).is_some(),
+            )
+            .field("legacy_ssh_compatibility", &self.legacy_ssh_compatibility)
+            .field("connect_timeout_seconds", &self.connect_timeout_seconds)
+            .field("initial_remote_path", &self.initial_remote_path)
+            .field("proxy_hops", &self.proxy_hops)
+            .field("proxy_chain_expanded", &self.proxy_chain_expanded)
+            .field("proxy_command_enabled", &self.proxy_command_enabled)
+            .field("proxy_command", &"[redacted secret]")
+            .field("proxy_command_keychain_id", &self.proxy_command_keychain_id)
+            .field("upstream_proxy_policy", &self.upstream_proxy_policy)
+            .field("upstream_proxy_protocol", &self.upstream_proxy_protocol)
+            .field("upstream_proxy_host", &self.upstream_proxy_host)
+            .field("upstream_proxy_port", &self.upstream_proxy_port)
+            .field("upstream_proxy_auth", &self.upstream_proxy_auth)
+            .field("upstream_proxy_username", &self.upstream_proxy_username)
+            .field("upstream_proxy_password", &"[redacted secret]")
+            .field(
+                "upstream_proxy_password_keychain_id",
+                &self.upstream_proxy_password_keychain_id,
+            )
+            .field("upstream_proxy_remote_dns", &self.upstream_proxy_remote_dns)
+            .field("upstream_proxy_no_proxy", &self.upstream_proxy_no_proxy)
+            .finish()
+    }
+}
+
+impl StandaloneSftpSecondaryForm {
+    fn zeroize_secret_drafts(&mut self) {
+        self.password.zeroize();
+        self.passphrase.zeroize();
+        self.proxy_command.zeroize();
+        self.upstream_proxy_password.zeroize();
+        for hop in &mut self.proxy_hops {
+            hop.zeroize_secret_drafts();
+        }
+    }
+}
+
+impl Drop for StandaloneSftpSecondaryForm {
+    fn drop(&mut self) {
+        // The second endpoint owns its drafts independently and scrubs them on form teardown.
+        self.zeroize_secret_drafts();
+    }
+}
+
 pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) transport: NewConnectionTransport,
     /// Selects one discovered shell for this one-shot local terminal launch.
@@ -508,6 +676,12 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) serial_profile_id: Option<String>,
     /// Identifies an existing Telnet asset without changing a live Telnet session.
     pub(in crate::workspace) telnet_profile_id: Option<String>,
+    /// Identifies an independent SFTP asset without creating a NodeRouter node.
+    pub(in crate::workspace) standalone_sftp_profile_id: Option<String>,
+    /// Controls whether the dual-pane SFTP surface has one or two authenticated remotes.
+    pub(in crate::workspace) standalone_sftp_transfer_mode: StandaloneSftpTransferMode,
+    /// Owns the second endpoint only while editing a remote-to-remote profile.
+    pub(in crate::workspace) standalone_sftp_secondary: StandaloneSftpSecondaryForm,
     pub(in crate::workspace) saved_password_keychain_id: Option<String>,
     pub(in crate::workspace) password_loaded: bool,
     pub(in crate::workspace) password_visible: bool,
@@ -521,6 +695,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) save_password: bool,
     pub(in crate::workspace) group: String,
     pub(in crate::workspace) notes: String,
+    pub(in crate::workspace) sftp_initial_remote_path: String,
     pub(in crate::workspace) post_connect_command: String,
     pub(in crate::workspace) proxy_command_enabled: bool,
     pub(in crate::workspace) proxy_command: String,
@@ -533,6 +708,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) basic_section_expanded: Option<bool>,
     pub(in crate::workspace) authentication_section_expanded: Option<bool>,
     pub(in crate::workspace) route_section_expanded: Option<bool>,
+    pub(in crate::workspace) standalone_sftp_secondary_route_section_expanded: Option<bool>,
     pub(in crate::workspace) ssh_options_section_expanded: Option<bool>,
     pub(in crate::workspace) terminal_section_expanded: Option<bool>,
     pub(in crate::workspace) appearance_section_expanded: Option<bool>,
@@ -541,11 +717,16 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) remote_features_section_expanded: Option<bool>,
     pub(in crate::workspace) serial_parameters_section_expanded: Option<bool>,
     pub(in crate::workspace) mosh_options_section_expanded: Option<bool>,
+    pub(in crate::workspace) sftp_options_section_expanded: Option<bool>,
     pub(in crate::workspace) local_shell_section_expanded: Option<bool>,
+    /// Keeps the uncommon transport group out of the primary list until requested.
+    pub(in crate::workspace) advanced_connections_expanded: bool,
     pub(in crate::workspace) tags: Vec<String>,
     pub(in crate::workspace) proxy_hops: Vec<NewConnectionProxyHop>,
     pub(in crate::workspace) proxy_chain_expanded: bool,
     pub(in crate::workspace) jump_server_form: Option<NewConnectionProxyHop>,
+    /// Selects which independently owned endpoint receives the pending jump host.
+    pub(in crate::workspace) jump_server_target: ConnectionRouteTarget,
     pub(in crate::workspace) upstream_proxy_policy: NewConnectionUpstreamProxyPolicy,
     pub(in crate::workspace) upstream_proxy_protocol: SavedUpstreamProxyProtocol,
     pub(in crate::workspace) upstream_proxy_host: String,
@@ -616,6 +797,15 @@ impl fmt::Debug for NewConnectionForm {
             .field("serial_profile_id", &self.serial_profile_id)
             .field("telnet_profile_id", &self.telnet_profile_id)
             .field(
+                "standalone_sftp_profile_id",
+                &self.standalone_sftp_profile_id,
+            )
+            .field(
+                "standalone_sftp_transfer_mode",
+                &self.standalone_sftp_transfer_mode,
+            )
+            .field("standalone_sftp_secondary", &self.standalone_sftp_secondary)
+            .field(
                 "saved_password_keychain_id",
                 &self.saved_password_keychain_id,
             )
@@ -632,6 +822,7 @@ impl fmt::Debug for NewConnectionForm {
             .field("group", &self.group)
             // Notes are user-authored free text and may contain sensitive context.
             .field("notes_present", &!self.notes.is_empty())
+            .field("sftp_initial_remote_path", &self.sftp_initial_remote_path)
             .field("post_connect_command", &self.post_connect_command)
             .field("proxy_command_enabled", &self.proxy_command_enabled)
             .field("proxy_command", &"[redacted secret]")
@@ -676,8 +867,16 @@ impl fmt::Debug for NewConnectionForm {
                 &self.mosh_options_section_expanded,
             )
             .field(
+                "sftp_options_section_expanded",
+                &self.sftp_options_section_expanded,
+            )
+            .field(
                 "local_shell_section_expanded",
                 &self.local_shell_section_expanded,
+            )
+            .field(
+                "advanced_connections_expanded",
+                &self.advanced_connections_expanded,
             )
             .field("tags", &self.tags)
             .field("proxy_hops", &self.proxy_hops)
@@ -757,6 +956,9 @@ impl Default for NewConnectionForm {
             mosh_profile_id: None,
             serial_profile_id: None,
             telnet_profile_id: None,
+            standalone_sftp_profile_id: None,
+            standalone_sftp_transfer_mode: StandaloneSftpTransferMode::LocalRemote,
+            standalone_sftp_secondary: StandaloneSftpSecondaryForm::default(),
             saved_password_keychain_id: None,
             password_loaded: true,
             password_visible: false,
@@ -770,6 +972,7 @@ impl Default for NewConnectionForm {
             save_password: false,
             group: String::new(),
             notes: String::new(),
+            sftp_initial_remote_path: String::new(),
             post_connect_command: String::new(),
             proxy_command_enabled: false,
             proxy_command: String::new(),
@@ -781,6 +984,7 @@ impl Default for NewConnectionForm {
             basic_section_expanded: None,
             authentication_section_expanded: None,
             route_section_expanded: None,
+            standalone_sftp_secondary_route_section_expanded: None,
             ssh_options_section_expanded: None,
             terminal_section_expanded: None,
             appearance_section_expanded: None,
@@ -789,11 +993,14 @@ impl Default for NewConnectionForm {
             remote_features_section_expanded: None,
             serial_parameters_section_expanded: None,
             mosh_options_section_expanded: None,
+            sftp_options_section_expanded: None,
             local_shell_section_expanded: None,
+            advanced_connections_expanded: false,
             tags: Vec::new(),
             proxy_hops: Vec::new(),
             proxy_chain_expanded: false,
             jump_server_form: None,
+            jump_server_target: ConnectionRouteTarget::Primary,
             upstream_proxy_policy: NewConnectionUpstreamProxyPolicy::UseGlobal,
             upstream_proxy_protocol: SavedUpstreamProxyProtocol::Socks5,
             upstream_proxy_host: "127.0.0.1".to_string(),
@@ -845,6 +1052,19 @@ impl NewConnectionForm {
         self.error
             .as_ref()
             .is_some_and(|message| self.success_feedback_message.as_ref() == Some(message))
+    }
+
+    pub(in crate::workspace) fn set_standalone_sftp_transfer_mode(
+        &mut self,
+        mode: StandaloneSftpTransferMode,
+    ) {
+        if mode == StandaloneSftpTransferMode::LocalRemote
+            && self.standalone_sftp_transfer_mode == StandaloneSftpTransferMode::RemoteRemote
+        {
+            // Hidden second-endpoint credentials must not outlive the selected topology.
+            self.standalone_sftp_secondary.zeroize_secret_drafts();
+        }
+        self.standalone_sftp_transfer_mode = mode;
     }
 
     fn zeroize_secret_drafts(&mut self) {
@@ -1019,6 +1239,12 @@ pub(in crate::workspace) fn connection_secret_field_visible(
     match field {
         NewConnectionField::Password => Some(form.password_visible),
         NewConnectionField::Passphrase => Some(form.passphrase_visible),
+        NewConnectionField::StandaloneSftpSecondaryPassword => {
+            Some(form.standalone_sftp_secondary.password_visible)
+        }
+        NewConnectionField::StandaloneSftpSecondaryPassphrase => {
+            Some(form.standalone_sftp_secondary.passphrase_visible)
+        }
         _ => None,
     }
 }
@@ -1035,6 +1261,16 @@ pub(in crate::workspace) fn toggle_connection_secret_field_visibility(
         }
         NewConnectionField::Passphrase => {
             form.passphrase_visible = !form.passphrase_visible;
+            true
+        }
+        NewConnectionField::StandaloneSftpSecondaryPassword => {
+            form.standalone_sftp_secondary.password_visible =
+                !form.standalone_sftp_secondary.password_visible;
+            true
+        }
+        NewConnectionField::StandaloneSftpSecondaryPassphrase => {
+            form.standalone_sftp_secondary.passphrase_visible =
+                !form.standalone_sftp_secondary.passphrase_visible;
             true
         }
         _ => false,
@@ -1061,6 +1297,10 @@ pub(in crate::workspace) fn refresh_identity_agent_availability(form: &mut NewCo
 fn refresh_focused_identity_agent_availability(form: &mut NewConnectionForm) {
     if form.focused_field == NewConnectionField::IdentityAgent {
         refresh_identity_agent_availability(form);
+    } else if form.focused_field == NewConnectionField::StandaloneSftpSecondaryIdentityAgent {
+        form.standalone_sftp_secondary.agent_available = oxideterm_ssh::ssh_agent_available(
+            identity_agent_selector(&form.standalone_sftp_secondary.identity_agent),
+        );
     }
 }
 
@@ -1265,7 +1505,17 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::MoshUdpPort,
             NewConnectionField::MoshLocale,
         ]);
-    } else if upstream_proxy_policy == NewConnectionUpstreamProxyPolicy::Custom {
+    } else if transport == NewConnectionTransport::StandaloneSftp {
+        // Independent SFTP uses SSH authentication and routing without terminal-only commands.
+        fields.retain(|field| *field != NewConnectionField::PostConnectCommand);
+        fields.push(NewConnectionField::InitialRemotePath);
+    }
+    if upstream_proxy_policy == NewConnectionUpstreamProxyPolicy::Custom
+        && matches!(
+            transport,
+            NewConnectionTransport::Ssh | NewConnectionTransport::StandaloneSftp
+        )
+    {
         fields.extend([
             NewConnectionField::UpstreamProxyHost,
             NewConnectionField::UpstreamProxyPort,
@@ -1357,6 +1607,90 @@ pub(in crate::workspace) fn next_jump_connection_field(
     fields[next]
 }
 
+pub(in crate::workspace) fn next_standalone_sftp_field(
+    form: &NewConnectionForm,
+    forward: bool,
+) -> NewConnectionField {
+    fn append_auth_fields(
+        fields: &mut Vec<NewConnectionField>,
+        auth_tab: SshAuthTab,
+        secondary: bool,
+    ) {
+        match (auth_tab, secondary) {
+            (SshAuthTab::Password, false) => fields.push(NewConnectionField::Password),
+            (SshAuthTab::Password, true) => {
+                fields.push(NewConnectionField::StandaloneSftpSecondaryPassword)
+            }
+            (SshAuthTab::DefaultKey, false) => fields.push(NewConnectionField::Passphrase),
+            (SshAuthTab::DefaultKey, true) => {
+                fields.push(NewConnectionField::StandaloneSftpSecondaryPassphrase)
+            }
+            (SshAuthTab::SshKey, false) => {
+                fields.extend([NewConnectionField::KeyPath, NewConnectionField::Passphrase])
+            }
+            (SshAuthTab::SshKey, true) => fields.extend([
+                NewConnectionField::StandaloneSftpSecondaryKeyPath,
+                NewConnectionField::StandaloneSftpSecondaryPassphrase,
+            ]),
+            (SshAuthTab::ManagedKey, false) => fields.extend([
+                NewConnectionField::ManagedKeyId,
+                NewConnectionField::Passphrase,
+            ]),
+            (SshAuthTab::ManagedKey, true) => fields.extend([
+                NewConnectionField::StandaloneSftpSecondaryManagedKeyId,
+                NewConnectionField::StandaloneSftpSecondaryPassphrase,
+            ]),
+            (SshAuthTab::Certificate, false) => fields.extend([
+                NewConnectionField::KeyPath,
+                NewConnectionField::CertPath,
+                NewConnectionField::Passphrase,
+            ]),
+            (SshAuthTab::Certificate, true) => fields.extend([
+                NewConnectionField::StandaloneSftpSecondaryKeyPath,
+                NewConnectionField::StandaloneSftpSecondaryCertPath,
+                NewConnectionField::StandaloneSftpSecondaryPassphrase,
+            ]),
+            (SshAuthTab::Agent, false) => fields.push(NewConnectionField::IdentityAgent),
+            (SshAuthTab::Agent, true) => {
+                fields.push(NewConnectionField::StandaloneSftpSecondaryIdentityAgent)
+            }
+            (SshAuthTab::TwoFactor, _) => {}
+        }
+    }
+
+    let mut fields = vec![
+        NewConnectionField::Name,
+        NewConnectionField::Group,
+        NewConnectionField::Notes,
+        NewConnectionField::Host,
+        NewConnectionField::Port,
+        NewConnectionField::Username,
+    ];
+    append_auth_fields(&mut fields, form.auth_tab, false);
+    fields.push(NewConnectionField::InitialRemotePath);
+    if form.standalone_sftp_transfer_mode == StandaloneSftpTransferMode::RemoteRemote {
+        fields.extend([
+            NewConnectionField::StandaloneSftpSecondaryHost,
+            NewConnectionField::StandaloneSftpSecondaryPort,
+            NewConnectionField::StandaloneSftpSecondaryUsername,
+        ]);
+        append_auth_fields(&mut fields, form.standalone_sftp_secondary.auth_tab, true);
+        fields.push(NewConnectionField::StandaloneSftpSecondaryInitialRemotePath);
+    }
+    let index = fields
+        .iter()
+        .position(|candidate| *candidate == form.focused_field)
+        .unwrap_or(0);
+    let next = if forward {
+        (index + 1) % fields.len()
+    } else if index == 0 {
+        fields.len() - 1
+    } else {
+        index - 1
+    };
+    fields[next]
+}
+
 pub(in crate::workspace) fn current_connection_field_mut(
     form: &mut NewConnectionForm,
 ) -> &mut String {
@@ -1373,6 +1707,51 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::IdentityAgent => &mut form.identity_agent,
         NewConnectionField::Group => &mut form.group,
         NewConnectionField::Notes => &mut form.notes,
+        NewConnectionField::InitialRemotePath => &mut form.sftp_initial_remote_path,
+        NewConnectionField::StandaloneSftpSecondaryHost => &mut form.standalone_sftp_secondary.host,
+        NewConnectionField::StandaloneSftpSecondaryPort => &mut form.standalone_sftp_secondary.port,
+        NewConnectionField::StandaloneSftpSecondaryUsername => {
+            &mut form.standalone_sftp_secondary.username
+        }
+        NewConnectionField::StandaloneSftpSecondaryPassword => {
+            &mut form.standalone_sftp_secondary.password
+        }
+        NewConnectionField::StandaloneSftpSecondaryKeyPath => {
+            &mut form.standalone_sftp_secondary.key_path
+        }
+        NewConnectionField::StandaloneSftpSecondaryManagedKeyId => {
+            &mut form.standalone_sftp_secondary.managed_key_id
+        }
+        NewConnectionField::StandaloneSftpSecondaryCertPath => {
+            &mut form.standalone_sftp_secondary.cert_path
+        }
+        NewConnectionField::StandaloneSftpSecondaryPassphrase => {
+            &mut form.standalone_sftp_secondary.passphrase
+        }
+        NewConnectionField::StandaloneSftpSecondaryIdentityAgent => {
+            &mut form.standalone_sftp_secondary.identity_agent
+        }
+        NewConnectionField::StandaloneSftpSecondaryInitialRemotePath => {
+            &mut form.standalone_sftp_secondary.initial_remote_path
+        }
+        NewConnectionField::StandaloneSftpSecondaryProxyCommand => {
+            &mut form.standalone_sftp_secondary.proxy_command
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyHost => {
+            &mut form.standalone_sftp_secondary.upstream_proxy_host
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyPort => {
+            &mut form.standalone_sftp_secondary.upstream_proxy_port
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyNoProxy => {
+            &mut form.standalone_sftp_secondary.upstream_proxy_no_proxy
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyUsername => {
+            &mut form.standalone_sftp_secondary.upstream_proxy_username
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyPassword => {
+            &mut form.standalone_sftp_secondary.upstream_proxy_password
+        }
         NewConnectionField::PostConnectCommand => &mut form.post_connect_command,
         NewConnectionField::ProxyCommand => &mut form.proxy_command,
         NewConnectionField::UpstreamProxyHost => &mut form.upstream_proxy_host,
@@ -1470,6 +1849,51 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::IdentityAgent => &form.identity_agent,
         NewConnectionField::Group => &form.group,
         NewConnectionField::Notes => &form.notes,
+        NewConnectionField::InitialRemotePath => &form.sftp_initial_remote_path,
+        NewConnectionField::StandaloneSftpSecondaryHost => &form.standalone_sftp_secondary.host,
+        NewConnectionField::StandaloneSftpSecondaryPort => &form.standalone_sftp_secondary.port,
+        NewConnectionField::StandaloneSftpSecondaryUsername => {
+            &form.standalone_sftp_secondary.username
+        }
+        NewConnectionField::StandaloneSftpSecondaryPassword => {
+            &form.standalone_sftp_secondary.password
+        }
+        NewConnectionField::StandaloneSftpSecondaryKeyPath => {
+            &form.standalone_sftp_secondary.key_path
+        }
+        NewConnectionField::StandaloneSftpSecondaryManagedKeyId => {
+            &form.standalone_sftp_secondary.managed_key_id
+        }
+        NewConnectionField::StandaloneSftpSecondaryCertPath => {
+            &form.standalone_sftp_secondary.cert_path
+        }
+        NewConnectionField::StandaloneSftpSecondaryPassphrase => {
+            &form.standalone_sftp_secondary.passphrase
+        }
+        NewConnectionField::StandaloneSftpSecondaryIdentityAgent => {
+            &form.standalone_sftp_secondary.identity_agent
+        }
+        NewConnectionField::StandaloneSftpSecondaryInitialRemotePath => {
+            &form.standalone_sftp_secondary.initial_remote_path
+        }
+        NewConnectionField::StandaloneSftpSecondaryProxyCommand => {
+            &form.standalone_sftp_secondary.proxy_command
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyHost => {
+            &form.standalone_sftp_secondary.upstream_proxy_host
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyPort => {
+            &form.standalone_sftp_secondary.upstream_proxy_port
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyNoProxy => {
+            &form.standalone_sftp_secondary.upstream_proxy_no_proxy
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyUsername => {
+            &form.standalone_sftp_secondary.upstream_proxy_username
+        }
+        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyPassword => {
+            &form.standalone_sftp_secondary.upstream_proxy_password
+        }
         NewConnectionField::PostConnectCommand => &form.post_connect_command,
         NewConnectionField::ProxyCommand => &form.proxy_command,
         NewConnectionField::UpstreamProxyHost => &form.upstream_proxy_host,
@@ -1648,8 +2072,8 @@ mod tests {
         RemoteDesktopVncCompression, RemoteDesktopVncImageQuality, RemoteDesktopVncOptions,
         RemoteDesktopVncPreference, RemoteDesktopVncSecurityPolicy, RemoteDesktopVncSessionMode,
         SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction, SshAuthFamily, SshAuthTab,
-        SshKeyAuthSource, TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT,
-        apply_remote_desktop_vnc_preference, apply_transport_default_port,
+        SshKeyAuthSource, StandaloneSftpTransferMode, TELNET_DEFAULT_PORT_TEXT,
+        VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference, apply_transport_default_port,
         apply_transport_default_username, auth_family_from_tab, auth_tab_from_key_source,
         backspace_current_connection_field, connection_icon_field_visible,
         connection_secret_field_visible, default_auth_tab_for_family, form_from_mosh_profile,
@@ -1729,6 +2153,10 @@ mod tests {
         form.password = "password-value".to_string();
         form.passphrase = "passphrase-value".to_string();
         form.upstream_proxy_password = "proxy-password-value".to_string();
+        form.standalone_sftp_transfer_mode = StandaloneSftpTransferMode::RemoteRemote;
+        form.standalone_sftp_secondary.password = "secondary-password-value".to_string();
+        form.standalone_sftp_secondary.passphrase = "secondary-passphrase-value".to_string();
+        form.set_standalone_sftp_transfer_mode(StandaloneSftpTransferMode::LocalRemote);
         form.zeroize_secret_drafts();
 
         let mut proxy_hop = NewConnectionProxyHop::new();
@@ -1739,6 +2167,8 @@ mod tests {
         assert!(form.password.is_empty());
         assert!(form.passphrase.is_empty());
         assert!(form.upstream_proxy_password.is_empty());
+        assert!(form.standalone_sftp_secondary.password.is_empty());
+        assert!(form.standalone_sftp_secondary.passphrase.is_empty());
         assert!(proxy_hop.password.is_empty());
         assert!(proxy_hop.passphrase.is_empty());
     }
@@ -2423,8 +2853,12 @@ mod tests {
 
     #[test]
     fn ssh_and_mosh_tab_navigation_follow_basic_information_order() {
-        // Both forms render name and group before endpoint and authentication fields.
-        for transport in [NewConnectionTransport::Ssh, NewConnectionTransport::Mosh] {
+        // Every remote form renders name and group before its remaining basic fields.
+        for transport in [
+            NewConnectionTransport::Ssh,
+            NewConnectionTransport::Mosh,
+            NewConnectionTransport::StandaloneSftp,
+        ] {
             assert_eq!(
                 next_connection_field(
                     NewConnectionField::Name,
@@ -2436,6 +2870,11 @@ mod tests {
                 ),
                 NewConnectionField::Group
             );
+            let field_after_group = if transport == NewConnectionTransport::Mosh {
+                NewConnectionField::Host
+            } else {
+                NewConnectionField::Notes
+            };
             assert_eq!(
                 next_connection_field(
                     NewConnectionField::Group,
@@ -2445,7 +2884,7 @@ mod tests {
                     NewConnectionUpstreamProxyAuth::None,
                     true,
                 ),
-                NewConnectionField::Host
+                field_after_group
             );
         }
     }
