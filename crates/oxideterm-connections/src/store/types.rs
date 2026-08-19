@@ -426,6 +426,9 @@ pub struct SavedConnection {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    /// Free-form user metadata. UI copy warns against storing credentials here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
     pub host: String,
     #[serde(default = "default_port")]
     pub port: u16,
@@ -496,6 +499,9 @@ pub struct ConnectionInfo {
     pub id: String,
     pub name: String,
     pub group: Option<String>,
+    /// Free-form user metadata. It is intentionally excluded from connection search.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
     pub host: String,
     pub port: u16,
     pub username: String,
@@ -602,6 +608,7 @@ impl From<&SavedConnection> for ConnectionInfo {
             id: conn.id.clone(),
             name: conn.name.clone(),
             group: conn.group.clone(),
+            notes: conn.notes.clone(),
             host: conn.host.clone(),
             port: conn.port,
             username: conn.username.clone(),
@@ -1116,6 +1123,7 @@ pub struct SaveConnectionRequest {
     pub id: Option<String>,
     pub name: String,
     pub group: Option<String>,
+    pub notes: Option<String>,
     pub host: String,
     pub port: u16,
     pub username: String,

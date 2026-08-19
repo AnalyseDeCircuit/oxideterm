@@ -22,6 +22,7 @@ struct ConnectionFormModalSnapshot {
     cert_path: String,
     save_password: bool,
     group: String,
+    notes: String,
     post_connect_command: String,
     proxy_command_enabled: bool,
     proxy_command: zeroize::Zeroizing<String>,
@@ -68,6 +69,7 @@ impl ConnectionFormModalSnapshot {
             cert_path: form.cert_path.clone(),
             save_password: form.save_password,
             group: form.group.clone(),
+            notes: form.notes.clone(),
             post_connect_command: form.post_connect_command.clone(),
             proxy_command_enabled: form.proxy_command_enabled,
             // Rendering owns one bounded zeroizing copy; persisted forms retain only a keychain id.
@@ -420,6 +422,19 @@ impl WorkspaceApp {
                                             &form.group,
                                             cx,
                                         ))
+                                        .when(ssh_submission_mode, |basic| {
+                                            basic
+                                                .child(self.render_connection_multiline_field(
+                                                    self.i18n.t("ssh.form.notes"),
+                                                    &form.notes,
+                                                    self.i18n.t("ssh.form.notes_placeholder"),
+                                                    NewConnectionField::Notes,
+                                                    cx,
+                                                ))
+                                                .child(self.render_connection_hint(
+                                                    self.i18n.t("ssh.form.notes_hint"),
+                                                ))
+                                        })
                                         .child(
                                             div()
                                                 .flex()

@@ -12,6 +12,7 @@ fn connection_sync_record(
             id: "conn-1".to_string(),
             name: "Production".to_string(),
             group: None,
+            notes: None,
             host: "example.test".to_string(),
             port: 22,
             username: "ops".to_string(),

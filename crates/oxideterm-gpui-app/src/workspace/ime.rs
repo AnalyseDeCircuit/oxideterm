@@ -20,7 +20,10 @@ use super::file_manager::FileManagerInput;
 use super::forwards::ForwardInput;
 use super::graphics::GraphicsInput;
 use super::launcher::LauncherInput;
-use super::new_connection::{NewConnectionField, refresh_identity_agent_availability};
+use super::new_connection::{
+    CONNECTION_NOTES_LINE_HEIGHT, CONNECTION_NOTES_VERTICAL_PADDING, NewConnectionField,
+    refresh_identity_agent_availability,
+};
 use super::quick_commands::QuickCommandInput;
 use super::session_manager::{SessionManagerInput, SessionManagerState};
 use super::sftp::SftpInput;
@@ -1548,6 +1551,9 @@ impl WorkspaceApp {
                 // y-to-line mapping tied to the shared textarea renderer.
                 px(input.textarea_line_height())
             }
+            WorkspaceImeTarget::NewConnection(NewConnectionField::Notes) => {
+                px(CONNECTION_NOTES_LINE_HEIGHT)
+            }
             _ if ime_target_is_read_only(target) && line_count > 0 => {
                 let inferred = f32::from(bounds.size.height) / line_count as f32;
                 px(inferred.clamp(16.0, 40.0))
@@ -1579,6 +1585,9 @@ impl WorkspaceApp {
                 // hit-testing starts from the content box, so subtract that top
                 // inset before mapping y to a UTF-16 line.
                 px(8.0)
+            }
+            WorkspaceImeTarget::NewConnection(NewConnectionField::Notes) => {
+                px(CONNECTION_NOTES_VERTICAL_PADDING)
             }
             _ => px(0.0),
         }
@@ -2945,6 +2954,7 @@ fn new_connection_field_value(
         NewConnectionField::Passphrase => &form.passphrase,
         NewConnectionField::IdentityAgent => &form.identity_agent,
         NewConnectionField::Group => &form.group,
+        NewConnectionField::Notes => &form.notes,
         NewConnectionField::PostConnectCommand => &form.post_connect_command,
         NewConnectionField::ProxyCommand => &form.proxy_command,
         NewConnectionField::UpstreamProxyHost => &form.upstream_proxy_host,
@@ -2990,6 +3000,7 @@ fn connection_field_value_mut(
         NewConnectionField::Passphrase => &mut form.passphrase,
         NewConnectionField::IdentityAgent => &mut form.identity_agent,
         NewConnectionField::Group => &mut form.group,
+        NewConnectionField::Notes => &mut form.notes,
         NewConnectionField::PostConnectCommand => &mut form.post_connect_command,
         NewConnectionField::ProxyCommand => &mut form.proxy_command,
         NewConnectionField::UpstreamProxyHost => &mut form.upstream_proxy_host,
@@ -3103,6 +3114,7 @@ fn ime_target_accepts_newline(target: WorkspaceImeTarget) -> bool {
         WorkspaceImeTarget::ReadOnlyText(_) => true,
         WorkspaceImeTarget::Settings(input) => input.accepts_newline(),
         WorkspaceImeTarget::AiChatInput | WorkspaceImeTarget::AiMessageEdit => true,
+        WorkspaceImeTarget::NewConnection(NewConnectionField::Notes) => true,
         WorkspaceImeTarget::SessionManager(SessionManagerInput::OxideExportDescription) => true,
         _ => false,
     }

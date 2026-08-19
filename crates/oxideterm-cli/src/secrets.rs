@@ -491,6 +491,7 @@ fn write_connection_secret(
             id: Some(connection.id),
             name: connection.name,
             group: connection.group,
+            notes: connection.notes,
             host: connection.host,
             port: connection.port,
             username: connection.username,

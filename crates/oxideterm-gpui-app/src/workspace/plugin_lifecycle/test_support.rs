@@ -340,6 +340,7 @@ pub(super) fn test_connection_store_with_agent_connection(
             id: Some("conn-1".to_string()),
             name: "Home".to_string(),
             group: None,
+            notes: None,
             host: "192.168.1.2".to_string(),
             port: 22,
             username: "me".to_string(),

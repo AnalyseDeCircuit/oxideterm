@@ -7,14 +7,16 @@ use gpui::{
 use super::{
     ConnectionFormState,
     form_state::{
-        NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
-        NewConnectionSelect, NewConnectionSubmitAction, NewConnectionTransport,
-        NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy, RDP_DEFAULT_PORT_TEXT,
-        RemoteDesktopSessionFeature, RemoteDesktopVncPreference, SSH_DEFAULT_PORT_TEXT,
-        SavedConnectionPromptAction, SshAuthFamily, SshAuthTab, SshKeyAuthSource,
-        TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference,
-        apply_transport_default_port, apply_transport_default_username, auth_family_from_tab,
-        auth_tab_from_key_source, backspace_current_connection_field, clear_connection_selection,
+        CONNECTION_NOTES_LINE_HEIGHT, CONNECTION_NOTES_MIN_HEIGHT,
+        CONNECTION_NOTES_VERTICAL_PADDING, NewConnectionField, NewConnectionForm,
+        NewConnectionFormMode, NewConnectionProxyHop, NewConnectionSelect,
+        NewConnectionSubmitAction, NewConnectionTransport, NewConnectionUpstreamProxyAuth,
+        NewConnectionUpstreamProxyPolicy, RDP_DEFAULT_PORT_TEXT, RemoteDesktopSessionFeature,
+        RemoteDesktopVncPreference, SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction,
+        SshAuthFamily, SshAuthTab, SshKeyAuthSource, TELNET_DEFAULT_PORT_TEXT,
+        VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference, apply_transport_default_port,
+        apply_transport_default_username, auth_family_from_tab, auth_tab_from_key_source,
+        backspace_current_connection_field, clear_connection_selection,
         clear_current_connection_field, connection_field_is_selected,
         connection_icon_field_visible, connection_secret_field_visible, current_connection_field,
         default_auth_tab_for_family, insert_text_into_current_connection_field,
@@ -56,12 +58,17 @@ use oxideterm_gpui_ui::{
         SelectAnchorId, select_anchor_probe, select_option, select_option_action,
         select_overlay_popup_with_max_height, select_trigger_with_focus_visible,
     },
-    text_input, text_input_anchor_probe,
+    text_input,
+    text_input::{
+        text_caret, text_input_value_segments, text_input_value_segments_with_marked_range,
+    },
+    text_input_anchor_probe,
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopVncCompression, RemoteDesktopVncImageQuality, RemoteDesktopVncSecurityPolicy,
     RemoteDesktopVncSessionMode,
 };
+use oxideterm_settings_model::{settings_multiline_line_ranges, settings_multiline_line_selection};
 // Keep the modal, proxy-chain, and field-control implementations in explicit
 // submodules so their dependencies and visibility remain locally auditable.
 mod field_controls;
@@ -205,6 +212,7 @@ impl WorkspaceApp {
                     | NewConnectionField::Host
                     | NewConnectionField::Username
                     | NewConnectionField::Group
+                    | NewConnectionField::Notes
                     | NewConnectionField::ProxyCommand
                     | NewConnectionField::Color
                     | NewConnectionField::IdentityAgent
@@ -345,12 +353,7 @@ impl WorkspaceApp {
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
             return;
         };
-        let single_line = text
-            .replace("\r\n", "\n")
-            .replace('\r', "\n")
-            .lines()
-            .collect::<Vec<_>>()
-            .join(" ");
+        let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
         let pasted = self.update_connection_form_state(cx, |state| {
             let Some(form) = state.form.as_mut() else {
                 return false;
@@ -361,7 +364,13 @@ impl WorkspaceApp {
             {
                 return false;
             }
-            insert_text_into_current_connection_field(form, &single_line);
+            if form.focused_field == NewConnectionField::Notes {
+                insert_text_into_current_connection_field(form, &normalized);
+            } else {
+                // All other connection form controls remain single-line inputs.
+                let single_line = normalized.lines().collect::<Vec<_>>().join(" ");
+                insert_text_into_current_connection_field(form, &single_line);
+            }
             form.error = None;
             true
         });

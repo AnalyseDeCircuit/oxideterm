@@ -39,6 +39,7 @@ mod tests {
             version: CONFIG_VERSION,
             name: name.to_string(),
             group: Some("Ops".to_string()),
+            notes: Some("Primary production host\nOwned by Platform".to_string()),
             host: "example.com".to_string(),
             port: 2222,
             username: "deploy".to_string(),
@@ -169,6 +170,10 @@ mod tests {
 
         let imported = target.connections().first().unwrap();
         assert_eq!(imported.name, "Prod");
+        assert_eq!(
+            imported.notes.as_deref(),
+            Some("Primary production host\nOwned by Platform")
+        );
         assert_eq!(imported.host, "example.com");
         assert_eq!(imported.port, 2222);
         assert_eq!(imported.options.keep_alive_interval, 30);
@@ -973,6 +978,7 @@ mod tests {
             source_connection_id: None,
             name: "Prod".to_string(),
             group: None,
+            notes: None,
             host: "example.org".to_string(),
             port: 22,
             username: "me".to_string(),
@@ -1451,6 +1457,7 @@ mod tests {
             source_connection_id: None,
             name: name.to_string(),
             group: None,
+            notes: None,
             host: host.to_string(),
             port: 22,
             username: "me".to_string(),

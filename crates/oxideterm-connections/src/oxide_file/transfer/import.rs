@@ -664,6 +664,7 @@ fn encrypted_connection_to_saved(
             version: CONFIG_VERSION,
             name: name_override.unwrap_or(conn.name),
             group: conn.group,
+            notes: conn.notes,
             host: conn.host,
             port: conn.port,
             username: conn.username,
@@ -1035,6 +1036,7 @@ fn merge_saved_connection(
     imported: SavedConnection,
 ) -> SavedConnection {
     existing.group = imported.group.or(existing.group);
+    existing.notes = imported.notes.or(existing.notes);
     existing.host = imported.host;
     existing.port = imported.port;
     existing.username = imported.username;

@@ -42,6 +42,7 @@ fn saved_connection(auth: SavedAuth) -> SavedConnection {
         version: oxideterm_connections::CONFIG_VERSION,
         name: "Home".to_string(),
         group: None,
+        notes: None,
         host: "target.example.com".to_string(),
         port: 22,
         username: "me".to_string(),

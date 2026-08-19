@@ -366,6 +366,7 @@ pub(in crate::workspace) fn form_from_saved_connection(
     form.passphrase = passphrase;
     form.save_password = save_password;
     form.group = group_label_for_form(conn.group.as_deref());
+    form.notes = conn.notes.clone().unwrap_or_default();
     form.color = conn.color.clone().unwrap_or_default();
     form.icon_background_color = conn.icon_background_color.clone().unwrap_or_default();
     form.icon = conn.icon.clone().unwrap_or_default();
@@ -624,6 +625,7 @@ fn connection_draft_from_form_with_proxy_hop_prefix(
         username: form.username.clone(),
         auth: auth_draft_from_form(form, persist_password_draft),
         group: form.group.clone(),
+        notes: form.notes.clone(),
         color: form.color.clone(),
         icon_background_color: form.icon_background_color.clone(),
         icon: form.icon.clone(),

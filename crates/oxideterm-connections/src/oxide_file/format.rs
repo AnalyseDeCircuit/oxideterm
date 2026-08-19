@@ -223,6 +223,8 @@ pub struct EncryptedConnection {
     pub source_connection_id: Option<String>,
     pub name: String,
     pub group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
     pub host: String,
     pub port: u16,
     pub username: String,
@@ -257,6 +259,8 @@ impl fmt::Debug for EncryptedConnection {
             )
             .field("name", &self.name)
             .field("group", &self.group)
+            // Notes are free-form and may contain operationally sensitive context.
+            .field("has_notes", &self.notes.is_some())
             .field("host", &self.host)
             .field("port", &self.port)
             .field("username", &self.username)

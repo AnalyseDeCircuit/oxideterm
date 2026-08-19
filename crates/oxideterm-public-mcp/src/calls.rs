@@ -189,6 +189,8 @@ pub struct PublicSshProfile {
     pub name: String,
     #[serde(default)]
     pub group: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
     pub host: String,
     #[serde(default = "default_ssh_port")]
     pub port: u16,

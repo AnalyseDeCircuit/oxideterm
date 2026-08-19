@@ -1,5 +1,5 @@
 use super::*;
-use gpui::{Animation, AnimationExt, App};
+use gpui::{Animation, AnimationExt, App, CursorStyle};
 use oxideterm_settings_model::parse_rgb24_hex;
 
 const NEW_CONNECTION_TRANSPORT_ROW_HEIGHT: f32 = 36.0;
@@ -601,6 +601,111 @@ impl WorkspaceApp {
         };
 
         form_field(&self.tokens, label, control)
+    }
+
+    pub(super) fn render_connection_multiline_field(
+        &self,
+        label: String,
+        value: &str,
+        placeholder: String,
+        field: NewConnectionField,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let target = WorkspaceImeTarget::NewConnection(field);
+        let focused = self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .is_some_and(|form| form.field_focused && form.focused_field == field);
+        let marked_range = self.ime_marked_virtual_range_for_target(target, cx);
+        let selection = self.ime_selected_range_for_target(target, cx);
+        let showing_placeholder = value.is_empty() && marked_range.is_none();
+        let display = if showing_placeholder {
+            placeholder
+        } else {
+            self.ime_text_with_marked_text_for_target(target, cx)
+                .unwrap_or_else(|| value.to_string())
+        };
+        let theme = self.tokens.ui;
+        let mut textarea = div()
+            .w_full()
+            .min_h(px(CONNECTION_NOTES_MIN_HEIGHT))
+            .px(px(self.tokens.metrics.ui_control_padding_x))
+            .py(px(CONNECTION_NOTES_VERTICAL_PADDING))
+            .flex()
+            .flex_col()
+            .items_start()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(if focused {
+                rgb(theme.accent)
+            } else {
+                rgb(theme.border)
+            })
+            .bg(rgba((theme.bg << 8) | 0x80))
+            .cursor(CursorStyle::IBeam)
+            .overflow_hidden()
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .line_height(px(CONNECTION_NOTES_LINE_HEIGHT))
+            .text_color(if showing_placeholder {
+                rgb(theme.text_muted)
+            } else {
+                rgb(theme.text)
+            });
+        let lines = settings_multiline_line_ranges(&display);
+        for (index, (line_range, line_text)) in lines.iter().enumerate() {
+            let is_last_line = index + 1 == lines.len();
+            let local_marked_range = marked_range.as_ref().and_then(|marked| {
+                let start = marked.start.max(line_range.start);
+                let end = marked.end.min(line_range.end);
+                (start < end).then_some(start - line_range.start..end - line_range.start)
+            });
+            let (line_selection, line_caret) = if showing_placeholder || marked_range.is_some() {
+                (None, None)
+            } else {
+                settings_multiline_line_selection(selection.as_ref(), line_range)
+            };
+            let segments = if showing_placeholder {
+                div().child(line_text.as_str().to_string())
+            } else if let Some(marked_range) = local_marked_range {
+                text_input_value_segments_with_marked_range(&self.tokens, line_text, marked_range)
+            } else {
+                text_input_value_segments(
+                    &self.tokens,
+                    line_text,
+                    false,
+                    line_selection,
+                    line_caret,
+                    self.input_caret.visible(),
+                )
+            };
+            textarea = textarea.child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .h(px(CONNECTION_NOTES_LINE_HEIGHT))
+                    .min_h(px(CONNECTION_NOTES_LINE_HEIGHT))
+                    .flex()
+                    .items_center()
+                    .when(focused && showing_placeholder && index == 0, |line| {
+                        line.child(text_caret(&self.tokens, self.input_caret.visible()))
+                    })
+                    .child(segments)
+                    .when(
+                        focused
+                            && is_last_line
+                            && !showing_placeholder
+                            && selection.is_none()
+                            && marked_range.is_none(),
+                        |line| line.child(text_caret(&self.tokens, self.input_caret.visible())),
+                    ),
+            );
+        }
+        form_field(
+            &self.tokens,
+            label,
+            self.finish_connection_input(textarea, field, cx),
+        )
     }
 
     pub(super) fn render_connection_secret_field(

@@ -11,6 +11,11 @@ pub(in crate::workspace) use oxideterm_connections::{
     ConnectionTransport as NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
     TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT,
 };
+
+/// Shared geometry keeps textarea rendering and IME hit testing aligned.
+pub(in crate::workspace) const CONNECTION_NOTES_LINE_HEIGHT: f32 = 20.0;
+pub(in crate::workspace) const CONNECTION_NOTES_MIN_HEIGHT: f32 = 84.0;
+pub(in crate::workspace) const CONNECTION_NOTES_VERTICAL_PADDING: f32 = 8.0;
 use oxideterm_remote_desktop::{
     RemoteDesktopProviderCapabilities, RemoteDesktopSessionOptions, RemoteDesktopVncCompression,
     RemoteDesktopVncImageQuality, RemoteDesktopVncOptions, RemoteDesktopVncSecurityPolicy,
@@ -191,6 +196,7 @@ pub(in crate::workspace) enum NewConnectionField {
     Passphrase,
     IdentityAgent,
     Group,
+    Notes,
     PostConnectCommand,
     ProxyCommand,
     Color,
@@ -513,6 +519,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) passphrase_visible: bool,
     pub(in crate::workspace) save_password: bool,
     pub(in crate::workspace) group: String,
+    pub(in crate::workspace) notes: String,
     pub(in crate::workspace) post_connect_command: String,
     pub(in crate::workspace) proxy_command_enabled: bool,
     pub(in crate::workspace) proxy_command: String,
@@ -622,6 +629,8 @@ impl fmt::Debug for NewConnectionForm {
             .field("passphrase_visible", &self.passphrase_visible)
             .field("save_password", &self.save_password)
             .field("group", &self.group)
+            // Notes are user-authored free text and may contain sensitive context.
+            .field("notes_present", &!self.notes.is_empty())
             .field("post_connect_command", &self.post_connect_command)
             .field("proxy_command_enabled", &self.proxy_command_enabled)
             .field("proxy_command", &"[redacted secret]")
@@ -759,6 +768,7 @@ impl Default for NewConnectionForm {
             passphrase_visible: false,
             save_password: false,
             group: String::new(),
+            notes: String::new(),
             post_connect_command: String::new(),
             proxy_command_enabled: false,
             proxy_command: String::new(),
@@ -1166,6 +1176,7 @@ pub(in crate::workspace) fn next_connection_field(
         SshAuthTab::Password => vec![
             NewConnectionField::Name,
             NewConnectionField::Group,
+            NewConnectionField::Notes,
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::Username,
@@ -1175,6 +1186,7 @@ pub(in crate::workspace) fn next_connection_field(
         SshAuthTab::DefaultKey => vec![
             NewConnectionField::Name,
             NewConnectionField::Group,
+            NewConnectionField::Notes,
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::Username,
@@ -1184,6 +1196,7 @@ pub(in crate::workspace) fn next_connection_field(
         SshAuthTab::SshKey => vec![
             NewConnectionField::Name,
             NewConnectionField::Group,
+            NewConnectionField::Notes,
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::Username,
@@ -1194,6 +1207,7 @@ pub(in crate::workspace) fn next_connection_field(
         SshAuthTab::ManagedKey => vec![
             NewConnectionField::Name,
             NewConnectionField::Group,
+            NewConnectionField::Notes,
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::Username,
@@ -1204,6 +1218,7 @@ pub(in crate::workspace) fn next_connection_field(
         SshAuthTab::Certificate => vec![
             NewConnectionField::Name,
             NewConnectionField::Group,
+            NewConnectionField::Notes,
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::Username,
@@ -1215,6 +1230,7 @@ pub(in crate::workspace) fn next_connection_field(
         SshAuthTab::Agent => vec![
             NewConnectionField::Name,
             NewConnectionField::Group,
+            NewConnectionField::Notes,
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::Username,
@@ -1224,6 +1240,7 @@ pub(in crate::workspace) fn next_connection_field(
         SshAuthTab::TwoFactor => vec![
             NewConnectionField::Name,
             NewConnectionField::Group,
+            NewConnectionField::Notes,
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::Username,
@@ -1231,7 +1248,12 @@ pub(in crate::workspace) fn next_connection_field(
         ],
     };
     if transport == NewConnectionTransport::Mosh {
-        fields.retain(|field| *field != NewConnectionField::PostConnectCommand);
+        fields.retain(|field| {
+            !matches!(
+                field,
+                NewConnectionField::Notes | NewConnectionField::PostConnectCommand
+            )
+        });
         fields.extend([
             NewConnectionField::MoshServerExecutable,
             NewConnectionField::MoshUdpHost,
@@ -1345,6 +1367,7 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::Passphrase => &mut form.passphrase,
         NewConnectionField::IdentityAgent => &mut form.identity_agent,
         NewConnectionField::Group => &mut form.group,
+        NewConnectionField::Notes => &mut form.notes,
         NewConnectionField::PostConnectCommand => &mut form.post_connect_command,
         NewConnectionField::ProxyCommand => &mut form.proxy_command,
         NewConnectionField::UpstreamProxyHost => &mut form.upstream_proxy_host,
@@ -1441,6 +1464,7 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::Passphrase => &form.passphrase,
         NewConnectionField::IdentityAgent => &form.identity_agent,
         NewConnectionField::Group => &form.group,
+        NewConnectionField::Notes => &form.notes,
         NewConnectionField::PostConnectCommand => &form.post_connect_command,
         NewConnectionField::ProxyCommand => &form.proxy_command,
         NewConnectionField::UpstreamProxyHost => &form.upstream_proxy_host,
@@ -2493,6 +2517,7 @@ mod tests {
             id: "conn-1".to_string(),
             name: "Bastion".to_string(),
             group: Some("Prod".to_string()),
+            notes: None,
             host: "bastion.example.com".to_string(),
             port: 2222,
             username: "jump".to_string(),

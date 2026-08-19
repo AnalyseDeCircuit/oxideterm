@@ -351,6 +351,7 @@ fn export_connection(
         source_connection_id: Some(conn.id.clone()),
         name: conn.name.clone(),
         group: conn.group.clone(),
+        notes: conn.notes.clone(),
         host: conn.host.clone(),
         port: conn.port,
         username: conn.username.clone(),

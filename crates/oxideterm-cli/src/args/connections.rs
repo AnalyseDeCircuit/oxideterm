@@ -118,6 +118,11 @@ pub struct ConnectionDirectArgs {
     pub port: Option<u16>,
     #[arg(long, help = "Connection group")]
     pub group: Option<String>,
+    #[arg(
+        long,
+        help = "Free-form connection notes; do not store passwords or keys"
+    )]
+    pub notes: Option<String>,
     #[arg(long, help = "Connection color")]
     pub color: Option<String>,
     #[arg(long = "tag", help = "Connection tag; repeat to set multiple tags")]

@@ -310,6 +310,7 @@ mod tests {
                 id: None,
                 name: "production".to_string(),
                 group: None,
+                notes: None,
                 host: "manual.example.com".to_string(),
                 port: 22,
                 username: "admin".to_string(),

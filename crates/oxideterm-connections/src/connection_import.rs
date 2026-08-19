@@ -1825,6 +1825,7 @@ fn imported_draft_to_saved_connection(
         version: CONFIG_VERSION,
         name,
         group,
+        notes: None,
         host: draft.host.clone(),
         port: draft.port,
         username: draft.username.clone(),

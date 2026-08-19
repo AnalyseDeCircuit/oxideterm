@@ -198,6 +198,10 @@ impl ConnectionStore {
         request: SaveConnectionRequest,
     ) -> Result<(ConnectionInfo, SavedConnectionRuntimeSecrets)> {
         let group = normalize_optional_group_name(request.group.as_deref())?;
+        let notes = request.notes.and_then(|notes| {
+            let notes = notes.trim().to_string();
+            (!notes.is_empty()).then_some(notes)
+        });
         let now = Utc::now();
         let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
         let old_keychain_ids = self
@@ -265,6 +269,7 @@ impl ConnectionStore {
                 .unwrap_or(CONFIG_VERSION),
             name: non_empty(request.name.trim(), "Connection name")?.to_string(),
             group: group.clone(),
+            notes,
             host: non_empty(request.host.trim(), "Host")?.to_string(),
             port: request.port.max(1),
             username: non_empty(request.username.trim(), "Username")?.to_string(),

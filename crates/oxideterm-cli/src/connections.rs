@@ -787,16 +787,18 @@ fn format_connection_row(connection: &ConnectionInfo) -> String {
 
 fn format_connection_details(connection: &ConnectionInfo) -> String {
     let group = connection.group.as_deref().unwrap_or("-");
+    let notes = connection.notes.as_deref().unwrap_or("-");
     let tags = if connection.tags.is_empty() {
         "-".to_string()
     } else {
         connection.tags.join(",")
     };
     format!(
-        "id: {}\nname: {}\ngroup: {}\nhost: {}\nport: {}\nusername: {}\nauth: {:?}\ntags: {}",
+        "id: {}\nname: {}\ngroup: {}\nnotes: {}\nhost: {}\nport: {}\nusername: {}\nauth: {:?}\ntags: {}",
         connection.id,
         connection.name,
         group,
+        notes,
         connection.host,
         connection.port,
         connection.username,

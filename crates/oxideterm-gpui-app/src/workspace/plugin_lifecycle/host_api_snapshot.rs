@@ -511,6 +511,7 @@ mod tests {
             id: "saved-1".to_string(),
             name: "Production".to_string(),
             group: Some("Servers".to_string()),
+            notes: None,
             host: "example.test".to_string(),
             port: 22,
             username: "operator".to_string(),

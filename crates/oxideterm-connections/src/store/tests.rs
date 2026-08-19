@@ -19,6 +19,7 @@ mod tests {
             id: Some(id.to_string()),
             name: "Home".to_string(),
             group: None,
+            notes: None,
             host: "192.168.1.2".to_string(),
             port: 22,
             username: "me".to_string(),
@@ -40,6 +41,38 @@ mod tests {
             post_connect_command: None,
             terminal: ConnectionTerminalOptions::default(),
         }
+    }
+
+    #[test]
+    fn connection_notes_are_optional_multiline_metadata_and_not_searchable() {
+        let mut store = load_empty_store("connection-notes");
+        let mut with_notes = request("conn-notes", SavedAuth::Agent);
+        with_notes.notes = Some("  Rack B\nOwned by Network Operations  ".to_string());
+        let info = store.upsert(with_notes).unwrap();
+
+        assert_eq!(
+            info.notes.as_deref(),
+            Some("Rack B\nOwned by Network Operations")
+        );
+        assert!(!info.matches_search_query("Network Operations"));
+
+        let saved = store.get("conn-notes").unwrap();
+        let mut legacy_value = serde_json::to_value(saved).unwrap();
+        legacy_value.as_object_mut().unwrap().remove("notes");
+        let legacy: SavedConnection = serde_json::from_value(legacy_value).unwrap();
+        assert!(legacy.notes.is_none());
+        assert!(
+            serde_json::to_value(&legacy)
+                .unwrap()
+                .get("notes")
+                .is_none()
+        );
+        assert!(
+            serde_json::to_value(ConnectionInfo::from(&legacy))
+                .unwrap()
+                .get("notes")
+                .is_none()
+        );
     }
 
     fn mosh_request(id: &str, auth: SavedAuth) -> SaveMoshProfileRequest {
@@ -678,6 +711,7 @@ mod tests {
             version: CONFIG_VERSION,
             name: "Work Host".to_string(),
             group: Some("Work".to_string()),
+            notes: None,
             host: "work.example.com".to_string(),
             port: 22,
             username: "me".to_string(),
@@ -1573,6 +1607,7 @@ mod tests {
             version: CONFIG_VERSION,
             name: "Good".to_string(),
             group: None,
+            notes: None,
             host: "good.example.com".to_string(),
             port: 22,
             username: "me".to_string(),
@@ -2026,6 +2061,7 @@ mod tests {
         let mut source_request = request("conn-1", SavedAuth::Agent);
         source_request.name = "Production".to_string();
         source_request.group = Some("Operations".to_string());
+        source_request.notes = Some("Primary host\nOwner: Platform".to_string());
         source_request.color = Some("#123456".to_string());
         source_request.icon = Some("server".to_string());
         source_request.tags = vec!["prod".to_string(), "critical".to_string()];
@@ -2077,6 +2113,10 @@ mod tests {
         let imported = target.get("conn-1").unwrap();
         assert_eq!(imported.name, "Production");
         assert_eq!(imported.group.as_deref(), Some("Operations"));
+        assert_eq!(
+            imported.notes.as_deref(),
+            Some("Primary host\nOwner: Platform")
+        );
         assert_eq!(imported.color.as_deref(), Some("#123456"));
         assert_eq!(imported.icon.as_deref(), Some("server"));
         assert_eq!(imported.tags, vec!["prod", "critical"]);
@@ -2641,6 +2681,7 @@ mod tests {
             version: CONFIG_VERSION,
             name: "Managed".to_string(),
             group: None,
+            notes: None,
             host: "example.com".to_string(),
             port: 22,
             username: "deploy".to_string(),

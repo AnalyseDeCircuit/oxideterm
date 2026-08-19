@@ -22,6 +22,7 @@ pub(super) struct ConnectionSpec {
     port: Option<u16>,
     username: Option<String>,
     group: Option<Option<String>>,
+    notes: Option<Option<String>>,
     color: Option<Option<String>>,
     #[serde(default)]
     tags: Option<Vec<String>>,
@@ -100,6 +101,7 @@ pub(super) fn connection_spec_from_direct_args(
         port: args.port,
         username: args.username,
         group: args.group.map(Some),
+        notes: args.notes.map(Some),
         color: args.color.map(Some),
         tags: (!args.tags.is_empty()).then_some(args.tags),
         auth,
@@ -158,6 +160,9 @@ pub(super) fn connection_request_from_spec(
         group: spec
             .group
             .unwrap_or_else(|| existing.and_then(|connection| connection.group.clone())),
+        notes: spec
+            .notes
+            .unwrap_or_else(|| existing.and_then(|connection| connection.notes.clone())),
         host,
         port: spec.port.unwrap_or_else(|| {
             existing
@@ -439,6 +444,7 @@ impl ConnectionDirectArgs {
             || self.username.is_some()
             || self.port.is_some()
             || self.group.is_some()
+            || self.notes.is_some()
             || self.color.is_some()
             || !self.tags.is_empty()
             || self.auth.is_some()

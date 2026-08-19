@@ -345,6 +345,7 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             group: Some("prod".to_string()),
+            notes: None,
             host: "example.com".to_string(),
             port: 22,
             username: "root".to_string(),

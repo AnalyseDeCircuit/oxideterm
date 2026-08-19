@@ -598,6 +598,7 @@ fn build_saved_connection_from_sync_payload(
         version: CONFIG_VERSION,
         name: non_empty(payload.name.trim(), "Connection name")?.to_string(),
         group: normalize_optional_group_name(payload.group.as_deref())?,
+        notes: payload.notes.clone(),
         host: non_empty(payload.host.trim(), "Host")?.to_string(),
         port: payload.port.max(1),
         username: non_empty(payload.username.trim(), "Username")?.to_string(),
