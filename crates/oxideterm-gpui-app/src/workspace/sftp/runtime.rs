@@ -1393,7 +1393,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace::sftp) fn visible_sftp_remote_id(
+    pub(in crate::workspace) fn visible_sftp_remote_id(
         &self,
         cx: &App,
     ) -> Option<SftpRemoteId> {

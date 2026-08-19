@@ -1059,11 +1059,11 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::Graphics(input));
         }
 
-        if self
-            .active_tab(cx)
-            .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Sftp)
+        if self.visible_sftp_remote_id(cx).is_some()
             && let Some(input) = self.sftp_view.read(cx).focused_input()
         {
+            // The input owner may be a full SFTP tab or the embedded terminal
+            // sidebar; visibility, not the active tab kind, defines ownership.
             return Some(WorkspaceImeTarget::Sftp(input));
         }
 
