@@ -86,13 +86,27 @@ Do not derive release notes from commit subjects alone. Read the meaningful impl
 
 Insert `## <version>` as the newest entry in the selected changelog. The heading must exactly match the version because `.github/scripts/compose_release_notes.py` uses it to locate the entry. The heading is an extraction boundary, not necessarily part of the published release body.
 
-Write in English to match the existing release files. Use concise user-facing past tense. Keep the opening summary paragraph on one physical line so the GitHub Release editor does not show an artificial break; the composer also normalizes accidental soft wrapping as a safeguard. Combine related commits into one outcome and avoid raw commit-title dumps, implementation trivia, unsupported performance claims, and claims that were not verified. Use one restrained, semantically relevant emoji on each main stable-release heading to improve scanability; do not decorate every bullet or mix multiple emoji styles within one section.
+Write every version entry as two complete language blocks in this order:
+
+```markdown
+## <version>
+
+### English
+
+<English summary and sections>
+
+### 中文
+
+<Chinese summary and sections>
+```
+
+Keep both blocks structurally aligned: they must describe the same outcomes, limitations, validation status, and upgrade requirements in the same order. Translate for natural release-note language rather than word for word, and keep product names, commands, file names, and protocol names unchanged when translation would reduce precision. Do not merge English and Chinese into the same bullet. Use concise user-facing past tense in English and concise completed-action wording in Chinese. Keep each language's opening summary paragraph on one physical line so the GitHub Release editor does not show an artificial break. Combine related commits into one outcome and avoid raw commit-title dumps, implementation trivia, unsupported performance claims, and claims that were not verified. Use one restrained, semantically relevant emoji on each main stable-release section heading in both blocks; do not decorate every bullet or mix multiple emoji styles within one section.
 
 Apply channel-specific emphasis:
 
-- **Stable:** Summarize the complete delta since the previous stable tag. Start with one short release summary, then use only useful sections such as `### ✨ Highlights`, `### 🛠️ Fixes`, `### 🔒 Security`, or `### 🧰 Release Maintenance`. Emphasize user-visible behavior and compatibility. The composed GitHub Release body must begin with this summary, omit both a product-major heading such as `# OxideTerm 2.0` and a repeated version heading such as `## 2.0.7`, then place `## 📥 Download for your system`, installation tips, and links after the changelog content.
-- **Beta:** Summarize the delta since the previous beta tag. State what is approaching stable, what changed, and which workflows need validation. Mention known limitations only when supported by the diff or issue context.
-- **GPUI preview:** Summarize the delta since the previous GPUI preview tag. Focus on newly testable native UI/runtime work, parity, rough edges, and concrete testing targets. Keep the compact summary-and-bullets style used by existing preview entries.
+- **Stable:** Summarize the complete delta since the previous stable tag. In each language block, start with one short release summary, then use only useful sections such as `#### ✨ Highlights` / `#### ✨ 重点更新`, `#### 🛠️ Fixes` / `#### 🛠️ 修复`, `#### 🔒 Security` / `#### 🔒 安全`, or `#### 🧰 Release Maintenance` / `#### 🧰 发布维护`. Emphasize user-visible behavior and compatibility. The composed GitHub Release body must begin with `### English`, place the matching `### 中文` block immediately after the complete English block, omit both a product-major heading such as `# OxideTerm 2.0` and a repeated version heading such as `## 2.0.7`, then place `## 📥 Download for your system`, installation tips, and links after both language blocks.
+- **Beta:** Summarize the delta since the previous beta tag in complete English and Chinese blocks. State what is approaching stable, what changed, and which workflows need validation. Mention known limitations only when supported by the diff or issue context, and include them in both languages.
+- **GPUI preview:** Summarize the delta since the previous GPUI preview tag in complete English and Chinese blocks. Focus on newly testable native UI/runtime work, parity, rough edges, and concrete testing targets. Keep the compact summary-and-bullets style used by existing preview entries.
 
 If there is no earlier tag for that channel, state which preceding release tag was used as the bootstrap baseline.
 
@@ -128,7 +142,7 @@ python3 .github/scripts/compose_release_notes.py \
   --output /tmp/oxideterm-release-notes-<version>.md
 ```
 
-Read the generated file and verify that the intended section appears once, the channel is correct, and stable download URLs use the target tag. For stable notes, also verify that the summary is the first visible content, the GitHub Release title is not repeated in the body, and the order is changelog, downloads, installation tips, then links.
+Read the generated file and verify that the intended section appears once, the channel is correct, both `### English` and `### 中文` appear once in that order, their claims and bullet coverage match, and stable download URLs use the target tag. For stable notes, also verify that `### English` is the first visible content, the Chinese block appears before downloads, the GitHub Release title is not repeated in the body, and the order is bilingual changelog, downloads, installation tips, then links.
 
 ### Fork release attribution check
 
