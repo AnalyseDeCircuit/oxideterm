@@ -100,6 +100,7 @@ fn apply_oxide_import_with_options_inner(
         serial_profiles_json,
         telnet_profiles_json,
         mosh_profiles_json,
+        standalone_sftp_profiles_json,
         remote_desktop_profiles_json,
         plugin_settings,
         portable_secrets,
@@ -178,6 +179,31 @@ fn apply_oxide_import_with_options_inner(
             })?;
         }
     }
+    let standalone_sftp_profiles_snapshot = standalone_sftp_profiles_json
+        .as_deref()
+        .map(|snapshot_json| {
+            serde_json::from_str::<StandaloneSftpProfilesSyncSnapshot>(snapshot_json).map_err(
+                |error| {
+                    OxideFileError::InvalidFormat(format!(
+                        "Invalid standalone SFTP profiles snapshot in .oxide payload: {error}"
+                    ))
+                },
+            )
+        })
+        .transpose()?;
+    if options.import_standalone_sftp_profiles {
+        for profile in standalone_sftp_profiles_snapshot
+            .as_ref()
+            .into_iter()
+            .flat_map(|snapshot| &snapshot.records)
+        {
+            profile.validate().map_err(|error| {
+                OxideFileError::InvalidFormat(format!(
+                    "Failed to validate standalone SFTP profiles from .oxide payload: {error}"
+                ))
+            })?;
+        }
+    }
     let mut remote_desktop_profiles_snapshot = remote_desktop_profiles_json
         .as_deref()
         .map(|snapshot_json| {
@@ -226,6 +252,7 @@ fn apply_oxide_import_with_options_inner(
         serial_profiles_json,
         telnet_profiles_json,
         mosh_profiles_json,
+        standalone_sftp_profiles_json,
         remote_desktop_profiles_json,
         plugin_settings,
         portable_secrets: if options.import_portable_secrets {
@@ -450,6 +477,22 @@ fn apply_oxide_import_with_options_inner(
                     profile_count.saturating_sub(result.imported_mosh_profiles);
             } else {
                 result.skipped_mosh_profiles = profile_count;
+            }
+        }
+        if let Some(standalone_sftp_profiles_snapshot) = standalone_sftp_profiles_snapshot {
+            let profile_count = standalone_sftp_profiles_snapshot.records.len();
+            if options.import_standalone_sftp_profiles {
+                result.imported_standalone_sftp_profiles = store
+                    .apply_standalone_sftp_profiles_snapshot(standalone_sftp_profiles_snapshot)
+                    .map_err(|error| {
+                        OxideFileError::InvalidFormat(format!(
+                            "Failed to import standalone SFTP profiles from .oxide payload: {error}"
+                        ))
+                    })?;
+                result.skipped_standalone_sftp_profiles = profile_count
+                    .saturating_sub(result.imported_standalone_sftp_profiles);
+            } else {
+                result.skipped_standalone_sftp_profiles = profile_count;
             }
         }
         if let Some(remote_desktop_profiles_snapshot) = remote_desktop_profiles_snapshot {

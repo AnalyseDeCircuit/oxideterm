@@ -49,9 +49,14 @@ impl CloudSyncOperationService {
             let mut snapshot = connection_store.export_saved_connections_snapshot()?;
             filter_saved_connection_snapshot(&mut snapshot, item_filter.connection_ids.as_ref());
             let bytes = serde_json::to_vec(&snapshot)?;
-            let path = connections_object_path(&snapshot.revision);
+            let connections_revision = local_snapshot
+                .metadata
+                .saved_connections_revision
+                .clone()
+                .unwrap_or_else(|| snapshot.revision.clone());
+            let path = connections_object_path(&connections_revision);
             manifest.sections.connections = Some(crate::StructuredObjectEntry {
-                revision: snapshot.revision.clone(),
+                revision: connections_revision,
                 path: path.clone(),
                 record_count: Some(snapshot.records.len()),
                 content_type: "application/json".to_string(),
@@ -183,6 +188,35 @@ impl CloudSyncOperationService {
             let path = mosh_profiles_object_path(&snapshot.revision);
             manifest.sections.mosh_profiles = Some(crate::StructuredObjectEntry {
                 revision: snapshot.revision.clone(),
+                path: path.clone(),
+                record_count: Some(snapshot.records.len()),
+                content_type: "application/json".to_string(),
+            });
+            objects.push(StructuredUploadObject {
+                path,
+                bytes,
+                content_type: "application/json".to_string(),
+            });
+            completed_exports += 1;
+            report_progress(
+                progress,
+                CloudSyncProgressStage::Exporting,
+                2 + completed_exports,
+                total,
+            );
+        }
+
+        if local_snapshot.scope.sync_connections {
+            let snapshot = connection_store.export_standalone_sftp_profiles_snapshot()?;
+            let bytes = serde_json::to_vec(&snapshot)?;
+            let connections_revision = local_snapshot
+                .metadata
+                .saved_connections_revision
+                .clone()
+                .unwrap_or_else(|| snapshot.revision.clone());
+            let path = standalone_sftp_profiles_object_path(&connections_revision);
+            manifest.sections.standalone_sftp_profiles = Some(crate::StructuredObjectEntry {
+                revision: connections_revision,
                 path: path.clone(),
                 record_count: Some(snapshot.records.len()),
                 content_type: "application/json".to_string(),

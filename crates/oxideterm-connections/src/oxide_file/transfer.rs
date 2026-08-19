@@ -18,7 +18,8 @@ use crate::{
     AuthType, CONFIG_VERSION, ConnectionOptions, ConnectionStore, MoshProfilesSyncSnapshot,
     RemoteDesktopProfilesSyncSnapshot, SavedAuth, SavedConnection, SavedPrivilegeCredential,
     SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
-    SecretString, SerialProfilesSyncSnapshot, TelnetProfilesSyncSnapshot,
+    SecretString, SerialProfilesSyncSnapshot, StandaloneSftpProfilesSyncSnapshot,
+    TelnetProfilesSyncSnapshot,
 };
 
 use super::{
@@ -62,6 +63,7 @@ pub struct OxideExportOptions {
     pub serial_profiles_json: Option<String>,
     pub telnet_profiles_json: Option<String>,
     pub mosh_profiles_json: Option<String>,
+    pub standalone_sftp_profiles_json: Option<String>,
     pub remote_desktop_profiles_json: Option<String>,
     pub plugin_settings: Vec<EncryptedPluginSetting>,
     pub portable_secrets: Vec<EncryptedPortableSecret>,
@@ -82,6 +84,7 @@ impl Default for OxideExportOptions {
             serial_profiles_json: None,
             telnet_profiles_json: None,
             mosh_profiles_json: None,
+            standalone_sftp_profiles_json: None,
             remote_desktop_profiles_json: None,
             plugin_settings: Vec::new(),
             portable_secrets: Vec::new(),
@@ -99,6 +102,7 @@ pub struct OxideImportOptions {
     pub import_serial_profiles: bool,
     pub import_telnet_profiles: bool,
     pub import_mosh_profiles: bool,
+    pub import_standalone_sftp_profiles: bool,
     pub import_remote_desktop_profiles: bool,
     pub import_portable_secrets: bool,
     /// Restore managed-key metadata instead of extracting managed keys as plain imported key files.
@@ -117,6 +121,7 @@ impl Default for OxideImportOptions {
             import_serial_profiles: true,
             import_telnet_profiles: true,
             import_mosh_profiles: true,
+            import_standalone_sftp_profiles: true,
             import_remote_desktop_profiles: true,
             import_portable_secrets: false,
             restore_managed_keys: true,
@@ -182,6 +187,7 @@ pub struct ImportPreview {
     pub serial_profiles_count: usize,
     pub telnet_profiles_count: usize,
     pub mosh_profiles_count: usize,
+    pub standalone_sftp_profiles_count: usize,
     pub remote_desktop_profiles_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app_settings_format: Option<String>,
@@ -273,6 +279,10 @@ pub struct ImportResultEnvelope {
     pub mosh_profiles_json: Option<String>,
     pub imported_mosh_profiles: usize,
     pub skipped_mosh_profiles: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub standalone_sftp_profiles_json: Option<String>,
+    pub imported_standalone_sftp_profiles: usize,
+    pub skipped_standalone_sftp_profiles: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_desktop_profiles_json: Option<String>,
     pub imported_remote_desktop_profiles: usize,

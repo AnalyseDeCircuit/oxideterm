@@ -4,8 +4,9 @@
 use oxideterm_connections::{
     ConnectionStore, ConnectionX11ForwardingMode, ConnectionX11ForwardingOptions, SSH_CONFIG_TAG,
     SSH_PROXY_COMMAND_TAG, SavedAuth, SavedConnection, SavedConnectionRuntimeSecrets,
-    SavedUpstreamProxyAuth, SavedUpstreamProxyPolicy, SecretString, resolve_proxy_command,
-    resolve_ssh_config_alias,
+    SavedStandaloneSftpEndpointRuntimeSecrets, SavedStandaloneSftpProfileRuntimeSecrets,
+    SavedUpstreamProxyAuth, SavedUpstreamProxyPolicy, SecretString, StandaloneSftpEndpoint,
+    StandaloneSftpProfile, resolve_proxy_command, resolve_ssh_config_alias,
 };
 use oxideterm_settings::PersistedSettings;
 use oxideterm_ssh::{
@@ -143,6 +144,137 @@ pub fn ssh_config_from_saved_connection_with_runtime_secrets(
         x11_forwarding: x11_forward_policy(conn.options.x11_forwarding),
         strict_host_key_checking: true,
         post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
+        ..SshConfig::default()
+    })
+}
+
+/// Materializes one independent SFTP endpoint without assigning NodeRouter ownership.
+pub fn ssh_config_from_standalone_sftp_profile_with_runtime_secrets(
+    store: &ConnectionStore,
+    settings: &PersistedSettings,
+    profile: &StandaloneSftpProfile,
+    mut runtime_secrets: SavedStandaloneSftpProfileRuntimeSecrets,
+    auth_override: Option<AuthMethod>,
+) -> Option<SshConfig> {
+    let primary = StandaloneSftpEndpoint {
+        host: profile.host.clone(),
+        port: profile.port,
+        username: profile.username.clone(),
+        auth: profile.auth.clone(),
+        connect_timeout_seconds: profile.connect_timeout_seconds,
+        proxy_chain: profile.proxy_chain.clone(),
+        upstream_proxy: profile.upstream_proxy.clone(),
+        proxy_command: profile.proxy_command.clone(),
+        identity_agent: profile.identity_agent.clone(),
+        legacy_ssh_compatibility: profile.legacy_ssh_compatibility,
+        initial_remote_path: profile.initial_remote_path.clone(),
+    };
+    let primary_secrets = SavedStandaloneSftpEndpointRuntimeSecrets {
+        auth: runtime_secrets.auth.take(),
+        proxy_chain: std::mem::take(&mut runtime_secrets.proxy_chain),
+        upstream_proxy: runtime_secrets.upstream_proxy.take(),
+        proxy_command: runtime_secrets.proxy_command.take(),
+    };
+    ssh_config_from_standalone_sftp_endpoint_with_runtime_secrets(
+        store,
+        settings,
+        &profile.name,
+        &primary,
+        primary_secrets,
+        auth_override,
+    )
+}
+
+/// Materializes one endpoint of a standalone SFTP profile without NodeRouter ownership.
+pub fn ssh_config_from_standalone_sftp_endpoint_with_runtime_secrets(
+    store: &ConnectionStore,
+    settings: &PersistedSettings,
+    profile_name: &str,
+    endpoint: &StandaloneSftpEndpoint,
+    mut runtime_secrets: SavedStandaloneSftpEndpointRuntimeSecrets,
+    auth_override: Option<AuthMethod>,
+) -> Option<SshConfig> {
+    if auth_override.is_some() && runtime_secrets.auth.is_some() {
+        return None;
+    }
+    if runtime_secrets.proxy_chain.len() != endpoint.proxy_chain.len() {
+        return None;
+    }
+    let auth = match auth_override {
+        Some(auth) => auth,
+        None => auth_method_from_saved_auth_with_runtime_secret(
+            store,
+            &endpoint.auth,
+            runtime_secrets.auth.take(),
+        )?,
+    };
+    let proxy_command = endpoint.proxy_command.as_ref().map(|saved_command| {
+        if !settings.ssh_config.allow_proxy_command {
+            return ProxyCommandConfig::AuthorizationRequired;
+        }
+        let command = runtime_secrets
+            .proxy_command
+            .take()
+            .or_else(|| store.get_saved_proxy_command(saved_command).ok());
+        command.map_or(ProxyCommandConfig::Unavailable, |command| {
+            proxy_command_from_value(
+                true,
+                command,
+                profile_name,
+                &endpoint.host,
+                Some(&endpoint.username),
+                Some(endpoint.port),
+            )
+        })
+    });
+    let proxy_chain = if proxy_command.is_some() {
+        Vec::new()
+    } else {
+        endpoint
+            .proxy_chain
+            .iter()
+            .zip(runtime_secrets.proxy_chain)
+            .map(|(hop, secret)| {
+                Some(ProxyHopConfig {
+                    host: hop.host.clone(),
+                    port: hop.port,
+                    username: hop.username.clone(),
+                    auth: auth_method_from_saved_auth_with_runtime_secret(
+                        store, &hop.auth, secret,
+                    )?,
+                    agent_forwarding: hop.agent_forwarding,
+                    identity_agent: hop.identity_agent.clone(),
+                    agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
+                    legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+                    strict_host_key_checking: true,
+                    trust_host_key: None,
+                    expected_host_key_fingerprint: None,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?
+    };
+    let upstream_proxy = if proxy_command.is_some() {
+        None
+    } else {
+        upstream_proxy_from_saved_policy_with_runtime_secret(
+            store,
+            settings,
+            &endpoint.upstream_proxy,
+            runtime_secrets.upstream_proxy.take(),
+        )?
+    };
+    Some(SshConfig {
+        host: endpoint.host.clone(),
+        port: endpoint.port,
+        username: endpoint.username.clone(),
+        auth,
+        timeout_secs: endpoint.connect_timeout_seconds,
+        proxy_chain: (!proxy_chain.is_empty()).then_some(proxy_chain),
+        upstream_proxy,
+        proxy_command,
+        identity_agent: endpoint.identity_agent.clone(),
+        legacy_ssh_compatibility: endpoint.legacy_ssh_compatibility,
+        strict_host_key_checking: true,
         ..SshConfig::default()
     })
 }

@@ -153,6 +153,12 @@ impl ConnectionStore {
         build_mosh_profiles_sync_snapshot(&self.data)
     }
 
+    pub fn export_standalone_sftp_profiles_snapshot(
+        &self,
+    ) -> Result<StandaloneSftpProfilesSyncSnapshot> {
+        build_standalone_sftp_profiles_sync_snapshot(&self.data)
+    }
+
     pub fn export_remote_desktop_profiles_snapshot(
         &self,
     ) -> Result<RemoteDesktopProfilesSyncSnapshot> {
@@ -575,6 +581,41 @@ impl ConnectionStore {
         Ok(applied)
     }
 
+    pub fn apply_standalone_sftp_profiles_snapshot(
+        &mut self,
+        snapshot: StandaloneSftpProfilesSyncSnapshot,
+    ) -> Result<usize> {
+        // Treat every incoming snapshot as portable metadata, even when it came from a .oxide file.
+        let mut applied = 0usize;
+        for mut profile in snapshot.records {
+            if profile.transfer_mode == StandaloneSftpTransferMode::LocalRemote {
+                profile.secondary_endpoint = None;
+            }
+            make_standalone_sftp_profile_portable(&mut profile);
+            profile.validate()?;
+            if let Some(existing) = self
+                .data
+                .standalone_sftp_profiles
+                .iter_mut()
+                .find(|existing| existing.id == profile.id)
+            {
+                if profile.updated_at >= existing.updated_at {
+                    preserve_standalone_sftp_local_secrets(&mut profile, existing);
+                    *existing = profile;
+                    applied += 1;
+                }
+            } else {
+                self.data.standalone_sftp_profiles.push(profile);
+                applied += 1;
+            }
+        }
+        if applied > 0 {
+            self.normalize();
+            self.save()?;
+        }
+        Ok(applied)
+    }
+
 }
 
 fn build_saved_connection_from_sync_payload(
@@ -736,6 +777,58 @@ fn build_mosh_profiles_sync_snapshot(
     })
 }
 
+fn build_standalone_sftp_profiles_sync_snapshot(
+    data: &ConnectionStoreData,
+) -> Result<StandaloneSftpProfilesSyncSnapshot> {
+    let mut records = data.standalone_sftp_profiles.clone();
+    for profile in &mut records {
+        make_standalone_sftp_profile_portable(profile);
+    }
+    records.sort_by(|left, right| left.id.cmp(&right.id));
+    let revision = sha256_hex(
+        &records
+            .iter()
+            .map(|profile| (&profile.id, profile.updated_at.to_rfc3339()))
+            .collect::<Vec<_>>(),
+    )?;
+    Ok(StandaloneSftpProfilesSyncSnapshot {
+        revision,
+        exported_at: Utc::now().to_rfc3339(),
+        records,
+    })
+}
+
+pub(crate) fn make_standalone_sftp_profile_portable(profile: &mut StandaloneSftpProfile) {
+    profile.auth = portable_mosh_auth(&profile.auth);
+    for hop in &mut profile.proxy_chain {
+        hop.auth = portable_mosh_auth(&hop.auth);
+    }
+    profile.upstream_proxy = portable_upstream_proxy(&profile.upstream_proxy);
+    if profile.proxy_command.is_some() {
+        profile.proxy_command = Some(SavedProxyCommand {
+            keychain_id: None,
+            plaintext_command: None,
+        });
+    }
+    if let Some(endpoint) = &mut profile.secondary_endpoint {
+        make_standalone_sftp_endpoint_portable(endpoint);
+    }
+}
+
+fn make_standalone_sftp_endpoint_portable(endpoint: &mut StandaloneSftpEndpoint) {
+    endpoint.auth = portable_mosh_auth(&endpoint.auth);
+    for hop in &mut endpoint.proxy_chain {
+        hop.auth = portable_mosh_auth(&hop.auth);
+    }
+    endpoint.upstream_proxy = portable_upstream_proxy(&endpoint.upstream_proxy);
+    if endpoint.proxy_command.is_some() {
+        endpoint.proxy_command = Some(SavedProxyCommand {
+            keychain_id: None,
+            plaintext_command: None,
+        });
+    }
+}
+
 fn portable_mosh_auth(auth: &SavedAuth) -> SavedAuth {
     match auth {
         SavedAuth::Password { .. } => SavedAuth::Password {
@@ -793,6 +886,100 @@ fn mosh_auth_target_matches(left: &SavedAuth, right: &SavedAuth) -> bool {
             },
         ) => left_key == right_key && left_cert == right_cert,
         _ => false,
+    }
+}
+
+fn preserve_standalone_sftp_local_secrets(
+    incoming: &mut StandaloneSftpProfile,
+    existing: &StandaloneSftpProfile,
+) {
+    preserve_standalone_sftp_endpoint_local_secrets(
+        &mut incoming.auth,
+        &mut incoming.proxy_chain,
+        &mut incoming.upstream_proxy,
+        &mut incoming.proxy_command,
+        &existing.auth,
+        &existing.proxy_chain,
+        &existing.upstream_proxy,
+        existing.proxy_command.as_ref(),
+    );
+    if let (Some(incoming_endpoint), Some(existing_endpoint)) = (
+        &mut incoming.secondary_endpoint,
+        &existing.secondary_endpoint,
+    ) {
+        preserve_standalone_sftp_endpoint_local_secrets(
+            &mut incoming_endpoint.auth,
+            &mut incoming_endpoint.proxy_chain,
+            &mut incoming_endpoint.upstream_proxy,
+            &mut incoming_endpoint.proxy_command,
+            &existing_endpoint.auth,
+            &existing_endpoint.proxy_chain,
+            &existing_endpoint.upstream_proxy,
+            existing_endpoint.proxy_command.as_ref(),
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn preserve_standalone_sftp_endpoint_local_secrets(
+    incoming_auth: &mut SavedAuth,
+    incoming_proxy_chain: &mut [SavedProxyHop],
+    incoming_upstream_proxy: &mut SavedUpstreamProxyPolicy,
+    incoming_proxy_command: &mut Option<SavedProxyCommand>,
+    existing_auth: &SavedAuth,
+    existing_proxy_chain: &[SavedProxyHop],
+    existing_upstream_proxy: &SavedUpstreamProxyPolicy,
+    existing_proxy_command: Option<&SavedProxyCommand>,
+) {
+    if mosh_auth_target_matches(incoming_auth, existing_auth) {
+        *incoming_auth = existing_auth.clone();
+    }
+    for hop in incoming_proxy_chain {
+        if let Some(existing_hop) = existing_proxy_chain.iter().find(|candidate| {
+            candidate.host == hop.host
+                && candidate.port == hop.port
+                && candidate.username == hop.username
+                && mosh_auth_target_matches(&candidate.auth, &hop.auth)
+        }) {
+            hop.auth = existing_hop.auth.clone();
+        }
+    }
+    preserve_standalone_sftp_upstream_proxy_secret(
+        incoming_upstream_proxy,
+        existing_upstream_proxy,
+    );
+    if incoming_proxy_command.is_some() && existing_proxy_command.is_some() {
+        *incoming_proxy_command = existing_proxy_command.cloned();
+    }
+}
+
+fn preserve_standalone_sftp_upstream_proxy_secret(
+    incoming: &mut SavedUpstreamProxyPolicy,
+    existing: &SavedUpstreamProxyPolicy,
+) {
+    let (
+        SavedUpstreamProxyPolicy::Custom {
+            proxy: incoming_proxy,
+        },
+        SavedUpstreamProxyPolicy::Custom {
+            proxy: existing_proxy,
+        },
+    ) = (incoming, existing)
+    else {
+        return;
+    };
+    if incoming_proxy.protocol == existing_proxy.protocol
+        && incoming_proxy.host == existing_proxy.host
+        && incoming_proxy.port == existing_proxy.port
+        && matches!(
+            (&incoming_proxy.auth, &existing_proxy.auth),
+            (
+                SavedUpstreamProxyAuth::Password { username: left, .. },
+                SavedUpstreamProxyAuth::Password { username: right, .. }
+            ) if left == right
+        )
+    {
+        incoming_proxy.auth = existing_proxy.auth.clone();
     }
 }
 

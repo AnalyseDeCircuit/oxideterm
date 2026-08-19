@@ -143,6 +143,11 @@ fn export_connections_to_oxide_inner(
             }
         }
     }
+    let standalone_sftp_profiles_json = options
+        .standalone_sftp_profiles_json
+        .as_deref()
+        .map(portable_standalone_sftp_profiles_json)
+        .transpose()?;
     let forwards_by_connection = options
         .forwards
         .iter()
@@ -192,6 +197,9 @@ fn export_connections_to_oxide_inner(
         count_telnet_profiles_for_export(options.telnet_profiles_json.as_deref());
     let mosh_profiles_count =
         count_mosh_profiles_for_export(options.mosh_profiles_json.as_deref());
+    let standalone_sftp_profiles_count = count_standalone_sftp_profiles_for_export(
+        standalone_sftp_profiles_json.as_deref(),
+    );
     let remote_desktop_profiles_count =
         count_remote_desktop_profiles_for_export(options.remote_desktop_profiles_json.as_deref());
     let has_extra_payload = options.app_settings_json.is_some()
@@ -199,6 +207,7 @@ fn export_connections_to_oxide_inner(
         || options.serial_profiles_json.is_some()
         || options.telnet_profiles_json.is_some()
         || options.mosh_profiles_json.is_some()
+        || standalone_sftp_profiles_json.is_some()
         || options.remote_desktop_profiles_json.is_some()
         || !options.plugin_settings.is_empty()
         || !options.portable_secrets.is_empty();
@@ -210,6 +219,7 @@ fn export_connections_to_oxide_inner(
         serial_profiles_json: options.serial_profiles_json,
         telnet_profiles_json: options.telnet_profiles_json,
         mosh_profiles_json: options.mosh_profiles_json,
+        standalone_sftp_profiles_json,
         remote_desktop_profiles_json: options.remote_desktop_profiles_json,
         plugin_settings: options.plugin_settings,
         portable_secrets: options.portable_secrets,
@@ -235,6 +245,7 @@ fn export_connections_to_oxide_inner(
         serial_profiles_count,
         telnet_profiles_count,
         mosh_profiles_count,
+        standalone_sftp_profiles_count,
         remote_desktop_profiles_count,
         plugin_settings_count: (!payload.plugin_settings.is_empty())
             .then_some(payload.plugin_settings.len()),
@@ -648,6 +659,30 @@ fn count_telnet_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize
 fn count_mosh_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
     let value = serde_json::from_str::<Value>(snapshot_json?).ok()?;
     value.get("records")?.as_array().map(Vec::len)
+}
+
+fn count_standalone_sftp_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
+    let value = serde_json::from_str::<Value>(snapshot_json?).ok()?;
+    value.get("records")?.as_array().map(Vec::len)
+}
+
+fn portable_standalone_sftp_profiles_json(
+    snapshot_json: &str,
+) -> Result<String, OxideFileError> {
+    let mut snapshot = serde_json::from_str::<StandaloneSftpProfilesSyncSnapshot>(snapshot_json)
+        .map_err(|error| {
+            OxideFileError::InvalidFormat(format!(
+                "Invalid standalone SFTP profiles snapshot for .oxide export: {error}"
+            ))
+        })?;
+    for profile in &mut snapshot.records {
+        crate::store::make_standalone_sftp_profile_portable(profile);
+    }
+    serde_json::to_string(&snapshot).map_err(|error| {
+        OxideFileError::InvalidFormat(format!(
+            "Failed to serialize standalone SFTP profiles for .oxide export: {error}"
+        ))
+    })
 }
 
 fn count_remote_desktop_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {

@@ -207,6 +207,7 @@ pub enum SshTransportError {
         host: String,
         port: u16,
         fingerprint: String,
+        key_type: String,
     },
     #[error(
         "SSH host key changed for {host}:{port}: expected {expected_fingerprint}, got {actual_fingerprint}"
@@ -216,6 +217,7 @@ pub enum SshTransportError {
         port: u16,
         expected_fingerprint: String,
         actual_fingerprint: String,
+        key_type: String,
     },
     #[error("SSH host key check failed: {0}")]
     HostKeyCheckFailed(String),

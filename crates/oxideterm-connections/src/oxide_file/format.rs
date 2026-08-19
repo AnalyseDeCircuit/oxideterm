@@ -118,6 +118,8 @@ pub struct OxideMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mosh_profiles_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standalone_sftp_profiles_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_desktop_profiles_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_settings_count: Option<usize>,
@@ -141,6 +143,8 @@ pub struct EncryptedPayload {
     pub telnet_profiles_json: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mosh_profiles_json: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standalone_sftp_profiles_json: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_desktop_profiles_json: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -171,6 +175,10 @@ impl fmt::Debug for EncryptedPayload {
                 &self.telnet_profiles_json.is_some(),
             )
             .field("has_mosh_profiles_json", &self.mosh_profiles_json.is_some())
+            .field(
+                "has_standalone_sftp_profiles_json",
+                &self.standalone_sftp_profiles_json.is_some(),
+            )
             .field(
                 "has_remote_desktop_profiles_json",
                 &self.remote_desktop_profiles_json.is_some(),

@@ -8,8 +8,8 @@ use chrono::DateTime;
 use oxideterm_connections::{
     ApplySavedConnectionsSyncOutcome, ConnectionStore, ManagedSshKeyInfo, MoshProfilesSyncSnapshot,
     RemoteDesktopProfilesSyncSnapshot, SavedConnectionsConflictStrategy,
-    SavedConnectionsSyncSnapshot, SerialProfilesSyncSnapshot, TelnetProfilesSyncSnapshot,
-    oxide_file::EncryptedPluginSetting,
+    SavedConnectionsSyncSnapshot, SerialProfilesSyncSnapshot, StandaloneSftpProfilesSyncSnapshot,
+    TelnetProfilesSyncSnapshot, oxide_file::EncryptedPluginSetting,
 };
 use oxideterm_forwarding::{
     ApplySavedForwardsSyncSnapshotResult, ForwardType, ForwardingRegistry,
@@ -80,6 +80,8 @@ pub fn build_local_snapshot(
     let serial_profiles_snapshot = connection_store.export_serial_profiles_snapshot()?;
     let telnet_profiles_snapshot = connection_store.export_telnet_profiles_snapshot()?;
     let mosh_profiles_snapshot = connection_store.export_mosh_profiles_snapshot()?;
+    let standalone_sftp_profiles_snapshot =
+        connection_store.export_standalone_sftp_profiles_snapshot()?;
     let remote_desktop_profiles_snapshot =
         connection_store.export_remote_desktop_profiles_snapshot()?;
     let app_settings_section_revisions =
@@ -95,8 +97,13 @@ pub fn build_local_snapshot(
             &referenced_managed_key_revision_payload(connection_store, &connections_snapshot),
         )?)?;
 
+    let saved_connections_revision = tauri_simple_stable_hash(&(
+        connections_snapshot.revision.as_str(),
+        standalone_sftp_profiles_snapshot.revision.as_str(),
+    ))?;
     let metadata = LocalSyncMetadata {
-        saved_connections_revision: Some(connections_snapshot.revision.clone()),
+        // Standalone SFTP profiles share the Connections cloud-sync section.
+        saved_connections_revision: Some(saved_connections_revision),
         saved_forwards_revision: Some(forwards_snapshot.revision.clone()),
         quick_commands_revision: Some(tauri_simple_stable_hash(&quick_commands_json)?),
         serial_profiles_revision: Some(serial_profiles_snapshot.revision.clone()),
@@ -138,6 +145,7 @@ pub fn apply_structured_snapshots(
     serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
     telnet_profiles_snapshot: Option<TelnetProfilesSyncSnapshot>,
     mosh_profiles_snapshot: Option<MoshProfilesSyncSnapshot>,
+    standalone_sftp_profiles_snapshot: Option<StandaloneSftpProfilesSyncSnapshot>,
     mut remote_desktop_profiles_snapshot: Option<RemoteDesktopProfilesSyncSnapshot>,
     app_settings_snapshots: BTreeMap<String, String>,
     plugin_settings_snapshot: Vec<EncryptedPluginSetting>,
@@ -152,6 +160,7 @@ pub fn apply_structured_snapshots(
         serial_profiles_snapshot.as_ref(),
         telnet_profiles_snapshot.as_ref(),
         mosh_profiles_snapshot.as_ref(),
+        standalone_sftp_profiles_snapshot.as_ref(),
         remote_desktop_profiles_snapshot.as_ref(),
         &app_settings_snapshots,
         &plugin_settings_snapshot,
@@ -261,6 +270,9 @@ pub fn apply_structured_snapshots(
         } else {
             0
         };
+        if let Some(snapshot) = standalone_sftp_profiles_snapshot {
+            connection_store.apply_standalone_sftp_profiles_snapshot(snapshot)?;
+        }
         let remote_desktop_profiles_applied =
             if let Some(snapshot) = remote_desktop_profiles_snapshot {
                 connection_store.apply_remote_desktop_profiles_snapshot(snapshot)?
@@ -464,6 +476,7 @@ fn preflight_structured_snapshots(
     serial_profiles_snapshot: Option<&SerialProfilesSyncSnapshot>,
     telnet_profiles_snapshot: Option<&TelnetProfilesSyncSnapshot>,
     mosh_profiles_snapshot: Option<&MoshProfilesSyncSnapshot>,
+    standalone_sftp_profiles_snapshot: Option<&StandaloneSftpProfilesSyncSnapshot>,
     remote_desktop_profiles_snapshot: Option<&RemoteDesktopProfilesSyncSnapshot>,
     app_settings_snapshots: &BTreeMap<String, String>,
     plugin_settings_snapshot: &[EncryptedPluginSetting],
@@ -497,6 +510,12 @@ fn preflight_structured_snapshots(
         profile.validate()?;
     }
     for profile in mosh_profiles_snapshot
+        .into_iter()
+        .flat_map(|snapshot| &snapshot.records)
+    {
+        profile.validate()?;
+    }
+    for profile in standalone_sftp_profiles_snapshot
         .into_iter()
         .flat_map(|snapshot| &snapshot.records)
     {
@@ -724,6 +743,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             app_settings_snapshots,
             plugin_settings_snapshot,
             SavedConnectionsConflictStrategy::Replace,
@@ -787,6 +807,7 @@ mod tests {
             Some(connections_snapshot),
             None,
             Some("{".to_string()),
+            None,
             None,
             None,
             None,

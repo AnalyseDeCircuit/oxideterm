@@ -480,6 +480,14 @@ fn default_config_version() -> u32 {
     CONFIG_VERSION
 }
 
+fn default_ssh_connect_timeout_seconds() -> u64 {
+    DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS
+}
+
+fn is_default_ssh_connect_timeout_seconds(value: &u64) -> bool {
+    *value == DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS
+}
+
 impl SavedConnection {
     pub fn touch(&mut self) {
         let now = Utc::now();
@@ -852,6 +860,276 @@ impl fmt::Debug for SavedMoshProfileRuntimeSecrets {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StandaloneSftpTransferMode {
+    #[default]
+    LocalRemote,
+    RemoteRemote,
+}
+
+impl StandaloneSftpTransferMode {
+    fn is_local_remote(value: &Self) -> bool {
+        *value == Self::LocalRemote
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct StandaloneSftpEndpoint {
+    pub host: String,
+    #[serde(default = "default_port")]
+    pub port: u16,
+    pub username: String,
+    pub auth: SavedAuth,
+    #[serde(
+        default = "default_ssh_connect_timeout_seconds",
+        skip_serializing_if = "is_default_ssh_connect_timeout_seconds"
+    )]
+    pub connect_timeout_seconds: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proxy_chain: Vec<SavedProxyHop>,
+    #[serde(default, skip_serializing_if = "SavedUpstreamProxyPolicy::is_use_global")]
+    pub upstream_proxy: SavedUpstreamProxyPolicy,
+    /// Manual ProxyCommand text stays in protected storage; metadata keeps only its reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_command: Option<SavedProxyCommand>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_agent: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub legacy_ssh_compatibility: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_remote_path: Option<String>,
+}
+
+impl fmt::Debug for StandaloneSftpEndpoint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Endpoint metadata may temporarily own plaintext credentials before keychain handoff.
+        formatter
+            .debug_struct("StandaloneSftpEndpoint")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("auth_type", &self.auth.auth_type())
+            .field("connect_timeout_seconds", &self.connect_timeout_seconds)
+            .field("proxy_chain_len", &self.proxy_chain.len())
+            .field("has_upstream_proxy", &!self.upstream_proxy.is_use_global())
+            .field("has_proxy_command", &self.proxy_command.is_some())
+            .field("identity_agent", &self.identity_agent)
+            .field("legacy_ssh_compatibility", &self.legacy_ssh_compatibility)
+            .field("initial_remote_path", &self.initial_remote_path)
+            .finish()
+    }
+}
+
+impl StandaloneSftpEndpoint {
+    pub fn new(
+        host: impl Into<String>,
+        port: u16,
+        username: impl Into<String>,
+        auth: SavedAuth,
+    ) -> Self {
+        Self {
+            host: host.into(),
+            port,
+            username: username.into(),
+            auth,
+            connect_timeout_seconds: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
+            proxy_chain: Vec::new(),
+            upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
+            proxy_command: None,
+            identity_agent: None,
+            legacy_ssh_compatibility: false,
+            initial_remote_path: None,
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.host.trim().is_empty() {
+            bail!("Standalone SFTP secondary host is required");
+        }
+        if self.port == 0 {
+            bail!("Standalone SFTP secondary port must be greater than zero");
+        }
+        if self.username.trim().is_empty() {
+            bail!("Standalone SFTP secondary username is required");
+        }
+        if self.connect_timeout_seconds == 0 {
+            bail!("Standalone SFTP secondary connect timeout must be greater than zero");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StandaloneSftpProfile {
+    pub id: String,
+    #[serde(default = "default_config_version")]
+    pub version: u32,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// Free-form user metadata. UI copy warns against storing credentials here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_background_color: Option<String>,
+    pub host: String,
+    #[serde(default = "default_port")]
+    pub port: u16,
+    pub username: String,
+    pub auth: SavedAuth,
+    #[serde(
+        default = "default_ssh_connect_timeout_seconds",
+        skip_serializing_if = "is_default_ssh_connect_timeout_seconds"
+    )]
+    pub connect_timeout_seconds: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proxy_chain: Vec<SavedProxyHop>,
+    #[serde(default, skip_serializing_if = "SavedUpstreamProxyPolicy::is_use_global")]
+    pub upstream_proxy: SavedUpstreamProxyPolicy,
+    /// Manual ProxyCommand text stays in protected storage; metadata keeps only its reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_command: Option<SavedProxyCommand>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_agent: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub legacy_ssh_compatibility: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_remote_path: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "StandaloneSftpTransferMode::is_local_remote"
+    )]
+    pub transfer_mode: StandaloneSftpTransferMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secondary_endpoint: Option<StandaloneSftpEndpoint>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<DateTime<Utc>>,
+}
+
+pub struct SaveStandaloneSftpProfileRequest {
+    pub id: Option<String>,
+    pub name: String,
+    pub group: Option<String>,
+    pub notes: Option<String>,
+    pub icon: Option<String>,
+    pub color: Option<String>,
+    pub icon_background_color: Option<String>,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub auth: SavedAuth,
+    pub connect_timeout_seconds: u64,
+    pub proxy_chain: Vec<SavedProxyHop>,
+    pub upstream_proxy: SavedUpstreamProxyPolicy,
+    pub proxy_command: Option<SavedProxyCommand>,
+    pub identity_agent: Option<String>,
+    pub legacy_ssh_compatibility: bool,
+    pub initial_remote_path: Option<String>,
+    pub transfer_mode: StandaloneSftpTransferMode,
+    pub secondary_endpoint: Option<StandaloneSftpEndpoint>,
+}
+
+impl fmt::Debug for SaveStandaloneSftpProfileRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Requests may own temporary credentials before the store moves them into keychain.
+        formatter
+            .debug_struct("SaveStandaloneSftpProfileRequest")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("group", &self.group)
+            .field("has_notes", &self.notes.is_some())
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("auth_type", &self.auth.auth_type())
+            .field("connect_timeout_seconds", &self.connect_timeout_seconds)
+            .field("proxy_chain_len", &self.proxy_chain.len())
+            .field("upstream_proxy", &self.upstream_proxy)
+            .field("has_proxy_command", &self.proxy_command.is_some())
+            .field("identity_agent", &self.identity_agent)
+            .field("legacy_ssh_compatibility", &self.legacy_ssh_compatibility)
+            .field("initial_remote_path", &self.initial_remote_path)
+            .field("transfer_mode", &self.transfer_mode)
+            .field("secondary_endpoint", &self.secondary_endpoint)
+            .finish()
+    }
+}
+
+/// Owns protected values for one endpoint during a standalone SFTP connection attempt.
+pub struct SavedStandaloneSftpEndpointRuntimeSecrets {
+    pub auth: Option<SecretString>,
+    pub proxy_chain: Vec<Option<SecretString>>,
+    pub upstream_proxy: Option<SecretString>,
+    pub proxy_command: Option<SecretString>,
+}
+
+impl fmt::Debug for SavedStandaloneSftpEndpointRuntimeSecrets {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SavedStandaloneSftpEndpointRuntimeSecrets")
+            .field("auth", &self.auth.as_ref().map(|_| "[redacted secret]"))
+            .field(
+                "proxy_chain",
+                &self
+                    .proxy_chain
+                    .iter()
+                    .map(|secret| secret.as_ref().map(|_| "[redacted secret]"))
+                    .collect::<Vec<_>>(),
+            )
+            .field(
+                "upstream_proxy",
+                &self.upstream_proxy.as_ref().map(|_| "[redacted secret]"),
+            )
+            .field(
+                "proxy_command",
+                &self.proxy_command.as_ref().map(|_| "[redacted secret]"),
+            )
+            .finish()
+    }
+}
+
+/// Owns protected values only for the lifetime of one standalone SFTP connection attempt.
+pub struct SavedStandaloneSftpProfileRuntimeSecrets {
+    pub auth: Option<SecretString>,
+    pub proxy_chain: Vec<Option<SecretString>>,
+    pub upstream_proxy: Option<SecretString>,
+    pub proxy_command: Option<SecretString>,
+    pub secondary_endpoint: Option<SavedStandaloneSftpEndpointRuntimeSecrets>,
+}
+
+impl fmt::Debug for SavedStandaloneSftpProfileRuntimeSecrets {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SavedStandaloneSftpProfileRuntimeSecrets")
+            .field("auth", &self.auth.as_ref().map(|_| "[redacted secret]"))
+            .field(
+                "proxy_chain",
+                &self
+                    .proxy_chain
+                    .iter()
+                    .map(|secret| secret.as_ref().map(|_| "[redacted secret]"))
+                    .collect::<Vec<_>>(),
+            )
+            .field(
+                "upstream_proxy",
+                &self.upstream_proxy.as_ref().map(|_| "[redacted secret]"),
+            )
+            .field(
+                "proxy_command",
+                &self.proxy_command.as_ref().map(|_| "[redacted secret]"),
+            )
+            .field("secondary_endpoint", &self.secondary_endpoint)
+            .finish()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RemoteDesktopProfile {
     pub id: String,
@@ -1072,6 +1350,72 @@ impl MoshProfile {
     }
 }
 
+impl StandaloneSftpProfile {
+    pub fn new(
+        name: impl Into<String>,
+        host: impl Into<String>,
+        port: u16,
+        username: impl Into<String>,
+        auth: SavedAuth,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4().to_string(),
+            version: CONFIG_VERSION,
+            name: name.into(),
+            group: None,
+            notes: None,
+            icon: None,
+            color: None,
+            icon_background_color: None,
+            host: host.into(),
+            port,
+            username: username.into(),
+            auth,
+            connect_timeout_seconds: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
+            proxy_chain: Vec::new(),
+            upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
+            proxy_command: None,
+            identity_agent: None,
+            legacy_ssh_compatibility: false,
+            initial_remote_path: None,
+            transfer_mode: StandaloneSftpTransferMode::LocalRemote,
+            secondary_endpoint: None,
+            created_at: now,
+            updated_at: now,
+            last_used_at: None,
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.id.trim().is_empty() {
+            bail!("Standalone SFTP profile id is required");
+        }
+        if self.name.trim().is_empty() {
+            bail!("Standalone SFTP profile name is required");
+        }
+        if self.host.trim().is_empty() {
+            bail!("Standalone SFTP host is required");
+        }
+        if self.port == 0 {
+            bail!("Standalone SFTP port must be greater than zero");
+        }
+        if self.connect_timeout_seconds == 0 {
+            bail!("Standalone SFTP connect timeout must be greater than zero");
+        }
+        if self.username.trim().is_empty() {
+            bail!("Standalone SFTP username is required");
+        }
+        if self.transfer_mode == StandaloneSftpTransferMode::RemoteRemote {
+            self.secondary_endpoint
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Standalone SFTP secondary endpoint is required"))?
+                .validate()?;
+        }
+        Ok(())
+    }
+}
+
 impl RemoteDesktopProfile {
     pub fn new(
         name: impl Into<String>,
@@ -1236,6 +1580,8 @@ pub struct ConnectionStoreData {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mosh_profiles: Vec<MoshProfile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub standalone_sftp_profiles: Vec<StandaloneSftpProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remote_desktop_profiles: Vec<RemoteDesktopProfile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub local_privilege_credentials: Vec<SavedPrivilegeCredential>,
@@ -1257,6 +1603,7 @@ impl Default for ConnectionStoreData {
             serial_profiles: Vec::new(),
             telnet_profiles: Vec::new(),
             mosh_profiles: Vec::new(),
+            standalone_sftp_profiles: Vec::new(),
             remote_desktop_profiles: Vec::new(),
             local_privilege_credentials: Vec::new(),
             pending_keychain_cleanup: Vec::new(),
@@ -1290,6 +1637,15 @@ pub struct MoshProfilesSyncSnapshot {
     pub exported_at: String,
     #[serde(default)]
     pub records: Vec<MoshProfile>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StandaloneSftpProfilesSyncSnapshot {
+    pub revision: String,
+    pub exported_at: String,
+    #[serde(default)]
+    pub records: Vec<StandaloneSftpProfile>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

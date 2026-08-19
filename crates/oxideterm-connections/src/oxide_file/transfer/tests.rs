@@ -490,6 +490,102 @@ mod tests {
     }
 
     #[test]
+    fn export_import_roundtrip_preserves_standalone_sftp_without_credentials() {
+        const PASSWORD: &str = "standalone-sftp-archive-secret";
+        let mut source = temp_store("standalone-sftp-profile-source");
+        let mut request = crate::SaveStandaloneSftpProfileRequest {
+            id: Some("sftp-archive".to_string()),
+            name: "Archive endpoint".to_string(),
+            group: Some("Storage".to_string()),
+            notes: Some("Separate SFTP port".to_string()),
+            icon: Some("server".to_string()),
+            color: None,
+            icon_background_color: None,
+            host: "archive.example.test".to_string(),
+            port: 2222,
+            username: "backup".to_string(),
+            auth: SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some(SecretString::from(PASSWORD)),
+            },
+            connect_timeout_seconds: 45,
+            proxy_chain: Vec::new(),
+            upstream_proxy: SavedUpstreamProxyPolicy::Direct,
+            proxy_command: None,
+            identity_agent: None,
+            legacy_ssh_compatibility: false,
+            initial_remote_path: Some("/srv/archive".to_string()),
+            transfer_mode: crate::StandaloneSftpTransferMode::LocalRemote,
+            secondary_endpoint: None,
+        };
+        request.proxy_chain.push(SavedProxyHop {
+            host: "jump.example.test".to_string(),
+            port: 22,
+            username: "jump".to_string(),
+            auth: SavedAuth::Agent,
+            agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
+            legacy_ssh_compatibility: false,
+        });
+        source.upsert_standalone_sftp_profile(request).unwrap();
+
+        let snapshot_json = serde_json::to_string_pretty(
+            &source.export_standalone_sftp_profiles_snapshot().unwrap(),
+        )
+        .unwrap();
+        assert!(!snapshot_json.contains(PASSWORD));
+        assert!(!snapshot_json.contains("oxide_conn_password_"));
+
+        let bytes = export_connections_to_oxide(
+            &source,
+            &[],
+            "secret!",
+            OxideExportOptions {
+                standalone_sftp_profiles_json: Some(snapshot_json),
+                ..OxideExportOptions::default()
+            },
+        )
+        .unwrap();
+        let file = OxideFile::from_bytes(&bytes).unwrap();
+        assert_eq!(file.metadata.standalone_sftp_profiles_count, Some(1));
+        let preview = preview_oxide_import(
+            &temp_store("standalone-sftp-profile-preview"),
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+        assert_eq!(preview.standalone_sftp_profiles_count, 1);
+
+        let mut target = temp_store("standalone-sftp-profile-target");
+        let imported = apply_oxide_import(
+            &mut target,
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+        assert_eq!(imported.imported_standalone_sftp_profiles, 1);
+        let imported_profile = &target.standalone_sftp_profiles()[0];
+        assert_eq!(imported_profile.id, "sftp-archive");
+        assert_eq!(imported_profile.port, 2222);
+        assert_eq!(imported_profile.connect_timeout_seconds, 45);
+        assert_eq!(
+            imported_profile.initial_remote_path.as_deref(),
+            Some("/srv/archive")
+        );
+        assert_eq!(imported_profile.proxy_chain.len(), 1);
+        assert!(matches!(
+            imported_profile.auth,
+            SavedAuth::Password {
+                keychain_id: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn export_import_roundtrip_preserves_remote_desktop_assets_without_credentials() {
         const CREDENTIAL: &str = "oxide-remote-desktop-secret";
         let mut source = temp_store("remote-desktop-profile-source");

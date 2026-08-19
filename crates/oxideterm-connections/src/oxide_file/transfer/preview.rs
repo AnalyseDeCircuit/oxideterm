@@ -106,6 +106,7 @@ fn preview_oxide_import_inner(
         serial_profiles_json,
         telnet_profiles_json,
         mosh_profiles_json,
+        standalone_sftp_profiles_json,
         remote_desktop_profiles_json,
         plugin_settings,
         portable_secrets,
@@ -131,6 +132,9 @@ fn preview_oxide_import_inner(
         serial_profiles_count: count_serial_profiles(serial_profiles_json.as_deref()),
         telnet_profiles_count: count_telnet_profiles(telnet_profiles_json.as_deref()),
         mosh_profiles_count: count_mosh_profiles(mosh_profiles_json.as_deref()),
+        standalone_sftp_profiles_count: count_standalone_sftp_profiles(
+            standalone_sftp_profiles_json.as_deref(),
+        ),
         remote_desktop_profiles_count: count_remote_desktop_profiles(
             remote_desktop_profiles_json.as_deref(),
         ),

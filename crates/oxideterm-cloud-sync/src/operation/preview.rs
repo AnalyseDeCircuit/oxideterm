@@ -125,6 +125,7 @@ impl CloudSyncOperationService {
             serial_profiles_snapshot: None,
             telnet_profiles_snapshot: None,
             mosh_profiles_snapshot: None,
+            standalone_sftp_profiles_snapshot: None,
             remote_desktop_profiles_snapshot: None,
             base_connections_snapshot: None,
             base_forwards_snapshot: None,
@@ -132,6 +133,7 @@ impl CloudSyncOperationService {
             base_serial_profiles_snapshot: None,
             base_telnet_profiles_snapshot: None,
             base_mosh_profiles_snapshot: None,
+            base_standalone_sftp_profiles_snapshot: None,
             base_remote_desktop_profiles_snapshot: None,
             sensitive_credentials_entry: None,
             sensitive_credentials_preview: None,
@@ -179,6 +181,13 @@ impl CloudSyncOperationService {
                 .read_required_object(settings, &metadata_secrets, entry)
                 .await?;
             preview.mosh_profiles_snapshot = Some(serde_json::from_slice(&object.bytes)?);
+        }
+        if let Some(entry) = preview.manifest.sections.standalone_sftp_profiles.as_ref() {
+            let object = self
+                .read_required_object(settings, &metadata_secrets, entry)
+                .await?;
+            preview.standalone_sftp_profiles_snapshot =
+                Some(serde_json::from_slice(&object.bytes)?);
         }
         if let Some(entry) = preview.manifest.sections.remote_desktop_profiles.as_ref() {
             let object = self
@@ -235,6 +244,14 @@ impl CloudSyncOperationService {
                 &metadata_secrets,
                 previous.mosh_profiles.as_deref(),
                 mosh_profiles_object_path,
+            )
+            .await?;
+            preview.base_standalone_sftp_profiles_snapshot = read_optional_snapshot_at_revision(
+                self,
+                settings,
+                &metadata_secrets,
+                previous.connections.as_deref(),
+                standalone_sftp_profiles_object_path,
             )
             .await?;
             preview.base_remote_desktop_profiles_snapshot = read_optional_snapshot_at_revision(

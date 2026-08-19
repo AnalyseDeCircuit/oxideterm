@@ -126,6 +126,21 @@ pub(super) fn merge_structured_preview_fields(
         let local = connection_store.export_mosh_profiles_snapshot()?;
         changed |= merge_mosh_profile_records(remote, base, &local, conflict_strategy, Utc::now())?;
     }
+    if selection.connections
+        && let (Some(remote), Some(base)) = (
+            preview.standalone_sftp_profiles_snapshot.as_mut(),
+            preview.base_standalone_sftp_profiles_snapshot.as_ref(),
+        )
+    {
+        let local = connection_store.export_standalone_sftp_profiles_snapshot()?;
+        changed |= merge_standalone_sftp_profile_records(
+            remote,
+            base,
+            &local,
+            conflict_strategy,
+            Utc::now(),
+        )?;
+    }
     if selection.remote_desktop_profiles
         && let (Some(remote), Some(base)) = (
             preview.remote_desktop_profiles_snapshot.as_mut(),
@@ -390,6 +405,45 @@ pub(super) fn merge_mosh_profile_records(
     remote: &mut MoshProfilesSyncSnapshot,
     base: &MoshProfilesSyncSnapshot,
     local: &MoshProfilesSyncSnapshot,
+    conflict_strategy: &ConflictStrategy,
+    merged_at: chrono::DateTime<Utc>,
+) -> Result<bool> {
+    let base_records = base
+        .records
+        .iter()
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect::<BTreeMap<_, _>>();
+    let local_records = local
+        .records
+        .iter()
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect::<BTreeMap<_, _>>();
+    let mut changed = false;
+    for remote_profile in &mut remote.records {
+        let Some(base_profile) = base_records.get(remote_profile.id.as_str()).copied() else {
+            continue;
+        };
+        let Some(local_profile) = local_records.get(remote_profile.id.as_str()).copied() else {
+            continue;
+        };
+        if let Some(mut merged_profile) = merge_structured_model_fields(
+            base_profile,
+            local_profile,
+            remote_profile,
+            conflict_strategy,
+        )? {
+            merged_profile.updated_at = merged_at;
+            *remote_profile = merged_profile;
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
+pub(super) fn merge_standalone_sftp_profile_records(
+    remote: &mut StandaloneSftpProfilesSyncSnapshot,
+    base: &StandaloneSftpProfilesSyncSnapshot,
+    local: &StandaloneSftpProfilesSyncSnapshot,
     conflict_strategy: &ConflictStrategy,
     merged_at: chrono::DateTime<Utc>,
 ) -> Result<bool> {

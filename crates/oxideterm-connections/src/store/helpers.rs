@@ -218,6 +218,44 @@ fn managed_key_usage_from_data(data: &ConnectionStoreData, key_id: &str) -> Mana
             }
         }
     }
+    for profile in &data.standalone_sftp_profiles {
+        if matches!(&profile.auth, SavedAuth::ManagedKey { key_id: id, .. } if id == key_id) {
+            items.push(ManagedSshKeyUsageItem {
+                connection_id: profile.id.clone(),
+                connection_name: profile.name.clone(),
+                location: "standalone_sftp".to_string(),
+            });
+        }
+        for (index, hop) in profile.proxy_chain.iter().enumerate() {
+            if matches!(&hop.auth, SavedAuth::ManagedKey { key_id: id, .. } if id == key_id) {
+                items.push(ManagedSshKeyUsageItem {
+                    connection_id: profile.id.clone(),
+                    connection_name: profile.name.clone(),
+                    location: format!("standalone_sftp.proxy_chain[{index}]"),
+                });
+            }
+        }
+        if let Some(endpoint) = &profile.secondary_endpoint {
+            if matches!(&endpoint.auth, SavedAuth::ManagedKey { key_id: id, .. } if id == key_id) {
+                items.push(ManagedSshKeyUsageItem {
+                    connection_id: profile.id.clone(),
+                    connection_name: profile.name.clone(),
+                    location: "standalone_sftp.secondary_endpoint".to_string(),
+                });
+            }
+            for (index, hop) in endpoint.proxy_chain.iter().enumerate() {
+                if matches!(&hop.auth, SavedAuth::ManagedKey { key_id: id, .. } if id == key_id) {
+                    items.push(ManagedSshKeyUsageItem {
+                        connection_id: profile.id.clone(),
+                        connection_name: profile.name.clone(),
+                        location: format!(
+                            "standalone_sftp.secondary_endpoint.proxy_chain[{index}]"
+                        ),
+                    });
+                }
+            }
+        }
+    }
 
     ManagedSshKeyUsage {
         key_id: key_id.to_string(),
@@ -268,6 +306,24 @@ fn collect_connection_keychain_ids(connection: &SavedConnection) -> Vec<String> 
         &connection.upstream_proxy,
         connection.proxy_command.as_ref(),
     )
+}
+
+fn collect_standalone_sftp_keychain_ids(profile: &StandaloneSftpProfile) -> Vec<String> {
+    let mut ids = collect_keychain_ids_for_parts(
+        &profile.auth,
+        &profile.proxy_chain,
+        &profile.upstream_proxy,
+        profile.proxy_command.as_ref(),
+    );
+    if let Some(endpoint) = &profile.secondary_endpoint {
+        ids.extend(collect_keychain_ids_for_parts(
+            &endpoint.auth,
+            &endpoint.proxy_chain,
+            &endpoint.upstream_proxy,
+            endpoint.proxy_command.as_ref(),
+        ));
+    }
+    ids
 }
 
 fn collect_privilege_keychain_ids(connection: &SavedConnection) -> Vec<String> {

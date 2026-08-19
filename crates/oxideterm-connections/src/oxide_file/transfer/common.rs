@@ -86,6 +86,19 @@ fn count_mosh_profiles(snapshot_json: Option<&str>) -> usize {
         .map_or(0, Vec::len)
 }
 
+fn count_standalone_sftp_profiles(snapshot_json: Option<&str>) -> usize {
+    let Some(json) = snapshot_json else {
+        return 0;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(json) else {
+        return 0;
+    };
+    value
+        .get("records")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len)
+}
+
 fn count_remote_desktop_profiles(snapshot_json: Option<&str>) -> usize {
     let Some(json) = snapshot_json else {
         return 0;

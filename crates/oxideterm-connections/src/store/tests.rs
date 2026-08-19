@@ -99,8 +99,251 @@ mod tests {
         }
     }
 
+    fn standalone_sftp_request(
+        id: &str,
+        auth: SavedAuth,
+    ) -> SaveStandaloneSftpProfileRequest {
+        SaveStandaloneSftpProfileRequest {
+            id: Some(id.to_string()),
+            name: "Archive SFTP".to_string(),
+            group: Some("Storage".to_string()),
+            notes: Some("  Separate file endpoint  ".to_string()),
+            icon: Some("server".to_string()),
+            color: None,
+            icon_background_color: None,
+            host: "sftp.example.test".to_string(),
+            port: 2222,
+            username: "archive".to_string(),
+            auth,
+            connect_timeout_seconds: 45,
+            proxy_chain: Vec::new(),
+            upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
+            proxy_command: None,
+            identity_agent: None,
+            legacy_ssh_compatibility: false,
+            initial_remote_path: Some(" /srv/archive ".to_string()),
+            transfer_mode: StandaloneSftpTransferMode::LocalRemote,
+            secondary_endpoint: None,
+        }
+    }
+
     fn load_empty_store(name: &str) -> ConnectionStore {
         ConnectionStore::load(temp_store_path(name)).expect("store should load")
+    }
+
+    #[test]
+    fn standalone_sftp_persists_references_and_loads_redacted_runtime_secrets() {
+        const PRIMARY_SECRET: &str = "standalone-primary-secret";
+        const HOP_SECRET: &str = "standalone-hop-secret";
+        const PROXY_SECRET: &str = "standalone-proxy-secret";
+        const COMMAND_SECRET: &str = "standalone-command-secret";
+        const SECONDARY_SECRET: &str = "standalone-secondary-secret";
+
+        let mut store = load_empty_store("standalone-sftp-secrets");
+        let mut invalid = standalone_sftp_request(
+            "sftp-invalid",
+            SavedAuth::Password {
+                keychain_id: Some("standalone-invalid-keychain-id".to_string()),
+                plaintext_password: Some(SecretString::from(PRIMARY_SECRET)),
+            },
+        );
+        invalid.connect_timeout_seconds = 0;
+        assert!(store.upsert_standalone_sftp_profile(invalid).is_err());
+        assert!(
+            store
+                .keychain
+                .get("standalone-invalid-keychain-id")
+                .is_err()
+        );
+
+        let mut request = standalone_sftp_request(
+            "sftp-1",
+            SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some(SecretString::from(PRIMARY_SECRET)),
+            },
+        );
+        request.proxy_chain.push(SavedProxyHop {
+            host: "jump.example.test".to_string(),
+            port: 22,
+            username: "jump".to_string(),
+            auth: SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some(SecretString::from(HOP_SECRET)),
+            },
+            agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
+            legacy_ssh_compatibility: false,
+        });
+        request.upstream_proxy = SavedUpstreamProxyPolicy::Custom {
+            proxy: SavedUpstreamProxyConfig {
+                protocol: SavedUpstreamProxyProtocol::Socks5,
+                host: "proxy.example.test".to_string(),
+                port: 1080,
+                auth: SavedUpstreamProxyAuth::Password {
+                    username: "proxy-user".to_string(),
+                    keychain_id: None,
+                    plaintext_password: Some(SecretString::from(PROXY_SECRET)),
+                },
+                remote_dns: true,
+                no_proxy: String::new(),
+            },
+        };
+        request.proxy_command = Some(SavedProxyCommand {
+            keychain_id: None,
+            plaintext_command: Some(SecretString::from(COMMAND_SECRET)),
+        });
+        request.transfer_mode = StandaloneSftpTransferMode::RemoteRemote;
+        request.secondary_endpoint = Some(StandaloneSftpEndpoint {
+            host: "mirror.example.test".to_string(),
+            port: 2200,
+            username: "mirror".to_string(),
+            auth: SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some(SecretString::from(SECONDARY_SECRET)),
+            },
+            connect_timeout_seconds: 50,
+            proxy_chain: Vec::new(),
+            upstream_proxy: SavedUpstreamProxyPolicy::Direct,
+            proxy_command: None,
+            identity_agent: None,
+            legacy_ssh_compatibility: false,
+            initial_remote_path: Some(" /srv/mirror ".to_string()),
+        });
+
+        let request_debug = format!("{request:?}");
+        for secret in [
+            PRIMARY_SECRET,
+            HOP_SECRET,
+            PROXY_SECRET,
+            COMMAND_SECRET,
+            SECONDARY_SECRET,
+        ] {
+            assert!(!request_debug.contains(secret));
+        }
+        let (profile, immediate_secrets) = store
+            .upsert_standalone_sftp_profile_with_runtime_secrets(request)
+            .unwrap();
+        assert_eq!(profile.notes.as_deref(), Some("Separate file endpoint"));
+        assert_eq!(profile.initial_remote_path.as_deref(), Some("/srv/archive"));
+        assert_eq!(profile.connect_timeout_seconds, 45);
+        assert_eq!(
+            profile
+                .secondary_endpoint
+                .as_ref()
+                .and_then(|endpoint| endpoint.initial_remote_path.as_deref()),
+            Some("/srv/mirror")
+        );
+
+        let serialized = serde_json::to_string(&profile).unwrap();
+        let immediate_debug = format!("{immediate_secrets:?}");
+        for secret in [
+            PRIMARY_SECRET,
+            HOP_SECRET,
+            PROXY_SECRET,
+            COMMAND_SECRET,
+            SECONDARY_SECRET,
+        ] {
+            assert!(!serialized.contains(secret));
+            assert!(!immediate_debug.contains(secret));
+        }
+
+        let loaded = store
+            .load_standalone_sftp_profile_runtime_secrets("sftp-1")
+            .unwrap();
+        assert_eq!(loaded.auth.as_ref().unwrap(), PRIMARY_SECRET);
+        assert_eq!(loaded.proxy_chain[0].as_ref().unwrap(), HOP_SECRET);
+        assert_eq!(loaded.upstream_proxy.as_ref().unwrap(), PROXY_SECRET);
+        assert_eq!(loaded.proxy_command.as_ref().unwrap(), COMMAND_SECRET);
+        assert_eq!(
+            loaded
+                .secondary_endpoint
+                .as_ref()
+                .and_then(|endpoint| endpoint.auth.as_ref())
+                .unwrap(),
+            SECONDARY_SECRET
+        );
+
+        let mut snapshot = store.export_standalone_sftp_profiles_snapshot().unwrap();
+        let portable_json = serde_json::to_string(&snapshot).unwrap();
+        for secret in [
+            PRIMARY_SECRET,
+            HOP_SECRET,
+            PROXY_SECRET,
+            COMMAND_SECRET,
+            SECONDARY_SECRET,
+        ] {
+            assert!(!portable_json.contains(secret));
+        }
+        snapshot.records[0].notes = Some("Synced metadata".to_string());
+        snapshot.records[0].updated_at += Duration::seconds(1);
+        assert_eq!(store.apply_standalone_sftp_profiles_snapshot(snapshot).unwrap(), 1);
+        let loaded_after_sync = store
+            .load_standalone_sftp_profile_runtime_secrets("sftp-1")
+            .unwrap();
+        assert_eq!(loaded_after_sync.auth.as_ref().unwrap(), PRIMARY_SECRET);
+        assert_eq!(loaded_after_sync.proxy_chain[0].as_ref().unwrap(), HOP_SECRET);
+        assert_eq!(
+            loaded_after_sync.upstream_proxy.as_ref().unwrap(),
+            PROXY_SECRET
+        );
+        assert_eq!(
+            loaded_after_sync.proxy_command.as_ref().unwrap(),
+            COMMAND_SECRET
+        );
+        assert_eq!(
+            loaded_after_sync
+                .secondary_endpoint
+                .as_ref()
+                .and_then(|endpoint| endpoint.auth.as_ref())
+                .unwrap(),
+            SECONDARY_SECRET
+        );
+        let profile = store.get_standalone_sftp_profile("sftp-1").unwrap();
+        let keychain_ids = collect_standalone_sftp_keychain_ids(profile);
+
+        let mut legacy_value = serde_json::to_value(profile).unwrap();
+        legacy_value.as_object_mut().unwrap().remove("version");
+        legacy_value
+            .as_object_mut()
+            .unwrap()
+            .remove("connect_timeout_seconds");
+        legacy_value.as_object_mut().unwrap().remove("transfer_mode");
+        legacy_value
+            .as_object_mut()
+            .unwrap()
+            .remove("secondary_endpoint");
+        let legacy: StandaloneSftpProfile = serde_json::from_value(legacy_value).unwrap();
+        assert_eq!(legacy.version, CONFIG_VERSION);
+        assert_eq!(
+            legacy.transfer_mode,
+            StandaloneSftpTransferMode::LocalRemote
+        );
+        assert!(
+            serde_json::to_value(&legacy)
+                .unwrap()
+                .get("transfer_mode")
+                .is_none()
+        );
+        assert_eq!(
+            legacy.connect_timeout_seconds,
+            DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS
+        );
+        let mut default_timeout = profile.clone();
+        default_timeout.connect_timeout_seconds = DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS;
+        assert!(
+            serde_json::to_value(default_timeout)
+                .unwrap()
+                .get("connect_timeout_seconds")
+                .is_none()
+        );
+
+        assert!(store.delete_standalone_sftp_profile("sftp-1").unwrap());
+        assert!(store.get_standalone_sftp_profile("sftp-1").is_none());
+        for keychain_id in keychain_ids {
+            assert!(store.keychain.get(&keychain_id).is_err());
+        }
     }
 
     #[test]
@@ -243,6 +486,14 @@ mod tests {
         let telnet_id = telnet.id.clone();
         store.data.telnet_profiles.push(telnet);
 
+        let mut standalone_sftp =
+            standalone_sftp_request("sftp-in-subtree", SavedAuth::Agent);
+        standalone_sftp.group = Some("Production/Core/SFTP".to_string());
+        let standalone_sftp_id = store
+            .upsert_standalone_sftp_profile(standalone_sftp)
+            .unwrap()
+            .id;
+
         let mut remote = RemoteDesktopProfile::new(
             "Desktop",
             RemoteDesktopProtocol::Rdp,
@@ -261,7 +512,7 @@ mod tests {
             .rename_group("Production", "Live".to_string())
             .unwrap();
 
-        assert!(updated >= 4);
+        assert!(updated >= 5);
         assert!(
             store
                 .groups()
@@ -294,6 +545,12 @@ mod tests {
                 .and_then(|profile| profile.group.as_deref()),
             Some("Live/Core")
         );
+        assert_eq!(
+            store
+                .get_standalone_sftp_profile(&standalone_sftp_id)
+                .and_then(|profile| profile.group.as_deref()),
+            Some("Live/Core/SFTP")
+        );
         assert!(store.groups().contains(&"Unrelated".to_string()));
         assert!(store.groups().contains(&"Production-Backup".to_string()));
 
@@ -308,6 +565,7 @@ mod tests {
         assert!(reloaded.get("ssh-in-subtree").unwrap().group.is_none());
         assert!(reloaded.serial_profiles()[0].group.is_none());
         assert!(reloaded.telnet_profiles()[0].group.is_none());
+        assert!(reloaded.standalone_sftp_profiles()[0].group.is_none());
         assert!(reloaded.remote_desktop_profiles()[0].group.is_none());
         assert!(reloaded.groups().contains(&"Unrelated".to_string()));
         assert!(
@@ -2889,6 +3147,7 @@ mod tests {
                     &[],
                     &[],
                     &[],
+                    &[],
                     std::slice::from_ref(&cleared.id),
                     Some("Moved"),
                 )
@@ -2933,6 +3192,12 @@ mod tests {
         let mosh = store
             .upsert_mosh_profile(mosh_request("mosh-move", SavedAuth::Agent))
             .unwrap();
+        let standalone_sftp = store
+            .upsert_standalone_sftp_profile(standalone_sftp_request(
+                "standalone-sftp-move",
+                SavedAuth::Agent,
+            ))
+            .unwrap();
         let remote = store
             .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
                 id: Some("remote-move".to_string()),
@@ -2951,11 +3216,12 @@ mod tests {
                     std::slice::from_ref(&serial.id),
                     std::slice::from_ref(&telnet.id),
                     std::slice::from_ref(&mosh.id),
+                    std::slice::from_ref(&standalone_sftp.id),
                     std::slice::from_ref(&remote.id),
                     Some("Moved"),
                 )
                 .unwrap(),
-            5
+            6
         );
         assert_eq!(
             store.get("ssh-move").and_then(|connection| connection.group.as_deref()),
@@ -2982,6 +3248,12 @@ mod tests {
                 .mosh_profiles()
                 .iter()
                 .find(|profile| profile.id == mosh.id)
+                .and_then(|profile| profile.group.as_deref()),
+            Some("Moved")
+        );
+        assert_eq!(
+            store
+                .get_standalone_sftp_profile(&standalone_sftp.id)
                 .and_then(|profile| profile.group.as_deref()),
             Some("Moved")
         );

@@ -11,7 +11,7 @@ use chrono::Utc;
 use oxideterm_connections::{
     ConnectionStore, MoshProfilesSyncSnapshot, RemoteDesktopProfilesSyncSnapshot,
     SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot, SerialProfilesSyncSnapshot,
-    TelnetProfilesSyncSnapshot,
+    StandaloneSftpProfilesSyncSnapshot, TelnetProfilesSyncSnapshot,
     oxide_file::{
         AppSettingsSectionPreview, EncryptedPortableSecret, ImportConflictStrategy, ImportPreview,
         ImportResultEnvelope, OxideBatchDecryptionContext, OxideBatchEncryptionContext,
@@ -47,6 +47,7 @@ use crate::{
         CloudSyncApplyOutcome, CloudSyncLocalSnapshot, apply_structured_snapshots,
         build_local_snapshot,
     },
+    standalone_sftp_profiles_object_path,
     state::CloudSyncHistorySummary,
     telnet_profiles_object_path,
 };
@@ -214,6 +215,7 @@ pub struct StructuredPreview {
     pub serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
     pub telnet_profiles_snapshot: Option<TelnetProfilesSyncSnapshot>,
     pub mosh_profiles_snapshot: Option<MoshProfilesSyncSnapshot>,
+    pub standalone_sftp_profiles_snapshot: Option<StandaloneSftpProfilesSyncSnapshot>,
     pub remote_desktop_profiles_snapshot: Option<RemoteDesktopProfilesSyncSnapshot>,
     pub base_connections_snapshot: Option<SavedConnectionsSyncSnapshot>,
     pub base_forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
@@ -221,6 +223,7 @@ pub struct StructuredPreview {
     pub base_serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
     pub base_telnet_profiles_snapshot: Option<TelnetProfilesSyncSnapshot>,
     pub base_mosh_profiles_snapshot: Option<MoshProfilesSyncSnapshot>,
+    pub base_standalone_sftp_profiles_snapshot: Option<StandaloneSftpProfilesSyncSnapshot>,
     pub base_remote_desktop_profiles_snapshot: Option<RemoteDesktopProfilesSyncSnapshot>,
     pub sensitive_credentials_entry: Option<Vec<u8>>,
     pub sensitive_credentials_preview: Option<ImportPreview>,

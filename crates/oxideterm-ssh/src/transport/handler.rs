@@ -246,6 +246,7 @@ impl client::Handler for NativeClientHandler {
                     port: self.port,
                     expected_fingerprint: expected_fingerprint.to_string(),
                     actual_fingerprint,
+                    key_type: server_public_key.algorithm().as_str().to_string(),
                 });
             }
             if let Some(trust_host_key) = self.trust_host_key {
@@ -297,6 +298,7 @@ impl client::Handler for NativeClientHandler {
                         host: self.host.clone(),
                         port: self.port,
                         fingerprint,
+                        key_type: server_public_key.algorithm().as_str().to_string(),
                     })
                 } else {
                     learn_host_key(&self.host, self.port, server_public_key)?;
@@ -323,6 +325,7 @@ impl client::Handler for NativeClientHandler {
                     port: self.port,
                     expected_fingerprint,
                     actual_fingerprint,
+                    key_type: server_public_key.algorithm().as_str().to_string(),
                 })
             }
         }

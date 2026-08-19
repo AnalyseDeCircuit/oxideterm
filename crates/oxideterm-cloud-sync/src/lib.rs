@@ -448,6 +448,8 @@ pub struct StructuredManifestSections {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mosh_profiles: Option<StructuredObjectEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standalone_sftp_profiles: Option<StructuredObjectEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_desktop_profiles: Option<StructuredObjectEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensitive_credentials: Option<StructuredObjectEntry>,
@@ -843,7 +845,8 @@ pub fn count_structured_upload_plan_units(
 ) -> usize {
     let mut total = 0;
     if scope.sync_connections {
-        total += 1;
+        // Connections owns both saved SSH records and standalone SFTP profiles.
+        total += 2;
     }
     if scope.sync_forwards {
         total += 1;
@@ -912,6 +915,10 @@ pub fn telnet_profiles_object_path(revision: &str) -> String {
 
 pub fn mosh_profiles_object_path(revision: &str) -> String {
     format!("structured/mosh-profiles/{revision}.json")
+}
+
+pub fn standalone_sftp_profiles_object_path(revision: &str) -> String {
+    format!("structured/standalone-sftp-profiles/{revision}.json")
 }
 
 pub fn remote_desktop_profiles_object_path(revision: &str) -> String {
@@ -1358,6 +1365,6 @@ mod tests {
             ..LocalSyncMetadata::default()
         };
 
-        assert_eq!(count_structured_upload_plan_units(&metadata, &scope), 4);
+        assert_eq!(count_structured_upload_plan_units(&metadata, &scope), 5);
     }
 }

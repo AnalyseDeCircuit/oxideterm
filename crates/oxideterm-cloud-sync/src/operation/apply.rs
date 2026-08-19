@@ -44,6 +44,8 @@ impl CloudSyncOperationService {
             selection.telnet_profiles && preview.telnet_profiles_snapshot.is_some();
         let apply_mosh_profiles =
             selection.mosh_profiles && preview.mosh_profiles_snapshot.is_some();
+        let apply_standalone_sftp_profiles =
+            selection.connections && preview.standalone_sftp_profiles_snapshot.is_some();
         let apply_remote_desktop_profiles =
             selection.remote_desktop_profiles && preview.remote_desktop_profiles_snapshot.is_some();
         let apply_sensitive_credentials =
@@ -68,6 +70,7 @@ impl CloudSyncOperationService {
             + usize::from(apply_serial_profiles)
             + usize::from(apply_telnet_profiles)
             + usize::from(apply_mosh_profiles)
+            + usize::from(apply_standalone_sftp_profiles)
             + usize::from(apply_remote_desktop_profiles)
             + usize::from(apply_sensitive_credentials))
         .max(1);
@@ -145,6 +148,7 @@ impl CloudSyncOperationService {
                             import_serial_profiles: false,
                             import_telnet_profiles: false,
                             import_mosh_profiles: false,
+                            import_standalone_sftp_profiles: false,
                             import_remote_desktop_profiles: false,
                             import_portable_secrets: true,
                             restore_managed_keys: true,
@@ -287,6 +291,11 @@ impl CloudSyncOperationService {
         } else {
             None
         };
+        let standalone_sftp_profiles_snapshot = if selection.connections {
+            preview.standalone_sftp_profiles_snapshot
+        } else {
+            None
+        };
         let mut remote_desktop_profiles_snapshot = if selection.remote_desktop_profiles {
             preview.remote_desktop_profiles_snapshot
         } else {
@@ -312,6 +321,7 @@ impl CloudSyncOperationService {
             serial_profiles_snapshot,
             telnet_profiles_snapshot,
             mosh_profiles_snapshot,
+            standalone_sftp_profiles_snapshot,
             remote_desktop_profiles_snapshot,
             app_settings_snapshots,
             plugin_settings_snapshot,
@@ -323,6 +333,7 @@ impl CloudSyncOperationService {
             + usize::from(apply_serial_profiles)
             + usize::from(apply_telnet_profiles)
             + usize::from(apply_mosh_profiles)
+            + usize::from(apply_standalone_sftp_profiles)
             + usize::from(apply_remote_desktop_profiles);
         report_progress(
             progress,
