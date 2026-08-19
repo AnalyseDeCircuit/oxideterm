@@ -2,14 +2,14 @@
 
 This file lists third-party Rust crates and detected licenses, including transitive dependencies.
 It is generated from `cargo deny list -f json -l crate`.
-Generated: 2026-07-26T17:46:54.928663Z
+Generated: 2026-08-19T17:58:51.928373Z
 
 ## Summary
 
-- MIT: 1057
-- Apache-2.0: 848
+- MIT: 1066
+- Apache-2.0: 857
 - Apache-2.0 WITH LLVM-exception: 60
-- Zlib: 43
+- Zlib: 45
 - BSD-3-Clause: 21
 - MPL-2.0: 20
 - Unicode-3.0: 19
@@ -62,9 +62,9 @@ This section is a review prompt for binary distribution; it does not replace leg
 | aes | 0.9.1 | MIT, Apache-2.0 | https://crates.io/crates/aes |
 | aes-gcm | 0.11.0-rc.4 | Apache-2.0, MIT | https://crates.io/crates/aes-gcm |
 | aes-kw | 0.3.1 | MIT, Apache-2.0 | https://crates.io/crates/aes-kw |
-| agent-client-protocol | 0.14.0 | Apache-2.0 | https://crates.io/crates/agent-client-protocol |
-| agent-client-protocol-derive | 0.14.0 | Apache-2.0 | https://crates.io/crates/agent-client-protocol-derive |
-| agent-client-protocol-schema | 0.13.6 | Apache-2.0 | https://crates.io/crates/agent-client-protocol-schema |
+| agent-client-protocol | 2.0.0 | Apache-2.0 | https://crates.io/crates/agent-client-protocol |
+| agent-client-protocol-derive | 2.0.0 | Apache-2.0 | https://crates.io/crates/agent-client-protocol-derive |
+| agent-client-protocol-schema | 1.5.0 | Apache-2.0 | https://crates.io/crates/agent-client-protocol-schema |
 | ahash | 0.8.12 | MIT, Apache-2.0 | https://crates.io/crates/ahash |
 | aho-corasick | 1.1.4 | Unlicense, MIT | https://crates.io/crates/aho-corasick |
 | alacritty_terminal | 0.26.0 | Apache-2.0 | https://crates.io/crates/alacritty_terminal |
@@ -126,6 +126,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | backtrace | 0.3.76 | MIT, Apache-2.0 | https://crates.io/crates/backtrace |
 | base16ct | 1.0.0 | Apache-2.0, MIT | https://crates.io/crates/base16ct |
 | base64 | 0.22.1 | MIT, Apache-2.0 | https://crates.io/crates/base64 |
+| base64 | 0.23.1 | MIT, Apache-2.0 | https://crates.io/crates/base64 |
 | base64ct | 1.8.3 | Apache-2.0, MIT | https://crates.io/crates/base64ct |
 | bcrypt-pbkdf | 0.11.0 | MIT, Apache-2.0 | https://crates.io/crates/bcrypt-pbkdf |
 | bincode | 1.3.3 | MIT | https://crates.io/crates/bincode |
@@ -254,6 +255,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | cssparser-macros | 0.7.0 | MPL-2.0 | https://crates.io/crates/cssparser-macros |
 | ctor | 1.0.9 | Apache-2.0, MIT | https://crates.io/crates/ctor |
 | ctr | 0.10.1 | MIT, Apache-2.0 | https://crates.io/crates/ctr |
+| ctr | 0.9.2 | MIT, Apache-2.0 | https://crates.io/crates/ctr |
 | ctutils | 0.4.2 | Apache-2.0, MIT | https://crates.io/crates/ctutils |
 | cursor-icon | 1.2.0 | MIT, Apache-2.0, Zlib | https://crates.io/crates/cursor-icon |
 | curve25519-dalek | 5.0.0-rc.1 | BSD-3-Clause | https://crates.io/crates/curve25519-dalek |
@@ -272,7 +274,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | der | 0.7.10 | Apache-2.0, MIT | https://crates.io/crates/der |
 | der | 0.8.0 | Apache-2.0, MIT | https://crates.io/crates/der |
 | der-parser | 10.0.0 | MIT, Apache-2.0 | https://crates.io/crates/der-parser |
-| der_derive | 0.7.3 | Apache-2.0, MIT | https://crates.io/crates/der_derive |
+| der_derive | 0.8.0 | Apache-2.0, MIT | https://crates.io/crates/der_derive |
 | deranged | 0.5.8 | MIT, Apache-2.0 | https://crates.io/crates/deranged |
 | derive_arbitrary | 1.4.2 | MIT, Apache-2.0 | https://crates.io/crates/derive_arbitrary |
 | derive_more | 2.1.1 | MIT | https://crates.io/crates/derive_more |
@@ -479,25 +481,25 @@ This section is a review prompt for binary distribution; it does not replace leg
 | io-lifetimes | 2.0.4 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/io-lifetimes |
 | io-surface | 0.16.1 | MIT, Apache-2.0 | https://crates.io/crates/io-surface |
 | ipnet | 2.12.0 | MIT, Apache-2.0 | https://crates.io/crates/ipnet |
-| ironrdp | 0.16.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-async | 0.9.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-bulk | 0.1.1 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-cliprdr | 0.6.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-cliprdr-format | 0.2.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-connector | 0.9.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-core | 0.2.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-displaycontrol | 0.7.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-dvc | 0.7.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-egfx | 0.2.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-error | 0.2.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-graphics | 0.8.1 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-input | 0.6.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-pdu | 0.8.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-rdpsnd | 0.8.1 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-session | 0.10.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-svc | 0.7.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-tls | 0.2.1 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
-| ironrdp-tokio | 0.9.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp | 0.17.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-async | 0.10.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-bulk | 0.1.1 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-cliprdr | 0.7.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-cliprdr-format | 0.2.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-connector | 0.10.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-core | 0.2.1 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-displaycontrol | 0.8.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-dvc | 0.8.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-egfx | 0.3.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-error | 0.2.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-graphics | 0.9.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-input | 0.7.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-pdu | 0.9.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-rdpsnd | 0.9.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-session | 0.11.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-svc | 0.8.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-tls | 0.2.2 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp-tokio | 0.10.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
 | is-docker | 0.2.0 | MIT | https://crates.io/crates/is-docker |
 | is-wsl | 0.4.0 | MIT | https://crates.io/crates/is-wsl |
 | is_terminal_polyfill | 1.70.2 | MIT, Apache-2.0 | https://crates.io/crates/is_terminal_polyfill |
@@ -512,7 +514,6 @@ This section is a review prompt for binary distribution; it does not replace leg
 | jni-sys-macros | 0.4.1 | MIT, Apache-2.0 | https://crates.io/crates/jni-sys-macros |
 | jobserver | 0.1.34 | MIT, Apache-2.0 | https://crates.io/crates/jobserver |
 | js-sys | 0.3.99 | MIT, Apache-2.0 | https://crates.io/crates/js-sys |
-| jsonrpcmsg | 0.1.2 | MIT, Apache-2.0 | https://crates.io/crates/jsonrpcmsg |
 | keccak | 0.2.0 | Apache-2.0, MIT | https://crates.io/crates/keccak |
 | kem | 0.3.0 | Apache-2.0, MIT | https://crates.io/crates/kem |
 | keyring | 3.6.3 | MIT, Apache-2.0 | https://crates.io/crates/keyring |
@@ -604,6 +605,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | num-complex | 0.4.6 | MIT, Apache-2.0 | https://crates.io/crates/num-complex |
 | num-conv | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/num-conv |
 | num-derive | 0.4.2 | MIT, Apache-2.0 | https://crates.io/crates/num-derive |
+| num-derive | 0.5.1 | MIT, Apache-2.0 | https://crates.io/crates/num-derive |
 | num-integer | 0.1.46 | MIT, Apache-2.0 | https://crates.io/crates/num-integer |
 | num-iter | 0.1.45 | MIT, Apache-2.0 | https://crates.io/crates/num-iter |
 | num-rational | 0.4.2 | MIT, Apache-2.0 | https://crates.io/crates/num-rational |
@@ -642,6 +644,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | objc2-service-management | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-service-management |
 | object | 0.37.3 | Apache-2.0, MIT | https://crates.io/crates/object |
 | object | 0.39.1 | Apache-2.0, MIT | https://crates.io/crates/object |
+| ocb3 | 0.1.0 | Apache-2.0, MIT | https://crates.io/crates/ocb3 |
 | oid | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/oid |
 | once_cell | 1.21.4 | MIT, Apache-2.0 | https://crates.io/crates/once_cell |
 | once_cell_polyfill | 1.70.2 | MIT, Apache-2.0 | https://crates.io/crates/once_cell_polyfill |
@@ -681,7 +684,6 @@ This section is a review prompt for binary distribution; it does not replace leg
 | pathfinder_simd | 0.5.6 | MIT, Apache-2.0 | https://crates.io/crates/pathfinder_simd |
 | pbkdf2 | 0.12.2 | MIT, Apache-2.0 | https://crates.io/crates/pbkdf2 |
 | pbkdf2 | 0.13.0 | MIT, Apache-2.0 | https://crates.io/crates/pbkdf2 |
-| pem-rfc7468 | 0.7.0 | Apache-2.0, MIT | https://crates.io/crates/pem-rfc7468 |
 | pem-rfc7468 | 1.0.0 | Apache-2.0, MIT | https://crates.io/crates/pem-rfc7468 |
 | percent-encoding | 2.3.2 | MIT, Apache-2.0 | https://crates.io/crates/percent-encoding |
 | phf | 0.11.3 | MIT | https://crates.io/crates/phf |
@@ -736,6 +738,8 @@ This section is a review prompt for binary distribution; it does not replace leg
 | profiling-procmacros | 1.0.17 | MIT, Apache-2.0 | https://crates.io/crates/profiling-procmacros |
 | proptest | 1.11.0 | MIT, Apache-2.0 | https://crates.io/crates/proptest |
 | proptest-macro | 0.5.0 | MIT, Apache-2.0 | https://crates.io/crates/proptest-macro |
+| prost | 0.14.4 | Apache-2.0 | https://crates.io/crates/prost |
+| prost-derive | 0.14.4 | Apache-2.0 | https://crates.io/crates/prost-derive |
 | psm | 0.1.31 | MIT, Apache-2.0 | https://crates.io/crates/psm |
 | pulldown-cmark | 0.12.2 | MIT | https://crates.io/crates/pulldown-cmark |
 | pulldown-cmark-escape | 0.11.0 | MIT | https://crates.io/crates/pulldown-cmark-escape |
@@ -798,6 +802,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | rfc6979 | 0.6.0-pre.0 | Apache-2.0, MIT | https://crates.io/crates/rfc6979 |
 | rgb | 0.8.53 | MIT | https://crates.io/crates/rgb |
 | ring | 0.17.14 | Apache-2.0, ISC | https://crates.io/crates/ring |
+| rmcp | 3.1.2 | Apache-2.0 | https://crates.io/crates/rmcp |
 | rmp | 0.8.15 | MIT | https://crates.io/crates/rmp |
 | rmp-serde | 1.3.1 | MIT | https://crates.io/crates/rmp-serde |
 | rodio | 0.21.1 | MIT, Apache-2.0 | https://crates.io/crates/rodio |
@@ -829,6 +834,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | rusty-fork | 0.3.1 | MIT, Apache-2.0 | https://crates.io/crates/rusty-fork |
 | rustybuzz | 0.20.1 | MIT | https://crates.io/crates/rustybuzz |
 | ryu | 1.0.23 | Apache-2.0, BSL-1.0 | https://crates.io/crates/ryu |
+| safe_arch | 0.7.4 | Zlib, Apache-2.0, MIT | https://crates.io/crates/safe_arch |
 | safe_arch | 0.9.3 | Zlib, Apache-2.0, MIT | https://crates.io/crates/safe_arch |
 | safe_arch | 1.1.0 | Zlib, Apache-2.0, MIT | https://crates.io/crates/safe_arch |
 | salsa20 | 0.11.0 | MIT, Apache-2.0 | https://crates.io/crates/salsa20 |
@@ -864,9 +870,9 @@ This section is a review prompt for binary distribution; it does not replace leg
 | serde_urlencoded | 0.7.1 | MIT, Apache-2.0 | https://crates.io/crates/serde_urlencoded |
 | serde_with | 3.21.0 | MIT, Apache-2.0 | https://crates.io/crates/serde_with |
 | serde_with_macros | 3.21.0 | MIT, Apache-2.0 | https://crates.io/crates/serde_with_macros |
+| serde_yaml | 0.9.34+deprecated | MIT, Apache-2.0 | https://crates.io/crates/serde_yaml |
 | serialport | 4.9.0 | MPL-2.0 | https://crates.io/crates/serialport |
 | servo_arc | 0.4.3 | MIT, Apache-2.0 | https://crates.io/crates/servo_arc |
-| sha1 | 0.10.6 | MIT, Apache-2.0 | https://crates.io/crates/sha1 |
 | sha1 | 0.11.0 | MIT, Apache-2.0 | https://crates.io/crates/sha1 |
 | sha1_smol | 1.0.1 | BSD-3-Clause | https://crates.io/crates/sha1_smol |
 | sha2 | 0.10.9 | MIT, Apache-2.0 | https://crates.io/crates/sha2 |
@@ -897,6 +903,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | spki | 0.7.3 | Apache-2.0, MIT | https://crates.io/crates/spki |
 | spki | 0.8.0 | Apache-2.0, MIT | https://crates.io/crates/spki |
 | sponge-cursor | 0.1.0 | MIT, Apache-2.0 | https://crates.io/crates/sponge-cursor |
+| sse-stream | 0.2.5 | MIT, Apache-2.0 | https://crates.io/crates/sse-stream |
 | ssh-cipher | 0.3.0-rc.9 | Apache-2.0, MIT | https://crates.io/crates/ssh-cipher |
 | ssh-encoding | 0.3.0-rc.9 | Apache-2.0, MIT | https://crates.io/crates/ssh-encoding |
 | ssh-key | 0.7.0-rc.10 | Apache-2.0, MIT | https://crates.io/crates/ssh-key |
@@ -934,6 +941,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | symphonia-utils-xiph | 0.5.5 | MPL-2.0 | https://crates.io/crates/symphonia-utils-xiph |
 | syn | 1.0.109 | MIT, Apache-2.0 | https://crates.io/crates/syn |
 | syn | 2.0.117 | MIT, Apache-2.0 | https://crates.io/crates/syn |
+| syn | 3.0.3 | MIT, Apache-2.0 | https://crates.io/crates/syn |
 | sync_wrapper | 1.0.2 | Apache-2.0 | https://crates.io/crates/sync_wrapper |
 | synstructure | 0.13.2 | MIT | https://crates.io/crates/synstructure |
 | syntect | 5.3.0 | MIT | https://crates.io/crates/syntect |
@@ -970,6 +978,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | tokio-macros | 2.7.0 | MIT | https://crates.io/crates/tokio-macros |
 | tokio-native-tls | 0.3.1 | MIT | https://crates.io/crates/tokio-native-tls |
 | tokio-rustls | 0.26.4 | MIT, Apache-2.0 | https://crates.io/crates/tokio-rustls |
+| tokio-stream | 0.1.18 | MIT | https://crates.io/crates/tokio-stream |
 | tokio-util | 0.7.18 | MIT | https://crates.io/crates/tokio-util |
 | toml | 0.8.23 | MIT, Apache-2.0 | https://crates.io/crates/toml |
 | toml | 1.1.2+spec-1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/toml |
@@ -1049,6 +1058,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | unicode-xid | 0.2.6 | MIT, Apache-2.0 | https://crates.io/crates/unicode-xid |
 | universal-hash | 0.5.1 | MIT, Apache-2.0 | https://crates.io/crates/universal-hash |
 | universal-hash | 0.6.1 | MIT, Apache-2.0 | https://crates.io/crates/universal-hash |
+| unsafe-libyaml | 0.2.11 | MIT | https://crates.io/crates/unsafe-libyaml |
 | untrusted | 0.7.1 | ISC | https://crates.io/crates/untrusted |
 | untrusted | 0.9.0 | ISC | https://crates.io/crates/untrusted |
 | url | 2.5.8 | MIT, Apache-2.0 | https://crates.io/crates/url |
@@ -1065,6 +1075,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | version_check | 0.9.5 | MIT, Apache-2.0 | https://crates.io/crates/version_check |
 | vswhom | 0.1.0 | MIT | https://crates.io/crates/vswhom |
 | vswhom-sys | 0.1.3 | MIT | https://crates.io/crates/vswhom-sys |
+| vt100 | 0.16.2 | MIT | https://crates.io/crates/vt100 |
 | vte | 0.15.0 | Apache-2.0, MIT | https://crates.io/crates/vte |
 | wait-timeout | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/wait-timeout |
 | waker-fn | 1.2.0 | Apache-2.0, MIT | https://crates.io/crates/waker-fn |
@@ -1120,6 +1131,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | wgpu-types | 29.0.4 | MIT, Apache-2.0 | https://crates.io/crates/wgpu-types |
 | which | 6.0.3 | MIT | https://crates.io/crates/which |
 | whoami | 1.6.1 | Apache-2.0, BSL-1.0, MIT | https://crates.io/crates/whoami |
+| wide | 0.7.33 | Zlib, Apache-2.0, MIT | https://crates.io/crates/wide |
 | wide | 0.8.3 | Zlib, Apache-2.0, MIT | https://crates.io/crates/wide |
 | wide | 1.5.0 | Zlib, Apache-2.0, MIT | https://crates.io/crates/wide |
 | widestring | 1.2.1 | MIT, Apache-2.0 | https://crates.io/crates/widestring |
@@ -1217,7 +1229,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | x11rb | 0.13.2 | MIT, Apache-2.0 | https://crates.io/crates/x11rb |
 | x11rb-protocol | 0.13.2 | MIT, Apache-2.0 | https://crates.io/crates/x11rb-protocol |
 | x25519-dalek | 3.0.0-rc.1 | BSD-3-Clause | https://crates.io/crates/x25519-dalek |
-| x509-cert | 0.2.5 | Apache-2.0, MIT | https://crates.io/crates/x509-cert |
+| x509-cert | 0.3.0 | Apache-2.0, MIT | https://crates.io/crates/x509-cert |
 | xattr | 1.6.1 | MIT, Apache-2.0 | https://crates.io/crates/xattr |
 | xcursor | 0.3.10 | MIT | https://crates.io/crates/xcursor |
 | xim-ctext | 0.3.0 | MIT | https://crates.io/crates/xim-ctext |

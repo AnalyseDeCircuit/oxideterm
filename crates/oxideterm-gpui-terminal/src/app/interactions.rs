@@ -201,10 +201,44 @@ impl TerminalPane {
     }
 
     pub fn handle_unfocused_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
+        if self.focused {
+            // Focused printable input is committed by the platform input
+            // handler after keydown; forwarding it here would duplicate text.
+            return false;
+        }
+
         // Workspace can temporarily own focus while the terminal pane remains
         // the visible active shell. Reuse the pane encoder so Tab, Backspace,
         // and other protocol keys keep the same behavior as focused input.
-        self.handle_key(event, cx)
+        if self.handle_key(event, cx) {
+            return true;
+        }
+
+        let modifiers = event.keystroke.modifiers;
+        if modifiers.platform || modifiers.control || modifiers.alt {
+            return false;
+        }
+
+        // Printable text normally arrives through the focused platform input
+        // handler. Forward its key text explicitly when Workspace temporarily
+        // owns focus, while leaving shortcuts and IME composition untouched.
+        if let Some(text) = event
+            .keystroke
+            .key_char
+            .as_deref()
+            .filter(|text| !text.is_empty() && !text.chars().any(char::is_control))
+        {
+            self.commit_text(text, cx);
+            return true;
+        }
+
+        // Some platforms omit key_char for an unmodified Space key.
+        if matches!(event.keystroke.key.as_str(), "space" | " ") {
+            self.commit_text(" ", cx);
+            return true;
+        }
+
+        false
     }
 
     pub(crate) fn handle_key_up(&mut self, event: &KeyUpEvent, cx: &mut Context<Self>) {

@@ -246,7 +246,8 @@ fn default_detect_file_paths_as_links() -> bool {
 }
 
 fn default_terminal_semantic_coloring() -> bool {
-    true
+    // Semantic coloring is opt-in because it changes application-provided terminal output.
+    false
 }
 
 fn default_confirm_before_closing_ssh() -> bool {
@@ -441,7 +442,7 @@ impl Default for TerminalSettings {
             background_fit: BackgroundFit::Cover,
             background_scope: BackgroundScope::Content,
             background_enabled_tabs: vec!["terminal".to_string(), "local_terminal".to_string()],
-            semantic_coloring: true,
+            semantic_coloring: false,
             semantic_scheme: TerminalSemanticScheme::default(),
             semantic_custom_scheme: None,
             custom_semantic_schemes: Vec::new(),
@@ -486,7 +487,7 @@ mod tests {
             ),
             ("fontLigatures", false, |settings| settings.font_ligatures),
             ("rightClickPaste", false, |settings| settings.right_click_paste),
-            ("semanticColoring", true, |settings| {
+            ("semanticColoring", false, |settings| {
                 settings.semantic_coloring
             }),
         ];

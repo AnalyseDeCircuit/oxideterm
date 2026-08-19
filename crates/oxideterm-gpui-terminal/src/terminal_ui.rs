@@ -171,7 +171,8 @@ impl Default for TerminalUiPreferences {
             right_click_paste: TERMINAL_RIGHT_CLICK_PASTE,
             open_links_with_modifier: TERMINAL_OPEN_LINKS_WITH_MODIFIER,
             detect_file_paths_as_links: TERMINAL_DETECT_FILE_PATHS_AS_LINKS,
-            semantic_coloring: true,
+            // Match persisted settings so standalone terminal views remain opt-in as well.
+            semantic_coloring: false,
             semantic_scheme: resolved_terminal_semantic_scheme(
                 TerminalSemanticScheme::default(),
                 None,
