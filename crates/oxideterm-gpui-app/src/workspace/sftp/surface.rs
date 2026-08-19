@@ -350,13 +350,13 @@ impl WorkspaceApp {
                                 cx.entity(),
                             )),
                     )
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(px(SFTP_TEXT_10))
-                            .text_color(rgb(theme.text_muted))
-                            .child(path),
-                    ),
+                    .child(self.render_sftp_sidebar_path_bar(
+                        &path,
+                        &snapshot.remote.path_input,
+                        snapshot.remote.path_editing,
+                        snapshot.focused_input,
+                        cx,
+                    )),
             )
             .child(self.render_sftp_filter(
                 SftpPane::Remote,
@@ -375,7 +375,100 @@ impl WorkspaceApp {
             // sidebar without being clipped by the sidebar scroll region.
             root = root.child(self.render_sftp_context_menu(menu, window, false, cx));
         }
+        if !dialog_open
+            && snapshot.focused_input == Some(SftpInput::RemotePath)
+            && let Some(completion) =
+                self.render_path_completion_overlay(PathCompletionOwner::SftpRemote, cx)
+        {
+            root = root.child(completion);
+        }
         root.into_any_element()
+    }
+
+    fn render_sftp_sidebar_path_bar(
+        &self,
+        path: &str,
+        path_input: &str,
+        editing: bool,
+        focused_input: Option<SftpInput>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let focused = focused_input == Some(SftpInput::RemotePath);
+        let mut path_bar = div()
+            .id("sftp-sidebar-path-input")
+            .w_full()
+            .min_w(px(0.0))
+            .h(px(24.0))
+            .flex()
+            .items_center()
+            .gap_1()
+            .px_2()
+            .rounded(px(self.tokens.radii.sm))
+            .border_1()
+            .border_color(if focused {
+                rgb(theme.accent)
+            } else {
+                rgb(theme.border)
+            })
+            .bg(rgb(theme.bg_sunken));
+
+        if editing {
+            // The sidebar uses one compact text field instead of the full breadcrumb row.
+            path_bar = path_bar
+                .child(self.render_sftp_inline_text(
+                    SftpInput::RemotePath,
+                    Some(SftpPane::Remote),
+                    path_input,
+                    "sftp.file_list.path_placeholder",
+                    focused,
+                    cx,
+                ))
+                .child(
+                    div()
+                        .flex_none()
+                        .size(px(16.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(self.tokens.radii.sm))
+                        .cursor_pointer()
+                        .hover(move |button| button.bg(rgb(theme.bg_hover)))
+                        .child(Self::render_lucide_icon(
+                            LucideIcon::CornerDownLeft,
+                            SFTP_ICON_SM,
+                            rgb(theme.text),
+                        ))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.commit_sftp_path_input(SftpPane::Remote, cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                );
+        } else {
+            path_bar = path_bar
+                .cursor(CursorStyle::IBeam)
+                .child(
+                    div()
+                        .min_w(px(0.0))
+                        .truncate()
+                        .text_size(px(SFTP_TEXT_10))
+                        .text_color(rgb(theme.text_muted))
+                        .child(path.to_string()),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, window, cx| {
+                        window.focus(&this.focus_handle, cx);
+                        this.start_sftp_path_edit(SftpPane::Remote, cx);
+                        cx.stop_propagation();
+                    }),
+                );
+        }
+
+        path_bar.into_any_element()
     }
 
     pub(in crate::workspace) fn render_sftp_surface(
