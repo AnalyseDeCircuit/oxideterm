@@ -797,6 +797,9 @@ pub struct MoshProfile {
     pub ssh_port: u16,
     pub username: String,
     pub auth: SavedAuth,
+    /// The SSH bootstrap may traverse jump hosts; the Mosh UDP session remains direct.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proxy_chain: Vec<SavedProxyHop>,
     #[serde(default = "default_mosh_server_executable")]
     pub server_executable: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -836,6 +839,7 @@ pub struct SaveMoshProfileRequest {
     pub ssh_port: u16,
     pub username: String,
     pub auth: SavedAuth,
+    pub proxy_chain: Vec<SavedProxyHop>,
     pub server_executable: String,
     pub udp_host_override: Option<String>,
     pub udp_port: MoshUdpPortSelection,
@@ -849,6 +853,7 @@ pub struct SaveMoshProfileRequest {
 /// Carries a newly saved Mosh auth secret directly into one bootstrap attempt.
 pub struct SavedMoshProfileRuntimeSecrets {
     pub auth: Option<SecretString>,
+    pub proxy_chain: Vec<Option<SecretString>>,
 }
 
 impl fmt::Debug for SavedMoshProfileRuntimeSecrets {
@@ -856,6 +861,14 @@ impl fmt::Debug for SavedMoshProfileRuntimeSecrets {
         formatter
             .debug_struct("SavedMoshProfileRuntimeSecrets")
             .field("auth", &self.auth.as_ref().map(|_| "[redacted secret]"))
+            .field(
+                "proxy_chain",
+                &self
+                    .proxy_chain
+                    .iter()
+                    .map(|secret| secret.as_ref().map(|_| "[redacted secret]"))
+                    .collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
@@ -1296,6 +1309,7 @@ impl MoshProfile {
             ssh_port,
             username: username.into(),
             auth,
+            proxy_chain: Vec::new(),
             server_executable: default_mosh_server_executable(),
             udp_host_override: None,
             udp_port: MoshUdpPortSelection::Automatic,

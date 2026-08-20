@@ -3,7 +3,7 @@ use std::fmt;
 use oxideterm_connections::{
     AuthType, ConnectionInfo, ConnectionTerminalOptions, ConnectionX11ForwardingOptions,
     DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS, MoshIpFamily, MoshPredictionMode, MoshProfile,
-    MoshUdpPortSelection, RemoteDesktopProfile, SavedAuth, SavedConnection,
+    MoshUdpPortSelection, RemoteDesktopProfile, SavedAuth, SavedConnection, SavedProxyHop,
     SavedUpstreamProxyProtocol, SerialProfile, StandaloneSftpTransferMode, TelnetProfile,
     TransportUsernameTransition, transport_port_replacement, transport_username_transition,
 };
@@ -424,6 +424,30 @@ impl NewConnectionProxyHop {
         }
     }
 
+    pub(in crate::workspace) fn from_saved(
+        persisted_proxy_hop_index: usize,
+        hop: &SavedProxyHop,
+    ) -> Self {
+        // Reopen only route metadata; protected credentials stay in their current owner.
+        Self {
+            saved_connection_id: String::new(),
+            persisted_proxy_hop_index: Some(persisted_proxy_hop_index),
+            host: hop.host.clone(),
+            port: hop.port.to_string(),
+            username: hop.username.clone(),
+            auth_tab: ssh_auth_tab_from_saved_auth(&hop.auth),
+            password: String::new(),
+            key_path: hop.auth.key_path().unwrap_or_default().to_string(),
+            managed_key_id: hop.auth.managed_key_id().unwrap_or_default().to_string(),
+            cert_path: hop.auth.cert_path().unwrap_or_default().to_string(),
+            passphrase: String::new(),
+            agent_forwarding: hop.agent_forwarding,
+            identity_agent: hop.identity_agent.clone().unwrap_or_default(),
+            agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
+            legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+        }
+    }
+
     pub(in crate::workspace) fn complete(&self) -> bool {
         !self.host.trim().is_empty() && !self.username.trim().is_empty()
     }
@@ -725,6 +749,8 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) proxy_hops: Vec<NewConnectionProxyHop>,
     pub(in crate::workspace) proxy_chain_expanded: bool,
     pub(in crate::workspace) jump_server_form: Option<NewConnectionProxyHop>,
+    /// Identifies a hop temporarily moved into the editor so cancel can restore it in place.
+    pub(in crate::workspace) jump_server_edit_index: Option<usize>,
     /// Selects which independently owned endpoint receives the pending jump host.
     pub(in crate::workspace) jump_server_target: ConnectionRouteTarget,
     pub(in crate::workspace) upstream_proxy_policy: NewConnectionUpstreamProxyPolicy,
@@ -882,6 +908,7 @@ impl fmt::Debug for NewConnectionForm {
             .field("proxy_hops", &self.proxy_hops)
             .field("proxy_chain_expanded", &self.proxy_chain_expanded)
             .field("jump_server_form", &self.jump_server_form)
+            .field("jump_server_edit_index", &self.jump_server_edit_index)
             .field("upstream_proxy_policy", &self.upstream_proxy_policy)
             .field("upstream_proxy_protocol", &self.upstream_proxy_protocol)
             .field("upstream_proxy_host", &self.upstream_proxy_host)
@@ -1000,6 +1027,7 @@ impl Default for NewConnectionForm {
             proxy_hops: Vec::new(),
             proxy_chain_expanded: false,
             jump_server_form: None,
+            jump_server_edit_index: None,
             jump_server_target: ConnectionRouteTarget::Primary,
             upstream_proxy_policy: NewConnectionUpstreamProxyPolicy::UseGlobal,
             upstream_proxy_protocol: SavedUpstreamProxyProtocol::Socks5,
@@ -1146,6 +1174,13 @@ pub(in crate::workspace) fn form_from_mosh_profile(
     form.agent_available =
         oxideterm_ssh::ssh_agent_available(identity_agent_selector(&form.identity_agent));
     form.legacy_ssh_compatibility = profile.legacy_ssh_compatibility;
+    form.proxy_hops = profile
+        .proxy_chain
+        .iter()
+        .enumerate()
+        .map(|(index, hop)| NewConnectionProxyHop::from_saved(index, hop))
+        .collect();
+    form.proxy_chain_expanded = !form.proxy_hops.is_empty();
     form.mosh_server_executable = profile.server_executable.clone();
     form.mosh_udp_host = profile.udp_host_override.clone().unwrap_or_default();
     form.mosh_udp_port = match profile.udp_port {
@@ -2057,8 +2092,8 @@ mod tests {
     use gpui::{Keystroke, Modifiers};
     use oxideterm_connections::{
         AuthType, ConnectionInfo, MoshIpFamily, MoshPredictionMode, MoshProfile,
-        MoshUdpPortSelection, RemoteDesktopProfile, SavedAuth, SavedUpstreamProxyPolicy,
-        SerialFlowControl, SerialParity, SerialProfile, TelnetProfile,
+        MoshUdpPortSelection, RemoteDesktopProfile, SavedAuth, SavedProxyHop,
+        SavedUpstreamProxyPolicy, SerialFlowControl, SerialParity, SerialProfile, TelnetProfile,
     };
     use oxideterm_remote_desktop::{
         RemoteDesktopAudioOptions, RemoteDesktopClipboardOptions, RemoteDesktopDisplayOptions,
@@ -2264,6 +2299,16 @@ mod tests {
         profile.ip_family = MoshIpFamily::Ipv4;
         profile.prediction = MoshPredictionMode::Always;
         profile.locale = Some("en_US.UTF-8".to_string());
+        profile.proxy_chain.push(SavedProxyHop {
+            host: "jump.example.com".to_string(),
+            port: 2200,
+            username: "jump".to_string(),
+            auth: SavedAuth::Agent,
+            agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
+            legacy_ssh_compatibility: false,
+        });
 
         let form = form_from_mosh_profile(&profile, "Ungrouped".to_string());
 
@@ -2290,6 +2335,10 @@ mod tests {
         );
         assert!(form.save_password);
         assert!(form.password.is_empty());
+        assert!(form.proxy_chain_expanded);
+        assert_eq!(form.proxy_hops.len(), 1);
+        assert_eq!(form.proxy_hops[0].host, "jump.example.com");
+        assert_eq!(form.proxy_hops[0].persisted_proxy_hop_index, Some(0));
     }
 
     #[test]

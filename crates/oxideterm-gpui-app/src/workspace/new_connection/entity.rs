@@ -572,18 +572,26 @@ impl ConnectionFlowEntity {
         self.jump_server_exit_task = None;
         let commit = std::mem::take(&mut self.form.jump_server_exit_commits);
         if let Some(form) = self.form.form.as_mut() {
-            if commit {
-                if let Some(jump_server) = form.jump_server_form.take() {
-                    match form.jump_server_target {
-                        super::ConnectionRouteTarget::Primary => {
-                            form.proxy_hops.push(jump_server);
-                            form.proxy_chain_expanded = true;
-                        }
-                        super::ConnectionRouteTarget::StandaloneSftpSecondary => {
-                            form.standalone_sftp_secondary.proxy_hops.push(jump_server);
-                            form.standalone_sftp_secondary.proxy_chain_expanded = true;
-                        }
+            if let Some(jump_server) = form.jump_server_form.take() {
+                let edit_index = form.jump_server_edit_index.take();
+                let proxy_hops = match form.jump_server_target {
+                    super::ConnectionRouteTarget::Primary => {
+                        form.proxy_chain_expanded = true;
+                        &mut form.proxy_hops
                     }
+                    super::ConnectionRouteTarget::StandaloneSftpSecondary => {
+                        form.standalone_sftp_secondary.proxy_chain_expanded = true;
+                        &mut form.standalone_sftp_secondary.proxy_hops
+                    }
+                };
+                if let Some(index) = edit_index {
+                    // The existing hop is moved into the modal, so both save and cancel
+                    // restore it at its original position without duplicating secrets.
+                    proxy_hops.insert(index.min(proxy_hops.len()), jump_server);
+                } else if commit {
+                    proxy_hops.push(jump_server);
+                }
+                if commit {
                     if form.auth_tab == super::SshAuthTab::TwoFactor {
                         form.auth_tab = super::SshAuthTab::Password;
                         form.focused_field = super::NewConnectionField::Password;
@@ -592,8 +600,6 @@ impl ConnectionFlowEntity {
                     form.selected_field = None;
                     form.error = None;
                 }
-            } else {
-                form.jump_server_form = None;
             }
         }
         self.form.jump_server_presence.reopen();
@@ -1382,6 +1388,27 @@ mod tests {
             entity.form.replace_with_new_form(form);
 
             assert!(entity.begin_jump_server_form_exit(true, Duration::ZERO, cx));
+            let form = entity.form.form.as_ref().expect("retained connection form");
+            assert!(form.jump_server_form.is_none());
+            assert_eq!(form.proxy_hops.len(), 1);
+            assert_eq!(form.proxy_hops[0].host, "jump.example.test");
+        });
+    }
+
+    #[gpui::test]
+    fn cancelling_jump_server_edit_restores_the_original_hop(cx: &mut TestAppContext) {
+        let entity = cx.new(ConnectionFlowEntity::new);
+
+        entity.update(cx, |entity, cx| {
+            let mut form = NewConnectionForm::default();
+            let mut jump_server = NewConnectionProxyHop::new();
+            jump_server.host = "jump.example.test".to_string();
+            jump_server.username = "alice".to_string();
+            form.jump_server_form = Some(jump_server);
+            form.jump_server_edit_index = Some(0);
+            entity.form.replace_with_new_form(form);
+
+            assert!(entity.begin_jump_server_form_exit(false, Duration::ZERO, cx));
             let form = entity.form.form.as_ref().expect("retained connection form");
             assert!(form.jump_server_form.is_none());
             assert_eq!(form.proxy_hops.len(), 1);

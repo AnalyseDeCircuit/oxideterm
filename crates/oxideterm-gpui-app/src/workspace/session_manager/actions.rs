@@ -1245,6 +1245,7 @@ impl WorkspaceApp {
             return;
         };
         let mut form = form_from_saved_connection(&conn, None);
+        restore_legacy_jump_host_in_form(&mut form, &conn, &self.connection_store);
         form.name = duplicate_connection_template_name(
             &conn.name,
             self.connection_store

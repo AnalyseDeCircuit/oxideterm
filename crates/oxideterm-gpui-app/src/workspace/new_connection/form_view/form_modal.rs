@@ -1042,18 +1042,33 @@ impl WorkspaceApp {
                                         ))
                                 })
                                 .when(mosh_mode, |content| {
+                                    let route = div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(self.tokens.metrics.modal_section_gap))
+                                        .child(self.render_connection_hint(
+                                            self.i18n.t("mosh.form.jump_route_hint"),
+                                        ))
+                                        .child(self.render_proxy_chain_section(false, cx))
+                                        .into_any_element();
                                     let mosh_options = self.render_mosh_advanced_fields(
-                                            &form.mosh_server_executable,
-                                            &form.mosh_udp_host,
+                                        &form.mosh_server_executable,
+                                        &form.mosh_udp_host,
                                             &form.mosh_udp_port,
-                                            &form.mosh_locale,
-                                            cx,
-                                        );
-                                    content.child(self.render_connection_form_section(
-                                        ConnectionFormSection::MoshOptions,
-                                        mosh_options,
+                                        &form.mosh_locale,
                                         cx,
-                                    ))
+                                        );
+                                    content
+                                        .child(self.render_connection_form_section(
+                                            ConnectionFormSection::Route,
+                                            route,
+                                            cx,
+                                        ))
+                                        .child(self.render_connection_form_section(
+                                            ConnectionFormSection::MoshOptions,
+                                            mosh_options,
+                                            cx,
+                                        ))
                                 })
                                     })
                                     .when(shows_icon_field, |content| {

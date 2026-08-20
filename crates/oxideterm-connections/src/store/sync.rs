@@ -566,6 +566,10 @@ impl ConnectionStore {
                     if mosh_auth_target_matches(&profile.auth, &existing.auth) {
                         profile.auth = existing.auth.clone();
                     }
+                    preserve_proxy_chain_local_secrets(
+                        &mut profile.proxy_chain,
+                        &existing.proxy_chain,
+                    );
                     *existing = profile;
                     applied += 1;
                 }
@@ -762,6 +766,9 @@ fn build_mosh_profiles_sync_snapshot(
     let mut records = data.mosh_profiles.clone();
     for profile in &mut records {
         profile.auth = portable_mosh_auth(&profile.auth);
+        for hop in &mut profile.proxy_chain {
+            hop.auth = portable_mosh_auth(&hop.auth);
+        }
     }
     records.sort_by(|left, right| left.id.cmp(&right.id));
     let revision = sha256_hex(
@@ -886,6 +893,22 @@ fn mosh_auth_target_matches(left: &SavedAuth, right: &SavedAuth) -> bool {
             },
         ) => left_key == right_key && left_cert == right_cert,
         _ => false,
+    }
+}
+
+fn preserve_proxy_chain_local_secrets(
+    incoming_proxy_chain: &mut [SavedProxyHop],
+    existing_proxy_chain: &[SavedProxyHop],
+) {
+    for hop in incoming_proxy_chain {
+        if let Some(existing_hop) = existing_proxy_chain.iter().find(|candidate| {
+            candidate.host == hop.host
+                && candidate.port == hop.port
+                && candidate.username == hop.username
+                && mosh_auth_target_matches(&candidate.auth, &hop.auth)
+        }) {
+            hop.auth = existing_hop.auth.clone();
+        }
     }
 }
 
@@ -1253,8 +1276,22 @@ mod mosh_tests {
 
     #[test]
     fn mosh_snapshot_strips_device_local_credential_references() {
+        let mut profile = password_profile(Some("local-keychain-entry"));
+        profile.proxy_chain.push(SavedProxyHop {
+            host: "jump.example.test".to_string(),
+            port: 22,
+            username: "jump".to_string(),
+            auth: SavedAuth::Password {
+                keychain_id: Some("local-proxy-keychain-entry".to_string()),
+                plaintext_password: None,
+            },
+            agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
+            legacy_ssh_compatibility: false,
+        });
         let data = ConnectionStoreData {
-            mosh_profiles: vec![password_profile(Some("local-keychain-entry"))],
+            mosh_profiles: vec![profile],
             ..ConnectionStoreData::default()
         };
 
@@ -1270,6 +1307,7 @@ mod mosh_tests {
         ));
         let json = serde_json::to_string(&snapshot).expect("snapshot must serialize");
         assert!(!json.contains("local-keychain-entry"));
+        assert!(!json.contains("local-proxy-keychain-entry"));
     }
 
     #[test]
@@ -1279,11 +1317,27 @@ mod mosh_tests {
             uuid::Uuid::new_v4()
         ));
         let mut store = ConnectionStore::load(&path).expect("store must load");
-        let local = password_profile(Some("local-keychain-entry"));
+        let mut local = password_profile(Some("local-keychain-entry"));
+        local.proxy_chain.push(SavedProxyHop {
+            host: "jump.example.test".to_string(),
+            port: 22,
+            username: "jump".to_string(),
+            auth: SavedAuth::Password {
+                keychain_id: Some("local-proxy-keychain-entry".to_string()),
+                plaintext_password: None,
+            },
+            agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
+            legacy_ssh_compatibility: false,
+        });
         let mut incoming = local.clone();
         incoming.name = "Renamed mobile shell".to_string();
         incoming.updated_at = local.updated_at + chrono::Duration::seconds(1);
         incoming.auth = portable_mosh_auth(&incoming.auth);
+        for hop in &mut incoming.proxy_chain {
+            hop.auth = portable_mosh_auth(&hop.auth);
+        }
         store.data.mosh_profiles.push(local);
 
         let applied = store
@@ -1304,6 +1358,13 @@ mod mosh_tests {
                 plaintext_password: None
             } if keychain_id == "local-keychain-entry"
         ));
+        assert!(matches!(
+            &profile.proxy_chain[0].auth,
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                plaintext_password: None
+            } if keychain_id == "local-proxy-keychain-entry"
+        ));
         let _ = std::fs::remove_file(path);
     }
 
@@ -1312,10 +1373,12 @@ mod mosh_tests {
         let secret = "mosh-bootstrap-password";
         let runtime = SavedMoshProfileRuntimeSecrets {
             auth: Some(SecretString::from(secret)),
+            proxy_chain: vec![Some(SecretString::from("proxy-secret"))],
         };
 
         let debug = format!("{runtime:?}");
         assert!(!debug.contains(secret));
+        assert!(!debug.contains("proxy-secret"));
         assert!(debug.contains("redacted secret"));
     }
 }

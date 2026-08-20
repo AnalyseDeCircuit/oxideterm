@@ -410,6 +410,30 @@ fn save_profile(
         PublicSavedConnectionProfile::Mosh(profile) => {
             let existing_id = typed_existing_id(existing_key, CONNECTION_KEY_MOSH_PREFIX, "mosh")?;
             let existing = existing_id.and_then(|id| store.get_mosh_profile(id));
+            let proxy_chain = profile
+                .proxy_chain
+                .iter()
+                .enumerate()
+                .map(|(index, hop)| {
+                    let matching_hop = existing
+                        .and_then(|profile| profile.proxy_chain.get(index))
+                        .filter(|existing_hop| {
+                            existing_hop.host == hop.host.trim()
+                                && existing_hop.port == hop.port
+                                && existing_hop.username == hop.username.trim()
+                        });
+                    Ok(SavedProxyHop {
+                        host: hop.host.clone(),
+                        port: hop.port,
+                        username: hop.username.clone(),
+                        auth: saved_auth(&hop.auth, matching_hop.map(|hop| &hop.auth))?,
+                        agent_forwarding: hop.agent_forwarding,
+                        identity_agent: hop.identity_agent.clone(),
+                        agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
+                        legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
             let saved = store
                 .upsert_mosh_profile(SaveMoshProfileRequest {
                     id: existing_id.map(ToOwned::to_owned),
@@ -423,6 +447,7 @@ fn save_profile(
                     ssh_port: profile.ssh_port,
                     username: profile.username.clone(),
                     auth: saved_auth(&profile.auth, existing.map(|profile| &profile.auth))?,
+                    proxy_chain,
                     server_executable: profile.server_executable.clone(),
                     udp_host_override: profile.udp_host_override.clone(),
                     udp_port: match profile.udp_port {
@@ -763,12 +788,19 @@ fn store_credential(
             .map_err(public_store_error);
     }
     if let Some(id) = key.strip_prefix(CONNECTION_KEY_MOSH_PREFIX) {
-        if !matches!(slot, PublicCredentialSlot::Primary) {
-            return Err("Mosh exposes only its primary credential slot".to_owned());
+        return match slot {
+            PublicCredentialSlot::Primary => store.store_mosh_profile_credential(id, secret),
+            PublicCredentialSlot::ProxyHop { index } => store.store_mosh_proxy_hop_credential(
+                id,
+                usize::try_from(index)
+                    .map_err(|_| "The proxy hop index is outside the supported range")?,
+                secret,
+            ),
+            PublicCredentialSlot::UpstreamProxy => {
+                return Err("Mosh does not expose an upstream proxy credential slot".to_owned());
+            }
         }
-        return store
-            .store_mosh_profile_credential(id, secret)
-            .map_err(public_store_error);
+        .map_err(public_store_error);
     }
     if let Some(id) = key.strip_prefix(CONNECTION_KEY_DESKTOP_PREFIX) {
         if !matches!(slot, PublicCredentialSlot::Primary) {
@@ -793,12 +825,18 @@ fn forget_credential(
             .map_err(public_store_error);
     }
     if let Some(id) = key.strip_prefix(CONNECTION_KEY_MOSH_PREFIX) {
-        if !matches!(slot, PublicCredentialSlot::Primary) {
-            return Err("Mosh exposes only its primary credential slot".to_owned());
+        return match slot {
+            PublicCredentialSlot::Primary => store.forget_mosh_profile_credential(id),
+            PublicCredentialSlot::ProxyHop { index } => store.forget_mosh_proxy_hop_credential(
+                id,
+                usize::try_from(index)
+                    .map_err(|_| "The proxy hop index is outside the supported range")?,
+            ),
+            PublicCredentialSlot::UpstreamProxy => {
+                return Err("Mosh does not expose an upstream proxy credential slot".to_owned());
+            }
         }
-        return store
-            .forget_mosh_profile_credential(id)
-            .map_err(public_store_error);
+        .map_err(public_store_error);
     }
     if let Some(id) = key.strip_prefix(CONNECTION_KEY_DESKTOP_PREFIX) {
         if !matches!(slot, PublicCredentialSlot::Primary) {
@@ -851,7 +889,15 @@ fn credential_status(store: &oxideterm_connections::ConnectionStore, key: &str) 
     if let Some(id) = key.strip_prefix(CONNECTION_KEY_MOSH_PREFIX)
         && let Some(profile) = store.get_mosh_profile(id)
     {
-        return vec![auth_status("primary", None, &profile.auth)];
+        let mut slots = vec![auth_status("primary", None, &profile.auth)];
+        slots.extend(
+            profile
+                .proxy_chain
+                .iter()
+                .enumerate()
+                .map(|(index, hop)| auth_status("proxy_hop", u32::try_from(index).ok(), &hop.auth)),
+        );
+        return slots;
     }
     if let Some(id) = key.strip_prefix(CONNECTION_KEY_DESKTOP_PREFIX)
         && let Some(profile) = store.get_remote_desktop_profile(id)

@@ -399,9 +399,42 @@ pub(in crate::workspace) fn form_from_saved_connection(
     form.dedicated_new_terminal_connection = conn.options.dedicated_new_terminal_connection;
     form.x11_forwarding = conn.options.x11_forwarding;
     form.terminal = conn.options.terminal.clone();
+    // Every saved-connection form receives the complete non-secret route so
+    // edit, duplicate, prompt, and SSH-config entry points cannot diverge.
+    form.proxy_hops = conn
+        .proxy_chain
+        .iter()
+        .enumerate()
+        .map(|(index, hop)| NewConnectionProxyHop::from_saved(index, hop))
+        .collect();
+    form.proxy_chain_expanded = !form.proxy_hops.is_empty();
     form.save_connection = true;
     form.error = error;
     form
+}
+
+pub(in crate::workspace) fn restore_legacy_jump_host_in_form(
+    form: &mut NewConnectionForm,
+    connection: &SavedConnection,
+    store: &ConnectionStore,
+) {
+    if !form.proxy_hops.is_empty() {
+        return;
+    }
+    let Some(jump_id) = connection.options.jump_host.as_deref() else {
+        return;
+    };
+    let Some(jump) = store
+        .connection_infos()
+        .into_iter()
+        .find(|candidate| candidate.id == jump_id)
+    else {
+        return;
+    };
+    let mut hop = NewConnectionProxyHop::new();
+    hop.apply_saved_connection(&jump);
+    form.proxy_hops.push(hop);
+    form.proxy_chain_expanded = true;
 }
 
 pub(super) fn form_from_standalone_sftp_profile(
@@ -460,7 +493,7 @@ pub(super) fn form_from_standalone_sftp_profile(
         .proxy_chain
         .iter()
         .enumerate()
-        .map(|(index, hop)| proxy_hop_form_from_saved_proxy_hop(index, hop))
+        .map(|(index, hop)| NewConnectionProxyHop::from_saved(index, hop))
         .collect();
     form.proxy_chain_expanded = !form.proxy_hops.is_empty();
     form.proxy_command_enabled = profile.proxy_command.is_some();
@@ -528,7 +561,7 @@ pub(super) fn form_from_standalone_sftp_profile(
             .proxy_chain
             .iter()
             .enumerate()
-            .map(|(index, hop)| proxy_hop_form_from_saved_proxy_hop(index, hop))
+            .map(|(index, hop)| NewConnectionProxyHop::from_saved(index, hop))
             .collect();
         secondary.proxy_chain_expanded = !secondary.proxy_hops.is_empty();
         secondary.proxy_command_enabled = endpoint.proxy_command.is_some();
@@ -549,46 +582,6 @@ pub(super) fn form_from_standalone_sftp_profile(
     }
     form.focused_field = NewConnectionField::Name;
     form
-}
-
-pub(in crate::workspace) fn restore_saved_proxy_chain_in_form(
-    form: &mut NewConnectionForm,
-    connection: &SavedConnection,
-) {
-    // Edit forms retain only non-secret hop metadata plus an index back to the
-    // persisted owner; passwords and passphrases remain in the keychain.
-    form.proxy_hops = connection
-        .proxy_chain
-        .iter()
-        .enumerate()
-        .map(|(persisted_proxy_hop_index, hop)| {
-            proxy_hop_form_from_saved_proxy_hop(persisted_proxy_hop_index, hop)
-        })
-        .collect();
-    form.proxy_chain_expanded = !form.proxy_hops.is_empty();
-}
-
-fn proxy_hop_form_from_saved_proxy_hop(
-    persisted_proxy_hop_index: usize,
-    hop: &SavedProxyHop,
-) -> NewConnectionProxyHop {
-    NewConnectionProxyHop {
-        saved_connection_id: String::new(),
-        persisted_proxy_hop_index: Some(persisted_proxy_hop_index),
-        host: hop.host.clone(),
-        port: hop.port.to_string(),
-        username: hop.username.clone(),
-        auth_tab: ssh_auth_tab_from_saved_auth(&hop.auth),
-        password: String::new(),
-        key_path: hop.auth.key_path().unwrap_or_default().to_string(),
-        managed_key_id: hop.auth.managed_key_id().unwrap_or_default().to_string(),
-        cert_path: hop.auth.cert_path().unwrap_or_default().to_string(),
-        passphrase: String::new(),
-        agent_forwarding: hop.agent_forwarding,
-        identity_agent: hop.identity_agent.clone().unwrap_or_default(),
-        agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
-        legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
-    }
 }
 
 pub(super) fn connection_has_unloaded_keychain_password(conn: &SavedConnection) -> bool {

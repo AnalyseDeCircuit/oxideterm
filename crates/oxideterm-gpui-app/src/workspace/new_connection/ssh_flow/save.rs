@@ -390,9 +390,9 @@ fn runtime_mosh_auth_from_form(form: &mut NewConnectionForm) -> AuthMethod {
 
 fn runtime_mosh_auth_from_saved(
     auth: &SavedAuth,
-    secrets: SavedMoshProfileRuntimeSecrets,
+    secret: Option<SecretString>,
 ) -> Option<AuthMethod> {
-    let secret = secrets.auth.map(SecretString::into_zeroizing);
+    let secret = secret.map(SecretString::into_zeroizing);
     Some(match auth {
         SavedAuth::Password { .. } => AuthMethod::password_secret(secret?),
         SavedAuth::Key { key_path, .. } => AuthMethod::key_secret(key_path.clone(), secret),
@@ -406,6 +406,49 @@ fn runtime_mosh_auth_from_saved(
         } => AuthMethod::certificate_secret(key_path.clone(), cert_path.clone(), secret),
         SavedAuth::KeyboardInteractive => AuthMethod::KeyboardInteractive,
         SavedAuth::Agent => AuthMethod::Agent,
+    })
+}
+
+fn runtime_mosh_config_from_saved(
+    profile: &oxideterm_connections::MoshProfile,
+    mut secrets: SavedMoshProfileRuntimeSecrets,
+    auth_override: Option<AuthMethod>,
+) -> Option<SshConfig> {
+    if secrets.proxy_chain.len() != profile.proxy_chain.len() {
+        return None;
+    }
+    let auth = auth_override
+        .or_else(|| runtime_mosh_auth_from_saved(&profile.auth, secrets.auth.take()))?;
+    let proxy_chain = profile
+        .proxy_chain
+        .iter()
+        .zip(secrets.proxy_chain)
+        .map(|(hop, secret)| {
+            Some(ProxyHopConfig {
+                host: hop.host.clone(),
+                port: hop.port,
+                username: hop.username.clone(),
+                auth: runtime_mosh_auth_from_saved(&hop.auth, secret)?,
+                agent_forwarding: hop.agent_forwarding,
+                identity_agent: hop.identity_agent.clone(),
+                agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
+                legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+                strict_host_key_checking: true,
+                trust_host_key: None,
+                expected_host_key_fingerprint: None,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(SshConfig {
+        host: profile.host.clone(),
+        port: profile.ssh_port,
+        username: profile.username.clone(),
+        auth,
+        proxy_chain: (!proxy_chain.is_empty()).then_some(proxy_chain),
+        identity_agent: profile.identity_agent.clone(),
+        legacy_ssh_compatibility: profile.legacy_ssh_compatibility,
+        strict_host_key_checking: true,
+        ..SshConfig::default()
     })
 }
 
@@ -510,6 +553,107 @@ fn preserve_edited_proxy_hop_auth(
         request_hop.auth = persisted_hop.auth.clone();
     }
     Ok(())
+}
+
+fn auth_for_duplicate_owner(
+    connection_store: &ConnectionStore,
+    auth: SavedAuth,
+) -> anyhow::Result<SavedAuth> {
+    match auth {
+        SavedAuth::Password {
+            keychain_id: _,
+            plaintext_password: Some(password),
+        } => Ok(SavedAuth::Password {
+            keychain_id: None,
+            plaintext_password: Some(password),
+        }),
+        SavedAuth::Password {
+            keychain_id: Some(_),
+            plaintext_password: None,
+        } => connection_store.copy_saved_auth_for_new_owner(&auth),
+        SavedAuth::Key {
+            key_path,
+            has_passphrase,
+            plaintext_passphrase: Some(passphrase),
+            ..
+        } => Ok(SavedAuth::Key {
+            key_path,
+            has_passphrase,
+            passphrase_keychain_id: None,
+            plaintext_passphrase: Some(passphrase),
+        }),
+        SavedAuth::Certificate {
+            key_path,
+            cert_path,
+            has_passphrase,
+            plaintext_passphrase: Some(passphrase),
+            ..
+        } => Ok(SavedAuth::Certificate {
+            key_path,
+            cert_path,
+            has_passphrase,
+            passphrase_keychain_id: None,
+            plaintext_passphrase: Some(passphrase),
+        }),
+        SavedAuth::ManagedKey {
+            key_id,
+            plaintext_passphrase: Some(passphrase),
+            ..
+        } => Ok(SavedAuth::ManagedKey {
+            key_id,
+            passphrase_keychain_id: None,
+            plaintext_passphrase: Some(passphrase),
+        }),
+        SavedAuth::Key {
+            passphrase_keychain_id: Some(_),
+            ..
+        }
+        | SavedAuth::Certificate {
+            passphrase_keychain_id: Some(_),
+            ..
+        }
+        | SavedAuth::ManagedKey {
+            passphrase_keychain_id: Some(_),
+            ..
+        } => connection_store.copy_saved_auth_for_new_owner(&auth),
+        auth => Ok(auth),
+    }
+}
+
+fn upstream_proxy_for_duplicate_owner(
+    connection_store: &ConnectionStore,
+    policy: SavedUpstreamProxyPolicy,
+) -> anyhow::Result<SavedUpstreamProxyPolicy> {
+    let SavedUpstreamProxyPolicy::Custom { mut proxy } = policy else {
+        return Ok(policy);
+    };
+    if let SavedUpstreamProxyAuth::Password {
+        username,
+        keychain_id,
+        plaintext_password,
+    } = proxy.auth
+    {
+        let password = match plaintext_password {
+            Some(password) => Some(password),
+            None if keychain_id.is_some() => {
+                Some(connection_store.get_saved_upstream_proxy_password(
+                    &SavedUpstreamProxyAuth::Password {
+                        username: username.clone(),
+                        keychain_id,
+                        plaintext_password: None,
+                    },
+                )?)
+            }
+            None => None,
+        };
+        // The duplicate persists a fresh protected-store owner during upsert.
+        proxy.auth = SavedUpstreamProxyAuth::Password {
+            username,
+            keychain_id: None,
+            plaintext_password: password,
+        };
+    }
+    Ok(SavedUpstreamProxyPolicy::Custom { proxy })
 }
 
 fn proxy_hop_auth_target_matches(left: &SavedProxyHop, right: &SavedProxyHop) -> bool {
@@ -1418,6 +1562,11 @@ impl WorkspaceApp {
                 }
                 _ => {}
             }
+            if let Err(error) = validate_proxy_chain_form(form) {
+                form.error = Some(error);
+                cx.notify();
+                return None;
+            }
             let udp_port = match parse_mosh_udp_port(&form.mosh_udp_port) {
                 Ok(udp_port) => udp_port,
                 Err(_) => {
@@ -1452,12 +1601,27 @@ impl WorkspaceApp {
             let ssh_port = ssh_port.expect("validated Mosh SSH port must exist");
 
             if action == NewConnectionSubmitAction::Connect {
+                let saved_proxy_hop_auth = match saved_proxy_hop_auth_from_store(
+                    &this.connection_store,
+                    form,
+                    &this.i18n.t("sessions.saved_next_hop.missing_credentials"),
+                ) {
+                    Ok(auth) => auth,
+                    Err(error) => {
+                        form.error = Some(error);
+                        cx.notify();
+                        return None;
+                    }
+                };
+                let proxy_chain =
+                    proxy_chain_from_form(form, RuntimeSecretHandoff::Move, saved_proxy_hop_auth);
                 let auth = runtime_mosh_auth_from_form(form);
                 let config = SshConfig {
                     host,
                     port: ssh_port,
                     username,
                     auth,
+                    proxy_chain,
                     identity_agent: identity_agent_from_form(&form.identity_agent),
                     legacy_ssh_compatibility: form.legacy_ssh_compatibility,
                     strict_host_key_checking: true,
@@ -1476,6 +1640,50 @@ impl WorkspaceApp {
                 ));
             }
 
+            let existing_profile = form
+                .mosh_profile_id
+                .as_deref()
+                .and_then(|id| this.connection_store.get_mosh_profile(id))
+                .cloned();
+            let proxy_chain = match (|| -> anyhow::Result<Vec<SavedProxyHop>> {
+                let missing_credentials_message =
+                    this.i18n.t("sessions.saved_next_hop.missing_credentials");
+                let saved_auth_copies = saved_proxy_hop_auth_copies(
+                    &this.connection_store,
+                    &form.proxy_hops,
+                    &missing_credentials_message,
+                )?;
+                let edit_sources = form
+                    .proxy_hops
+                    .iter()
+                    .map(|hop| EditedProxyHopSource {
+                        persisted_proxy_hop_index: hop.persisted_proxy_hop_index,
+                        has_explicit_secret_draft: hop.has_explicit_secret_draft(),
+                    })
+                    .collect();
+                let mut proxy_chain = form
+                    .proxy_hops
+                    .iter_mut()
+                    .map(saved_standalone_sftp_proxy_hop_from_form)
+                    .collect::<anyhow::Result<Vec<_>>>()?;
+                preserve_edited_proxy_hop_auth(
+                    &mut proxy_chain,
+                    existing_profile
+                        .as_ref()
+                        .map_or(&[], |profile| profile.proxy_chain.as_slice()),
+                    edit_sources,
+                    saved_auth_copies,
+                    &missing_credentials_message,
+                )?;
+                Ok(proxy_chain)
+            })() {
+                Ok(proxy_chain) => proxy_chain,
+                Err(error) => {
+                    form.error = Some(error.to_string());
+                    cx.notify();
+                    return None;
+                }
+            };
             let auth_override = (action == NewConnectionSubmitAction::SaveAndConnect
                 && form.auth_tab == SshAuthTab::Password
                 && !mosh_password_draft_is_persistent(form))
@@ -1493,6 +1701,7 @@ impl WorkspaceApp {
                 ssh_port,
                 username,
                 auth,
+                proxy_chain,
                 server_executable,
                 udp_host_override: options.udp_host_override,
                 udp_port,
@@ -1546,8 +1755,7 @@ impl WorkspaceApp {
             return;
         }
 
-        let Some(auth) =
-            auth_override.or_else(|| runtime_mosh_auth_from_saved(&profile.auth, runtime_secrets))
+        let Some(config) = runtime_mosh_config_from_saved(&profile, runtime_secrets, auth_override)
         else {
             self.update_connection_form_state(cx, |state| {
                 if let Some(form) = state.form.as_mut() {
@@ -1557,16 +1765,6 @@ impl WorkspaceApp {
             });
             cx.notify();
             return;
-        };
-        let config = SshConfig {
-            host: profile.host.clone(),
-            port: profile.ssh_port,
-            username: profile.username.clone(),
-            auth,
-            identity_agent: profile.identity_agent.clone(),
-            legacy_ssh_compatibility: profile.legacy_ssh_compatibility,
-            strict_host_key_checking: true,
-            ..SshConfig::default()
         };
         let title = profile.name.clone();
         let options = mosh_options_from_profile(&profile);
@@ -2174,7 +2372,7 @@ impl WorkspaceApp {
         };
         self.prepare_modal_interaction_boundary(cx);
         let mut form = form_from_saved_connection(&conn, error);
-        restore_saved_proxy_chain_in_form(&mut form, &conn);
+        restore_legacy_jump_host_in_form(&mut form, &conn, &self.connection_store);
         self.update_connection_form_state(cx, |state| {
             state.replace_with_new_form(form);
             state.editing_saved_connection_id = Some(id.to_string());
@@ -2197,7 +2395,8 @@ impl WorkspaceApp {
             return;
         };
         self.prepare_modal_interaction_boundary(cx);
-        let form = form_from_saved_connection(&conn, error);
+        let mut form = form_from_saved_connection(&conn, error);
+        restore_legacy_jump_host_in_form(&mut form, &conn, &self.connection_store);
         self.update_connection_form_state(cx, |state| {
             state.replace_with_new_form(form);
             state.editing_saved_connection_id = Some(id.to_string());
@@ -2487,18 +2686,46 @@ impl WorkspaceApp {
         let Some(save_request) = self.with_connection_form_mut(cx, |this, form, _cx| {
             let form = form?;
             Some((|| {
+                let source_connection = source_connection
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Source connection is no longer available"))?;
+                let missing_credentials_message =
+                    this.i18n.t("sessions.saved_next_hop.missing_credentials");
+                let saved_auth_copies = saved_proxy_hop_auth_copies(
+                    &this.connection_store,
+                    &form.proxy_hops,
+                    &missing_credentials_message,
+                )?;
+                let edit_sources = form
+                    .proxy_hops
+                    .iter()
+                    .map(|hop| EditedProxyHopSource {
+                        persisted_proxy_hop_index: hop.persisted_proxy_hop_index,
+                        has_explicit_secret_draft: hop.has_explicit_secret_draft(),
+                    })
+                    .collect();
                 let mut request =
                     save_request_from_form_with_existing_auth(form, None, source_auth.as_ref())?;
-                if form.proxy_hops.is_empty()
-                    && let Some(connection) = source_connection.as_ref()
-                {
-                    // Preserve the source chain when it was not expanded for editing.
-                    request.proxy_chain = connection.proxy_chain.clone();
+                preserve_edited_proxy_hop_auth(
+                    &mut request.proxy_chain,
+                    &source_connection.proxy_chain,
+                    edit_sources,
+                    saved_auth_copies,
+                    &missing_credentials_message,
+                )?;
+                request.auth = auth_for_duplicate_owner(&this.connection_store, request.auth)?;
+                for hop in &mut request.proxy_chain {
+                    hop.auth = auth_for_duplicate_owner(
+                        &this.connection_store,
+                        std::mem::replace(&mut hop.auth, SavedAuth::Agent),
+                    )?;
                 }
+                request.upstream_proxy = upstream_proxy_for_duplicate_owner(
+                    &this.connection_store,
+                    request.upstream_proxy,
+                )?;
                 if request.proxy_command.is_some()
-                    && let Some(source_command) = source_connection
-                        .as_ref()
-                        .and_then(|connection| connection.proxy_command.as_ref())
+                    && let Some(source_command) = source_connection.proxy_command.as_ref()
                 {
                     // A duplicate receives a new protected-store owner instead of sharing an id.
                     request.proxy_command = Some(SavedProxyCommand {
@@ -2719,7 +2946,24 @@ impl WorkspaceApp {
         let Some(profile) = self.connection_store.get_mosh_profile(id).cloned() else {
             return;
         };
-        let Some(auth) = auth_method_from_saved_auth(&self.connection_store, &profile.auth) else {
+        let runtime_secrets = match self.connection_store.load_mosh_profile_runtime_secrets(id) {
+            Ok(secrets) => secrets,
+            Err(_) => {
+                self.open_saved_mosh_profile_editor(id, window, cx);
+                let missing_credentials = self
+                    .i18n
+                    .t("sessionManager.mosh_profiles.missing_credentials");
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.error = Some(missing_credentials);
+                        form.focused_field = NewConnectionField::Name;
+                        form.field_focused = false;
+                    }
+                });
+                return;
+            }
+        };
+        let Some(config) = runtime_mosh_config_from_saved(&profile, runtime_secrets, None) else {
             // Portable profiles intentionally omit credentials. Open the editor at the
             // matching secret field so the device-local value can be supplied safely.
             self.open_saved_mosh_profile_editor(id, window, cx);
@@ -2741,16 +2985,6 @@ impl WorkspaceApp {
                 }
             });
             return;
-        };
-        let config = SshConfig {
-            host: profile.host.clone(),
-            port: profile.ssh_port,
-            username: profile.username.clone(),
-            auth,
-            identity_agent: profile.identity_agent.clone(),
-            legacy_ssh_compatibility: profile.legacy_ssh_compatibility,
-            strict_host_key_checking: true,
-            ..SshConfig::default()
         };
         let title = profile.name.clone();
         let options = mosh_options_from_profile(&profile);
@@ -2775,7 +3009,7 @@ impl WorkspaceApp {
         let upstream_proxy = config.upstream_proxy.take();
         let worker_config = config;
         let worker_title = title;
-        let routed_standalone_sftp = worker_config
+        let routed_preflight = worker_config
             .proxy_chain
             .as_ref()
             .is_some_and(|chain| !chain.is_empty())
@@ -2784,14 +3018,15 @@ impl WorkspaceApp {
                 SshConnectionIntent::StandaloneSftp { .. }
                     | SshConnectionIntent::StandaloneSftpSecondary { .. }
                     | SshConnectionIntent::TestStandaloneSftp
+                    | SshConnectionIntent::Mosh(_)
             );
         let prompt_handler = Arc::new(NativeSshPromptHandler::new(tx.clone()));
         let managed_key_resolver = managed_key_resolver_from_store(&self.connection_store);
         std::thread::spawn(move || {
             let (checked_host, checked_port, status) = match tokio::runtime::Runtime::new() {
-                Ok(runtime) if routed_standalone_sftp => {
-                    // Routed preflight authenticates through the chain; retain the original
-                    // zeroizing config so the accepted connection can start afterwards.
+                Ok(runtime) if routed_preflight => {
+                    // Routed SFTP and Mosh preflight authenticate through every hop. The
+                    // bounded zeroizing copy survives only until the accepted launch starts.
                     let mut route_config = worker_config.clone();
                     route_config.upstream_proxy = upstream_proxy.clone();
                     runtime.block_on(
@@ -2912,6 +3147,38 @@ mod saved_connection_open_tests {
             } if password == "replacement-secret"
         ));
         assert!(form.password.is_empty());
+    }
+
+    #[test]
+    fn saved_mosh_proxy_chain_becomes_bootstrap_route() {
+        let mut profile = oxideterm_connections::MoshProfile::new(
+            "Mosh through jump",
+            "target.example.com",
+            22,
+            "ops",
+            SavedAuth::Agent,
+        );
+        profile.proxy_chain = vec![password_proxy_hop(SavedAuth::Password {
+            keychain_id: Some("jump-password-owner".to_string()),
+            plaintext_password: None,
+        })];
+
+        let config = runtime_mosh_config_from_saved(
+            &profile,
+            SavedMoshProfileRuntimeSecrets {
+                auth: None,
+                proxy_chain: vec![Some(SecretString::from("jump-password"))],
+            },
+            None,
+        )
+        .expect("Mosh bootstrap route");
+
+        assert_eq!(config.proxy_chain.as_ref().map(Vec::len), Some(1));
+        assert_eq!(
+            config.proxy_chain.as_ref().unwrap()[0].host,
+            "jump.example.com"
+        );
+        assert!(!format!("{config:?}").contains("jump-password"));
     }
 
     #[test]

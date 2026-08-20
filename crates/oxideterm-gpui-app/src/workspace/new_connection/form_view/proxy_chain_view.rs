@@ -1365,6 +1365,7 @@ impl WorkspaceApp {
                 this.update_connection_form_state(cx, |state| {
                     if let Some(form) = state.form.as_mut() {
                         form.jump_server_form = Some(NewConnectionProxyHop::new());
+                        form.jump_server_edit_index = None;
                         form.jump_server_target = if secondary {
                             ConnectionRouteTarget::StandaloneSftpSecondary
                         } else {
@@ -1519,7 +1520,16 @@ impl WorkspaceApp {
                                         .text_color(rgb(self.tokens.ui.text_muted))
                                         .child(format!("{}. {}", index + 1, hop_title)),
                                 )
-                                .child(self.render_remove_jump_button(index, secondary, cx)),
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .child(self.render_edit_jump_button(index, secondary, cx))
+                                        .child(
+                                            self.render_remove_jump_button(index, secondary, cx),
+                                        ),
+                                ),
                         )
                         .child(self.render_proxy_hop_line(
                             self.i18n.t("ssh.form.proxy_chain_host"),
@@ -1605,6 +1615,60 @@ impl WorkspaceApp {
                         }
                     }
                 });
+                cx.stop_propagation();
+                cx.notify();
+            },
+            cx,
+        )
+        .into_any_element()
+    }
+
+    fn render_edit_jump_button(
+        &self,
+        index: usize,
+        secondary: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.workspace_icon_action_button(
+            LucideIcon::Pencil,
+            14.0,
+            rgb(self.tokens.ui.text_muted),
+            IconButtonOptions {
+                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                ..IconButtonOptions::opaque_toolbar(24.0, ButtonRadius::Sm)
+            },
+            move |this, _event, window, cx| {
+                this.update_connection_form_state(cx, |state| {
+                    let Some(form) = state.form.as_mut() else {
+                        return;
+                    };
+                    let jump_server = {
+                        let proxy_hops = if secondary {
+                            &mut form.standalone_sftp_secondary.proxy_hops
+                        } else {
+                            &mut form.proxy_hops
+                        };
+                        if index >= proxy_hops.len() {
+                            return;
+                        }
+                        proxy_hops.remove(index)
+                    };
+                    // Move instead of clone so temporary secret drafts have one owner.
+                    form.jump_server_form = Some(jump_server);
+                    form.jump_server_edit_index = Some(index);
+                    form.jump_server_target = if secondary {
+                        ConnectionRouteTarget::StandaloneSftpSecondary
+                    } else {
+                        ConnectionRouteTarget::Primary
+                    };
+                    form.field_focused = true;
+                    form.focused_field = NewConnectionField::JumpHost;
+                    form.selected_field = None;
+                    state.jump_server_presence.reopen();
+                });
+                this.close_new_connection_select(cx);
+                this.show_active_input_caret(cx);
+                window.focus(&this.focus_handle, cx);
                 cx.stop_propagation();
                 cx.notify();
             },

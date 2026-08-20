@@ -1,4 +1,5 @@
 use super::*;
+use oxideterm_connections::SavedProxyHop;
 
 pub(super) fn base_form() -> NewConnectionForm {
     let mut form = NewConnectionForm::default();
@@ -208,9 +209,7 @@ pub(super) fn edit_properties_restores_proxy_chain_without_loading_secrets() {
         agent_forwarding_socket: Some("/tmp/proxy-forward.sock".to_string()),
         legacy_ssh_compatibility: true,
     }];
-    let mut form = form_from_saved_connection(&saved_connection, None);
-
-    restore_saved_proxy_chain_in_form(&mut form, &saved_connection);
+    let form = form_from_saved_connection(&saved_connection, None);
 
     assert!(form.proxy_chain_expanded);
     assert_eq!(form.proxy_hops.len(), 1);
@@ -245,7 +244,6 @@ pub(super) fn edit_properties_can_remove_the_entire_proxy_chain() {
         legacy_ssh_compatibility: false,
     }];
     let mut form = form_from_saved_connection(&saved_connection, None);
-    restore_saved_proxy_chain_in_form(&mut form, &saved_connection);
     form.proxy_hops.clear();
 
     let request = save_request_from_form_with_existing_auth(
