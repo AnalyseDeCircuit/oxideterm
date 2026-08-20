@@ -390,6 +390,14 @@ unsafe fn build_window_class(name: &'static str, superclass: &Class) -> *const C
             window_will_exit_fullscreen as extern "C" fn(&Object, Sel, id),
         );
         decl.add_method(
+            sel!(windowDidEnterFullScreen:),
+            window_did_change_fullscreen as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(windowDidExitFullScreen:),
+            window_did_change_fullscreen as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
             sel!(windowDidMove:),
             window_did_move as extern "C" fn(&Object, Sel, id),
         );
@@ -2340,6 +2348,13 @@ extern "C" fn window_will_exit_fullscreen(this: &Object, _: Sel, _: id) {
             lock.native_window.setTitlebarAppearsTransparent_(YES);
         }
     }
+}
+
+extern "C" fn window_did_change_fullscreen(this: &Object, _: Sel, _: id) {
+    let window_state = unsafe { get_window_state(this) };
+    // Notify bounds observers only after AppKit has finalized the fullscreen
+    // style mask, so persisted state cannot retain the previous transition state.
+    update_window_scale_factor(&window_state);
 }
 
 pub(crate) fn is_macos_version_at_least(version: NSOperatingSystemVersion) -> bool {

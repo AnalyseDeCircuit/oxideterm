@@ -605,6 +605,16 @@ impl WaylandWindowStatePtr {
         !state.children.is_empty()
     }
 
+    fn notify_window_state_changed(&self) {
+        let callback = self.callbacks.borrow_mut().moved.take();
+        if let Some(mut callback) = callback {
+            // Wayland owns global placement, but GPUI uses the moved callback
+            // to invalidate persisted window bounds and state together.
+            callback();
+            self.callbacks.borrow_mut().moved = Some(callback);
+        }
+    }
+
     pub fn frame(&self) {
         let mut state = self.state.borrow_mut();
         state.surface.frame(&state.globals.qh, state.surface.id());
@@ -624,6 +634,7 @@ impl WaylandWindowStatePtr {
 
     pub fn handle_xdg_surface_event(&self, event: xdg_surface::Event) {
         if let xdg_surface::Event::Configure { serial } = event {
+            let mut window_state_changed = false;
             {
                 let mut state = self.state.borrow_mut();
                 if let Some(window_controls) = state.in_progress_window_controls.take() {
@@ -641,18 +652,27 @@ impl WaylandWindowStatePtr {
 
                 if let Some(mut configure) = state.in_progress_configure.take() {
                     let got_unmaximized = state.maximized && !configure.maximized;
+                    window_state_changed = state.fullscreen != configure.fullscreen
+                        || state.maximized != configure.maximized;
                     state.fullscreen = configure.fullscreen;
                     state.maximized = configure.maximized;
                     state.tiling = configure.tiling;
                     // Limit interactive resizes to once per vblank
                     if configure.resizing && state.resize_throttle {
                         state.surface_state.ack_configure(serial);
+                        drop(state);
+                        if window_state_changed {
+                            self.notify_window_state_changed();
+                        }
                         return;
                     } else if configure.resizing {
                         state.resize_throttle = true;
                     }
                     if !configure.fullscreen && !configure.maximized {
-                        configure.size = if got_unmaximized {
+                        configure.size = if !state.acknowledged_first_configure || got_unmaximized {
+                            // The requested bounds carry the restored application size.
+                            // A compositor's first normal configure is only a suggestion
+                            // and must not replace that size on every launch.
                             Some(state.window_bounds.size)
                         } else {
                             compute_outer_size(state.inset(), configure.size, state.tiling)
@@ -693,6 +713,11 @@ impl WaylandWindowStatePtr {
                 state.acknowledged_first_configure = true;
                 drop(state);
                 self.frame();
+            } else {
+                drop(state);
+            }
+            if window_state_changed {
+                self.notify_window_state_changed();
             }
         }
     }
