@@ -1,6 +1,6 @@
 ---
 name: oxideterm-release
-description: Prepare, publish, or recover canceled OxideTerm stable, beta, or GPUI preview releases by deriving changelog content from the previous tag, running the repository version-bump script, validating channel-specific release notes, committing, pushing, and creating the correct annotated tag. Use when the user asks to upgrade the OxideTerm version, prepare a release, write a release changelog, commit and push a release, create a release tag, republish the same version after its tag-triggered workflow was canceled, or repair release assets from a completed Native Package run.
+description: Prepare, publish, or recover canceled OxideTerm stable, beta, or GPUI preview releases by deriving changelog content from the previous tag, selecting the requested release-note detail level, running the repository version-bump script, validating channel-specific notes and fork ownership, committing, pushing, and creating the correct annotated tag. Use when the user asks to upgrade the OxideTerm version, prepare a release, write a release changelog, commit and push a release, create a release tag, republish the same version after its tag-triggered workflow was canceled, or repair release assets from a completed Native Package run.
 ---
 
 # OxideTerm Release
@@ -14,6 +14,7 @@ Resolve these values before making release changes:
 - Target version.
 - Target channel: `stable`, `beta`, or `gpui-preview`.
 - Explicit confirmation that the user ran the GUI application and approved publishing.
+- Release-note detail level when the user explicitly requests `minimal`, `medium`, or `detailed`; otherwise use `detailed`.
 
 Infer the channel only when the version is unambiguous. Ask before publishing if GUI approval is absent. Preparing a changelog or dry run does not require approval.
 
@@ -102,11 +103,23 @@ Write every version entry as two complete language blocks in this order:
 
 Keep both blocks structurally aligned: they must describe the same outcomes, limitations, validation status, and upgrade requirements in the same order. Translate for natural release-note language rather than word for word, and keep product names, commands, file names, and protocol names unchanged when translation would reduce precision. Do not merge English and Chinese into the same bullet. Use concise user-facing past tense in English and concise completed-action wording in Chinese. Keep each language's opening summary paragraph on one physical line so the GitHub Release editor does not show an artificial break. Combine related commits into one outcome and avoid raw commit-title dumps, implementation trivia, unsupported performance claims, and claims that were not verified. Use one restrained, semantically relevant emoji on each main stable-release section heading in both blocks; do not decorate every bullet or mix multiple emoji styles within one section.
 
+#### Release-note detail level
+
+Use the same level for the English and Chinese blocks. The levels control coverage and grouping, not a mandatory word count. Never omit a breaking change, security boundary, upgrade requirement, known limitation, or material compatibility issue just to satisfy a shorter level.
+
+| Level | Required density |
+|---|---|
+| `minimal` | Use only when the user explicitly requests it. Write one short summary followed by roughly 2–5 highly consolidated outcome bullets, with at most one or two headings when they materially improve scanning. Cover only the release's defining user-visible changes and required warnings. |
+| `medium` | Use only when the user explicitly requests it. Write one summary, a small number of useful sections, and grouped bullets that cover the major features, fixes, and security or compatibility outcomes. Consolidate related supporting workflows instead of enumerating each one separately. |
+| `detailed` | Default unless the user explicitly chooses another level. Organize the notes by meaningful subsystem or workflow and give each distinct user-visible capability, behavior change, compatibility fix, supported limitation, and verified performance or validation result enough space to be understood without reading the diff. Include supporting workflows when they materially affect how users understand or use the change, but do not add filler when a release has fewer real changes. |
+
+Treat the levels as coverage and grouping guidance, not fixed templates. Determine the complete factual delta first, then consolidate it to the selected level. If the user says only “write the release notes” or “prepare the release,” use `detailed`.
+
 Apply channel-specific emphasis:
 
 - **Stable:** Summarize the complete delta since the previous stable tag. In each language block, start with one short release summary, then use only useful sections such as `#### ✨ Highlights` / `#### ✨ 重点更新`, `#### 🛠️ Fixes` / `#### 🛠️ 修复`, `#### 🔒 Security` / `#### 🔒 安全`, or `#### 🧰 Release Maintenance` / `#### 🧰 发布维护`. Emphasize user-visible behavior and compatibility. The composed GitHub Release body must begin with `### English`, place the matching `### 中文` block immediately after the complete English block, omit both a product-major heading such as `# OxideTerm 2.0` and a repeated version heading such as `## 2.0.7`, then place `## 📥 Download for your system`, installation tips, and links after both language blocks.
 - **Beta:** Summarize the delta since the previous beta tag in complete English and Chinese blocks. State what is approaching stable, what changed, and which workflows need validation. Mention known limitations only when supported by the diff or issue context, and include them in both languages.
-- **GPUI preview:** Summarize the delta since the previous GPUI preview tag in complete English and Chinese blocks. Focus on newly testable native UI/runtime work, parity, rough edges, and concrete testing targets. Keep the compact summary-and-bullets style used by existing preview entries.
+- **GPUI preview:** Summarize the delta since the previous GPUI preview tag in complete English and Chinese blocks. Focus on newly testable native UI/runtime work, parity, rough edges, and concrete testing targets. Apply the selected detail level while keeping the writing test-oriented rather than turning preview notes into stable-release marketing.
 
 If there is no earlier tag for that channel, state which preceding release tag was used as the bootstrap baseline.
 
@@ -146,15 +159,33 @@ Read the generated file and verify that the intended section appears once, the c
 
 ### Fork release attribution check
 
-This release skill ships inside the repository, so forks that reuse it inherit this rule. When releasing under the OxideTerm name from a fork, the release notes must clearly state that the build is a community fork and must not point any support or documentation links at upstream resources: not `AnalyseDeCircuit/oxideterm/issues`, not the upstream changelog (`github.com/AnalyseDeCircuit/oxideterm/blob/main/.github/release-notes/...`), and not `oxideterm.app` documentation.
+This release skill ships inside the repository, so forks that reuse it inherit this rule. Determine the publishing repository from the remote that will receive the branch and tag. Treat it as a fork whenever that repository is not `AnalyseDeCircuit/oxideterm`, even when a separate `upstream` remote points to the official repository.
+
+```bash
+git remote -v
+git remote get-url origin
+```
+
+For an official `AnalyseDeCircuit/oxideterm` release, keep the official links, updater endpoints, and About attribution. For a fork release, all three checks below are blocking:
+
+1. **Release-note ownership.** The notes must clearly state that the build is a community fork. Support, documentation, issue, download, and changelog links must resolve to resources owned by the fork, not `AnalyseDeCircuit/oxideterm/issues`, the upstream changelog, upstream release downloads, or `oxideterm.app` documentation. The stable download composer currently derives upstream asset URLs from `.github/scripts/compose_release_notes.py`; a fork must redirect that source as well as the visible base-note links.
+2. **In-app updater ownership.** Every update channel exposed by the forked application must resolve to a fork-owned signed manifest and fork-owned release assets. The compiled endpoints currently live in `crates/oxideterm-update/src/channel.rs`; they must not contain `github.com/AnalyseDeCircuit/oxideterm/releases`. A fork may instead disable an update channel, but then the application must not offer or contact that channel. Never ship a fork that can update itself to an official OxideTerm build.
+3. **Help & About attribution.** Keep the existing `Copyright © <year> AnalyseDeCircuit` attribution; a fork must not replace or remove it. Add an adjacent small, localized line that clearly identifies the application as a fork and names the fork maintainer or project. Render it in the Help & About legal footer and add the corresponding key to all 11 locale catalogs.
 
 Why this rule exists: users cannot tell an official release from a fork build when the fork reuses the same name, version numbers, and release notes. Unmarked fork releases route bug reports and support traffic into the upstream repository, confuse downloads, and misattribute defects to the upstream maintainers. A short fork-attribution line and fork-owned support links prevent that confusion at no cost to the fork, and they are the standard expectation for any GPL redistribution.
 
 ```bash
 gh release list --repo <fork-owner>/oxideterm --limit 3
+rg -n 'AnalyseDeCircuit/oxideterm|oxideterm\.app' \
+  <composed-release-notes> <base-notes> .github/scripts/compose_release_notes.py
+rg -n 'github\.com/AnalyseDeCircuit/oxideterm/releases' crates/oxideterm-update/src
+rg -n 'settings_view\.help\.copyright|AnalyseDeCircuit|fork' \
+  crates/oxideterm-gpui-app/src/workspace/settings/pages/help.rs \
+  crates/oxideterm-i18n/locales/*/settings_view.json
+cargo test -p oxideterm-i18n locale_catalogs_have_the_same_complete_key_set
 ```
 
-If a fork release body is missing the fork attribution, copies this repository's release notes verbatim, or links any of its support/documentation entries to upstream resources (`AnalyseDeCircuit/oxideterm/issues`, the upstream changelog, or `oxideterm.app`), that release must be treated as blocked: do not proceed with it until the fork owner adds the fork attribution and redirects all support links to the fork's own repository and documentation.
+The `rg` commands are discovery checks: review each match rather than blindly requiring zero results, because the preserved copyright attribution must still name `AnalyseDeCircuit`. If a fork release fails any of the three ownership checks, treat publishing as blocked. Do not commit, push, or tag until the fork owns its release links and updater source and the About footer both preserves the upstream copyright and identifies the fork in all supported locales.
 
 ### 6. Review, commit, push, and tag
 
