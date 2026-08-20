@@ -465,8 +465,7 @@ impl TextEditorView {
         let cursor_column = cursor_visual_column.saturating_sub(display_row.start_col);
         let line_height = self.metrics.line_height;
         let gutter_width = self.visible_gutter_width();
-        let content_left =
-            gutter_width + self.visible_content_padding_x() - self.viewport.scroll_x_px;
+        let content_left = self.visible_content_padding_x() - self.viewport.scroll_x_px;
         let row_display = display_row;
         let byte_start = byte_column_for_visual_column(&line_text, display_row.start_col);
         let byte_end = byte_column_for_visual_column(&line_text, display_row.end_col);
@@ -543,7 +542,7 @@ impl TextEditorView {
                 .then_some(marked.text.as_str())
         });
 
-        let mut row = div()
+        let row = div()
             .relative()
             .h(px(line_height))
             .w_full()
@@ -599,18 +598,17 @@ impl TextEditorView {
                     this.open_context_menu(event.position, cx);
                     cx.stop_propagation();
                 }),
-            )
-            .when(self.presentation == EditorPresentation::Document, |row| {
-                row.child(self.render_gutter(
-                    display_row,
-                    line_height,
-                    gutter_width,
-                    is_current_line,
-                    foldable,
-                    folded,
-                    cx,
-                ))
-            });
+            );
+
+        // Keep horizontally scrolled document paint inside the content area so
+        // text and overlays never pass underneath the fixed gutter.
+        let mut content = div()
+            .absolute()
+            .left(px(gutter_width))
+            .right_0()
+            .top_0()
+            .h(px(line_height))
+            .overflow_hidden();
 
         for column in indent_guides {
             let byte_column = byte_column_for_visual_column(segment_text, column);
@@ -621,7 +619,7 @@ impl TextEditorView {
                         .expect("indent guides require shaped coordinates")
                         .x_for_index(byte_column),
                 );
-            row = row.child(
+            content = content.child(
                 div()
                     .absolute()
                     .top_0()
@@ -636,7 +634,7 @@ impl TextEditorView {
 
         for (start_x, width) in find_rects {
             let left = content_left + start_x;
-            row = row.child(
+            content = content.child(
                 div()
                     .absolute()
                     .top(px(line_height * 0.16))
@@ -656,7 +654,7 @@ impl TextEditorView {
 
         for (start_x, width) in selection_rects {
             let left = content_left + start_x;
-            row = row.child(
+            content = content.child(
                 div()
                     .absolute()
                     // Keep adjacent visual rows connected like a native editor selection.
@@ -672,7 +670,7 @@ impl TextEditorView {
 
         for (start_x, width) in bracket_rects {
             let left = content_left + start_x;
-            row = row.child(
+            content = content.child(
                 div()
                     .absolute()
                     .top(px(line_height * 0.12))
@@ -687,10 +685,10 @@ impl TextEditorView {
 
         if let Some(cursor_x) = cursor_x {
             let left = content_left + cursor_x;
-            row = row.child(self.render_cursor_at(left));
+            content = content.child(self.render_cursor_at(left));
         }
 
-        row.child(
+        content = content.child(
             div()
                 .absolute()
                 .top_0()
@@ -707,7 +705,20 @@ impl TextEditorView {
                     marked_text,
                     folded,
                 )),
-        )
+        );
+
+        row.child(content)
+            .when(self.presentation == EditorPresentation::Document, |row| {
+                row.child(self.render_gutter(
+                    display_row,
+                    line_height,
+                    gutter_width,
+                    is_current_line,
+                    foldable,
+                    folded,
+                    cx,
+                ))
+            })
     }
 
     fn render_gutter(
@@ -1090,20 +1101,27 @@ impl TextEditorView {
         if !self.buffer.is_empty() || placeholder.is_empty() {
             return None;
         }
+        let content_left = self.visible_content_padding_x() - self.viewport.scroll_x_px;
         Some(
             div()
                 .absolute()
+                .left(px(self.visible_gutter_width()))
+                .right_0()
                 .top_0()
-                .left(px(self.visible_gutter_width()
-                    + self.visible_content_padding_x()
-                    - self.viewport.scroll_x_px))
                 .h(px(self.metrics.line_height))
-                .flex()
-                .items_center()
-                .text_color(rgba(
-                    (self.appearance.muted_text_hex << 8) | CM_PLACEHOLDER_ALPHA,
-                ))
-                .child(placeholder.to_string()),
+                .overflow_hidden()
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(content_left))
+                        .h(px(self.metrics.line_height))
+                        .flex()
+                        .items_center()
+                        .text_color(rgba(
+                            (self.appearance.muted_text_hex << 8) | CM_PLACEHOLDER_ALPHA,
+                        ))
+                        .child(placeholder.to_string()),
+                ),
         )
     }
 
