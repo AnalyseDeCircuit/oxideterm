@@ -26,8 +26,16 @@ pub(super) fn selection_byte_range_for_line(
     let selected = selection.range();
     let start = selected.start.0.max(line_range.start);
     let end = selected.end.0.min(line_range.end);
-    if start >= end {
+    if start > end {
         return None;
+    }
+    if start == end {
+        // A selected newline gives an empty physical line no text bytes, but
+        // editors still paint one cell to keep a multi-line selection joined.
+        return (line_text.is_empty()
+            && selected.start.0 <= line_range.start
+            && selected.end.0 > line_range.start)
+            .then_some(0..0);
     }
     // Rendering uses shaped text positions, so preserve byte offsets instead
     // of converting through an assumed monospace cell width.
@@ -121,6 +129,17 @@ mod tests {
         assert_eq!(
             selection_byte_range_for_line(selection, text, 0..6),
             Some(3..5)
+        );
+
+        let across_empty_line = Selection::new(BufferOffset(0), BufferOffset(3));
+        assert_eq!(
+            selection_byte_range_for_line(across_empty_line, "", 2..2),
+            Some(0..0)
+        );
+        let ending_before_empty_line = Selection::new(BufferOffset(0), BufferOffset(2));
+        assert_eq!(
+            selection_byte_range_for_line(ending_before_empty_line, "", 2..2),
+            None
         );
     }
 

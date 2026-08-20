@@ -512,7 +512,7 @@ impl TextEditorView {
                     .x_for_index(byte_column),
             )
         });
-        let shaped_rects = |ranges: Vec<Range<usize>>| {
+        let shaped_rects = |ranges: Vec<Range<usize>>, empty_range_width: f32| {
             if ranges.is_empty() {
                 return Vec::new();
             }
@@ -524,13 +524,18 @@ impl TextEditorView {
                 .map(|range| {
                     let start = f32::from(coordinate_line.x_for_index(range.start));
                     let end = f32::from(coordinate_line.x_for_index(range.end));
-                    (start, (end - start).max(CM_CURSOR_WIDTH))
+                    let minimum_width = if range.is_empty() {
+                        empty_range_width
+                    } else {
+                        CM_CURSOR_WIDTH
+                    };
+                    (start, (end - start).max(minimum_width))
                 })
                 .collect::<Vec<_>>()
         };
-        let selection_rects = shaped_rects(selection_ranges);
-        let find_rects = shaped_rects(find_ranges);
-        let bracket_rects = shaped_rects(bracket_ranges);
+        let selection_rects = shaped_rects(selection_ranges, self.metrics.char_width);
+        let find_rects = shaped_rects(find_ranges, CM_CURSOR_WIDTH);
+        let bracket_rects = shaped_rects(bracket_ranges, CM_CURSOR_WIDTH);
         let foldable = display_row
             .is_first
             .then(|| self.foldable_range_starting_at(line))
