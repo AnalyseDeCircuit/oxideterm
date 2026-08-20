@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque, hash_map::DefaultHasher},
+    collections::{HashMap, HashSet, VecDeque, hash_map::DefaultHasher},
     env,
     hash::{Hash, Hasher},
     ops::Range,
@@ -344,11 +344,12 @@ pub struct TerminalPane {
     snapshot: TerminalSnapshot,
     snapshot_dirty: bool,
     snapshot_generation: u64,
+    next_snapshot_line_id: u64,
     terminal_timestamps_enabled: bool,
-    // Visual-only metadata keyed by terminal absolute line; never write this
+    // Visual-only metadata keyed by stable snapshot line identity; never write this
     // into the PTY buffer, copied text, or search/indexed terminal content.
-    row_timestamps: Arc<HashMap<i64, TerminalRowTimestamp>>,
-    row_timestamp_retained_min_line: Option<i64>,
+    row_timestamps: Arc<HashMap<u64, TerminalRowTimestamp>>,
+    row_timestamp_retained_min_line: Option<u64>,
     metrics: TerminalMetrics,
     selection: Option<TerminalSelection>,
     pending_paste: Option<String>,
@@ -565,6 +566,64 @@ fn privilege_prompt_input_tracking_available(mode: TermMode) -> bool {
     !mode.contains(TermMode::ALT_SCREEN)
 }
 
+fn take_snapshot_line_id(next_line_id: &mut u64) -> u64 {
+    let line_id = (*next_line_id).max(1);
+    *next_line_id = line_id.wrapping_add(1).max(1);
+    line_id
+}
+
+fn assign_initial_snapshot_line_ids(snapshot: &mut TerminalSnapshot, next_line_id: &mut u64) {
+    for row in &mut snapshot.lines {
+        row.line_id = take_snapshot_line_id(next_line_id);
+    }
+}
+
+fn reconcile_snapshot_line_ids(
+    snapshot: &mut TerminalSnapshot,
+    previous: &TerminalSnapshot,
+    next_line_id: &mut u64,
+) {
+    let previous_by_source = previous
+        .lines
+        .iter()
+        .filter(|row| row.source_id != 0 && row.line_id != 0)
+        .map(|row| (row.source_id, row))
+        .collect::<HashMap<_, _>>();
+    let previous_by_grid_line = previous
+        .lines
+        .iter()
+        .filter(|row| row.line_id != 0)
+        .map(|row| (row.absolute_line, row))
+        .collect::<HashMap<_, _>>();
+    let mut used_line_ids = snapshot
+        .lines
+        .iter()
+        .filter_map(|row| (row.line_id != 0).then_some(row.line_id))
+        .collect::<HashSet<_>>();
+
+    for row in &mut snapshot.lines {
+        if row.line_id != 0 {
+            continue;
+        }
+
+        // A backing row moving toward a lower grid line is retained output. Rows recycled into
+        // the bottom move in the opposite direction and therefore receive a new identity.
+        let moved_line_id = previous_by_source
+            .get(&row.source_id)
+            .filter(|previous_row| previous_row.absolute_line > row.absolute_line)
+            .map(|previous_row| previous_row.line_id);
+        let stationary_line_id = previous_by_grid_line
+            .get(&row.absolute_line)
+            .filter(|previous_row| previous_row.source_id == row.source_id)
+            .map(|previous_row| previous_row.line_id);
+        let inherited_line_id = moved_line_id
+            .or(stationary_line_id)
+            .filter(|line_id| !used_line_ids.contains(line_id));
+        row.line_id = inherited_line_id.unwrap_or_else(|| take_snapshot_line_id(next_line_id));
+        used_line_ids.insert(row.line_id);
+    }
+}
+
 include!("app_recording.rs");
 include!("app_command_marks.rs");
 include!("app_modem.rs");
@@ -740,7 +799,7 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Self> {
-        let (snapshot, session_kind, cwd_integration_launch_state) = {
+        let (mut snapshot, session_kind, cwd_integration_launch_state) = {
             let terminal = terminal.lock();
             (
                 terminal.snapshot().with_generation(1),
@@ -748,6 +807,8 @@ impl TerminalPane {
                 terminal.cwd_integration_launch_state(),
             )
         };
+        let mut next_snapshot_line_id = 1;
+        assign_initial_snapshot_line_ids(&mut snapshot, &mut next_snapshot_line_id);
         let cwd_shell_integration_status = initial_cwd_shell_integration_status(
             preferences.current_directory_awareness_enabled,
             session_kind,
@@ -853,6 +914,7 @@ impl TerminalPane {
             snapshot,
             snapshot_dirty: false,
             snapshot_generation: 1,
+            next_snapshot_line_id,
             terminal_timestamps_enabled: false,
             row_timestamps: Arc::new(HashMap::new()),
             row_timestamp_retained_min_line: None,
@@ -973,10 +1035,15 @@ impl TerminalPane {
     }
 
     fn stamp_snapshot(&mut self, mut snapshot: TerminalSnapshot) -> TerminalSnapshot {
-        self.record_snapshot_row_timestamps(&snapshot);
+        reconcile_snapshot_line_ids(
+            &mut snapshot,
+            &self.snapshot,
+            &mut self.next_snapshot_line_id,
+        );
         // Raw backend snapshots are stateless; the pane owns frame generation
         // so future render caches can invalidate without changing backends.
         snapshot.reuse_unchanged_rows_from(&self.snapshot);
+        self.record_snapshot_row_timestamps(&snapshot);
         self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
         if self.snapshot_generation == 0 {
             self.snapshot_generation = 1;
@@ -997,7 +1064,7 @@ impl TerminalPane {
     }
 
     fn trim_row_timestamps(&mut self, snapshot: &TerminalSnapshot) {
-        let Some(max_line) = snapshot.lines.iter().map(|row| row.absolute_line).max() else {
+        let Some(max_line) = snapshot.lines.iter().map(|row| row.line_id).max() else {
             Arc::make_mut(&mut self.row_timestamps).clear();
             self.row_timestamp_retained_min_line = None;
             return;
@@ -1007,7 +1074,7 @@ impl TerminalPane {
             .scrollback_lines
             .saturating_add(snapshot.rows)
             .saturating_add(1024)
-            .max(2048) as i64;
+            .max(2048) as u64;
         let min_line = max_line.saturating_sub(retained_rows);
         trim_row_timestamp_history(
             Arc::make_mut(&mut self.row_timestamps),
@@ -3287,7 +3354,7 @@ fn terminal_timestamp_label(hour: u32, minute: u32, second: u32, millis: u32) ->
 }
 
 fn record_timestampable_snapshot_rows(
-    row_timestamps: &mut HashMap<i64, TerminalRowTimestamp>,
+    row_timestamps: &mut HashMap<u64, TerminalRowTimestamp>,
     snapshot: &TerminalSnapshot,
     label: &str,
 ) {
@@ -3295,7 +3362,7 @@ fn record_timestampable_snapshot_rows(
         // The snapshot signature is a cheap invalidation key. Cursor-only changes
         // still fall through to the content signature comparison below.
         if row_timestamps
-            .get(&row.absolute_line)
+            .get(&row.line_id)
             .is_some_and(|timestamp| timestamp.source_signature == row.signature)
         {
             continue;
@@ -3303,7 +3370,7 @@ fn record_timestampable_snapshot_rows(
 
         if terminal_row_has_timestamp_content(row) {
             let timestamp_signature = terminal_row_timestamp_signature(row);
-            if let Some(timestamp) = row_timestamps.get_mut(&row.absolute_line) {
+            if let Some(timestamp) = row_timestamps.get_mut(&row.line_id) {
                 if timestamp.signature != timestamp_signature {
                     timestamp.label = label.to_string();
                     timestamp.signature = timestamp_signature;
@@ -3311,7 +3378,7 @@ fn record_timestampable_snapshot_rows(
                 timestamp.source_signature = row.signature;
             } else {
                 row_timestamps.insert(
-                    row.absolute_line,
+                    row.line_id,
                     TerminalRowTimestamp {
                         label: label.to_string(),
                         signature: timestamp_signature,
@@ -3322,15 +3389,15 @@ fn record_timestampable_snapshot_rows(
         } else {
             // Blank viewport rows are recycled later. Removing their metadata
             // prevents new output from inheriting a stale line-modification time.
-            row_timestamps.remove(&row.absolute_line);
+            row_timestamps.remove(&row.line_id);
         }
     }
 }
 
 fn trim_row_timestamp_history(
-    row_timestamps: &mut HashMap<i64, TerminalRowTimestamp>,
-    retained_min_line: &mut Option<i64>,
-    min_line: i64,
+    row_timestamps: &mut HashMap<u64, TerminalRowTimestamp>,
+    retained_min_line: &mut Option<u64>,
+    min_line: u64,
 ) {
     let Some(previous_min_line) = *retained_min_line else {
         row_timestamps.retain(|line, _| *line >= min_line);
@@ -3339,8 +3406,8 @@ fn trim_row_timestamp_history(
     };
 
     if min_line <= previous_min_line {
-        // Absolute line numbers can rewind when a session resets. New rows may
-        // then be inserted below the former boundary, so restart from this line.
+        // Snapshot identity can restart when a pane is rebuilt. New rows may then be inserted
+        // below the former boundary, so restart incremental trimming from this identity.
         *retained_min_line = Some(min_line);
         return;
     }
@@ -3617,6 +3684,8 @@ mod tests {
             cell.cursor = true;
         }
         let mut row = TerminalRow {
+            line_id: absolute_line.max(0) as u64,
+            source_id: 0,
             absolute_line,
             cells: Arc::new(cells),
             wrapped: false,
@@ -3640,6 +3709,49 @@ mod tests {
             lines: vec![row],
             images: Vec::new(),
         }
+    }
+
+    #[test]
+    fn snapshot_line_ids_follow_scrolled_sources_without_reusing_recycled_rows() {
+        let mut previous_lines = (0..3)
+            .map(|line| timestamp_test_row(line, &format!("line-{line}")))
+            .collect::<Vec<_>>();
+        for (index, row) in previous_lines.iter_mut().enumerate() {
+            row.line_id = 10 + index as u64;
+            row.source_id = 100 + index;
+        }
+        let previous = TerminalSnapshot {
+            generation: 1,
+            cols: 8,
+            rows: 3,
+            cursor_col: 0,
+            cursor_row: 2,
+            cursor_shape: TerminalCursorShape::Block,
+            display_offset: 0,
+            scrollback_lines: 0,
+            lines: previous_lines,
+            images: Vec::new(),
+        };
+        let mut next = previous.clone();
+        next.lines = vec![
+            previous.lines[1].clone(),
+            previous.lines[2].clone(),
+            previous.lines[0].clone(),
+        ];
+        for (index, row) in next.lines.iter_mut().enumerate() {
+            row.line_id = 0;
+            row.absolute_line = index as i64;
+        }
+        next.lines[0].signature = 2_000;
+        let mut next_line_id = 20;
+
+        reconcile_snapshot_line_ids(&mut next, &previous, &mut next_line_id);
+
+        assert_eq!(
+            next.lines.iter().map(|row| row.line_id).collect::<Vec<_>>(),
+            vec![11, 12, 20]
+        );
+        assert_eq!(next_line_id, 21);
     }
 
     #[test]
@@ -3691,10 +3803,10 @@ mod tests {
 
     #[test]
     fn row_timestamp_history_trims_incrementally_and_handles_rewind() {
-        let timestamp = |line: i64| TerminalRowTimestamp {
+        let timestamp = |line: u64| TerminalRowTimestamp {
             label: line.to_string(),
-            signature: line as u64,
-            source_signature: line as u64,
+            signature: line,
+            source_signature: line,
         };
         let mut row_timestamps = (0..6)
             .map(|line| (line, timestamp(line)))

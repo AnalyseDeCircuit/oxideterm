@@ -76,7 +76,7 @@ pub(crate) struct TerminalElement {
     bidi_enabled: bool,
     input: Option<TerminalElementInput>,
     transparent_background: bool,
-    row_timestamps: Option<Arc<HashMap<i64, TerminalRowTimestamp>>>,
+    row_timestamps: Option<Arc<HashMap<u64, TerminalRowTimestamp>>>,
     layout_cache: Option<Arc<Mutex<TerminalLayoutCache>>>,
     performance_metrics_enabled: bool,
     viewport_rows: usize,
@@ -627,7 +627,7 @@ impl TerminalElement {
 
     pub(crate) fn row_timestamps(
         mut self,
-        row_timestamps: Option<Arc<HashMap<i64, TerminalRowTimestamp>>>,
+        row_timestamps: Option<Arc<HashMap<u64, TerminalRowTimestamp>>>,
     ) -> Self {
         self.row_timestamps = row_timestamps;
         self
@@ -787,7 +787,7 @@ impl TerminalElement {
                 &mut text_runs,
                 &mut cursor,
             );
-            if let Some(timestamp_run) = self.timestamp_run_for_row(row_index, row.absolute_line) {
+            if let Some(timestamp_run) = self.timestamp_run_for_row(row_index, row.line_id) {
                 timestamp_runs.push(timestamp_run);
             }
         }
@@ -840,17 +840,8 @@ impl TerminalElement {
         }
     }
 
-    fn timestamp_run_for_row(
-        &self,
-        row_index: usize,
-        absolute_line: i64,
-    ) -> Option<BatchedTextRun> {
-        let label = self
-            .row_timestamps
-            .as_ref()?
-            .get(&absolute_line)?
-            .label
-            .clone();
+    fn timestamp_run_for_row(&self, row_index: usize, line_id: u64) -> Option<BatchedTextRun> {
+        let label = self.row_timestamps.as_ref()?.get(&line_id)?.label.clone();
         Some(BatchedTextRun {
             row: row_index,
             col: 0,
@@ -1131,7 +1122,7 @@ impl TerminalElement {
         let mut hasher = DefaultHasher::new();
         self.snapshot.cols.hash(&mut hasher);
         if let Some(row) = self.snapshot.lines.get(row_index) {
-            row.absolute_line.hash(&mut hasher);
+            row.line_id.hash(&mut hasher);
             row.signature.hash(&mut hasher);
             let has_cursor = row.cells.iter().any(|cell| cell.cursor);
             has_cursor.hash(&mut hasher);
@@ -1192,7 +1183,7 @@ impl TerminalElement {
         self.hash_semantic_layout(rows.clone(), semantic_role, &mut hasher);
         rows.len().hash(&mut hasher);
         for row in self.snapshot.lines.get(rows).unwrap_or(&[]) {
-            row.absolute_line.hash(&mut hasher);
+            row.line_id.hash(&mut hasher);
             row.signature.hash(&mut hasher);
         }
         TerminalLogicalHighlightCacheKey {
@@ -1241,7 +1232,7 @@ impl TerminalElement {
     fn row_link_cache_key(&self, row_index: usize) -> TerminalRowLinkCacheKey {
         let mut hasher = DefaultHasher::new();
         if let Some(row) = self.snapshot.lines.get(row_index) {
-            row.absolute_line.hash(&mut hasher);
+            row.line_id.hash(&mut hasher);
             row.signature.hash(&mut hasher);
         }
         self.detect_file_paths_as_links.hash(&mut hasher);
@@ -1386,7 +1377,7 @@ fn hash_logical_line_signatures(
         return;
     };
     for row in &snapshot.lines[line_range] {
-        row.absolute_line.hash(hasher);
+        row.line_id.hash(hasher);
         row.signature.hash(hasher);
     }
 }
@@ -2183,6 +2174,8 @@ mod cache_tests {
             cursor_cell.cursor = true;
         }
         let mut row = TerminalRow {
+            line_id: absolute_line.max(0) as u64,
+            source_id: 0,
             absolute_line,
             cells: Arc::new(cells),
             wrapped: false,
@@ -2221,6 +2214,26 @@ mod cache_tests {
             None,
             None,
         )
+    }
+
+    #[test]
+    fn stable_line_identity_keeps_layout_keys_across_grid_movement() {
+        let mut original_row = row_with_text_and_cursor(4, "stable", 5);
+        original_row.line_id = 42;
+        let mut moved_row = original_row.clone();
+        moved_row.absolute_line = 3;
+        let original = element(snapshot(0, vec![original_row]));
+        let moved = element(snapshot(0, vec![moved_row]));
+
+        assert_eq!(
+            original.row_layout_cache_key_with_semantic_role(0, None),
+            moved.row_layout_cache_key_with_semantic_role(0, None)
+        );
+        assert_eq!(
+            original.logical_highlight_cache_key_with_semantic_role(0..1, None),
+            moved.logical_highlight_cache_key_with_semantic_role(0..1, None)
+        );
+        assert_eq!(original.row_link_cache_key(0), moved.row_link_cache_key(0));
     }
 
     #[test]

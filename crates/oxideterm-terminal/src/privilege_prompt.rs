@@ -263,7 +263,10 @@ impl TerminalPrivilegePromptStream {
 /// Classifies a normalized terminal line as a standard password prompt.
 pub fn detect_terminal_privilege_prompt(line: &str) -> Option<TerminalPrivilegePrompt> {
     let line = line.trim();
-    if line.is_empty() || strip_prompt_colon(line).is_none() {
+    if line.is_empty()
+        || strip_prompt_colon(line).is_none()
+        || !contains_password_prompt_candidate(line)
+    {
         return None;
     }
 
@@ -286,6 +289,35 @@ pub fn detect_terminal_privilege_prompt(line: &str) -> Option<TerminalPrivilegeP
     };
 
     (!looks_like_password_result(line)).then_some(prompt)
+}
+
+fn contains_password_prompt_candidate(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    bytes.iter().enumerate().any(|(index, byte)| {
+        let remaining = &bytes[index..];
+        match byte.to_ascii_lowercase() {
+            b'p' => {
+                starts_with_ascii_case_insensitive(remaining, b"password")
+                    || starts_with_ascii_case_insensitive(remaining, b"passwort")
+            }
+            b'c' => starts_with_ascii_case_insensitive(remaining, b"contra"),
+            b's' => starts_with_ascii_case_insensitive(remaining, b"senha"),
+            b'm' => starts_with_ascii_case_insensitive(remaining, b"mot de passe"),
+            0xd0 => remaining.starts_with("пароль".as_bytes()),
+            0xe3 => remaining.starts_with("パスワード".as_bytes()),
+            // Chinese prompt labels may contain spaces between their characters.
+            0xe5 => {
+                remaining.starts_with("密".as_bytes()) || remaining.starts_with("口".as_bytes())
+            }
+            0xec => remaining.starts_with("암호".as_bytes()),
+            _ => false,
+        }
+    })
+}
+
+fn starts_with_ascii_case_insensitive(text: &[u8], prefix: &[u8]) -> bool {
+    text.get(..prefix.len())
+        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
 }
 
 fn parse_sudo_prompt(line: &str) -> Option<Option<String>> {
@@ -584,6 +616,12 @@ mod tests {
     #[test]
     fn classifier_rejects_password_result_after_candidate_matching() {
         assert!(detect_terminal_privilege_prompt("[sudo] password for failed:").is_none());
+    }
+
+    #[test]
+    fn classifier_rejects_non_password_colon_before_full_classification() {
+        assert!(detect_terminal_privilege_prompt("OxideTerm Unicode workload:").is_none());
+        assert!(detect_terminal_privilege_prompt("time:12:34:56:").is_none());
     }
 
     #[test]

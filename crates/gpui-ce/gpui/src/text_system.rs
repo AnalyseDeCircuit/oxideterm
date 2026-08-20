@@ -451,6 +451,7 @@ impl WindowTextSystem {
             layout,
             text,
             decoration_runs,
+            prepared_paint: Default::default(),
         }
     }
 
@@ -519,6 +520,7 @@ impl WindowTextSystem {
             layout,
             text,
             decoration_runs,
+            prepared_paint: Default::default(),
         }
     }
 

@@ -236,6 +236,8 @@ mod tests {
 
     fn snapshot(text: &str, explicit_range: Range<usize>) -> TerminalSnapshot {
         let mut row = TerminalRow {
+            line_id: 0,
+            source_id: 0,
             absolute_line: 0,
             cells: Arc::new(
                 text.chars()

@@ -4,8 +4,11 @@ use crate::{
     WrapBoundary, WrappedLineLayout, black, fill, point, px, size,
 };
 use derive_more::{Deref, DerefMut};
+use parking_lot::Mutex;
 use smallvec::SmallVec;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+use crate::window::PreparedGlyphBatch;
 
 /// Pre-computed glyph data for efficient painting without per-glyph cache lookups.
 ///
@@ -39,7 +42,7 @@ pub struct DecorationRun {
 }
 
 /// A line of text that has been shaped and decorated.
-#[derive(Clone, Default, Debug, Deref, DerefMut)]
+#[derive(Default, Debug, Deref, DerefMut)]
 pub struct ShapedLine {
     #[deref]
     #[deref_mut]
@@ -47,6 +50,110 @@ pub struct ShapedLine {
     /// The text that was shaped for this line.
     pub text: SharedString,
     pub(crate) decoration_runs: SmallVec<[DecorationRun; 32]>,
+    pub(super) prepared_paint: OnceLock<Mutex<Option<PreparedLinePaint>>>,
+}
+
+impl Clone for ShapedLine {
+    fn clone(&self) -> Self {
+        Self {
+            layout: self.layout.clone(),
+            text: self.text.clone(),
+            decoration_runs: self.decoration_runs.clone(),
+            // Clones can be painted in a different window or at a different origin.
+            prepared_paint: OnceLock::new(),
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct PreparedLinePaintKey {
+    renderer_resource_generation: u64,
+    scale_factor_bits: u32,
+    line_height_bits: u32,
+    origin_phase_x_bits: u32,
+    origin_phase_y_bits: u32,
+    subpixel_rendering: SmallVec<[bool; 16]>,
+}
+
+#[derive(Debug)]
+pub(super) struct PreparedLinePaint {
+    key: PreparedLinePaintKey,
+    glyphs: Arc<PreparedGlyphBatch>,
+}
+
+#[inline]
+fn device_pixel_phase(value: f32) -> f32 {
+    value.rem_euclid(1.0)
+}
+
+fn prepare_line_glyphs(
+    layout: &LineLayout,
+    decoration_runs: &[DecorationRun],
+    origin: Point<Pixels>,
+    line_height: Pixels,
+    device_origin: Point<crate::ScaledPixels>,
+    subpixel_rendering: &[bool],
+    window: &mut Window,
+) -> Result<PreparedGlyphBatch> {
+    let baseline_y = (line_height - layout.ascent - layout.descent) / 2.0 + layout.ascent;
+    let mut decoration_runs = decoration_runs.iter();
+    let mut run_end = 0;
+    let mut color = black();
+    let mut dilation = window.glyph_dilation_for_color(color);
+    let mut glyphs = PreparedGlyphBatch::default();
+
+    for (run_index, run) in layout.runs.iter().enumerate() {
+        let use_subpixel_rendering = subpixel_rendering.get(run_index).copied().unwrap_or(false);
+        for glyph in &run.glyphs {
+            if glyph.index >= run_end {
+                let mut style_run = decoration_runs.next();
+                while let Some(run) = style_run {
+                    if glyph.index < run_end + run.len as usize {
+                        break;
+                    }
+                    run_end += run.len as usize;
+                    style_run = decoration_runs.next();
+                }
+
+                if let Some(style_run) = style_run {
+                    run_end += style_run.len as usize;
+                    color = style_run.color;
+                    dilation = window.glyph_dilation_for_color(color);
+                } else {
+                    run_end = layout.len;
+                }
+            }
+
+            let glyph_origin = point(
+                origin.x + glyph.position.x,
+                origin.y + baseline_y + glyph.position.y,
+            );
+            if glyph.is_emoji {
+                window.prepare_emoji_for_batch(
+                    glyph_origin,
+                    run.font_id,
+                    glyph.id,
+                    layout.font_size,
+                    device_origin,
+                    &mut glyphs,
+                )?;
+            } else {
+                window.prepare_glyph_for_batch(
+                    glyph_origin,
+                    run.font_id,
+                    glyph.id,
+                    layout.font_size,
+                    color,
+                    use_subpixel_rendering,
+                    dilation,
+                    device_origin,
+                    &mut glyphs,
+                )?;
+            }
+        }
+    }
+
+    Ok(glyphs)
 }
 
 impl ShapedLine {
@@ -76,6 +183,7 @@ impl ShapedLine {
             runs: layout.runs.clone(),
             len,
         });
+        self.prepared_paint = OnceLock::new();
         self
     }
 
@@ -102,6 +210,80 @@ impl ShapedLine {
         )?;
 
         Ok(())
+    }
+
+    /// Paint the line using cached atlas tiles and relative sprite bounds.
+    ///
+    /// This path is intended for stable, left-aligned single-line content such as terminal rows.
+    /// Decorated text retains the general painter because its segment geometry is uncommon in
+    /// terminal output and must preserve the full wrapping behavior.
+    pub fn paint_cached(
+        &self,
+        origin: Point<Pixels>,
+        line_height: Pixels,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<()> {
+        if self
+            .decoration_runs
+            .iter()
+            .any(|run| run.underline.is_some() || run.strikethrough.is_some())
+        {
+            return self.paint(origin, line_height, TextAlign::Left, None, window, cx);
+        }
+
+        let line_bounds = Bounds::new(origin, size(self.layout.width, line_height));
+        if !line_bounds.intersects(&window.content_mask().bounds) {
+            return Ok(());
+        }
+
+        window.paint_layer(line_bounds, |window| {
+            let scale_factor = window.scale_factor();
+            let device_origin = point(
+                crate::ScaledPixels(origin.x.0 * scale_factor),
+                crate::ScaledPixels(origin.y.0 * scale_factor),
+            );
+            let subpixel_rendering = self
+                .layout
+                .runs
+                .iter()
+                .map(|run| window.should_use_subpixel_rendering(run.font_id, self.layout.font_size))
+                .collect::<SmallVec<[bool; 16]>>();
+            let key = PreparedLinePaintKey {
+                renderer_resource_generation: window.renderer_resource_generation(),
+                scale_factor_bits: scale_factor.to_bits(),
+                line_height_bits: line_height.0.to_bits(),
+                origin_phase_x_bits: device_pixel_phase(device_origin.x.0).to_bits(),
+                origin_phase_y_bits: device_pixel_phase(device_origin.y.0).to_bits(),
+                subpixel_rendering,
+            };
+
+            let mut prepared_paint = self.prepared_paint.get_or_init(|| Mutex::new(None)).lock();
+            if prepared_paint
+                .as_ref()
+                .is_none_or(|prepared| prepared.key != key)
+            {
+                let glyphs = prepare_line_glyphs(
+                    &self.layout,
+                    &self.decoration_runs,
+                    origin,
+                    line_height,
+                    device_origin,
+                    &key.subpixel_rendering,
+                    window,
+                )?;
+                *prepared_paint = Some(PreparedLinePaint {
+                    key,
+                    glyphs: Arc::new(glyphs),
+                });
+            }
+
+            let prepared_paint = prepared_paint
+                .as_ref()
+                .expect("prepared line paint is initialized above");
+            window.paint_prepared_glyph_batch(device_origin, prepared_paint.glyphs.clone());
+            Ok(())
+        })
     }
 
     /// Paint the background of the line to the window.
@@ -233,6 +415,7 @@ impl ShapedLine {
             }),
             text: left_text,
             decoration_runs: left_decorations,
+            prepared_paint: OnceLock::new(),
         };
 
         let right = ShapedLine {
@@ -246,6 +429,7 @@ impl ShapedLine {
             }),
             text: right_text,
             decoration_runs: right_decorations,
+            prepared_paint: OnceLock::new(),
         };
 
         (left, right)
@@ -786,7 +970,14 @@ mod tests {
             }),
             text: SharedString::new(text),
             decoration_runs: SmallVec::from(decorations.to_vec()),
+            prepared_paint: OnceLock::new(),
         }
+    }
+
+    #[test]
+    fn device_pixel_phase_ignores_integer_translation() {
+        assert_eq!(device_pixel_phase(12.25), device_pixel_phase(112.25));
+        assert_ne!(device_pixel_phase(12.25), device_pixel_phase(12.5));
     }
 
     #[test]
@@ -904,6 +1095,7 @@ mod tests {
             }),
             text: "abcdef".into(),
             decoration_runs: SmallVec::new(),
+            prepared_paint: OnceLock::new(),
         };
 
         // First split at byte 2 — mid-run in run A

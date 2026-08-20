@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
+    borrow::Cow,
     collections::VecDeque,
     sync::{Arc, Condvar, Mutex, MutexGuard},
     time::Duration,
@@ -370,9 +371,18 @@ pub(crate) struct Utf8ResidualGuard {
 }
 
 impl Utf8ResidualGuard {
-    pub(crate) fn push(&mut self, bytes: &[u8]) -> Option<Vec<u8>> {
+    pub(crate) fn push<'a>(&mut self, bytes: &'a [u8]) -> Option<Cow<'a, [u8]>> {
         if bytes.is_empty() && self.residual.is_empty() {
             return None;
+        }
+
+        if self.residual.is_empty() {
+            let split = split_before_incomplete_utf8_tail(bytes);
+            if split < bytes.len() {
+                // Retain only the incomplete scalar instead of copying the complete chunk.
+                self.residual.extend_from_slice(&bytes[split..]);
+            }
+            return (split > 0).then(|| Cow::Borrowed(&bytes[..split]));
         }
 
         let mut combined = Vec::with_capacity(self.residual.len() + bytes.len());
@@ -391,7 +401,7 @@ impl Utf8ResidualGuard {
             self.residual.clear();
         }
 
-        (!combined.is_empty()).then_some(combined)
+        (!combined.is_empty()).then_some(Cow::Owned(combined))
     }
 
     pub(crate) fn flush(&mut self) -> Option<Vec<u8>> {
@@ -542,20 +552,31 @@ mod tests {
     fn utf8_guard_keeps_incomplete_tail() {
         let mut guard = Utf8ResidualGuard::default();
         assert_eq!(guard.push(&[0xe4, 0xbd]), None);
-        assert_eq!(guard.push(&[0xa0]), Some("你".as_bytes().to_vec()));
+        assert_eq!(guard.push(&[0xa0]).as_deref(), Some("你".as_bytes()));
     }
 
     #[test]
     fn utf8_guard_flushes_invalid_bytes_unchanged() {
         let mut guard = Utf8ResidualGuard::default();
-        assert_eq!(guard.push(&[0xff, b'a']), Some(vec![0xff, b'a']));
+        assert_eq!(
+            guard.push(&[0xff, b'a']).as_deref(),
+            Some(&[0xff, b'a'][..])
+        );
     }
 
     #[test]
     fn utf8_guard_does_not_split_emoji_tail() {
         let mut guard = Utf8ResidualGuard::default();
         assert_eq!(guard.push(&[0xf0, 0x9f, 0x98]), None);
-        assert_eq!(guard.push(&[0x80]), Some("😀".as_bytes().to_vec()));
+        assert_eq!(guard.push(&[0x80]).as_deref(), Some("😀".as_bytes()));
+    }
+
+    #[test]
+    fn utf8_guard_borrows_complete_chunks() {
+        let mut guard = Utf8ResidualGuard::default();
+        let bytes = "plain 中文 🚀".as_bytes();
+
+        assert!(matches!(guard.push(bytes), Some(Cow::Borrowed(value)) if value == bytes));
     }
 
     #[test]

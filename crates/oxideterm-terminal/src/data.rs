@@ -30,8 +30,14 @@ impl TerminalSnapshot {
     }
 
     pub fn reuse_unchanged_rows_from(&mut self, previous: &Self) -> usize {
-        // Match by terminal grid line so scrolling can reuse rows that moved to
-        // a different viewport index between frames.
+        // Stable line identities follow output rows as they move through the viewport. Raw
+        // backend snapshots retain the grid-line fallback until the pane assigns identities.
+        let previous_rows_by_id = previous
+            .lines
+            .iter()
+            .filter(|row| row.line_id != 0)
+            .map(|row| (row.line_id, row))
+            .collect::<HashMap<_, _>>();
         let previous_rows_by_line = previous
             .lines
             .iter()
@@ -39,7 +45,12 @@ impl TerminalSnapshot {
             .collect::<HashMap<_, _>>();
         let mut reused_rows = 0;
         for row in &mut self.lines {
-            let Some(previous_row) = previous_rows_by_line.get(&row.absolute_line) else {
+            let previous_row = if row.line_id != 0 {
+                previous_rows_by_id.get(&row.line_id)
+            } else {
+                previous_rows_by_line.get(&row.absolute_line)
+            };
+            let Some(previous_row) = previous_row else {
                 continue;
             };
             if row.reuse_cells_from_if_equal(previous_row) {
@@ -116,6 +127,8 @@ mod tests {
     #[test]
     fn terminal_snapshot_reuses_equal_row_cell_buffers() {
         let mut previous_row = TerminalRow {
+            line_id: 1,
+            source_id: 0,
             absolute_line: 0,
             cells: Arc::new(vec![test_cell('a')]),
             wrapped: false,
@@ -125,6 +138,8 @@ mod tests {
         previous_row.refresh_signature();
 
         let mut next_row = TerminalRow {
+            line_id: 1,
+            source_id: 0,
             absolute_line: 0,
             cells: Arc::new(vec![test_cell('a')]),
             wrapped: false,
@@ -155,6 +170,8 @@ mod tests {
     #[test]
     fn terminal_snapshot_keeps_changed_row_cell_buffers_separate() {
         let mut previous_row = TerminalRow {
+            line_id: 1,
+            source_id: 0,
             absolute_line: 0,
             cells: Arc::new(vec![test_cell('a')]),
             wrapped: false,
@@ -164,6 +181,8 @@ mod tests {
         previous_row.refresh_signature();
 
         let mut next_row = TerminalRow {
+            line_id: 1,
+            source_id: 0,
             absolute_line: 0,
             cells: Arc::new(vec![test_cell('b')]),
             wrapped: false,
@@ -194,6 +213,8 @@ mod tests {
     #[test]
     fn terminal_snapshot_reuses_equal_rows_after_scroll_changes_viewport_index() {
         let mut first_row = TerminalRow {
+            line_id: 1,
+            source_id: 0,
             absolute_line: -1,
             cells: Arc::new(vec![test_cell('a')]),
             wrapped: false,
@@ -202,6 +223,8 @@ mod tests {
         };
         first_row.refresh_signature();
         let mut second_row = TerminalRow {
+            line_id: 2,
+            source_id: 0,
             absolute_line: 0,
             cells: Arc::new(vec![test_cell('b')]),
             wrapped: false,
@@ -223,7 +246,9 @@ mod tests {
         };
 
         let mut moved_row = TerminalRow {
-            absolute_line: 0,
+            line_id: 2,
+            source_id: 0,
+            absolute_line: -1,
             cells: Arc::new(vec![test_cell('b')]),
             wrapped: false,
             active_input: false,
@@ -231,6 +256,8 @@ mod tests {
         };
         moved_row.refresh_signature();
         let mut new_bottom_row = TerminalRow {
+            line_id: 3,
+            source_id: 0,
             absolute_line: 1,
             cells: Arc::new(vec![test_cell('c')]),
             wrapped: false,

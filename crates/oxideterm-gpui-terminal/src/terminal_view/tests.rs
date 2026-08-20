@@ -42,6 +42,8 @@ fn cursor_snapshot() -> TerminalSnapshot {
     snapshot.cursor_col = 0;
     snapshot.cursor_row = 0;
     snapshot.lines = vec![oxideterm_terminal::TerminalRow {
+        line_id: 0,
+        source_id: 0,
         absolute_line: 0,
         wrapped: false,
         active_input: false,
@@ -106,6 +108,8 @@ fn row_from_text(text: &str, cols: usize) -> oxideterm_terminal::TerminalRow {
         });
     }
     let mut row = oxideterm_terminal::TerminalRow {
+        line_id: 0,
+        source_id: 0,
         absolute_line: 0,
         cells: Arc::new(cells),
         wrapped: false,
@@ -164,6 +168,8 @@ fn row_from_text_with_wide_spacers(text: &str) -> oxideterm_terminal::TerminalRo
         }
     }
     let mut row = oxideterm_terminal::TerminalRow {
+        line_id: 0,
+        source_id: 0,
         absolute_line: 0,
         cells: Arc::new(cells),
         wrapped: false,

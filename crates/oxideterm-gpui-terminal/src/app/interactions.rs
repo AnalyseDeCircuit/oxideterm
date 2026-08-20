@@ -2730,6 +2730,8 @@ mod tests {
             cells.push(test_cell(' '));
         }
         let mut row = TerminalRow {
+            line_id: 0,
+            source_id: 0,
             absolute_line: 0,
             cells: Arc::new(cells),
             wrapped: false,

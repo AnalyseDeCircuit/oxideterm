@@ -57,6 +57,10 @@ pub struct TerminalAttrs {
 
 #[derive(Clone, Debug)]
 pub struct TerminalRow {
+    /// Stable presentation identity assigned by the pane. Zero means unassigned.
+    pub line_id: u64,
+    /// Opaque identity of the backing emulator row used for adjacent-snapshot reuse.
+    pub source_id: usize,
     pub absolute_line: i64,
     pub cells: Arc<Vec<TerminalCell>>,
     pub wrapped: bool,
@@ -93,8 +97,13 @@ impl TerminalRow {
     }
 
     pub fn reuse_cells_from_if_equal(&mut self, previous: &Self) -> bool {
+        let same_line = if self.line_id != 0 && previous.line_id != 0 {
+            self.line_id == previous.line_id
+        } else {
+            self.absolute_line == previous.absolute_line
+        };
         if self.signature != previous.signature
-            || self.absolute_line != previous.absolute_line
+            || !same_line
             || self.wrapped != previous.wrapped
             || self.active_input != previous.active_input
             || self.cells.as_ref() != previous.cells.as_ref()
@@ -128,6 +137,8 @@ mod tests {
     #[test]
     fn row_signature_tracks_paint_relevant_content() {
         let mut row = TerminalRow {
+            line_id: 0,
+            source_id: 0,
             absolute_line: 0,
             cells: Arc::new(vec![test_cell('a')]),
             wrapped: false,

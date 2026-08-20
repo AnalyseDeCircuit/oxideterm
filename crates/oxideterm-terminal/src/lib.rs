@@ -7,6 +7,7 @@ use std::{
     thread::JoinHandle,
 };
 
+use alacritty_terminal::term::cell::Cell as AlacrittyCell;
 use alacritty_terminal::{
     event::{Event as AlacEvent, EventListener, Notify, OnResize, WindowSize},
     grid::{Dimensions, Scroll},

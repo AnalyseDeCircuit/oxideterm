@@ -396,14 +396,7 @@ pub(crate) fn paint_text_run(
                 Some(metrics.cell_width),
             )
         });
-        let _ = shaped.paint(
-            position,
-            metrics.line_height,
-            TextAlign::Left,
-            None,
-            window,
-            cx,
-        );
+        let _ = shaped.paint_cached(position, metrics.line_height, window, cx);
         return;
     }
 
