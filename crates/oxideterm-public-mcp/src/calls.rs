@@ -341,6 +341,8 @@ pub struct PublicMoshProfile {
     pub ssh_port: u16,
     pub username: String,
     pub auth: PublicConnectionAuth,
+    #[serde(default)]
+    pub proxy_chain: Vec<PublicProxyHopProfile>,
     #[serde(default = "default_mosh_server")]
     pub server_executable: String,
     #[serde(default)]

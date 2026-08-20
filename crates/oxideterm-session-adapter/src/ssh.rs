@@ -35,6 +35,8 @@ pub fn ssh_config_from_saved_connection_with_auth(
     let proxy_command = proxy_command_from_saved_connection(store, settings, conn, None);
     let proxy_chain = if proxy_command.is_some() {
         Vec::new()
+    } else if conn.proxy_chain.is_empty() {
+        legacy_jump_host_proxy_chain(store, conn)?
     } else {
         proxy_chain_config_from_saved_connection(store, conn)?
     };
@@ -95,6 +97,8 @@ pub fn ssh_config_from_saved_connection_with_runtime_secrets(
     );
     let proxy_chain = if proxy_command.is_some() {
         Vec::new()
+    } else if conn.proxy_chain.is_empty() {
+        legacy_jump_host_proxy_chain(store, conn)?
     } else {
         conn.proxy_chain
             .iter()
@@ -444,6 +448,9 @@ pub fn proxy_chain_config_from_saved_connection(
     store: &ConnectionStore,
     conn: &SavedConnection,
 ) -> Option<Vec<ProxyHopConfig>> {
+    if conn.proxy_chain.is_empty() {
+        return legacy_jump_host_proxy_chain(store, conn);
+    }
     conn.proxy_chain
         .iter()
         .map(|hop| {
@@ -462,6 +469,32 @@ pub fn proxy_chain_config_from_saved_connection(
             })
         })
         .collect()
+}
+
+fn legacy_jump_host_proxy_chain(
+    store: &ConnectionStore,
+    connection: &SavedConnection,
+) -> Option<Vec<ProxyHopConfig>> {
+    let Some(jump_id) = connection.options.jump_host.as_deref() else {
+        return Some(Vec::new());
+    };
+    if jump_id == connection.id {
+        return None;
+    }
+    let jump = store.get(jump_id)?;
+    Some(vec![ProxyHopConfig {
+        host: jump.host.clone(),
+        port: jump.port,
+        username: jump.username.clone(),
+        auth: auth_method_from_saved_auth(store, &jump.auth)?,
+        agent_forwarding: jump.options.agent_forwarding,
+        identity_agent: jump.options.identity_agent.clone(),
+        agent_forwarding_socket: jump.options.agent_forwarding_socket.clone(),
+        legacy_ssh_compatibility: jump.options.legacy_ssh_compatibility,
+        strict_host_key_checking: true,
+        trust_host_key: None,
+        expected_host_key_fingerprint: None,
+    }])
 }
 
 pub fn ssh_config_for_saved_connection_hop(

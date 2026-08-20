@@ -437,6 +437,7 @@ mod tests {
                 ssh_port: 22,
                 username: "alice".to_string(),
                 auth: SavedAuth::Agent,
+                proxy_chain: Vec::new(),
                 server_executable: "mosh-server".to_string(),
                 udp_host_override: None,
                 udp_port: MoshUdpPortSelection::Automatic,

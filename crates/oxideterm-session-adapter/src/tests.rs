@@ -212,6 +212,29 @@ fn saved_proxy_chain_becomes_ssh_config_chain() {
 }
 
 #[test]
+fn legacy_jump_host_becomes_runtime_proxy_chain() {
+    let (mut store, path) = temp_connection_store("legacy-jump-host");
+    let mut jump = saved_connection(SavedAuth::Agent);
+    jump.id = "jump-1".to_string();
+    jump.host = "jump.example.com".to_string();
+    jump.port = 2200;
+    jump.username = "jump".to_string();
+    store.upsert_imported_connection(jump).unwrap();
+
+    let mut target = saved_connection(SavedAuth::Agent);
+    target.options.jump_host = Some("jump-1".to_string());
+    let config = ssh_config_from_saved_connection(&store, &PersistedSettings::default(), &target)
+        .expect("legacy jump host should resolve");
+
+    let chain = config.proxy_chain.expect("one legacy jump host");
+    assert_eq!(chain.len(), 1);
+    assert_eq!(chain[0].host, "jump.example.com");
+    assert_eq!(chain[0].port, 2200);
+    assert_eq!(chain[0].username, "jump");
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn saved_connection_hops_become_independent_runtime_configs() {
     let (store, path) = temp_connection_store("materialized-hops");
     let mut connection = saved_connection(SavedAuth::Agent);

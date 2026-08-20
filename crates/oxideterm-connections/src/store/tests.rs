@@ -88,6 +88,7 @@ mod tests {
             ssh_port: 22,
             username: "me".to_string(),
             auth,
+            proxy_chain: Vec::new(),
             server_executable: "mosh-server".to_string(),
             udp_host_override: None,
             udp_port: MoshUdpPortSelection::Automatic,

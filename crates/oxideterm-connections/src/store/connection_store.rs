@@ -243,6 +243,10 @@ impl ConnectionStore {
             self.materialize_auth_with_runtime_secret(request.auth, existing_auth.as_ref())?;
         let (proxy_chain, proxy_chain_secrets) =
             self.materialize_proxy_chain_with_runtime_secrets(request.proxy_chain)?;
+        if !proxy_chain.is_empty() {
+            // A modern embedded route supersedes the legacy saved-connection reference.
+            options.jump_host = None;
+        }
         let (upstream_proxy, upstream_proxy_secret) = self
             .materialize_upstream_proxy_policy_with_runtime_secret(
                 request.upstream_proxy,
@@ -1038,13 +1042,18 @@ impl ConnectionStore {
         let existing = self.get_mosh_profile(&id).cloned();
         let old_keychain_ids = existing
             .as_ref()
-            .map(|profile| collect_keychain_ids_for_auth(&profile.auth))
+            .map(collect_mosh_keychain_ids)
             .unwrap_or_default();
         let (auth, auth_secret) = self.materialize_auth_with_runtime_secret(
             request.auth,
             existing.as_ref().map(|profile| &profile.auth),
         )?;
-        let next_keychain_ids = collect_keychain_ids_for_auth(&auth);
+        let (proxy_chain, proxy_chain_secrets) =
+            self.materialize_proxy_chain_with_runtime_secrets(request.proxy_chain)?;
+        let mut next_keychain_ids = collect_keychain_ids_for_auth(&auth);
+        for hop in &proxy_chain {
+            next_keychain_ids.extend(collect_keychain_ids_for_auth(&hop.auth));
+        }
         let mut profile = existing.unwrap_or_else(|| {
             let mut profile = MoshProfile::new(
                 request.name.trim(),
@@ -1066,6 +1075,7 @@ impl ConnectionStore {
         profile.ssh_port = request.ssh_port;
         profile.username = request.username.trim().to_string();
         profile.auth = auth;
+        profile.proxy_chain = proxy_chain;
         profile.server_executable = request.server_executable.trim().to_string();
         profile.udp_host_override = normalize_optional_text(request.udp_host_override);
         profile.udp_port = request.udp_port;
@@ -1101,14 +1111,17 @@ impl ConnectionStore {
         }
         Ok((
             profile,
-            SavedMoshProfileRuntimeSecrets { auth: auth_secret },
+            SavedMoshProfileRuntimeSecrets {
+                auth: auth_secret,
+                proxy_chain: proxy_chain_secrets,
+            },
         ))
     }
 
     pub fn delete_mosh_profile(&mut self, id: &str) -> Result<bool> {
         let keychain_ids = self
             .get_mosh_profile(id)
-            .map(|profile| collect_keychain_ids_for_auth(&profile.auth))
+            .map(collect_mosh_keychain_ids)
             .unwrap_or_default();
         let before = self.data.mosh_profiles.len();
         self.data.mosh_profiles.retain(|profile| profile.id != id);
@@ -1120,6 +1133,22 @@ impl ConnectionStore {
             }
         }
         Ok(deleted)
+    }
+
+    pub fn load_mosh_profile_runtime_secrets(
+        &self,
+        id: &str,
+    ) -> Result<SavedMoshProfileRuntimeSecrets> {
+        let profile = self
+            .get_mosh_profile(id)
+            .ok_or_else(|| anyhow::anyhow!("Mosh profile not found"))?;
+        let auth = self.load_saved_auth_runtime_secret(&profile.auth)?;
+        let proxy_chain = profile
+            .proxy_chain
+            .iter()
+            .map(|hop| self.load_saved_auth_runtime_secret(&hop.auth))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(SavedMoshProfileRuntimeSecrets { auth, proxy_chain })
     }
 
     /// Stores a Mosh primary credential without changing its recent-use timestamp.
@@ -1145,6 +1174,34 @@ impl ConnectionStore {
         Ok(true)
     }
 
+    pub fn store_mosh_proxy_hop_credential(
+        &mut self,
+        id: &str,
+        hop_index: usize,
+        secret: &SecretString,
+    ) -> Result<bool> {
+        let Some(profile) = self.get_mosh_profile(id) else {
+            return Ok(false);
+        };
+        let auth = profile
+            .proxy_chain
+            .get(hop_index)
+            .map(|hop| hop.auth.clone())
+            .ok_or_else(|| anyhow::anyhow!("Mosh proxy hop credential slot not found"))?;
+        let (next_auth, reference) = auth_with_protected_credential(auth)?;
+        self.keychain.store(&reference, secret)?;
+        let profile = self
+            .data
+            .mosh_profiles
+            .iter_mut()
+            .find(|profile| profile.id == id)
+            .expect("Mosh profile checked above");
+        profile.proxy_chain[hop_index].auth = next_auth;
+        profile.updated_at = Utc::now();
+        self.save()?;
+        Ok(true)
+    }
+
     /// Forgets a Mosh primary credential without changing its recent-use timestamp.
     pub fn forget_mosh_profile_credential(&mut self, id: &str) -> Result<bool> {
         let Some(profile) = self.get_mosh_profile(id) else {
@@ -1161,6 +1218,36 @@ impl ConnectionStore {
             .find(|profile| profile.id == id)
             .expect("Mosh profile checked above");
         profile.auth = next_auth;
+        profile.updated_at = Utc::now();
+        self.save()?;
+        self.delete_or_queue_connection_keychain_entry(reference)?;
+        Ok(true)
+    }
+
+    pub fn forget_mosh_proxy_hop_credential(
+        &mut self,
+        id: &str,
+        hop_index: usize,
+    ) -> Result<bool> {
+        let Some(profile) = self.get_mosh_profile(id) else {
+            return Ok(false);
+        };
+        let auth = profile
+            .proxy_chain
+            .get(hop_index)
+            .map(|hop| &hop.auth)
+            .ok_or_else(|| anyhow::anyhow!("Mosh proxy hop credential slot not found"))?;
+        let (next_auth, reference) = auth_without_protected_credential(auth);
+        let Some(reference) = reference else {
+            return Ok(false);
+        };
+        let profile = self
+            .data
+            .mosh_profiles
+            .iter_mut()
+            .find(|profile| profile.id == id)
+            .expect("Mosh profile checked above");
+        profile.proxy_chain[hop_index].auth = next_auth;
         profile.updated_at = Utc::now();
         self.save()?;
         self.delete_or_queue_connection_keychain_entry(reference)?;

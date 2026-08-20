@@ -308,6 +308,14 @@ fn collect_connection_keychain_ids(connection: &SavedConnection) -> Vec<String> 
     )
 }
 
+fn collect_mosh_keychain_ids(profile: &MoshProfile) -> Vec<String> {
+    let mut ids = collect_keychain_ids_for_auth(&profile.auth);
+    for hop in &profile.proxy_chain {
+        ids.extend(collect_keychain_ids_for_auth(&hop.auth));
+    }
+    ids
+}
+
 fn collect_standalone_sftp_keychain_ids(profile: &StandaloneSftpProfile) -> Vec<String> {
     let mut ids = collect_keychain_ids_for_parts(
         &profile.auth,
