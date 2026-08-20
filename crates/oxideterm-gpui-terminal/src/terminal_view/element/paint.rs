@@ -524,17 +524,27 @@ fn paint_powerline_separators(
     metrics: &TerminalMetrics,
     window: &mut Window,
 ) -> bool {
-    let chars = run.text.chars().collect::<Vec<_>>();
-    if chars.is_empty()
-        || chars.len() != run.cells
-        || !chars.iter().all(|ch| powerline_separator(*ch).is_some())
+    let mut run_chars = run.text.chars();
+    let Some(first) = run_chars.next() else {
+        return false;
+    };
+    // Avoid collecting ordinary text runs that cannot contain Powerline separators.
+    if powerline_separator(first).is_none() {
+        return false;
+    }
+
+    let chars = std::iter::once(first).chain(run_chars);
+    if chars.clone().count() != run.cells
+        || !chars.clone().all(|ch| powerline_separator(ch).is_some())
     {
         return false;
     }
 
+    // Separator runs are short, so validating twice is cheaper than allocating
+    // a character buffer while still preventing partially painted mixed runs.
     let paint_metrics = PowerlinePaintMetrics::for_scale_factor(window.scale_factor());
 
-    for (offset, ch) in chars.into_iter().enumerate() {
+    for (offset, ch) in chars.enumerate() {
         let raw_bounds = Bounds::new(
             origin
                 + point(

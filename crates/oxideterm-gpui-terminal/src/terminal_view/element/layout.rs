@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use gpui::{Bounds, Pixels, point, px, rgba, size};
 use oxideterm_terminal::{TerminalSearchMatch, TerminalSnapshot};
-use oxideterm_terminal_unicode::visual_line_for_row;
+use oxideterm_terminal_unicode::visual_line_for_row_if_bidi;
 
 use crate::terminal_ui::*;
 use crate::terminal_view::element::{TerminalRect, TerminalScrollbar};
@@ -177,8 +177,8 @@ fn cursor_visual_col(snapshot: &TerminalSnapshot) -> usize {
     snapshot
         .lines
         .get(snapshot.cursor_row)
-        .map(visual_line_for_row)
-        .filter(|line| line.has_bidi)
+        // Ordinary cursor rows do not need an allocated visual mapping.
+        .and_then(visual_line_for_row_if_bidi)
         .map(|line| line.visual_col_for_logical_col(snapshot.cursor_col))
         .unwrap_or(snapshot.cursor_col)
 }

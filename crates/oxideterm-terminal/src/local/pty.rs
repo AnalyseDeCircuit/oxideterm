@@ -794,11 +794,12 @@ pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
 
     if cursor_row < rows.len() && cursor_col < size.cols {
         rows[cursor_row].cells_mut()[cursor_col].cursor = true;
-        let _ = mark_active_input_rows(&mut rows, cursor_row);
-    }
-
-    for row in &mut rows {
-        row.refresh_signature();
+        let active_input_rows = mark_active_input_rows(&mut rows, cursor_row);
+        // Snapshot rows already carry content signatures. Only cursor and
+        // active-input metadata changed after row construction.
+        for row in &mut rows[active_input_rows] {
+            row.refresh_signature();
+        }
     }
 
     TerminalSnapshot {
@@ -822,62 +823,64 @@ fn snapshot_row_from_term<T: EventListener>(
     row: usize,
 ) -> TerminalRow {
     let grid_line = row as i32 - display_offset as i32;
+    let mut cells = Vec::with_capacity(size.cols);
+    let mut wrapped = false;
+    if grid_line >= -(term.grid().history_size() as i32)
+        && grid_line < term.screen_lines() as i32
+    {
+        let terminal_row = &term.grid()[Line(grid_line)];
+        for cell in terminal_row[..].iter().take(size.cols) {
+            wrapped |= cell.flags.contains(Flags::WRAPLINE);
+            if cell
+                .flags
+                .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+            {
+                cells.push(blank_terminal_cell());
+                continue;
+            }
+            let ch = if cell.c == '\0' { ' ' } else { cell.c };
+            let attrs = attrs_from_flags(cell.flags);
+            let (fg, bg) = style_colors_for_cell(cell.fg, cell.bg, ch, attrs);
+            let style_origin = style_origin_for_cell(cell.fg, cell.bg, attrs);
+            cells.push(TerminalCell {
+                ch,
+                zerowidth: cell.zerowidth().into_iter().flatten().copied().collect(),
+                wide: cell.flags.contains(Flags::WIDE_CHAR),
+                fg,
+                bg,
+                style_origin,
+                attrs,
+                hyperlink: cell
+                    .hyperlink()
+                    .map(|hyperlink| hyperlink.uri().to_string()),
+                cursor: false,
+            });
+        }
+    }
+    cells.resize_with(size.cols, blank_terminal_cell);
     let mut snapshot_row = TerminalRow {
         absolute_line: i64::from(grid_line),
-        wrapped: false,
+        wrapped,
         active_input: false,
         signature: 0,
-        cells: Arc::new(vec![
-            TerminalCell {
-                ch: ' ',
-                zerowidth: String::new(),
-                wide: false,
-                fg: OXIDETERM_DARK_THEME.foreground,
-                bg: OXIDETERM_DARK_THEME.ansi_background,
-                style_origin: TerminalStyleOrigin::default(),
-                attrs: TerminalAttrs::default(),
-                hyperlink: None,
-                cursor: false,
-            };
-            size.cols
-        ]),
+        cells: Arc::new(cells),
     };
-    if grid_line < -(term.grid().history_size() as i32) || grid_line >= term.screen_lines() as i32 {
-        snapshot_row.refresh_signature();
-        return snapshot_row;
-    }
-
-    let terminal_row = &term.grid()[Line(grid_line)];
-    for (col, cell) in terminal_row[..].iter().take(size.cols).enumerate() {
-        if cell.flags.contains(Flags::WRAPLINE) {
-            snapshot_row.wrapped = true;
-        }
-        if cell
-            .flags
-            .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
-        {
-            continue;
-        }
-        let ch = if cell.c == '\0' { ' ' } else { cell.c };
-        let attrs = attrs_from_flags(cell.flags);
-        let (fg, bg) = style_colors_for_cell(cell.fg, cell.bg, ch, attrs);
-        let style_origin = style_origin_for_cell(cell.fg, cell.bg, attrs);
-        snapshot_row.cells_mut()[col] = TerminalCell {
-            ch,
-            zerowidth: cell.zerowidth().into_iter().flatten().copied().collect(),
-            wide: cell.flags.contains(Flags::WIDE_CHAR),
-            fg,
-            bg,
-            style_origin,
-            attrs,
-            hyperlink: cell
-                .hyperlink()
-                .map(|hyperlink| hyperlink.uri().to_string()),
-            cursor: false,
-        };
-    }
     snapshot_row.refresh_signature();
     snapshot_row
+}
+
+fn blank_terminal_cell() -> TerminalCell {
+    TerminalCell {
+        ch: ' ',
+        zerowidth: String::new(),
+        wide: false,
+        fg: OXIDETERM_DARK_THEME.foreground,
+        bg: OXIDETERM_DARK_THEME.ansi_background,
+        style_origin: TerminalStyleOrigin::default(),
+        attrs: TerminalAttrs::default(),
+        hyperlink: None,
+        cursor: false,
+    }
 }
 
 fn refresh_snapshot_metadata<T: EventListener>(

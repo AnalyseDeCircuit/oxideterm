@@ -18,7 +18,7 @@ use oxideterm_terminal_semantic::{
     CompiledSemanticScheme, SemanticLineRole, SemanticScheme, SemanticShellDialect,
     compiled_builtin_scheme,
 };
-use oxideterm_terminal_unicode::{TerminalVisualLine, visual_line_for_row};
+use oxideterm_terminal_unicode::{TerminalVisualLine, visual_line_for_row_if_bidi};
 use parking_lot::Mutex;
 use unicode_width::UnicodeWidthChar;
 
@@ -821,8 +821,7 @@ impl TerminalElement {
                     .snapshot
                     .lines
                     .get(self.snapshot.cursor_row)
-                    .map(|row| visual_line_for_row_with_bidi(row, self.bidi_enabled))
-                    .filter(|line| line.has_bidi)
+                    .and_then(|row| visual_line_for_row_with_bidi(row, self.bidi_enabled))
                     .map(|line| line.visual_col_for_logical_col(self.snapshot.cursor_col))
                     .unwrap_or(self.snapshot.cursor_col);
                 Some(BatchedTextRun {
@@ -978,11 +977,10 @@ impl TerminalElement {
         let visual_line = visual_line_for_row_with_bidi(row, self.bidi_enabled);
 
         for (col_index, cell) in row.cells.iter().enumerate() {
-            let paint_col = if visual_line.has_bidi {
-                visual_line.visual_col_for_logical_col(col_index)
-            } else {
-                col_index
-            };
+            let paint_col = visual_line
+                .as_ref()
+                .map(|line| line.visual_col_for_logical_col(col_index))
+                .unwrap_or(col_index);
             if self.cursor_visible
                 && cell.cursor
                 && self.snapshot.cursor_shape != TerminalCursorShape::Hidden
@@ -1038,7 +1036,7 @@ impl TerminalElement {
                 selections.push(rect);
             }
 
-            if visual_line.has_bidi {
+            if visual_line.is_some() {
                 continue;
             }
 
@@ -1053,14 +1051,13 @@ impl TerminalElement {
                         col_index,
                     );
                 let style = text_run_for_cell(cell, fg, link, &self.metrics);
-                let cell_text = cell_text(cell);
                 if cell.zerowidth.is_empty() && powerline_separator(cell.ch).is_some() {
                     if let Some(run) = current_run.take() {
                         text_runs.push(run);
                     }
                     text_runs.push(PendingTerminalRowTextRun {
                         col: col_index,
-                        text: cell_text,
+                        text: cell_text(cell),
                         cells: cell_width,
                         style,
                     });
@@ -1070,9 +1067,11 @@ impl TerminalElement {
                     && run.col + run.cells == col_index
                     && text_run_style_matches(&run.style, &style)
                 {
-                    run.text.push_str(&cell_text);
+                    // Append directly to the existing run so ordinary rows do not
+                    // allocate a temporary String for every visible cell.
+                    push_cell_text(&mut run.text, cell);
                     run.cells += cell_width;
-                    run.style.len += cell_text.len();
+                    run.style.len += cell_text_len(cell);
                     continue;
                 }
 
@@ -1081,7 +1080,7 @@ impl TerminalElement {
                 }
                 current_run = Some(PendingTerminalRowTextRun {
                     col: col_index,
-                    text: cell_text,
+                    text: cell_text(cell),
                     cells: cell_width,
                     style,
                 });
@@ -1090,11 +1089,11 @@ impl TerminalElement {
             }
         }
 
-        if visual_line.has_bidi {
+        if let Some(visual_line) = visual_line.as_ref() {
             push_visual_text_runs(
                 row_index,
                 row,
-                &visual_line,
+                visual_line,
                 link_ranges,
                 self.hovered_link.as_ref(),
                 &self.metrics,
@@ -1262,11 +1261,10 @@ impl TerminalElement {
         let text = self.ghost_text.as_deref().filter(|text| !text.is_empty())?;
         let row = self.snapshot.lines.get(self.snapshot.cursor_row)?;
         let visual_line = visual_line_for_row_with_bidi(row, self.bidi_enabled);
-        let col = if visual_line.has_bidi {
-            visual_line.visual_col_for_logical_col(self.snapshot.cursor_col)
-        } else {
-            self.snapshot.cursor_col
-        };
+        let col = visual_line
+            .as_ref()
+            .map(|line| line.visual_col_for_logical_col(self.snapshot.cursor_col))
+            .unwrap_or(self.snapshot.cursor_col);
         let remaining_cells = self.snapshot.cols.saturating_sub(col);
         if remaining_cells == 0 {
             return None;
@@ -1312,11 +1310,12 @@ fn ghost_text_prefix_for_cells(text: &str, max_cells: usize) -> (String, usize) 
 fn visual_line_for_row_with_bidi(
     row: &oxideterm_terminal::TerminalRow,
     bidi_enabled: bool,
-) -> TerminalVisualLine {
+) -> Option<TerminalVisualLine> {
+    // Ordinary rows use their logical cell order without allocating a visual map.
     if bidi_enabled {
-        visual_line_for_row(row)
+        visual_line_for_row_if_bidi(row)
     } else {
-        TerminalVisualLine::identity(row)
+        None
     }
 }
 
@@ -1877,11 +1876,10 @@ fn map_rects_to_visual(
         let Some(row) = snapshot.lines.get(rect.row) else {
             continue;
         };
-        let visual_line = visual_line_for_row_with_bidi(row, bidi_enabled);
-        if !visual_line.has_bidi {
+        let Some(visual_line) = visual_line_for_row_with_bidi(row, bidi_enabled) else {
             mapped.push(rect);
             continue;
-        }
+        };
 
         for range in visual_line.visual_rects_for_logical_range(rect.col..rect.col + rect.cells) {
             mapped.push(TerminalRect {
@@ -1896,14 +1894,18 @@ fn map_rects_to_visual(
 }
 
 fn cell_text(cell: &oxideterm_terminal::TerminalCell) -> String {
-    if cell.zerowidth.is_empty() {
-        cell.ch.to_string()
-    } else {
-        let mut text = String::with_capacity(cell.ch.len_utf8() + cell.zerowidth.len());
-        text.push(cell.ch);
-        text.push_str(&cell.zerowidth);
-        text
-    }
+    let mut text = String::with_capacity(cell_text_len(cell));
+    push_cell_text(&mut text, cell);
+    text
+}
+
+fn push_cell_text(text: &mut String, cell: &oxideterm_terminal::TerminalCell) {
+    text.push(cell.ch);
+    text.push_str(&cell.zerowidth);
+}
+
+fn cell_text_len(cell: &oxideterm_terminal::TerminalCell) -> usize {
+    cell.ch.len_utf8() + cell.zerowidth.len()
 }
 
 impl IntoElement for TerminalElement {

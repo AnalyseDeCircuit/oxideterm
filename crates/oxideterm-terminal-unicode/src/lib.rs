@@ -144,12 +144,19 @@ impl TerminalVisualLine {
 }
 
 pub fn visual_line_for_row(row: &TerminalRow) -> TerminalVisualLine {
-    let Some(content_span) = content_span(row) else {
-        return TerminalVisualLine::identity(row);
-    };
+    visual_line_for_row_if_bidi(row).unwrap_or_else(|| TerminalVisualLine::identity(row))
+}
+
+pub fn visual_line_for_row_if_bidi(row: &TerminalRow) -> Option<TerminalVisualLine> {
+    let content_span = content_span(row)?;
+    // Most terminal rows are already in visual order. Reject them before
+    // allocating clusters, strings, and logical-to-visual maps.
+    if !row_contains_bidi_text(row, content_span.clone()) {
+        return None;
+    }
     let clusters = row_clusters(row, content_span.clone());
-    if clusters.is_empty() || !contains_bidi_text(&clusters) {
-        return TerminalVisualLine::identity(row);
+    if clusters.is_empty() {
+        return None;
     }
 
     let text = clusters
@@ -157,9 +164,7 @@ pub fn visual_line_for_row(row: &TerminalRow) -> TerminalVisualLine {
         .map(|cluster| cluster.text.as_str())
         .collect::<String>();
     let bidi = BidiInfo::new(&text, None);
-    let Some(paragraph) = bidi.paragraphs.first() else {
-        return TerminalVisualLine::identity(row);
-    };
+    let paragraph = bidi.paragraphs.first()?;
 
     let mut levels = Vec::with_capacity(clusters.len());
     for cluster in &clusters {
@@ -172,7 +177,7 @@ pub fn visual_line_for_row(row: &TerminalRow) -> TerminalVisualLine {
     }
 
     if levels.iter().all(|level| *level == 0) {
-        return TerminalVisualLine::identity(row);
+        return None;
     }
 
     let visual_order = reordered_cluster_indices(&levels);
@@ -221,13 +226,13 @@ pub fn visual_line_for_row(row: &TerminalRow) -> TerminalVisualLine {
         });
     }
 
-    TerminalVisualLine {
+    Some(TerminalVisualLine {
         clusters: visual_clusters,
         visual_runs,
         logical_to_visual,
         visual_to_logical,
         has_bidi: true,
-    }
+    })
 }
 
 fn identity_map(cols: usize) -> Vec<Option<usize>> {
@@ -303,9 +308,13 @@ fn cell_width(cell: &TerminalCell) -> usize {
     }
 }
 
-fn contains_bidi_text(clusters: &[SourceCluster]) -> bool {
-    clusters.iter().any(|cluster| {
-        cluster.text.chars().any(|ch| {
+fn row_contains_bidi_text(row: &TerminalRow, span: Range<usize>) -> bool {
+    row.cells
+        .get(span)
+        .unwrap_or_default()
+        .iter()
+        .flat_map(|cell| std::iter::once(cell.ch).chain(cell.zerowidth.chars()))
+        .any(|ch| {
             matches!(
                 unicode_bidi::bidi_class(ch),
                 unicode_bidi::BidiClass::R
@@ -313,7 +322,6 @@ fn contains_bidi_text(clusters: &[SourceCluster]) -> bool {
                     | unicode_bidi::BidiClass::AN
             )
         })
-    })
 }
 
 fn reordered_cluster_indices(levels: &[u8]) -> Vec<usize> {
@@ -385,7 +393,9 @@ mod tests {
 
     #[test]
     fn ltr_rows_use_identity_mapping() {
-        let line = visual_line_for_row(&row("abc"));
+        let source = row("abc");
+        assert!(visual_line_for_row_if_bidi(&source).is_none());
+        let line = visual_line_for_row(&source);
         assert!(!line.has_bidi);
         assert_eq!(line.logical_to_visual, vec![Some(0), Some(1), Some(2)]);
         assert_eq!(line.visual_to_logical, vec![Some(0), Some(1), Some(2)]);
@@ -394,9 +404,10 @@ mod tests {
     #[test]
     fn arabic_row_is_reordered_without_changing_logical_text() {
         let source = "السلام";
-        let line = visual_line_for_row(&row(source));
+        let source_row = row(source);
+        let line = visual_line_for_row_if_bidi(&source_row).expect("Arabic visual line");
         assert!(line.has_bidi);
-        assert_eq!(row(source).text(), source);
+        assert_eq!(source_row.text(), source);
         assert_eq!(
             line.clusters.first().unwrap().logical_col,
             source.chars().count() - 1
