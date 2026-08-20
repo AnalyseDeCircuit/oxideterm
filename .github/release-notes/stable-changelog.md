@@ -3,6 +3,30 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.0.23
+
+### English
+
+OxideTerm 2.0.23 substantially improves terminal throughput and high-density scrolling efficiency.
+
+#### ⚡ Terminal Performance
+
+- Optimized terminal output processing and high-density scrolling by eliminating repeated scanning, copying, scheduling, layout, and rendering work while preserving protocol detection and terminal compatibility.
+- In OxideTerm's reproducible 16 MiB release-build benchmark, median process-to-PTY throughput increased from 3.144 to 69.031 MiB/s for plain text, from 7.330 to 88.384 MiB/s for ANSI output, from 4.393 to 68.711 MiB/s for Unicode output, and from 10.191 to 96.685 MiB/s for long CSI sequences. These results correspond to speedups of 21.96×, 12.06×, 15.64×, and 9.49× respectively.
+- The comparison used the same fixture size, one warm-up, and the median of three measured runs. It measures process-to-PTY throughput rather than completed rendering or input latency.
+
+### 中文
+
+OxideTerm 2.0.23 显著提升终端吞吐量及高密度滚动效率。
+
+#### ⚡ 终端性能
+
+- 优化终端输出处理及高密度滚动，减少重复扫描、复制、调度、布局和绘制工作，同时保持协议探测能力及终端兼容性。
+- 在 OxideTerm 可复现的 16 MiB 发布构建基准中，纯文本的进程到 PTY 吞吐量中位数由 3.144 MiB/s 提升至 69.031 MiB/s，ANSI 输出由 7.330 MiB/s 提升至 88.384 MiB/s，Unicode 输出由 4.393 MiB/s 提升至 68.711 MiB/s，长 CSI 序列由 10.191 MiB/s 提升至 96.685 MiB/s，分别达到原来的 21.96 倍、12.06 倍、15.64 倍和 9.49 倍。
+- 对比采用相同的测试数据规模、一次预热及三次测量的中位数。该结果衡量进程到 PTY 的吞吐量，不代表绘制完成耗时或输入延迟。
+
+![OxideTerm release-build terminal throughput before and after optimization](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/v2.0.24/.github/release-notes/assets/terminal-performance-release-comparison.png)
+
 ## 2.0.22
 
 ### English

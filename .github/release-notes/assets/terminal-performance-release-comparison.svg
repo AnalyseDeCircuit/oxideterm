@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="600" viewBox="0 0 1100 600" role="img" aria-labelledby="title description">
+  <title id="title">OxideTerm release-build terminal throughput before and after optimization</title>
+  <desc id="description">Grouped bars compare median process-to-PTY throughput for plain, ANSI, Unicode, and long CSI workloads. Throughput increased from 3.144 to 69.031, 7.330 to 88.384, 4.393 to 68.711, and 10.191 to 96.685 MiB per second.</desc>
+  <style>
+    text { fill: #1e293b; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    .title { font-size: 24px; font-weight: 700; }
+    .subtitle, .note { fill: #64748b; font-size: 14px; }
+    .axis { font-size: 13px; }
+    .value { font-size: 13px; font-weight: 650; text-anchor: middle; }
+    .speedup { fill: #ffffff; font-size: 14px; font-weight: 750; text-anchor: middle; }
+    .speedup-note { fill: #ffffff; font-size: 11px; text-anchor: middle; }
+    .grid { stroke: #cbd5e1; stroke-width: 1; }
+    .frame { fill: none; stroke: #94a3b8; stroke-width: 1; }
+    .before { fill: #94a3b8; }
+    .after { fill: #2563eb; }
+  </style>
+
+  <rect width="1100" height="600" fill="#f8fafc"/>
+
+  <text class="title" x="90" y="38">Terminal throughput: release build before vs after</text>
+  <text class="subtitle" x="90" y="66">16 MiB fixture · 1 warm-up · median of 3 measured runs · higher is better</text>
+
+  <rect class="before" x="842" y="26" width="18" height="18" rx="2"/>
+  <text class="axis" x="868" y="40">Before</text>
+  <rect class="after" x="938" y="26" width="18" height="18" rx="2"/>
+  <text class="axis" x="964" y="40">After</text>
+
+  <line class="grid" x1="90" y1="480" x2="1070" y2="480"/>
+  <line class="grid" x1="90" y1="404" x2="1070" y2="404"/>
+  <line class="grid" x1="90" y1="328" x2="1070" y2="328"/>
+  <line class="grid" x1="90" y1="252" x2="1070" y2="252"/>
+  <line class="grid" x1="90" y1="176" x2="1070" y2="176"/>
+  <line class="grid" x1="90" y1="100" x2="1070" y2="100"/>
+  <rect class="frame" x="90" y="100" width="980" height="380"/>
+
+  <text class="axis" x="76" y="484" text-anchor="end">0</text>
+  <text class="axis" x="76" y="408" text-anchor="end">20</text>
+  <text class="axis" x="76" y="332" text-anchor="end">40</text>
+  <text class="axis" x="76" y="256" text-anchor="end">60</text>
+  <text class="axis" x="76" y="180" text-anchor="end">80</text>
+  <text class="axis" x="76" y="104" text-anchor="end">100</text>
+  <text class="axis" transform="translate(24 290) rotate(-90)" text-anchor="middle">Median throughput (MiB/s)</text>
+
+  <rect class="before" x="118" y="468.1" width="68" height="11.9" rx="2"/>
+  <rect class="after" x="192" y="217.7" width="68" height="262.3" rx="2"/>
+  <text class="value" x="152" y="458">3.144</text>
+  <text class="value" x="226" y="207">69.031</text>
+  <text class="speedup" x="226" y="246">21.96×</text>
+  <text class="speedup-note" x="226" y="263">faster</text>
+  <text class="axis" x="189" y="514" text-anchor="middle">plain</text>
+
+  <rect class="before" x="368" y="452.1" width="68" height="27.9" rx="2"/>
+  <rect class="after" x="442" y="144.1" width="68" height="335.9" rx="2"/>
+  <text class="value" x="402" y="442">7.330</text>
+  <text class="value" x="476" y="134">88.384</text>
+  <text class="speedup" x="476" y="173">12.06×</text>
+  <text class="speedup-note" x="476" y="190">faster</text>
+  <text class="axis" x="439" y="514" text-anchor="middle">ansi</text>
+
+  <rect class="before" x="618" y="463.3" width="68" height="16.7" rx="2"/>
+  <rect class="after" x="692" y="218.9" width="68" height="261.1" rx="2"/>
+  <text class="value" x="652" y="453">4.393</text>
+  <text class="value" x="726" y="208">68.711</text>
+  <text class="speedup" x="726" y="247">15.64×</text>
+  <text class="speedup-note" x="726" y="264">faster</text>
+  <text class="axis" x="689" y="514" text-anchor="middle">unicode</text>
+
+  <rect class="before" x="868" y="441.3" width="68" height="38.7" rx="2"/>
+  <rect class="after" x="942" y="112.6" width="68" height="367.4" rx="2"/>
+  <text class="value" x="902" y="431">10.191</text>
+  <text class="value" x="976" y="102">96.685</text>
+  <text class="speedup" x="976" y="142">9.49×</text>
+  <text class="speedup-note" x="976" y="159">faster</text>
+  <text class="axis" x="939" y="514" text-anchor="middle">long-csi</text>
+
+  <text class="note" x="90" y="560">Measures process-to-PTY throughput; it does not measure completed rendering or input latency.</text>
+  <text class="note" x="90" y="582">Before: 20260819T202020Z-23504 · After: 20260820T131720Z-72791</text>
+</svg>
