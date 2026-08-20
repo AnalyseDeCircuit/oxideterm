@@ -51,6 +51,33 @@ mod tests {
     }
 
     #[test]
+    fn ordered_plain_and_csi_output_does_not_query_graphics_cursor() {
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let cursor_calls = std::cell::Cell::new(0);
+        let chunks: [&[u8]; 2] = [b"before\x1b", b"[31mcolored\x1b[0mafter"];
+        let mut terminal_bytes = Vec::new();
+
+        for chunk in chunks {
+            ingress.advance_ordered(
+                chunk,
+                |segment| match segment {
+                    TerminalGraphicsSegment::Terminal(bytes) => {
+                        terminal_bytes.extend_from_slice(&bytes);
+                    }
+                    TerminalGraphicsSegment::Event(_) => panic!("unexpected graphics event"),
+                },
+                || {
+                    cursor_calls.set(cursor_calls.get() + 1);
+                    cursor()
+                },
+            );
+        }
+
+        assert_eq!(terminal_bytes, b"before\x1b[31mcolored\x1b[0mafter");
+        assert_eq!(cursor_calls.get(), 0);
+    }
+
+    #[test]
     fn split_osc_sequence_is_consumed() {
         let mut png = RgbaImage::new(1, 1);
         png.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));

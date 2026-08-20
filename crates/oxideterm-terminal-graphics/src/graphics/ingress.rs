@@ -82,17 +82,17 @@ impl GraphicsIngress {
     }
 
     pub fn advance(&mut self, bytes: &[u8], cursor: GraphicsCursor) -> GraphicsAdvance {
-        if !self.options.enabled {
-            return GraphicsAdvance {
-                terminal_bytes: bytes.to_vec(),
-                events: Vec::new(),
-            };
-        }
-
         let mut result = GraphicsAdvance::default();
-        for &byte in bytes {
-            self.advance_byte(byte, cursor, &mut result);
-        }
+        self.advance_ordered(
+            bytes,
+            |segment| match segment {
+                TerminalGraphicsSegment::Terminal(mut terminal_bytes) => {
+                    result.terminal_bytes.append(&mut terminal_bytes);
+                }
+                TerminalGraphicsSegment::Event(event) => result.events.push(event),
+            },
+            || cursor,
+        );
         result
     }
 
@@ -104,41 +104,8 @@ impl GraphicsIngress {
     where
         F: FnMut() -> GraphicsCursor,
     {
-        if !self.options.enabled {
-            return vec![TerminalGraphicsSegment::Terminal(bytes.to_vec())];
-        }
-
         let mut segments = Vec::new();
-        let mut terminal_bytes = Vec::new();
-        for &byte in bytes {
-            let before_state = self.state.clone();
-            let mut result = GraphicsAdvance::default();
-            self.advance_byte(byte, cursor(), &mut result);
-            terminal_bytes.extend(result.terminal_bytes);
-            if !result.events.is_empty() {
-                if !terminal_bytes.is_empty() {
-                    segments.push(TerminalGraphicsSegment::Terminal(std::mem::take(
-                        &mut terminal_bytes,
-                    )));
-                }
-                segments.extend(
-                    result
-                        .events
-                        .into_iter()
-                        .map(TerminalGraphicsSegment::Event),
-                );
-            } else if entered_control_sequence(&before_state, &self.state)
-                && !terminal_bytes.is_empty()
-            {
-                segments.push(TerminalGraphicsSegment::Terminal(std::mem::take(
-                    &mut terminal_bytes,
-                )));
-            }
-        }
-
-        if !terminal_bytes.is_empty() {
-            segments.push(TerminalGraphicsSegment::Terminal(terminal_bytes));
-        }
+        self.advance_ordered(bytes, |segment| segments.push(segment), &mut cursor);
         segments
     }
 
@@ -175,12 +142,24 @@ impl GraphicsIngress {
             return;
         }
 
-        let mut terminal_bytes = Vec::new();
-        for &byte in bytes {
-            let before_state = self.state.clone();
-            let mut result = GraphicsAdvance::default();
-            self.advance_byte(byte, cursor(), &mut result);
-            terminal_bytes.extend(result.terminal_bytes);
+        let mut terminal_bytes = Vec::with_capacity(bytes.len());
+        let mut result = GraphicsAdvance::default();
+        let mut index = 0;
+        while index < bytes.len() {
+            if matches!(self.state, ParserState::Ground) {
+                let remaining = &bytes[index..];
+                let Some(escape_offset) = remaining.iter().position(|byte| *byte == 0x1b) else {
+                    // Ordinary terminal output does not need graphics state-machine work.
+                    terminal_bytes.extend_from_slice(remaining);
+                    break;
+                };
+                terminal_bytes.extend_from_slice(&remaining[..escape_offset]);
+                index += escape_offset;
+            }
+
+            let was_terminal_state = matches!(self.state, ParserState::Ground | ParserState::Esc);
+            self.advance_byte(bytes[index], &mut cursor, &mut result);
+            terminal_bytes.append(&mut result.terminal_bytes);
             if !result.events.is_empty() {
                 if !terminal_bytes.is_empty() {
                     emit(TerminalGraphicsSegment::Terminal(std::mem::take(
@@ -189,16 +168,18 @@ impl GraphicsIngress {
                 }
                 // Preserve protocol ordering for callers that must synchronize
                 // graphics state with terminal side effects such as screen swaps.
-                for event in result.events {
+                for event in result.events.drain(..) {
                     emit(TerminalGraphicsSegment::Event(event));
                 }
-            } else if entered_control_sequence(&before_state, &self.state)
+            } else if was_terminal_state
+                && !matches!(self.state, ParserState::Ground | ParserState::Esc)
                 && !terminal_bytes.is_empty()
             {
                 emit(TerminalGraphicsSegment::Terminal(std::mem::take(
                     &mut terminal_bytes,
                 )));
             }
+            index += 1;
         }
 
         if !terminal_bytes.is_empty() {
@@ -206,7 +187,10 @@ impl GraphicsIngress {
         }
     }
 
-    fn advance_byte(&mut self, byte: u8, cursor: GraphicsCursor, result: &mut GraphicsAdvance) {
+    fn advance_byte<C>(&mut self, byte: u8, cursor: &mut C, result: &mut GraphicsAdvance)
+    where
+        C: FnMut() -> GraphicsCursor,
+    {
         let state = std::mem::replace(&mut self.state, ParserState::Ground);
         match state {
             ParserState::Ground => match byte {
@@ -223,7 +207,7 @@ impl GraphicsIngress {
                 }
             },
             ParserState::Osc(mut data) => match byte {
-                0x07 => self.dispatch_osc(data, cursor, result),
+                0x07 => self.dispatch_osc(data, cursor(), result),
                 0x1b => self.state = ParserState::OscEsc(data),
                 _ => {
                     data.push(byte);
@@ -231,7 +215,7 @@ impl GraphicsIngress {
                 }
             },
             ParserState::OscEsc(data) => match byte {
-                b'\\' => self.dispatch_osc(data, cursor, result),
+                b'\\' => self.dispatch_osc(data, cursor(), result),
                 _ => {
                     result.terminal_bytes.extend_from_slice(b"\x1b]");
                     result.terminal_bytes.extend_from_slice(&data);
@@ -247,7 +231,7 @@ impl GraphicsIngress {
                 }
             },
             ParserState::DcsEsc(mut data) => match byte {
-                b'\\' => self.dispatch_dcs(data, cursor, result),
+                b'\\' => self.dispatch_dcs(data, cursor(), result),
                 _ => {
                     data.push(0x1b);
                     data.push(byte);
@@ -262,7 +246,7 @@ impl GraphicsIngress {
                 }
             },
             ParserState::ApcEsc(mut data) => match byte {
-                b'\\' => self.dispatch_apc(data, cursor, result),
+                b'\\' => self.dispatch_apc(data, cursor(), result),
                 _ => {
                     data.push(0x1b);
                     data.push(byte);

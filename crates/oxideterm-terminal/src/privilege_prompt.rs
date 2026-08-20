@@ -1,6 +1,7 @@
 use zeroize::Zeroizing;
 
 const MAX_PROMPT_LINE_BYTES: usize = 2_048;
+const RETAINED_PROMPT_LINE_BYTES: usize = 1_024;
 
 /// A password prompt classified directly from decoded terminal output.
 #[derive(Clone, Eq, PartialEq)]
@@ -203,16 +204,23 @@ impl TerminalPrivilegePromptStream {
 
         self.current_line.push(character);
         self.bound_current_line();
-        self.detect_current_prompt(events);
+        if matches!(character, ':' | '：') {
+            self.detect_current_prompt(events);
+        }
     }
 
     fn finish_line(&mut self, events: &mut Vec<TerminalPrivilegePromptEvent>) {
         let normalized_line = self.current_line.trim();
+        if !self.prompt_visible {
+            self.current_line.clear();
+            self.emitted_line = None;
+            return;
+        }
+
         let line_has_prompt = detect_terminal_privilege_prompt(normalized_line).is_some();
-        let line_has_retry = looks_like_retry_notice(normalized_line);
-        if line_has_retry && self.prompt_visible {
+        if looks_like_retry_notice(normalized_line) {
             self.retry_pending = true;
-        } else if self.prompt_visible && !line_has_prompt && !normalized_line.is_empty() {
+        } else if !line_has_prompt && !normalized_line.is_empty() {
             self.prompt_visible = false;
             self.retry_pending = false;
             events.push(TerminalPrivilegePromptEvent::Dismissed);
@@ -241,7 +249,9 @@ impl TerminalPrivilegePromptStream {
         if self.current_line.len() <= MAX_PROMPT_LINE_BYTES {
             return;
         }
-        let mut start = self.current_line.len() - MAX_PROMPT_LINE_BYTES;
+        // Trim to a lower watermark so a long terminal line does not shift the
+        // retained prompt tail after every additional character.
+        let mut start = self.current_line.len() - RETAINED_PROMPT_LINE_BYTES;
         while !self.current_line.is_char_boundary(start) {
             start += 1;
         }
@@ -253,24 +263,29 @@ impl TerminalPrivilegePromptStream {
 /// Classifies a normalized terminal line as a standard password prompt.
 pub fn detect_terminal_privilege_prompt(line: &str) -> Option<TerminalPrivilegePrompt> {
     let line = line.trim();
-    if line.is_empty() || looks_like_password_result(line) {
+    if line.is_empty() || strip_prompt_colon(line).is_none() {
         return None;
     }
-    if let Some(username) = parse_sudo_prompt(line) {
-        return Some(TerminalPrivilegePrompt::Sudo {
+
+    let prompt = if let Some(username) = parse_sudo_prompt(line) {
+        TerminalPrivilegePrompt::Sudo {
             username,
             prompt_text: line.to_string(),
-        });
-    }
-    if let Some(target_user) = parse_su_prompt(line) {
-        return Some(TerminalPrivilegePrompt::Su {
+        }
+    } else if let Some(target_user) = parse_su_prompt(line) {
+        TerminalPrivilegePrompt::Su {
             target_user,
             prompt_text: line.to_string(),
-        });
-    }
-    is_generic_password_prompt(line).then(|| TerminalPrivilegePrompt::GenericPassword {
-        prompt_text: line.to_string(),
-    })
+        }
+    } else if is_generic_password_prompt(line) {
+        TerminalPrivilegePrompt::GenericPassword {
+            prompt_text: line.to_string(),
+        }
+    } else {
+        return None;
+    };
+
+    (!looks_like_password_result(line)).then_some(prompt)
 }
 
 fn parse_sudo_prompt(line: &str) -> Option<Option<String>> {
@@ -290,7 +305,10 @@ fn parse_sudo_prompt(line: &str) -> Option<Option<String>> {
 
 fn strip_sudo_marker(line: &str) -> Option<&str> {
     let trimmed = line.trim();
-    if !trimmed.to_ascii_lowercase().starts_with("[sudo") {
+    if !trimmed
+        .get(.."[sudo".len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("[sudo"))
+    {
         return None;
     }
     let marker_end = trimmed.find(']')?;
@@ -376,11 +394,17 @@ fn is_password_prompt_text(line: &str) -> bool {
 
 fn is_password_label(label: &str) -> bool {
     let label = label.trim();
-    let lower = label.to_ascii_lowercase();
-    matches!(
-        lower.as_str(),
-        "password" | "passwort" | "contraseña" | "contrasena" | "senha" | "mot de passe"
-    ) || is_cjk_password_label(label)
+    [
+        "password",
+        "passwort",
+        "contraseña",
+        "contrasena",
+        "senha",
+        "mot de passe",
+    ]
+    .iter()
+    .any(|candidate| label.eq_ignore_ascii_case(candidate))
+        || is_cjk_password_label(label)
         || matches!(label, "パスワード" | "암호" | "пароль")
 }
 
@@ -462,6 +486,36 @@ mod tests {
     }
 
     #[test]
+    fn stream_detects_fullwidth_prompt_colon_split_across_chunks() {
+        let mut stream = TerminalPrivilegePromptStream::default();
+        assert!(stream.observe("密码".as_bytes()).is_empty());
+        assert_eq!(
+            stream.observe("：".as_bytes()),
+            vec![TerminalPrivilegePromptEvent::Visible {
+                prompt: TerminalPrivilegePrompt::GenericPassword {
+                    prompt_text: "密码：".to_string(),
+                },
+                retry: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn stream_emits_prompt_once_when_trailing_spaces_follow_colon() {
+        let mut stream = TerminalPrivilegePromptStream::default();
+        assert_eq!(
+            stream.observe(b"Password:   "),
+            vec![TerminalPrivilegePromptEvent::Visible {
+                prompt: TerminalPrivilegePrompt::GenericPassword {
+                    prompt_text: "Password:".to_string(),
+                },
+                retry: false,
+            }]
+        );
+        assert!(stream.observe(b" ").is_empty());
+    }
+
+    #[test]
     fn stream_ignores_split_shell_integration_osc_with_st_terminator() {
         let mut stream = TerminalPrivilegePromptStream::default();
         assert!(stream.observe(b"\x1b]633;C\x1b").is_empty());
@@ -514,6 +568,38 @@ mod tests {
         assert_eq!(
             stream.observe(b"\noperation cancelled\n"),
             vec![TerminalPrivilegePromptEvent::Dismissed]
+        );
+    }
+
+    #[test]
+    fn stream_ignores_colon_heavy_non_prompt_output() {
+        let mut stream = TerminalPrivilegePromptStream::default();
+        assert!(
+            stream
+                .observe(b"time:12:34:56 level:info module:terminal message:healthy\n")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn classifier_rejects_password_result_after_candidate_matching() {
+        assert!(detect_terminal_privilege_prompt("[sudo] password for failed:").is_none());
+    }
+
+    #[test]
+    fn stream_detects_prompt_after_amortized_long_line_truncation() {
+        let mut stream = TerminalPrivilegePromptStream::default();
+        let mut output = vec![b' '; MAX_PROMPT_LINE_BYTES * 2];
+        output.extend_from_slice(b"[sudo] password for deploy:");
+        assert_eq!(
+            stream.observe(&output),
+            vec![TerminalPrivilegePromptEvent::Visible {
+                prompt: TerminalPrivilegePrompt::Sudo {
+                    username: Some("deploy".to_string()),
+                    prompt_text: "[sudo] password for deploy:".to_string(),
+                },
+                retry: false,
+            }]
         );
     }
 }

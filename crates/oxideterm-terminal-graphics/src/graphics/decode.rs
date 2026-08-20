@@ -1,8 +1,3 @@
-fn entered_control_sequence(before: &ParserState, after: &ParserState) -> bool {
-    matches!(before, ParserState::Ground | ParserState::Esc)
-        && !matches!(after, ParserState::Ground | ParserState::Esc)
-}
-
 #[derive(Clone, Debug)]
 struct DecodedPixels {
     width: u32,

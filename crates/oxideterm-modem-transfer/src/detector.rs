@@ -62,6 +62,11 @@ impl ModemDetector {
     }
 }
 
+pub(crate) fn detect_modem_start(bytes: &[u8]) -> Option<DetectedModemStart> {
+    let zmodem_start = find_zmodem_start(bytes, 0);
+    zmodem_start.or_else(|| detect_xymodem_start(bytes, 0))
+}
+
 fn find_zmodem_start(window: &[u8], current_start: usize) -> Option<DetectedModemStart> {
     let patterns: [&[u8]; 3] = [
         &[ZPAD, ZPAD, ZDLE, ZHEX],

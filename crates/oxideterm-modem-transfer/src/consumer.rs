@@ -1,11 +1,11 @@
 // Copyright (C) 2026 OxideTerm contributors.
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::detector::{DetectedModemProtocol, ModemDetector};
+use crate::detector::{DetectedModemProtocol, detect_modem_start};
 use crate::stream::{ModemTransfer, ModemWakeCallback};
 use crate::zmodem::ZFrameType;
 use crate::zmodem_transfer::parse_zmodem_header_prefix;
-use std::fmt;
+use std::{borrow::Cow, fmt};
 
 const PLAIN_HISTORY_LIMIT: usize = 512;
 const XYMODEM_CANCEL_BYTES: &[u8] = &[crate::xymodem::CAN; 8];
@@ -99,73 +99,86 @@ enum ModemDetectionScope {
 }
 
 impl ModemDetectionScope {
-    fn mask_control_strings(&mut self, bytes: &[u8]) -> Vec<u8> {
+    fn mask_control_strings<'a>(&mut self, bytes: &'a [u8]) -> Cow<'a, [u8]> {
         // Spaces preserve text-token boundaries without allowing binary image
         // payload bytes to participate in modem marker or command detection.
         const MASKED_BYTE: u8 = b' ';
 
-        bytes
-            .iter()
-            .map(|byte| {
-                let byte = *byte;
-                match *self {
-                    Self::Ground => match byte {
-                        0x1b => {
-                            *self = Self::Escape;
+        if matches!(self, Self::Ground)
+            && !bytes
+                .iter()
+                .any(|byte| matches!(*byte, 0x1b | 0x90 | 0x9d | 0x9f))
+        {
+            return Cow::Borrowed(bytes);
+        }
+
+        Cow::Owned(
+            bytes
+                .iter()
+                .map(|byte| {
+                    let byte = *byte;
+                    match *self {
+                        Self::Ground => match byte {
+                            0x1b => {
+                                *self = Self::Escape;
+                                MASKED_BYTE
+                            }
+                            0x90 => {
+                                *self = Self::control_string(TerminalControlStringKind::Dcs);
+                                MASKED_BYTE
+                            }
+                            0x9d => {
+                                *self = Self::control_string(TerminalControlStringKind::Osc);
+                                MASKED_BYTE
+                            }
+                            0x9f => {
+                                *self = Self::control_string(TerminalControlStringKind::Apc);
+                                MASKED_BYTE
+                            }
+                            _ => byte,
+                        },
+                        Self::Escape => match byte {
+                            b']' => {
+                                *self = Self::control_string(TerminalControlStringKind::Osc);
+                                MASKED_BYTE
+                            }
+                            b'P' => {
+                                *self = Self::control_string(TerminalControlStringKind::Dcs);
+                                MASKED_BYTE
+                            }
+                            b'_' => {
+                                *self = Self::control_string(TerminalControlStringKind::Apc);
+                                MASKED_BYTE
+                            }
+                            0x1b => MASKED_BYTE,
+                            _ => {
+                                *self = Self::Ground;
+                                byte
+                            }
+                        },
+                        Self::ControlString {
+                            kind,
+                            escape_pending,
+                        } => {
+                            let terminated_by_bel =
+                                kind == TerminalControlStringKind::Osc && byte == 0x07;
+                            if terminated_by_bel
+                                || byte == 0x9c
+                                || (escape_pending && byte == b'\\')
+                            {
+                                *self = Self::Ground;
+                            } else {
+                                *self = Self::ControlString {
+                                    kind,
+                                    escape_pending: byte == 0x1b,
+                                };
+                            }
                             MASKED_BYTE
                         }
-                        0x90 => {
-                            *self = Self::control_string(TerminalControlStringKind::Dcs);
-                            MASKED_BYTE
-                        }
-                        0x9d => {
-                            *self = Self::control_string(TerminalControlStringKind::Osc);
-                            MASKED_BYTE
-                        }
-                        0x9f => {
-                            *self = Self::control_string(TerminalControlStringKind::Apc);
-                            MASKED_BYTE
-                        }
-                        _ => byte,
-                    },
-                    Self::Escape => match byte {
-                        b']' => {
-                            *self = Self::control_string(TerminalControlStringKind::Osc);
-                            MASKED_BYTE
-                        }
-                        b'P' => {
-                            *self = Self::control_string(TerminalControlStringKind::Dcs);
-                            MASKED_BYTE
-                        }
-                        b'_' => {
-                            *self = Self::control_string(TerminalControlStringKind::Apc);
-                            MASKED_BYTE
-                        }
-                        0x1b => MASKED_BYTE,
-                        _ => {
-                            *self = Self::Ground;
-                            byte
-                        }
-                    },
-                    Self::ControlString {
-                        kind,
-                        escape_pending,
-                    } => {
-                        let terminated_by_bel =
-                            kind == TerminalControlStringKind::Osc && byte == 0x07;
-                        if terminated_by_bel || byte == 0x9c || (escape_pending && byte == b'\\') {
-                            *self = Self::Ground;
-                        } else {
-                            *self = Self::ControlString {
-                                kind,
-                                escape_pending: byte == 0x1b,
-                            };
-                        }
-                        MASKED_BYTE
                     }
-                }
-            })
-            .collect()
+                })
+                .collect(),
+        )
     }
 
     const fn control_string(kind: TerminalControlStringKind) -> Self {
@@ -273,22 +286,44 @@ impl ModemConsumer {
         }
 
         let masked_bytes = self.detection_scope.mask_control_strings(bytes);
-        let mut scan_bytes = Vec::with_capacity(self.plain_tail.len() + bytes.len());
-        scan_bytes.extend_from_slice(&self.plain_tail);
-        scan_bytes.extend_from_slice(bytes);
-        self.plain_tail.clear();
-        let mut detection_bytes =
-            Vec::with_capacity(self.detection_tail.len() + masked_bytes.len());
-        detection_bytes.extend_from_slice(&self.detection_tail);
-        detection_bytes.extend_from_slice(&masked_bytes);
-        self.detection_tail.clear();
+        if self.plain_tail.is_empty()
+            && self.detection_tail.is_empty()
+            && !contains_modem_candidate(masked_bytes.as_ref())
+        {
+            self.remember_plain_output(masked_bytes.as_ref());
+            let mut events = vec![ModemConsumerEvent::WriteTerminal(bytes.to_vec())];
+            if let Some(request) = xymodem_download_request(&self.plain_history) {
+                self.start_transfer(&[], request.clone());
+                events.push(ModemConsumerEvent::TransferStarted(request));
+            }
+            return events;
+        }
 
-        let mut detector = ModemDetector::new();
-        let Some(start) = detector.scan_first(&detection_bytes) else {
-            let hold = possible_modem_prefix_suffix_len(&detection_bytes);
+        let scan_bytes = if self.plain_tail.is_empty() {
+            Cow::Borrowed(bytes)
+        } else {
+            let mut combined = Vec::with_capacity(self.plain_tail.len() + bytes.len());
+            combined.extend_from_slice(&self.plain_tail);
+            combined.extend_from_slice(bytes);
+            self.plain_tail.clear();
+            Cow::Owned(combined)
+        };
+        let detection_bytes = if self.detection_tail.is_empty() {
+            Cow::Borrowed(masked_bytes.as_ref())
+        } else {
+            let mut combined = Vec::with_capacity(self.detection_tail.len() + masked_bytes.len());
+            combined.extend_from_slice(&self.detection_tail);
+            combined.extend_from_slice(masked_bytes.as_ref());
+            self.detection_tail.clear();
+            Cow::Owned(combined)
+        };
+
+        let Some(start) = detect_modem_start(detection_bytes.as_ref()) else {
+            let hold = possible_modem_prefix_suffix_len(detection_bytes.as_ref());
             if hold == scan_bytes.len() {
-                self.plain_tail = scan_bytes;
-                self.detection_tail = detection_bytes;
+                self.plain_tail.extend_from_slice(scan_bytes.as_ref());
+                self.detection_tail
+                    .extend_from_slice(detection_bytes.as_ref());
                 return Vec::new();
             }
             let split = scan_bytes.len() - hold;
@@ -396,11 +431,19 @@ impl ModemConsumer {
         if bytes.is_empty() {
             return;
         }
-        self.plain_history.extend_from_slice(bytes);
-        if self.plain_history.len() > PLAIN_HISTORY_LIMIT {
-            let discard = self.plain_history.len() - PLAIN_HISTORY_LIMIT;
+        if bytes.len() >= PLAIN_HISTORY_LIMIT {
+            self.plain_history.clear();
+            self.plain_history
+                .extend_from_slice(&bytes[bytes.len() - PLAIN_HISTORY_LIMIT..]);
+            return;
+        }
+
+        let retained_bytes = PLAIN_HISTORY_LIMIT - bytes.len();
+        if self.plain_history.len() > retained_bytes {
+            let discard = self.plain_history.len() - retained_bytes;
             self.plain_history.drain(..discard);
         }
+        self.plain_history.extend_from_slice(bytes);
     }
 }
 
@@ -556,6 +599,19 @@ fn possible_modem_prefix_suffix_len(bytes: &[u8]) -> usize {
         .unwrap_or(0)
 }
 
+fn contains_modem_candidate(bytes: &[u8]) -> bool {
+    bytes.iter().any(|byte| {
+        matches!(
+            *byte,
+            crate::zmodem::ZPAD
+                | crate::xymodem::WANT_CRC
+                | crate::xymodem::NAK
+                | crate::xymodem::SOH
+                | crate::xymodem::STX
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -619,6 +675,28 @@ mod tests {
         let _ = consumer.process_server_output(b"\x1bPqpreview\x1b\\");
         let header = encode_hex_header(ZFrameType::ZrqInit, position_header(0), true);
         let events = consumer.process_server_output(&header);
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ModemConsumerEvent::TransferStarted(ModemTransferRequest {
+                protocol: DetectedModemProtocol::Zmodem,
+                direction: ModemTransferDirection::Download
+            })
+        )));
+    }
+
+    #[test]
+    fn zmodem_detection_survives_ordinary_output_fast_path() {
+        let mut consumer = ModemConsumer::new();
+        assert_eq!(
+            terminal_bytes(&consumer.process_server_output(b"ordinary output\r\n")),
+            b"ordinary output\r\n"
+        );
+        let header = encode_hex_header(ZFrameType::ZrqInit, position_header(0), true);
+        let split = 3;
+
+        assert!(consumer.process_server_output(&header[..split]).is_empty());
+        let events = consumer.process_server_output(&header[split..]);
 
         assert!(events.iter().any(|event| matches!(
             event,

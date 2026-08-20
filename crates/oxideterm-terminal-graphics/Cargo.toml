@@ -11,3 +11,9 @@ icy_sixel.workspace = true
 image.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "graphics_ingress"
+harness = false

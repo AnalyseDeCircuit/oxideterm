@@ -8086,6 +8086,7 @@ dependencies = [
 name = "oxideterm-modem-transfer"
 version = "2.0.22"
 dependencies = [
+ "criterion 0.5.1",
  "thiserror 2.0.18",
 ]
 
@@ -8496,6 +8497,7 @@ version = "2.0.22"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "criterion 0.5.1",
  "icy_sixel",
  "image",
  "thiserror 2.0.18",
