@@ -1,7 +1,12 @@
 use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, px, rgb};
 use oxideterm_theme::ThemeTokens;
 
-pub fn form_field(tokens: &ThemeTokens, label: String, input: impl IntoElement) -> AnyElement {
+/// Renders project-native label content above one form control.
+pub fn form_field(
+    tokens: &ThemeTokens,
+    label: impl IntoElement,
+    input: impl IntoElement,
+) -> AnyElement {
     let theme = tokens.ui;
     div()
         .flex()

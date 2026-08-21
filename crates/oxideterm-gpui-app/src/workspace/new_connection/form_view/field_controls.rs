@@ -3644,51 +3644,79 @@ impl WorkspaceApp {
         toggle: fn(&mut NewConnectionForm),
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // Security-sensitive SSH toggles keep their warning available without
-        // adding permanent helper copy to an already dense advanced section.
+        // Advanced SSH toggles keep their explanation available without
+        // adding permanent helper copy to an already dense form section.
         div()
             .flex()
             .items_center()
             .gap(px(self.tokens.spacing.two))
             .child(self.render_connection_checkbox(self.i18n.t(label_key), checked, toggle, cx))
-            .child(
-                div()
-                    .id(trigger_id)
-                    .size(px(18.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_pointer()
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Info,
-                        14.0,
-                        rgb(self.tokens.ui.warning),
-                    ))
-                    .on_mouse_move(
-                        cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
-                            this.queue_workspace_tooltip(
-                                tooltip_id,
-                                this.i18n.t(hint_key),
-                                f32::from(event.position.x) + 12.0,
-                                f32::from(event.position.y) + 16.0,
-                                cx,
-                            );
-                        }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.clear_workspace_tooltip(tooltip_id, cx);
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
-                        if !*hovered {
-                            // Tooltip content is portalled, so the trigger clears ownership.
-                            this.clear_workspace_tooltip(tooltip_id, cx);
-                        }
-                    })),
+            .child(self.render_connection_help_icon(trigger_id, tooltip_id, hint_key, cx))
+            .into_any_element()
+    }
+
+    fn render_connection_label_with_help(
+        &self,
+        trigger_id: &'static str,
+        tooltip_id: &'static str,
+        label_key: &'static str,
+        hint_key: &'static str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(self.tokens.spacing.two))
+            .child(self.i18n.t(label_key))
+            .child(self.render_connection_help_icon(trigger_id, tooltip_id, hint_key, cx))
+            .into_any_element()
+    }
+
+    fn render_connection_help_icon(
+        &self,
+        trigger_id: &'static str,
+        tooltip_id: &'static str,
+        hint_key: &'static str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // All advanced SSH explanations share one existing tooltip interaction
+        // so dense forms do not alternate between inline and hidden help text.
+        div()
+            .id(trigger_id)
+            .size(px(18.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .child(Self::render_lucide_icon(
+                LucideIcon::Info,
+                14.0,
+                rgb(self.tokens.ui.warning),
+            ))
+            .on_mouse_move(
+                cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
+                    this.queue_workspace_tooltip(
+                        tooltip_id,
+                        this.i18n.t(hint_key),
+                        f32::from(event.position.x) + 12.0,
+                        f32::from(event.position.y) + 16.0,
+                        cx,
+                    );
+                }),
             )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.clear_workspace_tooltip(tooltip_id, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                if !*hovered {
+                    // Tooltip content is portalled, so the trigger clears ownership.
+                    this.clear_workspace_tooltip(tooltip_id, cx);
+                }
+            }))
             .into_any_element()
     }
 
@@ -3866,31 +3894,18 @@ impl WorkspaceApp {
                             )),
                     ),
             )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(self.tokens.spacing.one))
-                    .child(self.render_connection_checkbox(
-                        self.i18n.t("ssh.form.dedicated_new_terminal_connection"),
-                        dedicated_new_terminal_connection,
-                        |form| {
-                            form.dedicated_new_terminal_connection =
-                                !form.dedicated_new_terminal_connection;
-                        },
-                        cx,
-                    ))
-                    .child(
-                        div()
-                            .pl(px(self.tokens.spacing.three))
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(
-                                self.i18n
-                                    .t("ssh.form.dedicated_new_terminal_connection_hint"),
-                            ),
-                    ),
-            )
+            .child(self.render_connection_checkbox_with_help(
+                "new-connection-dedicated-terminal-help",
+                "new-connection-dedicated-terminal",
+                "ssh.form.dedicated_new_terminal_connection",
+                "ssh.form.dedicated_new_terminal_connection_hint",
+                dedicated_new_terminal_connection,
+                |form| {
+                    form.dedicated_new_terminal_connection =
+                        !form.dedicated_new_terminal_connection;
+                },
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -4004,10 +4019,15 @@ impl WorkspaceApp {
             .gap(px(self.tokens.spacing.three))
             .child(form_field(
                 &self.tokens,
-                self.i18n.t("ssh.form.connect_timeout"),
+                self.render_connection_label_with_help(
+                    "new-connection-connect-timeout-help",
+                    "new-connection-connect-timeout",
+                    "ssh.form.connect_timeout",
+                    "ssh.form.connect_timeout_hint",
+                    cx,
+                ),
                 segmented_tabs(&self.tokens).children(timeout_tabs),
             ))
-            .child(self.render_connection_hint(self.i18n.t("ssh.form.connect_timeout_hint")))
             .child(self.render_connection_checkbox_with_help(
                 "new-connection-agent-forwarding-help",
                 "new-connection-agent-forwarding",
@@ -4017,35 +4037,43 @@ impl WorkspaceApp {
                 |form| form.agent_forwarding = !form.agent_forwarding,
                 cx,
             ))
-            .child(self.render_connection_checkbox(
-                self.i18n.t("ssh.form.x11_forwarding"),
+            .child(self.render_connection_checkbox_with_help(
+                "new-connection-x11-forwarding-help",
+                "new-connection-x11-forwarding",
+                "ssh.form.x11_forwarding",
+                "ssh.form.x11_forwarding_hint",
                 x11_forwarding.enabled,
                 |form| form.x11_forwarding.enabled = !form.x11_forwarding.enabled,
                 cx,
             ))
-            .child(self.render_connection_hint(self.i18n.t("ssh.form.x11_forwarding_hint")))
             .when(x11_forwarding.enabled, |content| {
-                content
-                    .child(form_field(
-                        &self.tokens,
-                        self.i18n.t("ssh.form.x11_mode"),
-                        segmented_tabs(&self.tokens).children(x11_mode_options),
-                    ))
-                    .child(self.render_connection_hint(self.i18n.t("ssh.form.x11_mode_hint")))
+                content.child(form_field(
+                    &self.tokens,
+                    self.render_connection_label_with_help(
+                        "new-connection-x11-mode-help",
+                        "new-connection-x11-mode",
+                        "ssh.form.x11_mode",
+                        "ssh.form.x11_mode_hint",
+                        cx,
+                    ),
+                    segmented_tabs(&self.tokens).children(x11_mode_options),
+                ))
             })
             .when(
                 x11_forwarding.enabled
                     && x11_forwarding.mode == ConnectionX11ForwardingMode::Untrusted,
                 |content| {
-                    content
-                        .child(form_field(
-                            &self.tokens,
-                            self.i18n.t("ssh.form.x11_timeout"),
-                            segmented_tabs(&self.tokens).children(x11_timeout_options),
-                        ))
-                        .child(
-                            self.render_connection_hint(self.i18n.t("ssh.form.x11_timeout_hint")),
-                        )
+                    content.child(form_field(
+                        &self.tokens,
+                        self.render_connection_label_with_help(
+                            "new-connection-x11-timeout-help",
+                            "new-connection-x11-timeout",
+                            "ssh.form.x11_timeout",
+                            "ssh.form.x11_timeout_hint",
+                            cx,
+                        ),
+                        segmented_tabs(&self.tokens).children(x11_timeout_options),
+                    ))
                 },
             )
             .child(self.render_connection_checkbox_with_help(
