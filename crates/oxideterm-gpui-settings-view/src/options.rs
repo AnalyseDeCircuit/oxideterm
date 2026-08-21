@@ -480,6 +480,10 @@ pub fn set_quick_commands_toast(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.command_bar.quick_commands_show_toast = value;
 }
 
+pub fn set_terminal_trigger_shell_execution(settings: &mut PersistedSettings, value: bool) {
+    settings.terminal.triggers.explicit_shell_enabled = value;
+}
+
 pub fn set_diagnostics_debug_logging(settings: &mut PersistedSettings, value: bool) {
     settings.diagnostics.debug_logging = value;
 }

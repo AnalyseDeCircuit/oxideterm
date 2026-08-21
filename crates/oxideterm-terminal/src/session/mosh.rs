@@ -28,6 +28,7 @@ pub struct MoshTerminalSession {
     output_queue: VecDeque<crate::backpressure::ByteBoundedItem<MoshTerminalWorkerEvent>>,
     output_processor: Option<TerminalOutputProcessor>,
     output_events_enabled: bool,
+    trigger_stream: Option<oxideterm_terminal_triggers::TerminalTriggerStream>,
     shell_integration: TerminalShellIntegration,
     predictor: PredictionOverlay,
     next_prediction_id: u64,
@@ -134,6 +135,7 @@ impl MoshTerminalSession {
             output_queue: VecDeque::new(),
             output_processor: None,
             output_events_enabled: false,
+            trigger_stream: None,
             shell_integration: TerminalShellIntegration::default(),
             predictor: PredictionOverlay::new(prediction_display, false),
             next_prediction_id: 0,
@@ -292,6 +294,12 @@ impl MoshTerminalSession {
             bytes,
             |segment| match segment {
                 TerminalGraphicsSegment::Terminal(terminal_bytes) => {
+                    if let Some(stream) = self.trigger_stream.as_mut() {
+                        stream.observe_bytes(&terminal_bytes, |matched| {
+                            self.pending_events
+                                .push(TerminalEvent::TriggerMatched(matched));
+                        });
+                    }
                     if self.output_events_enabled {
                         let (_, recordable) = self.shell_integration.advance_with_recording(
                             &mut self.parser,
@@ -518,6 +526,13 @@ impl TerminalSessionBackend for MoshTerminalSession {
 
     fn set_output_events_enabled(&mut self, enabled: bool) {
         self.output_events_enabled = enabled;
+    }
+
+    fn set_trigger_rules(
+        &mut self,
+        rules: Option<Arc<oxideterm_terminal_triggers::CompiledTriggerSet>>,
+    ) {
+        self.trigger_stream = rules.map(oxideterm_terminal_triggers::TerminalTriggerStream::new);
     }
 
     fn mosh_connection_status(&self) -> Option<MoshConnectionStatus> {

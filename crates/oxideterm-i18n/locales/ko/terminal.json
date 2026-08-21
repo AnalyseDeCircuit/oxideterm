@@ -1,6 +1,16 @@
 {
   "terminal": {
     "local_terminal": "로컬 터미널",
+    "triggers": {
+      "risky_quick_command_title": "위험한 트리거 작업을 실행하시겠습니까?",
+      "risky_quick_command_description": "트리거 “{{trigger}}”이(가) {{risk}} 위험도의 빠른 명령 “{{command}}”을(를) 실행합니다.",
+      "cancel": "취소",
+      "run": "실행",
+      "launch_failed": "트리거가 로컬 프로그램을 시작하지 못했습니다.",
+      "risk_high": "높음",
+      "risk_medium": "중간",
+      "risk_configured": "구성됨"
+    },
     "paste": {
       "title": "여러 줄 감지됨 ({{count}}줄)",
       "more_lines": "... {{count}}줄 더",
@@ -18,6 +28,7 @@
       "insert_selection_into_command": "선택 항목을 여기에 삽입",
       "replace_command_with_selection": "선택 항목으로 명령 바꾸기",
       "find": "찾기...",
+      "manage_triggers": "이 세션의 트리거 관리...",
       "select_command": "명령 선택",
       "previous_command": "이전 명령",
       "next_command": "다음 명령",
@@ -68,7 +79,8 @@
       "discarded": "Terminal recording discarded",
       "saved": "Terminal recording saved",
       "save_failed": "Failed to save terminal recording",
-      "open_cast": "Open terminal recording",
+      "title": "터미널 녹화",
+      "open_cast": "터미널 녹화 열기",
       "open_failed": "Could not open terminal recording",
       "recording": "REC",
       "paused": "Paused",

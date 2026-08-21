@@ -55,6 +55,7 @@
     "cmd_new_terminal": "Nouveau terminal local",
     "cmd_new_connection": "Nouvelle connexion SSH",
     "cmd_settings": "Ouvrir les paramètres",
+    "cmd_manage_terminal_triggers": "Gérer les déclencheurs du terminal",
     "cmd_toggle_sidebar": "Basculer la barre latérale",
     "cmd_toggle_panel": "Afficher/masquer le panneau",
     "cmd_toggle_ai_sidebar": "Afficher/masquer OxideSens",

@@ -1,6 +1,16 @@
 {
   "terminal": {
     "local_terminal": "Terminal cục bộ",
+    "triggers": {
+      "risky_quick_command_title": "Chạy hành động kích hoạt có rủi ro?",
+      "risky_quick_command_description": "Trình kích hoạt “{{trigger}}” sẽ chạy lệnh nhanh “{{command}}” với mức rủi ro {{risk}}.",
+      "cancel": "Hủy",
+      "run": "Chạy",
+      "launch_failed": "Trình kích hoạt không thể khởi chạy chương trình cục bộ.",
+      "risk_high": "cao",
+      "risk_medium": "trung bình",
+      "risk_configured": "đã cấu hình"
+    },
     "paste": {
       "title": "Phát hiện nhiều dòng ({{count}} dòng)",
       "more_lines": "... {{count}} dòng nữa",
@@ -18,6 +28,7 @@
       "insert_selection_into_command": "Chèn vùng chọn tại đây",
       "replace_command_with_selection": "Thay lệnh bằng vùng chọn",
       "find": "Tìm...",
+      "manage_triggers": "Quản lý trình kích hoạt cho phiên này...",
       "select_command": "Chọn lệnh",
       "previous_command": "Lệnh trước",
       "next_command": "Lệnh tiếp theo",
@@ -68,7 +79,8 @@
       "discarded": "Terminal recording discarded",
       "saved": "Terminal recording saved",
       "save_failed": "Failed to save terminal recording",
-      "open_cast": "Open terminal recording",
+      "title": "Bản ghi đầu cuối",
+      "open_cast": "Mở bản ghi đầu cuối",
       "open_failed": "Could not open terminal recording",
       "recording": "REC",
       "paused": "Paused",

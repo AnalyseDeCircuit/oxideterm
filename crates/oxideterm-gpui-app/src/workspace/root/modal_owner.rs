@@ -64,6 +64,7 @@ pub(in crate::workspace) enum ActiveWindowModalOwner {
         phase: oxideterm_gpui_ui::motion::ExitPhase,
     },
     RemoteShellIntegration,
+    TerminalTriggerQuickCommand,
     CloudSync {
         phase: oxideterm_gpui_ui::motion::ExitPhase,
     },
@@ -149,36 +150,37 @@ impl ActiveWindowModalOwner {
             Self::SettingsReset { .. } => 12,
             Self::SettingsDataDirectory { .. } => 13,
             Self::RemoteShellIntegration => 14,
-            Self::CloudSync { .. } => 15,
-            Self::NodeDisconnect { .. } => 16,
-            Self::TabClose { .. } => 17,
-            Self::HostProcessConfirm { .. } => 18,
-            Self::HostDockerConfirm { .. } => 19,
-            Self::HostDockerLogs => 20,
-            Self::HostServiceConfirm { .. } => 21,
-            Self::HostServiceLogs => 22,
-            Self::HostTmuxConfirm { .. } => 23,
-            Self::HostTmuxInput => 24,
-            Self::HostScheduleConfirm { .. } => 25,
-            Self::HostScheduleLogs => 26,
-            Self::NativePluginConfirm { .. } => 27,
-            Self::TabRename => 28,
-            Self::ActiveTabWindowModal { .. } => 29,
-            Self::TerminalCastPlayer => 30,
-            Self::ThemeEditor { .. } => 31,
-            Self::SettingsSshConfigImport { .. } => 32,
-            Self::TerminalCommandSpecsEditor => 33,
-            Self::AiTextEditor => 34,
-            Self::OxideImport { .. } => 35,
-            Self::OxideExport { .. } => 36,
-            Self::CommandPalette => 37,
-            Self::VersionMigration => 38,
-            Self::Onboarding => 39,
-            Self::LegalNotice { .. } => 40,
-            Self::NativeUpdateReleaseNotes { .. } => 41,
-            Self::Shortcuts => 42,
-            Self::AppLockDialog => 43,
-            Self::MermaidZoom => 44,
+            Self::TerminalTriggerQuickCommand => 15,
+            Self::CloudSync { .. } => 16,
+            Self::NodeDisconnect { .. } => 17,
+            Self::TabClose { .. } => 18,
+            Self::HostProcessConfirm { .. } => 19,
+            Self::HostDockerConfirm { .. } => 20,
+            Self::HostDockerLogs => 21,
+            Self::HostServiceConfirm { .. } => 22,
+            Self::HostServiceLogs => 23,
+            Self::HostTmuxConfirm { .. } => 24,
+            Self::HostTmuxInput => 25,
+            Self::HostScheduleConfirm { .. } => 26,
+            Self::HostScheduleLogs => 27,
+            Self::NativePluginConfirm { .. } => 28,
+            Self::TabRename => 29,
+            Self::ActiveTabWindowModal { .. } => 30,
+            Self::TerminalCastPlayer => 31,
+            Self::ThemeEditor { .. } => 32,
+            Self::SettingsSshConfigImport { .. } => 33,
+            Self::TerminalCommandSpecsEditor => 34,
+            Self::AiTextEditor => 35,
+            Self::OxideImport { .. } => 36,
+            Self::OxideExport { .. } => 37,
+            Self::CommandPalette => 38,
+            Self::VersionMigration => 39,
+            Self::Onboarding => 40,
+            Self::LegalNotice { .. } => 41,
+            Self::NativeUpdateReleaseNotes { .. } => 42,
+            Self::Shortcuts => 43,
+            Self::AppLockDialog => 44,
+            Self::MermaidZoom => 45,
         }
     }
 
@@ -215,6 +217,7 @@ impl ActiveWindowModalOwner {
             | Self::HostKeyChallenge
             | Self::KeyboardInteractiveChallenge
             | Self::RemoteShellIntegration
+            | Self::TerminalTriggerQuickCommand
             | Self::HostDockerLogs
             | Self::HostServiceLogs
             | Self::HostTmuxInput
@@ -308,6 +311,7 @@ pub(in crate::workspace) struct ActiveWindowModalProjection {
     pub(in crate::workspace) settings_data_directory_phase:
         Option<oxideterm_gpui_ui::motion::ExitPhase>,
     pub(in crate::workspace) remote_shell_integration_open: bool,
+    pub(in crate::workspace) terminal_trigger_quick_command_open: bool,
     pub(in crate::workspace) cloud_sync_phase: Option<oxideterm_gpui_ui::motion::ExitPhase>,
     pub(in crate::workspace) tab_close_phase: Option<oxideterm_gpui_ui::motion::ExitPhase>,
     pub(in crate::workspace) host_tools_modal:
@@ -405,6 +409,9 @@ impl ActiveWindowModalProjection {
         let remote_shell_owner = self
             .remote_shell_integration_open
             .then_some(ActiveWindowModalOwner::RemoteShellIntegration);
+        let terminal_trigger_owner = self
+            .terminal_trigger_quick_command_open
+            .then_some(ActiveWindowModalOwner::TerminalTriggerQuickCommand);
         let cloud_sync_owner = self
             .cloud_sync_phase
             .map(|phase| ActiveWindowModalOwner::CloudSync { phase });
@@ -508,6 +515,7 @@ impl ActiveWindowModalProjection {
             overlay_owner,
             settings_data_owner,
             remote_shell_owner,
+            terminal_trigger_owner,
             cloud_sync_owner,
             tab_owner,
             host_tools_owner,
@@ -660,6 +668,7 @@ impl WorkspaceApp {
                 .workspace_runtime
                 .read(cx)
                 .remote_shell_integration_confirm_open(),
+            terminal_trigger_quick_command_open: self.terminal_trigger_quick_command_pending(),
             cloud_sync_phase,
             tab_close_phase: self.tab_host.read(cx).close_confirm_phase(),
             host_tools_modal: self.host_tools.read(cx).window_modal_snapshot(),
@@ -876,6 +885,9 @@ impl WorkspaceApp {
             }
             ActiveWindowModalOwner::RemoteShellIntegration => {
                 let _ = self.handle_remote_shell_integration_confirm_key(event, cx);
+            }
+            ActiveWindowModalOwner::TerminalTriggerQuickCommand => {
+                let _ = self.handle_terminal_trigger_quick_command_key(event, cx);
             }
             ActiveWindowModalOwner::CloudSync { .. } => {
                 let _ = self.handle_cloud_sync_confirm_key(event, cx);

@@ -85,6 +85,7 @@ enum PaletteAction {
     OpenTopology,
     OpenPluginManager,
     OpenCloudSync,
+    ManageTerminalTriggers,
     ReloadWindow,
     CloseTab,
     CloseOtherTabs,
@@ -497,6 +498,9 @@ impl WorkspaceApp {
             PaletteAction::OpenTopology => self.open_topology_tab(window, cx),
             PaletteAction::OpenPluginManager => self.open_plugin_manager_tab(window, cx),
             PaletteAction::OpenCloudSync => self.open_cloud_sync_tab(window, cx),
+            PaletteAction::ManageTerminalTriggers => {
+                self.open_terminal_trigger_settings(window, cx)
+            }
             PaletteAction::ReloadWindow => self.reload_window_from_palette(cx),
             PaletteAction::CloseTab => self.close_active_tab_from_palette(window, cx),
             PaletteAction::CloseOtherTabs => self.close_other_tabs_from_palette(window, cx),
@@ -2251,6 +2255,13 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             "app.settings",
             LucideIcon::Settings,
         ),
+        CommandSpec {
+            id: "cmd:manage_terminal_triggers",
+            label_key: Cow::Borrowed("command_palette.cmd_manage_terminal_triggers"),
+            icon: LucideIcon::Zap,
+            shortcut_action: None,
+            action: PaletteAction::ManageTerminalTriggers,
+        },
         keybinding_command(
             "cmd:toggle_sidebar",
             "command_palette.cmd_toggle_sidebar",

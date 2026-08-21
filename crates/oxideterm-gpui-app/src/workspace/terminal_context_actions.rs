@@ -6,15 +6,16 @@ fn terminal_selection_command_bar_text(selection: &str) -> Option<String> {
 }
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn handle_active_terminal_context_action_request(
+    pub(in crate::workspace) fn handle_terminal_context_action_request_for_pane(
         &mut self,
+        pane_id: PaneId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(active_pane) = self.active_pane(cx) else {
+        let Some(source_pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
             return false;
         };
-        let Some(action) = active_pane.update(cx, |pane, _cx| pane.take_context_action_request())
+        let Some(action) = source_pane.update(cx, |pane, _cx| pane.take_context_action_request())
         else {
             return false;
         };
@@ -25,7 +26,7 @@ impl WorkspaceApp {
                 true
             }
             TerminalContextAction::SendSelectionToAi => {
-                let Some(_selection) = active_pane.read(cx).selected_text_snapshot() else {
+                let Some(_selection) = source_pane.read(cx).selected_text_snapshot() else {
                     return false;
                 };
                 // The inline panel owns AI context sanitization and truncation.
@@ -33,7 +34,7 @@ impl WorkspaceApp {
                 true
             }
             TerminalContextAction::FillCommandBarFromSelection => {
-                let Some(selection) = active_pane.read(cx).selected_text_snapshot() else {
+                let Some(selection) = source_pane.read(cx).selected_text_snapshot() else {
                     return false;
                 };
                 let Some(command) = terminal_selection_command_bar_text(&selection) else {
@@ -48,6 +49,10 @@ impl WorkspaceApp {
                 self.ime_marked_text = None;
                 self.focus_terminal_command_sender_editor(sender_id, window, cx);
                 cx.notify();
+                true
+            }
+            TerminalContextAction::OpenSessionTriggers => {
+                self.open_terminal_trigger_settings_for_pane(pane_id, window, cx);
                 true
             }
         }

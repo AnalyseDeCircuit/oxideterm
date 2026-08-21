@@ -55,6 +55,7 @@
     "cmd_new_terminal": "新規ローカルターミナル",
     "cmd_new_connection": "新規 SSH 接続",
     "cmd_settings": "設定を開く",
+    "cmd_manage_terminal_triggers": "ターミナルトリガーを管理",
     "cmd_toggle_sidebar": "サイドバー切替",
     "cmd_toggle_panel": "パネルの切り替え",
     "cmd_toggle_ai_sidebar": "OxideSens の切り替え",

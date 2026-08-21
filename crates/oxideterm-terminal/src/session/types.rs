@@ -148,6 +148,11 @@ pub trait TerminalSessionBackend: Send {
     fn set_encoding(&mut self, encoding: TerminalEncoding);
     fn set_output_processor(&mut self, _processor: Option<TerminalOutputProcessor>) {}
     fn set_output_events_enabled(&mut self, _enabled: bool) {}
+    fn set_trigger_rules(
+        &mut self,
+        _rules: Option<Arc<oxideterm_terminal_triggers::CompiledTriggerSet>>,
+    ) {
+    }
     fn serial_runtime_options(&self) -> Option<SerialRuntimeOptions> {
         None
     }

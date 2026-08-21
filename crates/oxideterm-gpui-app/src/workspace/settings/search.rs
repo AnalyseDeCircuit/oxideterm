@@ -262,6 +262,15 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             ],
         ),
         terminal_search_entry(
+            TerminalSettingsPage::Awareness,
+            3,
+            "settings_view.terminal.triggers.title",
+            &[
+                "settings_view.terminal.triggers.description",
+                "settings_view.terminal.triggers.shell_execution",
+            ],
+        ),
+        terminal_search_entry(
             TerminalSettingsPage::Transfer,
             1,
             "settings_view.terminal.in_band_transfer.title",
@@ -803,6 +812,11 @@ impl WorkspaceApp {
                 && self.settings_dynamic_section_counts(cx).knowledge_has_error,
         );
         let target_section_index = result.section_index + knowledge_error_offset;
+        if result.terminal_page == Some(TerminalSettingsPage::Awareness)
+            && result.section_index == 3
+        {
+            self.terminal_trigger_settings_pane = None;
+        }
         self.settings_workspace.update(cx, |settings, cx| {
             settings.set_active_tab(tab, cx);
             if let Some(page) = result.terminal_page {

@@ -225,6 +225,7 @@ impl WorkspaceApp {
                                     terminal.quick_commands.toggle_open()
                                 });
                                 this.dismiss_terminal_broadcast_menu(cx);
+                                this.dismiss_terminal_recording_menu();
                                 this.close_terminal_cwd_picker(cx);
                                 this.close_terminal_git_branch_picker(cx);
                                 this.close_terminal_project_panel(cx);

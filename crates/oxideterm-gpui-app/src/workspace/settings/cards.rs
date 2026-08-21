@@ -1275,6 +1275,9 @@ impl WorkspaceApp {
         if let Some(value) = persisted_settings_input_value(settings, input) {
             return value;
         }
+        if let Some(value) = self.terminal_trigger_settings_input_value(input) {
+            return value;
+        }
         if let Some(value) = self.ai_entity.read(cx).settings_input_value(input) {
             return value.to_owned();
         }
@@ -1379,6 +1382,11 @@ impl WorkspaceApp {
         if ai_state::AiWorkspaceEntity::owns_settings_input(input) {
             // Entity-owned inputs are updated directly by the IME adapter and
             // must not be copied into the legacy settings page model.
+            cx.notify();
+            return;
+        }
+        let terminal_trigger_input_draft = self.settings_input_draft.clone();
+        if self.apply_terminal_trigger_settings_input(input, &terminal_trigger_input_draft) {
             cx.notify();
             return;
         }

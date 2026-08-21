@@ -7847,6 +7847,7 @@ dependencies = [
  "oxideterm-ssh-launch",
  "oxideterm-terminal",
  "oxideterm-terminal-recording",
+ "oxideterm-terminal-triggers",
  "oxideterm-theme",
  "oxideterm-topology",
  "oxideterm-update",
@@ -8004,6 +8005,7 @@ dependencies = [
  "oxideterm-terminal",
  "oxideterm-terminal-recording",
  "oxideterm-terminal-semantic",
+ "oxideterm-terminal-triggers",
  "oxideterm-terminal-unicode",
  "oxideterm-theme",
  "oxideterm-trzsz",
@@ -8473,6 +8475,7 @@ dependencies = [
  "oxideterm-terminal-encoding",
  "oxideterm-terminal-graphics",
  "oxideterm-terminal-model",
+ "oxideterm-terminal-triggers",
  "oxideterm-trzsz",
  "polling",
  "serialport",
@@ -8523,6 +8526,20 @@ dependencies = [
  "roxmltree",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "oxideterm-terminal-triggers"
+version = "2.0.22"
+dependencies = [
+ "criterion 0.5.1",
+ "oxideterm-atomic-file",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "zeroize",
 ]
 
 [[package]]

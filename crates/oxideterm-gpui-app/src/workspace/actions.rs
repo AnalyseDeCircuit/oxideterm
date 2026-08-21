@@ -451,6 +451,10 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.dismiss_terminal_recording_menu() {
+            cx.notify();
+            return true;
+        }
         if self.dismiss_terminal_highlight_popover() {
             cx.notify();
             return true;
@@ -520,6 +524,7 @@ impl WorkspaceApp {
         let should_open = !self.terminal.read(cx).broadcast_menu_open();
         self.dismiss_terminal_broadcast_menu(cx);
         if should_open {
+            self.dismiss_terminal_recording_menu();
             self.dismiss_terminal_highlight_popover();
             self.close_terminal_quick_commands_popover(cx);
             self.close_terminal_cwd_picker(cx);
@@ -1595,7 +1600,7 @@ impl WorkspaceApp {
         self.execute_quick_command(command, window, cx);
     }
 
-    fn execute_quick_command(
+    pub(in crate::workspace) fn execute_quick_command(
         &mut self,
         command: &str,
         window: &mut Window,
@@ -1656,6 +1661,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn start_active_terminal_recording(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_terminal_recording_menu();
         let title = self.active_tab(cx).map(|tab| tab.title.clone());
         if let Some(pane) = self.active_pane(cx) {
             let _ = pane.update(cx, |pane, cx| pane.start_recording(title, cx));

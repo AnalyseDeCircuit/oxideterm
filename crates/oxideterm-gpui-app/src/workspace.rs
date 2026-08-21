@@ -63,6 +63,7 @@ mod terminal_cwd;
 mod terminal_entity;
 mod terminal_git;
 mod terminal_project;
+mod terminal_triggers_runtime;
 mod version_migration;
 mod virtual_list;
 mod window_intent;
@@ -737,7 +738,15 @@ pub(crate) struct WorkspaceApp {
     tab_host: Entity<tabs::WorkspaceTabHostEntity>,
     _tab_host_subscription: Subscription,
     search: SearchBarState,
+    terminal_recording_menu_open: bool,
     terminal_highlight_popover_open: bool,
+    // Settings keep the source pane stable while editing session-only trigger overrides.
+    terminal_trigger_settings_pane: Option<PaneId>,
+    terminal_trigger_shell_confirmation_pending: bool,
+    terminal_triggers: settings::TerminalTriggersSettingsState,
+    terminal_trigger_runtime: terminal_triggers_runtime::TerminalTriggerRuntimeState,
+    terminal_trigger_saved_connections:
+        HashMap<TerminalSessionId, oxideterm_terminal_triggers::SavedConnectionRef>,
     terminal_semantic_highlight_section_expanded: bool,
     terminal_rule_highlight_section_expanded: bool,
     terminal_command_context_highlight_section_expanded: bool,

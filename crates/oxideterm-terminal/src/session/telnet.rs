@@ -44,6 +44,7 @@ pub struct TelnetSession {
     output_decoder: TerminalOutputDecoder,
     output_processor: Option<TerminalOutputProcessor>,
     output_events_enabled: bool,
+    trigger_stream: Option<oxideterm_terminal_triggers::TerminalTriggerStream>,
     input_encoder: TerminalInputEncoder,
     encoding_detector: EncodingMismatchDetector,
     modem_consumer: ModemConsumer,
@@ -277,6 +278,7 @@ impl TelnetSession {
             output_decoder: TerminalOutputDecoder::new(encoding),
             output_processor: None,
             output_events_enabled: false,
+            trigger_stream: None,
             input_encoder: TerminalInputEncoder::new(encoding),
             encoding_detector: EncodingMismatchDetector::new(encoding),
             modem_consumer: ModemConsumer::new(),
@@ -410,6 +412,12 @@ impl TelnetSession {
                         self.pending_events.push(TerminalEvent::EncodingHint(hint));
                     }
                     let decoded = self.output_decoder.decode_to_utf8_bytes(&terminal_bytes);
+                    if let Some(stream) = self.trigger_stream.as_mut() {
+                        stream.observe_bytes(decoded.as_ref(), |matched| {
+                            self.pending_events
+                                .push(TerminalEvent::TriggerMatched(matched));
+                        });
+                    }
                     if self.output_events_enabled {
                         // Apply the same private-OSC recording boundary as PTY sessions.
                         let (_, recordable) = self.shell_integration.advance_with_recording(
@@ -676,6 +684,13 @@ impl TerminalSessionBackend for TelnetSession {
 
     fn set_output_events_enabled(&mut self, enabled: bool) {
         self.output_events_enabled = enabled;
+    }
+
+    fn set_trigger_rules(
+        &mut self,
+        rules: Option<Arc<oxideterm_terminal_triggers::CompiledTriggerSet>>,
+    ) {
+        self.trigger_stream = rules.map(oxideterm_terminal_triggers::TerminalTriggerStream::new);
     }
 
     fn start_modem_transfer(

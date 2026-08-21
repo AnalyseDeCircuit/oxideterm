@@ -55,6 +55,7 @@
     "cmd_new_terminal": "New Local Terminal",
     "cmd_new_connection": "New SSH Connection",
     "cmd_settings": "Open Settings",
+    "cmd_manage_terminal_triggers": "Manage Terminal Triggers",
     "cmd_toggle_sidebar": "Toggle Sidebar",
     "cmd_zen_mode": "Toggle Zen Mode",
     "cmd_toggle_panel": "Toggle Panel",

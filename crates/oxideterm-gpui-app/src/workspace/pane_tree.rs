@@ -128,6 +128,14 @@ impl WorkspaceApp {
             }
             // TabHost consumes this signal before ordinary pane delivery.
             TerminalPaneEvent::OutputActivity => {}
+            TerminalPaneEvent::TriggerMatchesAvailable => {
+                let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
+                    return;
+                };
+                let pane_owner = pane.downgrade();
+                let matches = pane.update(cx, |pane, _cx| pane.take_trigger_matches());
+                self.handle_terminal_trigger_matches(pane_id, session_id, pane_owner, matches, cx);
+            }
             TerminalPaneEvent::CurrentDirectoryChanged => {
                 if self.active_pane_id(cx) == Some(pane_id) {
                     self.sync_active_terminal_metadata_context(cx);
@@ -203,9 +211,8 @@ impl WorkspaceApp {
                         TerminalPaneInteraction::PrivilegePromptSubmit => {
                             workspace.handle_active_privilege_prompt_submit_request(window, cx)
                         }
-                        TerminalPaneInteraction::ContextAction => {
-                            workspace.handle_active_terminal_context_action_request(window, cx)
-                        }
+                        TerminalPaneInteraction::ContextAction => workspace
+                            .handle_terminal_context_action_request_for_pane(pane_id, window, cx),
                     };
                     if handled {
                         cx.notify();
@@ -226,6 +233,7 @@ impl WorkspaceApp {
         self.tab_host.update(cx, |tab_host, _cx| {
             tab_host.bind_terminal_location(session_id, TerminalLocation { tab_id, pane_id });
         });
+        self.refresh_terminal_trigger_pane(pane_id, cx);
         self.debug_assert_terminal_location(session_id, cx);
     }
 
@@ -420,6 +428,8 @@ impl WorkspaceApp {
             self.release_public_mcp_terminal_for_closed_session(session_id, cx);
             self.serial_terminal_configs.remove(&session_id);
             self.telnet_terminal_profile_ids.remove(&session_id);
+            self.terminal_trigger_saved_connections.remove(&session_id);
+            self.clear_terminal_trigger_session_overrides(session_id);
             self.unregister_ssh_terminal_session(session_id, cx);
         }
 
@@ -470,6 +480,8 @@ impl WorkspaceApp {
             self.release_public_mcp_terminal_for_closed_session(session_id, cx);
             self.serial_terminal_configs.remove(&session_id);
             self.telnet_terminal_profile_ids.remove(&session_id);
+            self.terminal_trigger_saved_connections.remove(&session_id);
+            self.clear_terminal_trigger_session_overrides(session_id);
             self.unregister_ssh_terminal_session(session_id, cx);
         }
         for pane_id in pane_ids

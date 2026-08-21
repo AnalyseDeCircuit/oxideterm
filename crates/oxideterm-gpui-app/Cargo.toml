@@ -69,6 +69,7 @@ oxideterm-sftp = { path = "../oxideterm-sftp" }
 oxideterm-ssh-launch = { path = "../oxideterm-ssh-launch" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
+oxideterm-terminal-triggers = { path = "../oxideterm-terminal-triggers" }
 oxideterm-terminal-recording = { path = "../oxideterm-terminal-recording" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 oxideterm-topology = { path = "../oxideterm-topology" }

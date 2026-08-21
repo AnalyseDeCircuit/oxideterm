@@ -1,6 +1,16 @@
 {
   "terminal": {
     "local_terminal": "Terminale locale",
+    "triggers": {
+      "risky_quick_command_title": "Eseguire un’azione trigger rischiosa?",
+      "risky_quick_command_description": "Il trigger «{{trigger}}» eseguirà il comando rapido «{{command}}» con rischio {{risk}}.",
+      "cancel": "Annulla",
+      "run": "Esegui",
+      "launch_failed": "Il trigger non ha potuto avviare il programma locale.",
+      "risk_high": "alto",
+      "risk_medium": "medio",
+      "risk_configured": "configurato"
+    },
     "paste": {
       "title": "Rilevate righe multiple ({{count}} righe)",
       "more_lines": "... altre {{count}} righe",
@@ -18,6 +28,7 @@
       "insert_selection_into_command": "Inserisci selezione qui",
       "replace_command_with_selection": "Sostituisci comando con selezione",
       "find": "Trova...",
+      "manage_triggers": "Gestisci i trigger per questa sessione...",
       "select_command": "Seleziona comando",
       "previous_command": "Comando precedente",
       "next_command": "Comando successivo",
@@ -68,7 +79,8 @@
       "discarded": "Terminal recording discarded",
       "saved": "Terminal recording saved",
       "save_failed": "Failed to save terminal recording",
-      "open_cast": "Open terminal recording",
+      "title": "Registrazione terminale",
+      "open_cast": "Apri registrazione terminale",
       "open_failed": "Could not open terminal recording",
       "recording": "REC",
       "paused": "Paused",

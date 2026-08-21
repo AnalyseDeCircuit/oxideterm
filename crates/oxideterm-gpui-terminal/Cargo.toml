@@ -18,6 +18,7 @@ oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
 oxideterm-terminal-recording = { path = "../oxideterm-terminal-recording" }
+oxideterm-terminal-triggers = { path = "../oxideterm-terminal-triggers" }
 oxideterm-terminal-semantic = { path = "../oxideterm-terminal-semantic", features = ["shell-syntax"] }
 oxideterm-terminal-unicode = { path = "../oxideterm-terminal-unicode" }
 oxideterm-theme = { path = "../oxideterm-theme" }

@@ -262,6 +262,13 @@ impl TerminalSession {
         self.backend.set_output_events_enabled(enabled);
     }
 
+    pub fn set_trigger_rules(
+        &mut self,
+        rules: Option<Arc<oxideterm_terminal_triggers::CompiledTriggerSet>>,
+    ) {
+        self.backend.set_trigger_rules(rules);
+    }
+
     pub fn serial_runtime_options(&self) -> Option<SerialRuntimeOptions> {
         self.backend.serial_runtime_options()
     }

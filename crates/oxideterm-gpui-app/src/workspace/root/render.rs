@@ -1020,6 +1020,10 @@ impl WorkspaceApp {
                 self.render_remote_shell_integration_confirm(cx),
                 |root, dialog| root.child(dialog),
             )
+            .when_some(
+                self.render_terminal_trigger_quick_command_confirm(cx),
+                |root, dialog| root.child(dialog),
+            )
             .when(cloud_sync_confirm_open, |root| {
                 root.child(self.render_cloud_sync_confirm_dialog(cx))
             })

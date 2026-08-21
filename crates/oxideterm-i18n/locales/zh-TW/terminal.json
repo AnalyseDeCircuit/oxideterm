@@ -1,6 +1,16 @@
 {
   "terminal": {
     "local_terminal": "本機終端機",
+    "triggers": {
+      "risky_quick_command_title": "執行高風險觸發器動作？",
+      "risky_quick_command_description": "觸發器「{{trigger}}」將執行快速命令「{{command}}」，風險等級為{{risk}}。",
+      "cancel": "取消",
+      "run": "執行",
+      "launch_failed": "觸發器無法啟動本機程式。",
+      "risk_high": "高",
+      "risk_medium": "中",
+      "risk_configured": "依設定需確認"
+    },
     "paste": {
       "title": "偵測到多行內容（{{count}} 行）",
       "more_lines": "... 還有 {{count}} 行",
@@ -18,6 +28,7 @@
       "insert_selection_into_command": "在此插入選取內容",
       "replace_command_with_selection": "用選取內容取代目前命令",
       "find": "尋找...",
+      "manage_triggers": "管理此工作階段的觸發器...",
       "select_command": "選取命令",
       "previous_command": "上一個命令",
       "next_command": "下一個命令",
@@ -68,6 +79,7 @@
       "discarded": "終端錄製已丟棄",
       "saved": "終端錄製已儲存",
       "save_failed": "終端錄製儲存失敗",
+      "title": "終端錄製",
       "open_cast": "開啟終端錄製",
       "open_failed": "無法開啟終端錄製",
       "recording": "錄製中",

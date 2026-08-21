@@ -310,6 +310,17 @@ impl LocalPtySession {
             .send(LocalGraphicsMsg::SetOutputEventsEnabled(enabled));
     }
 
+    pub fn set_trigger_rules(
+        &mut self,
+        rules: Option<Arc<oxideterm_terminal_triggers::CompiledTriggerSet>>,
+    ) {
+        // Cross-chunk state is transferred to and owned by the PTY reader thread.
+        let _ = self
+            .notifier
+            .0
+            .send(LocalGraphicsMsg::SetTriggerRules(rules));
+    }
+
     pub fn start_modem_transfer(
         &mut self,
         request: TerminalModemTransferRequest,

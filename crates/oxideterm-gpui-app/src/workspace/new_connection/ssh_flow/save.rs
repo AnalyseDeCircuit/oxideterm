@@ -1348,10 +1348,18 @@ impl WorkspaceApp {
         }
 
         match self.create_serial_terminal_tab(config, window, cx) {
-            Ok(_) => {
+            Ok(session_id) => {
                 if let Some(request) = save_request {
                     match self.connection_store.upsert_serial_profile(request) {
-                        Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
+                        Ok(profile) => {
+                            self.register_terminal_trigger_saved_connection(
+                                session_id,
+                                oxideterm_terminal_triggers::SavedConnectionKind::Serial,
+                                profile.id,
+                                cx,
+                            );
+                            self.queue_cloud_sync_dirty_refresh(cx);
+                        }
                         Err(error) => {
                             let message = format!(
                                 "{}: {error}",
@@ -1505,7 +1513,13 @@ impl WorkspaceApp {
                 }
                 if let Some(profile_id) = connected_profile_id {
                     self.telnet_terminal_profile_ids
-                        .insert(session_id, profile_id);
+                        .insert(session_id, profile_id.clone());
+                    self.register_terminal_trigger_saved_connection(
+                        session_id,
+                        oxideterm_terminal_triggers::SavedConnectionKind::Telnet,
+                        profile_id,
+                        cx,
+                    );
                 }
                 self.update_connection_form_state(cx, ConnectionFormState::clear);
             }

@@ -1,6 +1,16 @@
 {
   "terminal": {
     "local_terminal": "ローカルターミナル",
+    "triggers": {
+      "risky_quick_command_title": "危険なトリガーアクションを実行しますか？",
+      "risky_quick_command_description": "トリガー「{{trigger}}」は、{{risk}}リスクのクイックコマンド「{{command}}」を実行します。",
+      "cancel": "キャンセル",
+      "run": "実行",
+      "launch_failed": "トリガーがローカルプログラムを起動できませんでした。",
+      "risk_high": "高",
+      "risk_medium": "中",
+      "risk_configured": "設定済み"
+    },
     "paste": {
       "title": "複数行が検出されました ({{count}}行)",
       "more_lines": "... さらに{{count}}行",
@@ -18,6 +28,7 @@
       "insert_selection_into_command": "選択範囲をここに挿入",
       "replace_command_with_selection": "選択範囲でコマンドを置換",
       "find": "検索...",
+      "manage_triggers": "このセッションのトリガーを管理...",
       "select_command": "コマンドを選択",
       "previous_command": "前のコマンド",
       "next_command": "次のコマンド",
@@ -68,7 +79,8 @@
       "discarded": "Terminal recording discarded",
       "saved": "Terminal recording saved",
       "save_failed": "Failed to save terminal recording",
-      "open_cast": "Open terminal recording",
+      "title": "端末録画",
+      "open_cast": "端末録画を開く",
       "open_failed": "Could not open terminal recording",
       "recording": "REC",
       "paused": "Paused",

@@ -918,6 +918,14 @@ impl WorkspaceApp {
                 .with_preference_overrides(preference_overrides)
         });
         self.register_terminal_pane(pane_id, session_id, pane, window, cx);
+        if let Some(saved_connection_id) = saved_connection_id {
+            self.register_terminal_trigger_saved_connection(
+                session_id,
+                oxideterm_terminal_triggers::SavedConnectionKind::Ssh,
+                saved_connection_id,
+                cx,
+            );
+        }
         self.refresh_native_plugin_terminal_hooks(cx);
         self.persist_session_tree_snapshot();
         Ok((pane_id, session_id))

@@ -55,6 +55,7 @@
     "cmd_new_terminal": "新建本地终端",
     "cmd_new_connection": "新建 SSH 连接",
     "cmd_settings": "打开设置",
+    "cmd_manage_terminal_triggers": "管理终端触发器",
     "cmd_toggle_sidebar": "切换侧边栏",
     "cmd_toggle_panel": "切换面板",
     "cmd_toggle_ai_sidebar": "切换 OxideSens",

@@ -55,6 +55,7 @@
     "cmd_new_terminal": "Nuevo terminal local",
     "cmd_new_connection": "Nueva conexión SSH",
     "cmd_settings": "Abrir ajustes",
+    "cmd_manage_terminal_triggers": "Administrar activadores del terminal",
     "cmd_toggle_sidebar": "Alternar barra lateral",
     "cmd_toggle_panel": "Alternar panel",
     "cmd_toggle_ai_sidebar": "Alternar OxideSens",

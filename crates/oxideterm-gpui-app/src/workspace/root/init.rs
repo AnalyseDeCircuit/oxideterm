@@ -179,6 +179,8 @@ impl WorkspaceApp {
                 workspace.handle_settings_workspace_event(settings, event, cx);
             },
         );
+        let terminal_triggers =
+            settings::TerminalTriggersSettingsState::load(settings_store.path());
         let launcher = cx.new(|cx| LauncherWorkspaceEntity::new(settings.launcher.enabled, cx));
         let launcher_observation = cx.observe(&launcher, |_workspace, _launcher, cx| {
             // Entity-owned scans and input transitions repaint every mounted launcher surface.
@@ -613,7 +615,14 @@ impl WorkspaceApp {
             tab_host,
             _tab_host_subscription: tab_host_subscription,
             search: SearchBarState::default(),
+            terminal_recording_menu_open: false,
             terminal_highlight_popover_open: false,
+            terminal_trigger_settings_pane: None,
+            terminal_trigger_shell_confirmation_pending: false,
+            terminal_triggers,
+            terminal_trigger_runtime:
+                terminal_triggers_runtime::TerminalTriggerRuntimeState::default(),
+            terminal_trigger_saved_connections: HashMap::new(),
             terminal_semantic_highlight_section_expanded: true,
             terminal_rule_highlight_section_expanded: true,
             terminal_command_context_highlight_section_expanded: true,
@@ -869,9 +878,11 @@ impl WorkspaceApp {
         workspace.sync_active_terminal_metadata_context(cx);
         workspace.sync_active_terminal_recording_elapsed_tick(cx);
         workspace.sync_active_privilege_prompt_inline_hint(cx);
+        workspace.refresh_terminal_trigger_runtime(cx);
         workspace.schedule_automatic_native_update_check(cx);
         cx.on_release(|workspace, cx| {
             workspace.flush_main_window_state(cx);
+            workspace.shutdown_terminal_trigger_runtime();
             // Shutdown ordering is security-sensitive: late broker callbacks
             // fail before user-decision waiters and owner projections disappear.
             workspace.ai_runtime_context.update(cx, |runtime, _cx| {
@@ -1121,6 +1132,7 @@ impl WorkspaceApp {
                     .i18n
                     .t("terminal.command_selection.replace_command_with_selection"),
                 find: self.i18n.t("terminal.command_selection.find"),
+                manage_triggers: self.i18n.t("terminal.command_selection.manage_triggers"),
                 select_command: self.i18n.t("terminal.command_selection.select_command"),
                 previous_command: self.i18n.t("terminal.command_selection.previous_command"),
                 next_command: self.i18n.t("terminal.command_selection.next_command"),

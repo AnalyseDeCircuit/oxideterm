@@ -75,6 +75,12 @@ pub enum SelectAnchorId {
     SettingsTerminalDeleteSequence,
     SettingsTerminalCursorStyle,
     SettingsRemoteShellIntegrationMode,
+    SettingsTerminalTriggerMatchMode,
+    SettingsTerminalTriggerAction,
+    SettingsTerminalTriggerProcessMode,
+    SettingsTerminalTriggerQuickCommand,
+    SettingsTerminalTriggerTiming,
+    SettingsTerminalTriggerScope,
     SettingsIdeAgentMode,
     SettingsLocalShell,
     SettingsLocalShellSemanticScheme(usize),
@@ -187,6 +193,12 @@ impl SelectAnchorId {
                 | Self::SettingsTerminalDeleteSequence
                 | Self::SettingsTerminalCursorStyle
                 | Self::SettingsRemoteShellIntegrationMode
+                | Self::SettingsTerminalTriggerMatchMode
+                | Self::SettingsTerminalTriggerAction
+                | Self::SettingsTerminalTriggerProcessMode
+                | Self::SettingsTerminalTriggerQuickCommand
+                | Self::SettingsTerminalTriggerTiming
+                | Self::SettingsTerminalTriggerScope
                 | Self::SettingsIdeAgentMode
                 | Self::SettingsLocalShell
                 | Self::SettingsLocalShellSemanticScheme(_)

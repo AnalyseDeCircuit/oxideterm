@@ -1,6 +1,16 @@
 {
   "terminal": {
     "local_terminal": "Terminal local",
+    "triggers": {
+      "risky_quick_command_title": "Exécuter une action de déclencheur risquée ?",
+      "risky_quick_command_description": "Le déclencheur « {{trigger}} » exécutera la commande rapide « {{command}} » avec un risque {{risk}}.",
+      "cancel": "Annuler",
+      "run": "Exécuter",
+      "launch_failed": "Le déclencheur n’a pas pu démarrer le programme local.",
+      "risk_high": "élevé",
+      "risk_medium": "moyen",
+      "risk_configured": "configuré"
+    },
     "paste": {
       "title": "Lignes multiples détectées ({{count}} lignes)",
       "more_lines": "... {{count}} lignes supplémentaires",
@@ -18,6 +28,7 @@
       "insert_selection_into_command": "Insérer la sélection ici",
       "replace_command_with_selection": "Remplacer la commande par la sélection",
       "find": "Rechercher...",
+      "manage_triggers": "Gérer les déclencheurs de cette session...",
       "select_command": "Sélectionner la commande",
       "previous_command": "Commande précédente",
       "next_command": "Commande suivante",
@@ -68,7 +79,8 @@
       "discarded": "Terminal recording discarded",
       "saved": "Terminal recording saved",
       "save_failed": "Failed to save terminal recording",
-      "open_cast": "Open terminal recording",
+      "title": "Enregistrement du terminal",
+      "open_cast": "Ouvrir un enregistrement du terminal",
       "open_failed": "Could not open terminal recording",
       "recording": "REC",
       "paused": "Paused",

@@ -105,6 +105,8 @@ pub enum TerminalPaneEvent {
     PrivilegePromptSubmitRequested,
     // The requested action remains pane-owned until the active Workspace consumes it.
     ContextActionRequested,
+    // Match payloads remain pane-owned; Workspace drains them using the source pane identity.
+    TriggerMatchesAvailable,
     // Search completion is asynchronous; Workspace reads the latest pane-owned status.
     SearchStatusChanged,
 }
@@ -357,6 +359,7 @@ pub struct TerminalPane {
     context_menu: Option<TerminalContextMenu>,
     context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence,
     context_action_requested: Option<TerminalContextAction>,
+    pending_trigger_matches: VecDeque<oxideterm_terminal_triggers::TriggerMatched>,
     plugin_input_interceptor: Option<TerminalInputInterceptor>,
     input_broadcaster: Option<TerminalInputBroadcaster>,
     #[cfg(test)]
@@ -477,6 +480,7 @@ pub enum TerminalContextAction {
     SendSelectionToAi,
     FillCommandBarFromSelection,
     OpenSearch,
+    OpenSessionTriggers,
 }
 
 #[derive(Clone, Debug)]
@@ -925,6 +929,7 @@ impl TerminalPane {
             context_menu: None,
             context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             context_action_requested: None,
+            pending_trigger_matches: VecDeque::new(),
             plugin_input_interceptor: None,
             input_broadcaster: None,
             #[cfg(test)]
@@ -2032,6 +2037,51 @@ impl TerminalPane {
         self.send_command_sender_text(text, cx)
     }
 
+    pub fn send_trigger_text(
+        &mut self,
+        text: &str,
+        append_enter: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(input) = terminal_trigger_input(text, append_enter) else {
+            return false;
+        };
+        if !self.terminal_accepts_input() {
+            return false;
+        }
+
+        // Trigger captures bypass plugin interception, broadcast, recording, and command
+        // history so remote output cannot escape through an unrelated observer.
+        let write_result = {
+            let mut terminal = self.terminal.lock();
+            if self.input_locked || self.terminal_exited || !terminal.is_interactive() {
+                return false;
+            }
+            terminal.write_text(&input)
+        };
+        if write_result.is_err() {
+            return false;
+        }
+
+        self.last_terminal_input = Instant::now();
+        self.reset_cursor_blink();
+        self.restore_live_output_after_user_input();
+        cx.notify();
+        true
+    }
+
+    pub fn set_trigger_rules(
+        &mut self,
+        rules: Option<Arc<oxideterm_terminal_triggers::CompiledTriggerSet>>,
+    ) {
+        self.pending_trigger_matches.clear();
+        self.terminal.lock().set_trigger_rules(rules);
+    }
+
+    pub fn take_trigger_matches(&mut self) -> Vec<oxideterm_terminal_triggers::TriggerMatched> {
+        self.pending_trigger_matches.drain(..).collect()
+    }
+
     pub fn send_command_sender_raw_bytes(&mut self, bytes: &[u8], cx: &mut Context<Self>) -> bool {
         if bytes.is_empty() || !self.terminal_accepts_input() {
             return false;
@@ -2621,6 +2671,17 @@ impl TerminalPane {
             TerminalEvent::Output(bytes) => {
                 if let Some(recorder) = self.recorder.as_mut() {
                     recorder.record_output(&bytes);
+                }
+                TerminalEventEffect::default()
+            }
+            TerminalEvent::TriggerMatched(matched) => {
+                const MAX_PENDING_TRIGGER_MATCHES: usize = 128;
+                let should_emit = self.pending_trigger_matches.is_empty();
+                if self.pending_trigger_matches.len() < MAX_PENDING_TRIGGER_MATCHES {
+                    self.pending_trigger_matches.push_back(matched);
+                    if should_emit {
+                        cx.emit(TerminalPaneEvent::TriggerMatchesAvailable);
+                    }
                 }
                 TerminalEventEffect::default()
             }
@@ -3323,6 +3384,17 @@ pub fn paste_needs_confirmation(text: &str) -> bool {
         && (text.split('\n').count() > PASTE_LINE_THRESHOLD || text.len() > PASTE_CHAR_THRESHOLD)
 }
 
+fn terminal_trigger_input(text: &str, append_enter: bool) -> Option<Zeroizing<String>> {
+    if text.is_empty() && !append_enter {
+        return None;
+    }
+    let mut input = Zeroizing::new(text.to_string());
+    if append_enter {
+        input.push('\r');
+    }
+    Some(input)
+}
+
 fn graphics_options_from_preferences(preferences: &TerminalUiPreferences) -> GraphicsOptions {
     let graphics = preferences.render_policy.terminal_graphics;
     let storage_limit_mb = graphics.storage_limit_bytes.div_ceil(1024 * 1024);
@@ -3510,6 +3582,29 @@ mod tests {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
             div()
         }
+    }
+
+    #[test]
+    fn trigger_input_appends_only_the_explicit_enter() {
+        assert!(terminal_trigger_input("", false).is_none());
+        assert_eq!(
+            terminal_trigger_input("value", false)
+                .as_ref()
+                .map(|input| input.as_str()),
+            Some("value")
+        );
+        assert_eq!(
+            terminal_trigger_input("value\nnext", true)
+                .as_ref()
+                .map(|input| input.as_str()),
+            Some("value\nnext\r")
+        );
+        assert_eq!(
+            terminal_trigger_input("", true)
+                .as_ref()
+                .map(|input| input.as_str()),
+            Some("\r")
+        );
     }
 
     #[test]

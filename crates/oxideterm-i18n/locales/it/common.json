@@ -55,6 +55,7 @@
     "cmd_new_terminal": "Nuovo terminale locale",
     "cmd_new_connection": "Nuova connessione SSH",
     "cmd_settings": "Apri impostazioni",
+    "cmd_manage_terminal_triggers": "Gestisci trigger del terminale",
     "cmd_toggle_sidebar": "Attiva/disattiva barra laterale",
     "cmd_toggle_panel": "Mostra/nascondi pannello",
     "cmd_toggle_ai_sidebar": "Mostra/nascondi OxideSens",

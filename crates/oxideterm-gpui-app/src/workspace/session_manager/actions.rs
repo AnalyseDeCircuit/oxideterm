@@ -923,7 +923,13 @@ impl WorkspaceApp {
             flow_control: terminal_serial_flow_from_profile(&profile.flow_control),
         };
         match self.create_serial_terminal_tab(config, window, cx) {
-            Ok(_) => {
+            Ok(session_id) => {
+                self.register_terminal_trigger_saved_connection(
+                    session_id,
+                    oxideterm_terminal_triggers::SavedConnectionKind::Serial,
+                    profile.id.clone(),
+                    cx,
+                );
                 let _ = self.connection_store.mark_serial_profile_used(id);
                 self.queue_cloud_sync_dirty_refresh(cx);
             }
@@ -985,6 +991,12 @@ impl WorkspaceApp {
             Ok(session_id) => {
                 self.telnet_terminal_profile_ids
                     .insert(session_id, profile.id.clone());
+                self.register_terminal_trigger_saved_connection(
+                    session_id,
+                    oxideterm_terminal_triggers::SavedConnectionKind::Telnet,
+                    profile.id.clone(),
+                    cx,
+                );
                 let _ = self.connection_store.mark_telnet_profile_used(id);
             }
             Err(error) => {

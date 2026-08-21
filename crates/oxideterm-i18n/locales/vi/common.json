@@ -55,6 +55,7 @@
     "cmd_new_terminal": "Terminal mới",
     "cmd_new_connection": "Kết nối SSH mới",
     "cmd_settings": "Mở cài đặt",
+    "cmd_manage_terminal_triggers": "Quản lý trình kích hoạt terminal",
     "cmd_toggle_sidebar": "Chuyển đổi thanh bên",
     "cmd_toggle_panel": "Bật/tắt bảng điều khiển",
     "cmd_toggle_ai_sidebar": "Bật/tắt OxideSens",

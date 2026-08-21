@@ -61,6 +61,7 @@ pub(crate) enum LocalGraphicsMsg {
     SetEncoding(TerminalEncoding),
     SetOutputProcessor(Option<TerminalOutputProcessor>),
     SetOutputEventsEnabled(bool),
+    SetTriggerRules(Option<Arc<oxideterm_terminal_triggers::CompiledTriggerSet>>),
     StartModemTransfer {
         request: crate::TerminalModemTransferRequest,
         response_tx: Sender<Option<ModemTransfer>>,
@@ -155,6 +156,7 @@ where
             let encoding_detector = &mut state.encoding_detector;
             let output_decoder = &mut state.output_decoder;
             let output_events_enabled = state.output_events_enabled;
+            let trigger_stream = &mut state.trigger_stream;
             let privilege_prompt = &mut state.privilege_prompt;
             let shell_integration = &mut state.shell_integration;
             let alt_screen_active = &mut state.alt_screen_active;
@@ -167,6 +169,11 @@ where
                         }
                         let decoded = output_decoder.decode_to_utf8_bytes(&terminal_bytes);
                         parsed_bytes += terminal_bytes.len();
+                        if let Some(stream) = trigger_stream.as_mut() {
+                            stream.observe_bytes(decoded.as_ref(), |matched| {
+                                let _ = event_tx.send(TerminalEvent::TriggerMatched(matched));
+                            });
+                        }
                         for event in privilege_prompt.observe(decoded.as_ref()) {
                             let _ = event_tx.send(TerminalEvent::PrivilegePrompt(event));
                         }
@@ -351,6 +358,11 @@ where
                 }
                 LocalGraphicsMsg::SetOutputEventsEnabled(enabled) => {
                     state.output_events_enabled = enabled;
+                }
+                LocalGraphicsMsg::SetTriggerRules(rules) => {
+                    // The reader thread owns cross-chunk scanner state for this PTY.
+                    state.trigger_stream =
+                        rules.map(oxideterm_terminal_triggers::TerminalTriggerStream::new);
                 }
                 LocalGraphicsMsg::StartModemTransfer {
                     request,
@@ -791,6 +803,7 @@ struct LocalGraphicsState {
     magic_scan: MagicScanWindow,
     output_processor: Option<TerminalOutputProcessor>,
     output_events_enabled: bool,
+    trigger_stream: Option<oxideterm_terminal_triggers::TerminalTriggerStream>,
     output_decoder: TerminalOutputDecoder,
     privilege_prompt: TerminalPrivilegePromptStream,
     encoding_detector: EncodingMismatchDetector,
@@ -814,6 +827,7 @@ impl LocalGraphicsState {
             magic_scan: MagicScanWindow::default(),
             output_processor: None,
             output_events_enabled: false,
+            trigger_stream: None,
             output_decoder: TerminalOutputDecoder::new(encoding),
             privilege_prompt: TerminalPrivilegePromptStream::default(),
             encoding_detector: EncodingMismatchDetector::new(encoding),

@@ -55,6 +55,7 @@
     "cmd_new_terminal": "Neues lokales Terminal",
     "cmd_new_connection": "Neue SSH-Verbindung",
     "cmd_settings": "Einstellungen öffnen",
+    "cmd_manage_terminal_triggers": "Terminalauslöser verwalten",
     "cmd_toggle_sidebar": "Seitenleiste umschalten",
     "cmd_toggle_panel": "Panel umschalten",
     "cmd_toggle_ai_sidebar": "OxideSens umschalten",

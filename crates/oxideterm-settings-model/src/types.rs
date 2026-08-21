@@ -92,6 +92,12 @@ pub enum SettingsSelect {
     TerminalDeleteSequence,
     TerminalCursorStyle,
     RemoteShellIntegrationMode,
+    TerminalTriggerMatchMode,
+    TerminalTriggerAction,
+    TerminalTriggerProcessMode,
+    TerminalTriggerQuickCommand,
+    TerminalTriggerTiming,
+    TerminalTriggerScope,
     IdeAgentMode,
     LocalShell,
     LocalShellSemanticScheme(usize),
@@ -164,6 +170,15 @@ pub enum SettingsInput {
     InBandTransferMaxTotalBytes,
     TerminalCommandBarFocusHandoff,
     TerminalCommandSpecsJson,
+    TerminalTriggerName,
+    TerminalTriggerDescription,
+    TerminalTriggerPattern,
+    TerminalTriggerActionValue,
+    TerminalTriggerExecutable,
+    TerminalTriggerArguments,
+    TerminalTriggerWorkingDirectory,
+    TerminalTriggerDelayMs,
+    TerminalTriggerCooldownMs,
     KeybindingSearch,
     CustomThemeName,
     CustomThemeTerminalColor(usize),
@@ -462,6 +477,7 @@ impl SettingsInput {
             self,
             Self::TerminalCommandBarFocusHandoff
                 | Self::TerminalCommandSpecsJson
+                | Self::TerminalTriggerArguments
                 | Self::AiSystemPrompt
                 | Self::AiMemoryContent
                 | Self::AiAcpAgentArgs(_)
@@ -477,6 +493,7 @@ impl SettingsInput {
         // converts them to concrete units at the view boundary.
         match self {
             Self::TerminalCommandBarFocusHandoff | Self::TerminalCommandSpecsJson => 20.0,
+            Self::TerminalTriggerArguments => 20.0,
             Self::AiSystemPrompt | Self::AiMemoryContent => 22.0,
             Self::AiAcpAgentArgs(_)
             | Self::AiAcpAgentEnv(_)
@@ -524,6 +541,15 @@ impl SettingsInput {
             Self::InBandTransferMaxTotalBytes => 15,
             Self::TerminalCommandBarFocusHandoff => 16,
             Self::TerminalCommandSpecsJson => 17,
+            Self::TerminalTriggerName => 33_100,
+            Self::TerminalTriggerDescription => 33_101,
+            Self::TerminalTriggerPattern => 33_102,
+            Self::TerminalTriggerActionValue => 33_103,
+            Self::TerminalTriggerExecutable => 33_104,
+            Self::TerminalTriggerArguments => 33_105,
+            Self::TerminalTriggerWorkingDirectory => 33_106,
+            Self::TerminalTriggerDelayMs => 33_107,
+            Self::TerminalTriggerCooldownMs => 33_108,
             Self::KeybindingSearch => 18,
             Self::CustomThemeName => 10_000,
             Self::CustomThemeTerminalColor(index) => 10_100 + index as u64,

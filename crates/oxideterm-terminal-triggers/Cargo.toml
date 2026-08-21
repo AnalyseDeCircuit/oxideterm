@@ -1,0 +1,21 @@
+[package]
+name = "oxideterm-terminal-triggers"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+tempfile = "3.23"
+
+[[bench]]
+name = "trigger_stream"
+harness = false

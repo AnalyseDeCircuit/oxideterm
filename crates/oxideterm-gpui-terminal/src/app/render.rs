@@ -942,6 +942,11 @@ impl TerminalPane {
             .replace_command_with_selection
             .clone();
         let find_label = self.preferences.command_selection_labels.find.clone();
+        let manage_triggers_label = self
+            .preferences
+            .command_selection_labels
+            .manage_triggers
+            .clone();
         let select_command_label = self
             .preferences
             .command_selection_labels
@@ -1092,6 +1097,18 @@ impl TerminalPane {
                     false,
                     |this, _event, _window, cx| {
                         this.request_context_action(TerminalContextAction::OpenSearch, false, cx);
+                    },
+                    cx,
+                ))
+                .child(self.render_terminal_context_menu_item(
+                    manage_triggers_label,
+                    false,
+                    |this, _event, _window, cx| {
+                        this.request_context_action(
+                            TerminalContextAction::OpenSessionTriggers,
+                            false,
+                            cx,
+                        );
                     },
                     cx,
                 ))

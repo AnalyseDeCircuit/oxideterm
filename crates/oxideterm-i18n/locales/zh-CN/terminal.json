@@ -1,6 +1,16 @@
 {
   "terminal": {
     "local_terminal": "本地终端",
+    "triggers": {
+      "risky_quick_command_title": "执行高风险触发器动作？",
+      "risky_quick_command_description": "触发器“{{trigger}}”将执行快速命令“{{command}}”，风险级别为{{risk}}。",
+      "cancel": "取消",
+      "run": "执行",
+      "launch_failed": "触发器无法启动本机程序。",
+      "risk_high": "高",
+      "risk_medium": "中",
+      "risk_configured": "按设置需确认"
+    },
     "command_bar": {
       "command": "命令",
       "command_mode": "命令模式",
@@ -88,6 +98,7 @@
       "insert_selection_into_command": "在此插入选区",
       "replace_command_with_selection": "用选区替换当前命令",
       "find": "查找...",
+      "manage_triggers": "管理此会话的触发器...",
       "select_command": "选择命令",
       "previous_command": "上一个命令",
       "next_command": "下一个命令",
@@ -138,6 +149,7 @@
       "discarded": "终端录制已丢弃",
       "saved": "终端录制已保存",
       "save_failed": "终端录制保存失败",
+      "title": "终端录制",
       "open_cast": "打开终端录制",
       "open_failed": "无法打开终端录制",
       "recording": "录制中",

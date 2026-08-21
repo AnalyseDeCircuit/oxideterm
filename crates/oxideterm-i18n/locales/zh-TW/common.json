@@ -55,6 +55,7 @@
     "cmd_new_terminal": "新增本機終端",
     "cmd_new_connection": "新增 SSH 連線",
     "cmd_settings": "開啟設定",
+    "cmd_manage_terminal_triggers": "管理終端觸發器",
     "cmd_toggle_sidebar": "切換側邊欄",
     "cmd_toggle_panel": "切換面板",
     "cmd_toggle_ai_sidebar": "切換 OxideSens",

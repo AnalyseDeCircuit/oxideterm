@@ -854,6 +854,7 @@ impl WorkspaceApp {
     }
 
     fn prepare_terminal_cwd_picker(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_terminal_recording_menu();
         self.dismiss_terminal_broadcast_menu(cx);
         self.dismiss_terminal_highlight_popover();
         self.close_terminal_quick_commands_popover(cx);

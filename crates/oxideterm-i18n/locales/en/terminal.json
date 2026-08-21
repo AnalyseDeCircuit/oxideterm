@@ -1,6 +1,16 @@
 {
   "terminal": {
     "local_terminal": "Local Terminal",
+    "triggers": {
+      "risky_quick_command_title": "Run a risky trigger action?",
+      "risky_quick_command_description": "Trigger “{{trigger}}” will run quick command “{{command}}” with {{risk}} risk.",
+      "cancel": "Cancel",
+      "run": "Run",
+      "launch_failed": "The trigger could not start the local program.",
+      "risk_high": "high",
+      "risk_medium": "medium",
+      "risk_configured": "configured"
+    },
     "command_bar": {
       "command": "Command",
       "command_mode": "Command mode",
@@ -88,6 +98,7 @@
       "insert_selection_into_command": "Insert selection here",
       "replace_command_with_selection": "Replace command with selection",
       "find": "Find...",
+      "manage_triggers": "Manage triggers for this session...",
       "select_command": "Select command",
       "previous_command": "Previous command",
       "next_command": "Next command",
@@ -138,6 +149,7 @@
       "discarded": "Terminal recording discarded",
       "saved": "Terminal recording saved",
       "save_failed": "Failed to save terminal recording",
+      "title": "Terminal recording",
       "open_cast": "Open terminal recording",
       "open_failed": "Could not open terminal recording",
       "recording": "REC",

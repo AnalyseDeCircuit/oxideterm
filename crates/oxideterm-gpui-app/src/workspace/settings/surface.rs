@@ -85,6 +85,10 @@ impl WorkspaceApp {
             .active_tab(cx)
             .is_some_and(|tab| tab.kind == TabKind::Settings);
         self.active_surface = ActiveSurface::Terminal;
+        self.terminal_trigger_settings_pane = None;
+        self.terminal_trigger_shell_confirmation_pending = false;
+        self.clear_terminal_trigger_input_focus();
+        self.terminal_triggers.cancel_edit();
         self.close_settings_select();
         self.settings_workspace.update(cx, |settings, cx| {
             settings.close_navigation_editor(cx);

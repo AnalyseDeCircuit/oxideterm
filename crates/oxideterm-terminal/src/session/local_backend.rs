@@ -79,6 +79,13 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::set_output_events_enabled(self, enabled);
     }
 
+    fn set_trigger_rules(
+        &mut self,
+        rules: Option<Arc<oxideterm_terminal_triggers::CompiledTriggerSet>>,
+    ) {
+        LocalPtySession::set_trigger_rules(self, rules);
+    }
+
     fn start_modem_transfer(
         &mut self,
         request: TerminalModemTransferRequest,

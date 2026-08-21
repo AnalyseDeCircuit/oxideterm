@@ -2,6 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
+use oxideterm_gpui_ui::dropdown_menu::{
+    DropdownMenuItemKind, dropdown_menu_content, dropdown_menu_item,
+};
+
+const TERMINAL_RECORDING_MENU_WIDTH: f32 = 220.0;
+const TERMINAL_RECORDING_MENU_BOTTOM: f32 = 30.0;
 
 impl WorkspaceApp {
     pub(super) fn render_terminal_command_bar(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -99,7 +105,7 @@ impl WorkspaceApp {
             self.i18n.t("terminal.recording.show_timestamps")
         };
         let recording_toggle_tooltip_title = match recording_status.state {
-            TerminalRecordingState::Idle => self.i18n.t("terminal.recording.start"),
+            TerminalRecordingState::Idle => self.i18n.t("terminal.recording.title"),
             TerminalRecordingState::Recording => self.i18n.t("terminal.recording.pause"),
             TerminalRecordingState::Paused => self.i18n.t("terminal.recording.resume"),
         };
@@ -385,6 +391,7 @@ impl WorkspaceApp {
                                             this.close_terminal_cwd_picker(cx);
                                             this.close_terminal_git_branch_picker(cx);
                                             this.close_terminal_project_panel(cx);
+                                            this.dismiss_terminal_recording_menu();
                                             this.terminal_highlight_popover_open = false;
                                             cx.stop_propagation();
                                             cx.notify();
@@ -393,6 +400,24 @@ impl WorkspaceApp {
                                     ))
                                 },
                             )
+                            .when_some(active_pane_id, |actions, pane_id| {
+                                // Capture the visible pane so the shortcut cannot retarget after a tab switch.
+                                actions.child(self.terminal_command_action_button(
+                                    LucideIcon::Activity,
+                                    rgb(theme.text_muted),
+                                    false,
+                                    None,
+                                    "terminal-command-session-triggers",
+                                    self.i18n.t("terminal.command_selection.manage_triggers"),
+                                    move |this, _event, window, cx| {
+                                        this.open_terminal_trigger_settings_for_pane(
+                                            pane_id, window, cx,
+                                        );
+                                        cx.stop_propagation();
+                                    },
+                                    cx,
+                                ))
+                            })
                             .child(select_anchor_probe(
                                 SelectAnchorId::TerminalBroadcastMenu,
                                 self.terminal_command_action_button(
@@ -529,40 +554,62 @@ impl WorkspaceApp {
                                         .child(format_recording_elapsed(recording_status.elapsed)),
                                 )
                             })
-                            .child(self.terminal_command_action_button(
-                                match recording_status.state {
-                                    TerminalRecordingState::Paused => LucideIcon::Play,
-                                    _ => LucideIcon::Circle,
-                                },
-                                if recording_active {
-                                    rgb(theme.error)
-                                } else {
-                                    rgb(theme.text_muted)
-                                },
-                                false,
-                                Some(if recording_active {
-                                    rgba((theme.error << 8) | 0x26)
-                                } else {
-                                    rgba(0x00000000)
-                                }),
-                                "terminal-command-recording-toggle",
-                                recording_toggle_tooltip_title,
-                                move |this, _event, _window, cx| {
-                                    match recording_status.state {
-                                        TerminalRecordingState::Idle => {
-                                            this.start_active_terminal_recording(cx)
+                            .when(!recording_active, |actions| {
+                                actions.child(
+                                    div()
+                                        .relative()
+                                        .flex_none()
+                                        .child(self.terminal_command_action_button(
+                                            LucideIcon::FileVideo,
+                                            rgb(theme.text_muted),
+                                            false,
+                                            Some(if self.terminal_recording_menu_open {
+                                                rgba((theme.accent << 8) | 0x26)
+                                            } else {
+                                                rgba(0x00000000)
+                                            }),
+                                            "terminal-command-recording-menu",
+                                            recording_toggle_tooltip_title.clone(),
+                                            |this, _event, _window, cx| {
+                                                this.toggle_terminal_recording_menu(cx);
+                                                cx.stop_propagation();
+                                            },
+                                            cx,
+                                        ))
+                                        .when(self.terminal_recording_menu_open, |anchor| {
+                                            // Keep the menu in the toolbar button's local coordinate
+                                            // owner so its anchor is current in the same draw pass.
+                                            anchor.child(self.render_terminal_recording_menu(cx))
+                                        }),
+                                )
+                            })
+                            .when(recording_active, |actions| {
+                                actions.child(self.terminal_command_action_button(
+                                    if recording_status.state == TerminalRecordingState::Paused {
+                                        LucideIcon::Play
+                                    } else {
+                                        LucideIcon::Circle
+                                    },
+                                    rgb(theme.error),
+                                    false,
+                                    Some(rgba((theme.error << 8) | 0x26)),
+                                    "terminal-command-recording-toggle",
+                                    recording_toggle_tooltip_title.clone(),
+                                    move |this, _event, _window, cx| {
+                                        match recording_status.state {
+                                            TerminalRecordingState::Recording => {
+                                                this.pause_active_terminal_recording(cx)
+                                            }
+                                            TerminalRecordingState::Paused => {
+                                                this.resume_active_terminal_recording(cx)
+                                            }
+                                            TerminalRecordingState::Idle => {}
                                         }
-                                        TerminalRecordingState::Recording => {
-                                            this.pause_active_terminal_recording(cx)
-                                        }
-                                        TerminalRecordingState::Paused => {
-                                            this.resume_active_terminal_recording(cx)
-                                        }
-                                    }
-                                    cx.stop_propagation();
-                                },
-                                cx,
-                            ))
+                                        cx.stop_propagation();
+                                    },
+                                    cx,
+                                ))
+                            })
                             .when(recording_active, |actions| {
                                 actions
                                     .child(self.terminal_command_action_button(
@@ -591,20 +638,7 @@ impl WorkspaceApp {
                                         },
                                         cx,
                                     ))
-                            })
-                            .child(self.terminal_command_action_button(
-                                LucideIcon::FilePlay,
-                                rgb(theme.text_muted),
-                                false,
-                                None,
-                                "terminal-command-recording-open",
-                                self.i18n.t("terminal.recording.open_cast"),
-                                |this, _event, window, cx| {
-                                    this.open_terminal_cast_file(window, cx);
-                                    cx.stop_propagation();
-                                },
-                                cx,
-                            )),
+                            }),
                     ),
             );
         select_anchor_probe(
@@ -624,6 +658,77 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.render_quick_commands_popover(cx)
+    }
+
+    fn toggle_terminal_recording_menu(&mut self, cx: &mut Context<Self>) {
+        let should_open = !self.terminal_recording_menu_open;
+        self.terminal_recording_menu_open = should_open;
+        if should_open {
+            self.dismiss_terminal_broadcast_menu(cx);
+            self.dismiss_terminal_highlight_popover();
+            self.close_terminal_quick_commands_popover(cx);
+            self.close_terminal_cwd_picker(cx);
+            self.close_terminal_git_branch_picker(cx);
+            self.close_terminal_project_panel(cx);
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn dismiss_terminal_recording_menu(&mut self) -> bool {
+        std::mem::take(&mut self.terminal_recording_menu_open)
+    }
+
+    fn render_terminal_recording_menu(&self, cx: &mut Context<Self>) -> AnyElement {
+        let menu = context_menu_event_boundary(
+            dropdown_menu_content(&self.tokens)
+                .absolute()
+                .bottom(px(TERMINAL_RECORDING_MENU_BOTTOM))
+                .right(px(0.0))
+                .w(px(TERMINAL_RECORDING_MENU_WIDTH))
+                .occlude(),
+        );
+        let start_item = dropdown_menu_item(
+            &self.tokens,
+            self.i18n.t("terminal.recording.start"),
+            DropdownMenuItemKind::Plain,
+            false,
+            false,
+        );
+        let open_item = dropdown_menu_item(
+            &self.tokens,
+            self.i18n.t("terminal.recording.open_cast"),
+            DropdownMenuItemKind::Plain,
+            false,
+            false,
+        );
+
+        menu.child(self.workspace_context_menu_styled_action(
+            start_item,
+            false,
+            false,
+            ContextMenuActionableStyle::default(),
+            |this| {
+                this.terminal_recording_menu_open = false;
+            },
+            |this, _event, _window, cx| {
+                this.start_active_terminal_recording(cx);
+            },
+            cx,
+        ))
+        .child(self.workspace_context_menu_styled_action(
+            open_item,
+            false,
+            false,
+            ContextMenuActionableStyle::default(),
+            |this| {
+                this.terminal_recording_menu_open = false;
+            },
+            |this, _event, window, cx| {
+                this.open_terminal_cast_file(window, cx);
+            },
+            cx,
+        ))
+        .into_any_element()
     }
 
     pub(in crate::workspace) fn render_terminal_broadcast_menu(

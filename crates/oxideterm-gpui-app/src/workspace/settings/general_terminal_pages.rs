@@ -1111,6 +1111,7 @@ impl WorkspaceApp {
                 ],
             ),
             (TerminalSettingsPage::Awareness, 1) => self.remote_shell_integration_card(cx),
+            (TerminalSettingsPage::Awareness, 2) => self.terminal_triggers_settings_card(cx),
             (TerminalSettingsPage::Transfer, 0) => self.settings_card(
                 "settings_view.terminal.in_band_transfer.title",
                 "settings_view.terminal.in_band_transfer.runtime_note",

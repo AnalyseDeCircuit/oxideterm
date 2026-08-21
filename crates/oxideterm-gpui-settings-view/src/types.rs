@@ -71,6 +71,14 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::TerminalDeleteSequence => SelectAnchorId::SettingsTerminalDeleteSequence,
             Self::TerminalCursorStyle => SelectAnchorId::SettingsTerminalCursorStyle,
             Self::RemoteShellIntegrationMode => SelectAnchorId::SettingsRemoteShellIntegrationMode,
+            Self::TerminalTriggerMatchMode => SelectAnchorId::SettingsTerminalTriggerMatchMode,
+            Self::TerminalTriggerAction => SelectAnchorId::SettingsTerminalTriggerAction,
+            Self::TerminalTriggerProcessMode => SelectAnchorId::SettingsTerminalTriggerProcessMode,
+            Self::TerminalTriggerQuickCommand => {
+                SelectAnchorId::SettingsTerminalTriggerQuickCommand
+            }
+            Self::TerminalTriggerTiming => SelectAnchorId::SettingsTerminalTriggerTiming,
+            Self::TerminalTriggerScope => SelectAnchorId::SettingsTerminalTriggerScope,
             Self::IdeAgentMode => SelectAnchorId::SettingsIdeAgentMode,
             Self::LocalShell => SelectAnchorId::SettingsLocalShell,
             Self::LocalShellSemanticScheme(index) => {
