@@ -722,6 +722,8 @@
         "key_path": "Key path",
         "cert_path": "Certificate path",
         "managed_key": "Managed key",
+        "gssapi_server_identity": "Kerberos server name",
+        "gssapi_delegate_credentials": "Kerberos credential delegation",
         "proxy_chain": "Proxy chain",
         "agent_forwarding": "Agent forwarding",
         "post_connect_command": "Post-connect command",

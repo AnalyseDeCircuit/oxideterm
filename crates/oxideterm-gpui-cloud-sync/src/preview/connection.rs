@@ -102,6 +102,18 @@ pub(super) fn connection_changed_fields(
     );
     push_changed(
         &mut fields,
+        "plugin.cloud_sync.diff_fields.gssapi_server_identity",
+        before.gssapi_server_identity.clone(),
+        after.gssapi_server_identity.clone(),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.gssapi_delegate_credentials",
+        Some(before.gssapi_delegate_credentials.to_string()),
+        Some(after.gssapi_delegate_credentials.to_string()),
+    );
+    push_changed(
+        &mut fields,
         "plugin.cloud_sync.diff_fields.proxy_chain",
         Some(before.proxy_chain.len().to_string()),
         Some(after.proxy_chain.len().to_string()),
@@ -226,6 +238,24 @@ pub(super) fn connection_merge_fields(
         local.managed_key_id.clone(),
         remote.managed_key_id.clone(),
         effective.managed_key_id.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.gssapi_server_identity",
+        base.gssapi_server_identity.clone(),
+        local.gssapi_server_identity.clone(),
+        remote.gssapi_server_identity.clone(),
+        effective.gssapi_server_identity.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.gssapi_delegate_credentials",
+        Some(base.gssapi_delegate_credentials.to_string()),
+        Some(local.gssapi_delegate_credentials.to_string()),
+        Some(remote.gssapi_delegate_credentials.to_string()),
+        Some(effective.gssapi_delegate_credentials.to_string()),
         conflict_strategy,
     );
     push_merge_changed(

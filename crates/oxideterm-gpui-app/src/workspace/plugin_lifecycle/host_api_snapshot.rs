@@ -520,6 +520,8 @@ mod tests {
             cert_path: Some("/private/id_ed25519-cert.pub".to_string()),
             managed_key_id: Some("managed-secret-ref".to_string()),
             managed_key_name: Some("Managed key".to_string()),
+            gssapi_server_identity: None,
+            gssapi_delegate_credentials: false,
             proxy_chain: vec![ProxyHopInfo {
                 host: "jump.example.test".to_string(),
                 port: 22,
@@ -529,6 +531,8 @@ mod tests {
                 cert_path: None,
                 managed_key_id: Some("jump-secret-ref".to_string()),
                 managed_key_name: None,
+                gssapi_server_identity: None,
+                gssapi_delegate_credentials: false,
                 agent_forwarding: false,
                 identity_agent: Some("/private/jump-agent.sock".to_string()),
                 agent_forwarding_socket: None,

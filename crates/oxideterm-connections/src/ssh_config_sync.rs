@@ -218,6 +218,16 @@ fn auth_source_matches(existing: &SavedAuth, resolved: &SavedAuth) -> bool {
         (SavedAuth::Agent, SavedAuth::Agent)
         | (SavedAuth::KeyboardInteractive, SavedAuth::KeyboardInteractive) => true,
         (
+            SavedAuth::Gssapi {
+                server_identity: existing_identity,
+                delegate_credentials: existing_delegate,
+            },
+            SavedAuth::Gssapi {
+                server_identity: resolved_identity,
+                delegate_credentials: resolved_delegate,
+            },
+        ) => existing_identity == resolved_identity && existing_delegate == resolved_delegate,
+        (
             SavedAuth::Key {
                 key_path: existing_path,
                 ..

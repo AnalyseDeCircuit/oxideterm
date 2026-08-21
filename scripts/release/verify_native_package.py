@@ -332,6 +332,8 @@ def verify_appimage(path: Path, expected_version: str) -> None:
         for name in REQUIRED_DOCUMENTS:
             if not list(extracted.rglob(name)):
                 raise RuntimeError(f"{path.name} does not contain {name}")
+        if not list((extracted / "usr" / "lib").glob("libgssapi*.so*")):
+            raise RuntimeError(f"{path.name} does not contain the Kerberos GSSAPI runtime")
         versions = list(extracted.rglob(PACKAGE_VERSION_FILENAME))
         if not versions or all(item.read_text(encoding="utf-8").strip() != expected_version for item in versions):
             raise RuntimeError(f"{path.name} does not contain version {expected_version}")

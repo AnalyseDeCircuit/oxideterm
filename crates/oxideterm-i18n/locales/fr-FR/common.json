@@ -730,6 +730,8 @@
         "key_path": "Chemin de clé",
         "cert_path": "Chemin du certificat",
         "managed_key": "Clé gérée",
+        "gssapi_server_identity": "Nom du serveur Kerberos",
+        "gssapi_delegate_credentials": "Délégation des identifiants Kerberos",
         "proxy_chain": "Chaîne de proxy",
         "agent_forwarding": "Transfert d’agent",
         "post_connect_command": "Commande après connexion",

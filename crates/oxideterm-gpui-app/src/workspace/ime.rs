@@ -2952,6 +2952,7 @@ fn new_connection_field_value(
         NewConnectionField::ManagedKeyId => &form.managed_key_id,
         NewConnectionField::CertPath => &form.cert_path,
         NewConnectionField::Passphrase => &form.passphrase,
+        NewConnectionField::GssapiServerIdentity => &form.gssapi_server_identity,
         NewConnectionField::IdentityAgent => &form.identity_agent,
         NewConnectionField::Group => &form.group,
         NewConnectionField::Notes => &form.notes,
@@ -2993,6 +2994,9 @@ fn new_connection_field_value(
         NewConnectionField::StandaloneSftpSecondaryPassphrase => {
             &form.standalone_sftp_secondary.passphrase
         }
+        NewConnectionField::StandaloneSftpSecondaryGssapiServerIdentity => {
+            &form.standalone_sftp_secondary.gssapi_server_identity
+        }
         NewConnectionField::StandaloneSftpSecondaryIdentityAgent => {
             &form.standalone_sftp_secondary.identity_agent
         }
@@ -3025,6 +3029,9 @@ fn new_connection_field_value(
         NewConnectionField::JumpManagedKeyId => &form.jump_server_form.as_ref()?.managed_key_id,
         NewConnectionField::JumpCertPath => &form.jump_server_form.as_ref()?.cert_path,
         NewConnectionField::JumpPassphrase => &form.jump_server_form.as_ref()?.passphrase,
+        NewConnectionField::JumpGssapiServerIdentity => {
+            &form.jump_server_form.as_ref()?.gssapi_server_identity
+        }
         NewConnectionField::JumpIdentityAgent => &form.jump_server_form.as_ref()?.identity_agent,
     })
 }
@@ -3043,6 +3050,7 @@ fn connection_field_value_mut(
         NewConnectionField::ManagedKeyId => &mut form.managed_key_id,
         NewConnectionField::CertPath => &mut form.cert_path,
         NewConnectionField::Passphrase => &mut form.passphrase,
+        NewConnectionField::GssapiServerIdentity => &mut form.gssapi_server_identity,
         NewConnectionField::IdentityAgent => &mut form.identity_agent,
         NewConnectionField::Group => &mut form.group,
         NewConnectionField::Notes => &mut form.notes,
@@ -3083,6 +3091,9 @@ fn connection_field_value_mut(
         }
         NewConnectionField::StandaloneSftpSecondaryPassphrase => {
             &mut form.standalone_sftp_secondary.passphrase
+        }
+        NewConnectionField::StandaloneSftpSecondaryGssapiServerIdentity => {
+            &mut form.standalone_sftp_secondary.gssapi_server_identity
         }
         NewConnectionField::StandaloneSftpSecondaryIdentityAgent => {
             &mut form.standalone_sftp_secondary.identity_agent
@@ -3163,6 +3174,13 @@ fn connection_field_value_mut(
                 .as_mut()
                 .expect("jump passphrase field without jump form")
                 .passphrase
+        }
+        NewConnectionField::JumpGssapiServerIdentity => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump Kerberos server field without jump form")
+                .gssapi_server_identity
         }
         NewConnectionField::JumpIdentityAgent => {
             &mut form

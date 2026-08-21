@@ -327,7 +327,9 @@ fn auth_method_from_saved_auth_with_runtime_secret(
         (SavedAuth::ManagedKey { key_id, .. }, Some(passphrase)) => Some(
             AuthMethod::managed_key_secret(key_id.clone(), Some(passphrase.into_zeroizing())),
         ),
-        (SavedAuth::Agent | SavedAuth::KeyboardInteractive, Some(_)) => None,
+        (SavedAuth::Agent | SavedAuth::KeyboardInteractive | SavedAuth::Gssapi { .. }, Some(_)) => {
+            None
+        }
         (_, None) => auth_method_from_saved_auth(store, auth),
     }
 }

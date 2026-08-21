@@ -730,6 +730,8 @@
         "key_path": "鍵のパス",
         "cert_path": "証明書のパス",
         "managed_key": "管理鍵",
+        "gssapi_server_identity": "Kerberos サーバー名",
+        "gssapi_delegate_credentials": "Kerberos 資格情報の委任",
         "proxy_chain": "プロキシチェーン",
         "agent_forwarding": "エージェント転送",
         "post_connect_command": "接続後コマンド",

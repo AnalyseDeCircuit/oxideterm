@@ -43,7 +43,8 @@ impl WorkspaceApp {
                 SshAuthTab::Password
                 | SshAuthTab::Agent
                 | SshAuthTab::DefaultKey
-                | SshAuthTab::TwoFactor => {}
+                | SshAuthTab::TwoFactor
+                | SshAuthTab::Gssapi => {}
                 SshAuthTab::SshKey => {
                     if form.key_path.trim().is_empty() {
                         form.error = Some(this.i18n.t("ssh.form.key_path_required"));
@@ -172,6 +173,11 @@ impl WorkspaceApp {
                     secret_handoff.zeroizing_non_empty(&mut form.passphrase),
                 ),
                 SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
+                SshAuthTab::Gssapi => AuthMethod::gssapi(
+                    (!form.gssapi_server_identity.trim().is_empty())
+                        .then(|| form.gssapi_server_identity.trim().to_string()),
+                    form.gssapi_delegate_credentials,
+                ),
             };
             let proxy_chain = if proxy_command.is_some() {
                 None

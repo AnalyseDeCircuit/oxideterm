@@ -6,20 +6,21 @@ use channels::WindowSizeRef;
 use kex::ServerKex;
 use log::debug;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc::{Receiver, Sender, channel};
+use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, channel};
 use tokio::sync::oneshot;
 
 use super::*;
 use crate::channels::{Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf};
 use crate::helpers::NameList;
 use crate::kex::{EXTENSION_SUPPORT_AS_CLIENT, KexCause, SessionKexState};
-use crate::{map_err, msg};
+use crate::{ChannelOpenFailure, map_err, msg};
 
 /// A connected server session. This type is unique to a client.
 #[derive(Debug)]
 pub struct Session {
     pub(crate) common: CommonSession<Arc<Config>>,
     pub(crate) sender: Handle,
+    pub(crate) priority_receiver: UnboundedReceiver<Msg>,
     pub(crate) receiver: Receiver<Msg>,
     pub(crate) target_window_size: u32,
     pub(crate) pending_reads: Vec<Vec<u8>>,
@@ -82,6 +83,10 @@ pub enum Msg {
         language_tag: String,
     },
     Channel(ChannelId, ChannelMsg),
+    ChannelOpenReply {
+        pending: PendingChannelOpen,
+        result: Result<(), ChannelOpenFailure>,
+    },
 }
 
 impl From<(ChannelId, ChannelMsg)> for Msg {
@@ -90,10 +95,21 @@ impl From<(ChannelId, ChannelMsg)> for Msg {
     }
 }
 
+pub use crate::PendingChannelOpen;
+
+/// A handle passed to channel-open callbacks that the handler uses to
+/// accept or reject the incoming channel request.
+///
+/// Dropping the handle without calling [`accept`](ChannelOpenHandle::accept) or
+/// [`reject`](ChannelOpenHandle::reject) automatically sends an
+/// `AdministrativelyProhibited` rejection to the client.
+pub type ChannelOpenHandle = crate::ChannelOpenHandleInner<Msg>;
+
 #[derive(Clone, Debug)]
 /// Handle to a session, used to send messages to a client outside of
 /// the request/response cycle.
 pub struct Handle {
+    pub(crate) priority_sender: UnboundedSender<Msg>,
     pub(crate) sender: Sender<Msg>,
     pub(crate) channel_buffer_size: usize,
 }
@@ -475,6 +491,143 @@ impl Session {
         }
     }
 
+    /// Dispatch a single message received on the session's internal channel
+    /// (sent via [`Handle`]). Shared by the `select!` receiver arm and the
+    /// pre-`select!` backlog drain so the two can't drift apart.
+    fn dispatch_msg(&mut self, msg: Msg) -> Result<(), Error> {
+        match msg {
+            Msg::Channel(id, ChannelMsg::Data { data }) => {
+                self.data(id, data)?;
+            }
+            Msg::Channel(id, ChannelMsg::ExtendedData { ext, data }) => {
+                self.extended_data(id, ext, data)?;
+            }
+            Msg::Channel(id, ChannelMsg::Eof) => {
+                self.eof(id)?;
+            }
+            Msg::Channel(id, ChannelMsg::Close) => {
+                self.close(id)?;
+            }
+            Msg::Channel(id, ChannelMsg::Success) => {
+                self.channel_success(id)?;
+            }
+            Msg::Channel(id, ChannelMsg::Failure) => {
+                self.channel_failure(id)?;
+            }
+            Msg::Channel(id, ChannelMsg::XonXoff { client_can_do }) => {
+                self.xon_xoff_request(id, client_can_do)?;
+            }
+            Msg::Channel(id, ChannelMsg::ExitStatus { exit_status }) => {
+                self.exit_status_request(id, exit_status)?;
+            }
+            Msg::Channel(
+                id,
+                ChannelMsg::ExitSignal {
+                    signal_name,
+                    core_dumped,
+                    error_message,
+                    lang_tag,
+                },
+            ) => {
+                self.exit_signal_request(id, signal_name, core_dumped, &error_message, &lang_tag)?;
+            }
+            Msg::Channel(id, ChannelMsg::WindowAdjusted { new_size }) => {
+                debug!("window adjusted to {new_size:?} for channel {id:?}");
+            }
+            Msg::ChannelOpenAgent { channel_ref } => {
+                let id = self.channel_open_agent()?;
+                self.channels.insert(id, channel_ref);
+            }
+            Msg::ChannelOpenSession { channel_ref } => {
+                let id = self.channel_open_session()?;
+                self.channels.insert(id, channel_ref);
+            }
+            Msg::ChannelOpenDirectTcpIp {
+                host_to_connect,
+                port_to_connect,
+                originator_address,
+                originator_port,
+                channel_ref,
+            } => {
+                let id = self.channel_open_direct_tcpip(
+                    &host_to_connect,
+                    port_to_connect,
+                    &originator_address,
+                    originator_port,
+                )?;
+                self.channels.insert(id, channel_ref);
+            }
+            Msg::ChannelOpenDirectStreamLocal {
+                socket_path,
+                channel_ref,
+            } => {
+                let id = self.channel_open_direct_streamlocal(&socket_path)?;
+                self.channels.insert(id, channel_ref);
+            }
+            Msg::ChannelOpenForwardedTcpIp {
+                connected_address,
+                connected_port,
+                originator_address,
+                originator_port,
+                channel_ref,
+            } => {
+                let id = self.channel_open_forwarded_tcpip(
+                    &connected_address,
+                    connected_port,
+                    &originator_address,
+                    originator_port,
+                )?;
+                self.channels.insert(id, channel_ref);
+            }
+            Msg::ChannelOpenForwardedStreamLocal {
+                server_socket_path,
+                channel_ref,
+            } => {
+                let id = self.channel_open_forwarded_streamlocal(&server_socket_path)?;
+                self.channels.insert(id, channel_ref);
+            }
+            Msg::ChannelOpenX11 {
+                originator_address,
+                originator_port,
+                channel_ref,
+            } => {
+                let id = self.channel_open_x11(&originator_address, originator_port)?;
+                self.channels.insert(id, channel_ref);
+            }
+            Msg::TcpIpForward {
+                address,
+                port,
+                reply_channel,
+            } => {
+                self.tcpip_forward(&address, port, reply_channel)?;
+            }
+            Msg::CancelTcpIpForward {
+                address,
+                port,
+                reply_channel,
+            } => {
+                self.cancel_tcpip_forward(&address, port, reply_channel)?;
+            }
+            Msg::Disconnect {
+                reason,
+                description,
+                language_tag,
+            } => {
+                self.common
+                    .disconnect(reason, &description, &language_tag)?;
+            }
+            Msg::ChannelOpenReply { pending, result } => {
+                self.finalize_channel_open_reply(pending, result)?;
+            }
+            other => {
+                // should be unreachable, since the receiver only gets
+                // messages from methods implemented within russh
+                unimplemented!("unimplemented (client-only?) message: {other:?}")
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) async fn run<H, R>(
         mut self,
         mut stream: SshRead<R>,
@@ -511,6 +664,52 @@ impl Session {
         while !self.common.disconnected {
             self.common.received_data = false;
             let mut sent_keepalive = false;
+
+            // Drain messages already queued on the session channel (e.g. shell
+            // output pushed via `Handle::data()` from a spawned task) before
+            // blocking in `select!`. `select!` only handles one queued message
+            // per loop iteration, so a task producing faster than the loop
+            // drains falls behind. Capped so high-rate output can't starve
+            // client input (Ctrl+C, resize): once the cap is hit we fall through
+            // to `select!`, which picks up any client-side event first. Gated on
+            // `!kex.active()` to match the `select!` receiver arm.
+            const MAX_MESSAGES_PER_BATCH: usize = 64;
+            // Leave application messages in the bounded receiver once a peer's
+            // channel window is exhausted. Network reads remain active so a
+            // window adjustment can release the queued data.
+            if !self.kex.active() && !self.common.has_any_pending_data() {
+                let mut drained = 0;
+                while drained < MAX_MESSAGES_PER_BATCH {
+                    // Only Empty/Disconnected end the drain; both mean "nothing
+                    // more to hand off right now", so treat them the same.
+                    let msg = match self.priority_receiver.try_recv() {
+                        Ok(msg) => msg,
+                        Err(_) => match self.receiver.try_recv() {
+                            Ok(msg) => msg,
+                            Err(_) => break,
+                        },
+                    };
+                    self.dispatch_msg(msg)?;
+                    drained += 1;
+                    if self.common.has_any_pending_data() {
+                        break;
+                    }
+                }
+                if drained > 0 {
+                    self.flush()?;
+                    map_err!(
+                        self.common
+                            .packet_writer
+                            .flush_into(&mut stream_write)
+                            .await
+                    )?;
+                }
+                // A drained Disconnect sets this; don't block in `select!` after.
+                if self.common.disconnected {
+                    continue;
+                }
+            }
+
             tokio::select! {
                 r = &mut reading => {
                     let (stream_read, mut buffer, mut opening_cipher) = match r {
@@ -560,80 +759,26 @@ impl Session {
                     debug!("timeout");
                     return Err(crate::Error::InactivityTimeout.into());
                 }
-                msg = self.receiver.recv(), if !self.kex.active() => {
+                msg = self.priority_receiver.recv(), if !self.kex.active() => {
                     match msg {
-                        Some(Msg::Channel(id, ChannelMsg::Data { data })) => {
-                            self.data(id, data)?;
+                        Some(msg) => self.dispatch_msg(msg)?,
+                        None => {
+                            debug!("self.priority_receiver: received None");
                         }
-                        Some(Msg::Channel(id, ChannelMsg::ExtendedData { ext, data })) => {
-                            self.extended_data(id, ext, data)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::Eof)) => {
-                            self.eof(id)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::Close)) => {
-                            self.close(id)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::Success)) => {
-                            self.channel_success(id)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::Failure)) => {
-                            self.channel_failure(id)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::XonXoff { client_can_do })) => {
-                            self.xon_xoff_request(id, client_can_do)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::ExitStatus { exit_status })) => {
-                            self.exit_status_request(id, exit_status)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::ExitSignal { signal_name, core_dumped, error_message, lang_tag })) => {
-                            self.exit_signal_request(id, signal_name, core_dumped, &error_message, &lang_tag)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::WindowAdjusted { new_size })) => {
-                            debug!("window adjusted to {new_size:?} for channel {id:?}");
-                        }
-                        Some(Msg::ChannelOpenAgent { channel_ref }) => {
-                            let id = self.channel_open_agent()?;
-                            self.channels.insert(id, channel_ref);
-                        }
-                        Some(Msg::ChannelOpenSession { channel_ref }) => {
-                            let id = self.channel_open_session()?;
-                            self.channels.insert(id, channel_ref);
-                        }
-                        Some(Msg::ChannelOpenDirectTcpIp { host_to_connect, port_to_connect, originator_address, originator_port, channel_ref }) => {
-                            let id = self.channel_open_direct_tcpip(&host_to_connect, port_to_connect, &originator_address, originator_port)?;
-                            self.channels.insert(id, channel_ref);
-                        }
-                        Some(Msg::ChannelOpenDirectStreamLocal { socket_path, channel_ref }) => {
-                            let id = self.channel_open_direct_streamlocal(&socket_path)?;
-                            self.channels.insert(id, channel_ref);
-                        }
-                        Some(Msg::ChannelOpenForwardedTcpIp { connected_address, connected_port, originator_address, originator_port, channel_ref }) => {
-                            let id = self.channel_open_forwarded_tcpip(&connected_address, connected_port, &originator_address, originator_port)?;
-                            self.channels.insert(id, channel_ref);
-                        }
-                        Some(Msg::ChannelOpenForwardedStreamLocal { server_socket_path, channel_ref }) => {
-                            let id = self.channel_open_forwarded_streamlocal(&server_socket_path)?;
-                            self.channels.insert(id, channel_ref);
-                        }
-                        Some(Msg::ChannelOpenX11 { originator_address, originator_port, channel_ref }) => {
-                            let id = self.channel_open_x11(&originator_address, originator_port)?;
-                            self.channels.insert(id, channel_ref);
-                        }
-                        Some(Msg::TcpIpForward { address, port, reply_channel }) => {
-                            self.tcpip_forward(&address, port, reply_channel)?;
-                        }
-                        Some(Msg::CancelTcpIpForward { address, port, reply_channel }) => {
-                            self.cancel_tcpip_forward(&address, port, reply_channel)?;
-                        }
-                        Some(Msg::Disconnect {reason, description, language_tag}) => {
-                            self.common.disconnect(reason, &description, &language_tag)?;
-                        }
-                        Some(_) => {
-                            // should be unreachable, since the receiver only gets
-                            // messages from methods implemented within russh
-                            unimplemented!("unimplemented (client-only?) message: {:?}", msg)
-                        }
+                    }
+                }
+                msg = self.receiver.recv(), if !self.kex.active() && !self.common.has_any_pending_data() => {
+                    // Channel open replies must be dispatched before any
+                    // channel traffic queued after them: `msg` may be data for
+                    // a channel whose confirmation is still sitting in the
+                    // priority queue, and dispatching that data first would
+                    // silently drop it (the channel is only registered when
+                    // its open reply is processed).
+                    while let Ok(reply) = self.priority_receiver.try_recv() {
+                        self.dispatch_msg(reply)?;
+                    }
+                    match msg {
+                        Some(msg) => self.dispatch_msg(msg)?,
                         None => {
                             debug!("self.receiver: received None");
                         }
@@ -870,6 +1015,40 @@ impl Session {
         Ok(())
     }
 
+    fn finalize_channel_open_reply(
+        &mut self,
+        pending: PendingChannelOpen,
+        result: Result<(), ChannelOpenFailure>,
+    ) -> Result<(), Error> {
+        if let Some(ref mut enc) = self.common.encrypted {
+            match result {
+                Ok(()) => {
+                    push_packet!(enc.write, {
+                        msg::CHANNEL_OPEN_CONFIRMATION.encode(&mut enc.write)?;
+                        pending.recipient_channel.encode(&mut enc.write)?;
+                        pending.sender_channel.0.encode(&mut enc.write)?;
+                        pending.window_size.encode(&mut enc.write)?;
+                        pending.packet_size.encode(&mut enc.write)?;
+                    });
+                    enc.channels
+                        .insert(pending.sender_channel, pending.channel_params);
+                    self.channels
+                        .insert(pending.sender_channel, pending.channel_ref);
+                }
+                Err(reason) => {
+                    push_packet!(enc.write, {
+                        msg::CHANNEL_OPEN_FAILURE.encode(&mut enc.write)?;
+                        pending.recipient_channel.encode(&mut enc.write)?;
+                        reason.code().encode(&mut enc.write)?;
+                        reason.description().encode(&mut enc.write)?;
+                        "en".encode(&mut enc.write)?;
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Send a "failure" reply to a request to open a channel open.
     pub fn channel_open_failure(
         &mut self,
@@ -882,7 +1061,7 @@ impl Session {
             push_packet!(enc.write, {
                 enc.write.push(msg::CHANNEL_OPEN_FAILURE);
                 channel.encode(&mut enc.write)?;
-                (reason as u32).encode(&mut enc.write)?;
+                reason.code().encode(&mut enc.write)?;
                 description.encode(&mut enc.write)?;
                 language.encode(&mut enc.write)?;
             })
@@ -1340,8 +1519,10 @@ mod tests {
 
     fn authenticated_session() -> Session {
         let config = Arc::new(crate::server::Config::default());
+        let (priority_sender, priority_receiver) = tokio::sync::mpsc::unbounded_channel();
         let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
         let handle = Handle {
+            priority_sender,
             sender,
             channel_buffer_size: config.channel_buffer_size,
         };
@@ -1383,6 +1564,7 @@ mod tests {
                 received_data: false,
             },
             sender: handle,
+            priority_receiver,
             receiver,
             target_window_size: config.window_size,
             pending_reads: Vec::new(),

@@ -38,6 +38,21 @@ fn agent_forwarding_endpoint_key_suffix(
     format!(":{label}={digest:x}")
 }
 
+fn authentication_key_suffix(auth: &AuthMethod) -> String {
+    let AuthMethod::Gssapi {
+        server_identity,
+        delegate_credentials,
+    } = auth
+    else {
+        return String::new();
+    };
+    let identity = server_identity.as_deref().unwrap_or_default();
+    // The configured service identity can reveal internal host naming, so the
+    // registry key retains only a digest while still separating GSS contexts.
+    let digest = Sha256::digest(identity.as_bytes());
+    format!(":gssapi={digest:x}:delegate={delegate_credentials}")
+}
+
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SshConfig {
     pub host: String,
@@ -213,15 +228,17 @@ impl SshConfig {
                     } else {
                         String::new()
                     };
+                    let authentication_suffix = authentication_key_suffix(&hop.auth);
                     format!(
-                        "{}@{}:{}{}{}{}{}",
+                        "{}@{}:{}{}{}{}{}{}",
                         hop.username,
                         hop.host,
                         hop.port,
                         legacy_suffix,
                         agent_forwarding_suffix,
                         identity_agent_suffix,
-                        forwarding_socket_suffix
+                        forwarding_socket_suffix,
+                        authentication_suffix
                     )
                 })
                 .collect::<Vec<_>>()
@@ -265,8 +282,9 @@ impl SshConfig {
             .proxy_command
             .as_ref()
             .map_or_else(String::new, ProxyCommandConfig::connection_key_suffix);
+        let authentication_key = authentication_key_suffix(&self.auth);
         format!(
-            "{}@{}:{}|{}{}{}{}{}{}{}",
+            "{}@{}:{}|{}{}{}{}{}{}{}{}",
             self.username,
             self.host,
             self.port,
@@ -276,7 +294,8 @@ impl SshConfig {
             agent_forwarding_key,
             identity_agent_key,
             agent_forwarding_socket_key,
-            proxy_command_key
+            proxy_command_key,
+            authentication_key
         )
     }
 
@@ -334,6 +353,12 @@ pub enum AuthMethod {
         passphrase: Option<Zeroizing<String>>,
     },
     KeyboardInteractive,
+    Gssapi {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        server_identity: Option<String>,
+        #[serde(default)]
+        delegate_credentials: bool,
+    },
 }
 
 impl fmt::Debug for AuthMethod {
@@ -377,6 +402,14 @@ impl fmt::Debug for AuthMethod {
                 )
                 .finish(),
             Self::KeyboardInteractive => formatter.write_str("KeyboardInteractive"),
+            Self::Gssapi {
+                server_identity,
+                delegate_credentials,
+            } => formatter
+                .debug_struct("Gssapi")
+                .field("server_identity_configured", &server_identity.is_some())
+                .field("delegate_credentials", delegate_credentials)
+                .finish(),
         }
     }
 }
@@ -389,7 +422,7 @@ impl AuthMethod {
             Self::Key { passphrase, .. }
             | Self::ManagedKey { passphrase, .. }
             | Self::Certificate { passphrase, .. } => passphrase.is_some(),
-            Self::Agent | Self::KeyboardInteractive => false,
+            Self::Agent | Self::KeyboardInteractive | Self::Gssapi { .. } => false,
         }
     }
 
@@ -455,6 +488,13 @@ impl AuthMethod {
             key_path: key_path.into(),
             cert_path: cert_path.into(),
             passphrase,
+        }
+    }
+
+    pub fn gssapi(server_identity: Option<String>, delegate_credentials: bool) -> Self {
+        Self::Gssapi {
+            server_identity,
+            delegate_credentials,
         }
     }
 }
@@ -541,6 +581,24 @@ mod tests {
         assert!(!pool_key.contains("helper-with-token"));
         assert!(!pool_key.contains("credential-value"));
         assert!(pool_key.contains("proxy-command="));
+    }
+
+    #[test]
+    fn gssapi_policy_separates_pool_identity_without_exposing_server_name() {
+        let server_name = "kerberos.internal.example";
+        let mut config = SshConfig {
+            host: "target".to_string(),
+            username: "operator".to_string(),
+            auth: AuthMethod::gssapi(Some(server_name.to_string()), false),
+            ..SshConfig::default()
+        };
+        let non_delegated = config.connection_key();
+        config.auth = AuthMethod::gssapi(Some(server_name.to_string()), true);
+        let delegated = config.connection_key();
+
+        assert_ne!(non_delegated, delegated);
+        assert!(!non_delegated.contains(server_name));
+        assert!(!delegated.contains(server_name));
     }
 
     #[test]

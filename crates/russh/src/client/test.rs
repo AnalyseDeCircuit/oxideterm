@@ -7,13 +7,14 @@ mod tests {
     use ssh_key::PrivateKey;
     use tokio::net::TcpListener;
 
+    use crate::cert::PublicKeyOrCertificate;
     // Import client types directly since we're in the client module
+    use crate::Error;
     use crate::client::{Config, Handler, connect};
     use crate::keys::PrivateKeyWithHashAlg;
-    use rand::rng;
     use crate::server::{self, Auth, Handler as ServerHandler, Server, Session};
     use crate::{ChannelId, SshId}; // Import directly from crate root
-    use crate::Error;
+    use rand::rng;
 
     #[derive(Clone)]
     struct TestServer {
@@ -37,13 +38,15 @@ mod tests {
         async fn channel_open_session(
             &mut self,
             channel: crate::channels::Channel<server::Msg>,
+            reply: server::ChannelOpenHandle,
             session: &mut Session,
-        ) -> Result<bool, Self::Error> {
+        ) -> Result<(), Self::Error> {
             {
                 let mut clients = self.clients.lock().unwrap();
                 clients.insert((self.id, channel.id()), session.handle());
             }
-            Ok(true)
+            reply.accept().await;
+            Ok(())
         }
 
         async fn auth_publickey(
@@ -72,7 +75,10 @@ mod tests {
     impl Handler for Client {
         type Error = Error;
 
-        async fn check_server_key(&mut self, _: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+        async fn check_server_key(
+            &mut self,
+            _: &PublicKeyOrCertificate,
+        ) -> Result<bool, Self::Error> {
             Ok(true)
         }
     }

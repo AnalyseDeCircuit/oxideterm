@@ -44,6 +44,8 @@ struct StandaloneSftpModalSnapshot {
     managed_key_id: String,
     cert_path: String,
     identity_agent: String,
+    gssapi_server_identity: String,
+    gssapi_delegate_credentials: bool,
     agent_available: Option<bool>,
     saved_credential_present: bool,
     save_password: bool,
@@ -60,6 +62,8 @@ struct StandaloneSftpModalSnapshot {
     secondary_managed_key_id: String,
     secondary_cert_path: String,
     secondary_identity_agent: String,
+    secondary_gssapi_server_identity: String,
+    secondary_gssapi_delegate_credentials: bool,
     secondary_agent_available: Option<bool>,
     secondary_saved_credential_present: bool,
     secondary_save_password: bool,
@@ -89,6 +93,8 @@ impl StandaloneSftpModalSnapshot {
             managed_key_id: form.managed_key_id.clone(),
             cert_path: form.cert_path.clone(),
             identity_agent: form.identity_agent.clone(),
+            gssapi_server_identity: form.gssapi_server_identity.clone(),
+            gssapi_delegate_credentials: form.gssapi_delegate_credentials,
             agent_available: form.agent_available,
             saved_credential_present: form.saved_password_keychain_id.is_some(),
             save_password: form.save_password,
@@ -106,6 +112,13 @@ impl StandaloneSftpModalSnapshot {
             secondary_managed_key_id: form.standalone_sftp_secondary.managed_key_id.clone(),
             secondary_cert_path: form.standalone_sftp_secondary.cert_path.clone(),
             secondary_identity_agent: form.standalone_sftp_secondary.identity_agent.clone(),
+            secondary_gssapi_server_identity: form
+                .standalone_sftp_secondary
+                .gssapi_server_identity
+                .clone(),
+            secondary_gssapi_delegate_credentials: form
+                .standalone_sftp_secondary
+                .gssapi_delegate_credentials,
             secondary_agent_available: form.standalone_sftp_secondary.agent_available,
             secondary_saved_credential_present: form
                 .standalone_sftp_secondary
@@ -422,6 +435,8 @@ impl WorkspaceApp {
             managed_key_id,
             cert_path,
             identity_agent,
+            gssapi_server_identity,
+            gssapi_delegate_credentials,
             agent_available,
             saved_credential_present,
             save_password,
@@ -437,6 +452,8 @@ impl WorkspaceApp {
                 form.secondary_managed_key_id.as_str(),
                 form.secondary_cert_path.as_str(),
                 form.secondary_identity_agent.as_str(),
+                form.secondary_gssapi_server_identity.as_str(),
+                form.secondary_gssapi_delegate_credentials,
                 form.secondary_agent_available,
                 form.secondary_saved_credential_present,
                 form.secondary_save_password,
@@ -453,6 +470,8 @@ impl WorkspaceApp {
                 form.managed_key_id.as_str(),
                 form.cert_path.as_str(),
                 form.identity_agent.as_str(),
+                form.gssapi_server_identity.as_str(),
+                form.gssapi_delegate_credentials,
                 form.agent_available,
                 form.saved_credential_present,
                 form.save_password,
@@ -566,6 +585,8 @@ impl WorkspaceApp {
                         managed_key_id,
                         cert_path,
                         identity_agent,
+                        gssapi_server_identity,
+                        gssapi_delegate_credentials,
                         agent_available,
                         saved_credential_present,
                         save_password,

@@ -308,6 +308,15 @@ fn toggle_secondary_sftp_password_persistence(form: &mut NewConnectionForm) {
     form.standalone_sftp_secondary.save_password = !form.standalone_sftp_secondary.save_password;
 }
 
+fn toggle_primary_sftp_gssapi_delegation(form: &mut NewConnectionForm) {
+    form.gssapi_delegate_credentials = !form.gssapi_delegate_credentials;
+}
+
+fn toggle_secondary_sftp_gssapi_delegation(form: &mut NewConnectionForm) {
+    let endpoint = &mut form.standalone_sftp_secondary;
+    endpoint.gssapi_delegate_credentials = !endpoint.gssapi_delegate_credentials;
+}
+
 impl WorkspaceApp {
     fn connection_form_section_expanded(
         &self,
@@ -1667,6 +1676,8 @@ impl WorkspaceApp {
         managed_key_id: &str,
         cert_path: &str,
         identity_agent: &str,
+        gssapi_server_identity: &str,
+        gssapi_delegate_credentials: bool,
         agent_available: Option<bool>,
         saved_credential_present: bool,
         save_password: bool,
@@ -1701,6 +1712,11 @@ impl WorkspaceApp {
             NewConnectionField::StandaloneSftpSecondaryIdentityAgent
         } else {
             NewConnectionField::IdentityAgent
+        };
+        let gssapi_server_identity_field = if secondary {
+            NewConnectionField::StandaloneSftpSecondaryGssapiServerIdentity
+        } else {
+            NewConnectionField::GssapiServerIdentity
         };
 
         div()
@@ -1832,6 +1848,37 @@ impl WorkspaceApp {
                         self.tokens.ui.warning,
                     ))
             })
+            .when(active_tab == SshAuthTab::Gssapi, |content| {
+                content
+                    .child(self.render_connection_hint(self.i18n.t("ssh.form.gssapi_desc")))
+                    .child(self.render_connection_field(
+                        self.i18n.t("ssh.form.gssapi_server_identity"),
+                        gssapi_server_identity,
+                        self.i18n.t("ssh.form.gssapi_server_identity_placeholder"),
+                        gssapi_server_identity_field,
+                        false,
+                        cx,
+                    ))
+                    .child(self.render_connection_hint(
+                        self.i18n.t("ssh.form.gssapi_server_identity_hint"),
+                    ))
+                    .child(self.render_connection_checkbox(
+                        self.i18n.t("ssh.form.gssapi_delegate_credentials"),
+                        gssapi_delegate_credentials,
+                        if secondary {
+                            toggle_secondary_sftp_gssapi_delegation
+                        } else {
+                            toggle_primary_sftp_gssapi_delegation
+                        },
+                        cx,
+                    ))
+                    .when(gssapi_delegate_credentials, |content| {
+                        content.child(self.render_connection_hint_with_color(
+                            self.i18n.t("ssh.form.gssapi_delegation_warning"),
+                            self.tokens.ui.warning,
+                        ))
+                    })
+            })
             .into_any_element()
     }
 
@@ -1843,22 +1890,26 @@ impl WorkspaceApp {
                 (SshAuthFamily::Agent, "ssh.drill_down.auth_agent"),
                 (SshAuthFamily::Key, "ssh.drill_down.auth_key"),
                 (SshAuthFamily::Password, "ssh.drill_down.auth_password"),
+                (SshAuthFamily::Gssapi, "ssh.auth.gssapi"),
             ],
             AuthSelectorContext::Jump => &[
                 (SshAuthFamily::Password, "ssh.auth.password"),
                 (SshAuthFamily::Key, "ssh.auth.key"),
                 (SshAuthFamily::Agent, "ssh.auth.agent"),
+                (SshAuthFamily::Gssapi, "ssh.auth.gssapi"),
             ],
             AuthSelectorContext::EditProperties | AuthSelectorContext::Prompt => &[
                 (SshAuthFamily::Password, "ssh.auth.password"),
                 (SshAuthFamily::Key, "ssh.auth.key"),
                 (SshAuthFamily::Agent, "ssh.auth.agent"),
+                (SshAuthFamily::Gssapi, "ssh.auth.gssapi"),
             ],
             AuthSelectorContext::Standard | AuthSelectorContext::StandaloneSftpSecondary => &[
                 (SshAuthFamily::Password, "ssh.auth.password"),
                 (SshAuthFamily::Key, "ssh.auth.key"),
                 (SshAuthFamily::Agent, "ssh.auth.agent"),
                 (SshAuthFamily::TwoFactor, "ssh.auth.two_factor"),
+                (SshAuthFamily::Gssapi, "ssh.auth.gssapi"),
             ],
         }
     }
@@ -2052,6 +2103,7 @@ impl WorkspaceApp {
             SshAuthFamily::Password => SshAuthTab::Password,
             SshAuthFamily::Agent => SshAuthTab::Agent,
             SshAuthFamily::TwoFactor => SshAuthTab::TwoFactor,
+            SshAuthFamily::Gssapi => SshAuthTab::Gssapi,
             SshAuthFamily::Key => {
                 // A top-level switch into Key should land on the file-key form,
                 // while repeated clicks preserve the selected key source.
@@ -2119,6 +2171,9 @@ impl WorkspaceApp {
                 SshAuthTab::Agent | SshAuthTab::TwoFactor => {
                     NewConnectionField::StandaloneSftpSecondaryHost
                 }
+                SshAuthTab::Gssapi => {
+                    NewConnectionField::StandaloneSftpSecondaryGssapiServerIdentity
+                }
             }
         } else if jump_form {
             match tab {
@@ -2128,6 +2183,7 @@ impl WorkspaceApp {
                 SshAuthTab::DefaultKey | SshAuthTab::Agent | SshAuthTab::TwoFactor => {
                     NewConnectionField::JumpHost
                 }
+                SshAuthTab::Gssapi => NewConnectionField::JumpGssapiServerIdentity,
             }
         } else {
             match tab {
@@ -2136,6 +2192,7 @@ impl WorkspaceApp {
                 SshAuthTab::ManagedKey => NewConnectionField::ManagedKeyId,
                 SshAuthTab::DefaultKey => NewConnectionField::Passphrase,
                 SshAuthTab::Agent | SshAuthTab::TwoFactor => NewConnectionField::Host,
+                SshAuthTab::Gssapi => NewConnectionField::GssapiServerIdentity,
             }
         }
     }

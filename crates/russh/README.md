@@ -1,7 +1,7 @@
 # Russh
 
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-83-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-90-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -15,7 +15,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 > ✨ = added in Russh
 
 * [More panic safety](https://github.com/warp-tech/russh#safety) ✨
-* async traits ✨
+* async traits
 * `direct-tcpip` (local port forwarding)
 * `forward-tcpip` (remote port forwarding) ✨
 * `direct-streamlocal` (local UNIX socket forwarding, client only) ✨
@@ -23,8 +23,8 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 * Ciphers:
   * `chacha20-poly1305@openssh.com`
   * `aes128-gcm@openssh.com` ✨
-  * `aes256-gcm@openssh.com` ✨
-  * `aes256-ctr` ✨
+  * `aes256-gcm@openssh.com`
+  * `aes256-ctr`
   * `aes192-ctr` ✨
   * `aes128-ctr` ✨
   * `aes256-cbc` ✨
@@ -32,6 +32,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * `aes128-cbc` ✨
   * `3des-cbc` ✨
 * Key exchanges:
+  * `mlkem768x25519-sha256`
   * `curve25519-sha256@libssh.org`
   * `diffie-hellman-group-sha1` (GEX) ✨
   * `diffie-hellman-group1-sha1` ✨
@@ -42,9 +43,10 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * `ecdh-sha2-nistp256` ✨
   * `ecdh-sha2-nistp384` ✨
   * `ecdh-sha2-nistp521` ✨
+  * OpenSSH strict key exchange support
 * MACs:
   * `hmac-sha1` ✨
-  * `hmac-sha2-256` ✨
+  * `hmac-sha2-256`
   * `hmac-sha2-512` ✨
   * `hmac-sha1-etm@openssh.com` ✨
   * `hmac-sha2-256-etm@openssh.com` ✨
@@ -53,10 +55,11 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * `ssh-ed25519`
   * `rsa-sha2-256`
   * `rsa-sha2-512`
-  * `ssh-rsa` ✨
-  * `ecdsa-sha2-nistp256` ✨
+  * `ssh-rsa`
+  * `ecdsa-sha2-nistp256`
   * `ecdsa-sha2-nistp384` ✨
   * `ecdsa-sha2-nistp521` ✨
+  * OpenSSH certificates ✨
 * Authentication methods:
   * `password`
   * `publickey`
@@ -114,7 +117,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 * [Sandhole](https://github.com/EpicEric/sandhole) - Expose HTTP/SSH/TCP services through SSH port forwarding. A reverse proxy that just works with an OpenSSH client.
   * Uses `russh::server` for reverse forwarding connections, local forwarding tunnels, and the `ratatui` based admin interface.
 * [Motor OS](https://github.com/moturus/motor-os) -  A new Rust-based operating system for VMs.
-  * Uses `russh::server` as the base for its own [SSH Server](https://github.com/moturus/motor-os/tree/main/src/bin/russhd). 
+  * Uses `russh::server` as the base for its own [SSH Server](https://github.com/moturus/motor-os/tree/main/src/bin/russhd).
 * [Cubic VM](https://github.com/cubic-vm/cubic) - A lightweight command-line manager for virtual machines.
   * Uses `russh::client` and `russh_sftp::client` to access the virtual machine instances.
 * [ferrissh](https://crates.io/crates/ferrissh) - An async SSH CLI scraper library for network device automation in Rust.
@@ -125,6 +128,8 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * Uses `russh::server` to allow Git operations over SSH.
 * [Calagopus](https://github.com/calagopus/wings) - Fast, Efficient and Scalable Game hosting - built for everyone.
   * Uses `russh::server` for efficiently implementing SSH shells and SFTP file management.
+* [Oryxis](https://github.com/wilsonglasser/oryxis) - Rust-native SSH client with an encrypted vault, P2P sync and an embedded terminal.
+  * Uses `russh::client` for connections, jump hosts, SOCKS/HTTP/command proxies and SFTP.
 
 ## Contributors ✨
 
@@ -241,6 +246,15 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/wi-adam"><img src="https://avatars.githubusercontent.com/u/127046659?v=4?s=100" width="100px;" alt="wi-adam"/><br /><sub><b>wi-adam</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=wi-adam" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="http://ddtkey.com"><img src="https://avatars.githubusercontent.com/u/26835520?v=4?s=100" width="100px;" alt="Artem Medvedev"/><br /><sub><b>Artem Medvedev</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=DDtKey" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/ztbh"><img src="https://avatars.githubusercontent.com/u/67856492?v=4?s=100" width="100px;" alt="ztbh"/><br /><sub><b>ztbh</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=ztbh" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://blog.sakurapuare.com"><img src="https://avatars.githubusercontent.com/u/52142762?v=4?s=100" width="100px;" alt="Moder Steven"/><br /><sub><b>Moder Steven</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=SakuraPuare" title="Code">💻</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://jkshin.nubimaru.com"><img src="https://avatars.githubusercontent.com/u/949915?v=4?s=100" width="100px;" alt="Jeongkyu Shin"/><br /><sub><b>Jeongkyu Shin</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=inureyes" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/PokAhonTAS911"><img src="https://avatars.githubusercontent.com/u/208599324?v=4?s=100" width="100px;" alt="PokAhonTAS911"/><br /><sub><b>PokAhonTAS911</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=PokAhonTAS911" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://ayamir.github.io"><img src="https://avatars.githubusercontent.com/u/61657399?v=4?s=100" width="100px;" alt="ayamir"/><br /><sub><b>ayamir</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=ayamir" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://l9o.dev"><img src="https://avatars.githubusercontent.com/u/112069?v=4?s=100" width="100px;" alt="Luiz Ribeiro"/><br /><sub><b>Luiz Ribeiro</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=luizribeiro" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://ctx.st"><img src="https://avatars.githubusercontent.com/u/259330610?v=4?s=100" width="100px;" alt="biao29"/><br /><sub><b>biao29</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=biao29" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/gvz"><img src="https://avatars.githubusercontent.com/u/3962183?v=4?s=100" width="100px;" alt="Georg von Zengen"/><br /><sub><b>Georg von Zengen</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=gvz" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>

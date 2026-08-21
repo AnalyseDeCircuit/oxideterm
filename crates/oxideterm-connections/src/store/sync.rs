@@ -864,6 +864,13 @@ fn portable_mosh_auth(auth: &SavedAuth) -> SavedAuth {
         },
         SavedAuth::KeyboardInteractive => SavedAuth::KeyboardInteractive,
         SavedAuth::Agent => SavedAuth::Agent,
+        SavedAuth::Gssapi {
+            server_identity,
+            delegate_credentials,
+        } => SavedAuth::Gssapi {
+            server_identity: server_identity.clone(),
+            delegate_credentials: *delegate_credentials,
+        },
     }
 }
 
@@ -872,6 +879,16 @@ fn mosh_auth_target_matches(left: &SavedAuth, right: &SavedAuth) -> bool {
         (SavedAuth::Password { .. }, SavedAuth::Password { .. })
         | (SavedAuth::KeyboardInteractive, SavedAuth::KeyboardInteractive)
         | (SavedAuth::Agent, SavedAuth::Agent) => true,
+        (
+            SavedAuth::Gssapi {
+                server_identity: left_identity,
+                delegate_credentials: left_delegate,
+            },
+            SavedAuth::Gssapi {
+                server_identity: right_identity,
+                delegate_credentials: right_delegate,
+            },
+        ) => left_identity == right_identity && left_delegate == right_delegate,
         (
             SavedAuth::Key { key_path: left, .. },
             SavedAuth::Key { key_path: right, .. },
@@ -1102,6 +1119,10 @@ fn saved_auth_from_connection_info(payload: &ConnectionInfo) -> SavedAuth {
         },
         AuthType::KeyboardInteractive => SavedAuth::KeyboardInteractive,
         AuthType::Agent => SavedAuth::Agent,
+        AuthType::Gssapi => SavedAuth::Gssapi {
+            server_identity: payload.gssapi_server_identity.clone(),
+            delegate_credentials: payload.gssapi_delegate_credentials,
+        },
     }
 }
 
@@ -1131,6 +1152,10 @@ fn saved_auth_from_proxy_hop_info(hop: &ProxyHopInfo) -> SavedAuth {
         },
         AuthType::KeyboardInteractive => SavedAuth::KeyboardInteractive,
         AuthType::Agent => SavedAuth::Agent,
+        AuthType::Gssapi => SavedAuth::Gssapi {
+            server_identity: hop.gssapi_server_identity.clone(),
+            delegate_credentials: hop.gssapi_delegate_credentials,
+        },
     }
 }
 

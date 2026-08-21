@@ -105,6 +105,7 @@ fn integration_capabilities() -> SshIntegrationCapabilities {
             "publickey-managed-key",
             "publickey-agent",
             "keyboard-interactive",
+            "gssapi-with-mic",
         ],
         channel_features: vec![
             "shell",
@@ -133,12 +134,6 @@ fn integration_capabilities() -> SshIntegrationCapabilities {
 
 fn known_limitations() -> Vec<SshCapabilityLimitation> {
     vec![
-        SshCapabilityLimitation {
-            capability: "gssapi-with-mic",
-            layer: SshCapabilityLayer::RusshCore,
-            status: SshCapabilityStatus::Unsupported,
-            note: "Kerberos and GSSAPI authentication are not implemented.",
-        },
         SshCapabilityLimitation {
             capability: "hostbased",
             layer: SshCapabilityLayer::RusshCore,

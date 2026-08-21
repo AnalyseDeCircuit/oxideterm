@@ -13,7 +13,10 @@ use std::{
 use dashmap::DashMap;
 use russh::{
     client,
-    keys::{PublicKey, PublicKeyBase64, parse_public_key_base64, ssh_key::HashAlg},
+    keys::{
+        PublicKey, PublicKeyBase64, PublicKeyOrCertificate, parse_public_key_base64,
+        ssh_key::HashAlg,
+    },
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -529,8 +532,18 @@ impl client::Handler for PreflightHandler {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &PublicKey,
+        server_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
+        let PublicKeyOrCertificate::PublicKey {
+            key: server_public_key,
+            ..
+        } = server_key
+        else {
+            // Host certificates require CA, principal, validity, and revocation
+            // checks; treating the embedded key as a raw known-hosts key would
+            // silently bypass that trust policy.
+            return Ok(false);
+        };
         let status = match verify_host_key(&self.host, self.port, server_public_key)? {
             HostKeyVerification::Verified => HostKeyStatus::Verified,
             HostKeyVerification::Unknown {

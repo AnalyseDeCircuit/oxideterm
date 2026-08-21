@@ -409,7 +409,10 @@ fn connection_statuses(id: Option<&str>, json: bool) -> CliResult<Vec<SecretStat
             scope: "connection",
             id: Some(connection.id.clone()),
             key: Some(connection.auth.auth_type().as_str().to_string()),
-            configured: !matches!(connection.auth, SavedAuth::Agent),
+            configured: !matches!(
+                connection.auth,
+                SavedAuth::Agent | SavedAuth::KeyboardInteractive | SavedAuth::Gssapi { .. }
+            ),
         })
         .collect())
 }

@@ -1,13 +1,12 @@
 use byteorder::{BigEndian, ByteOrder};
-use curve25519_dalek::constants::ED25519_BASEPOINT_TABLE;
 use curve25519_dalek::montgomery::MontgomeryPoint;
-use curve25519_dalek::scalar::Scalar;
 use log::debug;
 use sha2::Digest;
 use sntrup::sntrup761::{
     self, Ciphertext, DecapsulationKey, EncapsulationKey, SharedSecret as SntrupShared,
 };
 use ssh_encoding::{Encode, Writer};
+use zeroize::Zeroizing;
 
 use super::{KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret, compute_keys};
 use crate::mac;
@@ -35,7 +34,7 @@ impl KexType for Sntrup761X25519KexType {
 #[doc(hidden)]
 pub struct Sntrup761X25519Kex {
     sntrup_secret: Option<Box<DecapsulationKey>>,
-    x25519_secret: Option<Scalar>,
+    x25519_secret: Option<Zeroizing<[u8; 32]>>,
     k_sntrup: Option<SntrupShared>,
     k_cl: Option<MontgomeryPoint>,
 }
@@ -50,17 +49,20 @@ impl std::fmt::Debug for Sntrup761X25519Kex {
 }
 
 impl Sntrup761X25519Kex {
-    fn combined_shared_secret(&self) -> Result<Vec<u8>, Error> {
+    fn combined_shared_secret(&self) -> Result<Zeroizing<Vec<u8>>, Error> {
         let k_sntrup = self.k_sntrup.as_ref().ok_or(Error::KexInit)?;
         let k_cl = self.k_cl.as_ref().ok_or(Error::KexInit)?;
 
-        let mut combined = Vec::with_capacity(sntrup761::SHARED_SECRET_SIZE + X25519_PUBLIC_KEY_SIZE);
+        let mut combined = Zeroizing::new(Vec::with_capacity(
+            sntrup761::SHARED_SECRET_SIZE + X25519_PUBLIC_KEY_SIZE,
+        ));
         combined.extend_from_slice(k_sntrup.as_ref());
         combined.extend_from_slice(&k_cl.0);
 
         let mut hasher = sha2::Sha512::new();
         hasher.update(&combined);
-        Ok(hasher.finalize().to_vec())
+        let digest = Zeroizing::new(hasher.finalize());
+        Ok(Zeroizing::new(digest.to_vec()))
     }
 }
 
@@ -104,9 +106,13 @@ impl KexAlgorithmImplementor for Sntrup761X25519Kex {
         let (s_sntrup_ciphertext, k_sntrup) =
             c_sntrup_public.encapsulate(&mut rand::rng());
 
-        let s_x25519_secret = Scalar::from_bytes_mod_order(rand::random::<[u8; 32]>());
-        let s_x25519_public = (ED25519_BASEPOINT_TABLE * &s_x25519_secret).to_montgomery();
-        let k_cl = s_x25519_secret * c_x25519_public;
+        let s_x25519_secret = Zeroizing::new(rand::random::<[u8; 32]>());
+        let s_x25519_public = MontgomeryPoint::mul_base_clamped(*s_x25519_secret);
+        let k_cl = c_x25519_public.mul_clamped(*s_x25519_secret);
+        if k_cl.0 == [0u8; 32] {
+            debug!("client sent a low-order curve25519 pubkey");
+            return Err(Error::Kex);
+        }
 
         exchange.server_ephemeral.clear();
         exchange
@@ -127,8 +133,8 @@ impl KexAlgorithmImplementor for Sntrup761X25519Kex {
     ) -> Result<(), Error> {
         let (sntrup_public, sntrup_secret) = sntrup761::generate_key(&mut rand::rng());
 
-        let x25519_secret = Scalar::from_bytes_mod_order(rand::random::<[u8; 32]>());
-        let x25519_public = (ED25519_BASEPOINT_TABLE * &x25519_secret).to_montgomery();
+        let x25519_secret = Zeroizing::new(rand::random::<[u8; 32]>());
+        let x25519_public = MontgomeryPoint::mul_base_clamped(*x25519_secret);
 
         client_ephemeral.clear();
         client_ephemeral.extend_from_slice(sntrup_public.as_ref());
@@ -163,7 +169,11 @@ impl KexAlgorithmImplementor for Sntrup761X25519Kex {
         s_x25519_public.0.copy_from_slice(s_x25519_public_bytes);
 
         let x25519_secret = self.x25519_secret.take().ok_or(Error::KexInit)?;
-        let k_cl = x25519_secret * s_x25519_public;
+        let k_cl = s_x25519_public.mul_clamped(*x25519_secret);
+        if k_cl.0 == [0u8; 32] {
+            debug!("server sent a low-order curve25519 pubkey");
+            return Err(Error::Kex);
+        }
 
         self.k_sntrup = Some(k_sntrup);
         self.k_cl = Some(k_cl);
@@ -286,5 +296,32 @@ mod tests {
         };
 
         assert!(matches!(client_kex.compute_shared_secret(&[0; 32]), Err(Error::Kex)));
+    }
+
+    #[test]
+    fn sntrup761x25519_rejects_low_order_x25519_point() {
+        let (sntrup_public, _) = sntrup761::generate_key(&mut rand::rng());
+        let mut client_init = Vec::with_capacity(
+            SNTRUP761_PUBLIC_KEY_SIZE + X25519_PUBLIC_KEY_SIZE,
+        );
+        client_init.extend_from_slice(sntrup_public.as_ref());
+        client_init.extend_from_slice(&[0; X25519_PUBLIC_KEY_SIZE]);
+
+        let mut payload = vec![msg::KEX_HYBRID_INIT];
+        payload.extend_from_slice(&(client_init.len() as u32).to_be_bytes());
+        payload.extend_from_slice(&client_init);
+
+        let mut server_kex = Sntrup761X25519Kex {
+            sntrup_secret: None,
+            x25519_secret: None,
+            k_sntrup: None,
+            k_cl: None,
+        };
+        let mut exchange = Exchange::default();
+
+        assert!(matches!(
+            server_kex.server_dh(&mut exchange, &payload),
+            Err(Error::Kex)
+        ));
     }
 }

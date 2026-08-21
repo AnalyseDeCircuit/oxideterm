@@ -21,6 +21,9 @@ pub struct SshConfigHost {
     pub connect_timeout_seconds: Option<u64>,
     pub identity_file: Option<String>,
     pub certificate_file: Option<String>,
+    pub gssapi_authentication: bool,
+    pub gssapi_server_identity: Option<String>,
+    pub gssapi_delegate_credentials: bool,
     pub identity_agent: Option<String>,
     pub agent_forwarding: bool,
     pub agent_forwarding_socket: Option<String>,
@@ -38,6 +41,9 @@ pub struct SshConfigProxyHop {
     pub port: Option<u16>,
     pub identity_file: Option<String>,
     pub certificate_file: Option<String>,
+    pub gssapi_authentication: bool,
+    pub gssapi_server_identity: Option<String>,
+    pub gssapi_delegate_credentials: bool,
     pub identity_agent: Option<String>,
     pub agent_forwarding: bool,
     pub agent_forwarding_socket: Option<String>,
@@ -70,6 +76,9 @@ struct SshHostOptions {
     connect_timeout_seconds: Option<u64>,
     identity_file: Option<String>,
     certificate_file: Option<String>,
+    gssapi_authentication: Option<String>,
+    gssapi_server_identity: Option<String>,
+    gssapi_delegate_credentials: Option<String>,
     identity_agent: Option<String>,
     forward_agent: Option<String>,
     forward_x11: Option<String>,
@@ -314,6 +323,15 @@ fn apply_option(options: &mut SshHostOptions, key: &str, values: &[String]) {
         "certificatefile" if options.certificate_file.is_none() => {
             options.certificate_file = Some(value.clone())
         }
+        "gssapiauthentication" if options.gssapi_authentication.is_none() => {
+            options.gssapi_authentication = Some(value.clone())
+        }
+        "gssapiserveridentity" if options.gssapi_server_identity.is_none() => {
+            options.gssapi_server_identity = Some(value.clone())
+        }
+        "gssapidelegatecredentials" if options.gssapi_delegate_credentials.is_none() => {
+            options.gssapi_delegate_credentials = Some(value.clone())
+        }
         "identityagent" if options.identity_agent.is_none() => {
             options.identity_agent = Some(value.clone())
         }
@@ -358,6 +376,18 @@ fn merge_first_options(base: &mut SshHostOptions, update: &SshHostOptions) {
         .certificate_file
         .clone()
         .or_else(|| update.certificate_file.clone());
+    base.gssapi_authentication = base
+        .gssapi_authentication
+        .clone()
+        .or_else(|| update.gssapi_authentication.clone());
+    base.gssapi_server_identity = base
+        .gssapi_server_identity
+        .clone()
+        .or_else(|| update.gssapi_server_identity.clone());
+    base.gssapi_delegate_credentials = base
+        .gssapi_delegate_credentials
+        .clone()
+        .or_else(|| update.gssapi_delegate_credentials.clone());
     base.identity_agent = base
         .identity_agent
         .clone()
@@ -428,6 +458,22 @@ fn resolve_ssh_config_host(alias: &str, blocks: &[SshHostBlock]) -> Result<SshCo
         ))
     });
     let resolved_hostname = hostname.as_deref().unwrap_or(alias);
+    let gssapi_authentication = options
+        .gssapi_authentication
+        .as_deref()
+        .map(parse_yes_no)
+        .transpose()?
+        .unwrap_or(false);
+    let gssapi_server_identity = options
+        .gssapi_server_identity
+        .as_deref()
+        .map(|value| expand_connection_tokens(value, alias, options.user.as_deref(), options.port));
+    let gssapi_delegate_credentials = options
+        .gssapi_delegate_credentials
+        .as_deref()
+        .map(parse_yes_no)
+        .transpose()?
+        .unwrap_or(false);
     let identity_agent = options
         .identity_agent
         .as_deref()
@@ -502,6 +548,9 @@ fn resolve_ssh_config_host(alias: &str, blocks: &[SshHostBlock]) -> Result<SshCo
         connect_timeout_seconds: options.connect_timeout_seconds,
         identity_file,
         certificate_file,
+        gssapi_authentication,
+        gssapi_server_identity,
+        gssapi_delegate_credentials,
         identity_agent,
         agent_forwarding,
         agent_forwarding_socket,
@@ -681,6 +730,26 @@ fn resolved_proxy_jump_hop(
             jump_options.port,
         ))
     });
+    let jump_gssapi_authentication = jump_options
+        .gssapi_authentication
+        .as_deref()
+        .map(parse_yes_no)
+        .transpose()?
+        .unwrap_or(false);
+    let jump_gssapi_server_identity = jump_options.gssapi_server_identity.as_deref().map(|value| {
+        expand_connection_tokens(
+            value,
+            &target.host,
+            jump_options.user.as_deref(),
+            jump_options.port,
+        )
+    });
+    let jump_gssapi_delegate_credentials = jump_options
+        .gssapi_delegate_credentials
+        .as_deref()
+        .map(parse_yes_no)
+        .transpose()?
+        .unwrap_or(false);
     let jump_identity_agent = jump_options
         .identity_agent
         .as_deref()
@@ -707,6 +776,9 @@ fn resolved_proxy_jump_hop(
         port: target.port.or(jump_options.port),
         identity_file: jump_identity,
         certificate_file: jump_certificate,
+        gssapi_authentication: jump_gssapi_authentication,
+        gssapi_server_identity: jump_gssapi_server_identity,
+        gssapi_delegate_credentials: jump_gssapi_delegate_credentials,
         identity_agent: jump_identity_agent,
         agent_forwarding: jump_agent_forwarding,
         agent_forwarding_socket: jump_agent_forwarding_socket,
@@ -1202,6 +1274,40 @@ mod tests {
         assert_eq!(host.hostname.as_deref(), Some("prod.example.com"));
         assert_eq!(host.port, Some(2200));
         assert_eq!(host.connect_timeout_seconds, Some(120));
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn parser_preserves_explicit_gssapi_policy() {
+        let directory = std::env::temp_dir().join(format!(
+            "oxideterm-ssh-config-gssapi-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("config"),
+            concat!(
+                "Host production\n",
+                "  HostName prod.example.com\n",
+                "  GSSAPIAuthentication yes\n",
+                "  GSSAPIServerIdentity host/service.example.com@EXAMPLE.COM\n",
+                "  GSSAPIDelegateCredentials yes\n",
+            ),
+        )
+        .unwrap();
+
+        let blocks = parse_ssh_config_file(&directory.join("config")).unwrap();
+        let host = resolve_ssh_config_alias_from_blocks("production", &blocks)
+            .unwrap()
+            .unwrap();
+
+        assert!(host.gssapi_authentication);
+        assert_eq!(
+            host.gssapi_server_identity.as_deref(),
+            Some("host/service.example.com@EXAMPLE.COM")
+        );
+        assert!(host.gssapi_delegate_credentials);
         let _ = fs::remove_dir_all(directory);
     }
 

@@ -26,6 +26,9 @@ tracing.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+libgssapi.workspace = true
+
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true
 

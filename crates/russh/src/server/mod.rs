@@ -75,6 +75,8 @@ pub struct Config {
     pub auth_rejection_time_initial: Option<std::time::Duration>,
     /// The server's keys. The first key pair in the client's preference order will be chosen.
     pub keys: Vec<PrivateKey>,
+    /// The server's host certificates.
+    pub certificates: Vec<Certificate>,
     /// The bytes and time limits before key re-exchange.
     pub limits: Limits,
     /// The initial size of a channel (used for flow control).
@@ -108,10 +110,11 @@ impl Default for Config {
                 "_",
                 env!("CARGO_PKG_VERSION")
             ))),
-            methods: auth::MethodSet::all(),
+            methods: auth::MethodSet::server_supported(),
             auth_rejection_time: std::time::Duration::from_secs(1),
             auth_rejection_time_initial: None,
             keys: Vec::new(),
+            certificates: Vec::new(),
             window_size: 2097152,
             maximum_packet_size: 32768,
             channel_buffer_size: 100,
@@ -139,6 +142,7 @@ impl Debug for Config {
                 &self.auth_rejection_time_initial,
             )
             .field("keys", &"***")
+            .field("certificates", &"***")
             .field("window_size", &self.window_size)
             .field("maximum_packet_size", &self.maximum_packet_size)
             .field("channel_buffer_size", &self.channel_buffer_size)
@@ -349,33 +353,45 @@ pub trait Handler: Sized {
         async { Ok(()) }
     }
 
-    /// Called when a new session channel is created.
-    /// Return value indicates whether the channel request should be granted.
+    /// Called when a new session channel is requested by the client.
+    ///
+    /// The handler receives a [`ChannelOpenHandle`] that must be used to accept or
+    /// reject the request. Dropping the handle without calling either method
+    /// automatically rejects the channel.
     #[allow(unused_variables)]
     fn channel_open_session(
         &mut self,
         channel: Channel<Msg>,
+        reply: ChannelOpenHandle,
         session: &mut Session,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-        async { Ok(false) }
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
-    /// Called when a new X11 channel is created.
-    /// Return value indicates whether the channel request should be granted.
+    /// Called when a new X11 channel is requested by the client.
+    ///
+    /// The handler receives a [`ChannelOpenHandle`] that must be used to accept or
+    /// reject the request. Dropping the handle without calling either method
+    /// automatically rejects the channel.
     #[allow(unused_variables)]
     fn channel_open_x11(
         &mut self,
         channel: Channel<Msg>,
         originator_address: &str,
         originator_port: u32,
+        reply: ChannelOpenHandle,
         session: &mut Session,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-        async { Ok(false) }
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
-    /// Called when a new direct TCP/IP ("local TCP forwarding") channel is opened.
-    /// Return value indicates whether the channel request should be granted.
+    /// Called when a new direct TCP/IP ("local TCP forwarding") channel is requested.
+    ///
+    /// The handler receives a [`ChannelOpenHandle`] that must be used to accept or
+    /// reject the request. Dropping the handle without calling either method
+    /// automatically rejects the channel.
     #[allow(unused_variables)]
+    #[allow(clippy::too_many_arguments)]
     fn channel_open_direct_tcpip(
         &mut self,
         channel: Channel<Msg>,
@@ -383,15 +399,21 @@ pub trait Handler: Sized {
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
+        reply: ChannelOpenHandle,
         session: &mut Session,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-        async { Ok(false) }
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when a new remote forwarded TCP connection comes in.
     ///
+    /// The handler receives a [`ChannelOpenHandle`] that must be used to accept or
+    /// reject the request. Dropping the handle without calling either method
+    /// automatically rejects the channel.
+    ///
     /// <https://www.rfc-editor.org/rfc/rfc4254#section-7>
     #[allow(unused_variables)]
+    #[allow(clippy::too_many_arguments)]
     fn channel_open_forwarded_tcpip(
         &mut self,
         channel: Channel<Msg>,
@@ -399,21 +421,26 @@ pub trait Handler: Sized {
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
+        reply: ChannelOpenHandle,
         session: &mut Session,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-        async { Ok(false) }
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
-    /// Called when a new direct-streamlocal ("local UNIX socket forwarding") channel is created.
-    /// Return value indicates whether the channel request should be granted.
+    /// Called when a new direct-streamlocal ("local UNIX socket forwarding") channel is requested.
+    ///
+    /// The handler receives a [`ChannelOpenHandle`] that must be used to accept or
+    /// reject the request. Dropping the handle without calling either method
+    /// automatically rejects the channel.
     #[allow(unused_variables)]
     fn channel_open_direct_streamlocal(
         &mut self,
         channel: Channel<Msg>,
         socket_path: &str,
+        reply: ChannelOpenHandle,
         session: &mut Session,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-        async { Ok(false) }
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the client confirmed our request to open a
@@ -1039,8 +1066,10 @@ where
 
     // Reading SSH id and allocating a session.
     let mut stream = SshRead::new(stream);
+    let (priority_sender, priority_receiver) = tokio::sync::mpsc::unbounded_channel();
     let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
     let handle = server::session::Handle {
+        priority_sender,
         sender,
         channel_buffer_size: config.channel_buffer_size,
     };
@@ -1049,6 +1078,7 @@ where
     let mut session = Session {
         target_window_size: common.config.window_size,
         common,
+        priority_receiver,
         receiver,
         sender: handle.clone(),
         pending_reads: Vec::new(),
@@ -1106,7 +1136,11 @@ async fn reply<H: Handler + Send>(
             pkt.seqn.0,
             pkt.buffer.len()
         );
-        if session.common.strict_kex && session.common.encrypted.is_none() {
+        let strict_kex = match session.kex {
+            SessionKexState::InProgress(ref kex) => kex.strict_kex(),
+            _ => session.common.strict_kex,
+        };
+        if strict_kex && session.common.encrypted.is_none() {
             let seqno = pkt.seqn.0 - 1; // was incremented after read()
             validate_client_msg_strict_kex(*message_type, seqno as usize)?;
         }
@@ -1123,7 +1157,7 @@ async fn reply<H: Handler + Send>(
         // Kex will consume the packet right away
     }
 
-    let is_kex_msg = pkt.buffer.first().copied().map(is_kex_msg).unwrap_or(false);
+    let is_kex_msg = pkt.buffer.first().cloned().map(is_kex_msg).unwrap_or(false);
 
     if is_kex_msg {
         if let SessionKexState::InProgress(kex) = session.kex.take() {

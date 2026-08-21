@@ -215,7 +215,7 @@ serialport = "4"
 slotmap = "1.0.6"
 smallvec = { version = "1.6", features = ["union", "const_new"] }
 smol = "2.0"
-ssh-encoding = "=0.3.0-rc.9"
+ssh-encoding = "0.3"
 stacksafe = "1.0"
 strum = { version = "0.27.2", features = ["derive"] }
 subtle = "2.5"
@@ -223,6 +223,7 @@ sum_tree = { path = "crates/gpui-ce/gpui_sum_tree", version = "0.2.2", package =
 syn = { version = "2.0.101", features = ["full", "extra-traits", "visit-mut"] }
 sysinfo = { version = "0.33", default-features = false, features = ["disk", "system"] }
 thiserror = "2.0"
+libgssapi = "0.11"
 tokio = { version = "1.52", features = ["rt-multi-thread", "sync", "time", "io-util", "net", "fs", "process", "macros"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tower-service = "0.3"
@@ -301,6 +302,7 @@ windows = { version = "0.61", features = [
   "Win32_Media",
   "Win32_Networking_WinSock",
   "Win32_Security",
+  "Win32_Security_Authentication_Identity",
   "Win32_Security_Credentials",
   "Win32_Security_Cryptography",
   "Win32_Storage_FileSystem",

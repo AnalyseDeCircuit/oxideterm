@@ -78,6 +78,11 @@ pub enum PublicConnectionAuth {
     },
     KeyboardInteractive,
     Agent,
+    Gssapi {
+        server_identity: Option<String>,
+        #[serde(default)]
+        delegate_credentials: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]

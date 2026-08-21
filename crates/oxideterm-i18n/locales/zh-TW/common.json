@@ -730,6 +730,8 @@
         "key_path": "密鑰路徑",
         "cert_path": "憑證路徑",
         "managed_key": "託管密鑰",
+        "gssapi_server_identity": "Kerberos 伺服器名稱",
+        "gssapi_delegate_credentials": "Kerberos 憑證委派",
         "proxy_chain": "代理鏈",
         "agent_forwarding": "Agent 轉發",
         "post_connect_command": "連線後命令",

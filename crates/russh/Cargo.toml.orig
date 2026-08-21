@@ -9,7 +9,7 @@ license = "Apache-2.0"
 name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
-version = "0.61.2"
+version = "0.63.0"
 rust-version = "1.85"
 
 [features]
@@ -83,7 +83,7 @@ rand_core = { version = "0.10.0" }
 rand.workspace = true
 ring = { version = "0.17.14", optional = true }
 rsa = { version = "=0.10.0-rc.18", optional = true }
-russh-cryptovec = { version = "0.61.0", path = "../cryptovec", features = [
+russh-cryptovec = { version = "0.62.0", path = "../cryptovec", features = [
   "ssh-encoding",
 ] }
 russh-util = { version = "0.52.0", path = "../russh-util" }
@@ -92,7 +92,7 @@ scrypt = "0.12.0"
 sec1 = { version = "0.8", features = ["der"] }
 sha1.workspace = true
 sha2.workspace = true
-sha3 = "0.11.0"
+sha3 = "0.12.0"
 signature.workspace = true
 spki = "0.8"
 ssh-encoding.workspace = true
@@ -140,7 +140,7 @@ ratatui = "0.30"
 tempfile = "3.14.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-russh-sftp = "2.1.0"
+russh-sftp = "2.3.0"
 tokio.workspace = true
 tokio-stream.workspace = true
 

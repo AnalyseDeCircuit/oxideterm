@@ -95,23 +95,6 @@ impl OpenChannelMessage {
         })
     }
 
-    /// Pushes a confirmation that this channel was opened to the vec.
-    pub fn confirm(
-        &self,
-        buffer: &mut Vec<u8>,
-        sender_channel: u32,
-        window_size: u32,
-        packet_size: u32,
-    ) -> Result<(), crate::Error> {
-        push_packet!(buffer, {
-            msg::CHANNEL_OPEN_CONFIRMATION.encode(buffer)?;
-            self.recipient_channel.encode(buffer)?; // remote channel number.
-            sender_channel.encode(buffer)?; // our channel number.
-            window_size.encode(buffer)?;
-            packet_size.encode(buffer)?;
-        });
-        Ok(())
-    }
 
     /// Pushes a failure message to the vec.
     pub fn fail(
@@ -174,7 +157,7 @@ impl Decode for StreamLocalChannelInfo {
     type Error = ssh_encoding::Error;
 
     fn decode(r: &mut impl Reader) -> Result<Self, Self::Error> {
-        let socket_path = String::decode(r)?;
+        let socket_path = String::decode(r)?.to_owned();
         Ok(Self { socket_path })
     }
 }

@@ -8,6 +8,8 @@ struct ConnectionFormModalSnapshot {
     port: String,
     username: String,
     auth_tab: SshAuthTab,
+    gssapi_server_identity: String,
+    gssapi_delegate_credentials: bool,
     password_present: bool,
     remote_desktop_profile_id: Option<String>,
     mosh_profile_id: Option<String>,
@@ -56,6 +58,8 @@ impl ConnectionFormModalSnapshot {
             port: form.port.clone(),
             username: form.username.clone(),
             auth_tab: form.auth_tab,
+            gssapi_server_identity: form.gssapi_server_identity.clone(),
+            gssapi_delegate_credentials: form.gssapi_delegate_credentials,
             password_present: !form.password.is_empty(),
             remote_desktop_profile_id: form.remote_desktop_profile_id.clone(),
             mosh_profile_id: form.mosh_profile_id.clone(),
@@ -916,6 +920,39 @@ impl WorkspaceApp {
                                             ))
                                     },
                                 )
+                                .when(form.auth_tab == SshAuthTab::Gssapi, |content| {
+                                    content
+                                        .child(self.render_connection_hint(
+                                            self.i18n.t("ssh.form.gssapi_desc"),
+                                        ))
+                                        .child(self.render_connection_field(
+                                            self.i18n.t("ssh.form.gssapi_server_identity"),
+                                            &form.gssapi_server_identity,
+                                            self.i18n
+                                                .t("ssh.form.gssapi_server_identity_placeholder"),
+                                            NewConnectionField::GssapiServerIdentity,
+                                            false,
+                                            cx,
+                                        ))
+                                        .child(self.render_connection_hint(
+                                            self.i18n.t("ssh.form.gssapi_server_identity_hint"),
+                                        ))
+                                        .child(self.render_connection_checkbox(
+                                            self.i18n.t("ssh.form.gssapi_delegate_credentials"),
+                                            form.gssapi_delegate_credentials,
+                                            |form| {
+                                                form.gssapi_delegate_credentials =
+                                                    !form.gssapi_delegate_credentials;
+                                            },
+                                            cx,
+                                        ))
+                                        .when(form.gssapi_delegate_credentials, |content| {
+                                            content.child(self.render_connection_hint_with_color(
+                                                self.i18n.t("ssh.form.gssapi_delegation_warning"),
+                                                self.tokens.ui.warning,
+                                            ))
+                                        })
+                                })
                                 .into_any_element();
                                     if (ssh_submission_mode || mosh_mode || standalone_sftp_mode)
                                         && !prompt_mode

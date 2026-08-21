@@ -8,6 +8,7 @@ pub(super) fn auth_label(auth_type: AuthType) -> String {
         AuthType::Certificate => "Certificate",
         AuthType::KeyboardInteractive => "Keyboard Interactive",
         AuthType::Agent => "Agent",
+        AuthType::Gssapi => "Kerberos",
     }
     .to_string()
 }
@@ -344,7 +345,21 @@ pub(in crate::workspace) fn form_from_saved_connection(
                 String::new(),
                 false,
             ),
+            SavedAuth::Gssapi { .. } => (
+                SshAuthTab::Gssapi,
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                false,
+            ),
         };
+    let (gssapi_server_identity, gssapi_delegate_credentials) = conn
+        .auth
+        .gssapi_options()
+        .map(|(identity, delegate)| (identity.unwrap_or_default().to_string(), delegate))
+        .unwrap_or_default();
     let upstream_proxy_form = upstream_proxy_form_fields(&conn.upstream_proxy);
     let mut form = NewConnectionForm::default();
     form.name = conn.name.clone();
@@ -364,6 +379,8 @@ pub(in crate::workspace) fn form_from_saved_connection(
     form.managed_key_id = managed_key_id;
     form.cert_path = cert_path;
     form.passphrase = passphrase;
+    form.gssapi_server_identity = gssapi_server_identity;
+    form.gssapi_delegate_credentials = gssapi_delegate_credentials;
     form.save_password = save_password;
     form.group = group_label_for_form(conn.group.as_deref());
     form.notes = conn.notes.clone().unwrap_or_default();
@@ -474,7 +491,7 @@ pub(super) fn form_from_standalone_sftp_profile(
             passphrase_keychain_id,
             ..
         } => passphrase_keychain_id.is_some(),
-        SavedAuth::KeyboardInteractive | SavedAuth::Agent => false,
+        SavedAuth::KeyboardInteractive | SavedAuth::Agent | SavedAuth::Gssapi { .. } => false,
     };
     form.key_path = profile.auth.key_path().unwrap_or_default().to_string();
     form.managed_key_id = profile
@@ -483,6 +500,15 @@ pub(super) fn form_from_standalone_sftp_profile(
         .unwrap_or_default()
         .to_string();
     form.cert_path = profile.auth.cert_path().unwrap_or_default().to_string();
+    form.gssapi_server_identity = profile
+        .auth
+        .gssapi_options()
+        .and_then(|(identity, _)| identity.map(ToOwned::to_owned))
+        .unwrap_or_default();
+    form.gssapi_delegate_credentials = profile
+        .auth
+        .gssapi_options()
+        .is_some_and(|(_, delegate)| delegate);
     form.group = group_label_for_form(profile.group.as_deref());
     form.notes = profile.notes.clone().unwrap_or_default();
     form.icon = profile.icon.clone().unwrap_or_default();
@@ -542,7 +568,7 @@ pub(super) fn form_from_standalone_sftp_profile(
                 passphrase_keychain_id,
                 ..
             } => passphrase_keychain_id.is_some(),
-            SavedAuth::KeyboardInteractive | SavedAuth::Agent => false,
+            SavedAuth::KeyboardInteractive | SavedAuth::Agent | SavedAuth::Gssapi { .. } => false,
         };
         secondary.key_path = endpoint.auth.key_path().unwrap_or_default().to_string();
         secondary.managed_key_id = endpoint
@@ -551,6 +577,15 @@ pub(super) fn form_from_standalone_sftp_profile(
             .unwrap_or_default()
             .to_string();
         secondary.cert_path = endpoint.auth.cert_path().unwrap_or_default().to_string();
+        secondary.gssapi_server_identity = endpoint
+            .auth
+            .gssapi_options()
+            .and_then(|(identity, _)| identity.map(ToOwned::to_owned))
+            .unwrap_or_default();
+        secondary.gssapi_delegate_credentials = endpoint
+            .auth
+            .gssapi_options()
+            .is_some_and(|(_, delegate)| delegate);
         secondary.identity_agent = endpoint.identity_agent.clone().unwrap_or_default();
         secondary.agent_available =
             oxideterm_ssh::ssh_agent_available(identity_agent_selector(&secondary.identity_agent));
@@ -801,6 +836,8 @@ pub(super) fn proxy_hop_draft_from_form(
             managed_key_id: hop.managed_key_id.clone(),
             cert_path: hop.cert_path.clone(),
             passphrase: take_secret_from_ui_draft(&mut hop.passphrase),
+            gssapi_server_identity: hop.gssapi_server_identity.clone(),
+            gssapi_delegate_credentials: hop.gssapi_delegate_credentials,
             save_password: true,
             ..ConnectionAuthDraft::default()
         },
@@ -829,6 +866,8 @@ pub(super) fn auth_draft_from_form(
         managed_key_id: form.managed_key_id.clone(),
         cert_path: form.cert_path.clone(),
         passphrase: take_secret_from_ui_draft(&mut form.passphrase),
+        gssapi_server_identity: form.gssapi_server_identity.clone(),
+        gssapi_delegate_credentials: form.gssapi_delegate_credentials,
     }
 }
 
@@ -991,6 +1030,7 @@ pub(super) fn auth_draft_kind(tab: SshAuthTab) -> ConnectionAuthDraftKind {
         SshAuthTab::Certificate => ConnectionAuthDraftKind::Certificate,
         SshAuthTab::Agent => ConnectionAuthDraftKind::Agent,
         SshAuthTab::TwoFactor => ConnectionAuthDraftKind::TwoFactor,
+        SshAuthTab::Gssapi => ConnectionAuthDraftKind::Gssapi,
     }
 }
 
