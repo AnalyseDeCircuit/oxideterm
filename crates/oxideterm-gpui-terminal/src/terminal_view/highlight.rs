@@ -282,7 +282,12 @@ fn append_row_text(
     text: &mut String,
     map: &mut Vec<TextCell>,
 ) {
+    let mut skip_wide_spacer = false;
     for (col, cell) in row.cells.iter().take(max_cols).enumerate() {
+        if skip_wide_spacer {
+            skip_wide_spacer = false;
+            continue;
+        }
         let cells = if cell.wide { 2 } else { 1 };
         text.push(cell.ch);
         map.push(TextCell {
@@ -298,6 +303,9 @@ fn append_row_text(
                 cells,
             });
         }
+        // A wide glyph owns the following terminal spacer cell. Keeping that
+        // spacer in logical text breaks matches that cross CJK characters.
+        skip_wide_spacer = cell.wide;
     }
 }
 
