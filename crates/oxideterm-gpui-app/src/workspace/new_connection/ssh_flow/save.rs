@@ -2362,7 +2362,7 @@ impl WorkspaceApp {
                 SavedConnectionPromptAction::Connect,
                 Some(
                     self.i18n
-                        .t("sessionManager.edit_properties.password_placeholder"),
+                        .t("sessionManager.edit_properties.password_required"),
                 ),
                 window,
                 cx,

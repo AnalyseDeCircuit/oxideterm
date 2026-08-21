@@ -709,8 +709,6 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) saved_password_keychain_id: Option<String>,
     pub(in crate::workspace) password_loaded: bool,
     pub(in crate::workspace) password_visible: bool,
-    pub(in crate::workspace) password_loading: bool,
-    pub(in crate::workspace) password_error: Option<String>,
     pub(in crate::workspace) key_path: String,
     pub(in crate::workspace) managed_key_id: String,
     pub(in crate::workspace) cert_path: String,
@@ -837,8 +835,6 @@ impl fmt::Debug for NewConnectionForm {
             )
             .field("password_loaded", &self.password_loaded)
             .field("password_visible", &self.password_visible)
-            .field("password_loading", &self.password_loading)
-            .field("password_error", &self.password_error)
             .field("key_path", &self.key_path)
             .field("managed_key_id", &self.managed_key_id)
             .field("cert_path", &self.cert_path)
@@ -989,8 +985,6 @@ impl Default for NewConnectionForm {
             saved_password_keychain_id: None,
             password_loaded: true,
             password_visible: false,
-            password_loading: false,
-            password_error: None,
             key_path: String::new(),
             managed_key_id: String::new(),
             cert_path: String::new(),

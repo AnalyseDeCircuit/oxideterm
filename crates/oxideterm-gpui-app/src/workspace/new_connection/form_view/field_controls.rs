@@ -904,12 +904,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn render_edit_saved_password_field(
-        &self,
-        password_visible: bool,
-        password_loading: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    pub(super) fn render_edit_saved_password_field(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some((input, _)) = self.render_connection_secret_input(
             self.i18n
                 .t("sessionManager.edit_properties.password_placeholder"),
@@ -918,58 +913,10 @@ impl WorkspaceApp {
         ) else {
             return div().into_any_element();
         };
-        let icon = if password_visible {
-            LucideIcon::EyeOff
-        } else {
-            LucideIcon::Eye
-        };
         form_field(
             &self.tokens,
             self.i18n.t("sessionManager.edit_properties.saved_password"),
-            div().relative().child(input).child(
-                if password_loading {
-                    oxideterm_gpui_ui::button::icon_button(
-                        &self.tokens,
-                        self.render_loading_icon(
-                            "saved-password-loading",
-                            SECRET_VISIBILITY_ICON_SIZE,
-                            rgb(self.tokens.ui.text_muted),
-                        ),
-                        IconButtonOptions {
-                            loading: true,
-                            hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
-                            ..IconButtonOptions::opaque_toolbar(
-                                SECRET_VISIBILITY_BUTTON_SIZE,
-                                ButtonRadius::Sm,
-                            )
-                        },
-                    )
-                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                        cx.stop_propagation();
-                    })
-                } else {
-                    self.workspace_icon_action_button(
-                        icon,
-                        SECRET_VISIBILITY_ICON_SIZE,
-                        rgb(self.tokens.ui.text_muted),
-                        IconButtonOptions {
-                            hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
-                            ..IconButtonOptions::opaque_toolbar(
-                                SECRET_VISIBILITY_BUTTON_SIZE,
-                                ButtonRadius::Sm,
-                            )
-                        },
-                        |this, _event, _window, cx| {
-                            this.toggle_edit_saved_password_visibility(cx);
-                            cx.stop_propagation();
-                        },
-                        cx,
-                    )
-                }
-                .absolute()
-                .right(px(SECRET_VISIBILITY_BUTTON_OFFSET))
-                .top(px(SECRET_VISIBILITY_BUTTON_OFFSET)),
-            ),
+            input,
         )
     }
 
@@ -1498,47 +1445,6 @@ impl WorkspaceApp {
         };
         self.connection_flow.update(cx, |connection_flow, cx| {
             connection_flow.start_path_picker(field, selection, cx);
-        });
-    }
-
-    fn toggle_edit_saved_password_visibility(&mut self, cx: &mut Context<Self>) {
-        let source_connection_id = self
-            .saved_connection_form_source_id(cx)
-            .map(|connection_id| connection_id.to_string());
-        let should_load = self.update_connection_form_state(cx, |state| {
-            let Some(form) = state.form.as_mut() else {
-                return false;
-            };
-            if form.password_loading {
-                return false;
-            }
-            if form.password_loaded {
-                form.password_visible = !form.password_visible;
-                form.password_error = None;
-                return false;
-            }
-            form.password_loading = true;
-            form.password_error = None;
-            true
-        });
-        if !should_load {
-            cx.notify();
-            return;
-        }
-        let Some(connection_id) = source_connection_id else {
-            self.update_connection_form_state(cx, |state| {
-                if let Some(form) = state.form.as_mut() {
-                    form.password_loading = false;
-                }
-            });
-            return;
-        };
-        cx.notify();
-
-        let store = self.connection_store.clone();
-        let load = async move { store.get_connection_password(&connection_id) };
-        self.connection_flow.update(cx, |connection_flow, cx| {
-            connection_flow.start_password_load(load, cx);
         });
     }
 

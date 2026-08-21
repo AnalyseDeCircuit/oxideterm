@@ -351,13 +351,6 @@ impl WorkspaceApp {
         result
     }
 
-    pub(in crate::workspace) fn saved_connection_form_source_id<'a>(
-        &self,
-        cx: &'a App,
-    ) -> Option<&'a str> {
-        self.connection_form_state(cx).saved_connection_source_id()
-    }
-
     pub(in crate::workspace) fn saved_connection_form_uses_unloaded_secret(
         &self,
         cx: &App,

@@ -200,11 +200,19 @@ impl WorkspaceApp {
                 };
             }
 
-            let password_locked = saved_connection_form_uses_unloaded_secret
+            let password_uses_saved_value = saved_connection_form_uses_unloaded_secret
                 && form.focused_field == NewConnectionField::Password
                 && !form.password_loaded;
-            if password_locked && !matches!(key, "escape" | "enter" | "tab") {
-                return (ConnectionFormKeyResult::Handled, false);
+            if password_uses_saved_value {
+                if uses_text_edit_modifier && key == "v" {
+                    return (ConnectionFormKeyResult::Paste, false);
+                }
+                if text_input.is_some() || key == "space" {
+                    // The protected value stays in the keychain; only new input becomes UI-owned.
+                    form.password_loaded = true;
+                } else if !matches!(key, "escape" | "enter" | "tab") {
+                    return (ConnectionFormKeyResult::Handled, false);
+                }
             }
 
             let focused_field_accepts_ime = matches!(
@@ -251,6 +259,10 @@ impl WorkspaceApp {
                             current_connection_field(form).to_string(),
                         ));
                         clear_current_connection_field(form);
+                        restore_saved_password_placeholder_if_empty(
+                            form,
+                            saved_connection_form_uses_unloaded_secret,
+                        );
                         form.error = None;
                         show_caret = true;
                     }
@@ -297,9 +309,13 @@ impl WorkspaceApp {
                     (ConnectionFormKeyResult::Handled, true)
                 }
                 "backspace" => {
-                    let changed = backspace_current_connection_field(form)
-                        || form.error.take().is_some()
-                        || !caret_was_visible;
+                    let field_changed = backspace_current_connection_field(form);
+                    restore_saved_password_placeholder_if_empty(
+                        form,
+                        saved_connection_form_uses_unloaded_secret,
+                    );
+                    let changed =
+                        field_changed || form.error.take().is_some() || !caret_was_visible;
                     if changed {
                         cx.notify();
                     }
@@ -366,17 +382,21 @@ impl WorkspaceApp {
             let Some(form) = state.form.as_mut() else {
                 return false;
             };
-            if saved_connection_form_uses_unloaded_secret
-                && form.focused_field == NewConnectionField::Password
-                && !form.password_loaded
-            {
-                return false;
-            }
             if form.focused_field == NewConnectionField::Notes {
                 insert_text_into_current_connection_field(form, &normalized);
             } else {
                 // All other connection form controls remain single-line inputs.
                 let single_line = normalized.lines().collect::<Vec<_>>().join(" ");
+                if saved_connection_form_uses_unloaded_secret
+                    && form.focused_field == NewConnectionField::Password
+                    && !form.password_loaded
+                {
+                    if single_line.is_empty() {
+                        return false;
+                    }
+                    // A pasted replacement is owned by the form; the saved value is never loaded.
+                    form.password_loaded = true;
+                }
                 insert_text_into_current_connection_field(form, &single_line);
             }
             form.error = None;
@@ -386,5 +406,19 @@ impl WorkspaceApp {
             self.show_active_input_caret(cx);
             cx.notify();
         }
+    }
+}
+
+fn restore_saved_password_placeholder_if_empty(
+    form: &mut NewConnectionForm,
+    editing_saved_connection: bool,
+) {
+    if editing_saved_connection
+        && form.focused_field == NewConnectionField::Password
+        && form.saved_password_keychain_id.is_some()
+        && form.password.is_empty()
+    {
+        form.password_loaded = false;
+        form.password_visible = false;
     }
 }
