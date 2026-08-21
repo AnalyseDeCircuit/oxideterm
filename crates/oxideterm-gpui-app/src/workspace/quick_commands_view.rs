@@ -5,15 +5,16 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, App, Context, CursorStyle, KeyDownEvent, MouseButton, div, prelude::*, px, rgb,
-    rgba,
+    AnyElement, App, Context, CursorStyle, KeyDownEvent, MouseButton, Window, div, prelude::*, px,
+    rgb, rgba,
 };
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_gpui_ui::{
-    CommandPanelOptions, StatusPillOptions, StatusTone, SurfacePadding, command_panel,
+    CommandPanelOptions, StatusPillOptions, StatusTone, SurfacePadding, UiStateTone, command_panel,
     modal::rounded_shell_child_radius,
+    scroll::ScrollableElement,
     select::SelectAnchorId,
-    status_pill,
+    state_notice, status_pill,
     text_input::{TextInputView, text_input_anchor_probe, text_input_with_viewport},
 };
 use oxideterm_quick_commands::{
@@ -50,6 +51,7 @@ const QUICK_COMMANDS_POPOVER_HORIZONTAL_MARGIN: f32 = 12.0;
 const QUICK_COMMANDS_LIST_MAX_HEIGHT: f32 = 360.0;
 const QUICK_COMMANDS_CONTENT_MIN_HEIGHT: f32 = 300.0;
 const QUICK_COMMANDS_BODY_HEADER_HEIGHT: f32 = 49.0;
+const QUICK_COMMAND_CATEGORY_PICKER_MAX_HEIGHT: f32 = 72.0;
 
 fn quick_command_icon_label_key(icon: QuickCommandIcon) -> String {
     format!(
@@ -208,6 +210,7 @@ struct QuickCommandsRenderSnapshot {
     highlighted_command: Option<String>,
     command_editor: Option<QuickCommandDraft>,
     category_editor: Option<QuickCommandCategoryDraft>,
+    pending_command: Option<Zeroizing<String>>,
     last_persist_error: Option<String>,
     visible_commands: Arc<Vec<QuickCommand>>,
     pinned: bool,
@@ -283,6 +286,14 @@ impl TerminalQuickCommandsState {
     pub(in crate::workspace) fn request_confirmation(&mut self, command: String) {
         self.pending_command = Some(Zeroizing::new(command));
         self.open = true;
+    }
+
+    fn cancel_confirmation(&mut self) -> bool {
+        self.pending_command.take().is_some()
+    }
+
+    fn take_pending_command(&mut self) -> Option<Zeroizing<String>> {
+        self.pending_command.take()
     }
 
     fn prepare_insertion(&mut self, command: String, keep_open: bool) -> String {
@@ -605,6 +616,7 @@ impl TerminalQuickCommandsState {
             highlighted_command: self.store.highlighted_command.clone(),
             command_editor: self.store.command_editor.clone(),
             category_editor: self.store.category_editor.clone(),
+            pending_command: self.pending_command.clone(),
             last_persist_error: self.store.last_persist_error.clone(),
             visible_commands,
             pinned: self.pinned,
@@ -643,6 +655,23 @@ impl WorkspaceApp {
         self.terminal.update(cx, |terminal, _cx| {
             terminal.quick_commands.finish_execution()
         });
+    }
+
+    fn cancel_terminal_quick_command_confirmation(&mut self, cx: &mut Context<Self>) {
+        if self.terminal.update(cx, |terminal, _cx| {
+            terminal.quick_commands.cancel_confirmation()
+        }) {
+            cx.notify();
+        }
+    }
+
+    fn confirm_terminal_quick_command(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let command = self.terminal.update(cx, |terminal, _cx| {
+            terminal.quick_commands.take_pending_command()
+        });
+        if let Some(command) = command {
+            self.execute_quick_command(command.as_str(), window, cx);
+        }
     }
 
     fn insert_quick_command_into_command_bar(
@@ -889,7 +918,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let mut sidebar = div()
+        let sidebar = div()
             .w(px(160.0))
             .h_full()
             .flex_none()
@@ -958,6 +987,7 @@ impl WorkspaceApp {
                     ),
             );
 
+        let mut category_list = div().flex().flex_col().gap(px(6.0));
         for category in &snapshot.categories {
             let category_id = category.id.clone();
             let active = category.id == snapshot.active_category;
@@ -970,7 +1000,7 @@ impl WorkspaceApp {
                 .iter()
                 .any(|default| default.id == category.id)
                 && count == 0;
-            sidebar = sidebar.child(
+            category_list = category_list.child(
                 div()
                     .group("quick-command-category")
                     .cursor_pointer()
@@ -1075,7 +1105,13 @@ impl WorkspaceApp {
         }
 
         sidebar
-            .child(div().flex_1())
+            .child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .overflow_y_scrollbar()
+                    .child(category_list),
+            )
             .when_some(snapshot.last_persist_error.as_ref(), |sidebar, error| {
                 sidebar.child(
                     div()
@@ -1098,7 +1134,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
+        let body = div()
             .flex_1()
             .h_full()
             .min_w(px(0.0))
@@ -1160,14 +1196,94 @@ impl WorkspaceApp {
                                 cx,
                             )),
                     ),
+            );
+        if let Some(command) = snapshot.pending_command.as_ref() {
+            return body
+                .child(self.render_quick_command_confirmation(command.as_str(), cx))
+                .into_any_element();
+        }
+
+        body.when_some(snapshot.category_editor.as_ref(), |body, _| {
+            body.child(self.render_quick_command_category_editor(snapshot, cx))
+        })
+        .when_some(snapshot.command_editor.as_ref(), |body, _| {
+            body.child(self.render_quick_command_editor(snapshot, cx))
+        })
+        .child(self.render_quick_command_rows(snapshot, cx))
+        .into_any_element()
+    }
+
+    fn render_quick_command_confirmation(
+        &self,
+        command: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let risky = classify_command_risk(command).is_some();
+        let description_key = if risky {
+            "terminal.quick_commands.confirm_risky_description"
+        } else {
+            "terminal.quick_commands.confirm_description"
+        };
+        let description = self.i18n.t(description_key).replace("{{command}}", command);
+        let (tone, icon, icon_color) = if risky {
+            (
+                UiStateTone::Warning,
+                LucideIcon::AlertTriangle,
+                theme.warning,
             )
-            .when_some(snapshot.category_editor.as_ref(), |body, _| {
-                body.child(self.render_quick_command_category_editor(snapshot, cx))
-            })
-            .when_some(snapshot.command_editor.as_ref(), |body, _| {
-                body.child(self.render_quick_command_editor(snapshot, cx))
-            })
-            .child(self.render_quick_command_rows(snapshot, cx))
+        } else {
+            (UiStateTone::Accent, LucideIcon::Terminal, theme.accent)
+        };
+        let notice = state_notice(
+            &self.tokens,
+            tone,
+            Self::render_lucide_icon(icon, 14.0, rgb(icon_color)),
+            self.i18n.t("terminal.quick_commands.confirm_title"),
+            Some(description),
+        );
+
+        div()
+            .flex_1()
+            .min_h(px(0.0))
+            .p(px(16.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(560.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.0))
+                    .child(div().max_h(px(160.0)).overflow_y_scrollbar().child(notice))
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .gap(px(8.0))
+                            .child(self.quick_command_text_button(
+                                self.i18n.t("terminal.quick_commands.cancel"),
+                                true,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.cancel_terminal_quick_command_confirmation(cx);
+                                    cx.stop_propagation();
+                                }),
+                            ))
+                            .child(
+                                self.quick_command_text_button(
+                                    self.i18n.t("terminal.quick_commands.run"),
+                                    true,
+                                    cx.listener(|this, _event, window, cx| {
+                                        this.confirm_terminal_quick_command(window, cx);
+                                        cx.stop_propagation();
+                                    }),
+                                )
+                                .bg(rgba((theme.accent << 8) | 0x26)),
+                            ),
+                    ),
+            )
             .into_any_element()
     }
 
@@ -1663,7 +1779,13 @@ window.focus(&this.focus_handle, cx);
                             cx,
                         ),
                     )
-                    .child(categories),
+                    .child(
+                        div()
+                            .w_full()
+                            .max_h(px(QUICK_COMMAND_CATEGORY_PICKER_MAX_HEIGHT))
+                            .overflow_y_scrollbar()
+                            .child(categories),
+                    ),
             )
             .child(self.render_quick_editor_buttons(
                 can_save,
@@ -1824,7 +1946,7 @@ window.focus(&this.focus_handle, cx);
 #[cfg(test)]
 mod terminal_command_bar_quick_command_tests {
     use super::{
-        QuickCommandCategoryDraft, QuickCommandDraft, QuickCommandIcon,
+        QuickCommandCategoryDraft, QuickCommandDraft, QuickCommandIcon, TerminalQuickCommandsState,
         quick_command_category_draft_can_save, quick_command_draft_can_save,
         quick_command_space_inserts_literal,
     };
@@ -1881,5 +2003,29 @@ mod terminal_command_bar_quick_command_tests {
                 icon: QuickCommandIcon::Zap,
             }
         ));
+    }
+
+    #[test]
+    fn pending_confirmation_is_rendered_and_consumed_once() {
+        let temp = tempfile::tempdir().expect("temporary quick command directory");
+        let mut state = TerminalQuickCommandsState::load(&temp.path().join("settings.json"));
+        state.request_confirmation("sudo systemctl status sshd".to_string());
+
+        let snapshot = state.render_snapshot(&[]);
+        assert_eq!(
+            snapshot
+                .pending_command
+                .as_ref()
+                .map(|command| command.as_str()),
+            Some("sudo systemctl status sshd")
+        );
+        assert_eq!(
+            state
+                .take_pending_command()
+                .as_ref()
+                .map(|command| command.as_str()),
+            Some("sudo systemctl status sshd")
+        );
+        assert!(state.render_snapshot(&[]).pending_command.is_none());
     }
 }

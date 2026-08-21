@@ -206,7 +206,11 @@ impl Render for TextEditorView {
                 this.handle_key(event, window, cx);
             }))
             .child(body);
-        if let Some(scrollbar) = self.render_vertical_scrollbar(view, cx) {
+        if self.presentation == EditorPresentation::Document
+            && let Some(scrollbar) = self.render_vertical_scrollbar(view, cx)
+        {
+            // Inline editors are single-row controls. Their overflow belongs to
+            // the horizontal axis, so a vertical thumb is always misleading.
             root = root.child(scrollbar);
         }
         if let Some(scrollbar) = self.render_horizontal_scrollbar(cx.entity(), cx) {
