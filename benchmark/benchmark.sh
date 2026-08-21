@@ -40,10 +40,15 @@ if ! "$benchmark_root/verify.sh" >/dev/null 2>&1; then
     "$benchmark_root/prepare.sh" >/dev/null
 fi
 
-benchmark_run_id="$(date -u '+%Y%m%dT%H%M%SZ')-$$"
+benchmark_started_at_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+benchmark_run_timestamp=$(printf '%s' "$benchmark_started_at_utc" | tr -d ':-')
+benchmark_run_id="${benchmark_run_timestamp}-$$"
 result_directory="$results_root/$benchmark_run_id"
 raw_result_path="$result_directory/runs.jsonl"
-summary_path="$result_directory/summary.json"
+json_summary_path="$result_directory/summary.json"
+markdown_summary_path="$result_directory/summary.md"
+# Record the running terminal build because it may differ from the repository checkout.
+oxideterm_version=${TERM_PROGRAM_VERSION:-unknown}
 mkdir -p "$result_directory"
 : > "$raw_result_path"
 
@@ -82,14 +87,37 @@ while [ "$measured_iteration" -le "$measured_runs" ]; do
 done
 exec 3>&-
 
-python3 - "$raw_result_path" "$summary_path" "$fixture_size_mib" "$warmup_runs" "$measured_runs" <<'PYTHON'
+python3 - \
+    "$raw_result_path" \
+    "$json_summary_path" \
+    "$markdown_summary_path" \
+    "$benchmark_run_id" \
+    "$benchmark_started_at_utc" \
+    "$oxideterm_version" \
+    "$fixture_size_mib" \
+    "$warmup_runs" \
+    "$measured_runs" <<'PYTHON'
 import json
 import statistics
 import sys
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 
-raw_result_path, summary_path, fixture_size_mib, warmup_runs, measured_runs = sys.argv[1:]
+(
+    raw_result_path,
+    json_summary_path,
+    markdown_summary_path,
+    benchmark_run_id,
+    started_at_utc,
+    oxideterm_version,
+    fixture_size_mib,
+    warmup_runs,
+    measured_runs,
+) = sys.argv[1:]
+oxideterm_version = " ".join(oxideterm_version.split()) or "unknown"
+started_at = datetime.strptime(started_at_utc, "%Y-%m-%dT%H:%M:%SZ")
+started_at_display = started_at.strftime("%Y-%m-%d %H:%M:%S UTC")
 samples_by_workload = defaultdict(list)
 for line in Path(raw_result_path).read_text(encoding="utf-8").splitlines():
     sample = json.loads(line)
@@ -109,13 +137,52 @@ for workload in ("plain", "ansi", "unicode", "long-csi"):
 summary = {
     "fixture_size_mib": int(fixture_size_mib),
     "measured_runs": int(measured_runs),
+    "oxideterm_version": oxideterm_version,
     "results": summary_results,
-    "schema_version": 1,
+    "run_id": benchmark_run_id,
+    "schema_version": 2,
+    "started_at_utc": started_at_utc,
     "warmup_runs": int(warmup_runs),
 }
-Path(summary_path).write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+Path(json_summary_path).write_text(
+    json.dumps(summary, indent=2, sort_keys=True) + "\n",
+    encoding="utf-8",
+)
+
+markdown_lines = [
+    "# OxideTerm terminal benchmark summary",
+    "",
+    f"- **OxideTerm version:** `{oxideterm_version}`",
+    f"- **Run time:** {started_at_display}",
+    f"- **Run ID:** `{benchmark_run_id}`",
+    f"- **Fixture:** {fixture_size_mib} MiB",
+    f"- **Warm-up runs:** {warmup_runs}",
+    f"- **Measured runs:** {measured_runs}",
+    "",
+    "| Workload | Median time (ms) | Median throughput (MiB/s) |",
+    "|---|---:|---:|",
+]
+for workload, result in summary_results.items():
+    markdown_lines.append(
+        f"| {workload} | {result['elapsed_ms_median']:.3f} | "
+        f"{result['pty_mib_per_second_median']:.3f} |"
+    )
+markdown_lines.extend(
+    [
+        "",
+        "> This benchmark measures process-to-PTY throughput, not completed rendering or input latency.",
+        "",
+        "## Result files",
+        "",
+        "- [Raw samples](./runs.jsonl)",
+        "- [Machine-readable summary](./summary.json)",
+        "",
+    ]
+)
+Path(markdown_summary_path).write_text("\n".join(markdown_lines), encoding="utf-8")
 
 print("\nOxideTerm terminal benchmark summary")
+print(f"Version: {oxideterm_version} | Run time: {started_at_display}")
 print(f"Fixture: {fixture_size_mib} MiB | warm-ups: {warmup_runs} | measured runs: {measured_runs}")
 print(f"{'workload':<12} {'median ms':>12} {'median MiB/s':>16}")
 for workload, result in summary_results.items():
@@ -125,5 +192,6 @@ for workload, result in summary_results.items():
         f"{result['pty_mib_per_second_median']:>16.3f}"
     )
 print(f"\nRaw results: {raw_result_path}")
-print(f"Summary:     {summary_path}")
+print(f"Markdown:    {markdown_summary_path}")
+print(f"JSON:        {json_summary_path}")
 PYTHON

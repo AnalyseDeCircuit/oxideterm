@@ -1393,10 +1393,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn visible_sftp_remote_id(
-        &self,
-        cx: &App,
-    ) -> Option<SftpRemoteId> {
+    pub(in crate::workspace) fn visible_sftp_remote_id(&self, cx: &App) -> Option<SftpRemoteId> {
         let sftp = self.sftp_view.read(cx);
         let surface_id = sftp.current_surface_id?;
         let remote_id = sftp.current_remote_id.clone()?;

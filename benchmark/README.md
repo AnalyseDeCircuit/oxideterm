@@ -12,12 +12,13 @@ Open an OxideTerm terminal pane in the repository and run one command:
 ./benchmark/benchmark.sh
 ```
 
-It automatically prepares missing fixtures, performs one warm-up and three measured runs for every workload, prints a median summary, and saves both raw JSONL samples and `summary.json` under `benchmark/results/`.
+It automatically prepares missing fixtures, performs one warm-up and three measured runs for every workload, prints a median summary, and saves raw JSONL samples, a machine-readable `summary.json`, and a human-readable `summary.md` under `benchmark/results/`. Both summaries record the running OxideTerm version and the UTC run time.
 
 Example summary:
 
 ```text
 OxideTerm terminal benchmark summary
+Version: 2.0.23 | Run time: 2026-08-21 13:10:42 UTC
 Fixture: 16 MiB | warm-ups: 1 | measured runs: 3
 workload        median ms     median MiB/s
 plain             123.456          129.600
@@ -26,8 +27,11 @@ unicode           210.000           76.190
 long-csi          250.000           64.000
 
 Raw results: benchmark/results/<run-id>/runs.jsonl
-Summary:     benchmark/results/<run-id>/summary.json
+Markdown:    benchmark/results/<run-id>/summary.md
+JSON:        benchmark/results/<run-id>/summary.json
 ```
+
+The Markdown report includes the version, readable UTC time, run configuration, median result table, measurement scope, and links to the raw and JSON files. `summary.json` stores the same run metadata for automated comparisons.
 
 Change fixture size or repetition counts through environment variables:
 
