@@ -47,6 +47,7 @@ sudo apt-get remove -y 'libunwind-[0-9]*-dev' 2>/dev/null || true
 PACKAGES=(
   build-essential
   libasound2-dev
+  libdbus-1-dev
   libfontconfig1-dev
   libfreetype6-dev
   libgstreamer-plugins-base1.0-dev

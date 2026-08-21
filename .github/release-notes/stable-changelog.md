@@ -46,7 +46,7 @@ OxideTerm 2.0.23 adds terminal-output triggers, substantially improves terminal 
 
 #### 🧰 Linux Build Maintenance
 
-- Removed obsolete GTK, JavaScriptCoreGTK, Soup, and WebKitGTK development packages from the Linux dependency installer. OxideTerm's native GPUI interface continues to render directly to the GPU and does not require a WebView runtime.
+- Removed obsolete GTK, JavaScriptCoreGTK, Soup, and WebKitGTK development packages from the Linux dependency installer while retaining the DBus development files required by system-keyring integration. OxideTerm's native GPUI interface continues to render directly to the GPU and does not require a WebView runtime.
 
 ### 中文
 
@@ -89,7 +89,7 @@ OxideTerm 2.0.23 新增终端输出触发器，显著提升终端吞吐量，加
 
 #### 🧰 Linux 构建维护
 
-- 从 Linux 依赖安装脚本中移除已不再需要的 GTK、JavaScriptCoreGTK、Soup 和 WebKitGTK 开发包。OxideTerm 的原生 GPUI 界面继续直接通过 GPU 绘制，不依赖 WebView 运行时。
+- 从 Linux 依赖安装脚本中移除已不再需要的 GTK、JavaScriptCoreGTK、Soup 和 WebKitGTK 开发包，同时保留系统钥匙串集成所需的 DBus 开发文件。OxideTerm 的原生 GPUI 界面继续直接通过 GPU 绘制，不依赖 WebView 运行时。
 
 ![OxideTerm release-build terminal throughput before and after optimization](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/v2.0.23/.github/release-notes/assets/terminal-performance-release-comparison.png)
 
