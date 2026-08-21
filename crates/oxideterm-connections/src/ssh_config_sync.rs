@@ -9,8 +9,9 @@ use std::{
 use anyhow::Result;
 
 use crate::{
-    ConnectionStore, SSH_CONFIG_TAG, SSH_PROXY_COMMAND_TAG, SavedAuth, SavedConnection,
-    SshConfigHost, list_ssh_config_hosts_from_path, saved_connection_from_ssh_host,
+    ConnectionStore, SSH_CONFIG_TAG, SSH_PROXY_COMMAND_TAG, SSH_REMOTE_COMMAND_TAG, SavedAuth,
+    SavedConnection, SshConfigHost, list_ssh_config_hosts_from_path,
+    saved_connection_from_ssh_host,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -119,6 +120,9 @@ fn sync_resolved_ssh_config_hosts(
         resolved.color = existing.color;
         resolved.icon = existing.icon;
         resolved.tags = merged_ssh_config_tags(&existing.tags, &resolved.tags);
+        let existing_remote_command_managed = has_remote_command_tag(&existing.tags);
+        let resolved_remote_command_managed = has_remote_command_tag(&resolved.tags);
+        let resolved_post_connect_command = resolved.options.post_connect_command.take();
         let resolved_agent_forwarding = resolved.options.agent_forwarding;
         let resolved_connect_timeout_seconds = resolved.options.connect_timeout_seconds;
         let resolved_identity_agent = resolved.options.identity_agent.clone();
@@ -132,8 +136,15 @@ fn sync_resolved_ssh_config_hosts(
         resolved.options.identity_agent = resolved_identity_agent;
         resolved.options.agent_forwarding_socket = resolved_agent_forwarding_socket;
         resolved.options.x11_forwarding = resolved_x11_forwarding;
+        if existing_remote_command_managed || resolved_remote_command_managed {
+            // The marker transfers ownership back to OpenSSH config, including
+            // clearing a command when RemoteCommand is removed or set to none.
+            resolved.options.post_connect_command = resolved_post_connect_command;
+            resolved.post_connect_command = None;
+        } else {
+            resolved.post_connect_command = existing.post_connect_command;
+        }
         resolved.upstream_proxy = existing.upstream_proxy;
-        resolved.post_connect_command = existing.post_connect_command;
         pending.push(resolved);
         outcome.updated.push(alias);
     }
@@ -154,6 +165,7 @@ fn ssh_config_fields_match(existing: &SavedConnection, resolved: &SavedConnectio
         && existing.options.identity_agent == resolved.options.identity_agent
         && existing.options.agent_forwarding_socket == resolved.options.agent_forwarding_socket
         && existing.options.x11_forwarding == resolved.options.x11_forwarding
+        && remote_command_fields_match(existing, resolved)
         && existing.proxy_chain.len() == resolved.proxy_chain.len()
         && existing
             .proxy_chain
@@ -175,14 +187,28 @@ fn has_proxy_command_tag(tags: &[String]) -> bool {
     tags.iter().any(|tag| tag == SSH_PROXY_COMMAND_TAG)
 }
 
+fn has_remote_command_tag(tags: &[String]) -> bool {
+    tags.iter().any(|tag| tag == SSH_REMOTE_COMMAND_TAG)
+}
+
+fn remote_command_fields_match(existing: &SavedConnection, resolved: &SavedConnection) -> bool {
+    let existing_managed = has_remote_command_tag(&existing.tags);
+    let resolved_managed = has_remote_command_tag(&resolved.tags);
+    existing_managed == resolved_managed
+        && (!resolved_managed || existing.post_connect_command() == resolved.post_connect_command())
+}
+
 fn merged_ssh_config_tags(existing: &[String], resolved: &[String]) -> Vec<String> {
     let mut tags = existing
         .iter()
-        .filter(|tag| tag.as_str() != SSH_PROXY_COMMAND_TAG)
+        .filter(|tag| !matches!(tag.as_str(), SSH_PROXY_COMMAND_TAG | SSH_REMOTE_COMMAND_TAG))
         .cloned()
         .collect::<Vec<_>>();
     if has_proxy_command_tag(resolved) {
         tags.push(SSH_PROXY_COMMAND_TAG.to_string());
+    }
+    if has_remote_command_tag(resolved) {
+        tags.push(SSH_REMOTE_COMMAND_TAG.to_string());
     }
     tags
 }
@@ -293,6 +319,60 @@ mod tests {
                 .identity_agent
                 .as_deref()
                 .is_some_and(|path| path.ends_with("/.ssh/agent-b.sock"))
+        );
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn sync_tracks_remote_command_without_overwriting_app_owned_commands() {
+        let directory = temp_path("remote-command");
+        std::fs::create_dir_all(&directory).unwrap();
+        let config_path = directory.join("config");
+        let store_path = directory.join("connections.json");
+        std::fs::write(
+            &config_path,
+            "Host production\n  HostName prod.example.com\n  RemoteCommand echo first\n",
+        )
+        .unwrap();
+
+        sync_ssh_config_path_into_store(&store_path, &config_path).unwrap();
+        let store = ConnectionStore::load(&store_path).unwrap();
+        assert_eq!(
+            store.connections()[0].post_connect_command(),
+            Some("echo first")
+        );
+        assert!(has_remote_command_tag(&store.connections()[0].tags));
+
+        std::fs::write(
+            &config_path,
+            "Host production\n  HostName prod.example.com\n  RemoteCommand none\n",
+        )
+        .unwrap();
+        sync_ssh_config_path_into_store(&store_path, &config_path).unwrap();
+        let store = ConnectionStore::load(&store_path).unwrap();
+        assert!(store.connections()[0].post_connect_command().is_none());
+        assert!(has_remote_command_tag(&store.connections()[0].tags));
+
+        std::fs::write(
+            &config_path,
+            "Host production\n  HostName prod.example.com\n",
+        )
+        .unwrap();
+        sync_ssh_config_path_into_store(&store_path, &config_path).unwrap();
+        let mut store = ConnectionStore::load(&store_path).unwrap();
+        assert!(!has_remote_command_tag(&store.connections()[0].tags));
+        let mut connection = store.connections()[0].clone();
+        connection.options.post_connect_command = Some("echo app-owned".to_string());
+        store
+            .upsert_imported_connections_transaction(vec![connection])
+            .unwrap();
+
+        let outcome = sync_ssh_config_path_into_store(&store_path, &config_path).unwrap();
+        let store = ConnectionStore::load(&store_path).unwrap();
+        assert_eq!(outcome.skipped, vec!["production"]);
+        assert_eq!(
+            store.connections()[0].post_connect_command(),
+            Some("echo app-owned")
         );
         let _ = std::fs::remove_dir_all(directory);
     }

@@ -27,6 +27,7 @@ pub struct SshConfigHost {
     pub x11_forwarding: ConnectionX11ForwardingOptions,
     pub proxy_chain: Vec<SshConfigProxyHop>,
     pub proxy_command: Option<Vec<SecretString>>,
+    pub remote_command: Option<SecretString>,
     pub already_imported: bool,
 }
 
@@ -76,6 +77,7 @@ struct SshHostOptions {
     forward_x11_timeout: Option<String>,
     proxy_jump: Option<String>,
     proxy_command: Option<Vec<SecretString>>,
+    remote_command: Option<SecretString>,
 }
 
 const MAX_PROXY_JUMP_DEPTH: usize = 16;
@@ -232,6 +234,18 @@ fn parse_ssh_config_file_into(
     let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
 
     for raw_line in source.lines() {
+        if let Some(remote_command) = remote_command_value(raw_line) {
+            if blocks[*current_block].options.remote_command.is_none() {
+                // Keep imported commands redacted until the existing persisted
+                // post-connect field takes ownership of the resolved value.
+                blocks[*current_block].options.remote_command = Some(SecretString::new(
+                    (!remote_command.eq_ignore_ascii_case("none"))
+                        .then_some(remote_command)
+                        .unwrap_or_default(),
+                ));
+            }
+            continue;
+        }
         let line = strip_comment(raw_line).trim();
         if line.is_empty() {
             continue;
@@ -368,6 +382,10 @@ fn merge_first_options(base: &mut SshHostOptions, update: &SshHostOptions) {
         base.proxy_jump = update.proxy_jump.clone();
         base.proxy_command = update.proxy_command.clone();
     }
+    base.remote_command = base
+        .remote_command
+        .clone()
+        .or_else(|| update.remote_command.clone());
 }
 
 fn resolve_ssh_config_alias_from_blocks(
@@ -461,6 +479,20 @@ fn resolve_ssh_config_host(alias: &str, blocks: &[SshHostBlock]) -> Result<SshCo
                 })
                 .collect()
         });
+    let remote_command = options.remote_command.as_ref().map(|command| {
+        if command.is_empty() {
+            SecretString::default()
+        } else {
+            SecretString::new(expand_remote_command_tokens(
+                command.expose_secret(),
+                alias,
+                resolved_hostname,
+                options.user.as_deref(),
+                options.port,
+                options.proxy_jump.as_deref(),
+            ))
+        }
+    });
 
     Ok(SshConfigHost {
         alias: alias.to_string(),
@@ -476,6 +508,7 @@ fn resolve_ssh_config_host(alias: &str, blocks: &[SshHostBlock]) -> Result<SshCo
         x11_forwarding,
         proxy_chain,
         proxy_command,
+        remote_command,
         already_imported: false,
     })
 }
@@ -957,6 +990,76 @@ fn expand_proxy_command_tokens(
     expanded
 }
 
+fn expand_remote_command_tokens(
+    value: &str,
+    alias: &str,
+    hostname: &str,
+    remote_user: Option<&str>,
+    port: Option<u16>,
+    proxy_jump: Option<&str>,
+) -> String {
+    let home = dirs::home_dir().unwrap_or_default();
+    let local_user = whoami::username();
+    let local_hostname = whoami::fallible::hostname().unwrap_or_default();
+    let short_local_hostname = local_hostname
+        .split_once('.')
+        .map(|(name, _)| name)
+        .unwrap_or(&local_hostname);
+    #[cfg(unix)]
+    let local_uid = {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(&home)
+            .map(|metadata| metadata.uid().to_string())
+            .unwrap_or_default()
+    };
+    #[cfg(not(unix))]
+    let local_uid = String::new();
+
+    let mut expanded = String::with_capacity(value.len());
+    let mut characters = value.chars();
+    while let Some(character) = characters.next() {
+        if character != '%' {
+            expanded.push(character);
+            continue;
+        }
+        match characters.next() {
+            Some('%') => expanded.push('%'),
+            Some('d') => expanded.push_str(&home.to_string_lossy()),
+            Some('h') => expanded.push_str(hostname),
+            Some('i') => expanded.push_str(&local_uid),
+            Some('j') => expanded.push_str(proxy_jump.unwrap_or_default()),
+            Some('k' | 'n') => expanded.push_str(alias),
+            Some('L') => expanded.push_str(short_local_hostname),
+            Some('l') => expanded.push_str(&local_hostname),
+            Some('p') => expanded.push_str(&port.unwrap_or(22).to_string()),
+            Some('r') => expanded.push_str(remote_user.unwrap_or_default()),
+            Some('u') => expanded.push_str(&local_user),
+            Some(token) => {
+                expanded.push('%');
+                expanded.push(token);
+            }
+            None => expanded.push('%'),
+        }
+    }
+    expanded
+}
+
+fn remote_command_value(line: &str) -> Option<&str> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let keyword_end = line
+        .find(|character: char| character.is_whitespace() || character == '=')
+        .unwrap_or(line.len());
+    if !line[..keyword_end].eq_ignore_ascii_case("remotecommand") {
+        return None;
+    }
+    let value = line[keyword_end..].trim_start();
+    let value = value.strip_prefix('=').unwrap_or(value).trim();
+    (!value.is_empty()).then_some(value)
+}
+
 fn strip_comment(line: &str) -> &str {
     let mut in_quotes = false;
     for (index, ch) in line.char_indices() {
@@ -1099,6 +1202,42 @@ mod tests {
         assert_eq!(host.hostname.as_deref(), Some("prod.example.com"));
         assert_eq!(host.port, Some(2200));
         assert_eq!(host.connect_timeout_seconds, Some(120));
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn remote_command_preserves_shell_text_and_expands_connection_tokens() {
+        let directory = std::env::temp_dir().join(format!(
+            "oxideterm-ssh-config-remote-command-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("config"),
+            concat!(
+                "Host production\n",
+                "  HostName prod.example.com\n",
+                "  User deploy\n",
+                "  Port 2200\n",
+                "  RemoteCommand printf '\"%h\" %n %p %r %% # preserved'\n",
+                "Host *\n",
+                "  RemoteCommand echo ignored\n",
+            ),
+        )
+        .unwrap();
+
+        let blocks = parse_ssh_config_file(&directory.join("config")).unwrap();
+        let host = resolve_ssh_config_alias_from_blocks("production", &blocks)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            host.remote_command
+                .as_ref()
+                .map(SecretString::expose_secret),
+            Some("printf '\"prod.example.com\" production 2200 deploy % # preserved'")
+        );
         let _ = fs::remove_dir_all(directory);
     }
 

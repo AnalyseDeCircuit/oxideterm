@@ -106,7 +106,10 @@ impl fmt::Debug for SshConfig {
             )
             .field("legacy_ssh_compatibility", &self.legacy_ssh_compatibility)
             .field("x11_forwarding", &self.x11_forwarding)
-            .field("post_connect_command", &self.post_connect_command)
+            .field(
+                "post_connect_command_configured",
+                &self.post_connect_command.is_some(),
+            )
             .finish()
     }
 }
@@ -538,6 +541,17 @@ mod tests {
         assert!(!pool_key.contains("helper-with-token"));
         assert!(!pool_key.contains("credential-value"));
         assert!(pool_key.contains("proxy-command="));
+    }
+
+    #[test]
+    fn post_connect_command_is_redacted_from_runtime_debug_output() {
+        let mut config = SshConfig::password("target", 22, "operator", "pw");
+        config.post_connect_command = Some("command-with-private-token".to_string());
+
+        let debug = format!("{config:?}");
+
+        assert!(!debug.contains("command-with-private-token"));
+        assert!(debug.contains("post_connect_command_configured: true"));
     }
 
     #[test]
