@@ -842,6 +842,7 @@ impl WorkspaceApp {
                 });
                 self.start_cloud_sync_upload_with_options(false, false, false, cx);
             }
+            CloudSyncUiIntent::ForceUpload => self.open_cloud_sync_force_upload_confirm(cx),
             CloudSyncUiIntent::FinishScopeEdit => self.finish_cloud_sync_scope_edit(cx),
             CloudSyncUiIntent::BeginInputSelection {
                 input,
@@ -945,17 +946,7 @@ impl WorkspaceApp {
                 });
                 self.save_cloud_sync_state(cx);
             }
-            if self
-                .cloud_sync
-                .read(cx)
-                .controller
-                .pull_preview_after_current
-            {
-                self.cloud_sync.update(cx, |cloud_sync, _cx| {
-                    cloud_sync.controller.pull_preview_after_current = false;
-                });
-                self.start_cloud_sync_pull_preview(cx);
-            } else if let Some(automatic) = self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            if let Some(automatic) = self.cloud_sync.update(cx, |cloud_sync, _cx| {
                 cloud_sync.controller.upload_after_current.take()
             }) {
                 self.start_cloud_sync_upload_with_options(false, automatic, true, cx);
@@ -1033,7 +1024,7 @@ impl WorkspaceApp {
                         if automatic {
                             self.finish_cloud_sync_automatic_upload_error(error, cx);
                         } else if is_cloud_sync_remote_changed_before_upload(&error) {
-                            self.finish_cloud_sync_upload_conflict_for_preview(error, cx);
+                            self.finish_cloud_sync_upload_conflict(error, cx);
                         } else {
                             self.finish_cloud_sync_error("upload", error, cx);
                         }
@@ -1318,7 +1309,7 @@ impl WorkspaceApp {
         self.save_cloud_sync_state(cx);
     }
 
-    pub(super) fn finish_cloud_sync_upload_conflict_for_preview(
+    pub(super) fn finish_cloud_sync_upload_conflict(
         &mut self,
         error: String,
         cx: &mut Context<Self>,
@@ -1335,7 +1326,6 @@ impl WorkspaceApp {
             );
             cloud_sync.controller.progress = None;
             cloud_sync.controller.upload_after_current = None;
-            cloud_sync.controller.pull_preview_after_current = true;
         });
         self.save_cloud_sync_state(cx);
     }

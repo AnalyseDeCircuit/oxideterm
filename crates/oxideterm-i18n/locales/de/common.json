@@ -615,6 +615,8 @@
       },
       "confirm": {
         "import_title": "Remote-Snapshot importieren?",
+        "force_upload_title": "Remote-Snapshot zwangsweise überschreiben?",
+        "force_upload_description": "Dadurch wird der Remote-Snapshot durch die ausgewählten lokalen Daten ersetzt, auch wenn er auf einem anderen Gerät geändert wurde. Diese Remote-Änderungen können verloren gehen.",
         "clear_secret_title": "Gespeichertes Geheimnis löschen?",
         "clear_secret_description": "Dies entfernt den gespeicherten Wert für {{label}} aus dem sicheren Speicher. Diese Aktion kann nicht rückgängig gemacht werden.",
         "restore_backup_title": "Vorherige lokale Sicherung wiederherstellen?",

@@ -261,7 +261,8 @@ pub struct ApplyLegacyPreviewOutcome {
 impl StructuredPreview {
     pub fn full_selection(&self) -> StructuredApplySelection {
         StructuredApplySelection {
-            connections: self.connections_snapshot.is_some(),
+            connections: self.connections_snapshot.is_some()
+                || self.standalone_sftp_profiles_snapshot.is_some(),
             forwards: self.forwards_snapshot.is_some(),
             quick_commands: self.quick_commands_snapshot_json.is_some(),
             serial_profiles: self.serial_profiles_snapshot.is_some(),

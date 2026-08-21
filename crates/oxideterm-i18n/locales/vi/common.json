@@ -615,6 +615,8 @@
       },
       "confirm": {
         "import_title": "Nhập ảnh chụp từ xa?",
+        "force_upload_title": "Buộc ghi đè ảnh chụp từ xa?",
+        "force_upload_description": "Thao tác này thay thế ảnh chụp từ xa bằng dữ liệu cục bộ đã chọn, ngay cả khi dữ liệu đã được thay đổi trên thiết bị khác. Các thay đổi từ xa đó có thể bị mất.",
         "clear_secret_title": "Xóa thông tin đã lưu?",
         "clear_secret_description": "Thao tác này sẽ xóa giá trị đã lưu cho {{label}} khỏi bộ nhớ bảo mật. Hành động này không thể hoàn tác.",
         "restore_backup_title": "Khôi phục bản sao lưu cục bộ trước đó?",

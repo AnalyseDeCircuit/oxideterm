@@ -607,6 +607,8 @@
       },
       "confirm": {
         "import_title": "确认导入远端快照？",
+        "force_upload_title": "确认强制覆盖远端快照？",
+        "force_upload_description": "即使远端快照已被其他设备修改，也会用选中的本地数据将其替换。其他设备的远端改动可能丢失。",
         "clear_secret_title": "确认清除已存 secret？",
         "clear_secret_description": "这会从安全存储中删除 {{label}} 的已存值，而且无法撤销。",
         "restore_backup_title": "确认恢复之前的本地备份？",

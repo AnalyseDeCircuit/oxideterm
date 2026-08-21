@@ -8,7 +8,7 @@ use std::collections::{BTreeSet, HashSet};
 use oxideterm_cloud_sync::{
     ConflictStrategy, RawSyncScope, StructuredApplySelection, StructuredDirtySections,
     StructuredManifest, StructuredSectionRevisions, SyncScope,
-    operation::{LegacyPreview, StructuredUploadItemFilter},
+    operation::{LegacyPreview, StructuredPreview, StructuredUploadItemFilter},
     state::CloudSyncHistorySummary,
 };
 use oxideterm_connections::oxide_file::{ImportConflictStrategy, OxideImportOptions};
@@ -465,30 +465,66 @@ impl CloudSyncPreviewSelection {
             } => ConflictStrategy::Replace,
             _ => default_conflict_strategy,
         };
+        let structured_full_selection = match preview {
+            CloudSyncPendingPreview::Structured(preview) => Some(preview.full_selection()),
+            CloudSyncPendingPreview::Legacy { .. } => None,
+        };
         Self {
-            import_connections: summary.connections > 0,
+            import_connections: structured_full_selection
+                .as_ref()
+                .map_or(summary.connections > 0, |selection| selection.connections),
             selected_connection_names: summary.connection_record_names(),
             selected_connection_ids: preview_connection_ids(preview),
-            import_quick_commands: summary.quick_commands > 0,
+            import_quick_commands: structured_full_selection
+                .as_ref()
+                .map_or(summary.quick_commands > 0, |selection| {
+                    selection.quick_commands
+                }),
             selected_quick_command_ids: preview_quick_command_ids(preview),
-            import_serial_profiles: summary.serial_profiles > 0,
+            import_serial_profiles: structured_full_selection
+                .as_ref()
+                .map_or(summary.serial_profiles > 0, |selection| {
+                    selection.serial_profiles
+                }),
             selected_serial_profile_ids: preview_serial_profile_ids(preview),
-            import_telnet_profiles: summary.telnet_profiles > 0,
+            import_telnet_profiles: structured_full_selection
+                .as_ref()
+                .map_or(summary.telnet_profiles > 0, |selection| {
+                    selection.telnet_profiles
+                }),
             selected_telnet_profile_ids: preview_telnet_profile_ids(preview),
-            import_mosh_profiles: summary.mosh_profiles > 0,
+            import_mosh_profiles: structured_full_selection
+                .as_ref()
+                .map_or(summary.mosh_profiles > 0, |selection| {
+                    selection.mosh_profiles
+                }),
             selected_mosh_profile_ids: preview_mosh_profile_ids(preview),
-            import_remote_desktop_profiles: summary.remote_desktop_profiles > 0,
+            import_remote_desktop_profiles: structured_full_selection
+                .as_ref()
+                .map_or(summary.remote_desktop_profiles > 0, |selection| {
+                    selection.remote_desktop_profiles
+                }),
             selected_remote_desktop_profile_ids: preview_remote_desktop_profile_ids(preview),
-            import_sensitive_credentials: summary.sensitive_credentials > 0,
+            import_sensitive_credentials: structured_full_selection
+                .as_ref()
+                .map_or(summary.sensitive_credentials > 0, |selection| {
+                    selection.sensitive_credentials
+                }),
             import_app_settings: summary.has_app_settings,
             selected_app_settings_sections: summary
                 .app_settings_sections
                 .iter()
                 .map(|section| section.id.clone())
                 .collect(),
-            import_plugin_settings: summary.plugin_settings_count > 0,
+            import_plugin_settings: structured_full_selection
+                .as_ref()
+                .map_or(summary.plugin_settings_count > 0, |selection| {
+                    !selection.plugin_ids.is_empty()
+                }),
             selected_plugin_ids: summary.plugin_settings_by_plugin.keys().cloned().collect(),
-            import_forwards: summary.forwards > 0,
+            import_forwards: structured_full_selection
+                .as_ref()
+                .map_or(summary.forwards > 0, |selection| selection.forwards),
             selected_forward_ids: preview_forward_ids(preview),
             conflict_strategy,
         }
@@ -550,20 +586,73 @@ impl CloudSyncPreviewSelection {
             || self.effective_import_plugin_settings()
     }
 
-    pub fn structured_selection(&self) -> StructuredApplySelection {
+    pub fn structured_selection(&self, preview: &StructuredPreview) -> StructuredApplySelection {
+        let quick_command_count =
+            preview
+                .quick_commands_snapshot_json
+                .as_deref()
+                .and_then(|json| {
+                    serde_json::from_str::<oxideterm_quick_commands::QuickCommandsSnapshot>(json)
+                        .ok()
+                        .map(|snapshot| snapshot.commands.len())
+                });
         StructuredApplySelection {
-            connections: self.import_connections && !self.selected_connection_ids.is_empty(),
-            forwards: self.import_forwards && !self.selected_forward_ids.is_empty(),
+            connections: self.import_connections
+                && (preview.standalone_sftp_profiles_snapshot.is_some()
+                    || structured_record_section_selected(
+                        !self.selected_connection_ids.is_empty(),
+                        preview
+                            .connections_snapshot
+                            .as_ref()
+                            .map(|snapshot| snapshot.records.len()),
+                    )),
+            forwards: self.import_forwards
+                && structured_record_section_selected(
+                    !self.selected_forward_ids.is_empty(),
+                    preview
+                        .forwards_snapshot
+                        .as_ref()
+                        .map(|snapshot| snapshot.records.len()),
+                ),
             quick_commands: self.import_quick_commands
-                && !self.selected_quick_command_ids.is_empty(),
+                && structured_record_section_selected(
+                    !self.selected_quick_command_ids.is_empty(),
+                    quick_command_count,
+                ),
             serial_profiles: self.import_serial_profiles
-                && !self.selected_serial_profile_ids.is_empty(),
+                && structured_record_section_selected(
+                    !self.selected_serial_profile_ids.is_empty(),
+                    preview
+                        .serial_profiles_snapshot
+                        .as_ref()
+                        .map(|snapshot| snapshot.records.len()),
+                ),
             telnet_profiles: self.import_telnet_profiles
-                && !self.selected_telnet_profile_ids.is_empty(),
-            mosh_profiles: self.import_mosh_profiles && !self.selected_mosh_profile_ids.is_empty(),
+                && structured_record_section_selected(
+                    !self.selected_telnet_profile_ids.is_empty(),
+                    preview
+                        .telnet_profiles_snapshot
+                        .as_ref()
+                        .map(|snapshot| snapshot.records.len()),
+                ),
+            mosh_profiles: self.import_mosh_profiles
+                && structured_record_section_selected(
+                    !self.selected_mosh_profile_ids.is_empty(),
+                    preview
+                        .mosh_profiles_snapshot
+                        .as_ref()
+                        .map(|snapshot| snapshot.records.len()),
+                ),
             remote_desktop_profiles: self.import_remote_desktop_profiles
-                && !self.selected_remote_desktop_profile_ids.is_empty(),
-            sensitive_credentials: self.import_sensitive_credentials,
+                && structured_record_section_selected(
+                    !self.selected_remote_desktop_profile_ids.is_empty(),
+                    preview
+                        .remote_desktop_profiles_snapshot
+                        .as_ref()
+                        .map(|snapshot| snapshot.records.len()),
+                ),
+            sensitive_credentials: self.import_sensitive_credentials
+                && preview.sensitive_credentials_entry.is_some(),
             app_settings_sections: if self.import_app_settings {
                 self.selected_app_settings_sections
                     .iter()
@@ -886,6 +975,13 @@ impl CloudSyncPreviewSelection {
     }
 }
 
+fn structured_record_section_selected(
+    has_selected_records: bool,
+    remote_record_count: Option<usize>,
+) -> bool {
+    remote_record_count.is_some_and(|record_count| record_count == 0 || has_selected_records)
+}
+
 fn toggle_set_value(values: &mut BTreeSet<String>, value: String) {
     if !values.remove(&value) {
         values.insert(value);
@@ -1117,7 +1213,7 @@ pub fn cloud_sync_apply_total_units(
     let rollback_units = usize::from(create_rollback_backup);
     let import_units = match preview {
         CloudSyncPendingPreview::Structured(preview) => {
-            let structured_selection = selection.structured_selection();
+            let structured_selection = selection.structured_selection(preview);
             usize::from(structured_selection.connections && preview.connections_snapshot.is_some())
                 + usize::from(structured_selection.forwards && preview.forwards_snapshot.is_some())
                 + usize::from(
@@ -1275,6 +1371,8 @@ pub fn has_cloud_sync_structured_conflict(
 mod tests {
     use super::*;
     use crate::CloudSyncPreviewRecord;
+    use oxideterm_cloud_sync::{StructuredObjectEntry, create_manifest_base};
+    use oxideterm_connections::SavedConnectionsSyncSnapshot;
 
     fn connection_record(name: &str) -> CloudSyncPreviewRecord {
         CloudSyncPreviewRecord {
@@ -1292,6 +1390,64 @@ mod tests {
             records: names.iter().map(|name| connection_record(name)).collect(),
             ..CloudSyncPreviewSummary::default()
         }
+    }
+
+    #[test]
+    fn fresh_client_applies_empty_remote_sections_to_establish_the_baseline() {
+        let mut manifest = create_manifest_base(
+            "remote-revision",
+            "2026-08-21T00:00:00Z",
+            "linux-device",
+            SyncScope::default(),
+        );
+        manifest.sections.connections = Some(StructuredObjectEntry {
+            revision: "empty-connections".to_string(),
+            path: "objects/connections/empty.json".to_string(),
+            record_count: Some(0),
+            content_type: "application/json".to_string(),
+        });
+        let preview = CloudSyncPendingPreview::Structured(StructuredPreview {
+            remote_metadata: Default::default(),
+            manifest,
+            connections_snapshot: Some(SavedConnectionsSyncSnapshot {
+                revision: "empty-connections".to_string(),
+                exported_at: "2026-08-21T00:00:00Z".to_string(),
+                records: Vec::new(),
+            }),
+            forwards_snapshot: None,
+            quick_commands_snapshot_json: None,
+            serial_profiles_snapshot: None,
+            telnet_profiles_snapshot: None,
+            mosh_profiles_snapshot: None,
+            standalone_sftp_profiles_snapshot: None,
+            remote_desktop_profiles_snapshot: None,
+            base_connections_snapshot: None,
+            base_forwards_snapshot: None,
+            base_quick_commands_snapshot_json: None,
+            base_serial_profiles_snapshot: None,
+            base_telnet_profiles_snapshot: None,
+            base_mosh_profiles_snapshot: None,
+            base_standalone_sftp_profiles_snapshot: None,
+            base_remote_desktop_profiles_snapshot: None,
+            sensitive_credentials_entry: None,
+            sensitive_credentials_preview: None,
+            app_settings_entries: Default::default(),
+            app_settings_sections: Default::default(),
+            plugin_settings_entries: Default::default(),
+            plugin_settings_counts: Default::default(),
+        });
+        let selection = CloudSyncPreviewSelection::from_preview(&preview, ConflictStrategy::Merge);
+        let CloudSyncPendingPreview::Structured(preview) = &preview else {
+            unreachable!("fixture is structured");
+        };
+        let applied = selection.structured_selection(preview);
+
+        assert!(selection.import_connections);
+        assert!(applied.connections);
+        assert!(structured_apply_covers_full_remote(
+            &preview.manifest,
+            &applied
+        ));
     }
 
     #[test]

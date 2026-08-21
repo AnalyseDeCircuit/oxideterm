@@ -644,6 +644,7 @@ pub async fn deliver_cloud_sync_apply_preview(
     };
     let result = match preview {
         CloudSyncPendingPreview::Structured(mut preview) => {
+            let structured_selection = selection.structured_selection(&preview);
             filter_structured_preview_for_selection(&mut preview, &selection);
             service
                 .apply_structured_preview(
@@ -652,7 +653,7 @@ pub async fn deliver_cloud_sync_apply_preview(
                     &mut settings_store,
                     &settings,
                     preview,
-                    selection.structured_selection(),
+                    structured_selection,
                     selection.conflict_strategy.clone(),
                     sync_password.as_ref().map(|password| password.as_str()),
                     Some(&mut apply_progress),

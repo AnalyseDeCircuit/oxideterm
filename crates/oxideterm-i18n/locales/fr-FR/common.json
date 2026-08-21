@@ -615,6 +615,8 @@
       },
       "confirm": {
         "import_title": "Importer le snapshot distant ?",
+        "force_upload_title": "Forcer le remplacement du snapshot distant ?",
+        "force_upload_description": "Cette action remplace le snapshot distant par les données locales sélectionnées, même s’il a été modifié sur un autre appareil. Ces modifications distantes peuvent être perdues.",
         "clear_secret_title": "Effacer le secret stocké ?",
         "clear_secret_description": "Cela supprime la valeur stockée pour {{label}} du stockage sécurisé. Cette action est irréversible.",
         "restore_backup_title": "Restaurer la sauvegarde locale précédente ?",

@@ -615,6 +615,8 @@
       },
       "confirm": {
         "import_title": "確認匯入遠端快照？",
+        "force_upload_title": "確認強制覆寫遠端快照？",
+        "force_upload_description": "即使遠端快照已由其他裝置修改，也會以選取的本機資料取代。其他裝置的遠端變更可能遺失。",
         "clear_secret_title": "確認清除已儲存的 secret？",
         "clear_secret_description": "這會從安全儲存中刪除 {{label}} 的已儲存值，而且無法復原。",
         "restore_backup_title": "確認還原之前的本機備份？",

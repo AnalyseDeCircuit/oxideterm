@@ -179,6 +179,40 @@ impl CloudSyncPageRenderer {
                 }
             });
         }
+        let force_upload_available = state.auto_upload_blocked_by_conflict
+            || state.conflict_details.is_some()
+            || state.status == CloudSyncStatus::Conflict;
+        let mut actions = vec![self.render_cloud_sync_action_button(
+            model.copy.apply_label_key,
+            ButtonVariant::Default,
+            busy || !model.can_apply,
+            self.intent_listener(CloudSyncUiIntent::ApplyPreview),
+        )];
+        if force_upload_available && !preview.is_backup() {
+            actions.push(self.render_cloud_sync_action_button(
+                "plugin.cloud_sync.actions.force_upload",
+                ButtonVariant::Destructive,
+                busy,
+                self.intent_listener(CloudSyncUiIntent::ForceUpload),
+            ));
+        }
+        actions.push(self.render_cloud_sync_action_button(
+            "plugin.cloud_sync.actions.cancel_preview",
+            ButtonVariant::Outline,
+            busy,
+            {
+                let cloud_sync = self.cloud_sync.clone();
+                move |_event, _window, cx| {
+                    cloud_sync.update(cx, |cloud_sync, cx| {
+                        cloud_sync.view.pending_preview = None;
+                        cloud_sync.view.preview_selection = None;
+                        cloud_sync.clear_select_focus();
+                        cx.notify();
+                    });
+                    cx.stop_propagation();
+                }
+            },
+        ));
         cloud_sync_preview_card(
             &self.tokens,
             self.cloud_sync_has_background(),
@@ -186,31 +220,7 @@ impl CloudSyncPageRenderer {
             fact_rows,
             warning,
             body,
-            cloud_sync_action_grid([
-                self.render_cloud_sync_action_button(
-                    model.copy.apply_label_key,
-                    ButtonVariant::Default,
-                    busy || !model.can_apply,
-                    self.intent_listener(CloudSyncUiIntent::ApplyPreview),
-                ),
-                self.render_cloud_sync_action_button(
-                    "plugin.cloud_sync.actions.cancel_preview",
-                    ButtonVariant::Outline,
-                    busy,
-                    {
-                        let cloud_sync = self.cloud_sync.clone();
-                        move |_event, _window, cx| {
-                            cloud_sync.update(cx, |cloud_sync, cx| {
-                                cloud_sync.view.pending_preview = None;
-                                cloud_sync.view.preview_selection = None;
-                                cloud_sync.clear_select_focus();
-                                cx.notify();
-                            });
-                            cx.stop_propagation();
-                        }
-                    },
-                ),
-            ]),
+            cloud_sync_action_grid(actions),
         )
     }
 
@@ -277,6 +287,40 @@ impl CloudSyncPageRenderer {
                 ),
             ])]
         };
+        let force_upload_available = state.auto_upload_blocked_by_conflict
+            || state.conflict_details.is_some()
+            || state.status == CloudSyncStatus::Conflict;
+        let mut actions = vec![self.render_cloud_sync_action_button(
+            "plugin.cloud_sync.actions.upload_now",
+            ButtonVariant::Default,
+            busy,
+            self.intent_listener(CloudSyncUiIntent::StartUpload),
+        )];
+        if force_upload_available {
+            actions.push(self.render_cloud_sync_action_button(
+                "plugin.cloud_sync.actions.force_upload",
+                ButtonVariant::Destructive,
+                busy,
+                self.intent_listener(CloudSyncUiIntent::ForceUpload),
+            ));
+        }
+        actions.push(self.render_cloud_sync_action_button(
+            "plugin.cloud_sync.actions.cancel_preview",
+            ButtonVariant::Outline,
+            busy,
+            {
+                let cloud_sync = self.cloud_sync.clone();
+                move |_event, _window, cx| {
+                    cloud_sync.update(cx, |cloud_sync, cx| {
+                        cloud_sync.view.upload_preview = None;
+                        cloud_sync.view.upload_selection = None;
+                        cloud_sync.clear_select_focus();
+                        cx.notify();
+                    });
+                    cx.stop_propagation();
+                }
+            },
+        ));
         cloud_sync_preview_card(
             &self.tokens,
             self.cloud_sync_has_background(),
@@ -284,31 +328,7 @@ impl CloudSyncPageRenderer {
             fact_rows,
             None,
             body,
-            cloud_sync_action_grid([
-                self.render_cloud_sync_action_button(
-                    "plugin.cloud_sync.actions.upload_now",
-                    ButtonVariant::Default,
-                    busy,
-                    self.intent_listener(CloudSyncUiIntent::StartUpload),
-                ),
-                self.render_cloud_sync_action_button(
-                    "plugin.cloud_sync.actions.cancel_preview",
-                    ButtonVariant::Outline,
-                    busy,
-                    {
-                        let cloud_sync = self.cloud_sync.clone();
-                        move |_event, _window, cx| {
-                            cloud_sync.update(cx, |cloud_sync, cx| {
-                                cloud_sync.view.upload_preview = None;
-                                cloud_sync.view.upload_selection = None;
-                                cloud_sync.clear_select_focus();
-                                cx.notify();
-                            });
-                            cx.stop_propagation();
-                        }
-                    },
-                ),
-            ]),
+            cloud_sync_action_grid(actions),
         )
     }
 

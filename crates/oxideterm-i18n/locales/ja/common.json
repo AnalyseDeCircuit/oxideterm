@@ -615,6 +615,8 @@
       },
       "confirm": {
         "import_title": "リモートスナップショットをインポートしますか？",
+        "force_upload_title": "リモートスナップショットを強制的に上書きしますか？",
+        "force_upload_description": "別のデバイスで変更されていても、選択したローカルデータでリモートスナップショットを置き換えます。リモート側の変更は失われる可能性があります。",
         "clear_secret_title": "保存済みシークレットを消去しますか？",
         "clear_secret_description": "{{label}} の保存済みの値をセキュアストレージから削除します。この操作は取り消せません。",
         "restore_backup_title": "以前のローカルバックアップを復元しますか？",

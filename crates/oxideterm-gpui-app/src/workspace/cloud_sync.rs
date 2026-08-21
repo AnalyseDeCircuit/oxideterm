@@ -158,7 +158,6 @@ pub(super) struct CloudSyncControllerState {
     pub(super) dirty_refresh_scheduled: bool,
     pub(super) dirty_refresh_generation: u64,
     pub(super) upload_after_current: Option<bool>,
-    pub(super) pull_preview_after_current: bool,
 }
 
 impl CloudSyncControllerState {
@@ -174,7 +173,6 @@ impl CloudSyncControllerState {
             dirty_refresh_scheduled: false,
             dirty_refresh_generation: 0,
             upload_after_current: None,
-            pull_preview_after_current: false,
         }
     }
 }
@@ -310,6 +308,7 @@ pub(super) enum CloudSyncUiIntent {
     SaveConfiguration,
     ApplyPreview,
     StartUpload,
+    ForceUpload,
     FinishScopeEdit,
     BeginInputSelection {
         input: SettingsInput,

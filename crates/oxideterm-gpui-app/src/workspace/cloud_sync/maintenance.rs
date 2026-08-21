@@ -92,6 +92,21 @@ impl WorkspaceApp {
         });
     }
 
+    pub(super) fn open_cloud_sync_force_upload_confirm(&mut self, cx: &mut Context<Self>) {
+        let has_preview = {
+            let cloud_sync = self.cloud_sync.read(cx);
+            cloud_sync.view.upload_preview.is_some() || cloud_sync.view.pending_preview.is_some()
+        };
+        if !has_preview {
+            return;
+        }
+        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync.view.confirm = Some(CloudSyncConfirm::ForceUpload);
+            cloud_sync.view.confirm_presence.reopen();
+            cloud_sync.view.confirm_focused_action = None;
+        });
+    }
+
     pub(super) fn open_cloud_sync_restore_confirm(
         &mut self,
         backup: Option<(String, String)>,
@@ -178,6 +193,9 @@ impl WorkspaceApp {
         }
         match confirm {
             Some(CloudSyncConfirm::ImportPreview) => self.start_cloud_sync_apply_preview(cx),
+            Some(CloudSyncConfirm::ForceUpload) => {
+                self.start_cloud_sync_upload_with_options(true, false, false, cx)
+            }
             Some(CloudSyncConfirm::ClearSecret { key, .. }) => {
                 self.clear_cloud_sync_secret(&key, cx)
             }

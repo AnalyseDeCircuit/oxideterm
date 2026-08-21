@@ -615,6 +615,8 @@
       },
       "confirm": {
         "import_title": "Importare lo snapshot remoto?",
+        "force_upload_title": "Forzare la sovrascrittura dello snapshot remoto?",
+        "force_upload_description": "Questo sostituisce lo snapshot remoto con i dati locali selezionati anche se è stato modificato su un altro dispositivo. Tali modifiche remote potrebbero andare perse.",
         "clear_secret_title": "Cancellare le credenziali memorizzate?",
         "clear_secret_description": "Questo rimuove il valore memorizzato per {{label}} dall'archivio sicuro. Questa azione non può essere annullata.",
         "restore_backup_title": "Ripristinare il backup locale precedente?",

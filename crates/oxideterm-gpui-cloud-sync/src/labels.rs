@@ -16,6 +16,7 @@ use crate::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CloudSyncConfirm {
     ImportPreview,
+    ForceUpload,
     ClearSecret { key: String, label: String },
     RestoreBackup { id: String, created_at: String },
     DeleteBackup { id: String, created_at: String },
@@ -407,6 +408,7 @@ pub fn cloud_sync_select_label_key(label: CloudSyncSelectLabelKey) -> &'static s
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CloudSyncConfirmDescription {
     None,
+    ForceUpload,
     ClearSecret { label: String },
     RestoreBackup { created_at: String },
     DeleteBackup { created_at: String },
@@ -453,6 +455,12 @@ pub fn cloud_sync_confirm_copy_spec(confirm: &CloudSyncConfirm) -> CloudSyncConf
             title_key: "plugin.cloud_sync.confirm.import_title",
             description: CloudSyncConfirmDescription::None,
             confirm_label_key: "plugin.cloud_sync.actions.import_preview",
+        },
+        CloudSyncConfirm::ForceUpload => CloudSyncConfirmCopySpec {
+            variant: ConfirmDialogVariant::Danger,
+            title_key: "plugin.cloud_sync.confirm.force_upload_title",
+            description: CloudSyncConfirmDescription::ForceUpload,
+            confirm_label_key: "plugin.cloud_sync.actions.force_upload",
         },
         CloudSyncConfirm::ClearSecret { label, .. } => CloudSyncConfirmCopySpec {
             variant: ConfirmDialogVariant::Danger,
@@ -502,6 +510,17 @@ pub fn cloud_sync_confirm_copy_spec(confirm: &CloudSyncConfirm) -> CloudSyncConf
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn force_upload_requires_a_danger_confirmation() {
+        let spec = cloud_sync_confirm_copy_spec(&CloudSyncConfirm::ForceUpload);
+
+        assert_eq!(spec.variant, ConfirmDialogVariant::Danger);
+        assert_eq!(
+            spec.confirm_label_key,
+            "plugin.cloud_sync.actions.force_upload"
+        );
+    }
 
     #[test]
     fn maps_snapshot_limit_error_to_copy_spec() {

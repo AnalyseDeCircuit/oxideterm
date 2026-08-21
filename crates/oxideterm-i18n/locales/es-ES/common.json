@@ -615,6 +615,8 @@
       },
       "confirm": {
         "import_title": "¿Importar snapshot remoto?",
+        "force_upload_title": "¿Forzar la sobrescritura del snapshot remoto?",
+        "force_upload_description": "Esto reemplaza el snapshot remoto con los datos locales seleccionados aunque haya cambiado en otro dispositivo. Esos cambios remotos pueden perderse.",
         "clear_secret_title": "¿Borrar secreto almacenado?",
         "clear_secret_description": "Esto elimina el valor almacenado para {{label}} del almacenamiento seguro. Esta acción no se puede deshacer.",
         "restore_backup_title": "¿Restaurar la copia de seguridad local anterior?",

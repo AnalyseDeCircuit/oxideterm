@@ -76,6 +76,10 @@ impl WorkspaceApp {
         let copy = cloud_sync_confirm_copy_spec(&confirm);
         let description = match copy.description {
             CloudSyncConfirmDescription::None => None,
+            CloudSyncConfirmDescription::ForceUpload => Some(
+                self.i18n
+                    .t("plugin.cloud_sync.confirm.force_upload_description"),
+            ),
             CloudSyncConfirmDescription::ClearSecret { label } => Some(self.i18n_replace(
                 "plugin.cloud_sync.confirm.clear_secret_description",
                 &[("label", label)],
