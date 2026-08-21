@@ -51,12 +51,8 @@ PACKAGES=(
   libfreetype6-dev
   libgstreamer-plugins-base1.0-dev
   libgstreamer1.0-dev
-  libgtk-3-dev
-  libjavascriptcoregtk-4.1-dev
   libssl-dev
-  libsoup-3.0-dev
   libunwind-dev
-  libwebkit2gtk-4.1-dev
   libx11-dev
   libxcb-cursor-dev
   libxcb-icccm4-dev
