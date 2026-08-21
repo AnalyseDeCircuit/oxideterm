@@ -29,6 +29,7 @@ pub enum ConnectionAuthDraftKind {
     Certificate,
     Agent,
     TwoFactor,
+    Gssapi,
 }
 
 #[derive(Clone)]
@@ -42,6 +43,8 @@ pub struct ConnectionAuthDraft {
     pub managed_key_id: String,
     pub cert_path: String,
     pub passphrase: SecretString,
+    pub gssapi_server_identity: String,
+    pub gssapi_delegate_credentials: bool,
 }
 
 impl fmt::Debug for ConnectionAuthDraft {
@@ -57,6 +60,14 @@ impl fmt::Debug for ConnectionAuthDraft {
             .field("managed_key_id", &self.managed_key_id)
             .field("cert_path", &self.cert_path)
             .field("passphrase", &self.passphrase)
+            .field(
+                "gssapi_server_identity_configured",
+                &!self.gssapi_server_identity.trim().is_empty(),
+            )
+            .field(
+                "gssapi_delegate_credentials",
+                &self.gssapi_delegate_credentials,
+            )
             .finish()
     }
 }
@@ -73,6 +84,8 @@ impl Default for ConnectionAuthDraft {
             managed_key_id: String::new(),
             cert_path: String::new(),
             passphrase: SecretString::default(),
+            gssapi_server_identity: String::new(),
+            gssapi_delegate_credentials: false,
         }
     }
 }
@@ -123,7 +136,13 @@ pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnec
         .as_ref()
         .filter(|command| !command.is_empty())
         .map(|command| command.expose_secret().to_string());
-    let auth = saved_auth_from_ssh_paths(host.identity_file, host.certificate_file);
+    let auth = saved_auth_from_ssh_host_options(
+        host.identity_file,
+        host.certificate_file,
+        host.gssapi_authentication,
+        host.gssapi_server_identity,
+        host.gssapi_delegate_credentials,
+    );
     let proxy_chain = host
         .proxy_chain
         .into_iter()
@@ -131,7 +150,13 @@ pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnec
             host: hop.host,
             port: hop.port.unwrap_or(22),
             username: hop.user.unwrap_or_else(current_username),
-            auth: saved_auth_from_ssh_paths(hop.identity_file, hop.certificate_file),
+            auth: saved_auth_from_ssh_host_options(
+                hop.identity_file,
+                hop.certificate_file,
+                hop.gssapi_authentication,
+                hop.gssapi_server_identity,
+                hop.gssapi_delegate_credentials,
+            ),
             agent_forwarding: hop.agent_forwarding,
             identity_agent: hop.identity_agent,
             agent_forwarding_socket: hop.agent_forwarding_socket,
@@ -200,6 +225,23 @@ fn saved_auth_from_ssh_paths(
             plaintext_passphrase: None,
         },
         _ => SavedAuth::Agent,
+    }
+}
+
+fn saved_auth_from_ssh_host_options(
+    identity_file: Option<String>,
+    certificate_file: Option<String>,
+    gssapi_authentication: bool,
+    gssapi_server_identity: Option<String>,
+    gssapi_delegate_credentials: bool,
+) -> SavedAuth {
+    if gssapi_authentication {
+        SavedAuth::Gssapi {
+            server_identity: gssapi_server_identity,
+            delegate_credentials: gssapi_delegate_credentials,
+        }
+    } else {
+        saved_auth_from_ssh_paths(identity_file, certificate_file)
     }
 }
 
@@ -275,6 +317,11 @@ pub fn saved_auth_from_draft(draft: ConnectionAuthDraft) -> SavedAuth {
         },
         ConnectionAuthDraftKind::TwoFactor => SavedAuth::KeyboardInteractive,
         ConnectionAuthDraftKind::Agent => SavedAuth::Agent,
+        ConnectionAuthDraftKind::Gssapi => SavedAuth::Gssapi {
+            server_identity: (!draft.gssapi_server_identity.trim().is_empty())
+                .then(|| draft.gssapi_server_identity.trim().to_string()),
+            delegate_credentials: draft.gssapi_delegate_credentials,
+        },
     }
 }
 
@@ -446,6 +493,9 @@ mod tests {
                 port: Some(2200),
                 identity_file: Some("/keys/jump".to_string()),
                 certificate_file: None,
+                gssapi_authentication: false,
+                gssapi_server_identity: None,
+                gssapi_delegate_credentials: false,
                 identity_agent: Some("/tmp/jump-agent.sock".to_string()),
                 agent_forwarding: true,
                 agent_forwarding_socket: Some("/tmp/jump-forward.sock".to_string()),

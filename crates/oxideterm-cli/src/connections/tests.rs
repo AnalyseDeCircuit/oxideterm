@@ -19,6 +19,8 @@ fn sample_connection(id: &str, name: &str) -> ConnectionInfo {
         cert_path: None,
         managed_key_id: None,
         managed_key_name: None,
+        gssapi_server_identity: None,
+        gssapi_delegate_credentials: false,
         proxy_chain: Vec::new(),
         upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
         created_at: "2026-05-26T00:00:00Z".to_string(),

@@ -641,6 +641,7 @@ fn count_sensitive_credentials_for_auth(
         }
         EncryptedAuth::KeyboardInteractive => {}
         EncryptedAuth::Agent => {}
+        EncryptedAuth::Gssapi { .. } => {}
     }
 }
 
@@ -918,6 +919,13 @@ fn import_auth(
         },
         EncryptedAuth::KeyboardInteractive => SavedAuth::KeyboardInteractive,
         EncryptedAuth::Agent => SavedAuth::Agent,
+        EncryptedAuth::Gssapi {
+            server_identity,
+            delegate_credentials,
+        } => SavedAuth::Gssapi {
+            server_identity,
+            delegate_credentials,
+        },
     })
 }
 

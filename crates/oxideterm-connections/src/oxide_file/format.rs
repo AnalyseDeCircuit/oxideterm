@@ -482,6 +482,12 @@ pub enum EncryptedAuth {
     },
     KeyboardInteractive,
     Agent,
+    Gssapi {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        server_identity: Option<String>,
+        #[serde(default)]
+        delegate_credentials: bool,
+    },
 }
 
 impl fmt::Debug for EncryptedAuth {
@@ -526,6 +532,14 @@ impl fmt::Debug for EncryptedAuth {
                 .finish(),
             Self::KeyboardInteractive => f.write_str("KeyboardInteractive"),
             Self::Agent => f.write_str("Agent"),
+            Self::Gssapi {
+                server_identity,
+                delegate_credentials,
+            } => f
+                .debug_struct("Gssapi")
+                .field("server_identity_configured", &server_identity.is_some())
+                .field("delegate_credentials", delegate_credentials)
+                .finish(),
         }
     }
 }

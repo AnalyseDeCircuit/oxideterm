@@ -64,6 +64,13 @@ fn standalone_sftp_secondary_auth_matches(
         && form.key_path.trim() == auth.key_path().unwrap_or_default()
         && form.cert_path.trim() == auth.cert_path().unwrap_or_default()
         && form.managed_key_id.trim() == auth.managed_key_id().unwrap_or_default()
+        && form.gssapi_server_identity.trim()
+            == auth
+                .gssapi_options()
+                .and_then(|(identity, _)| identity)
+                .unwrap_or_default()
+        && form.gssapi_delegate_credentials
+            == auth.gssapi_options().is_some_and(|(_, delegate)| delegate)
 }
 
 fn saved_standalone_sftp_proxy_hop_from_form(
@@ -116,6 +123,11 @@ fn saved_standalone_sftp_proxy_hop_from_form(
                 .then(|| SecretString::from(std::mem::take(&mut hop.passphrase))),
         },
         SshAuthTab::TwoFactor => SavedAuth::KeyboardInteractive,
+        SshAuthTab::Gssapi => SavedAuth::Gssapi {
+            server_identity: (!hop.gssapi_server_identity.trim().is_empty())
+                .then(|| hop.gssapi_server_identity.trim().to_string()),
+            delegate_credentials: hop.gssapi_delegate_credentials,
+        },
     };
     Ok(SavedProxyHop {
         host,
@@ -289,6 +301,11 @@ fn saved_standalone_sftp_secondary_endpoint_from_form(
                     .then(|| SecretString::from(std::mem::take(&mut form.passphrase))),
             },
             SshAuthTab::TwoFactor => SavedAuth::KeyboardInteractive,
+            SshAuthTab::Gssapi => SavedAuth::Gssapi {
+                server_identity: (!form.gssapi_server_identity.trim().is_empty())
+                    .then(|| form.gssapi_server_identity.trim().to_string()),
+                delegate_credentials: form.gssapi_delegate_credentials,
+            },
         }
     };
     let (proxy_chain, upstream_proxy, proxy_command) =
@@ -358,6 +375,11 @@ fn saved_mosh_auth_from_form(form: &mut NewConnectionForm) -> SavedAuth {
                 .then(|| SecretString::from(std::mem::take(&mut form.passphrase))),
         },
         SshAuthTab::TwoFactor => SavedAuth::KeyboardInteractive,
+        SshAuthTab::Gssapi => SavedAuth::Gssapi {
+            server_identity: (!form.gssapi_server_identity.trim().is_empty())
+                .then(|| form.gssapi_server_identity.trim().to_string()),
+            delegate_credentials: form.gssapi_delegate_credentials,
+        },
     }
 }
 
@@ -385,6 +407,11 @@ fn runtime_mosh_auth_from_form(form: &mut NewConnectionForm) -> AuthMethod {
             (!form.passphrase.is_empty()).then(|| take_zeroizing_secret(&mut form.passphrase)),
         ),
         SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
+        SshAuthTab::Gssapi => AuthMethod::gssapi(
+            (!form.gssapi_server_identity.trim().is_empty())
+                .then(|| form.gssapi_server_identity.trim().to_string()),
+            form.gssapi_delegate_credentials,
+        ),
     }
 }
 
@@ -406,6 +433,10 @@ fn runtime_mosh_auth_from_saved(
         } => AuthMethod::certificate_secret(key_path.clone(), cert_path.clone(), secret),
         SavedAuth::KeyboardInteractive => AuthMethod::KeyboardInteractive,
         SavedAuth::Agent => AuthMethod::Agent,
+        SavedAuth::Gssapi {
+            server_identity,
+            delegate_credentials,
+        } => AuthMethod::gssapi(server_identity.clone(), *delegate_credentials),
     })
 }
 
@@ -664,6 +695,16 @@ fn proxy_hop_auth_target_matches(left: &SavedProxyHop, right: &SavedProxyHop) ->
             (SavedAuth::Password { .. }, SavedAuth::Password { .. })
             | (SavedAuth::KeyboardInteractive, SavedAuth::KeyboardInteractive)
             | (SavedAuth::Agent, SavedAuth::Agent) => true,
+            (
+                SavedAuth::Gssapi {
+                    server_identity: left_identity,
+                    delegate_credentials: left_delegate,
+                },
+                SavedAuth::Gssapi {
+                    server_identity: right_identity,
+                    delegate_credentials: right_delegate,
+                },
+            ) => left_identity == right_identity && left_delegate == right_delegate,
             (
                 SavedAuth::Key {
                     key_path: left_path,
@@ -2994,6 +3035,7 @@ impl WorkspaceApp {
                         | SshAuthTab::ManagedKey
                         | SshAuthTab::Certificate => NewConnectionField::Passphrase,
                         SshAuthTab::Agent | SshAuthTab::TwoFactor => NewConnectionField::Name,
+                        SshAuthTab::Gssapi => NewConnectionField::GssapiServerIdentity,
                     };
                     form.field_focused = false;
                 }

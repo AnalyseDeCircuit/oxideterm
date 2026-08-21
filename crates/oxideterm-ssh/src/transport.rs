@@ -55,6 +55,8 @@ use crate::{
     upstream_proxy::{UpstreamProxyConfig, UpstreamProxyProtocol, dial_initial_tcp},
 };
 
+mod gssapi;
+
 pub const DEFAULT_PTY_MODES: &[(Pty, u32)] = &[
     (Pty::VINTR, 0x03),
     (Pty::VQUIT, 0x1c),
@@ -92,6 +94,7 @@ pub const DEFAULT_PTY_MODES: &[(Pty, u32)] = &[
 const NONE_AUTH_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const PASSWORD_RETRY_DELAY: Duration = Duration::from_millis(500);
 const PASSWORD_AUTH_TIMEOUT: Duration = Duration::from_secs(30);
+const GSSAPI_AUTH_TIMEOUT: Duration = Duration::from_secs(30);
 const KBI_USER_PROMPT_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_PASSWORD_KBI_FALLBACK_ROUNDS: usize = 5;
 const RSA_AUTH_ALGORITHMS: [Option<HashAlg>; 3] =

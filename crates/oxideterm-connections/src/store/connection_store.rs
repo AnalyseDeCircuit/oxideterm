@@ -2169,7 +2169,8 @@ impl ConnectionStore {
             | SavedAuth::Certificate { .. }
             | SavedAuth::ManagedKey { .. }
             | SavedAuth::KeyboardInteractive
-            | SavedAuth::Agent => Ok(None),
+            | SavedAuth::Agent
+            | SavedAuth::Gssapi { .. } => Ok(None),
         }
     }
 
@@ -2250,6 +2251,13 @@ impl ConnectionStore {
             }),
             SavedAuth::KeyboardInteractive => Ok(SavedAuth::KeyboardInteractive),
             SavedAuth::Agent => Ok(SavedAuth::Agent),
+            SavedAuth::Gssapi {
+                server_identity,
+                delegate_credentials,
+            } => Ok(SavedAuth::Gssapi {
+                server_identity: server_identity.clone(),
+                delegate_credentials: *delegate_credentials,
+            }),
         }
     }
 

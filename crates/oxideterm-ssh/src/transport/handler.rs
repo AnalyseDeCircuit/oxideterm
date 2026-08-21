@@ -177,17 +177,6 @@ impl NativeClientHandler {
 impl client::Handler for NativeClientHandler {
     type Error = SshTransportError;
 
-    fn should_accept_x11_server_channel(
-        &mut self,
-        _channel: russh::ChannelId,
-        _originator_address: &str,
-        _originator_port: u32,
-    ) -> impl Future<Output = bool> + Send {
-        let accepted = self.x11_dispatcher.has_active_routes()
-            || self.x11_forward_handler.read().is_some();
-        async move { accepted }
-    }
-
     fn kex_done(
         &mut self,
         _shared_secret: Option<&[u8]>,
@@ -224,8 +213,22 @@ impl client::Handler for NativeClientHandler {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &russh::keys::PublicKey,
+        server_key: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
+        let russh::keys::PublicKeyOrCertificate::PublicKey {
+            key: server_public_key,
+            ..
+        } = server_key
+        else {
+            // Certificate trust is deliberately disabled until the host-key
+            // policy validates its CA, principal, validity, and revocation.
+            tracing::debug!(
+                host = self.host.as_str(),
+                port = self.port,
+                "SSH host certificate rejected because certificate trust is not configured"
+            );
+            return Ok(false);
+        };
         let actual_fingerprint = public_key_fingerprint(server_public_key);
         tracing::debug!(
             host = self.host.as_str(),
@@ -334,22 +337,28 @@ impl client::Handler for NativeClientHandler {
     async fn server_channel_open_agent_forward(
         &mut self,
         channel: Channel<client::Msg>,
+        reply: client::ChannelOpenHandle,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
         if !self.agent_forwarding_requested
             || !self.agent_forwarding_accepted.load(Ordering::Acquire)
         {
-            let _ = channel.eof().await;
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
             return Ok(());
         }
 
         let Ok(permit) = self.agent_forward_semaphore.clone().try_acquire_owned() else {
-            let _ = channel.eof().await;
+            reply
+                .reject(russh::ChannelOpenFailure::ResourceShortage)
+                .await;
             return Ok(());
         };
 
         let agent_forwarding_endpoint = self.agent_forwarding_endpoint.clone();
         while self.agent_forward_tasks.try_join_next().is_some() {}
+        reply.accept().await;
         // The SSH handler owns relay tasks, so dropping the protocol session
         // aborts every agent bridge instead of detaching them.
         self.agent_forward_tasks.spawn(async move {
@@ -366,13 +375,17 @@ impl client::Handler for NativeClientHandler {
         connected_port: u32,
         originator_address: &str,
         originator_port: u32,
+        reply: client::ChannelOpenHandle,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
         let Some(registration) = self.remote_forward_handler.read().clone() else {
-            let _ = channel.eof().await;
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
             return Ok(());
         };
 
+        reply.accept().await;
         let event = RemoteForwardedTcpIp {
             connection_id: registration.connection_id.clone(),
             connected_address: connected_address.to_string(),
@@ -392,14 +405,27 @@ impl client::Handler for NativeClientHandler {
         channel: Channel<client::Msg>,
         originator_address: &str,
         originator_port: u32,
+        reply: client::ChannelOpenHandle,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
+        let has_dispatch_route = self.x11_dispatcher.has_active_routes();
+        let registration = self.x11_forward_handler.read().clone();
+        if !has_dispatch_route && registration.is_none() {
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
+        }
+
         let Ok(permit) = self.x11_forward_semaphore.clone().try_acquire_owned() else {
-            let _ = channel.eof().await;
+            reply
+                .reject(russh::ChannelOpenFailure::ResourceShortage)
+                .await;
             return Ok(());
         };
         while self.x11_forward_tasks.try_join_next().is_some() {}
-        if self.x11_dispatcher.has_active_routes() {
+        if has_dispatch_route {
+            reply.accept().await;
             let dispatcher = self.x11_dispatcher.clone();
             self.x11_forward_tasks.spawn(async move {
                 if let Err(error) = dispatcher.bridge(Box::new(channel.into_stream())).await {
@@ -410,20 +436,19 @@ impl client::Handler for NativeClientHandler {
             return Ok(());
         }
 
-        let Some(registration) = self.x11_forward_handler.read().clone() else {
-            let _ = channel.eof().await;
-            return Ok(());
-        };
-        let event = X11ForwardedChannel {
-            connection_id: registration.connection_id.clone(),
-            originator_address: originator_address.to_string(),
-            originator_port: originator_port as u16,
-            stream: Box::new(channel.into_stream()),
-        };
-        self.x11_forward_tasks.spawn(async move {
-            registration.handler.handle_x11_forward(event).await;
-            drop(permit);
-        });
+        if let Some(registration) = registration {
+            reply.accept().await;
+            let event = X11ForwardedChannel {
+                connection_id: registration.connection_id.clone(),
+                originator_address: originator_address.to_string(),
+                originator_port: originator_port as u16,
+                stream: Box::new(channel.into_stream()),
+            };
+            self.x11_forward_tasks.spawn(async move {
+                registration.handler.handle_x11_forward(event).await;
+                drop(permit);
+            });
+        }
         Ok(())
     }
 }
@@ -630,6 +655,39 @@ async fn authenticate_with_options(
             log_auth_result("keyboard-interactive", &result);
             result
         }
+        AuthMethod::Gssapi {
+            server_identity,
+            delegate_credentials,
+        } => {
+            tracing::debug!(
+                server_identity_configured = server_identity.is_some(),
+                delegate_credentials,
+                "SSH Kerberos authentication starting"
+            );
+            let mut authenticator = gssapi::KerberosAuthenticator::new(
+                &config.host,
+                server_identity.as_deref(),
+                *delegate_credentials,
+            )
+            .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))?;
+            let result = tokio::time::timeout(
+                GSSAPI_AUTH_TIMEOUT,
+                handle.authenticate_gssapi_with_mic(
+                    config.username.clone(),
+                    gssapi::KerberosAuthenticator::mechanism_oids(),
+                    &mut authenticator,
+                ),
+            )
+            .await
+            .map_err(|_| {
+                SshTransportError::AuthenticationFailed(
+                    "Kerberos authentication timed out".to_string(),
+                )
+            })?
+            .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))?;
+            log_auth_result("gssapi-with-mic", &result);
+            result
+        }
     };
 
     if result.success() {
@@ -657,6 +715,7 @@ fn auth_method_label(auth: &AuthMethod) -> &'static str {
         AuthMethod::ManagedKey { .. } => "managed-key",
         AuthMethod::Certificate { .. } => "certificate",
         AuthMethod::KeyboardInteractive => "keyboard-interactive",
+        AuthMethod::Gssapi { .. } => "gssapi-with-mic",
     }
 }
 

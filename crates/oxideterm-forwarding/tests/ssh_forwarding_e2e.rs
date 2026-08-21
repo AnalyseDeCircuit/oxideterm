@@ -404,9 +404,11 @@ impl server::Handler for ForwardingServer {
     async fn channel_open_session(
         &mut self,
         _channel: Channel<Msg>,
+        reply: server::ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
-        Ok(true)
+    ) -> Result<(), Self::Error> {
+        reply.accept().await;
+        Ok(())
     }
 
     async fn pty_request(
@@ -440,8 +442,9 @@ impl server::Handler for ForwardingServer {
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
+        reply: server::ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         self.direct_tcpip_opens.lock().await.push(DirectTcpipOpen {
             originator_address: originator_address.to_string(),
             originator_port,
@@ -454,7 +457,8 @@ impl server::Handler for ForwardingServer {
             let mut stream = channel.into_stream();
             let _ = tokio::io::copy_bidirectional(&mut stream, &mut target).await;
         });
-        Ok(true)
+        reply.accept().await;
+        Ok(())
     }
 
     async fn tcpip_forward(

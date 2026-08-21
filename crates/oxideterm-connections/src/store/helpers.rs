@@ -68,7 +68,7 @@ fn migrate_legacy_auth_credentials(
                 Ok(false)
             }
         }
-        SavedAuth::KeyboardInteractive | SavedAuth::Agent => Ok(false),
+        SavedAuth::KeyboardInteractive | SavedAuth::Agent | SavedAuth::Gssapi { .. } => Ok(false),
     }
 }
 
@@ -481,7 +481,7 @@ fn auth_with_protected_credential(auth: SavedAuth) -> Result<(SavedAuth, String)
                 reference,
             ))
         }
-        SavedAuth::KeyboardInteractive | SavedAuth::Agent => {
+        SavedAuth::KeyboardInteractive | SavedAuth::Agent | SavedAuth::Gssapi { .. } => {
             bail!("The selected authentication method has no stored credential slot")
         }
     }
@@ -538,6 +538,16 @@ fn auth_without_protected_credential(auth: &SavedAuth) -> (SavedAuth, Option<Str
         ),
         SavedAuth::KeyboardInteractive => (SavedAuth::KeyboardInteractive, None),
         SavedAuth::Agent => (SavedAuth::Agent, None),
+        SavedAuth::Gssapi {
+            server_identity,
+            delegate_credentials,
+        } => (
+            SavedAuth::Gssapi {
+                server_identity: server_identity.clone(),
+                delegate_credentials: *delegate_credentials,
+            },
+            None,
+        ),
     }
 }
 

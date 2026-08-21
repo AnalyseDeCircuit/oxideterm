@@ -14,6 +14,7 @@ pub enum AuthType {
     Certificate,
     KeyboardInteractive,
     Agent,
+    Gssapi,
 }
 
 impl AuthType {
@@ -25,6 +26,7 @@ impl AuthType {
             Self::Certificate => "certificate",
             Self::KeyboardInteractive => "keyboard_interactive",
             Self::Agent => "agent",
+            Self::Gssapi => "gssapi",
         }
     }
 }
@@ -67,6 +69,12 @@ pub enum SavedAuth {
     // Keyboard-interactive carries no persisted secret; prompts are collected during connect.
     KeyboardInteractive,
     Agent,
+    Gssapi {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        server_identity: Option<String>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        delegate_credentials: bool,
+    },
 }
 
 impl SavedAuth {
@@ -78,6 +86,7 @@ impl SavedAuth {
             Self::Certificate { .. } => AuthType::Certificate,
             Self::KeyboardInteractive => AuthType::KeyboardInteractive,
             Self::Agent => AuthType::Agent,
+            Self::Gssapi { .. } => AuthType::Gssapi,
         }
     }
 
@@ -98,6 +107,16 @@ impl SavedAuth {
     pub fn managed_key_id(&self) -> Option<&str> {
         match self {
             Self::ManagedKey { key_id, .. } => Some(key_id),
+            _ => None,
+        }
+    }
+
+    pub fn gssapi_options(&self) -> Option<(Option<&str>, bool)> {
+        match self {
+            Self::Gssapi {
+                server_identity,
+                delegate_credentials,
+            } => Some((server_identity.as_deref(), *delegate_credentials)),
             _ => None,
         }
     }
@@ -391,6 +410,10 @@ pub struct ProxyHopInfo {
     pub cert_path: Option<String>,
     pub managed_key_id: Option<String>,
     pub managed_key_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gssapi_server_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub gssapi_delegate_credentials: bool,
     pub agent_forwarding: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_agent: Option<String>,
@@ -410,6 +433,14 @@ impl From<&SavedProxyHop> for ProxyHopInfo {
             cert_path: hop.auth.cert_path().map(ToOwned::to_owned),
             managed_key_id: hop.auth.managed_key_id().map(ToOwned::to_owned),
             managed_key_name: None,
+            gssapi_server_identity: hop
+                .auth
+                .gssapi_options()
+                .and_then(|(identity, _)| identity.map(ToOwned::to_owned)),
+            gssapi_delegate_credentials: hop
+                .auth
+                .gssapi_options()
+                .is_some_and(|(_, delegate)| delegate),
             agent_forwarding: hop.agent_forwarding,
             identity_agent: hop.identity_agent.clone(),
             agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
@@ -518,6 +549,10 @@ pub struct ConnectionInfo {
     pub cert_path: Option<String>,
     pub managed_key_id: Option<String>,
     pub managed_key_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gssapi_server_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub gssapi_delegate_credentials: bool,
     pub proxy_chain: Vec<ProxyHopInfo>,
     pub upstream_proxy: SavedUpstreamProxyPolicy,
     pub created_at: String,
@@ -625,6 +660,14 @@ impl From<&SavedConnection> for ConnectionInfo {
             cert_path: conn.auth.cert_path().map(ToOwned::to_owned),
             managed_key_id: conn.auth.managed_key_id().map(ToOwned::to_owned),
             managed_key_name: None,
+            gssapi_server_identity: conn
+                .auth
+                .gssapi_options()
+                .and_then(|(identity, _)| identity.map(ToOwned::to_owned)),
+            gssapi_delegate_credentials: conn
+                .auth
+                .gssapi_options()
+                .is_some_and(|(_, delegate)| delegate),
             proxy_chain: conn.proxy_chain.iter().map(ProxyHopInfo::from).collect(),
             upstream_proxy: conn.upstream_proxy.clone(),
             created_at: conn.created_at.to_rfc3339(),

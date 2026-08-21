@@ -614,6 +614,17 @@ fn saved_auth(
         }
         PublicConnectionAuth::KeyboardInteractive => Ok(SavedAuth::KeyboardInteractive),
         PublicConnectionAuth::Agent => Ok(SavedAuth::Agent),
+        PublicConnectionAuth::Gssapi {
+            server_identity,
+            delegate_credentials,
+        } => Ok(SavedAuth::Gssapi {
+            server_identity: server_identity
+                .as_deref()
+                .map(str::trim)
+                .filter(|identity| !identity.is_empty())
+                .map(ToOwned::to_owned),
+            delegate_credentials: *delegate_credentials,
+        }),
     }
 }
 
@@ -930,6 +941,7 @@ fn auth_status(slot_kind: &str, index: Option<u32>, auth: &SavedAuth) -> Value {
         } => ("passphrase", passphrase_keychain_id.is_some(), true),
         SavedAuth::KeyboardInteractive => ("interactive", false, false),
         SavedAuth::Agent => ("agent", false, false),
+        SavedAuth::Gssapi { .. } => ("gssapi", false, false),
     };
     let slot = index.map_or_else(
         || json!({ "kind": slot_kind }),
@@ -1081,6 +1093,15 @@ pub(super) fn auth_projection(auth: &SavedAuth) -> Value {
         }),
         SavedAuth::Agent => json!({
             "kind": "agent",
+            "credential_configured": false,
+        }),
+        SavedAuth::Gssapi {
+            server_identity,
+            delegate_credentials,
+        } => json!({
+            "kind": "gssapi",
+            "server_identity": server_identity,
+            "delegate_credentials": delegate_credentials,
             "credential_configured": false,
         }),
     }

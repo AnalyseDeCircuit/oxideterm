@@ -6,7 +6,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use log::{debug, error, warn};
 use ssh_encoding::{Decode, Encode};
-use ssh_key::{Mpint, PublicKey, Signature};
+use ssh_key::{Certificate, Mpint, PublicKey, Signature};
 
 use super::IncomingSshPacket;
 use crate::client::{Config, NewKeys};
@@ -38,6 +38,7 @@ enum ClientKexState {
     },
     WaitingForNewKeys {
         server_host_key: PublicKey,
+        server_host_certificate: Option<Certificate>,
         newkeys: NewKeys,
     },
 }
@@ -87,6 +88,17 @@ impl ClientKex {
         }
     }
 
+    /// Whether strict kex was negotiated, as soon as the peer's KEXINIT has
+    /// been read (i.e. before the exchange completes).
+    pub fn strict_kex(&self) -> bool {
+        match self.state {
+            ClientKexState::Created => false,
+            ClientKexState::WaitingForGexReply { ref names, .. }
+            | ClientKexState::WaitingForDhReply { ref names, .. } => names.strict_kex(),
+            ClientKexState::WaitingForNewKeys { ref newkeys, .. } => newkeys.names.strict_kex(),
+        }
+    }
+
     pub fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error> {
         self.exchange.client_kex_init =
             negotiation::write_kex(&self.config.preferred, output, None)?;
@@ -121,6 +133,7 @@ impl ClientKex {
                         &input.buffer,
                         &self.config.preferred,
                         None,
+                        None,
                         &self.cause,
                     )?
                 };
@@ -141,7 +154,7 @@ impl ClientKex {
                     let newkeys = compute_keys(
                         Vec::new(),
                         kex,
-                        names,
+                        names.clone(),
                         self.exchange.clone(),
                         self.cause.session_id(),
                     )?;
@@ -152,6 +165,7 @@ impl ClientKex {
                     })?;
 
                     return Ok(KexProgress::Done {
+                        server_host_certificate: None,
                         newkeys,
                         server_host_key: None,
                     });
@@ -263,11 +277,31 @@ impl ClientKex {
                 #[allow(clippy::indexing_slicing)] // length checked
                 let r = &mut &input.buffer[1..];
 
-                let server_host_key = Bytes::decode(r)?; // server public key.
-                let server_host_key = parse_public_key(&server_host_key)?;
+                // The raw blob is kept as well as the parsed key. It is what
+                // goes into the exchange hash below: for a certificate the
+                // parsed form is only the key *inside* it, and re-encoding that
+                // would hash something the server never sent — a failure that
+                // looks like a bad signature and is computed entirely locally,
+                // so there is nothing on the wire to compare against.
+                let server_host_key_blob = Bytes::decode(r)?;
+                let server_host_certificate = if names.host_key_is_certificate {
+                    Some(Certificate::from_bytes(&server_host_key_blob)?)
+                } else {
+                    None
+                };
+                let server_host_key = match &server_host_certificate {
+                    // The certificate's own signature is checked by the client
+                    // against its trusted authorities, not here; what the key
+                    // exchange is signed with is the key the certificate
+                    // contains. The two are separate proofs and collapsing them
+                    // would accept a certificate nobody vouched for.
+                    Some(certificate) => PublicKey::new(certificate.public_key().clone(), ""),
+                    None => parse_public_key(&server_host_key_blob)?,
+                };
                 debug!(
-                    "received server host key: {:?}",
-                    server_host_key.to_openssh()
+                    "received server host key: {:?} (certificate: {})",
+                    server_host_key.to_openssh(),
+                    server_host_certificate.is_some()
                 );
 
                 let server_ephemeral = Bytes::decode(r)?;
@@ -277,7 +311,7 @@ impl ClientKex {
                 kex.compute_shared_secret(&self.exchange.server_ephemeral)?;
 
                 let mut pubkey_vec = Vec::new();
-                server_host_key.to_bytes()?.encode(&mut pubkey_vec)?;
+                server_host_key_blob.encode(&mut pubkey_vec)?;
 
                 let exchange = &self.exchange;
                 let hash = HASH_BUFFER.with({
@@ -304,7 +338,7 @@ impl ClientKex {
                 let newkeys = compute_keys(
                     hash,
                     kex,
-                    names,
+                    names.clone(),
                     self.exchange.clone(),
                     self.cause.session_id(),
                 )?;
@@ -318,6 +352,7 @@ impl ClientKex {
 
                 self.state = ClientKexState::WaitingForNewKeys {
                     server_host_key,
+                    server_host_certificate,
                     newkeys,
                 };
 
@@ -328,6 +363,7 @@ impl ClientKex {
             }
             ClientKexState::WaitingForNewKeys {
                 server_host_key,
+                server_host_certificate,
                 newkeys,
             } => {
                 // At this point the exchange is complete
@@ -349,6 +385,7 @@ impl ClientKex {
                 ensure_end(&r)?;
 
                 Ok(KexProgress::Done {
+                    server_host_certificate,
                     newkeys,
                     server_host_key: Some(server_host_key),
                 })

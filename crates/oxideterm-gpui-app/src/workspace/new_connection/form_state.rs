@@ -32,6 +32,7 @@ pub(in crate::workspace) enum SshAuthTab {
     Certificate,
     Agent,
     TwoFactor,
+    Gssapi,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -40,6 +41,7 @@ pub(in crate::workspace) enum SshAuthFamily {
     Key,
     Agent,
     TwoFactor,
+    Gssapi,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -59,6 +61,7 @@ pub(in crate::workspace) fn auth_family_from_tab(tab: SshAuthTab) -> SshAuthFami
         | SshAuthTab::Certificate => SshAuthFamily::Key,
         SshAuthTab::Agent => SshAuthFamily::Agent,
         SshAuthTab::TwoFactor => SshAuthFamily::TwoFactor,
+        SshAuthTab::Gssapi => SshAuthFamily::Gssapi,
     }
 }
 
@@ -68,7 +71,9 @@ pub(in crate::workspace) fn key_source_from_tab(tab: SshAuthTab) -> Option<SshKe
         SshAuthTab::SshKey => Some(SshKeyAuthSource::SshKey),
         SshAuthTab::ManagedKey => Some(SshKeyAuthSource::ManagedKey),
         SshAuthTab::Certificate => Some(SshKeyAuthSource::Certificate),
-        SshAuthTab::Password | SshAuthTab::Agent | SshAuthTab::TwoFactor => None,
+        SshAuthTab::Password | SshAuthTab::Agent | SshAuthTab::TwoFactor | SshAuthTab::Gssapi => {
+            None
+        }
     }
 }
 
@@ -89,6 +94,7 @@ pub(in crate::workspace) fn default_auth_tab_for_family(family: SshAuthFamily) -
         SshAuthFamily::Key => SshAuthTab::SshKey,
         SshAuthFamily::Agent => SshAuthTab::Agent,
         SshAuthFamily::TwoFactor => SshAuthTab::TwoFactor,
+        SshAuthFamily::Gssapi => SshAuthTab::Gssapi,
     }
 }
 
@@ -207,6 +213,7 @@ pub(in crate::workspace) enum NewConnectionField {
     ManagedKeyId,
     CertPath,
     Passphrase,
+    GssapiServerIdentity,
     IdentityAgent,
     Group,
     Notes,
@@ -219,6 +226,7 @@ pub(in crate::workspace) enum NewConnectionField {
     StandaloneSftpSecondaryManagedKeyId,
     StandaloneSftpSecondaryCertPath,
     StandaloneSftpSecondaryPassphrase,
+    StandaloneSftpSecondaryGssapiServerIdentity,
     StandaloneSftpSecondaryIdentityAgent,
     StandaloneSftpSecondaryInitialRemotePath,
     StandaloneSftpSecondaryProxyCommand,
@@ -239,6 +247,7 @@ pub(in crate::workspace) enum NewConnectionField {
     JumpManagedKeyId,
     JumpCertPath,
     JumpPassphrase,
+    JumpGssapiServerIdentity,
     JumpIdentityAgent,
     UpstreamProxyHost,
     UpstreamProxyPort,
@@ -368,6 +377,8 @@ pub(in crate::workspace) struct NewConnectionProxyHop {
     pub(in crate::workspace) managed_key_id: String,
     pub(in crate::workspace) cert_path: String,
     pub(in crate::workspace) passphrase: String,
+    pub(in crate::workspace) gssapi_server_identity: String,
+    pub(in crate::workspace) gssapi_delegate_credentials: bool,
     pub(in crate::workspace) agent_forwarding: bool,
     pub(in crate::workspace) identity_agent: String,
     pub(in crate::workspace) agent_forwarding_socket: Option<String>,
@@ -389,6 +400,14 @@ impl fmt::Debug for NewConnectionProxyHop {
             .field("managed_key_id", &self.managed_key_id)
             .field("cert_path", &self.cert_path)
             .field("passphrase", &"[redacted secret]")
+            .field(
+                "gssapi_server_identity_configured",
+                &!self.gssapi_server_identity.trim().is_empty(),
+            )
+            .field(
+                "gssapi_delegate_credentials",
+                &self.gssapi_delegate_credentials,
+            )
             .field("agent_forwarding", &self.agent_forwarding)
             .field(
                 "identity_agent_configured",
@@ -417,6 +436,8 @@ impl NewConnectionProxyHop {
             managed_key_id: String::new(),
             cert_path: String::new(),
             passphrase: String::new(),
+            gssapi_server_identity: String::new(),
+            gssapi_delegate_credentials: false,
             agent_forwarding: false,
             identity_agent: String::new(),
             agent_forwarding_socket: None,
@@ -441,6 +462,15 @@ impl NewConnectionProxyHop {
             managed_key_id: hop.auth.managed_key_id().unwrap_or_default().to_string(),
             cert_path: hop.auth.cert_path().unwrap_or_default().to_string(),
             passphrase: String::new(),
+            gssapi_server_identity: hop
+                .auth
+                .gssapi_options()
+                .and_then(|(identity, _)| identity.map(ToOwned::to_owned))
+                .unwrap_or_default(),
+            gssapi_delegate_credentials: hop
+                .auth
+                .gssapi_options()
+                .is_some_and(|(_, delegate)| delegate),
             agent_forwarding: hop.agent_forwarding,
             identity_agent: hop.identity_agent.clone().unwrap_or_default(),
             agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
@@ -459,7 +489,7 @@ impl NewConnectionProxyHop {
             | SshAuthTab::SshKey
             | SshAuthTab::ManagedKey
             | SshAuthTab::Certificate => !self.passphrase.is_empty(),
-            SshAuthTab::Agent | SshAuthTab::TwoFactor => false,
+            SshAuthTab::Agent | SshAuthTab::TwoFactor | SshAuthTab::Gssapi => false,
         }
     }
 
@@ -477,6 +507,17 @@ impl NewConnectionProxyHop {
             && self.key_path.trim() == connection.auth.key_path().unwrap_or_default()
             && self.cert_path.trim() == connection.auth.cert_path().unwrap_or_default()
             && self.managed_key_id.trim() == connection.auth.managed_key_id().unwrap_or_default()
+            && self.gssapi_server_identity.trim()
+                == connection
+                    .auth
+                    .gssapi_options()
+                    .and_then(|(identity, _)| identity)
+                    .unwrap_or_default()
+            && self.gssapi_delegate_credentials
+                == connection
+                    .auth
+                    .gssapi_options()
+                    .is_some_and(|(_, delegate)| delegate)
     }
 
     fn zeroize_secret_drafts(&mut self) {
@@ -506,6 +547,7 @@ impl NewConnectionProxyHop {
             AuthType::Certificate => SshAuthTab::Certificate,
             AuthType::KeyboardInteractive => SshAuthTab::TwoFactor,
             AuthType::Agent => SshAuthTab::Agent,
+            AuthType::Gssapi => SshAuthTab::Gssapi,
         };
         // ConnectionInfo is metadata-only. Keep keychain-backed passwords and
         // passphrases out of the form when reusing a saved connection as a hop.
@@ -514,6 +556,11 @@ impl NewConnectionProxyHop {
         self.key_path = connection.key_path.clone().unwrap_or_default();
         self.cert_path = connection.cert_path.clone().unwrap_or_default();
         self.managed_key_id = connection.managed_key_id.clone().unwrap_or_default();
+        self.gssapi_server_identity = connection
+            .gssapi_server_identity
+            .clone()
+            .unwrap_or_default();
+        self.gssapi_delegate_credentials = connection.gssapi_delegate_credentials;
         self.agent_forwarding = connection.agent_forwarding;
         self.identity_agent = connection.identity_agent.clone().unwrap_or_default();
         self.agent_forwarding_socket = connection.agent_forwarding_socket.clone();
@@ -530,6 +577,7 @@ pub(in crate::workspace) fn ssh_auth_tab_from_saved_auth(auth: &SavedAuth) -> Ss
         SavedAuth::Certificate { .. } => SshAuthTab::Certificate,
         SavedAuth::KeyboardInteractive => SshAuthTab::TwoFactor,
         SavedAuth::Agent => SshAuthTab::Agent,
+        SavedAuth::Gssapi { .. } => SshAuthTab::Gssapi,
     }
 }
 
@@ -552,6 +600,8 @@ pub(in crate::workspace) struct StandaloneSftpSecondaryForm {
     pub(in crate::workspace) managed_key_id: String,
     pub(in crate::workspace) cert_path: String,
     pub(in crate::workspace) passphrase: String,
+    pub(in crate::workspace) gssapi_server_identity: String,
+    pub(in crate::workspace) gssapi_delegate_credentials: bool,
     pub(in crate::workspace) passphrase_visible: bool,
     pub(in crate::workspace) save_password: bool,
     pub(in crate::workspace) identity_agent: String,
@@ -590,6 +640,8 @@ impl Default for StandaloneSftpSecondaryForm {
             managed_key_id: String::new(),
             cert_path: String::new(),
             passphrase: String::new(),
+            gssapi_server_identity: String::new(),
+            gssapi_delegate_credentials: false,
             passphrase_visible: false,
             save_password: false,
             identity_agent: String::new(),
@@ -630,6 +682,14 @@ impl fmt::Debug for StandaloneSftpSecondaryForm {
             .field("managed_key_id", &self.managed_key_id)
             .field("cert_path", &self.cert_path)
             .field("passphrase", &"[redacted secret]")
+            .field(
+                "gssapi_server_identity_configured",
+                &!self.gssapi_server_identity.trim().is_empty(),
+            )
+            .field(
+                "gssapi_delegate_credentials",
+                &self.gssapi_delegate_credentials,
+            )
             .field("save_password", &self.save_password)
             .field(
                 "identity_agent_configured",
@@ -688,6 +748,8 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) port: String,
     pub(in crate::workspace) username: String,
     pub(in crate::workspace) auth_tab: SshAuthTab,
+    pub(in crate::workspace) gssapi_server_identity: String,
+    pub(in crate::workspace) gssapi_delegate_credentials: bool,
     pub(in crate::workspace) password: String,
     pub(in crate::workspace) remote_desktop_session_options: RemoteDesktopSessionOptions,
     /// Identifies an existing RDP/VNC asset without overloading SSH edit state.
@@ -972,6 +1034,8 @@ impl Default for NewConnectionForm {
             port: SSH_DEFAULT_PORT_TEXT.to_string(),
             username: "root".to_string(),
             auth_tab: SshAuthTab::Password,
+            gssapi_server_identity: String::new(),
+            gssapi_delegate_credentials: false,
             password: String::new(),
             remote_desktop_session_options: RemoteDesktopSessionOptions::default(),
             remote_desktop_profile_id: None,
@@ -1159,6 +1223,15 @@ pub(in crate::workspace) fn form_from_mosh_profile(
         .unwrap_or_default()
         .to_string();
     form.cert_path = profile.auth.cert_path().unwrap_or_default().to_string();
+    form.gssapi_server_identity = profile
+        .auth
+        .gssapi_options()
+        .and_then(|(identity, _)| identity.map(ToOwned::to_owned))
+        .unwrap_or_default();
+    form.gssapi_delegate_credentials = profile
+        .auth
+        .gssapi_options()
+        .is_some_and(|(_, delegate)| delegate);
     form.group = profile.group.clone().unwrap_or(ungrouped_label);
     form.notes = profile.notes.clone().unwrap_or_default();
     form.icon = profile.icon.clone().unwrap_or_default();
@@ -1520,6 +1593,16 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::Username,
             NewConnectionField::PostConnectCommand,
         ],
+        SshAuthTab::Gssapi => vec![
+            NewConnectionField::Name,
+            NewConnectionField::Group,
+            NewConnectionField::Notes,
+            NewConnectionField::Host,
+            NewConnectionField::Port,
+            NewConnectionField::Username,
+            NewConnectionField::GssapiServerIdentity,
+            NewConnectionField::PostConnectCommand,
+        ],
     };
     if transport == NewConnectionTransport::Mosh {
         fields.retain(|field| {
@@ -1621,6 +1704,12 @@ pub(in crate::workspace) fn next_jump_connection_field(
             NewConnectionField::JumpPort,
             NewConnectionField::JumpUsername,
         ],
+        SshAuthTab::Gssapi => vec![
+            NewConnectionField::JumpHost,
+            NewConnectionField::JumpPort,
+            NewConnectionField::JumpUsername,
+            NewConnectionField::JumpGssapiServerIdentity,
+        ],
     };
     let index = fields
         .iter()
@@ -1684,6 +1773,10 @@ pub(in crate::workspace) fn next_standalone_sftp_field(
                 fields.push(NewConnectionField::StandaloneSftpSecondaryIdentityAgent)
             }
             (SshAuthTab::TwoFactor, _) => {}
+            (SshAuthTab::Gssapi, false) => fields.push(NewConnectionField::GssapiServerIdentity),
+            (SshAuthTab::Gssapi, true) => {
+                fields.push(NewConnectionField::StandaloneSftpSecondaryGssapiServerIdentity)
+            }
         }
     }
 
@@ -1733,6 +1826,7 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::ManagedKeyId => &mut form.managed_key_id,
         NewConnectionField::CertPath => &mut form.cert_path,
         NewConnectionField::Passphrase => &mut form.passphrase,
+        NewConnectionField::GssapiServerIdentity => &mut form.gssapi_server_identity,
         NewConnectionField::IdentityAgent => &mut form.identity_agent,
         NewConnectionField::Group => &mut form.group,
         NewConnectionField::Notes => &mut form.notes,
@@ -1756,6 +1850,9 @@ pub(in crate::workspace) fn current_connection_field_mut(
         }
         NewConnectionField::StandaloneSftpSecondaryPassphrase => {
             &mut form.standalone_sftp_secondary.passphrase
+        }
+        NewConnectionField::StandaloneSftpSecondaryGssapiServerIdentity => {
+            &mut form.standalone_sftp_secondary.gssapi_server_identity
         }
         NewConnectionField::StandaloneSftpSecondaryIdentityAgent => {
             &mut form.standalone_sftp_secondary.identity_agent
@@ -1846,6 +1943,13 @@ pub(in crate::workspace) fn current_connection_field_mut(
                 .expect("jump passphrase field without jump form")
                 .passphrase
         }
+        NewConnectionField::JumpGssapiServerIdentity => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump Kerberos server field without jump form")
+                .gssapi_server_identity
+        }
         NewConnectionField::JumpIdentityAgent => {
             &mut form
                 .jump_server_form
@@ -1875,6 +1979,7 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::ManagedKeyId => &form.managed_key_id,
         NewConnectionField::CertPath => &form.cert_path,
         NewConnectionField::Passphrase => &form.passphrase,
+        NewConnectionField::GssapiServerIdentity => &form.gssapi_server_identity,
         NewConnectionField::IdentityAgent => &form.identity_agent,
         NewConnectionField::Group => &form.group,
         NewConnectionField::Notes => &form.notes,
@@ -1898,6 +2003,9 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         }
         NewConnectionField::StandaloneSftpSecondaryPassphrase => {
             &form.standalone_sftp_secondary.passphrase
+        }
+        NewConnectionField::StandaloneSftpSecondaryGssapiServerIdentity => {
+            &form.standalone_sftp_secondary.gssapi_server_identity
         }
         NewConnectionField::StandaloneSftpSecondaryIdentityAgent => {
             &form.standalone_sftp_secondary.identity_agent
@@ -1987,6 +2095,13 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
                 .as_ref()
                 .expect("jump passphrase field without jump form")
                 .passphrase
+        }
+        NewConnectionField::JumpGssapiServerIdentity => {
+            &form
+                .jump_server_form
+                .as_ref()
+                .expect("jump Kerberos server field without jump form")
+                .gssapi_server_identity
         }
         NewConnectionField::JumpIdentityAgent => {
             &form
@@ -2527,6 +2642,8 @@ mod tests {
             cert_path: Some("~/.ssh/id_ed25519-cert.pub".to_string()),
             managed_key_id: None,
             managed_key_name: None,
+            gssapi_server_identity: None,
+            gssapi_delegate_credentials: false,
             proxy_chain: Vec::new(),
             upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
             created_at: "2026-06-15T00:00:00Z".to_string(),

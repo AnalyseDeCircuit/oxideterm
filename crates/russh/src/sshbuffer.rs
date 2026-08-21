@@ -23,6 +23,7 @@ use ssh_encoding::Writer;
 use super::cipher::SealingKey;
 use compression::Compress;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
+use zeroize::Zeroize;
 
 use super::*;
 
@@ -237,6 +238,21 @@ fn test_write_packet_compressed_matches_clear_cipher_output() {
     assert_eq!(writer.buffer().buffer, expected.buffer);
     assert_eq!(writer.buffer().bytes, packet.len());
     assert_eq!(writer.buffer().seqn, Wrapping(1));
+    assert!(writer.packet_buffer.is_empty());
+}
+
+#[cfg(feature = "flate2")]
+#[test]
+fn compressed_packet_error_wipes_plaintext_scratch() {
+    let mut writer = PacketWriter::new(Box::new(cipher::clear::Key {}), zlib_compress());
+
+    let error = writer.write_packet(|buffer| {
+        buffer.extend_from_slice(b"sensitive-packet-marker");
+        Err(Error::Inconsistent)
+    });
+
+    assert!(matches!(error, Err(Error::Inconsistent)));
+    assert!(writer.packet_buffer.is_empty());
 }
 
 #[cfg(feature = "flate2")]
@@ -284,8 +300,10 @@ fn packet_bytes_compressed_matches_packet_output() {
     assert_eq!(packet_bytes_writer.buffer().bytes, packet_bytes);
 }
 
-/// SSH packet read/write buffer. Uses Vec<u8> (not CryptoVec/mlocked) because
-/// packet data is not secret material.
+/// SSH packet read/write buffer.
+///
+/// Outgoing plaintext exists here only while a packet is being sealed. Error
+/// paths wipe appended plaintext before restoring the previous output length.
 #[derive(Debug, Default)]
 pub struct SSHBuffer {
     pub buffer: Vec<u8>,
@@ -370,6 +388,13 @@ impl Debug for PacketWriter {
     }
 }
 
+impl Drop for PacketWriter {
+    fn drop(&mut self) {
+        // Compression uses this allocation as plaintext scratch storage.
+        self.packet_buffer.zeroize();
+    }
+}
+
 impl PacketWriter {
     // SSH packet prefix = packet_length (cipher::PACKET_LENGTH_LEN bytes)
     // + padding_length (1 byte).
@@ -397,6 +422,7 @@ impl PacketWriter {
         match f(&mut buf) {
             Ok(()) => Ok(buf),
             Err(err) => {
+                buf.zeroize();
                 self.packet_buffer = buf;
                 Err(err)
             }
@@ -437,6 +463,7 @@ impl PacketWriter {
                 Ok(())
             }
             Err(err) => {
+                self.write_buffer.buffer[offset..].zeroize();
                 self.write_buffer.buffer.truncate(offset);
                 Err(err)
             }
@@ -463,6 +490,7 @@ impl PacketWriter {
                 Ok(())
             }
             Err(err) => {
+                self.write_buffer.buffer[offset..].zeroize();
                 self.write_buffer.buffer.truncate(offset);
                 Err(err)
             }
@@ -498,6 +526,10 @@ impl PacketWriter {
         }
         let buf = self.prepare_packet(f)?;
         let result = self.packet_raw(&buf);
+        // Compression needs the clear packet temporarily, but retaining it in
+        // the reusable allocation would outlive the encrypted send.
+        let mut buf = buf;
+        buf.zeroize();
         self.packet_buffer = buf;
         result
     }
@@ -528,6 +560,8 @@ impl PacketWriter {
     ) -> Result<Bytes, Error> {
         let buf = self.prepare_packet(f)?;
         if let Err(err) = self.packet_raw(&buf) {
+            let mut buf = buf;
+            buf.zeroize();
             self.packet_buffer = buf;
             return Err(err);
         }

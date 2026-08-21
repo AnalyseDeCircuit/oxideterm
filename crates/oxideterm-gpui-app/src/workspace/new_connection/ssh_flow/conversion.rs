@@ -169,6 +169,11 @@ pub(super) fn auth_method_from_proxy_hop(
         ),
         SshAuthTab::Agent => AuthMethod::Agent,
         SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
+        SshAuthTab::Gssapi => AuthMethod::gssapi(
+            (!hop.gssapi_server_identity.trim().is_empty())
+                .then(|| hop.gssapi_server_identity.trim().to_string()),
+            hop.gssapi_delegate_credentials,
+        ),
     }
 }
 
@@ -192,6 +197,8 @@ pub(super) fn form_from_runtime_config(
     form.managed_key_id = auth_fields.managed_key_id;
     form.cert_path = auth_fields.cert_path;
     form.passphrase = auth_fields.passphrase;
+    form.gssapi_server_identity = auth_fields.gssapi_server_identity;
+    form.gssapi_delegate_credentials = auth_fields.gssapi_delegate_credentials;
     form.group = default_group;
     form.post_connect_command = config.post_connect_command.clone().unwrap_or_default();
     form.agent_forwarding = config.agent_forwarding;
@@ -249,6 +256,8 @@ pub(super) fn proxy_hop_form_from_runtime_config(config: ProxyHopConfig) -> NewC
         // live path; the connection store then moves them into the keychain.
         password: auth_fields.password,
         passphrase: auth_fields.passphrase,
+        gssapi_server_identity: auth_fields.gssapi_server_identity,
+        gssapi_delegate_credentials: auth_fields.gssapi_delegate_credentials,
         agent_forwarding: config.agent_forwarding,
         identity_agent: config.identity_agent.unwrap_or_default(),
         agent_forwarding_socket: config.agent_forwarding_socket,
@@ -264,6 +273,8 @@ struct RuntimeAuthFormFields {
     cert_path: String,
     passphrase: String,
     save_password: bool,
+    gssapi_server_identity: String,
+    gssapi_delegate_credentials: bool,
 }
 
 fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
@@ -276,6 +287,8 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
             cert_path: String::new(),
             passphrase: String::new(),
             save_password: true,
+            gssapi_server_identity: String::new(),
+            gssapi_delegate_credentials: false,
         },
         AuthMethod::Key {
             key_path,
@@ -291,6 +304,8 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
                 .map(|value| std::mem::take(&mut **value))
                 .unwrap_or_default(),
             save_password: false,
+            gssapi_server_identity: String::new(),
+            gssapi_delegate_credentials: false,
         },
         AuthMethod::Key {
             key_path,
@@ -306,6 +321,8 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
                 .map(|value| std::mem::take(&mut **value))
                 .unwrap_or_default(),
             save_password: false,
+            gssapi_server_identity: String::new(),
+            gssapi_delegate_credentials: false,
         },
         AuthMethod::ManagedKey {
             key_id,
@@ -321,6 +338,8 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
                 .map(|value| std::mem::take(&mut **value))
                 .unwrap_or_default(),
             save_password: false,
+            gssapi_server_identity: String::new(),
+            gssapi_delegate_credentials: false,
         },
         AuthMethod::Certificate {
             key_path,
@@ -337,6 +356,8 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
                 .map(|value| std::mem::take(&mut **value))
                 .unwrap_or_default(),
             save_password: false,
+            gssapi_server_identity: String::new(),
+            gssapi_delegate_credentials: false,
         },
         AuthMethod::Agent => RuntimeAuthFormFields {
             auth_tab: SshAuthTab::Agent,
@@ -346,6 +367,8 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
             cert_path: String::new(),
             passphrase: String::new(),
             save_password: false,
+            gssapi_server_identity: String::new(),
+            gssapi_delegate_credentials: false,
         },
         AuthMethod::KeyboardInteractive => RuntimeAuthFormFields {
             auth_tab: SshAuthTab::TwoFactor,
@@ -355,6 +378,22 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
             cert_path: String::new(),
             passphrase: String::new(),
             save_password: false,
+            gssapi_server_identity: String::new(),
+            gssapi_delegate_credentials: false,
+        },
+        AuthMethod::Gssapi {
+            server_identity,
+            delegate_credentials,
+        } => RuntimeAuthFormFields {
+            auth_tab: SshAuthTab::Gssapi,
+            password: String::new(),
+            key_path: String::new(),
+            managed_key_id: String::new(),
+            cert_path: String::new(),
+            passphrase: String::new(),
+            save_password: false,
+            gssapi_server_identity: server_identity.unwrap_or_default(),
+            gssapi_delegate_credentials: delegate_credentials,
         },
     }
 }

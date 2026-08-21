@@ -10,6 +10,8 @@ struct JumpServerRenderSnapshot {
     managed_key_id: String,
     cert_path: String,
     identity_agent: String,
+    gssapi_server_identity: String,
+    gssapi_delegate_credentials: bool,
     agent_forwarding: bool,
     legacy_ssh_compatibility: bool,
     complete: bool,
@@ -27,6 +29,8 @@ impl JumpServerRenderSnapshot {
             managed_key_id: hop.managed_key_id.clone(),
             cert_path: hop.cert_path.clone(),
             identity_agent: hop.identity_agent.clone(),
+            gssapi_server_identity: hop.gssapi_server_identity.clone(),
+            gssapi_delegate_credentials: hop.gssapi_delegate_credentials,
             agent_forwarding: hop.agent_forwarding,
             legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
             complete: hop.complete(),
@@ -1089,6 +1093,41 @@ impl WorkspaceApp {
                                         self.i18n.t("ssh.form.agent_endpoint_hint"),
                                     ))
                             })
+                            .when(jump_form.auth_tab == SshAuthTab::Gssapi, |content| {
+                                content
+                                    .child(self.render_connection_hint(
+                                        self.i18n.t("ssh.form.gssapi_desc"),
+                                    ))
+                                    .child(self.render_connection_field(
+                                        self.i18n.t("ssh.form.gssapi_server_identity"),
+                                        &jump_form.gssapi_server_identity,
+                                        self.i18n.t("ssh.form.gssapi_server_identity_placeholder"),
+                                        NewConnectionField::JumpGssapiServerIdentity,
+                                        false,
+                                        cx,
+                                    ))
+                                    .child(self.render_connection_hint(
+                                        self.i18n.t("ssh.form.gssapi_server_identity_hint"),
+                                    ))
+                                    .child(self.render_connection_checkbox(
+                                        self.i18n.t("ssh.form.gssapi_delegate_credentials"),
+                                        jump_form.gssapi_delegate_credentials,
+                                        |form| {
+                                            if let Some(jump_form) = form.jump_server_form.as_mut()
+                                            {
+                                                jump_form.gssapi_delegate_credentials =
+                                                    !jump_form.gssapi_delegate_credentials;
+                                            }
+                                        },
+                                        cx,
+                                    ))
+                                    .when(jump_form.gssapi_delegate_credentials, |content| {
+                                        content.child(self.render_connection_hint_with_color(
+                                            self.i18n.t("ssh.form.gssapi_delegation_warning"),
+                                            self.tokens.ui.warning,
+                                        ))
+                                    })
+                            })
                             .child(self.render_connection_checkbox(
                                 self.i18n.t("ssh.form.agent_forwarding"),
                                 jump_form.agent_forwarding,
@@ -1450,6 +1489,7 @@ impl WorkspaceApp {
             SshAuthTab::Password => self.i18n.t("ssh.auth.password"),
             SshAuthTab::Agent => self.i18n.t("ssh.auth.agent"),
             SshAuthTab::TwoFactor => self.i18n.t("ssh.auth.two_factor"),
+            SshAuthTab::Gssapi => self.i18n.t("ssh.auth.gssapi"),
         };
         let auth_icon = if matches!(
             hop.auth_tab,

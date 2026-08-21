@@ -63,6 +63,10 @@ pub fn auth_method_from_saved_auth(
         // Keyboard-interactive prompts are collected by the runtime prompt handler.
         SavedAuth::KeyboardInteractive => AuthMethod::KeyboardInteractive,
         SavedAuth::Agent => AuthMethod::Agent,
+        SavedAuth::Gssapi {
+            server_identity,
+            delegate_credentials,
+        } => AuthMethod::gssapi(server_identity.clone(), *delegate_credentials),
     })
 }
 

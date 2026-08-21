@@ -54,6 +54,11 @@ enum ConnectionAuthSpec {
         passphrase_env: Option<String>,
     },
     Agent,
+    Gssapi {
+        server_identity: Option<String>,
+        #[serde(default)]
+        delegate_credentials: bool,
+    },
 }
 
 #[derive(Deserialize)]
@@ -292,6 +297,13 @@ fn saved_auth_from_connection_spec(
             }
         }
         ConnectionAuthSpec::Agent => SavedAuth::Agent,
+        ConnectionAuthSpec::Gssapi {
+            server_identity,
+            delegate_credentials,
+        } => SavedAuth::Gssapi {
+            server_identity: server_identity.filter(|identity| !identity.trim().is_empty()),
+            delegate_credentials,
+        },
     })
 }
 

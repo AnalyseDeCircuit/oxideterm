@@ -1,4 +1,6 @@
+use clap::Parser;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use russh::keys::{Certificate, *};
@@ -7,20 +9,50 @@ use russh::*;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
+#[derive(Parser, Debug)]
+#[clap(
+    name = "echoserver_custom_keys",
+    about = "Echo server with custom keys"
+)]
+struct Cli {
+    /// Path to the private key file
+    #[clap(short, long)]
+    key: PathBuf,
+
+    /// Path to the certificate file (optional)
+    #[clap(short, long)]
+    cert: Option<PathBuf>,
+
+    /// Port to listen on
+    #[clap(short, long, default_value_t = 2222)]
+    port: u16,
+}
+
 #[tokio::main]
 async fn main() {
     env_logger::builder()
         .filter_level(log::LevelFilter::Debug)
         .init();
 
+    let args = Cli::parse();
+
+    // Load private key
+    let key = russh::keys::load_secret_key(&args.key, None).expect("Could not load private key");
+
+    // Load certificate if provided
+    let mut certs = Vec::new();
+    if let Some(cert_path) = args.cert {
+        let cert =
+            russh::keys::load_openssh_certificate(&cert_path).expect("Could not load certificate");
+        certs.push(cert);
+    }
+
     let config = russh::server::Config {
         inactivity_timeout: Some(std::time::Duration::from_secs(3600)),
         auth_rejection_time: std::time::Duration::from_secs(3),
         auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
-        keys: vec![
-            russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519)
-                .unwrap(),
-        ],
+        keys: vec![key],
+        certificates: certs,
         preferred: Preferred {
             // kex: std::borrow::Cow::Owned(vec![russh::kex::DH_GEX_SHA256]),
             ..Preferred::default()
@@ -33,7 +65,7 @@ async fn main() {
         id: 0,
     };
 
-    let socket = TcpListener::bind(("0.0.0.0", 2222)).await.unwrap();
+    let socket = TcpListener::bind(("0.0.0.0", args.port)).await.unwrap();
     let server = sh.run_on_socket(config, &socket);
     let handle = server.handle();
 
@@ -42,6 +74,7 @@ async fn main() {
         handle.shutdown("Server shutting down after 10 minutes".into());
     });
 
+    println!("Listening on port {}", args.port);
     server.await.unwrap()
 }
 
