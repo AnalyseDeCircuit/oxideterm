@@ -276,12 +276,6 @@ impl TerminalPane {
         self.scroll_to_absolute_line(target_line, cx);
     }
 
-    pub fn clear_screen(&mut self, cx: &mut Context<Self>) {
-        // Ctrl-L asks the running shell/TUI to redraw without deleting scrollback
-        // or invalidating command facts the way a terminal reset would.
-        self.send_user_protocol_bytes(&[0x0c], cx);
-    }
-
     fn scroll_to_absolute_line(&mut self, absolute_line: usize, cx: &mut Context<Self>) {
         let desired_row = (self.snapshot.rows / 3).max(1);
         let target_offset = self

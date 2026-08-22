@@ -1159,7 +1159,7 @@ impl TerminalPane {
                     false,
                     |this, _event, _window, cx| {
                         this.dismiss_terminal_context_menu(cx);
-                        this.clear_screen(cx);
+                        this.clear_buffer(cx);
                     },
                     cx,
                 )),

@@ -221,7 +221,9 @@ impl WorkspaceApp {
         let Some(pane) = self.active_pane(cx) else {
             return false;
         };
-        pane.update(cx, |pane, cx| pane.clear_screen(cx));
+        // Clear host-owned emulator state without writing control bytes into PTYs or serial
+        // links.
+        pane.update(cx, |pane, cx| pane.clear_buffer(cx));
         true
     }
 
