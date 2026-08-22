@@ -139,6 +139,33 @@ class WindowsInstallerScriptTests(unittest.TestCase):
         )
         self.assertIn('IfFileExists "$DESKTOP\\OxideTerm.lnk"', script)
 
+    def test_installer_registers_connection_uri_capabilities_without_embedding_credentials(self) -> None:
+        identity = self.identity()
+        script = package_native.windows_installer_script(
+            binary=Path("oxideterm-native.exe"),
+            version="2.0.23",
+            identity=identity,
+            installer_root=Path(r"C:\dist\nsis-windows_x64"),
+            installer_path=Path(r"C:\dist\OxideTerm_setup.exe"),
+            icon_path=Path(r"C:\icons\icon.ico"),
+        )
+
+        for scheme in package_native.CONNECTION_URI_SCHEMES:
+            self.assertIn(f'"{scheme}" "{identity.app_identifier}.{scheme}"', script)
+        self.assertIn(r'"$\"$INSTDIR\oxideterm-native.exe$\" $\"%1$\""', script)
+        self.assertIn('Software\\RegisteredApplications', script)
+
+
+class MacosConnectionUriTests(unittest.TestCase):
+    def test_bundle_declares_all_connection_uri_schemes(self) -> None:
+        identity = package_native.release_identity("v2.0.23", "2.0.23")
+        plist = package_native.build_macos_info_plist("2.0.23", identity)
+
+        self.assertEqual(
+            plist["CFBundleURLTypes"][0]["CFBundleURLSchemes"],
+            list(package_native.CONNECTION_URI_SCHEMES),
+        )
+
 
 class MacosBridgeArchiveTests(unittest.TestCase):
     def test_tauri_bridge_archive_keeps_app_bundle_root(self) -> None:
@@ -451,6 +478,8 @@ class LinuxDesktopEntryTests(unittest.TestCase):
 
             desktop_entry = desktop_file.read_text(encoding="utf-8")
             self.assertIn("StartupWMClass=com.oxideterm.app", desktop_entry)
+            for scheme in package_native.CONNECTION_URI_SCHEMES:
+                self.assertIn(f"x-scheme-handler/{scheme}", desktop_entry)
 
 
 class PlatformSigningTests(unittest.TestCase):

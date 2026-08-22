@@ -41,6 +41,7 @@ BASE_APP_NAME = "OxideTerm"
 STABLE_APP_IDENTIFIER = "com.oxideterm.app"
 APP_BIN = "oxideterm-native"
 CLI_BIN = "oxideterm"
+CONNECTION_URI_SCHEMES = ("ssh", "telnet", "mosh")
 HELPER_BINS = ("oxideterm-rdp-helper", "oxideterm-vnc-helper")
 UPDATE_HELPER_PACKAGE = "oxideterm-update"
 UPDATE_HELPER_BIN = "oxideterm-update-helper"
@@ -637,6 +638,13 @@ def build_macos_info_plist(version: str, identity: ReleaseIdentity) -> dict:
         "CFBundleVersion": version,
         "LSMinimumSystemVersion": "13.0",
         "NSHighResolutionCapable": True,
+        "CFBundleURLTypes": [
+            {
+                "CFBundleTypeRole": "Viewer",
+                "CFBundleURLName": f"{identity.app_identifier}.connection-uri",
+                "CFBundleURLSchemes": list(CONNECTION_URI_SCHEMES),
+            }
+        ],
     }
     return merge_macos_info_plist_extensions(plist)
 
@@ -1050,6 +1058,44 @@ def create_windows_installer(
     script_path.unlink(missing_ok=True)
 
 
+def windows_protocol_registration_script(
+    identity: ReleaseIdentity, binary_name: str
+) -> str:
+    # Capabilities make OxideTerm an available handler without replacing the
+    # user's current default for any registered scheme.
+    capabilities_key = f"Software\\{identity.windows_registry_key}\\Capabilities"
+    lines = [
+        f'  WriteRegStr HKCU "{capabilities_key}" "ApplicationName" "{identity.app_name}"',
+        f'  WriteRegStr HKCU "{capabilities_key}" "ApplicationDescription" "{identity.app_name}"',
+        f'  WriteRegStr HKCU "{capabilities_key}" "ApplicationIcon" "$INSTDIR\\{binary_name},0"',
+        f'  WriteRegStr HKCU "Software\\RegisteredApplications" "{identity.app_name}" "{capabilities_key}"',
+    ]
+    for scheme in CONNECTION_URI_SCHEMES:
+        prog_id = f"{identity.app_identifier}.{scheme}"
+        class_key = f"Software\\Classes\\{prog_id}"
+        lines.extend(
+            [
+                f'  WriteRegStr HKCU "{class_key}" "" "{identity.app_name} {scheme.upper()} URI"',
+                f'  WriteRegStr HKCU "{class_key}" "URL Protocol" ""',
+                f'  WriteRegStr HKCU "{class_key}\\DefaultIcon" "" "$INSTDIR\\{binary_name},0"',
+                rf'  WriteRegStr HKCU "{class_key}\shell\open\command" "" "$\"$INSTDIR\{binary_name}$\" $\"%1$\""',
+                f'  WriteRegStr HKCU "{capabilities_key}\\URLAssociations" "{scheme}" "{prog_id}"',
+            ]
+        )
+    return "\n".join(lines)
+
+
+def windows_protocol_unregistration_script(identity: ReleaseIdentity) -> str:
+    lines = [
+        f'  DeleteRegValue HKCU "Software\\RegisteredApplications" "{identity.app_name}"'
+    ]
+    for scheme in CONNECTION_URI_SCHEMES:
+        lines.append(
+            f'  DeleteRegKey HKCU "Software\\Classes\\{identity.app_identifier}.{scheme}"'
+        )
+    return "\n".join(lines)
+
+
 def windows_installer_script(
     *,
     binary: Path,
@@ -1083,6 +1129,8 @@ def windows_installer_script(
     # Modern UI replaces the compiler-level Icon directives with its own
     # interface settings, which must be defined before MUI2.nsh is included.
     modern_ui_icon = nsis_path(icon_path)
+    protocol_registration = windows_protocol_registration_script(identity, binary.name)
+    protocol_unregistration = windows_protocol_unregistration_script(identity)
 
     return f"""
 Unicode true
@@ -1166,6 +1214,7 @@ legacy_shortcuts_done:
   Exec '"$INSTDIR\\{UPDATE_HELPER_DIR}\\{UPDATE_HELPER_BIN}.exe" --install-dir "$INSTDIR" --app-exe "$INSTDIR\\{binary.name}" --launch'
 
 install_done:
+{protocol_registration}
 SectionEnd
 
 Section "Start Menu Shortcut"
@@ -1186,6 +1235,7 @@ Section "Uninstall"
   Delete "$SMPROGRAMS\\{identity.app_name}\\{identity.app_name}.lnk"
   RMDir "$SMPROGRAMS\\{identity.app_name}"
   DeleteRegKey HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{identity.windows_uninstall_key}"
+{protocol_unregistration}
   DeleteRegKey HKCU "Software\\{identity.windows_registry_key}"
   RMDir /r "$INSTDIR"
 SectionEnd
@@ -1361,11 +1411,16 @@ def write_linux_desktop_file(path: Path, identity: ReleaseIdentity, exec_value: 
                 "[Desktop Entry]",
                 "Type=Application",
                 f"Name={identity.app_name}",
-                f"Exec={exec_value} %U",
+                f"Exec={exec_value} %u",
                 f"Icon={identity.linux_icon_name}",
                 f"StartupWMClass={identity.linux_desktop_id}",
                 "Terminal=false",
                 "Categories=Development;TerminalEmulator;Network;",
+                "MimeType="
+                + ";".join(
+                    f"x-scheme-handler/{scheme}" for scheme in CONNECTION_URI_SCHEMES
+                )
+                + ";",
                 "StartupNotify=true",
                 "",
             ]
