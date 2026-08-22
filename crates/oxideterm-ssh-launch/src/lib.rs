@@ -1,25 +1,31 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! SSH launch requests shared by the native CLI and GPUI app.
+//! Connection launch requests shared by the native CLI and GPUI app.
 //!
 //! This crate intentionally stays small: it owns only the safe, explicit
-//! native launch boundary, not a partial OpenSSH parser or session runtime.
+//! native launch boundary, not a transport or session runtime.
 
 use std::fmt;
 
+use percent_encoding::percent_decode_str;
 use serde::{Deserialize, Serialize};
+use url::Host;
 use zeroize::Zeroizing;
 
 /// Default port used by temporary SSH launch targets.
 pub const DEFAULT_SSH_PORT: u16 = 22;
+pub const DEFAULT_TELNET_PORT: u16 = 23;
+pub const DEFAULT_MOSH_SSH_PORT: u16 = 22;
 
-/// A native application launch request carried by the owner-only handoff file.
+/// A native application launch request carried by an owner-only handoff.
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum NativeSshLaunch {
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum NativeConnectionLaunch {
     SavedConnection(SavedConnectionLaunch),
-    Temporary(TemporarySshLaunch),
+    Ssh(TemporarySshLaunch),
+    Telnet(TemporaryTelnetLaunch),
+    Mosh(TemporaryMoshLaunch),
 }
 
 /// Selects a saved SSH profile without copying its connection properties or secrets.
@@ -56,6 +62,292 @@ impl fmt::Debug for TemporarySshLaunch {
             )
             .finish()
     }
+}
+
+#[derive(Eq, PartialEq, Serialize, Deserialize)]
+pub struct TemporaryTelnetLaunch {
+    pub host: String,
+    pub port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<Zeroizing<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<Zeroizing<String>>,
+}
+
+impl TemporaryTelnetLaunch {
+    pub fn title(&self) -> String {
+        format!("Telnet {}:{}", self.host, self.port)
+    }
+}
+
+impl fmt::Debug for TemporaryTelnetLaunch {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TemporaryTelnetLaunch")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field(
+                "username",
+                &self.username.as_ref().map(|_| "[redacted userinfo]"),
+            )
+            .field(
+                "password",
+                &self.password.as_ref().map(|_| "[redacted secret]"),
+            )
+            .finish()
+    }
+}
+
+#[derive(Eq, PartialEq, Serialize, Deserialize)]
+pub struct TemporaryMoshLaunch {
+    pub username: String,
+    pub host: String,
+    pub ssh_port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<Zeroizing<String>>,
+}
+
+impl TemporaryMoshLaunch {
+    pub fn title(&self) -> String {
+        format!("{}@{}", self.username, self.host)
+    }
+}
+
+impl fmt::Debug for TemporaryMoshLaunch {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TemporaryMoshLaunch")
+            .field("username", &self.username)
+            .field("host", &self.host)
+            .field("ssh_port", &self.ssh_port)
+            .field(
+                "password",
+                &self.password.as_ref().map(|_| "[redacted secret]"),
+            )
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ParseConnectionUriError {
+    Empty,
+    Invalid,
+    UnsupportedScheme,
+    MissingHost,
+    MissingUsername,
+    UnsupportedComponents,
+    InvalidUserInfo,
+}
+
+impl fmt::Display for ParseConnectionUriError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => formatter.write_str("connection URI is empty"),
+            Self::Invalid => formatter.write_str("connection URI is invalid"),
+            Self::UnsupportedScheme => formatter.write_str("connection URI scheme is unsupported"),
+            Self::MissingHost => formatter.write_str("connection URI is missing a host"),
+            Self::MissingUsername => formatter.write_str("connection URI is missing a username"),
+            Self::UnsupportedComponents => formatter
+                .write_str("connection URI contains unsupported path, query, or fragment data"),
+            Self::InvalidUserInfo => {
+                formatter.write_str("connection URI user information is invalid")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ParseConnectionUriError {}
+
+pub fn parse_connection_uri(
+    raw_uri: &str,
+    default_username: Option<&str>,
+) -> Result<NativeConnectionLaunch, ParseConnectionUriError> {
+    let raw_uri = raw_uri.trim();
+    if raw_uri.is_empty() {
+        return Err(ParseConnectionUriError::Empty);
+    }
+    if raw_uri
+        .chars()
+        .any(|character| character.is_whitespace() || character.is_control())
+    {
+        return Err(ParseConnectionUriError::Invalid);
+    }
+    let (scheme, remainder) = raw_uri
+        .split_once("://")
+        .ok_or(ParseConnectionUriError::Invalid)?;
+    let authority = remainder.strip_suffix('/').unwrap_or(remainder);
+    if authority.is_empty()
+        || authority
+            .chars()
+            .any(|character| matches!(character, '/' | '?' | '#'))
+    {
+        return Err(ParseConnectionUriError::UnsupportedComponents);
+    }
+    let (raw_user_info, host_authority) = match authority.rsplit_once('@') {
+        Some((user_info, host_authority)) if !user_info.contains('@') => {
+            (Some(user_info), host_authority)
+        }
+        Some(_) => return Err(ParseConnectionUriError::InvalidUserInfo),
+        None => (None, authority),
+    };
+    let (raw_username, raw_password) = raw_user_info
+        .map(|user_info| {
+            user_info
+                .split_once(':')
+                .map_or((user_info, None), |(username, password)| {
+                    (username, Some(password))
+                })
+        })
+        .unwrap_or(("", None));
+    let username = decode_user_info(raw_username)?;
+    let password = raw_password.map(decode_secret_user_info).transpose()?;
+    let (host, explicit_port) = parse_uri_host_authority(host_authority)?;
+
+    match scheme.to_ascii_lowercase().as_str() {
+        "ssh" => {
+            let username = connection_username(username, default_username)?;
+            Ok(NativeConnectionLaunch::Ssh(TemporarySshLaunch {
+                username,
+                host,
+                port: explicit_port.unwrap_or(DEFAULT_SSH_PORT),
+                password,
+            }))
+        }
+        "telnet" => {
+            if password.is_some() && username.is_empty() {
+                return Err(ParseConnectionUriError::MissingUsername);
+            }
+            Ok(NativeConnectionLaunch::Telnet(TemporaryTelnetLaunch {
+                host,
+                port: explicit_port.unwrap_or(DEFAULT_TELNET_PORT),
+                username: (!username.is_empty()).then(|| Zeroizing::new(username)),
+                password,
+            }))
+        }
+        "mosh" => {
+            let username = connection_username(username, default_username)?;
+            Ok(NativeConnectionLaunch::Mosh(TemporaryMoshLaunch {
+                username,
+                host,
+                ssh_port: explicit_port.unwrap_or(DEFAULT_MOSH_SSH_PORT),
+                password,
+            }))
+        }
+        _ => Err(ParseConnectionUriError::UnsupportedScheme),
+    }
+}
+
+fn parse_uri_host_authority(
+    authority: &str,
+) -> Result<(String, Option<u16>), ParseConnectionUriError> {
+    if authority.is_empty() {
+        return Err(ParseConnectionUriError::MissingHost);
+    }
+    if let Some(bracketed) = authority.strip_prefix('[') {
+        let bracket_end = bracketed
+            .find(']')
+            .ok_or(ParseConnectionUriError::Invalid)?;
+        let host = &bracketed[..bracket_end];
+        let suffix = &bracketed[bracket_end + 1..];
+        let address = host
+            .parse::<std::net::Ipv6Addr>()
+            .map_err(|_| ParseConnectionUriError::Invalid)?;
+        let port = parse_uri_port_suffix(suffix)?;
+        return Ok((address.to_string(), port));
+    }
+    if authority.contains('[') || authority.contains(']') || authority.matches(':').count() > 1 {
+        return Err(ParseConnectionUriError::Invalid);
+    }
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, port)) => (host, Some(parse_uri_port(port)?)),
+        None => (authority, None),
+    };
+    let host = match Host::parse(host).map_err(|_| ParseConnectionUriError::Invalid)? {
+        Host::Domain(host) if !host.is_empty() => host,
+        Host::Ipv4(host) => host.to_string(),
+        Host::Ipv6(_) | Host::Domain(_) => return Err(ParseConnectionUriError::MissingHost),
+    };
+    Ok((host, port))
+}
+
+fn parse_uri_port_suffix(suffix: &str) -> Result<Option<u16>, ParseConnectionUriError> {
+    if suffix.is_empty() {
+        return Ok(None);
+    }
+    let port = suffix
+        .strip_prefix(':')
+        .ok_or(ParseConnectionUriError::Invalid)?;
+    parse_uri_port(port).map(Some)
+}
+
+fn parse_uri_port(port: &str) -> Result<u16, ParseConnectionUriError> {
+    let port = port
+        .parse::<u16>()
+        .ok()
+        .filter(|port| *port > 0)
+        .ok_or(ParseConnectionUriError::Invalid)?;
+    Ok(port)
+}
+
+fn decode_user_info(value: &str) -> Result<String, ParseConnectionUriError> {
+    if !has_valid_percent_encoding(value) {
+        return Err(ParseConnectionUriError::InvalidUserInfo);
+    }
+    let decoded = percent_decode_str(value)
+        .decode_utf8()
+        .map_err(|_| ParseConnectionUriError::InvalidUserInfo)?;
+    if decoded.chars().any(char::is_control) {
+        return Err(ParseConnectionUriError::InvalidUserInfo);
+    }
+    Ok(decoded.into_owned())
+}
+
+fn decode_secret_user_info(value: &str) -> Result<Zeroizing<String>, ParseConnectionUriError> {
+    if !has_valid_percent_encoding(value) {
+        return Err(ParseConnectionUriError::InvalidUserInfo);
+    }
+    let decoded_bytes = Zeroizing::new(percent_decode_str(value).collect::<Vec<_>>());
+    let decoded = std::str::from_utf8(&decoded_bytes)
+        .map_err(|_| ParseConnectionUriError::InvalidUserInfo)?;
+    let decoded = Zeroizing::new(decoded.to_string());
+    if decoded.chars().any(char::is_control) {
+        return Err(ParseConnectionUriError::InvalidUserInfo);
+    }
+    Ok(decoded)
+}
+
+fn has_valid_percent_encoding(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'%' {
+            index += 1;
+            continue;
+        }
+        if index + 2 >= bytes.len()
+            || !bytes[index + 1].is_ascii_hexdigit()
+            || !bytes[index + 2].is_ascii_hexdigit()
+        {
+            return false;
+        }
+        index += 3;
+    }
+    true
+}
+
+fn connection_username(
+    parsed_username: String,
+    default_username: Option<&str>,
+) -> Result<String, ParseConnectionUriError> {
+    let username = if parsed_username.is_empty() {
+        default_username.unwrap_or_default().trim().to_string()
+    } else {
+        parsed_username
+    };
+    if username.is_empty() {
+        return Err(ParseConnectionUriError::MissingUsername);
+    }
+    Ok(username)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -233,22 +525,76 @@ mod tests {
     }
 
     #[test]
-    fn native_launch_wire_accepts_legacy_temporary_and_saved_requests() {
-        let temporary: NativeSshLaunch = serde_json::from_value(serde_json::json!({
+    fn connection_uri_parses_protocol_defaults_credentials_and_ipv6() {
+        let ssh = parse_connection_uri("ssh://alice:p%40ss@[2001:db8::10]:2200", None).unwrap();
+        assert!(matches!(
+            ssh,
+            NativeConnectionLaunch::Ssh(TemporarySshLaunch {
+                username,
+                host,
+                port: 2200,
+                password: Some(password),
+            }) if username == "alice" && host == "2001:db8::10" && password.as_str() == "p@ss"
+        ));
+
+        let telnet = parse_connection_uri("telnet://router.example.com", None).unwrap();
+        assert!(matches!(
+            telnet,
+            NativeConnectionLaunch::Telnet(TemporaryTelnetLaunch {
+                port: DEFAULT_TELNET_PORT,
+                username: None,
+                password: None,
+                ..
+            })
+        ));
+
+        let mosh = parse_connection_uri("mosh://server.example.com", Some("local-user")).unwrap();
+        assert!(matches!(
+            mosh,
+            NativeConnectionLaunch::Mosh(TemporaryMoshLaunch {
+                username,
+                ssh_port: DEFAULT_MOSH_SSH_PORT,
+                ..
+            }) if username == "local-user"
+        ));
+    }
+
+    #[test]
+    fn connection_uri_rejects_unhandled_or_ambiguous_components() {
+        for uri in [
+            "https://example.com",
+            "ssh://",
+            "ssh://example.com/path",
+            "ssh://example.com?command=id",
+            "ssh://example.com:0",
+            "ssh://user:bad%ZZpassword@example.com",
+            "telnet://:password@example.com",
+        ] {
+            assert!(parse_connection_uri(uri, None).is_err(), "accepted {uri}");
+        }
+    }
+
+    #[test]
+    fn native_launch_wire_redacts_credentials_and_round_trips() {
+        let temporary: NativeConnectionLaunch = serde_json::from_value(serde_json::json!({
+            "kind": "ssh",
             "username": "alice",
             "host": "example.com",
-            "port": 22
+            "port": 22,
+            "password": "wire-secret"
         }))
         .unwrap();
-        assert!(matches!(temporary, NativeSshLaunch::Temporary(_)));
+        assert!(!format!("{temporary:?}").contains("wire-secret"));
+        assert!(matches!(temporary, NativeConnectionLaunch::Ssh(_)));
 
-        let saved: NativeSshLaunch = serde_json::from_value(serde_json::json!({
+        let saved: NativeConnectionLaunch = serde_json::from_value(serde_json::json!({
+            "kind": "saved_connection",
             "saved_connection_id": "connection-1"
         }))
         .unwrap();
         assert_eq!(
             saved,
-            NativeSshLaunch::SavedConnection(SavedConnectionLaunch {
+            NativeConnectionLaunch::SavedConnection(SavedConnectionLaunch {
                 saved_connection_id: "connection-1".to_string(),
             })
         );

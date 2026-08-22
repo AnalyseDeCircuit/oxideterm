@@ -39,6 +39,7 @@ pub use secrets::*;
 pub use settings::*;
 
 use crate::ssh::SshLaunchArgs;
+use crate::uri::ConnectionUriArgs;
 
 // Root CLI parsing stays UI-free. Domain-specific argument DTOs live in
 // sibling modules so each command surface owns its own schema.
@@ -231,6 +232,8 @@ pub enum Command {
     Connections(ConnectionsCommand),
     #[command(about = "Open a temporary SSH terminal in the native GUI")]
     Ssh(SshLaunchArgs),
+    #[command(about = "Open an ssh://, telnet://, or mosh:// URI in the native GUI")]
+    Open(ConnectionUriArgs),
     #[command(about = "Inspect and manage saved SSH port forwards")]
     Forwards(ForwardsCommand),
     #[command(name = "quick-commands")]

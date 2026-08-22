@@ -86,9 +86,9 @@ pub use session::{
     SerialControlState, SerialDisplayMode, SerialError, SerialErrorCode, SerialFlowControl,
     SerialLineEnding, SerialParity, SerialPortInfo, SerialRuntimeOptions, SerialSendMode,
     SerialSessionConfig, SshPtySession, SshSessionConfig, TelnetControlCommand,
-    TelnetSessionConfig, TerminalDrainBudget, TerminalDrainReport, TerminalMagicKind,
-    TerminalOutputProcessor, TerminalResize, TerminalSession, TerminalSessionBackend,
-    TerminalSessionKind, TerminalSessionStatus, serial_list_ports,
+    TelnetLoginCredentials, TelnetSessionConfig, TerminalDrainBudget, TerminalDrainReport,
+    TerminalMagicKind, TerminalOutputProcessor, TerminalResize, TerminalSession,
+    TerminalSessionBackend, TerminalSessionKind, TerminalSessionStatus, serial_list_ports,
 };
 pub use shell_completion::{
     TerminalShellParseResult, TerminalShellToken, escape_terminal_path_for_shell,

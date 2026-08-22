@@ -22,6 +22,8 @@ const TELNET_OPTION_TERMINAL_TYPE: u8 = 24;
 const TELNET_OPTION_NAWS: u8 = 31;
 const TELNET_TERMINAL_TYPE_IS: u8 = 0;
 const TELNET_TERMINAL_TYPE_SEND: u8 = 1;
+const TELNET_URI_LOGIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const TELNET_URI_PROMPT_TAIL_LIMIT: usize = 256;
 
 pub struct TelnetSession {
     config: TelnetSessionConfig,
@@ -218,8 +220,9 @@ impl TelnetCodec {
 }
 
 impl TelnetSession {
-    pub fn new(
+    pub fn new_with_login(
         config: TelnetSessionConfig,
+        login: Option<TelnetLoginCredentials>,
         cols: usize,
         rows: usize,
         graphics_options: GraphicsOptions,
@@ -247,6 +250,8 @@ impl TelnetSession {
             let worker_config = config.clone();
             runtime.spawn(run_telnet_worker(
                 worker_config,
+                login,
+                encoding,
                 resize,
                 command_rx,
                 worker_tx,
@@ -895,8 +900,114 @@ impl TerminalSessionBackend for TelnetSession {
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum TelnetLoginStage {
+    Username,
+    Password,
+    Done,
+}
+
+struct TelnetLoginAutomation {
+    credentials: EncodedTelnetLoginCredentials,
+    stage: TelnetLoginStage,
+    prompt_tail: Vec<u8>,
+}
+
+impl TelnetLoginAutomation {
+    fn new(credentials: EncodedTelnetLoginCredentials) -> Self {
+        Self {
+            credentials,
+            stage: TelnetLoginStage::Username,
+            prompt_tail: Vec::with_capacity(TELNET_URI_PROMPT_TAIL_LIMIT),
+        }
+    }
+
+    fn observe(&mut self, bytes: &[u8]) -> Option<zeroize::Zeroizing<Vec<u8>>> {
+        for byte in bytes {
+            match byte {
+                b'\r' | b'\n' => self.prompt_tail.clear(),
+                0x08 | 0x7f => {
+                    self.prompt_tail.pop();
+                }
+                byte if byte.is_ascii_graphic() || *byte == b' ' => {
+                    if self.prompt_tail.len() == TELNET_URI_PROMPT_TAIL_LIMIT {
+                        self.prompt_tail.remove(0);
+                    }
+                    self.prompt_tail.push(byte.to_ascii_lowercase());
+                }
+                _ => {}
+            }
+        }
+
+        let prompt = self.prompt_tail.strip_suffix(b" ").unwrap_or(&self.prompt_tail);
+        match self.stage {
+            TelnetLoginStage::Username
+                if [b"login:".as_slice(), b"username:", b"user:"]
+                    .iter()
+                    .any(|suffix| prompt.ends_with(suffix)) =>
+            {
+                self.stage = if self.credentials.password.is_some() {
+                    TelnetLoginStage::Password
+                } else {
+                    TelnetLoginStage::Done
+                };
+                self.prompt_tail.clear();
+                Some(login_line(&self.credentials.username))
+            }
+            TelnetLoginStage::Password
+                if [b"password:".as_slice(), b"passcode:"]
+                    .iter()
+                    .any(|suffix| prompt.ends_with(suffix)) =>
+            {
+                self.stage = TelnetLoginStage::Done;
+                self.prompt_tail.clear();
+                self.credentials
+                    .password
+                    .as_ref()
+                    .map(|password| login_line(password.as_slice()))
+            }
+            _ => None,
+        }
+    }
+
+    fn complete(&self) -> bool {
+        self.stage == TelnetLoginStage::Done
+    }
+}
+
+struct EncodedTelnetLoginCredentials {
+    username: zeroize::Zeroizing<Vec<u8>>,
+    password: Option<zeroize::Zeroizing<Vec<u8>>>,
+}
+
+fn encode_telnet_login(
+    credentials: TelnetLoginCredentials,
+    encoding: TerminalEncoding,
+) -> EncodedTelnetLoginCredentials {
+    let encoder = TerminalInputEncoder::new(encoding);
+    EncodedTelnetLoginCredentials {
+        username: zeroize::Zeroizing::new(
+            encoder
+                .encode_text(credentials.username.as_str())
+                .into_owned(),
+        ),
+        password: credentials.password.map(|password| {
+            zeroize::Zeroizing::new(encoder.encode_text(password.as_str()).into_owned())
+        }),
+    }
+}
+
+fn login_line(value: &[u8]) -> zeroize::Zeroizing<Vec<u8>> {
+    let mut line = zeroize::Zeroizing::new(Vec::with_capacity(value.len() + 2));
+    line.extend_from_slice(value);
+    line.extend_from_slice(b"\r\n");
+    line
+}
+
 async fn run_telnet_worker(
     config: TelnetSessionConfig,
+    login: Option<TelnetLoginCredentials>,
+    encoding: TerminalEncoding,
     initial_resize: TerminalResize,
     mut command_rx: tokio::sync::mpsc::Receiver<TelnetCommand>,
     worker_tx: crate::backpressure::ByteBoundedSender<TelnetWorkerEvent>,
@@ -925,6 +1036,11 @@ async fn run_telnet_worker(
     let _ = worker_tx.send_control(TelnetWorkerEvent::Connected);
     let (mut reader, mut writer) = stream.into_split();
     let mut codec = TelnetCodec::new(initial_resize.cols as u16, initial_resize.rows as u16);
+    let mut login = login
+        .map(|credentials| encode_telnet_login(credentials, encoding))
+        .map(TelnetLoginAutomation::new);
+    let login_timeout = tokio::time::sleep(TELNET_URI_LOGIN_TIMEOUT);
+    tokio::pin!(login_timeout);
     let mut buffer = vec![0_u8; 8192];
     loop {
         tokio::select! {
@@ -940,6 +1056,18 @@ async fn run_telnet_worker(
                             if writer.write_all(&response).await.is_err() {
                                 let _ = worker_tx.send_control(TelnetWorkerEvent::Closed);
                                 return;
+                            }
+                        }
+                        if let Some(automation) = login.as_mut()
+                            && let Some(line) = automation.observe(&data)
+                        {
+                            let encoded = zeroize::Zeroizing::new(codec.encode_client_data(&line));
+                            if writer.write_all(&encoded).await.is_err() {
+                                let _ = worker_tx.send_control(TelnetWorkerEvent::Closed);
+                                return;
+                            }
+                            if automation.complete() {
+                                login = None;
                             }
                         }
                         if !data.is_empty() {
@@ -991,6 +1119,10 @@ async fn run_telnet_worker(
                     }
                 }
             }
+            _ = &mut login_timeout, if login.is_some() => {
+                // URI credentials are one-shot runtime state and must not survive a stalled login.
+                login = None;
+            }
         }
     }
 }
@@ -1009,6 +1141,30 @@ fn telnet_escape_iac_payload(bytes: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod telnet_tests {
     use super::*;
+
+    fn uri_login() -> TelnetLoginAutomation {
+        TelnetLoginAutomation::new(encode_telnet_login(
+            TelnetLoginCredentials {
+                username: zeroize::Zeroizing::new("uri-user".to_string()),
+                password: Some(zeroize::Zeroizing::new("uri-password".to_string())),
+            },
+            TerminalEncoding::Utf8,
+        ))
+    }
+
+    #[test]
+    fn uri_login_credentials_follow_split_prompts_once() {
+        let mut login = uri_login();
+        assert!(login.observe(b"device lo").is_none());
+        assert_eq!(login.observe(b"gin:").unwrap().as_slice(), b"uri-user\r\n");
+        assert!(login.observe(b"Pass").is_none());
+        assert_eq!(
+            login.observe(b"word:").unwrap().as_slice(),
+            b"uri-password\r\n"
+        );
+        assert!(login.complete());
+        assert!(login.observe(b"Password:").is_none());
+    }
 
     #[test]
     fn telnet_control_commands_map_to_protocol_bytes() {

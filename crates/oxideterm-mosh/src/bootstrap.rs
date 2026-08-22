@@ -11,7 +11,8 @@ use oxideterm_ssh::{
     SshSecretCommandOutput, SshTransportClient, SshTransportError,
 };
 
-const DEFAULT_MOSH_SERVER_EXECUTABLE: &str = "mosh-server";
+/// Default remote bootstrap executable used when no saved Mosh profile is involved.
+pub const DEFAULT_MOSH_SERVER_EXECUTABLE: &str = "mosh-server";
 const DEFAULT_BOOTSTRAP_COLUMNS: u16 = 80;
 const DEFAULT_BOOTSTRAP_ROWS: u16 = 24;
 const DEFAULT_COLOR_COUNT: u16 = 256;

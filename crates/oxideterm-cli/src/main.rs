@@ -29,6 +29,7 @@ mod report;
 mod secrets;
 mod settings;
 mod ssh;
+mod uri;
 mod write_guard;
 
 use clap::Parser;
@@ -65,6 +66,7 @@ fn run(cli: Cli) -> CliResult<i32> {
         Command::Settings(command) => settings::run(command),
         Command::Connections(command) => connections::run(command),
         Command::Ssh(args) => ssh::run(args),
+        Command::Open(args) => uri::run(args),
         Command::Forwards(command) => forwards::run(command),
         Command::QuickCommands(command) => quick_commands::run(command),
         Command::Plugins(command) => plugins::run(command),

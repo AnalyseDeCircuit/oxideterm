@@ -1,5 +1,5 @@
 use super::*;
-use crate::workspace::new_connection::SshTerminalConnectionOptions;
+use crate::workspace::new_connection::{MoshConnectionOptions, SshTerminalConnectionOptions};
 use crate::workspace::root::init::terminal_preference_overrides;
 use oxideterm_session_adapter::managed_key_resolver_from_store;
 
@@ -62,6 +62,25 @@ fn saved_node_route_matches_config(
 }
 
 impl WorkspaceApp {
+    pub(crate) fn open_native_connection_launch(
+        &mut self,
+        launch: NativeConnectionLaunch,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<()> {
+        match launch {
+            NativeConnectionLaunch::SavedConnection(launch) => {
+                self.open_saved_connection(&launch.saved_connection_id, window, cx);
+                Ok(())
+            }
+            NativeConnectionLaunch::Ssh(launch) => self.open_temporary_ssh_launch(launch, cx),
+            NativeConnectionLaunch::Telnet(launch) => {
+                self.open_temporary_telnet_launch(launch, window, cx)
+            }
+            NativeConnectionLaunch::Mosh(launch) => self.open_temporary_mosh_launch(launch, cx),
+        }
+    }
+
     pub(in crate::workspace) fn create_local_terminal_tab(
         &mut self,
         window: &mut Window,
@@ -154,6 +173,25 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
+        self.create_telnet_terminal_tab_with_login(
+            config,
+            None,
+            terminal_options,
+            title,
+            window,
+            cx,
+        )
+    }
+
+    fn create_telnet_terminal_tab_with_login(
+        &mut self,
+        config: TelnetSessionConfig,
+        login: Option<oxideterm_terminal::TelnetLoginCredentials>,
+        terminal_options: ConnectionTerminalOptions,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<TerminalSessionId> {
         let tab_id = self.alloc_tab_id(cx);
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
@@ -166,9 +204,15 @@ impl WorkspaceApp {
         preference_overrides.apply_to(&mut preferences);
         let pane_config = config;
         let pane = cx.new(|cx| {
-            TerminalPane::new_telnet_with_preferences(pane_config, preferences, window, cx)
-                .expect("failed to initialize Telnet terminal pane")
-                .with_preference_overrides(preference_overrides)
+            TerminalPane::new_telnet_with_login_preferences(
+                pane_config,
+                login,
+                preferences,
+                window,
+                cx,
+            )
+            .expect("failed to initialize Telnet terminal pane")
+            .with_preference_overrides(preference_overrides)
         });
 
         // Telnet is a local transport in the plugin API: it owns no SSH node,
@@ -719,6 +763,72 @@ impl WorkspaceApp {
         // The temporary launch now shares the same node-owned transport attempt
         // and reliable completion delivery as every other first terminal.
         self.ensure_node_connection_started(&node_id, cx);
+        cx.notify();
+        Ok(())
+    }
+
+    fn open_temporary_telnet_launch(
+        &mut self,
+        launch: TemporaryTelnetLaunch,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<()> {
+        let title = launch.title();
+        let config = TelnetSessionConfig {
+            host: launch.host,
+            port: launch.port,
+        };
+        let login = launch.username.map(|username| {
+            // URI user information is consumed by the Telnet worker and never enters the store.
+            oxideterm_terminal::TelnetLoginCredentials {
+                username,
+                password: launch.password,
+            }
+        });
+        self.create_telnet_terminal_tab_with_login(
+            config,
+            login,
+            ConnectionTerminalOptions::default(),
+            title,
+            window,
+            cx,
+        )?;
+        Ok(())
+    }
+
+    fn open_temporary_mosh_launch(
+        &mut self,
+        launch: TemporaryMoshLaunch,
+        cx: &mut Context<Self>,
+    ) -> Result<()> {
+        let title = launch.title();
+        let auth = match launch.password {
+            Some(password) => AuthMethod::password_secret(password),
+            None => AuthMethod::Agent,
+        };
+        let config = SshConfig {
+            host: launch.host,
+            port: launch.ssh_port,
+            username: launch.username,
+            auth,
+            strict_host_key_checking: true,
+            ..SshConfig::default()
+        };
+        self.start_ssh_preflight(
+            config,
+            title,
+            SshConnectionIntent::Mosh(MoshConnectionOptions {
+                saved_profile_id: None,
+                server_executable: oxideterm_mosh::DEFAULT_MOSH_SERVER_EXECUTABLE.to_string(),
+                udp_host_override: None,
+                udp_port: SavedMoshUdpPortSelection::Automatic,
+                ip_family: SavedMoshIpFamily::Auto,
+                prediction: MoshPredictionMode::Adaptive,
+                locale: None,
+                public_mcp_open_token: None,
+            }),
+            cx,
+        );
         cx.notify();
         Ok(())
     }

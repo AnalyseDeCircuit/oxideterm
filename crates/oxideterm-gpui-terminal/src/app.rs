@@ -719,16 +719,25 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Self> {
-        let terminal = Arc::new(Mutex::new(
-            TerminalSession::telnet_with_graphics_and_encoding(
-                config,
-                DEFAULT_COLS,
-                DEFAULT_ROWS,
-                graphics_options_from_preferences(&preferences),
-                preferences.terminal_encoding,
-                preferences.scrollback_lines,
-            ),
-        ));
+        Self::new_telnet_with_login_preferences(config, None, preferences, window, cx)
+    }
+
+    pub fn new_telnet_with_login_preferences(
+        config: TelnetSessionConfig,
+        login: Option<oxideterm_terminal::TelnetLoginCredentials>,
+        preferences: TerminalUiPreferences,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Self> {
+        let terminal = Arc::new(Mutex::new(TerminalSession::telnet_with_login_and_encoding(
+            config,
+            login,
+            DEFAULT_COLS,
+            DEFAULT_ROWS,
+            graphics_options_from_preferences(&preferences),
+            preferences.terminal_encoding,
+            preferences.scrollback_lines,
+        )));
         Self::from_session(terminal, preferences, window, cx)
     }
 

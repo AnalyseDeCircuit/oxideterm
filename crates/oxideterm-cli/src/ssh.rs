@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    env,
+    env, fmt,
     fs::OpenOptions,
     io::{self, Read, Write},
     path::{Path, PathBuf},
@@ -12,13 +12,14 @@ use std::{
 
 use clap::Args;
 use oxideterm_ssh_launch::{
-    NativeSshLaunch, SavedConnectionLaunch, TemporarySshLaunch, parse_user_host_target,
+    NativeConnectionLaunch, SavedConnectionLaunch, TemporarySshLaunch, parse_connection_uri,
+    parse_user_host_target,
 };
 use zeroize::Zeroizing;
 
 use crate::error::{CliError, CliResult};
 
-#[derive(Debug, Args)]
+#[derive(Args)]
 #[command(
     long_about = "Open a temporary SSH terminal in the native GPUI application. Passwords are accepted only from stdin so they do not appear in shell history or process lists."
 )]
@@ -28,31 +29,59 @@ use crate::error::{CliError, CliResult};
 pub struct SshLaunchArgs {
     #[arg(help = "SSH target in user@host form")]
     pub target: String,
-    #[arg(short = 'p', long, default_value_t = 22, value_parser = clap::value_parser!(u16).range(1..))]
-    pub port: u16,
+    #[arg(short = 'p', long, value_parser = clap::value_parser!(u16).range(1..))]
+    pub port: Option<u16>,
     #[arg(long, help = "Read the SSH password from stdin")]
     pub password_stdin: bool,
+}
+
+impl fmt::Debug for SshLaunchArgs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SshLaunchArgs")
+            .field("target", &"[redacted target]")
+            .field("port", &self.port)
+            .field("password_stdin", &self.password_stdin)
+            .finish()
+    }
 }
 
 pub fn run(args: SshLaunchArgs) -> CliResult<i32> {
     let launch = build_launch(args)?;
     let title = launch.title();
-    let request_path = write_launch_request(&NativeSshLaunch::Temporary(launch))?;
-    launch_native_gui(&request_path)?;
+    launch_request(&NativeConnectionLaunch::Ssh(launch))?;
     println!("Opening temporary SSH terminal: {title}");
     Ok(0)
 }
 
 pub(crate) fn launch_saved_connection(connection_id: String) -> CliResult<()> {
-    let request = NativeSshLaunch::SavedConnection(SavedConnectionLaunch {
+    let request = NativeConnectionLaunch::SavedConnection(SavedConnectionLaunch {
         saved_connection_id: connection_id,
     });
-    let request_path = write_launch_request(&request)?;
-    launch_native_gui(&request_path)
+    launch_request(&request)
 }
 
 fn build_launch(args: SshLaunchArgs) -> CliResult<TemporarySshLaunch> {
     let default_username = current_username();
+    if args
+        .target
+        .trim_start()
+        .split_once(':')
+        .is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case("ssh"))
+    {
+        let launch = parse_connection_uri(&args.target, default_username.as_deref())
+            .map_err(|error| CliError::new("invalid_ssh_target", error.to_string(), false))?;
+        let NativeConnectionLaunch::Ssh(mut launch) = launch else {
+            unreachable!("ssh URI parser returned another protocol")
+        };
+        if let Some(port) = args.port {
+            launch.port = port;
+        }
+        if args.password_stdin {
+            launch.password = Some(read_password_from_stdin()?);
+        }
+        return Ok(launch);
+    }
     let (username, host) = parse_user_host_target(&args.target, default_username.as_deref())
         .map_err(|error| {
             CliError::new(
@@ -69,12 +98,12 @@ fn build_launch(args: SshLaunchArgs) -> CliResult<TemporarySshLaunch> {
     Ok(TemporarySshLaunch {
         username,
         host,
-        port: args.port,
+        port: args.port.unwrap_or(22),
         password,
     })
 }
 
-fn current_username() -> Option<String> {
+pub(crate) fn current_username() -> Option<String> {
     env::var("USER")
         .or_else(|_| env::var("USERNAME"))
         .ok()
@@ -92,11 +121,19 @@ fn read_password_from_stdin() -> CliResult<Zeroizing<String>> {
     Ok(password)
 }
 
-fn write_launch_request(launch: &NativeSshLaunch) -> CliResult<PathBuf> {
-    let bytes =
-        Zeroizing::new(serde_json::to_vec(launch).map_err(|error| {
-            CliError::new("ssh_launch_serialize_failed", error.to_string(), false)
-        })?);
+pub(crate) fn launch_request(launch: &NativeConnectionLaunch) -> CliResult<()> {
+    let request_path = write_launch_request(launch)?;
+    launch_native_gui(&request_path)
+}
+
+fn write_launch_request(launch: &NativeConnectionLaunch) -> CliResult<PathBuf> {
+    let bytes = Zeroizing::new(serde_json::to_vec(launch).map_err(|error| {
+        CliError::new(
+            "connection_launch_serialize_failed",
+            error.to_string(),
+            false,
+        )
+    })?);
     let path = unique_launch_path();
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -105,13 +142,14 @@ fn write_launch_request(launch: &NativeSshLaunch) -> CliResult<PathBuf> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let mut file = options
-        .open(&path)
-        .map_err(|error| CliError::new("ssh_launch_file_failed", error.to_string(), false))?;
+    let mut file = options.open(&path).map_err(|error| {
+        CliError::new("connection_launch_file_failed", error.to_string(), false)
+    })?;
     // The request may carry a password from stdin. Keep it out of argv/env and
     // create the handoff file with owner-only permissions on Unix platforms.
-    file.write_all(&bytes)
-        .map_err(|error| CliError::new("ssh_launch_file_failed", error.to_string(), false))?;
+    file.write_all(&bytes).map_err(|error| {
+        CliError::new("connection_launch_file_failed", error.to_string(), false)
+    })?;
     Ok(path)
 }
 
@@ -121,7 +159,7 @@ fn unique_launch_path() -> PathBuf {
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
     env::temp_dir().join(format!(
-        "oxideterm-ssh-launch-{}-{stamp}.json",
+        "oxideterm-connection-launch-{}-{stamp}.json",
         std::process::id()
     ))
 }
@@ -164,7 +202,7 @@ fn spawn_from_path(request_path: &Path) -> io::Result<()> {
 
 fn spawn_native_binary(binary: &Path, request_path: &Path) -> io::Result<()> {
     Command::new(binary)
-        .arg("--ssh-launch-file")
+        .arg("--connection-launch-file")
         .arg(request_path)
         .spawn()
         .map(|_| ())
@@ -185,7 +223,7 @@ fn spawn_macos_bundle(request_path: &Path) -> CliResult<()> {
             "-b",
             "com.analysecircuit.OxideTerm",
             "--args",
-            "--ssh-launch-file",
+            "--connection-launch-file",
         ])
         .arg(request_path)
         .spawn()

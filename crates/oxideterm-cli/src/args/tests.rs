@@ -11,11 +11,27 @@ fn parses_temporary_ssh_launch() {
     match cli.command {
         Command::Ssh(args) => {
             assert_eq!(args.target, "alice@example.com");
-            assert_eq!(args.port, 2222);
+            assert_eq!(args.port, Some(2222));
             assert!(!args.password_stdin);
         }
         _ => panic!("expected ssh command"),
     }
+}
+
+#[test]
+fn parses_connection_uri_launch_without_exposing_it_in_debug_output() {
+    let cli = Cli::parse_from(["oxideterm", "open", "ssh://alice:uri-password@example.com"]);
+    let rendered = format!("{cli:?}");
+
+    assert!(matches!(cli.command, Command::Open(_)));
+    assert!(!rendered.contains("uri-password"));
+
+    let ssh_cli = Cli::parse_from([
+        "oxideterm",
+        "ssh",
+        "ssh://alice:second-password@example.com",
+    ]);
+    assert!(!format!("{ssh_cli:?}").contains("second-password"));
 }
 
 #[test]

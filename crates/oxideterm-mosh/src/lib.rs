@@ -11,8 +11,8 @@ mod bootstrap;
 mod session;
 
 pub use bootstrap::{
-    MoshBootstrapConfig, MoshBootstrapContext, MoshBootstrapError, MoshBootstrapResult,
-    MoshIpFamily, MoshUdpPortSelection, bootstrap_mosh,
+    DEFAULT_MOSH_SERVER_EXECUTABLE, MoshBootstrapConfig, MoshBootstrapContext, MoshBootstrapError,
+    MoshBootstrapResult, MoshIpFamily, MoshUdpPortSelection, bootstrap_mosh,
 };
 pub use session::{
     MoshSessionClient, MoshSessionCommandError, MoshSessionConfig, MoshSessionEvent,

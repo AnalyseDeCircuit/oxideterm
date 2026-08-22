@@ -8,6 +8,25 @@ pub struct TelnetSessionConfig {
     pub port: u16,
 }
 
+/// One-shot URI credentials consumed by the Telnet worker and never persisted.
+pub struct TelnetLoginCredentials {
+    pub username: zeroize::Zeroizing<String>,
+    pub password: Option<zeroize::Zeroizing<String>>,
+}
+
+impl std::fmt::Debug for TelnetLoginCredentials {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TelnetLoginCredentials")
+            .field("username", &"[redacted userinfo]")
+            .field(
+                "password",
+                &self.password.as_ref().map(|_| "[redacted secret]"),
+            )
+            .finish()
+    }
+}
+
 pub struct MoshTerminalConfig {
     pub title: String,
     pub bootstrap: oxideterm_mosh::MoshBootstrapConfig,
@@ -152,9 +171,30 @@ impl TerminalSession {
         encoding: TerminalEncoding,
         scrollback_lines: usize,
     ) -> Self {
+        Self::telnet_with_login_and_encoding(
+            config,
+            None,
+            cols,
+            rows,
+            graphics_options,
+            encoding,
+            scrollback_lines,
+        )
+    }
+
+    pub fn telnet_with_login_and_encoding(
+        config: TelnetSessionConfig,
+        login: Option<TelnetLoginCredentials>,
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+        encoding: TerminalEncoding,
+        scrollback_lines: usize,
+    ) -> Self {
         Self {
-            backend: Box::new(TelnetSession::new(
+            backend: Box::new(TelnetSession::new_with_login(
                 config,
+                login,
                 cols,
                 rows,
                 graphics_options,

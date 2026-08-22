@@ -183,6 +183,7 @@ objc = "0.2"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSGraphics"] }
 ocb3 = { version = "0.1.0", default-features = false, features = ["alloc"] }
 parking_lot = "0.12"
+percent-encoding = "2.3"
 polling = "3.11"
 pollster = "0.4.0"
 postage = { version = "0.5", features = ["futures-traits"] }

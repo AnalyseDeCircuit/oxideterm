@@ -151,8 +151,9 @@ use oxideterm_connection_monitor::{
     visible_tmux_session_rows,
 };
 use oxideterm_connections::{
-    ConnectionStore, ConnectionTerminalOptions, PrivilegeCredentialKind, SaveConnectionRequest,
-    SavedPrivilegeCredential, SshConfigSyncService,
+    ConnectionStore, ConnectionTerminalOptions, MoshIpFamily as SavedMoshIpFamily,
+    MoshPredictionMode, MoshUdpPortSelection as SavedMoshUdpPortSelection, PrivilegeCredentialKind,
+    SaveConnectionRequest, SavedPrivilegeCredential, SshConfigSyncService,
 };
 use oxideterm_forwarding::{
     ForwardEventDeliverySender, ForwardStatus, ForwardingRegistry, SavedForwardStore,
@@ -239,7 +240,9 @@ use oxideterm_ssh::{
     ReconnectSnapshot, SshAlgorithmDiagnosticKind, SshConfig, SshConnectionHandle,
     SshConnectionRegistry, SshTransportClient, TerminalEndpoint,
 };
-use oxideterm_ssh_launch::TemporarySshLaunch;
+use oxideterm_ssh_launch::{
+    NativeConnectionLaunch, TemporaryMoshLaunch, TemporarySshLaunch, TemporaryTelnetLaunch,
+};
 use oxideterm_terminal::{
     LocalPtyConfig, MoshTerminalConfig, RemoteShellIntegrationStatus, SerialSessionConfig,
     ShellInfo, SshSessionConfig, TelnetSessionConfig, TerminalCommandMarkDetectionSource,

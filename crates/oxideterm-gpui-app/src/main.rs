@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use gpui::{App, AppContext, actions};
 use oxideterm_i18n::I18n;
 use oxideterm_settings::{SettingsStore, WindowUiState};
+use zeroize::Zeroizing;
 
 use crate::assets::NativeAssets;
 use crate::window_placement::{default_window_bounds, initial_window_bounds};
@@ -96,8 +97,8 @@ actions!(
 
 fn main() {
     oxideterm_acp_adapter::run_from_env_if_requested();
-    let ssh_launch_path = ssh_launch_path_arg().unwrap_or_else(|error| {
-        eprintln!("failed to read SSH launch argument: {error}");
+    let native_launch_args = native_launch_args().unwrap_or_else(|error| {
+        eprintln!("failed to read native connection launch argument: {error}");
         std::process::exit(2);
     });
 
@@ -107,14 +108,18 @@ fn main() {
         eprintln!("failed to initialize OxideTerm portable runtime: {error}");
         std::process::exit(1);
     }
-    let single_instance = single_instance::acquire_or_forward(ssh_launch_path.clone())
-        .unwrap_or_else(|error| {
-            eprintln!("failed to initialize OxideTerm single-instance guard: {error}");
-            std::process::exit(1);
-        });
+    let single_instance = single_instance::acquire_or_forward(
+        native_launch_args.handoff_path.clone(),
+        native_launch_args.connection_launch,
+    )
+    .unwrap_or_else(|error| {
+        eprintln!("failed to initialize OxideTerm single-instance guard: {error}");
+        std::process::exit(1);
+    });
     let single_instance::SingleInstanceOutcome::Primary {
         _guard: _single_instance_guard,
         receiver: single_instance_rx,
+        startup_launch,
     } = single_instance
     else {
         return;
@@ -130,11 +135,13 @@ fn main() {
         eprintln!("failed to create the pre-2.0 migration snapshot: {error:#}");
         std::process::exit(1);
     }
-    let native_ssh_launch =
-        single_instance::read_ssh_launch_file(ssh_launch_path).unwrap_or_else(|error| {
-            eprintln!("failed to read SSH launch request: {error}");
-            std::process::exit(2);
-        });
+    let handoff_launch =
+        single_instance::read_connection_launch_file(native_launch_args.handoff_path)
+            .unwrap_or_else(|error| {
+                eprintln!("failed to read connection launch request: {error}");
+                std::process::exit(2);
+            });
+    let native_connection_launch = startup_launch.or(handoff_launch);
     let startup_settings_store = SettingsStore::load_default();
     let startup_settings = startup_settings_store
         .as_ref()
@@ -155,6 +162,38 @@ fn main() {
     };
 
     let application = oxideterm_gpui_platform::application().with_assets(NativeAssets);
+    let url_event_receiver = single_instance_rx.clone();
+    application.on_open_urls(move |urls, cx| {
+        let default_username = whoami::username();
+        let mut launches = Vec::new();
+        for url in urls {
+            let url = Zeroizing::new(url);
+            match oxideterm_ssh_launch::parse_connection_uri(&url, Some(&default_username)) {
+                Ok(launch) => launches.push(launch),
+                Err(error) => eprintln!("failed to open connection URI: {error}"),
+            }
+        }
+        if cx.windows().is_empty()
+            && !launches.is_empty()
+            && let Err(error) = open_primary_window(
+                cx,
+                Some(launches.remove(0)),
+                desktop_presence_menu_from_settings(),
+                Some(url_event_receiver.clone()),
+                SettingsStore::load_default()
+                    .map(|store| store.settings().clone())
+                    .unwrap_or_default(),
+            )
+        {
+            eprintln!("failed to open a window for connection URI: {error:#}");
+            return;
+        }
+        for launch in launches {
+            let _ = url_event_receiver.publish(
+                single_instance::SingleInstanceEvent::OpenNativeConnection(launch),
+            );
+        }
+    });
     let reopen_single_instance_rx = single_instance_rx.clone();
     application.on_reopen(move |cx| {
         if !cx.windows().is_empty() {
@@ -209,7 +248,7 @@ fn main() {
         )));
         let workspace_opened = match open_primary_window(
             cx,
-            native_ssh_launch,
+            native_connection_launch,
             desktop_presence_menu,
             Some(single_instance_rx),
             startup_settings.clone(),
@@ -258,7 +297,7 @@ fn confirm_update_after_initial_workspace() -> std::io::Result<()> {
 
 fn open_main_workspace_window(
     cx: &mut App,
-    native_ssh_launch: Option<oxideterm_ssh_launch::NativeSshLaunch>,
+    native_connection_launch: Option<oxideterm_ssh_launch::NativeConnectionLaunch>,
     desktop_presence_menu: oxideterm_desktop_presence::DesktopPresenceMenu,
     single_instance_rx: Option<single_instance::SingleInstanceReceiver>,
     window_ui: WindowUiState,
@@ -292,21 +331,12 @@ fn open_main_workspace_window(
                         )
                     })
             });
-            if let Some(launch) = native_ssh_launch
+            if let Some(launch) = native_connection_launch
                 && let Err(error) = session.update(cx, |session, cx| {
-                    match launch {
-                        oxideterm_ssh_launch::NativeSshLaunch::Temporary(launch) => {
-                            session.open_temporary_ssh_launch(launch, cx)
-                        }
-                        oxideterm_ssh_launch::NativeSshLaunch::SavedConnection(launch) => {
-                            // Startup launches use the same saved-profile owner as in-app actions.
-                            session.open_saved_connection(&launch.saved_connection_id, window, cx);
-                            Ok(())
-                        }
-                    }
+                    session.open_native_connection_launch(launch, window, cx)
                 })
             {
-                eprintln!("failed to open native SSH launch: {error}");
+                eprintln!("failed to open native connection launch: {error}");
             }
             cx.new(|cx| WorkspaceWindowShell::new(session, window, cx))
         },
@@ -316,7 +346,7 @@ fn open_main_workspace_window(
 
 fn open_primary_window(
     cx: &mut App,
-    native_ssh_launch: Option<oxideterm_ssh_launch::NativeSshLaunch>,
+    native_connection_launch: Option<oxideterm_ssh_launch::NativeConnectionLaunch>,
     desktop_presence_menu: oxideterm_desktop_presence::DesktopPresenceMenu,
     single_instance_rx: Option<single_instance::SingleInstanceReceiver>,
     settings: oxideterm_settings::PersistedSettings,
@@ -327,7 +357,7 @@ fn open_primary_window(
             cx,
             portable_status,
             settings,
-            native_ssh_launch,
+            native_connection_launch,
             desktop_presence_menu,
             single_instance_rx,
         )?;
@@ -336,7 +366,7 @@ fn open_primary_window(
 
     open_main_workspace_window(
         cx,
-        native_ssh_launch,
+        native_connection_launch,
         desktop_presence_menu,
         single_instance_rx,
         settings.window_ui,
@@ -344,19 +374,58 @@ fn open_primary_window(
     Ok(true)
 }
 
-fn ssh_launch_path_arg() -> Result<Option<PathBuf>, String> {
+struct NativeLaunchArgs {
+    handoff_path: Option<PathBuf>,
+    connection_launch: Option<oxideterm_ssh_launch::NativeConnectionLaunch>,
+}
+
+fn native_launch_args() -> Result<NativeLaunchArgs, String> {
     let mut args = std::env::args_os();
     let _program = args.next();
+    let mut handoff_path = None;
+    let mut connection_launch = None;
+    let default_username = whoami::username();
     while let Some(arg) = args.next() {
-        if arg == "--ssh-launch-file" {
-            return args
-                .next()
-                .map(PathBuf::from)
-                .map(Some)
-                .ok_or_else(|| "--ssh-launch-file requires a path".to_string());
+        if arg == "--ssh-launch-file" || arg == "--connection-launch-file" {
+            if handoff_path.is_some() || connection_launch.is_some() {
+                return Err("only one native connection launch may be supplied".to_string());
+            }
+            handoff_path =
+                Some(args.next().map(PathBuf::from).ok_or_else(|| {
+                    "connection launch file argument requires a path".to_string()
+                })?);
+            continue;
         }
+        let Ok(arg) = arg.into_string() else {
+            continue;
+        };
+        if !looks_like_connection_uri(&arg) {
+            continue;
+        }
+        if handoff_path.is_some() || connection_launch.is_some() {
+            return Err("only one native connection launch may be supplied".to_string());
+        }
+        let arg = Zeroizing::new(arg);
+        connection_launch = Some(
+            oxideterm_ssh_launch::parse_connection_uri(&arg, Some(&default_username))
+                .map_err(|error| error.to_string())?,
+        );
     }
-    Ok(None)
+    Ok(NativeLaunchArgs {
+        handoff_path,
+        connection_launch,
+    })
+}
+
+fn looks_like_connection_uri(value: &str) -> bool {
+    value
+        .trim_start()
+        .split_once(':')
+        .is_some_and(|(scheme, _)| {
+            ["ssh", "telnet", "mosh"]
+                .iter()
+                .any(|candidate| scheme.eq_ignore_ascii_case(candidate))
+        })
 }
 
 fn quit(_: &Quit, cx: &mut App) {

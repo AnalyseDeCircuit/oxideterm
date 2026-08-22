@@ -5,7 +5,9 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+percent-encoding.workspace = true
 serde.workspace = true
+url.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
