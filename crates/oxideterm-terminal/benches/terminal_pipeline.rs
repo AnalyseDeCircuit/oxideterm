@@ -1,11 +1,158 @@
 use std::time::{Duration, Instant};
 
-use criterion::{BatchSize, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use alacritty_terminal::{
+    event::VoidListener,
+    grid::Dimensions,
+    term::{Config, Term},
+    vte::{
+        Params, Parser, Perform,
+        ansi::{Processor, StdSyncHandler},
+    },
+};
+use criterion::{
+    BatchSize, BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
+};
 use oxideterm_terminal::{GraphicsOptions, TerminalSession};
 
 const BENCHMARK_ROWS: usize = 40;
 const BENCHMARK_COLS: usize = 120;
 const BENCHMARK_SCROLL_DELTA: i32 = 1;
+const INPUT_CORPUS_BYTES: usize = 256 * 1024;
+const CRLF_BENCHMARK_LINE_BYTES: usize = 64;
+
+#[derive(Clone, Copy)]
+struct BenchmarkSize;
+
+impl Dimensions for BenchmarkSize {
+    fn total_lines(&self) -> usize {
+        BENCHMARK_ROWS
+    }
+
+    fn screen_lines(&self) -> usize {
+        BENCHMARK_ROWS
+    }
+
+    fn columns(&self) -> usize {
+        BENCHMARK_COLS
+    }
+}
+
+#[derive(Default)]
+struct ParserActionCount {
+    actions: usize,
+}
+
+impl ParserActionCount {
+    fn record(&mut self) {
+        self.actions += 1;
+    }
+}
+
+impl Perform for ParserActionCount {
+    fn print(&mut self, _character: char) {
+        self.record();
+    }
+
+    fn print_text(&mut self, text: &str) {
+        // Byte progress keeps batch callbacks observable without reintroducing scalar decoding.
+        self.actions += text.len();
+    }
+
+    fn print_text_lines(&mut self, text: &str, _line_count: usize, _max_line_length: usize) {
+        self.actions += text.len();
+    }
+
+    fn execute(&mut self, _byte: u8) {
+        self.record();
+    }
+
+    fn hook(&mut self, _params: &Params, _intermediates: &[u8], _ignore: bool, _action: char) {
+        self.record();
+    }
+
+    fn put(&mut self, _byte: u8) {
+        self.record();
+    }
+
+    fn unhook(&mut self) {
+        self.record();
+    }
+
+    fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {
+        self.record();
+    }
+
+    fn csi_dispatch(
+        &mut self,
+        _params: &Params,
+        _intermediates: &[u8],
+        _ignore: bool,
+        _action: char,
+    ) {
+        self.record();
+    }
+
+    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {
+        self.record();
+    }
+}
+
+fn repeated_input(pattern: &[u8]) -> Vec<u8> {
+    let repetitions = INPUT_CORPUS_BYTES.div_ceil(pattern.len());
+    let mut corpus = Vec::with_capacity(repetitions * pattern.len());
+    for _ in 0..repetitions {
+        corpus.extend_from_slice(pattern);
+    }
+    corpus
+}
+
+fn fixed_size_input(pattern: &[u8]) -> Vec<u8> {
+    let mut corpus = repeated_input(pattern);
+    corpus.truncate(INPUT_CORPUS_BYTES);
+    corpus
+}
+
+fn crlf_ascii_input() -> Vec<u8> {
+    let mut corpus = vec![b'x'; INPUT_CORPUS_BYTES];
+    for line_end in (CRLF_BENCHMARK_LINE_BYTES..=corpus.len()).step_by(CRLF_BENCHMARK_LINE_BYTES) {
+        corpus[line_end - 2] = b'\r';
+        corpus[line_end - 1] = b'\n';
+    }
+    corpus
+}
+
+fn terminal_input_corpora() -> Vec<(&'static str, Vec<u8>)> {
+    vec![
+        (
+            "plain",
+            repeated_input(
+                b"oxideterm benchmark plain output cargo check completed successfully 0123456789\r\n",
+            ),
+        ),
+        (
+            "ansi",
+            repeated_input(
+                b"\x1b[38;5;42moxideterm benchmark colored output\x1b[0m cargo check\r\n",
+            ),
+        ),
+        (
+            "unicode",
+            repeated_input("OxideTerm 中文输出 e\u{301} Rust 🦀 终端基准测试\r\n".as_bytes()),
+        ),
+        (
+            "long-csi",
+            repeated_input(b"\x1b[1;2;3;4;5;7;8;9;22;23;24;25;27;28;29;38;5;42mX\x1b[0m"),
+        ),
+        ("wrapped-ascii", fixed_size_input(b"x")),
+        ("crlf-ascii", crlf_ascii_input()),
+    ]
+}
+
+fn benchmark_term() -> Term<VoidListener> {
+    let mut config = Config::default();
+    config.scrolling_history = 20_000;
+    Term::new(config, &BenchmarkSize, VoidListener)
+}
 
 fn terminal_corpus(lines: usize) -> Vec<u8> {
     let mut corpus = Vec::with_capacity(lines * 96);
@@ -116,5 +263,87 @@ fn benchmark_terminal_pipeline(criterion: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, benchmark_terminal_pipeline);
+fn benchmark_terminal_input_breakdown(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("terminal_input_breakdown");
+
+    for (name, corpus) in terminal_input_corpora() {
+        group.throughput(Throughput::Bytes(corpus.len() as u64));
+        group.bench_with_input(
+            BenchmarkId::new("parser", name),
+            &corpus,
+            |bencher, corpus| {
+                bencher.iter_batched(
+                    Parser::new,
+                    |mut parser| {
+                        let mut performer = ParserActionCount::default();
+                        parser.advance(&mut performer, black_box(corpus));
+                        black_box(performer.actions)
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::new("grid", name),
+            &corpus,
+            |bencher, corpus| {
+                bencher.iter_batched(
+                    || (Processor::<StdSyncHandler>::new(), benchmark_term()),
+                    |(mut parser, mut term)| {
+                        parser.advance(&mut term, black_box(corpus));
+                        black_box(term)
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+        if matches!(name, "plain" | "crlf-ascii") {
+            let mut scalar_dispatch_corpus = corpus.clone();
+            scalar_dispatch_corpus.push(b'x');
+            group.bench_with_input(
+                BenchmarkId::new("grid-scalar-dispatch", name),
+                &scalar_dispatch_corpus,
+                |bencher, corpus| {
+                    bencher.iter_batched(
+                        || (Processor::<StdSyncHandler>::new(), benchmark_term()),
+                        |(mut parser, mut term)| {
+                            parser.advance(&mut term, black_box(corpus));
+                            black_box(term)
+                        },
+                        BatchSize::SmallInput,
+                    );
+                },
+            );
+        }
+        group.bench_with_input(
+            BenchmarkId::new("pipeline", name),
+            &corpus,
+            |bencher, corpus| {
+                bencher.iter_batched(
+                    || {
+                        TerminalSession::recording_playback(
+                            BENCHMARK_COLS,
+                            BENCHMARK_ROWS,
+                            GraphicsOptions::default(),
+                            20_000,
+                        )
+                    },
+                    |mut terminal| {
+                        terminal.feed_recording_output(black_box(corpus));
+                        black_box(terminal)
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    benchmark_terminal_pipeline,
+    benchmark_terminal_input_breakdown
+);
 criterion_main!(benches);

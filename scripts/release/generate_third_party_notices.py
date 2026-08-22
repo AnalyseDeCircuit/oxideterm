@@ -27,6 +27,7 @@ PERMISSIVE_LICENSES = {
 }
 
 VENDORED_WORKSPACE_PACKAGES = {
+    "alacritty_terminal",
     "gpui",
     "gpui_ce_util",
     "gpui_collections",
@@ -44,6 +45,7 @@ VENDORED_WORKSPACE_PACKAGES = {
     "gpui_windows",
     "gpui_zed_util",
     "russh",
+    "vte",
 }
 MICROSOFT_TERMINAL_REVISION = "1283c0f5b99a2961673249fa77c6b986efb5086c"
 

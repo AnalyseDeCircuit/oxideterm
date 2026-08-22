@@ -2,7 +2,7 @@
 
 This file lists third-party Rust crates and detected licenses, including transitive dependencies.
 It is generated from `cargo deny list -f json -l crate`.
-Generated: 2026-08-22T10:13:37.880828Z
+Generated: 2026-08-22T16:36:20.428437Z
 
 ## Summary
 
@@ -67,7 +67,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | agent-client-protocol-schema | 1.5.0 | Apache-2.0 | https://crates.io/crates/agent-client-protocol-schema |
 | ahash | 0.8.12 | MIT, Apache-2.0 | https://crates.io/crates/ahash |
 | aho-corasick | 1.1.4 | Unlicense, MIT | https://crates.io/crates/aho-corasick |
-| alacritty_terminal | 0.26.0 | Apache-2.0 | https://crates.io/crates/alacritty_terminal |
+| alacritty_terminal | 0.26.0 | Apache-2.0 | vendored in repository |
 | aligned | 0.4.3 | MIT, Apache-2.0 | https://crates.io/crates/aligned |
 | aligned-vec | 0.6.4 | MIT | https://crates.io/crates/aligned-vec |
 | allocator-api2 | 0.2.21 | MIT, Apache-2.0 | https://crates.io/crates/allocator-api2 |
@@ -1078,7 +1078,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | vswhom | 0.1.0 | MIT | https://crates.io/crates/vswhom |
 | vswhom-sys | 0.1.3 | MIT | https://crates.io/crates/vswhom-sys |
 | vt100 | 0.16.2 | MIT | https://crates.io/crates/vt100 |
-| vte | 0.15.0 | Apache-2.0, MIT | https://crates.io/crates/vte |
+| vte | 0.15.0 | Apache-2.0, MIT | vendored in repository |
 | wait-timeout | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/wait-timeout |
 | waker-fn | 1.2.0 | Apache-2.0, MIT | https://crates.io/crates/waker-fn |
 | walkdir | 2.5.0 | Unlicense, MIT | https://crates.io/crates/walkdir |

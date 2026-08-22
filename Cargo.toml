@@ -78,6 +78,8 @@ members = [
   "crates/oxideterm-trzsz",
   "crates/oxideterm-workspace",
   "crates/oxideterm-x11-forwarding",
+  "crates/alacritty-terminal",
+  "crates/vte",
   "crates/gpui-ce/gpui",
   "crates/gpui-ce/gpui_ce_util",
   "crates/gpui-ce/gpui_collections",
@@ -101,9 +103,11 @@ default-members = ["crates/oxideterm-gpui-app"]
 resolver = "2"
 
 [patch.crates-io]
+alacritty_terminal = { path = "crates/alacritty-terminal" }
 gpui = { path = "crates/gpui-ce/gpui" }
 russh = { path = "crates/russh" }
 russh-sftp = { path = "crates/russh-sftp" }
+vte = { path = "crates/vte" }
 
 [workspace.package]
 edition = "2024"
