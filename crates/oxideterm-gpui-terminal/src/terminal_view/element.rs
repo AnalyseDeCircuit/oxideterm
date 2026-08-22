@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet, hash_map::DefaultHasher},
+    collections::{HashMap, VecDeque, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     ops::Range,
     sync::{Arc, OnceLock},
@@ -89,6 +89,8 @@ pub(crate) struct TerminalElement {
 pub(crate) struct TerminalElementInput {
     pub(crate) focus_handle: FocusHandle,
     pub(crate) view: Entity<TerminalPane>,
+    pub(crate) last_viewport_bounds: Option<Bounds<Pixels>>,
+    pub(crate) last_viewport_scale_factor_bits: Option<u32>,
 }
 
 #[allow(dead_code)]
@@ -234,6 +236,27 @@ struct TerminalRelativeLinkRange {
     kind: TerminalLinkKind,
 }
 
+// Wrapped rows share highlight and semantic metadata. Build that metadata once per frame instead
+// of walking and hashing the complete logical line again for every visible physical row.
+struct TerminalLogicalLine {
+    range: Range<usize>,
+    signature: u64,
+}
+
+struct TerminalLogicalLineIndex {
+    visible_rows: Range<usize>,
+    line_for_visible_row: Vec<usize>,
+    lines: Vec<TerminalLogicalLine>,
+}
+
+impl TerminalLogicalLineIndex {
+    fn line_for_row(&self, row: usize) -> Option<&TerminalLogicalLine> {
+        let row_offset = row.checked_sub(self.visible_rows.start)?;
+        let line_index = *self.line_for_visible_row.get(row_offset)?;
+        self.lines.get(line_index)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct TerminalRowLayoutCacheKey {
     signature: u64,
@@ -249,15 +272,10 @@ struct TerminalRowLinkCacheKey {
     signature: u64,
 }
 
-struct RecentCacheEntry<V> {
-    value: V,
-    last_used: u64,
-}
-
 struct RecentCache<K, V> {
-    entries: HashMap<K, RecentCacheEntry<V>>,
+    entries: HashMap<K, V>,
+    insertion_order: VecDeque<K>,
     capacity: usize,
-    access_sequence: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -273,40 +291,30 @@ where
     V: Clone,
 {
     fn new(capacity: usize) -> Self {
+        let capacity = capacity.max(1);
         Self {
-            entries: HashMap::new(),
-            capacity: capacity.max(1),
-            access_sequence: 0,
+            entries: HashMap::with_capacity(capacity),
+            insertion_order: VecDeque::with_capacity(capacity),
+            capacity,
         }
     }
 
     fn get_or_insert_with(&mut self, key: K, build: impl FnOnce() -> V) -> (V, bool) {
-        self.access_sequence = self.access_sequence.saturating_add(1);
-        let access_sequence = self.access_sequence;
-        if let Some(entry) = self.entries.get_mut(&key) {
-            entry.last_used = access_sequence;
-            return (entry.value.clone(), true);
+        if let Some(value) = self.entries.get(&key) {
+            return (value.clone(), true);
         }
 
         if self.entries.len() >= self.capacity
-            && let Some(oldest_key) = self
-                .entries
-                .iter()
-                .min_by_key(|(_, entry)| entry.last_used)
-                .map(|(key, _)| key.clone())
+            && let Some(oldest_key) = self.insertion_order.pop_front()
         {
-            // Evict one cold entry instead of periodically dropping the entire cache.
+            // Streaming output continuously misses these caches. Insertion-order eviction keeps
+            // that hot path constant-time while retaining several viewports of recent rows.
             self.entries.remove(&oldest_key);
         }
 
         let value = build();
-        self.entries.insert(
-            key,
-            RecentCacheEntry {
-                value: value.clone(),
-                last_used: access_sequence,
-            },
-        );
+        self.entries.insert(key.clone(), value.clone());
+        self.insertion_order.push_back(key);
         (value, false)
     }
 }
@@ -687,10 +695,11 @@ impl TerminalElement {
     ) -> TerminalElementLayout {
         let mut backgrounds = Vec::new();
         let semantic_roles = self.semantic_roles_for_rows(visible_rows.clone());
+        let logical_lines = self.logical_lines_for_rows(visible_rows.clone());
         let highlight_layout = if let Some(cache) = cache.as_deref_mut() {
-            self.cached_highlight_layout_for_rows(visible_rows.clone(), &semantic_roles, cache)
+            self.cached_highlight_layout_for_rows(&logical_lines, &semantic_roles, cache)
         } else {
-            self.highlight_layout_for_rows(visible_rows.clone())
+            self.highlight_layout_for_logical_lines(&logical_lines)
         };
         let search_matches = map_rects_to_visual(
             &self.snapshot,
@@ -758,9 +767,15 @@ impl TerminalElement {
                 continue;
             };
             let row_layout = if let Some(cache) = cache.as_deref_mut() {
-                let semantic_role = logical_line_range_for_row(&self.snapshot, row_index)
-                    .and_then(|rows| semantic_roles.get(&rows).copied());
-                let key = self.row_layout_cache_key_with_semantic_role(row_index, semantic_role);
+                let logical_line = logical_lines
+                    .line_for_row(row_index)
+                    .expect("visible snapshot rows must have logical line metadata");
+                let semantic_role = semantic_roles.get(&logical_line.range).copied();
+                let key = self.row_layout_cache_key_with_logical_line(
+                    row_index,
+                    logical_line,
+                    semantic_role,
+                );
                 cache.get_or_insert_row_with(key, self.performance_metrics_enabled, || {
                     self.row_layout(
                         row_index,
@@ -863,32 +878,43 @@ impl TerminalElement {
 
     fn cached_highlight_layout_for_rows(
         &self,
-        visible_rows: Range<usize>,
+        logical_lines: &TerminalLogicalLineIndex,
         semantic_roles: &HashMap<Range<usize>, SemanticLineRole>,
         cache: &mut TerminalLayoutCache,
     ) -> TerminalHighlightLayout {
         let mut layout = TerminalHighlightLayout::empty();
-        let mut seen_ranges = HashSet::new();
 
-        for row_index in visible_rows {
-            let Some(line_range) = logical_line_range_for_row(&self.snapshot, row_index) else {
-                continue;
-            };
-            if !seen_ranges.insert(line_range.clone()) {
-                continue;
-            }
-
-            let semantic_role = semantic_roles.get(&line_range).copied();
-            let key = self
-                .logical_highlight_cache_key_with_semantic_role(line_range.clone(), semantic_role);
+        for logical_line in &logical_lines.lines {
+            let semantic_role = semantic_roles.get(&logical_line.range).copied();
+            let key =
+                self.logical_highlight_cache_key_with_logical_line(logical_line, semantic_role);
             let relative_layout =
                 cache.get_or_insert_highlight_with(key, self.performance_metrics_enabled, || {
-                    let line_layout = self.highlight_layout_for_rows(line_range.clone());
-                    relative_highlight_layout(line_range.start, line_layout)
+                    let line_layout = self.highlight_layout_for_rows(logical_line.range.clone());
+                    relative_highlight_layout(logical_line.range.start, line_layout)
                 });
-            append_relative_highlight_layout(line_range.start, &relative_layout, &mut layout);
+            append_relative_highlight_layout(
+                logical_line.range.start,
+                &relative_layout,
+                &mut layout,
+            );
         }
 
+        layout
+    }
+
+    fn highlight_layout_for_logical_lines(
+        &self,
+        logical_lines: &TerminalLogicalLineIndex,
+    ) -> TerminalHighlightLayout {
+        let mut layout = TerminalHighlightLayout::empty();
+        for logical_line in &logical_lines.lines {
+            let mut line_layout = self.highlight_layout_for_rows(logical_line.range.clone());
+            layout.backgrounds.append(&mut line_layout.backgrounds);
+            layout.underlines.append(&mut line_layout.underlines);
+            layout.outlines.append(&mut line_layout.outlines);
+            layout.foregrounds.extend(line_layout.foregrounds);
+        }
         layout
     }
 
@@ -958,6 +984,12 @@ impl TerminalElement {
         link_ranges: &[TerminalLinkRange],
         terminal_background: Hsla,
     ) -> TerminalRowLayout {
+        // Visible link ranges are ordered by row. Restrict cell styling to this row so output in
+        // other rows cannot multiply every character lookup in a link-dense terminal.
+        let row_links_start = link_ranges.partition_point(|range| range.row < row_index);
+        let row_links_end = row_links_start
+            + link_ranges[row_links_start..].partition_point(|range| range.row == row_index);
+        let link_ranges = &link_ranges[row_links_start..row_links_end];
         let mut backgrounds = Vec::new();
         let mut selections = Vec::new();
         let mut text_runs = Vec::new();
@@ -1114,9 +1146,10 @@ impl TerminalElement {
         }
     }
 
-    fn row_layout_cache_key_with_semantic_role(
+    fn row_layout_cache_key_with_logical_line(
         &self,
         row_index: usize,
+        logical_line: &TerminalLogicalLine,
         semantic_role: Option<SemanticLineRole>,
     ) -> TerminalRowLayoutCacheKey {
         let mut hasher = DefaultHasher::new();
@@ -1131,7 +1164,7 @@ impl TerminalElement {
                 self.cursor_visible.hash(&mut hasher);
             }
         }
-        hash_logical_line_signatures(&self.snapshot, row_index, &mut hasher);
+        logical_line.signature.hash(&mut hasher);
         f32::from(self.metrics.font_size)
             .to_bits()
             .hash(&mut hasher);
@@ -1145,9 +1178,7 @@ impl TerminalElement {
         self.theme.background.hash(&mut hasher);
         self.theme.foreground.hash(&mut hasher);
         self.theme.header_foreground.hash(&mut hasher);
-        let semantic_rows = logical_line_range_for_row(&self.snapshot, row_index)
-            .unwrap_or(row_index..row_index.saturating_add(1));
-        self.hash_semantic_layout(semantic_rows, semantic_role, &mut hasher);
+        self.hash_semantic_layout(logical_line.range.clone(), semantic_role, &mut hasher);
         self.bidi_enabled.hash(&mut hasher);
         self.detect_file_paths_as_links.hash(&mut hasher);
         if let Some(hovered_link) = self
@@ -1171,21 +1202,17 @@ impl TerminalElement {
         }
     }
 
-    fn logical_highlight_cache_key_with_semantic_role(
+    fn logical_highlight_cache_key_with_logical_line(
         &self,
-        rows: Range<usize>,
+        logical_line: &TerminalLogicalLine,
         semantic_role: Option<SemanticLineRole>,
     ) -> TerminalLogicalHighlightCacheKey {
         let mut hasher = DefaultHasher::new();
         self.snapshot.cols.hash(&mut hasher);
         self.highlight_rules_signature.hash(&mut hasher);
         self.transient_command_highlight_signature.hash(&mut hasher);
-        self.hash_semantic_layout(rows.clone(), semantic_role, &mut hasher);
-        rows.len().hash(&mut hasher);
-        for row in self.snapshot.lines.get(rows).unwrap_or(&[]) {
-            row.line_id.hash(&mut hasher);
-            row.signature.hash(&mut hasher);
-        }
+        self.hash_semantic_layout(logical_line.range.clone(), semantic_role, &mut hasher);
+        logical_line.signature.hash(&mut hasher);
         TerminalLogicalHighlightCacheKey {
             signature: hasher.finish(),
         }
@@ -1208,6 +1235,43 @@ impl TerminalElement {
             .hash(hasher);
     }
 
+    fn logical_lines_for_rows(&self, visible_rows: Range<usize>) -> TerminalLogicalLineIndex {
+        let visible_rows = visible_rows.start.min(self.snapshot.lines.len())
+            ..visible_rows.end.min(self.snapshot.lines.len());
+        let mut line_for_visible_row = vec![0; visible_rows.len()];
+        let mut lines = Vec::new();
+        let mut row_index = visible_rows.start;
+
+        while row_index < visible_rows.end {
+            let Some(range) = logical_line_range_for_row(&self.snapshot, row_index) else {
+                break;
+            };
+            let mut hasher = DefaultHasher::new();
+            range.len().hash(&mut hasher);
+            for row in self.snapshot.lines.get(range.clone()).unwrap_or(&[]) {
+                row.line_id.hash(&mut hasher);
+                row.signature.hash(&mut hasher);
+            }
+            let line_index = lines.len();
+            let mapped_start = range.start.max(visible_rows.start);
+            let mapped_end = range.end.min(visible_rows.end);
+            for mapped_row in mapped_start..mapped_end {
+                line_for_visible_row[mapped_row - visible_rows.start] = line_index;
+            }
+            lines.push(TerminalLogicalLine {
+                range: range.clone(),
+                signature: hasher.finish(),
+            });
+            row_index = range.end.max(row_index + 1);
+        }
+
+        TerminalLogicalLineIndex {
+            visible_rows,
+            line_for_visible_row,
+            lines,
+        }
+    }
+
     fn semantic_roles_for_rows(
         &self,
         visible_rows: Range<usize>,
@@ -1220,8 +1284,8 @@ impl TerminalElement {
             let Some(rows) = logical_line_range_for_row(&self.snapshot, row_index) else {
                 continue;
             };
-            // Wrapped rows share one semantic role, so command marks are scanned once per
-            // logical line and the result is reused by both highlight and row-layout keys.
+            // Wrapped rows share one semantic role, so the command marks are scanned once per
+            // logical line and the result is reused by highlights and row layout keys.
             roles.entry(rows.clone()).or_insert_with(|| {
                 semantic_line_role_for_rows(&self.snapshot, &self.command_marks, rows)
             });
@@ -1366,20 +1430,6 @@ fn extend_or_push_row_rect(
         rects.push(rect);
     }
     *current = Some(TerminalRowRect { col, cells, color });
-}
-
-fn hash_logical_line_signatures(
-    snapshot: &TerminalSnapshot,
-    row_index: usize,
-    hasher: &mut impl Hasher,
-) {
-    let Some(line_range) = logical_line_range_for_row(snapshot, row_index) else {
-        return;
-    };
-    for row in &snapshot.lines[line_range] {
-        row.line_id.hash(hasher);
-        row.signature.hash(hasher);
-    }
 }
 
 fn logical_line_range_for_row(
@@ -1963,11 +2013,17 @@ impl Element for TerminalElement {
         if let Some(input) = &self.input {
             let view = input.view.clone();
             let scale_factor = window.scale_factor();
-            window.on_next_frame(move |_window, cx| {
-                let _ = view.update(cx, |view, cx| {
-                    view.apply_viewport_bounds(bounds, scale_factor, cx);
+            let viewport_changed = input.last_viewport_bounds != Some(bounds)
+                || input.last_viewport_scale_factor_bits != Some(scale_factor.to_bits());
+            if viewport_changed {
+                // Crossing the entity boundary schedules work for the next frame, so stable
+                // terminal paints must not enqueue an update that will immediately return.
+                window.on_next_frame(move |_window, cx| {
+                    let _ = view.update(cx, |view, cx| {
+                        view.apply_viewport_bounds(bounds, scale_factor, cx);
+                    });
                 });
-            });
+            }
         }
         if self.hovered_link.is_some() {
             window.set_window_cursor_style(CursorStyle::PointingHand);
@@ -2224,14 +2280,18 @@ mod cache_tests {
         moved_row.absolute_line = 3;
         let original = element(snapshot(0, vec![original_row]));
         let moved = element(snapshot(0, vec![moved_row]));
+        let original_lines = original.logical_lines_for_rows(0..1);
+        let moved_lines = moved.logical_lines_for_rows(0..1);
+        let original_line = original_lines.line_for_row(0).expect("original line");
+        let moved_line = moved_lines.line_for_row(0).expect("moved line");
 
         assert_eq!(
-            original.row_layout_cache_key_with_semantic_role(0, None),
-            moved.row_layout_cache_key_with_semantic_role(0, None)
+            original.row_layout_cache_key_with_logical_line(0, original_line, None),
+            moved.row_layout_cache_key_with_logical_line(0, moved_line, None)
         );
         assert_eq!(
-            original.logical_highlight_cache_key_with_semantic_role(0..1, None),
-            moved.logical_highlight_cache_key_with_semantic_role(0..1, None)
+            original.logical_highlight_cache_key_with_logical_line(original_line, None),
+            moved.logical_highlight_cache_key_with_logical_line(moved_line, None)
         );
         assert_eq!(original.row_link_cache_key(0), moved.row_link_cache_key(0));
     }

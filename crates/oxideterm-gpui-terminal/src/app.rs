@@ -353,6 +353,7 @@ pub struct TerminalPane {
     row_timestamps: Arc<HashMap<u64, TerminalRowTimestamp>>,
     row_timestamp_retained_min_line: Option<u64>,
     metrics: TerminalMetrics,
+    metrics_dirty: bool,
     selection: Option<TerminalSelection>,
     pending_paste: Option<String>,
     pending_paste_prefix: Option<Vec<u8>>,
@@ -430,6 +431,7 @@ pub struct TerminalPane {
     background_image_cache: BackgroundImageRenderCache,
     background_image_poll_active: bool,
     bounds: Option<Bounds<Pixels>>,
+    viewport_scale_factor_bits: Option<u32>,
     last_pty_resize: Option<(usize, usize, u16, u16)>,
     pending_pty_resize: Option<(usize, usize, u16, u16)>,
     pty_resize_generation: u64,
@@ -587,6 +589,10 @@ fn reconcile_snapshot_line_ids(
     previous: &TerminalSnapshot,
     next_line_id: &mut u64,
 ) {
+    if snapshot.lines.iter().all(|row| row.line_id != 0) {
+        return;
+    }
+
     let previous_by_source = previous
         .lines
         .iter()
@@ -932,6 +938,7 @@ impl TerminalPane {
             row_timestamps: Arc::new(HashMap::new()),
             row_timestamp_retained_min_line: None,
             metrics,
+            metrics_dirty: false,
             selection: None,
             pending_paste: None,
             pending_paste_prefix: None,
@@ -1028,6 +1035,7 @@ impl TerminalPane {
             },
             background_image_poll_active: false,
             bounds: None,
+            viewport_scale_factor_bits: None,
             last_pty_resize: None,
             pending_pty_resize: None,
             pty_resize_generation: 0,
@@ -1382,6 +1390,11 @@ impl TerminalPane {
                 .lock()
                 .set_trzsz_policy(preferences.trzsz_policy.clone());
         }
+        let metrics_changed = self.preferences.font_family != preferences.font_family
+            || self.preferences.cjk_font_family != preferences.cjk_font_family
+            || self.preferences.font_ligatures != preferences.font_ligatures
+            || self.preferences.font_size.to_bits() != preferences.font_size.to_bits()
+            || self.preferences.line_height.to_bits() != preferences.line_height.to_bits();
         let next_settings = TerminalUiSettings::from_preferences(&preferences);
         if !next_settings.command_marks_enabled {
             self.command_marks.clear();
@@ -1406,8 +1419,12 @@ impl TerminalPane {
         self.background_image_cache
             .set_byte_limit(preferences.render_policy.image_cache_bytes);
         self.preferences = preferences;
+        // Font resolution is stable across output frames and changes only with typography
+        // preferences, so defer the next measurement until the pane is rendered again.
+        self.metrics_dirty |= metrics_changed;
         self.last_pty_resize = None;
         self.pending_pty_resize = None;
+        self.viewport_scale_factor_bits = None;
         self.reset_cursor_blink();
         self.wake_terminal_scheduler();
         cx.notify();
@@ -3250,6 +3267,7 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         self.bounds = Some(bounds);
+        self.viewport_scale_factor_bits = Some(scale_factor.to_bits());
         let cell_width = self.metrics.cell_width_f32();
         let line_height = self.metrics.line_height_f32();
         let width = terminal_grid_span_for_viewport(

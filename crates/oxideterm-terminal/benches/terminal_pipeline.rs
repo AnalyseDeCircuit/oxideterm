@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use criterion::{BatchSize, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use oxideterm_terminal::{GraphicsOptions, TerminalSession};
 
@@ -88,6 +90,22 @@ fn benchmark_terminal_pipeline(criterion: &mut Criterion) {
             };
             incremental_scroll_snapshot = snapshot;
             black_box(incremental_scroll_snapshot.display_offset)
+        });
+    });
+    let mut output_scroll_terminal = populated_terminal(20_000);
+    let mut output_scroll_snapshot = output_scroll_terminal.snapshot();
+    criterion.bench_function("snapshot_output_scroll_incremental_120x40", |bencher| {
+        bencher.iter_custom(|iterations| {
+            let mut measured = Duration::ZERO;
+            for _ in 0..iterations {
+                output_scroll_terminal.feed_recording_output(black_box(b"next line\r\n"));
+                let started = Instant::now();
+                output_scroll_snapshot =
+                    output_scroll_terminal.snapshot_incremental(black_box(&output_scroll_snapshot));
+                measured += started.elapsed();
+            }
+            black_box(output_scroll_snapshot.generation);
+            measured
         });
     });
     let search_source = terminal

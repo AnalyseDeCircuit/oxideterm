@@ -100,10 +100,13 @@ pub(super) fn detect_link_ranges_for_rows_with_path_detection(
             continue;
         };
         let link_text = link_text_for_row(row);
+        let row_links_start = links.len();
         links.extend(detect_osc8_ranges(row_index, row));
-        links.extend(detect_url_ranges(row_index, &link_text, &links));
+        let url_ranges = detect_url_ranges(row_index, &link_text, &links[row_links_start..]);
+        links.extend(url_ranges);
         if detect_file_paths {
-            links.extend(detect_path_ranges(row_index, &link_text, &links));
+            let path_ranges = detect_path_ranges(row_index, &link_text, &links[row_links_start..]);
+            links.extend(path_ranges);
         }
     }
     links
@@ -191,15 +194,20 @@ fn detect_url_ranges(
     link_text: &LinkText,
     existing_links: &[TerminalLinkRange],
 ) -> Vec<TerminalLinkRange> {
+    const HTTPS_PREFIX: [char; 8] = ['h', 't', 't', 'p', 's', ':', '/', '/'];
+    const HTTP_PREFIX: [char; 7] = ['h', 't', 't', 'p', ':', '/', '/'];
+
     let chars: Vec<char> = link_text.text.chars().collect();
     let mut ranges = Vec::new();
     let mut index = 0;
     while index < chars.len() {
-        let rest = chars[index..].iter().collect::<String>();
-        let Some(prefix_len) = ["https://", "http://"]
-            .iter()
-            .find_map(|prefix| rest.starts_with(prefix).then_some(prefix.chars().count()))
-        else {
+        // Match directly on the character slice so a non-link prefix never allocates or copies
+        // the remainder of a long terminal row.
+        let prefix_len = if chars[index..].starts_with(&HTTPS_PREFIX) {
+            HTTPS_PREFIX.len()
+        } else if chars[index..].starts_with(&HTTP_PREFIX) {
+            HTTP_PREFIX.len()
+        } else {
             index += 1;
             continue;
         };

@@ -1094,6 +1094,31 @@ mod incremental_snapshot_tests {
     }
 
     #[test]
+    fn incremental_snapshot_keeps_content_written_before_scroll() {
+        let size = TerminalSize {
+            cols: 16,
+            rows: 3,
+            cell_width: 0,
+            cell_height: 0,
+        };
+        let (listener, _events) = local_event_channel();
+        let mut term = Term::new(Config::default(), &size, listener);
+        let graphics = TerminalGraphicsState::default();
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(&mut term, b"one\r\ntwo\r\nprompt");
+        let previous = snapshot_from_term(&term, size, &graphics);
+        term.reset_damage();
+
+        // Output commonly completes the active row before the following linefeed scrolls it.
+        parser.advance(&mut term, b"-completed\r\nnext");
+        let next = incremental_snapshot_from_term(&mut term, size, &graphics, &previous);
+        let full = snapshot_from_term(&term, size, &graphics);
+
+        assert!(next.lines[1].text().starts_with("prompt-completed"));
+        assert_snapshot_content_eq(&next, &full);
+    }
+
+    #[test]
     fn scroll_snapshot_reuses_overlapping_viewport_rows() {
         let size = TerminalSize {
             cols: 8,

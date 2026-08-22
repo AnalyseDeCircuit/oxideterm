@@ -123,6 +123,10 @@ impl Focusable for TerminalPane {
 
 impl Render for TerminalPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.metrics_dirty {
+            self.metrics = TerminalMetrics::measure_with_preferences(window, &self.preferences);
+            self.metrics_dirty = false;
+        }
         if self.snapshot_dirty {
             // Hidden panes keep their emulator state current without copying the full grid. The
             // first visible render after activation materializes exactly one latest snapshot.
@@ -146,7 +150,6 @@ impl Render for TerminalPane {
             self.render_stats.paint_micros = performance.paint_micros;
             self.render_stats.layout_cache_hit_percent = performance.cache_hit_percent;
         }
-        self.metrics = TerminalMetrics::measure_with_preferences(window, &self.preferences);
         let scrollbar_display_offset = self.smooth_scroll_display_offset();
         let (mut snapshot, smooth_scroll_y_offset, viewport_rows) =
             self.render_snapshot_for_smooth_scroll();
@@ -252,6 +255,8 @@ impl Render for TerminalPane {
             Some(TerminalElementInput {
                 focus_handle: self.focus_handle.clone(),
                 view: cx.entity(),
+                last_viewport_bounds: self.bounds,
+                last_viewport_scale_factor_bits: self.viewport_scale_factor_bits,
             }),
         )
         .detect_file_paths_as_links(self.settings.detect_file_paths_as_links)

@@ -30,6 +30,23 @@ impl TerminalSnapshot {
     }
 
     pub fn reuse_unchanged_rows_from(&mut self, previous: &Self) -> usize {
+        let stable_positions = self.lines.len() == previous.lines.len()
+            && self
+                .lines
+                .iter()
+                .zip(&previous.lines)
+                .all(|(row, previous_row)| row.line_id != 0 && row.line_id == previous_row.line_id);
+        if stable_positions {
+            return self
+                .lines
+                .iter_mut()
+                .zip(&previous.lines)
+                .filter_map(|(row, previous_row)| {
+                    row.reuse_cells_from_if_equal(previous_row).then_some(())
+                })
+                .count();
+        }
+
         // Stable line identities follow output rows as they move through the viewport. Raw
         // backend snapshots retain the grid-line fallback until the pane assigns identities.
         let previous_rows_by_id = previous
