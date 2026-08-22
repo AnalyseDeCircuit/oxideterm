@@ -354,6 +354,7 @@ mod tests {
             cert_path: None,
             managed_key_id: None,
             managed_key_name: None,
+            gssapi_authentication: false,
             gssapi_server_identity: None,
             gssapi_delegate_credentials: false,
             proxy_chain: Vec::new(),
@@ -368,6 +369,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
             post_connect_command: None,
         }
     }

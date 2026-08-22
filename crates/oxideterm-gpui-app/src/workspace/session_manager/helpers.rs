@@ -8,7 +8,6 @@ pub(super) fn auth_label(auth_type: AuthType) -> String {
         AuthType::Certificate => "Certificate",
         AuthType::KeyboardInteractive => "Keyboard Interactive",
         AuthType::Agent => "Agent",
-        AuthType::Gssapi => "Kerberos",
     }
     .to_string()
 }
@@ -249,7 +248,7 @@ pub(in crate::workspace) fn form_from_saved_connection(
     error: Option<String>,
 ) -> NewConnectionForm {
     let (auth_tab, password, key_path, managed_key_id, cert_path, passphrase, save_password) =
-        match &conn.auth {
+        match conn.auth.conventional_fallback() {
             SavedAuth::Password {
                 keychain_id,
                 plaintext_password,
@@ -345,15 +344,7 @@ pub(in crate::workspace) fn form_from_saved_connection(
                 String::new(),
                 false,
             ),
-            SavedAuth::Gssapi { .. } => (
-                SshAuthTab::Gssapi,
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                false,
-            ),
+            SavedAuth::KerberosPreferred { .. } => unreachable!("fallback auth is conventional"),
         };
     let (gssapi_server_identity, gssapi_delegate_credentials) = conn
         .auth
@@ -368,7 +359,7 @@ pub(in crate::workspace) fn form_from_saved_connection(
     form.username = conn.username.clone();
     form.auth_tab = auth_tab;
     form.password = password;
-    form.saved_password_keychain_id = match &conn.auth {
+    form.saved_password_keychain_id = match conn.auth.conventional_fallback() {
         SavedAuth::Password { keychain_id, .. } => keychain_id.clone(),
         _ => None,
     };
@@ -379,6 +370,7 @@ pub(in crate::workspace) fn form_from_saved_connection(
     form.managed_key_id = managed_key_id;
     form.cert_path = cert_path;
     form.passphrase = passphrase;
+    form.gssapi_enabled = conn.auth.gssapi_options().is_some();
     form.gssapi_server_identity = gssapi_server_identity;
     form.gssapi_delegate_credentials = gssapi_delegate_credentials;
     form.save_password = save_password;
@@ -413,6 +405,7 @@ pub(in crate::workspace) fn form_from_saved_connection(
     // Preserve compatibility settings when an existing connection enters edit mode.
     form.legacy_ssh_compatibility = conn.options.legacy_ssh_compatibility;
     form.connect_timeout_seconds = conn.options.effective_connect_timeout_seconds();
+    form.connect_timeout_seconds_text = form.connect_timeout_seconds.to_string();
     form.dedicated_new_terminal_connection = conn.options.dedicated_new_terminal_connection;
     form.x11_forwarding = conn.options.x11_forwarding;
     form.terminal = conn.options.terminal.clone();
@@ -470,12 +463,12 @@ pub(super) fn form_from_standalone_sftp_profile(
     form.port = profile.port.to_string();
     form.username = profile.username.clone();
     form.auth_tab = ssh_auth_tab_from_saved_auth(&profile.auth);
-    form.saved_password_keychain_id = match &profile.auth {
+    form.saved_password_keychain_id = match profile.auth.conventional_fallback() {
         SavedAuth::Password { keychain_id, .. } => keychain_id.clone(),
         _ => None,
     };
     form.password_loaded = true;
-    form.save_password = match &profile.auth {
+    form.save_password = match profile.auth.conventional_fallback() {
         SavedAuth::Password { keychain_id, .. } => keychain_id.is_some(),
         SavedAuth::Key {
             has_passphrase,
@@ -491,7 +484,8 @@ pub(super) fn form_from_standalone_sftp_profile(
             passphrase_keychain_id,
             ..
         } => passphrase_keychain_id.is_some(),
-        SavedAuth::KeyboardInteractive | SavedAuth::Agent | SavedAuth::Gssapi { .. } => false,
+        SavedAuth::KeyboardInteractive | SavedAuth::Agent => false,
+        SavedAuth::KerberosPreferred { .. } => unreachable!("fallback auth is conventional"),
     };
     form.key_path = profile.auth.key_path().unwrap_or_default().to_string();
     form.managed_key_id = profile
@@ -500,6 +494,7 @@ pub(super) fn form_from_standalone_sftp_profile(
         .unwrap_or_default()
         .to_string();
     form.cert_path = profile.auth.cert_path().unwrap_or_default().to_string();
+    form.gssapi_enabled = profile.auth.gssapi_options().is_some();
     form.gssapi_server_identity = profile
         .auth
         .gssapi_options()
@@ -541,6 +536,7 @@ pub(super) fn form_from_standalone_sftp_profile(
         oxideterm_ssh::ssh_agent_available(identity_agent_selector(&form.identity_agent));
     form.legacy_ssh_compatibility = profile.legacy_ssh_compatibility;
     form.connect_timeout_seconds = profile.connect_timeout_seconds;
+    form.connect_timeout_seconds_text = profile.connect_timeout_seconds.to_string();
     if let Some(endpoint) = profile.secondary_endpoint.as_ref() {
         let secondary_upstream_proxy_form = upstream_proxy_form_fields(&endpoint.upstream_proxy);
         let secondary = &mut form.standalone_sftp_secondary;
@@ -548,11 +544,11 @@ pub(super) fn form_from_standalone_sftp_profile(
         secondary.port = endpoint.port.to_string();
         secondary.username = endpoint.username.clone();
         secondary.auth_tab = ssh_auth_tab_from_saved_auth(&endpoint.auth);
-        secondary.password_keychain_id = match &endpoint.auth {
+        secondary.password_keychain_id = match endpoint.auth.conventional_fallback() {
             SavedAuth::Password { keychain_id, .. } => keychain_id.clone(),
             _ => None,
         };
-        secondary.save_password = match &endpoint.auth {
+        secondary.save_password = match endpoint.auth.conventional_fallback() {
             SavedAuth::Password { keychain_id, .. } => keychain_id.is_some(),
             SavedAuth::Key {
                 has_passphrase,
@@ -568,7 +564,8 @@ pub(super) fn form_from_standalone_sftp_profile(
                 passphrase_keychain_id,
                 ..
             } => passphrase_keychain_id.is_some(),
-            SavedAuth::KeyboardInteractive | SavedAuth::Agent | SavedAuth::Gssapi { .. } => false,
+            SavedAuth::KeyboardInteractive | SavedAuth::Agent => false,
+            SavedAuth::KerberosPreferred { .. } => unreachable!("fallback auth is conventional"),
         };
         secondary.key_path = endpoint.auth.key_path().unwrap_or_default().to_string();
         secondary.managed_key_id = endpoint
@@ -577,6 +574,7 @@ pub(super) fn form_from_standalone_sftp_profile(
             .unwrap_or_default()
             .to_string();
         secondary.cert_path = endpoint.auth.cert_path().unwrap_or_default().to_string();
+        secondary.gssapi_enabled = endpoint.auth.gssapi_options().is_some();
         secondary.gssapi_server_identity = endpoint
             .auth
             .gssapi_options()
@@ -590,7 +588,9 @@ pub(super) fn form_from_standalone_sftp_profile(
         secondary.agent_available =
             oxideterm_ssh::ssh_agent_available(identity_agent_selector(&secondary.identity_agent));
         secondary.legacy_ssh_compatibility = endpoint.legacy_ssh_compatibility;
+        secondary.ssh_algorithms = endpoint.ssh_algorithms.clone();
         secondary.connect_timeout_seconds = endpoint.connect_timeout_seconds;
+        secondary.connect_timeout_seconds_text = endpoint.connect_timeout_seconds.to_string();
         secondary.initial_remote_path = endpoint.initial_remote_path.clone().unwrap_or_default();
         secondary.proxy_hops = endpoint
             .proxy_chain
@@ -814,6 +814,7 @@ fn connection_draft_from_form_with_proxy_hop_prefix(
         identity_agent: identity_agent_from_form(&form.identity_agent),
         agent_forwarding_socket: form.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: form.legacy_ssh_compatibility,
+        ssh_algorithms: form.ssh_algorithms.clone(),
         connect_timeout_seconds: form.connect_timeout_seconds,
         dedicated_new_terminal_connection: form.dedicated_new_terminal_connection,
         x11_forwarding: form.x11_forwarding,
@@ -831,6 +832,7 @@ pub(super) fn proxy_hop_draft_from_form(
         username: hop.username.clone(),
         auth: ConnectionAuthDraft {
             kind: auth_draft_kind(hop.auth_tab),
+            gssapi_authentication: hop.gssapi_enabled,
             password: take_secret_from_ui_draft(&mut hop.password),
             key_path: hop.key_path.clone(),
             managed_key_id: hop.managed_key_id.clone(),
@@ -845,6 +847,7 @@ pub(super) fn proxy_hop_draft_from_form(
         identity_agent: identity_agent_from_form(&hop.identity_agent),
         agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+        ssh_algorithms: hop.ssh_algorithms.clone(),
     }
 }
 
@@ -854,6 +857,7 @@ pub(super) fn auth_draft_from_form(
 ) -> ConnectionAuthDraft {
     ConnectionAuthDraft {
         kind: auth_draft_kind(form.auth_tab),
+        gssapi_authentication: form.gssapi_enabled,
         password: if form.auth_tab == SshAuthTab::Password && persist_password_draft {
             take_secret_from_ui_draft(&mut form.password)
         } else {
@@ -1030,7 +1034,6 @@ pub(super) fn auth_draft_kind(tab: SshAuthTab) -> ConnectionAuthDraftKind {
         SshAuthTab::Certificate => ConnectionAuthDraftKind::Certificate,
         SshAuthTab::Agent => ConnectionAuthDraftKind::Agent,
         SshAuthTab::TwoFactor => ConnectionAuthDraftKind::TwoFactor,
-        SshAuthTab::Gssapi => ConnectionAuthDraftKind::Gssapi,
     }
 }
 

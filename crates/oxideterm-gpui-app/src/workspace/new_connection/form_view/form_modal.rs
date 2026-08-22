@@ -8,8 +8,10 @@ struct ConnectionFormModalSnapshot {
     port: String,
     username: String,
     auth_tab: SshAuthTab,
+    gssapi_enabled: bool,
     gssapi_server_identity: String,
     gssapi_delegate_credentials: bool,
+    gssapi_credentials_available: Option<bool>,
     password_present: bool,
     remote_desktop_profile_id: Option<String>,
     mosh_profile_id: Option<String>,
@@ -33,6 +35,7 @@ struct ConnectionFormModalSnapshot {
     icon: String,
     icon_picker_expanded: bool,
     legacy_ssh_compatibility: bool,
+    ssh_algorithm_editor_open: bool,
     agent_forwarding: bool,
     identity_agent: String,
     agent_available: Option<bool>,
@@ -46,7 +49,7 @@ struct ConnectionFormModalSnapshot {
     mosh_udp_port: String,
     mosh_locale: String,
     sftp_initial_remote_path: String,
-    connect_timeout_seconds: u64,
+    connect_timeout_seconds_text: String,
 }
 
 impl ConnectionFormModalSnapshot {
@@ -58,8 +61,10 @@ impl ConnectionFormModalSnapshot {
             port: form.port.clone(),
             username: form.username.clone(),
             auth_tab: form.auth_tab,
+            gssapi_enabled: form.gssapi_enabled,
             gssapi_server_identity: form.gssapi_server_identity.clone(),
             gssapi_delegate_credentials: form.gssapi_delegate_credentials,
+            gssapi_credentials_available: form.gssapi_credentials_available,
             password_present: !form.password.is_empty(),
             remote_desktop_profile_id: form.remote_desktop_profile_id.clone(),
             mosh_profile_id: form.mosh_profile_id.clone(),
@@ -84,6 +89,7 @@ impl ConnectionFormModalSnapshot {
             icon: form.icon.clone(),
             icon_picker_expanded: form.icon_picker_expanded,
             legacy_ssh_compatibility: form.legacy_ssh_compatibility,
+            ssh_algorithm_editor_open: form.ssh_algorithm_editor_open,
             agent_forwarding: form.agent_forwarding,
             identity_agent: form.identity_agent.clone(),
             agent_available: form.agent_available,
@@ -97,7 +103,7 @@ impl ConnectionFormModalSnapshot {
             mosh_udp_port: form.mosh_udp_port.clone(),
             mosh_locale: form.mosh_locale.clone(),
             sftp_initial_remote_path: form.sftp_initial_remote_path.clone(),
-            connect_timeout_seconds: form.connect_timeout_seconds,
+            connect_timeout_seconds_text: form.connect_timeout_seconds_text.clone(),
         }
     }
 }
@@ -116,6 +122,9 @@ impl WorkspaceApp {
         else {
             return div().into_any_element();
         };
+        if form.gssapi_enabled && form.gssapi_credentials_available.is_none() {
+            self.ensure_kerberos_credentials_availability(cx);
+        }
         let theme = self.tokens.ui;
         let mode = new_connection_form_mode(
             self.connection_form_state(cx)
@@ -278,6 +287,11 @@ impl WorkspaceApp {
         } else {
             self.i18n.t("ssh.form.subtitle")
         };
+        let connect_timeout_valid = form
+            .connect_timeout_seconds_text
+            .trim()
+            .parse::<u64>()
+            .is_ok_and(|seconds| seconds > 0);
         let has_required_fields = if local_terminal_mode {
             true
         } else if serial_mode {
@@ -294,6 +308,7 @@ impl WorkspaceApp {
                 && !form.username.trim().is_empty()
                 && !form.mosh_server_executable.trim().is_empty()
                 && form.port.trim().parse::<u16>().is_ok_and(|port| port > 0)
+                && connect_timeout_valid
         } else if remote_desktop_protocol
             == Some(oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp)
         {
@@ -312,10 +327,36 @@ impl WorkspaceApp {
             !form.host.trim().is_empty()
                 && !form.username.trim().is_empty()
                 && form.port.trim().parse::<u16>().is_ok()
+                && connect_timeout_valid
         };
         let primary_disabled = form.pending || !has_required_fields;
         let form_visible = self.connection_form_state(cx).presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        let base_modal_width = if drill_down_mode {
+            TAURI_DRILL_DOWN_MODAL_WIDTH
+        } else if prompt_mode || edit_properties_mode || saved_profile_edit_mode {
+            TAURI_EDIT_MODAL_WIDTH
+        } else if shows_transport_selector {
+            self.tokens.metrics.modal_width
+                + NEW_CONNECTION_TYPE_SIDEBAR_WIDTH
+                + self.tokens.metrics.modal_section_gap
+        } else {
+            self.tokens.metrics.modal_width
+        };
+        let algorithm_editor_visible =
+            form.ssh_algorithm_editor_open && (ssh_submission_mode || mosh_mode);
+        let requested_modal_width = if algorithm_editor_visible {
+            base_modal_width
+                + SSH_ALGORITHM_CATEGORY_COLUMN_WIDTH
+                + SSH_ALGORITHM_DETAIL_COLUMN_WIDTH
+                + self.tokens.metrics.modal_section_gap * 2.0
+        } else {
+            base_modal_width
+        };
+        let available_modal_width = (f32::from(window.viewport_size().width)
+            - NEW_CONNECTION_MODAL_VIEWPORT_MARGIN * 2.0)
+            .max(TAURI_EDIT_MODAL_WIDTH);
+        let modal_width = requested_modal_width.min(available_modal_width);
         // This is a long, continuously scrolling surface. A full-window
         // backdrop filter would run GPU blur and composite passes for every
         // scroll frame, so retain the dialog tint without the live blur.
@@ -335,20 +376,7 @@ impl WorkspaceApp {
                     &self.tokens,
                     "new-connection-form-enter",
                     modal_container(&self.tokens)
-                .w(px(if drill_down_mode {
-                    TAURI_DRILL_DOWN_MODAL_WIDTH
-                } else if prompt_mode
-                    || edit_properties_mode
-                    || saved_profile_edit_mode
-                {
-                    TAURI_EDIT_MODAL_WIDTH
-                } else if shows_transport_selector {
-                    self.tokens.metrics.modal_width
-                        + NEW_CONNECTION_TYPE_SIDEBAR_WIDTH
-                        + self.tokens.metrics.modal_section_gap
-                } else {
-                    self.tokens.metrics.modal_width
-                }))
+                .w(px(modal_width))
                 .max_h(px(modal_max_height))
                 .flex()
                 .flex_col()
@@ -616,6 +644,61 @@ impl WorkspaceApp {
                                         .flex()
                                         .flex_col()
                                         .gap(px(self.tokens.metrics.modal_section_gap))
+                                        .child(self.render_connection_checkbox(
+                                            self.i18n.t("ssh.form.kerberos_preferred"),
+                                            form.gssapi_enabled,
+                                            |form| form.gssapi_enabled = !form.gssapi_enabled,
+                                            cx,
+                                        ))
+                                        .when(form.gssapi_enabled, |content| {
+                                            content
+                                                .child(self.render_connection_hint(
+                                                    self.i18n.t("ssh.form.gssapi_desc"),
+                                                ))
+                                                .child(self.render_connection_field(
+                                                    self.i18n.t(
+                                                        "ssh.form.gssapi_server_identity",
+                                                    ),
+                                                    &form.gssapi_server_identity,
+                                                    self.i18n.t(
+                                                        "ssh.form.gssapi_server_identity_placeholder",
+                                                    ),
+                                                    NewConnectionField::GssapiServerIdentity,
+                                                    false,
+                                                    cx,
+                                                ))
+                                                .child(self.render_connection_hint(
+                                                    self.i18n.t(
+                                                        "ssh.form.gssapi_server_identity_hint",
+                                                    ),
+                                                ))
+                                                .child(self.render_kerberos_credentials_status(
+                                                    form.gssapi_credentials_available,
+                                                ))
+                                                .child(
+                                                    self.render_connection_checkbox_with_warning(
+                                                        "kerberos-delegation-help",
+                                                        "kerberos-delegation-tooltip",
+                                                        "ssh.form.gssapi_delegate_credentials",
+                                                        "ssh.form.gssapi_delegation_warning",
+                                                        form.gssapi_delegate_credentials,
+                                                        |form| {
+                                                            form.gssapi_delegate_credentials =
+                                                                !form.gssapi_delegate_credentials;
+                                                        },
+                                                        cx,
+                                                    ),
+                                                )
+                                        })
+                                        .child(
+                                            div()
+                                                .text_size(px(self.tokens.metrics.ui_text_sm))
+                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .text_color(rgb(self.tokens.ui.text))
+                                                .child(self.i18n.t(
+                                                    "ssh.form.fallback_authentication",
+                                                )),
+                                        )
                                         .child(selector)
                                 .when(form.auth_tab == SshAuthTab::Password, |content| {
                                     if edit_properties_mode
@@ -920,39 +1003,6 @@ impl WorkspaceApp {
                                             ))
                                     },
                                 )
-                                .when(form.auth_tab == SshAuthTab::Gssapi, |content| {
-                                    content
-                                        .child(self.render_connection_hint(
-                                            self.i18n.t("ssh.form.gssapi_desc"),
-                                        ))
-                                        .child(self.render_connection_field(
-                                            self.i18n.t("ssh.form.gssapi_server_identity"),
-                                            &form.gssapi_server_identity,
-                                            self.i18n
-                                                .t("ssh.form.gssapi_server_identity_placeholder"),
-                                            NewConnectionField::GssapiServerIdentity,
-                                            false,
-                                            cx,
-                                        ))
-                                        .child(self.render_connection_hint(
-                                            self.i18n.t("ssh.form.gssapi_server_identity_hint"),
-                                        ))
-                                        .child(self.render_connection_checkbox(
-                                            self.i18n.t("ssh.form.gssapi_delegate_credentials"),
-                                            form.gssapi_delegate_credentials,
-                                            |form| {
-                                                form.gssapi_delegate_credentials =
-                                                    !form.gssapi_delegate_credentials;
-                                            },
-                                            cx,
-                                        ))
-                                        .when(form.gssapi_delegate_credentials, |content| {
-                                            content.child(self.render_connection_hint_with_color(
-                                                self.i18n.t("ssh.form.gssapi_delegation_warning"),
-                                                self.tokens.ui.warning,
-                                            ))
-                                        })
-                                })
                                 .into_any_element();
                                     if (ssh_submission_mode || mosh_mode || standalone_sftp_mode)
                                         && !prompt_mode
@@ -1053,7 +1103,7 @@ impl WorkspaceApp {
                                         .into_any_element();
                                     let sftp_options = self.render_standalone_sftp_options(
                                         &form.sftp_initial_remote_path,
-                                        form.connect_timeout_seconds,
+                                        &form.connect_timeout_seconds_text,
                                         cx,
                                     );
                                     content
@@ -1159,6 +1209,11 @@ impl WorkspaceApp {
                                     })
                                 ),
                         )
+                        .when(algorithm_editor_visible, |content| {
+                            content
+                                .child(self.render_ssh_algorithm_category_column(cx))
+                                .child(self.render_ssh_algorithm_detail_column(cx))
+                        })
                         )
                         .when_some(
                             if prompt_mode {

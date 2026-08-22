@@ -228,16 +228,16 @@ use oxideterm_sftp::{
     tar_download_directory, tar_upload_directory,
 };
 use oxideterm_ssh::{
-    AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ConnectionState, ConnectionTraceEvent,
-    ConnectionTraceMode, ConnectionTracePlan, ConnectionTraceStage, ConnectionTraceState,
-    ConnectionTraceStatus, MAX_RETAINED_RECONNECT_JOBS, NodeEventReceiver, NodeEventSubscription,
-    NodeId, NodeOrigin, NodeReadiness, NodeRouter, NodeRuntimeStore, NodeState, NodeStateEvent,
-    NodeTreeExpansion, NodeTreePersistenceSnapshot, NodeTreeSnapshot, NodeTreeSnapshotNode,
-    PhaseResult, ProbeConnectionStatus, ProxyHopConfig, ReconnectForwardRuleSnapshot,
-    ReconnectNodeConnectionSnapshot, ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot,
-    ReconnectOrchestratorStore, ReconnectPhase, ReconnectProgress, ReconnectSnapshot,
-    SshAlgorithmDiagnosticKind, SshConfig, SshConnectionHandle, SshConnectionRegistry,
-    SshTransportClient, TerminalEndpoint,
+    AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ConnectionProgressReporter,
+    ConnectionState, ConnectionTraceEvent, ConnectionTraceMode, ConnectionTracePlan,
+    ConnectionTraceStage, ConnectionTraceState, ConnectionTraceStatus, MAX_RETAINED_RECONNECT_JOBS,
+    NodeEventReceiver, NodeEventSubscription, NodeId, NodeOrigin, NodeReadiness, NodeRouter,
+    NodeRuntimeStore, NodeState, NodeStateEvent, NodeTreeExpansion, NodeTreePersistenceSnapshot,
+    NodeTreeSnapshot, NodeTreeSnapshotNode, PhaseResult, ProbeConnectionStatus, ProxyHopConfig,
+    ReconnectForwardRuleSnapshot, ReconnectNodeConnectionSnapshot, ReconnectNodeTerminalSnapshot,
+    ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore, ReconnectPhase, ReconnectProgress,
+    ReconnectSnapshot, SshAlgorithmDiagnosticKind, SshConfig, SshConnectionHandle,
+    SshConnectionRegistry, SshTransportClient, TerminalEndpoint,
 };
 use oxideterm_ssh_launch::TemporarySshLaunch;
 use oxideterm_terminal::{

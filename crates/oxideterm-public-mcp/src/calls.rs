@@ -78,10 +78,11 @@ pub enum PublicConnectionAuth {
     },
     KeyboardInteractive,
     Agent,
-    Gssapi {
+    KerberosPreferred {
         server_identity: Option<String>,
         #[serde(default)]
         delegate_credentials: bool,
+        fallback: Box<PublicConnectionAuth>,
     },
 }
 

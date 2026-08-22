@@ -324,6 +324,7 @@ LogLevel VERBOSE
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
             strict_host_key_checking: false,
             trust_host_key: Some(false),
             expected_host_key_fingerprint: Some(self.host_fingerprint.clone()),

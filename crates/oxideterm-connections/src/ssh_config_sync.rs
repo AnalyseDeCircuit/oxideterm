@@ -214,19 +214,14 @@ fn merged_ssh_config_tags(existing: &[String], resolved: &[String]) -> Vec<Strin
 }
 
 fn auth_source_matches(existing: &SavedAuth, resolved: &SavedAuth) -> bool {
+    if existing.gssapi_options() != resolved.gssapi_options() {
+        return false;
+    }
+    let existing = existing.conventional_fallback();
+    let resolved = resolved.conventional_fallback();
     match (existing, resolved) {
         (SavedAuth::Agent, SavedAuth::Agent)
         | (SavedAuth::KeyboardInteractive, SavedAuth::KeyboardInteractive) => true,
-        (
-            SavedAuth::Gssapi {
-                server_identity: existing_identity,
-                delegate_credentials: existing_delegate,
-            },
-            SavedAuth::Gssapi {
-                server_identity: resolved_identity,
-                delegate_credentials: resolved_delegate,
-            },
-        ) => existing_identity == resolved_identity && existing_delegate == resolved_delegate,
         (
             SavedAuth::Key {
                 key_path: existing_path,
@@ -417,6 +412,7 @@ mod tests {
                 identity_agent: None,
                 agent_forwarding_socket: None,
                 legacy_ssh_compatibility: false,
+                ssh_algorithms: crate::SshAlgorithmPreferences::default(),
                 x11_forwarding: crate::ConnectionX11ForwardingOptions::default(),
                 dedicated_new_terminal_connection: false,
                 post_connect_command: None,

@@ -482,11 +482,12 @@ pub enum EncryptedAuth {
     },
     KeyboardInteractive,
     Agent,
-    Gssapi {
+    KerberosPreferred {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         server_identity: Option<String>,
         #[serde(default)]
         delegate_credentials: bool,
+        fallback: Box<EncryptedAuth>,
     },
 }
 
@@ -532,13 +533,15 @@ impl fmt::Debug for EncryptedAuth {
                 .finish(),
             Self::KeyboardInteractive => f.write_str("KeyboardInteractive"),
             Self::Agent => f.write_str("Agent"),
-            Self::Gssapi {
+            Self::KerberosPreferred {
                 server_identity,
                 delegate_credentials,
+                fallback,
             } => f
-                .debug_struct("Gssapi")
+                .debug_struct("KerberosPreferred")
                 .field("server_identity_configured", &server_identity.is_some())
                 .field("delegate_credentials", delegate_credentials)
+                .field("fallback", fallback)
                 .finish(),
         }
     }

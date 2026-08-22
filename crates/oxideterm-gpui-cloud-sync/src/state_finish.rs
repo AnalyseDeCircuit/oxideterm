@@ -4,7 +4,7 @@
 //! Cloud Sync persisted-state transitions after backend operations finish.
 
 use oxideterm_cloud_sync::{
-    CloudSyncStatus, STRUCTURED_MANIFEST_FORMAT, StructuredDirtyInfo,
+    CloudSyncStatus, StructuredDirtyInfo,
     operation::{ApplyStructuredPreviewOutcome, LegacyPreview, UploadOutcome},
     service::CloudSyncLocalSnapshot,
     state::{
@@ -15,6 +15,7 @@ use oxideterm_cloud_sync::{
         LegacyApplyStateInput, finish_legacy_apply_state, finish_structured_apply_state,
         finish_upload_state,
     },
+    structured_manifest_format_supported,
 };
 
 use crate::{
@@ -189,7 +190,7 @@ pub fn finish_cloud_sync_check_state(
             if !dirty.has_dirty || !metadata.exists {
                 return false;
             }
-            if metadata.format.as_deref() != Some(STRUCTURED_MANIFEST_FORMAT) {
+            if !structured_manifest_format_supported(metadata.format.as_deref()) {
                 return remote_updated;
             }
             has_cloud_sync_structured_conflict(

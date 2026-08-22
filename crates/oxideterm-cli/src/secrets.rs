@@ -410,8 +410,8 @@ fn connection_statuses(id: Option<&str>, json: bool) -> CliResult<Vec<SecretStat
             id: Some(connection.id.clone()),
             key: Some(connection.auth.auth_type().as_str().to_string()),
             configured: !matches!(
-                connection.auth,
-                SavedAuth::Agent | SavedAuth::KeyboardInteractive | SavedAuth::Gssapi { .. }
+                connection.auth.conventional_fallback(),
+                SavedAuth::Agent | SavedAuth::KeyboardInteractive
             ),
         })
         .collect())
@@ -511,6 +511,7 @@ fn write_connection_secret(
             identity_agent: connection.options.identity_agent,
             agent_forwarding_socket: connection.options.agent_forwarding_socket,
             legacy_ssh_compatibility: connection.options.legacy_ssh_compatibility,
+            ssh_algorithms: connection.options.ssh_algorithms,
             dedicated_new_terminal_connection: connection.options.dedicated_new_terminal_connection,
             x11_forwarding: connection.options.x11_forwarding,
             post_connect_command,

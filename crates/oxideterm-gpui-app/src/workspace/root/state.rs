@@ -54,6 +54,11 @@ impl WorkspaceSshNode {
 
 #[derive(Debug)]
 pub(in crate::workspace) enum ReconnectWorkerResult {
+    NodeConnectionProgress {
+        node_id: NodeId,
+        stage: ConnectionTraceStage,
+        attempt_id: runtime_entity::NodeTransportAttemptId,
+    },
     NodeConnected {
         node_id: NodeId,
         connection_id: String,

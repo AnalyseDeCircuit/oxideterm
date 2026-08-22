@@ -641,7 +641,9 @@ fn count_sensitive_credentials_for_auth(
         }
         EncryptedAuth::KeyboardInteractive => {}
         EncryptedAuth::Agent => {}
-        EncryptedAuth::Gssapi { .. } => {}
+        EncryptedAuth::KerberosPreferred { fallback, .. } => {
+            count_sensitive_credentials_for_auth(fallback, options, counts);
+        }
     }
 }
 
@@ -817,6 +819,7 @@ fn import_proxy_hop(
         identity_agent: None,
         agent_forwarding_socket: None,
         legacy_ssh_compatibility: false,
+        ssh_algorithms: SshAlgorithmPreferences::default(),
     })
 }
 
@@ -919,13 +922,21 @@ fn import_auth(
         },
         EncryptedAuth::KeyboardInteractive => SavedAuth::KeyboardInteractive,
         EncryptedAuth::Agent => SavedAuth::Agent,
-        EncryptedAuth::Gssapi {
+        EncryptedAuth::KerberosPreferred {
             server_identity,
             delegate_credentials,
-        } => SavedAuth::Gssapi {
+            fallback,
+        } => SavedAuth::with_kerberos_preferred(
+            import_auth(
+                store,
+                *fallback,
+                restored_managed_keys,
+                imported_managed_keys,
+                import_options,
+            )?,
             server_identity,
             delegate_credentials,
-        },
+        ),
     })
 }
 

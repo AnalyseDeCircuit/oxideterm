@@ -19,7 +19,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     CONFIG_VERSION, ConnectionOptions, ConnectionStore, SavedAuth, SavedConnection, SavedProxyHop,
-    SavedUpstreamProxyPolicy,
+    SavedUpstreamProxyPolicy, SshAlgorithmPreferences,
 };
 
 const DEFAULT_IMPORTED_GROUP: &str = "Imported";
@@ -1810,6 +1810,7 @@ fn imported_proxy_hop_to_saved(hop: &ImportedProxyHopDraft) -> SavedProxyHop {
         identity_agent: None,
         agent_forwarding_socket: None,
         legacy_ssh_compatibility: false,
+        ssh_algorithms: SshAlgorithmPreferences::default(),
     }
 }
 

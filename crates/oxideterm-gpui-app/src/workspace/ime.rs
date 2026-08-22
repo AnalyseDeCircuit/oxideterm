@@ -22,7 +22,7 @@ use super::graphics::GraphicsInput;
 use super::launcher::LauncherInput;
 use super::new_connection::{
     CONNECTION_NOTES_LINE_HEIGHT, CONNECTION_NOTES_VERTICAL_PADDING, NewConnectionField,
-    refresh_identity_agent_availability,
+    refresh_connection_timeout_seconds, refresh_identity_agent_availability,
 };
 use super::quick_commands::QuickCommandInput;
 use super::session_manager::{SessionManagerInput, SessionManagerState};
@@ -2901,6 +2901,7 @@ impl WorkspaceApp {
                     );
                     form.selected_field = None;
                     form.error = None;
+                    refresh_connection_timeout_seconds(form, field);
                     if field == NewConnectionField::IdentityAgent {
                         refresh_identity_agent_availability(form);
                     }
@@ -2974,6 +2975,7 @@ fn new_connection_field_value(
         NewConnectionField::MoshUdpPort => &form.mosh_udp_port,
         NewConnectionField::MoshLocale => &form.mosh_locale,
         NewConnectionField::InitialRemotePath => &form.sftp_initial_remote_path,
+        NewConnectionField::ConnectTimeoutSeconds => &form.connect_timeout_seconds_text,
         NewConnectionField::StandaloneSftpSecondaryHost => &form.standalone_sftp_secondary.host,
         NewConnectionField::StandaloneSftpSecondaryPort => &form.standalone_sftp_secondary.port,
         NewConnectionField::StandaloneSftpSecondaryUsername => {
@@ -3002,6 +3004,9 @@ fn new_connection_field_value(
         }
         NewConnectionField::StandaloneSftpSecondaryInitialRemotePath => {
             &form.standalone_sftp_secondary.initial_remote_path
+        }
+        NewConnectionField::StandaloneSftpSecondaryConnectTimeoutSeconds => {
+            &form.standalone_sftp_secondary.connect_timeout_seconds_text
         }
         NewConnectionField::StandaloneSftpSecondaryProxyCommand => {
             &form.standalone_sftp_secondary.proxy_command
@@ -3072,6 +3077,7 @@ fn connection_field_value_mut(
         NewConnectionField::MoshUdpPort => &mut form.mosh_udp_port,
         NewConnectionField::MoshLocale => &mut form.mosh_locale,
         NewConnectionField::InitialRemotePath => &mut form.sftp_initial_remote_path,
+        NewConnectionField::ConnectTimeoutSeconds => &mut form.connect_timeout_seconds_text,
         NewConnectionField::StandaloneSftpSecondaryHost => &mut form.standalone_sftp_secondary.host,
         NewConnectionField::StandaloneSftpSecondaryPort => &mut form.standalone_sftp_secondary.port,
         NewConnectionField::StandaloneSftpSecondaryUsername => {
@@ -3100,6 +3106,9 @@ fn connection_field_value_mut(
         }
         NewConnectionField::StandaloneSftpSecondaryInitialRemotePath => {
             &mut form.standalone_sftp_secondary.initial_remote_path
+        }
+        NewConnectionField::StandaloneSftpSecondaryConnectTimeoutSeconds => {
+            &mut form.standalone_sftp_secondary.connect_timeout_seconds_text
         }
         NewConnectionField::StandaloneSftpSecondaryProxyCommand => {
             &mut form.standalone_sftp_secondary.proxy_command

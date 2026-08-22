@@ -142,6 +142,7 @@ fn manual_proxy_command_uses_runtime_secret_and_overrides_other_routes() {
         identity_agent: None,
         agent_forwarding_socket: None,
         legacy_ssh_compatibility: false,
+        ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
     });
     let mut settings = PersistedSettings::default();
     settings.ssh_config.allow_proxy_command = true;
@@ -187,6 +188,7 @@ fn saved_proxy_chain_becomes_ssh_config_chain() {
         identity_agent: Some("/tmp/jump-agent.sock".to_string()),
         agent_forwarding_socket: Some("/tmp/jump-forward.sock".to_string()),
         legacy_ssh_compatibility: true,
+        ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
     }];
 
     let settings = PersistedSettings::default();
@@ -248,6 +250,7 @@ fn saved_connection_hops_become_independent_runtime_configs() {
         identity_agent: Some("/tmp/jump-agent.sock".to_string()),
         agent_forwarding_socket: Some("/tmp/jump-forward.sock".to_string()),
         legacy_ssh_compatibility: true,
+        ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
     }];
     let settings = PersistedSettings::default();
 

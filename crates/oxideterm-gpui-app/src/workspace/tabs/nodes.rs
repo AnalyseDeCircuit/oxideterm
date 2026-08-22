@@ -364,12 +364,6 @@ impl WorkspaceApp {
                         }
                         runtime_entity::ReconnectFailureAction::InitialConnect => {
                             if let Some((title, description)) = connection_failure_notice {
-                                self.push_reconnect_notice(
-                                    title.clone(),
-                                    description.clone(),
-                                    TerminalNoticeVariant::Error,
-                                    cx,
-                                );
                                 self.push_notification_entry(
                                     WorkspaceNotificationKind::Connection,
                                     WorkspaceNotificationSeverity::Error,

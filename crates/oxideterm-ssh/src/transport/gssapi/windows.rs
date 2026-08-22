@@ -73,6 +73,10 @@ impl CredentialHandle {
     }
 }
 
+pub(super) fn credentials_available() -> bool {
+    CredentialHandle::acquire().is_ok()
+}
+
 impl Drop for CredentialHandle {
     fn drop(&mut self) {
         if self.valid {
@@ -175,6 +179,13 @@ impl PlatformError {
         } else {
             Self::Other
         }
+    }
+
+    pub(super) fn allows_authentication_fallback(&self) -> bool {
+        matches!(
+            self,
+            Self::NoCredentials | Self::CredentialsExpired | Self::ServiceUnavailable
+        )
     }
 }
 

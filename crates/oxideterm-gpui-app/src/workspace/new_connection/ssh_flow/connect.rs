@@ -43,8 +43,7 @@ impl WorkspaceApp {
                 SshAuthTab::Password
                 | SshAuthTab::Agent
                 | SshAuthTab::DefaultKey
-                | SshAuthTab::TwoFactor
-                | SshAuthTab::Gssapi => {}
+                | SshAuthTab::TwoFactor => {}
                 SshAuthTab::SshKey => {
                     if form.key_path.trim().is_empty() {
                         form.error = Some(this.i18n.t("ssh.form.key_path_required"));
@@ -147,7 +146,7 @@ impl WorkspaceApp {
                     }
                 }
             };
-            let auth = match form.auth_tab {
+            let fallback_auth = match form.auth_tab {
                 SshAuthTab::Password => {
                     AuthMethod::password_secret(secret_handoff.zeroizing(&mut form.password))
                 }
@@ -173,11 +172,16 @@ impl WorkspaceApp {
                     secret_handoff.zeroizing_non_empty(&mut form.passphrase),
                 ),
                 SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
-                SshAuthTab::Gssapi => AuthMethod::gssapi(
+            };
+            let auth = if form.gssapi_enabled {
+                AuthMethod::kerberos_preferred(
+                    fallback_auth,
                     (!form.gssapi_server_identity.trim().is_empty())
                         .then(|| form.gssapi_server_identity.trim().to_string()),
                     form.gssapi_delegate_credentials,
-                ),
+                )
+            } else {
+                fallback_auth
             };
             let proxy_chain = if proxy_command.is_some() {
                 None
@@ -194,6 +198,7 @@ impl WorkspaceApp {
                 identity_agent: identity_agent_from_form(&form.identity_agent),
                 agent_forwarding_socket: form.agent_forwarding_socket.clone(),
                 legacy_ssh_compatibility: form.legacy_ssh_compatibility,
+                ssh_algorithms: form.ssh_algorithms.clone(),
                 x11_forwarding: x11_forward_policy(form.x11_forwarding),
                 proxy_chain,
                 upstream_proxy,

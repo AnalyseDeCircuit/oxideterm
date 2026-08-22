@@ -25,9 +25,19 @@ pub mod state_transitions;
 pub const CLOUD_SYNC_PLUGIN_ID: &str = "com.oxideterm.cloud-sync";
 
 pub const OXIDE_CONTENT_TYPE: &str = "application/vnd.oxideterm.oxide";
-pub const STRUCTURED_MANIFEST_FORMAT: &str = "structured-v1";
+pub const LEGACY_STRUCTURED_MANIFEST_FORMAT: &str = "structured-v1";
+pub const STRUCTURED_MANIFEST_FORMAT: &str = "structured-v2";
 pub const STRUCTURED_MANIFEST_CONTENT_TYPE: &str =
     "application/vnd.oxideterm.cloud-sync.manifest+json";
+
+/// Accepts the original structured format while new uploads advertise fields
+/// that older clients cannot safely round-trip.
+pub fn structured_manifest_format_supported(format: Option<&str>) -> bool {
+    matches!(
+        format,
+        Some(STRUCTURED_MANIFEST_FORMAT | LEGACY_STRUCTURED_MANIFEST_FORMAT)
+    )
+}
 
 pub const MAX_REMOTE_SNAPSHOT_BYTES: usize = 10 * 1024 * 1024;
 pub const MAX_ROLLBACK_BACKUP_BYTES: usize = 2 * 1024 * 1024;
@@ -1117,6 +1127,19 @@ mod tests {
             serde_json::to_value(&settings).unwrap()["autoUploadIntervalMins"],
             serde_json::json!(7.5)
         );
+    }
+
+    #[test]
+    fn accepts_previous_structured_manifest_during_v2_migration() {
+        assert!(structured_manifest_format_supported(Some(
+            LEGACY_STRUCTURED_MANIFEST_FORMAT
+        )));
+        assert!(structured_manifest_format_supported(Some(
+            STRUCTURED_MANIFEST_FORMAT
+        )));
+        assert!(!structured_manifest_format_supported(Some(
+            "structured-unknown"
+        )));
     }
 
     #[test]

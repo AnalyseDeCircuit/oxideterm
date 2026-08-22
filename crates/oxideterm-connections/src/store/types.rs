@@ -14,7 +14,6 @@ pub enum AuthType {
     Certificate,
     KeyboardInteractive,
     Agent,
-    Gssapi,
 }
 
 impl AuthType {
@@ -26,7 +25,6 @@ impl AuthType {
             Self::Certificate => "certificate",
             Self::KeyboardInteractive => "keyboard_interactive",
             Self::Agent => "agent",
-            Self::Gssapi => "gssapi",
         }
     }
 }
@@ -69,11 +67,12 @@ pub enum SavedAuth {
     // Keyboard-interactive carries no persisted secret; prompts are collected during connect.
     KeyboardInteractive,
     Agent,
-    Gssapi {
+    KerberosPreferred {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         server_identity: Option<String>,
         #[serde(default, skip_serializing_if = "is_false")]
         delegate_credentials: bool,
+        fallback: Box<SavedAuth>,
     },
 }
 
@@ -86,13 +85,14 @@ impl SavedAuth {
             Self::Certificate { .. } => AuthType::Certificate,
             Self::KeyboardInteractive => AuthType::KeyboardInteractive,
             Self::Agent => AuthType::Agent,
-            Self::Gssapi { .. } => AuthType::Gssapi,
+            Self::KerberosPreferred { fallback, .. } => fallback.auth_type(),
         }
     }
 
     pub fn key_path(&self) -> Option<&str> {
         match self {
             Self::Key { key_path, .. } | Self::Certificate { key_path, .. } => Some(key_path),
+            Self::KerberosPreferred { fallback, .. } => fallback.key_path(),
             _ => None,
         }
     }
@@ -100,6 +100,7 @@ impl SavedAuth {
     pub fn cert_path(&self) -> Option<&str> {
         match self {
             Self::Certificate { cert_path, .. } => Some(cert_path),
+            Self::KerberosPreferred { fallback, .. } => fallback.cert_path(),
             _ => None,
         }
     }
@@ -107,17 +108,41 @@ impl SavedAuth {
     pub fn managed_key_id(&self) -> Option<&str> {
         match self {
             Self::ManagedKey { key_id, .. } => Some(key_id),
+            Self::KerberosPreferred { fallback, .. } => fallback.managed_key_id(),
             _ => None,
         }
     }
 
     pub fn gssapi_options(&self) -> Option<(Option<&str>, bool)> {
         match self {
-            Self::Gssapi {
+            Self::KerberosPreferred {
                 server_identity,
                 delegate_credentials,
+                ..
             } => Some((server_identity.as_deref(), *delegate_credentials)),
             _ => None,
+        }
+    }
+
+    pub fn conventional_fallback(&self) -> &SavedAuth {
+        match self {
+            Self::KerberosPreferred { fallback, .. } => fallback.conventional_fallback(),
+            _ => self,
+        }
+    }
+
+    pub fn with_kerberos_preferred(
+        fallback: SavedAuth,
+        server_identity: Option<String>,
+        delegate_credentials: bool,
+    ) -> Self {
+        Self::KerberosPreferred {
+            server_identity,
+            delegate_credentials,
+            fallback: Box::new(match fallback {
+                Self::KerberosPreferred { fallback, .. } => *fallback,
+                fallback => fallback,
+            }),
         }
     }
 }
@@ -220,6 +245,64 @@ fn default_x11_untrusted_timeout_seconds() -> u32 {
     DEFAULT_X11_UNTRUSTED_TIMEOUT_SECONDS
 }
 
+pub const MAX_SSH_ALGORITHMS_PER_CATEGORY: usize = 64;
+pub const MAX_SSH_ALGORITHM_NAME_BYTES: usize = 128;
+
+/// Ordered SSH algorithm overrides for one endpoint.
+///
+/// Empty categories inherit the effective OxideTerm preset. Non-empty categories
+/// replace that preset category in negotiation order.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SshAlgorithmPreferences {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kex: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_key: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cipher: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mac: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compression: Vec<String>,
+}
+
+impl SshAlgorithmPreferences {
+    pub fn is_default(&self) -> bool {
+        self.kex.is_empty()
+            && self.host_key.is_empty()
+            && self.cipher.is_empty()
+            && self.mac.is_empty()
+            && self.compression.is_empty()
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        for (category, algorithms) in [
+            ("KEX", self.kex.as_slice()),
+            ("host key", self.host_key.as_slice()),
+            ("cipher", self.cipher.as_slice()),
+            ("MAC", self.mac.as_slice()),
+            ("compression", self.compression.as_slice()),
+        ] {
+            if algorithms.len() > MAX_SSH_ALGORITHMS_PER_CATEGORY {
+                bail!("Too many SSH {category} algorithms");
+            }
+            let mut unique = std::collections::HashSet::with_capacity(algorithms.len());
+            for algorithm in algorithms {
+                if algorithm.is_empty()
+                    || algorithm.len() > MAX_SSH_ALGORITHM_NAME_BYTES
+                    || algorithm.bytes().any(|byte| byte == b',' || byte.is_ascii_whitespace())
+                {
+                    bail!("Invalid SSH {category} algorithm name");
+                }
+                if !unique.insert(algorithm) {
+                    bail!("Duplicate SSH {category} algorithm");
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ConnectionOptions {
     /// Overrides the SSH TCP and protocol-handshake timeout for this host.
@@ -241,6 +324,8 @@ pub struct ConnectionOptions {
     pub agent_forwarding_socket: Option<String>,
     #[serde(default)]
     pub legacy_ssh_compatibility: bool,
+    #[serde(default)]
+    pub ssh_algorithms: SshAlgorithmPreferences,
     /// Some SSH servers require a new authentication exchange for every terminal.
     #[serde(default, skip_serializing_if = "is_false")]
     pub dedicated_new_terminal_connection: bool,
@@ -284,6 +369,8 @@ pub struct SavedProxyHop {
     pub agent_forwarding_socket: Option<String>,
     #[serde(default)]
     pub legacy_ssh_compatibility: bool,
+    #[serde(default)]
+    pub ssh_algorithms: SshAlgorithmPreferences,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -410,6 +497,8 @@ pub struct ProxyHopInfo {
     pub cert_path: Option<String>,
     pub managed_key_id: Option<String>,
     pub managed_key_name: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub gssapi_authentication: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gssapi_server_identity: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -420,6 +509,8 @@ pub struct ProxyHopInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_forwarding_socket: Option<String>,
     pub legacy_ssh_compatibility: bool,
+    #[serde(default)]
+    pub ssh_algorithms: SshAlgorithmPreferences,
 }
 
 impl From<&SavedProxyHop> for ProxyHopInfo {
@@ -433,6 +524,7 @@ impl From<&SavedProxyHop> for ProxyHopInfo {
             cert_path: hop.auth.cert_path().map(ToOwned::to_owned),
             managed_key_id: hop.auth.managed_key_id().map(ToOwned::to_owned),
             managed_key_name: None,
+            gssapi_authentication: hop.auth.gssapi_options().is_some(),
             gssapi_server_identity: hop
                 .auth
                 .gssapi_options()
@@ -445,6 +537,7 @@ impl From<&SavedProxyHop> for ProxyHopInfo {
             identity_agent: hop.identity_agent.clone(),
             agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
             legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+            ssh_algorithms: hop.ssh_algorithms.clone(),
         }
     }
 }
@@ -549,6 +642,8 @@ pub struct ConnectionInfo {
     pub cert_path: Option<String>,
     pub managed_key_id: Option<String>,
     pub managed_key_name: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub gssapi_authentication: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gssapi_server_identity: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -569,6 +664,8 @@ pub struct ConnectionInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_forwarding_socket: Option<String>,
     pub legacy_ssh_compatibility: bool,
+    #[serde(default)]
+    pub ssh_algorithms: SshAlgorithmPreferences,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_connect_command: Option<String>,
 }
@@ -660,6 +757,7 @@ impl From<&SavedConnection> for ConnectionInfo {
             cert_path: conn.auth.cert_path().map(ToOwned::to_owned),
             managed_key_id: conn.auth.managed_key_id().map(ToOwned::to_owned),
             managed_key_name: None,
+            gssapi_authentication: conn.auth.gssapi_options().is_some(),
             gssapi_server_identity: conn
                 .auth
                 .gssapi_options()
@@ -680,6 +778,7 @@ impl From<&SavedConnection> for ConnectionInfo {
             identity_agent: conn.options.identity_agent.clone(),
             agent_forwarding_socket: conn.options.agent_forwarding_socket.clone(),
             legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
+            ssh_algorithms: conn.options.ssh_algorithms.clone(),
             post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
         }
     }
@@ -859,6 +958,8 @@ pub struct MoshProfile {
     pub identity_agent: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub legacy_ssh_compatibility: bool,
+    #[serde(default)]
+    pub ssh_algorithms: SshAlgorithmPreferences,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -891,6 +992,7 @@ pub struct SaveMoshProfileRequest {
     pub locale: Option<String>,
     pub identity_agent: Option<String>,
     pub legacy_ssh_compatibility: bool,
+    pub ssh_algorithms: SshAlgorithmPreferences,
 }
 
 /// Carries a newly saved Mosh auth secret directly into one bootstrap attempt.
@@ -953,6 +1055,8 @@ pub struct StandaloneSftpEndpoint {
     pub identity_agent: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub legacy_ssh_compatibility: bool,
+    #[serde(default)]
+    pub ssh_algorithms: SshAlgorithmPreferences,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_remote_path: Option<String>,
 }
@@ -995,6 +1099,7 @@ impl StandaloneSftpEndpoint {
             proxy_command: None,
             identity_agent: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
             initial_remote_path: None,
         }
     }
@@ -1011,6 +1116,10 @@ impl StandaloneSftpEndpoint {
         }
         if self.connect_timeout_seconds == 0 {
             bail!("Standalone SFTP secondary connect timeout must be greater than zero");
+        }
+        self.ssh_algorithms.validate()?;
+        for hop in &self.proxy_chain {
+            hop.ssh_algorithms.validate()?;
         }
         Ok(())
     }
@@ -1054,6 +1163,8 @@ pub struct StandaloneSftpProfile {
     pub identity_agent: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub legacy_ssh_compatibility: bool,
+    #[serde(default)]
+    pub ssh_algorithms: SshAlgorithmPreferences,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_remote_path: Option<String>,
     #[serde(
@@ -1087,6 +1198,7 @@ pub struct SaveStandaloneSftpProfileRequest {
     pub proxy_command: Option<SavedProxyCommand>,
     pub identity_agent: Option<String>,
     pub legacy_ssh_compatibility: bool,
+    pub ssh_algorithms: SshAlgorithmPreferences,
     pub initial_remote_path: Option<String>,
     pub transfer_mode: StandaloneSftpTransferMode,
     pub secondary_endpoint: Option<StandaloneSftpEndpoint>,
@@ -1361,6 +1473,7 @@ impl MoshProfile {
             locale: None,
             identity_agent: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
             created_at: now,
             updated_at: now,
             last_used_at: None,
@@ -1403,6 +1516,10 @@ impl MoshProfile {
         }) {
             bail!("Mosh locale is invalid");
         }
+        self.ssh_algorithms.validate()?;
+        for hop in &self.proxy_chain {
+            hop.ssh_algorithms.validate()?;
+        }
         Ok(())
     }
 }
@@ -1435,6 +1552,7 @@ impl StandaloneSftpProfile {
             proxy_command: None,
             identity_agent: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
             initial_remote_path: None,
             transfer_mode: StandaloneSftpTransferMode::LocalRemote,
             secondary_endpoint: None,
@@ -1462,6 +1580,10 @@ impl StandaloneSftpProfile {
         }
         if self.username.trim().is_empty() {
             bail!("Standalone SFTP username is required");
+        }
+        self.ssh_algorithms.validate()?;
+        for hop in &self.proxy_chain {
+            hop.ssh_algorithms.validate()?;
         }
         if self.transfer_mode == StandaloneSftpTransferMode::RemoteRemote {
             self.secondary_endpoint
@@ -1561,6 +1683,7 @@ pub struct SaveConnectionRequest {
     pub identity_agent: Option<String>,
     pub agent_forwarding_socket: Option<String>,
     pub legacy_ssh_compatibility: bool,
+    pub ssh_algorithms: SshAlgorithmPreferences,
     pub dedicated_new_terminal_connection: bool,
     pub x11_forwarding: ConnectionX11ForwardingOptions,
     pub post_connect_command: Option<String>,

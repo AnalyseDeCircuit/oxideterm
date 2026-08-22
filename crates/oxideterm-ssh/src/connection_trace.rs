@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt, sync::Arc};
 
 use oxideterm_backend_classification::{BackendErrorClass, classify_message};
 
@@ -12,6 +12,9 @@ pub enum ConnectionTraceStage {
     SshHandshake,
     HostKey,
     Authentication,
+    KerberosCredentials,
+    GssapiExchange,
+    FallbackAuthentication,
     Pty,
     ShellReady,
     Ready,
@@ -31,6 +34,32 @@ pub enum ConnectionTraceMode {
     Reconnect,
 }
 
+#[derive(Clone)]
+pub struct ConnectionProgressReporter {
+    // The transport publishes typed stages without retaining UI or connection owners.
+    report: Arc<dyn Fn(ConnectionTraceStage) + Send + Sync>,
+}
+
+impl ConnectionProgressReporter {
+    pub fn new(report: impl Fn(ConnectionTraceStage) + Send + Sync + 'static) -> Self {
+        Self {
+            report: Arc::new(report),
+        }
+    }
+
+    pub fn report(&self, stage: ConnectionTraceStage) {
+        (self.report)(stage);
+    }
+}
+
+impl fmt::Debug for ConnectionProgressReporter {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ConnectionProgressReporter")
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ConnectionTraceEvent {
     pub attempt_id: String,
@@ -41,6 +70,7 @@ pub struct ConnectionTraceEvent {
     pub elapsed_ms: u64,
     pub detail: Option<String>,
     pub label: Option<String>,
+    pub endpoint: Option<String>,
     pub step_index: Option<u32>,
     pub total_steps: Option<u32>,
     pub mode: ConnectionTraceMode,
@@ -57,9 +87,11 @@ pub struct ConnectionTracePlan {
 struct ConnectionTraceNodeContext {
     attempt_id: String,
     label: Option<String>,
+    endpoint: Option<String>,
     step_index: Option<u32>,
     total_steps: Option<u32>,
     mode: ConnectionTraceMode,
+    last_stage: ConnectionTraceStage,
 }
 
 #[derive(Default)]
@@ -89,6 +121,7 @@ impl ConnectionTraceState {
         &mut self,
         node_id: NodeId,
         label: Option<String>,
+        endpoint: Option<String>,
         plan: Option<&ConnectionTracePlan>,
     ) {
         let (attempt_id, mode, step_index, total_steps) = plan
@@ -110,22 +143,25 @@ impl ConnectionTraceState {
             ConnectionTraceNodeContext {
                 attempt_id,
                 label,
+                endpoint,
                 step_index: Some(step_index),
                 total_steps: Some(total_steps),
                 mode,
+                last_stage: ConnectionTraceStage::Queued,
             },
         );
     }
 
     pub fn event(
-        &self,
+        &mut self,
         node_id: &NodeId,
         stage: ConnectionTraceStage,
         status: ConnectionTraceStatus,
         progress: f32,
         detail: Option<String>,
     ) -> Option<ConnectionTraceEvent> {
-        let context = self.nodes.get(node_id)?;
+        let context = self.nodes.get_mut(node_id)?;
+        context.last_stage = stage;
         Some(ConnectionTraceEvent {
             attempt_id: context.attempt_id.clone(),
             node_id: node_id.clone(),
@@ -135,6 +171,7 @@ impl ConnectionTraceState {
             elapsed_ms: 0,
             detail,
             label: context.label.clone(),
+            endpoint: context.endpoint.clone(),
             step_index: context.step_index,
             total_steps: context.total_steps,
             mode: context.mode,
@@ -143,6 +180,10 @@ impl ConnectionTraceState {
 
     pub fn contains(&self, node_id: &NodeId) -> bool {
         self.nodes.contains_key(node_id)
+    }
+
+    pub fn current_stage(&self, node_id: &NodeId) -> Option<ConnectionTraceStage> {
+        self.nodes.get(node_id).map(|context| context.last_stage)
     }
 
     pub fn finish(&mut self, node_id: &NodeId) {

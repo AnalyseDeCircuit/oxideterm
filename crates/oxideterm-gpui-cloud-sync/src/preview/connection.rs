@@ -330,3 +330,141 @@ pub(super) fn connection_summary_fields(value: &ConnectionInfo) -> Vec<CloudSync
         ),
     ]
 }
+
+pub(super) fn connection_options_changed_fields(
+    before: &ConnectionOptions,
+    after: &ConnectionOptions,
+) -> Vec<CloudSyncFieldDiffField> {
+    let mut fields = Vec::new();
+    for (label_key, before, after) in ssh_algorithm_field_values(before, after) {
+        push_changed(&mut fields, label_key, before, after);
+    }
+    fields
+}
+
+pub(super) fn connection_options_merge_fields(
+    base: &ConnectionOptions,
+    local: &ConnectionOptions,
+    remote: &ConnectionOptions,
+    effective: &ConnectionOptions,
+    conflict_strategy: &ConflictStrategy,
+) -> Vec<CloudSyncFieldDiffField> {
+    let mut fields = Vec::new();
+    for (label_key, base, local, remote, effective) in [
+        (
+            "plugin.cloud_sync.diff_fields.ssh_kex_algorithms",
+            algorithm_list_value(&base.ssh_algorithms.kex),
+            algorithm_list_value(&local.ssh_algorithms.kex),
+            algorithm_list_value(&remote.ssh_algorithms.kex),
+            algorithm_list_value(&effective.ssh_algorithms.kex),
+        ),
+        (
+            "plugin.cloud_sync.diff_fields.ssh_host_key_algorithms",
+            algorithm_list_value(&base.ssh_algorithms.host_key),
+            algorithm_list_value(&local.ssh_algorithms.host_key),
+            algorithm_list_value(&remote.ssh_algorithms.host_key),
+            algorithm_list_value(&effective.ssh_algorithms.host_key),
+        ),
+        (
+            "plugin.cloud_sync.diff_fields.ssh_cipher_algorithms",
+            algorithm_list_value(&base.ssh_algorithms.cipher),
+            algorithm_list_value(&local.ssh_algorithms.cipher),
+            algorithm_list_value(&remote.ssh_algorithms.cipher),
+            algorithm_list_value(&effective.ssh_algorithms.cipher),
+        ),
+        (
+            "plugin.cloud_sync.diff_fields.ssh_mac_algorithms",
+            algorithm_list_value(&base.ssh_algorithms.mac),
+            algorithm_list_value(&local.ssh_algorithms.mac),
+            algorithm_list_value(&remote.ssh_algorithms.mac),
+            algorithm_list_value(&effective.ssh_algorithms.mac),
+        ),
+        (
+            "plugin.cloud_sync.diff_fields.ssh_compression_algorithms",
+            algorithm_list_value(&base.ssh_algorithms.compression),
+            algorithm_list_value(&local.ssh_algorithms.compression),
+            algorithm_list_value(&remote.ssh_algorithms.compression),
+            algorithm_list_value(&effective.ssh_algorithms.compression),
+        ),
+    ] {
+        push_merge_changed(
+            &mut fields,
+            label_key,
+            base,
+            local,
+            remote,
+            effective,
+            conflict_strategy,
+        );
+    }
+    fields
+}
+
+pub(super) fn connection_options_summary_fields(
+    value: &ConnectionOptions,
+) -> Vec<CloudSyncFieldDiffField> {
+    [
+        (
+            "plugin.cloud_sync.diff_fields.ssh_kex_algorithms",
+            &value.ssh_algorithms.kex,
+        ),
+        (
+            "plugin.cloud_sync.diff_fields.ssh_host_key_algorithms",
+            &value.ssh_algorithms.host_key,
+        ),
+        (
+            "plugin.cloud_sync.diff_fields.ssh_cipher_algorithms",
+            &value.ssh_algorithms.cipher,
+        ),
+        (
+            "plugin.cloud_sync.diff_fields.ssh_mac_algorithms",
+            &value.ssh_algorithms.mac,
+        ),
+        (
+            "plugin.cloud_sync.diff_fields.ssh_compression_algorithms",
+            &value.ssh_algorithms.compression,
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(label_key, algorithms)| {
+        algorithm_list_value(algorithms).map(|value| field(label_key, None, Some(value)))
+    })
+    .collect()
+}
+
+fn ssh_algorithm_field_values(
+    before: &ConnectionOptions,
+    after: &ConnectionOptions,
+) -> [(&'static str, Option<String>, Option<String>); 5] {
+    [
+        (
+            "plugin.cloud_sync.diff_fields.ssh_kex_algorithms",
+            algorithm_list_value(&before.ssh_algorithms.kex),
+            algorithm_list_value(&after.ssh_algorithms.kex),
+        ),
+        (
+            "plugin.cloud_sync.diff_fields.ssh_host_key_algorithms",
+            algorithm_list_value(&before.ssh_algorithms.host_key),
+            algorithm_list_value(&after.ssh_algorithms.host_key),
+        ),
+        (
+            "plugin.cloud_sync.diff_fields.ssh_cipher_algorithms",
+            algorithm_list_value(&before.ssh_algorithms.cipher),
+            algorithm_list_value(&after.ssh_algorithms.cipher),
+        ),
+        (
+            "plugin.cloud_sync.diff_fields.ssh_mac_algorithms",
+            algorithm_list_value(&before.ssh_algorithms.mac),
+            algorithm_list_value(&after.ssh_algorithms.mac),
+        ),
+        (
+            "plugin.cloud_sync.diff_fields.ssh_compression_algorithms",
+            algorithm_list_value(&before.ssh_algorithms.compression),
+            algorithm_list_value(&after.ssh_algorithms.compression),
+        ),
+    ]
+}
+
+fn algorithm_list_value(algorithms: &[String]) -> Option<String> {
+    (!algorithms.is_empty()).then(|| algorithms.join(", "))
+}

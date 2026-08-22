@@ -58,6 +58,7 @@ mod tests {
                 identity_agent: None,
                 agent_forwarding_socket: None,
                 legacy_ssh_compatibility: false,
+                ssh_algorithms: SshAlgorithmPreferences::default(),
             }],
             upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
             proxy_command: None,
@@ -71,6 +72,7 @@ mod tests {
                 identity_agent: None,
                 agent_forwarding_socket: None,
                 legacy_ssh_compatibility: false,
+                ssh_algorithms: SshAlgorithmPreferences::default(),
                 x11_forwarding: crate::ConnectionX11ForwardingOptions::default(),
                 dedicated_new_terminal_connection: false,
                 post_connect_command: None,
@@ -446,6 +448,7 @@ mod tests {
                 locale: Some("en_US.UTF-8".to_string()),
                 identity_agent: None,
                 legacy_ssh_compatibility: false,
+                ssh_algorithms: SshAlgorithmPreferences::default(),
             })
             .unwrap();
         let mosh_profiles_json =
@@ -515,6 +518,7 @@ mod tests {
             proxy_command: None,
             identity_agent: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
             initial_remote_path: Some("/srv/archive".to_string()),
             transfer_mode: crate::StandaloneSftpTransferMode::LocalRemote,
             secondary_endpoint: None,
@@ -528,6 +532,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
         });
         source.upsert_standalone_sftp_profile(request).unwrap();
 

@@ -188,7 +188,7 @@ pub(super) fn ensure_no_remote_conflict(
     previous_remote_revision: Option<&str>,
     previous_remote_sections: Option<&StructuredSectionRevisions>,
 ) -> Result<()> {
-    if remote_metadata.format.as_deref() != Some(STRUCTURED_MANIFEST_FORMAT) {
+    if !crate::structured_manifest_format_supported(remote_metadata.format.as_deref()) {
         if local_snapshot.dirty.has_dirty
             && remote_metadata.revision.as_deref().is_some_and(|revision| {
                 previous_remote_revision.map_or(true, |previous| previous != revision)

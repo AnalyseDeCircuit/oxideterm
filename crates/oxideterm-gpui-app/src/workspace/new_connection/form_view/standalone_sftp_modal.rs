@@ -44,13 +44,14 @@ struct StandaloneSftpModalSnapshot {
     managed_key_id: String,
     cert_path: String,
     identity_agent: String,
+    gssapi_enabled: bool,
     gssapi_server_identity: String,
     gssapi_delegate_credentials: bool,
     agent_available: Option<bool>,
     saved_credential_present: bool,
     save_password: bool,
     initial_remote_path: String,
-    connect_timeout_seconds: u64,
+    connect_timeout_seconds_text: String,
     proxy_command_enabled: bool,
     proxy_command: zeroize::Zeroizing<String>,
     proxy_command_configured: bool,
@@ -62,19 +63,21 @@ struct StandaloneSftpModalSnapshot {
     secondary_managed_key_id: String,
     secondary_cert_path: String,
     secondary_identity_agent: String,
+    secondary_gssapi_enabled: bool,
     secondary_gssapi_server_identity: String,
     secondary_gssapi_delegate_credentials: bool,
     secondary_agent_available: Option<bool>,
     secondary_saved_credential_present: bool,
     secondary_save_password: bool,
     secondary_initial_remote_path: String,
-    secondary_connect_timeout_seconds: u64,
+    secondary_connect_timeout_seconds_text: String,
     secondary_proxy_command_enabled: bool,
     secondary_proxy_command: zeroize::Zeroizing<String>,
     secondary_proxy_command_configured: bool,
     pending: bool,
     error: Option<String>,
     feedback_success: bool,
+    gssapi_credentials_available: Option<bool>,
 }
 
 impl StandaloneSftpModalSnapshot {
@@ -93,13 +96,14 @@ impl StandaloneSftpModalSnapshot {
             managed_key_id: form.managed_key_id.clone(),
             cert_path: form.cert_path.clone(),
             identity_agent: form.identity_agent.clone(),
+            gssapi_enabled: form.gssapi_enabled,
             gssapi_server_identity: form.gssapi_server_identity.clone(),
             gssapi_delegate_credentials: form.gssapi_delegate_credentials,
             agent_available: form.agent_available,
             saved_credential_present: form.saved_password_keychain_id.is_some(),
             save_password: form.save_password,
             initial_remote_path: form.sftp_initial_remote_path.clone(),
-            connect_timeout_seconds: form.connect_timeout_seconds,
+            connect_timeout_seconds_text: form.connect_timeout_seconds_text.clone(),
             proxy_command_enabled: form.proxy_command_enabled,
             // Rendering owns one bounded zeroizing copy of the protected command draft.
             proxy_command: zeroize::Zeroizing::new(form.proxy_command.clone()),
@@ -112,6 +116,7 @@ impl StandaloneSftpModalSnapshot {
             secondary_managed_key_id: form.standalone_sftp_secondary.managed_key_id.clone(),
             secondary_cert_path: form.standalone_sftp_secondary.cert_path.clone(),
             secondary_identity_agent: form.standalone_sftp_secondary.identity_agent.clone(),
+            secondary_gssapi_enabled: form.standalone_sftp_secondary.gssapi_enabled,
             secondary_gssapi_server_identity: form
                 .standalone_sftp_secondary
                 .gssapi_server_identity
@@ -129,9 +134,10 @@ impl StandaloneSftpModalSnapshot {
                 .standalone_sftp_secondary
                 .initial_remote_path
                 .clone(),
-            secondary_connect_timeout_seconds: form
+            secondary_connect_timeout_seconds_text: form
                 .standalone_sftp_secondary
-                .connect_timeout_seconds,
+                .connect_timeout_seconds_text
+                .clone(),
             secondary_proxy_command_enabled: form.standalone_sftp_secondary.proxy_command_enabled,
             // Each endpoint keeps its protected command draft in a separate zeroizing owner.
             secondary_proxy_command: zeroize::Zeroizing::new(
@@ -144,6 +150,7 @@ impl StandaloneSftpModalSnapshot {
             pending: form.pending,
             error: form.error.clone(),
             feedback_success: form.feedback_is_success(),
+            gssapi_credentials_available: form.gssapi_credentials_available,
         }
     }
 }
@@ -163,6 +170,11 @@ impl WorkspaceApp {
         else {
             return div().into_any_element();
         };
+        if (form.gssapi_enabled || form.secondary_gssapi_enabled)
+            && form.gssapi_credentials_available.is_none()
+        {
+            self.ensure_kerberos_credentials_availability(cx);
+        }
         let remote_to_remote = form.transfer_mode == StandaloneSftpTransferMode::RemoteRemote;
         let endpoint_count = if remote_to_remote { 2.0 } else { 1.0 };
         let sidebar_width = if shows_transport_selector {
@@ -182,7 +194,12 @@ impl WorkspaceApp {
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let primary_complete = !form.host.trim().is_empty()
             && !form.username.trim().is_empty()
-            && form.port.trim().parse::<u16>().is_ok_and(|port| port > 0);
+            && form.port.trim().parse::<u16>().is_ok_and(|port| port > 0)
+            && form
+                .connect_timeout_seconds_text
+                .trim()
+                .parse::<u64>()
+                .is_ok_and(|seconds| seconds > 0);
         let secondary_complete = !remote_to_remote
             || (!form.secondary_host.trim().is_empty()
                 && !form.secondary_username.trim().is_empty()
@@ -190,7 +207,12 @@ impl WorkspaceApp {
                     .secondary_port
                     .trim()
                     .parse::<u16>()
-                    .is_ok_and(|port| port > 0));
+                    .is_ok_and(|port| port > 0)
+                && form
+                    .secondary_connect_timeout_seconds_text
+                    .trim()
+                    .parse::<u64>()
+                    .is_ok_and(|seconds| seconds > 0));
         let primary_disabled = form.pending || !primary_complete || !secondary_complete;
         let title = if form.profile_id.is_some() {
             self.i18n.t("sessionManager.edit_properties.title")
@@ -334,6 +356,7 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .gap(px(self.tokens.metrics.modal_section_gap))
+                    .pr(px(self.tokens.metrics.modal_section_gap))
                     .child(
                         div()
                             .p_3()
@@ -441,7 +464,7 @@ impl WorkspaceApp {
             saved_credential_present,
             save_password,
             initial_remote_path,
-            connect_timeout_seconds,
+            connect_timeout_seconds_text,
         ) = if secondary {
             (
                 form.secondary_host.as_str(),
@@ -458,7 +481,7 @@ impl WorkspaceApp {
                 form.secondary_saved_credential_present,
                 form.secondary_save_password,
                 form.secondary_initial_remote_path.as_str(),
-                form.secondary_connect_timeout_seconds,
+                form.secondary_connect_timeout_seconds_text.as_str(),
             )
         } else {
             (
@@ -476,7 +499,7 @@ impl WorkspaceApp {
                 form.saved_credential_present,
                 form.save_password,
                 form.initial_remote_path.as_str(),
-                form.connect_timeout_seconds,
+                form.connect_timeout_seconds_text.as_str(),
             )
         };
         let host_field = if secondary {
@@ -513,11 +536,15 @@ impl WorkspaceApp {
         let options = if secondary {
             self.render_standalone_sftp_secondary_options(
                 initial_remote_path,
-                connect_timeout_seconds,
+                connect_timeout_seconds_text,
                 cx,
             )
         } else {
-            self.render_standalone_sftp_options(initial_remote_path, connect_timeout_seconds, cx)
+            self.render_standalone_sftp_options(
+                initial_remote_path,
+                connect_timeout_seconds_text,
+                cx,
+            )
         };
 
         div()
@@ -540,6 +567,7 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .gap(px(self.tokens.metrics.modal_section_gap))
+                    .pr(px(self.tokens.metrics.modal_section_gap))
                     .child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_base))
@@ -585,8 +613,14 @@ impl WorkspaceApp {
                         managed_key_id,
                         cert_path,
                         identity_agent,
+                        if secondary {
+                            form.secondary_gssapi_enabled
+                        } else {
+                            form.gssapi_enabled
+                        },
                         gssapi_server_identity,
                         gssapi_delegate_credentials,
+                        form.gssapi_credentials_available,
                         agent_available,
                         saved_credential_present,
                         save_password,

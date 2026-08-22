@@ -290,7 +290,6 @@ fn count_auth_preflight(
             AuthType::Password => result.connections_with_passwords += 1,
             AuthType::Agent => result.connections_with_agent += 1,
             AuthType::KeyboardInteractive => {}
-            AuthType::Gssapi => {}
             AuthType::Key | AuthType::ManagedKey | AuthType::Certificate => {
                 result.connections_with_keys += 1
             }
@@ -593,12 +592,14 @@ fn export_auth(
         }
         SavedAuth::KeyboardInteractive => Ok(EncryptedAuth::KeyboardInteractive),
         SavedAuth::Agent => Ok(EncryptedAuth::Agent),
-        SavedAuth::Gssapi {
+        SavedAuth::KerberosPreferred {
             server_identity,
             delegate_credentials,
-        } => Ok(EncryptedAuth::Gssapi {
+            fallback,
+        } => Ok(EncryptedAuth::KerberosPreferred {
             server_identity: server_identity.clone(),
             delegate_credentials: *delegate_credentials,
+            fallback: Box::new(export_auth(store, fallback, options)?),
         }),
     }
 }

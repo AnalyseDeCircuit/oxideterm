@@ -781,6 +781,7 @@ mod tests {
                 identity_agent: None,
                 agent_forwarding_socket: None,
                 legacy_ssh_compatibility: false,
+                ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
                 dedicated_new_terminal_connection: false,
                 x11_forwarding: Default::default(),
                 post_connect_command: None,

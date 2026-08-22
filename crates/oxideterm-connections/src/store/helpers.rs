@@ -68,7 +68,10 @@ fn migrate_legacy_auth_credentials(
                 Ok(false)
             }
         }
-        SavedAuth::KeyboardInteractive | SavedAuth::Agent | SavedAuth::Gssapi { .. } => Ok(false),
+        SavedAuth::KerberosPreferred { fallback, .. } => {
+            migrate_legacy_auth_credentials(fallback, keychain)
+        }
+        SavedAuth::KeyboardInteractive | SavedAuth::Agent => Ok(false),
     }
 }
 
@@ -481,7 +484,22 @@ fn auth_with_protected_credential(auth: SavedAuth) -> Result<(SavedAuth, String)
                 reference,
             ))
         }
-        SavedAuth::KeyboardInteractive | SavedAuth::Agent | SavedAuth::Gssapi { .. } => {
+        SavedAuth::KerberosPreferred {
+            server_identity,
+            delegate_credentials,
+            fallback,
+        } => {
+            let (fallback, reference) = auth_with_protected_credential(*fallback)?;
+            Ok((
+                SavedAuth::with_kerberos_preferred(
+                    fallback,
+                    server_identity,
+                    delegate_credentials,
+                ),
+                reference,
+            ))
+        }
+        SavedAuth::KeyboardInteractive | SavedAuth::Agent => {
             bail!("The selected authentication method has no stored credential slot")
         }
     }
@@ -536,18 +554,23 @@ fn auth_without_protected_credential(auth: &SavedAuth) -> (SavedAuth, Option<Str
             },
             passphrase_keychain_id.clone(),
         ),
-        SavedAuth::KeyboardInteractive => (SavedAuth::KeyboardInteractive, None),
-        SavedAuth::Agent => (SavedAuth::Agent, None),
-        SavedAuth::Gssapi {
+        SavedAuth::KerberosPreferred {
             server_identity,
             delegate_credentials,
-        } => (
-            SavedAuth::Gssapi {
-                server_identity: server_identity.clone(),
-                delegate_credentials: *delegate_credentials,
-            },
-            None,
-        ),
+            fallback,
+        } => {
+            let (fallback, reference) = auth_without_protected_credential(fallback);
+            (
+                SavedAuth::with_kerberos_preferred(
+                    fallback,
+                    server_identity.clone(),
+                    *delegate_credentials,
+                ),
+                reference,
+            )
+        }
+        SavedAuth::KeyboardInteractive => (SavedAuth::KeyboardInteractive, None),
+        SavedAuth::Agent => (SavedAuth::Agent, None),
     }
 }
 

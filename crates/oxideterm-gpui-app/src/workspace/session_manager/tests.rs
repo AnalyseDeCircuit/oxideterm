@@ -208,6 +208,7 @@ pub(super) fn edit_properties_restores_proxy_chain_without_loading_secrets() {
         identity_agent: Some("/tmp/proxy-agent.sock".to_string()),
         agent_forwarding_socket: Some("/tmp/proxy-forward.sock".to_string()),
         legacy_ssh_compatibility: true,
+        ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
     }];
     let form = form_from_saved_connection(&saved_connection, None);
 
@@ -242,6 +243,7 @@ pub(super) fn edit_properties_can_remove_the_entire_proxy_chain() {
         identity_agent: None,
         agent_forwarding_socket: None,
         legacy_ssh_compatibility: false,
+        ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
     }];
     let mut form = form_from_saved_connection(&saved_connection, None);
     form.proxy_hops.clear();
@@ -345,12 +347,14 @@ pub(super) fn new_connection_request_carries_proxy_chain() {
             managed_key_id: String::new(),
             cert_path: String::new(),
             passphrase: String::new(),
+            gssapi_enabled: false,
             gssapi_server_identity: String::new(),
             gssapi_delegate_credentials: false,
             agent_forwarding: true,
             identity_agent: "  /tmp/jump-agent.sock  ".to_string(),
             agent_forwarding_socket: Some("/tmp/jump-forward.sock".to_string()),
             legacy_ssh_compatibility: true,
+            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
         });
 
     let request = save_request_from_form(&mut form, None).unwrap();
@@ -525,12 +529,14 @@ pub(super) fn proxy_hop_two_factor_is_saved_as_keyboard_interactive() {
             managed_key_id: String::new(),
             cert_path: String::new(),
             passphrase: String::new(),
+            gssapi_enabled: false,
             gssapi_server_identity: String::new(),
             gssapi_delegate_credentials: false,
             agent_forwarding: false,
             identity_agent: String::new(),
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
         });
 
     let request = save_request_from_form(&mut form, None).unwrap();

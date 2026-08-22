@@ -236,6 +236,8 @@ impl ConnectionStore {
         options.identity_agent = request.identity_agent;
         options.agent_forwarding_socket = request.agent_forwarding_socket;
         options.legacy_ssh_compatibility = request.legacy_ssh_compatibility;
+        request.ssh_algorithms.validate()?;
+        options.ssh_algorithms = request.ssh_algorithms;
         options.dedicated_new_terminal_connection = request.dedicated_new_terminal_connection;
         options.x11_forwarding = request.x11_forwarding;
         options.terminal = request.terminal;
@@ -2114,6 +2116,7 @@ impl ConnectionStore {
     }
 
     pub fn get_saved_auth_password(&self, auth: &SavedAuth) -> Result<SecretString> {
+        let auth = auth.conventional_fallback();
         match auth {
             SavedAuth::Password {
                 keychain_id: Some(keychain_id),
@@ -2131,6 +2134,7 @@ impl ConnectionStore {
     }
 
     fn load_saved_auth_runtime_secret(&self, auth: &SavedAuth) -> Result<Option<SecretString>> {
+        let auth = auth.conventional_fallback();
         match auth {
             SavedAuth::Password {
                 keychain_id: Some(keychain_id),
@@ -2170,7 +2174,7 @@ impl ConnectionStore {
             | SavedAuth::ManagedKey { .. }
             | SavedAuth::KeyboardInteractive
             | SavedAuth::Agent
-            | SavedAuth::Gssapi { .. } => Ok(None),
+            | SavedAuth::KerberosPreferred { .. } => Ok(None),
         }
     }
 
@@ -2182,6 +2186,7 @@ impl ConnectionStore {
     }
 
     pub fn get_saved_auth_passphrase(&self, auth: &SavedAuth) -> Result<Option<SecretString>> {
+        let auth = auth.conventional_fallback();
         match auth {
             SavedAuth::Key {
                 passphrase_keychain_id: Some(keychain_id),
@@ -2251,13 +2256,15 @@ impl ConnectionStore {
             }),
             SavedAuth::KeyboardInteractive => Ok(SavedAuth::KeyboardInteractive),
             SavedAuth::Agent => Ok(SavedAuth::Agent),
-            SavedAuth::Gssapi {
+            SavedAuth::KerberosPreferred {
                 server_identity,
                 delegate_credentials,
-            } => Ok(SavedAuth::Gssapi {
-                server_identity: server_identity.clone(),
-                delegate_credentials: *delegate_credentials,
-            }),
+                fallback,
+            } => Ok(SavedAuth::with_kerberos_preferred(
+                self.copy_saved_auth_for_new_owner(fallback)?,
+                server_identity.clone(),
+                *delegate_credentials,
+            )),
         }
     }
 
@@ -2699,6 +2706,7 @@ impl ConnectionStore {
         let mut materialized = Vec::with_capacity(proxy_chain.len());
         let mut runtime_secrets = Vec::with_capacity(proxy_chain.len());
         for hop in proxy_chain {
+            hop.ssh_algorithms.validate()?;
             let (auth, runtime_secret) =
                 self.materialize_auth_with_runtime_secret(hop.auth, None)?;
             materialized.push(SavedProxyHop {
@@ -2710,6 +2718,7 @@ impl ConnectionStore {
                 identity_agent: hop.identity_agent,
                 agent_forwarding_socket: hop.agent_forwarding_socket,
                 legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+                ssh_algorithms: hop.ssh_algorithms,
             });
             runtime_secrets.push(runtime_secret);
         }
@@ -2868,6 +2877,7 @@ impl ConnectionStore {
             proxy_command,
             identity_agent: normalize_optional_text(endpoint.identity_agent),
             legacy_ssh_compatibility: endpoint.legacy_ssh_compatibility,
+            ssh_algorithms: endpoint.ssh_algorithms,
             initial_remote_path: normalize_optional_text(endpoint.initial_remote_path),
         };
         endpoint.validate()?;
@@ -2905,9 +2915,11 @@ impl ConnectionStore {
         connection.host = non_empty(connection.host.trim(), "Host")?.to_string();
         connection.port = connection.port.max(1);
         connection.username = non_empty(connection.username.trim(), "Username")?.to_string();
+        connection.options.ssh_algorithms.validate()?;
         for hop in &connection.proxy_chain {
             non_empty(hop.host.trim(), "Proxy host")?;
             non_empty(hop.username.trim(), "Proxy username")?;
+            hop.ssh_algorithms.validate()?;
         }
 
         let auth = self.materialize_auth(connection.auth, existing_auth.as_ref())?;
@@ -2925,6 +2937,7 @@ impl ConnectionStore {
                 identity_agent: hop.identity_agent,
                 agent_forwarding_socket: hop.agent_forwarding_socket,
                 legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+                ssh_algorithms: hop.ssh_algorithms,
             });
         }
 

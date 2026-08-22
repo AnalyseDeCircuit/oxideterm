@@ -9,6 +9,7 @@
 //! crate without leaking SSH state into GPUI views.
 
 mod agent_endpoint;
+mod algorithms;
 mod capability;
 mod config;
 mod connection_registry;
@@ -23,6 +24,10 @@ mod transport;
 mod upstream_proxy;
 
 pub use agent_endpoint::ssh_agent_available;
+pub use algorithms::{
+    SshAlgorithmCategory, SshAlgorithmPreferenceError, preferred_algorithms,
+    visible_algorithm_names,
+};
 pub use capability::{
     SshAlgorithmOffer, SshCapabilityLayer, SshCapabilityLimitation, SshCapabilityReport,
     SshCapabilityStatus, SshIntegrationCapabilities, ssh_capability_report,
@@ -36,8 +41,8 @@ pub use connection_registry::{
     WS_BRIDGE_HEARTBEAT_TIMEOUT,
 };
 pub use connection_trace::{
-    ConnectionTraceEvent, ConnectionTraceMode, ConnectionTracePlan, ConnectionTraceStage,
-    ConnectionTraceState, ConnectionTraceStatus, SshAlgorithmDiagnosticKind,
+    ConnectionProgressReporter, ConnectionTraceEvent, ConnectionTraceMode, ConnectionTracePlan,
+    ConnectionTraceStage, ConnectionTraceState, ConnectionTraceStatus, SshAlgorithmDiagnosticKind,
     SshAlgorithmNegotiationDiagnostic, connection_trace_failure_stage,
     parse_algorithm_negotiation_error, server_offers_legacy_cipher, server_only_offers_ssh_rsa,
 };
@@ -71,6 +76,7 @@ pub use session_tree_plan::{
     NativeSessionTreeConnectAction, NativeSessionTreeConnectChallenge,
     NativeSessionTreeConnectEndpoint, NativeSessionTreeConnectPlan, NativeSessionTreeConnectStep,
 };
+pub use transport::kerberos_credentials_available;
 pub use transport::{
     BoxedSshForwardStream, KeyboardInteractivePrompt, KeyboardInteractivePromptRequest,
     KeyboardInteractiveResponses, ManagedKeyResolver, RemoteForwardHandler, RemoteForwardedTcpIp,

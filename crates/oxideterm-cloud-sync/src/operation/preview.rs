@@ -58,7 +58,7 @@ impl CloudSyncOperationService {
         if !metadata.exists {
             bail!("remote_not_found: no remote snapshot found");
         }
-        if metadata.format.as_deref() != Some(STRUCTURED_MANIFEST_FORMAT) {
+        if !crate::structured_manifest_format_supported(metadata.format.as_deref()) {
             return Ok(None);
         }
         let needs_password = metadata

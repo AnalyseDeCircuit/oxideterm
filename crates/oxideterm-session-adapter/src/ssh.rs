@@ -60,6 +60,7 @@ pub fn ssh_config_from_saved_connection_with_auth(
         identity_agent: conn.options.identity_agent.clone(),
         agent_forwarding_socket: conn.options.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
+        ssh_algorithms: conn.options.ssh_algorithms.clone(),
         x11_forwarding: x11_forward_policy(conn.options.x11_forwarding),
         strict_host_key_checking: true,
         post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
@@ -115,6 +116,7 @@ pub fn ssh_config_from_saved_connection_with_runtime_secrets(
                     identity_agent: hop.identity_agent.clone(),
                     agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
                     legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+                    ssh_algorithms: hop.ssh_algorithms.clone(),
                     strict_host_key_checking: true,
                     trust_host_key: None,
                     expected_host_key_fingerprint: None,
@@ -145,6 +147,7 @@ pub fn ssh_config_from_saved_connection_with_runtime_secrets(
         identity_agent: conn.options.identity_agent.clone(),
         agent_forwarding_socket: conn.options.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
+        ssh_algorithms: conn.options.ssh_algorithms.clone(),
         x11_forwarding: x11_forward_policy(conn.options.x11_forwarding),
         strict_host_key_checking: true,
         post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
@@ -171,6 +174,7 @@ pub fn ssh_config_from_standalone_sftp_profile_with_runtime_secrets(
         proxy_command: profile.proxy_command.clone(),
         identity_agent: profile.identity_agent.clone(),
         legacy_ssh_compatibility: profile.legacy_ssh_compatibility,
+        ssh_algorithms: profile.ssh_algorithms.clone(),
         initial_remote_path: profile.initial_remote_path.clone(),
     };
     let primary_secrets = SavedStandaloneSftpEndpointRuntimeSecrets {
@@ -250,6 +254,7 @@ pub fn ssh_config_from_standalone_sftp_endpoint_with_runtime_secrets(
                     identity_agent: hop.identity_agent.clone(),
                     agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
                     legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+                    ssh_algorithms: hop.ssh_algorithms.clone(),
                     strict_host_key_checking: true,
                     trust_host_key: None,
                     expected_host_key_fingerprint: None,
@@ -278,6 +283,7 @@ pub fn ssh_config_from_standalone_sftp_endpoint_with_runtime_secrets(
         proxy_command,
         identity_agent: endpoint.identity_agent.clone(),
         legacy_ssh_compatibility: endpoint.legacy_ssh_compatibility,
+        ssh_algorithms: endpoint.ssh_algorithms.clone(),
         strict_host_key_checking: true,
         ..SshConfig::default()
     })
@@ -305,6 +311,18 @@ fn auth_method_from_saved_auth_with_runtime_secret(
     runtime_secret: Option<SecretString>,
 ) -> Option<AuthMethod> {
     match (auth, runtime_secret) {
+        (
+            SavedAuth::KerberosPreferred {
+                server_identity,
+                delegate_credentials,
+                fallback,
+            },
+            runtime_secret,
+        ) => Some(AuthMethod::kerberos_preferred(
+            auth_method_from_saved_auth_with_runtime_secret(store, fallback, runtime_secret)?,
+            server_identity.clone(),
+            *delegate_credentials,
+        )),
         (SavedAuth::Password { .. }, Some(password)) => {
             Some(AuthMethod::password_secret(password.into_zeroizing()))
         }
@@ -327,9 +345,7 @@ fn auth_method_from_saved_auth_with_runtime_secret(
         (SavedAuth::ManagedKey { key_id, .. }, Some(passphrase)) => Some(
             AuthMethod::managed_key_secret(key_id.clone(), Some(passphrase.into_zeroizing())),
         ),
-        (SavedAuth::Agent | SavedAuth::KeyboardInteractive | SavedAuth::Gssapi { .. }, Some(_)) => {
-            None
-        }
+        (SavedAuth::Agent | SavedAuth::KeyboardInteractive, Some(_)) => None,
         (_, None) => auth_method_from_saved_auth(store, auth),
     }
 }
@@ -465,6 +481,7 @@ pub fn proxy_chain_config_from_saved_connection(
                 identity_agent: hop.identity_agent.clone(),
                 agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
                 legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+                ssh_algorithms: hop.ssh_algorithms.clone(),
                 strict_host_key_checking: true,
                 trust_host_key: None,
                 expected_host_key_fingerprint: None,
@@ -493,6 +510,7 @@ fn legacy_jump_host_proxy_chain(
         identity_agent: jump.options.identity_agent.clone(),
         agent_forwarding_socket: jump.options.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: jump.options.legacy_ssh_compatibility,
+        ssh_algorithms: jump.options.ssh_algorithms.clone(),
         strict_host_key_checking: true,
         trust_host_key: None,
         expected_host_key_fingerprint: None,

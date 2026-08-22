@@ -18,8 +18,8 @@ use crate::{
     AuthType, CONFIG_VERSION, ConnectionOptions, ConnectionStore, MoshProfilesSyncSnapshot,
     RemoteDesktopProfilesSyncSnapshot, SavedAuth, SavedConnection, SavedPrivilegeCredential,
     SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
-    SecretString, SerialProfilesSyncSnapshot, StandaloneSftpProfilesSyncSnapshot,
-    TelnetProfilesSyncSnapshot,
+    SecretString, SerialProfilesSyncSnapshot, SshAlgorithmPreferences,
+    StandaloneSftpProfilesSyncSnapshot, TelnetProfilesSyncSnapshot,
 };
 
 use super::{

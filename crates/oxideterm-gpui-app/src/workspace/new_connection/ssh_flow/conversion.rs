@@ -32,6 +32,7 @@ pub(super) fn proxy_chain_from_form(
             identity_agent: identity_agent_from_form(&hop.identity_agent),
             agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
             legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+            ssh_algorithms: hop.ssh_algorithms.clone(),
             strict_host_key_checking: true,
             trust_host_key: None,
             expected_host_key_fingerprint: None,
@@ -135,6 +136,9 @@ pub(super) fn prepare_tree_connect_config(config: &mut SshConfig) -> Result<(), 
 
 pub(super) fn resolve_default_key_for_tree_auth(auth: &mut AuthMethod) -> Result<(), String> {
     match auth {
+        AuthMethod::KerberosPreferred { fallback, .. } => {
+            resolve_default_key_for_tree_auth(fallback)
+        }
         AuthMethod::Key { key_path, .. } if key_path.trim().is_empty() => {
             *key_path = first_available_default_key_path().map_err(|error| error.to_string())?;
             Ok(())
@@ -147,7 +151,7 @@ pub(super) fn auth_method_from_proxy_hop(
     hop: &mut NewConnectionProxyHop,
     secret_handoff: RuntimeSecretHandoff,
 ) -> AuthMethod {
-    match hop.auth_tab {
+    let fallback = match hop.auth_tab {
         SshAuthTab::Password => {
             AuthMethod::password_secret(secret_handoff.zeroizing(&mut hop.password))
         }
@@ -169,11 +173,16 @@ pub(super) fn auth_method_from_proxy_hop(
         ),
         SshAuthTab::Agent => AuthMethod::Agent,
         SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
-        SshAuthTab::Gssapi => AuthMethod::gssapi(
+    };
+    if hop.gssapi_enabled {
+        AuthMethod::kerberos_preferred(
+            fallback,
             (!hop.gssapi_server_identity.trim().is_empty())
                 .then(|| hop.gssapi_server_identity.trim().to_string()),
             hop.gssapi_delegate_credentials,
-        ),
+        )
+    } else {
+        fallback
     }
 }
 
@@ -197,6 +206,7 @@ pub(super) fn form_from_runtime_config(
     form.managed_key_id = auth_fields.managed_key_id;
     form.cert_path = auth_fields.cert_path;
     form.passphrase = auth_fields.passphrase;
+    form.gssapi_enabled = auth_fields.gssapi_enabled;
     form.gssapi_server_identity = auth_fields.gssapi_server_identity;
     form.gssapi_delegate_credentials = auth_fields.gssapi_delegate_credentials;
     form.group = default_group;
@@ -206,6 +216,7 @@ pub(super) fn form_from_runtime_config(
     form.agent_forwarding_socket = config.agent_forwarding_socket.clone();
     form.legacy_ssh_compatibility = config.legacy_ssh_compatibility;
     form.connect_timeout_seconds = config.timeout_secs;
+    form.connect_timeout_seconds_text = config.timeout_secs.to_string();
     form.x11_forwarding = connection_x11_options(config.x11_forwarding);
     form.save_password = auth_fields.save_password;
 
@@ -256,12 +267,14 @@ pub(super) fn proxy_hop_form_from_runtime_config(config: ProxyHopConfig) -> NewC
         // live path; the connection store then moves them into the keychain.
         password: auth_fields.password,
         passphrase: auth_fields.passphrase,
+        gssapi_enabled: auth_fields.gssapi_enabled,
         gssapi_server_identity: auth_fields.gssapi_server_identity,
         gssapi_delegate_credentials: auth_fields.gssapi_delegate_credentials,
         agent_forwarding: config.agent_forwarding,
         identity_agent: config.identity_agent.unwrap_or_default(),
         agent_forwarding_socket: config.agent_forwarding_socket,
         legacy_ssh_compatibility: config.legacy_ssh_compatibility,
+        ssh_algorithms: config.ssh_algorithms,
     }
 }
 
@@ -273,6 +286,7 @@ struct RuntimeAuthFormFields {
     cert_path: String,
     passphrase: String,
     save_password: bool,
+    gssapi_enabled: bool,
     gssapi_server_identity: String,
     gssapi_delegate_credentials: bool,
 }
@@ -287,6 +301,7 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
             cert_path: String::new(),
             passphrase: String::new(),
             save_password: true,
+            gssapi_enabled: false,
             gssapi_server_identity: String::new(),
             gssapi_delegate_credentials: false,
         },
@@ -304,6 +319,7 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
                 .map(|value| std::mem::take(&mut **value))
                 .unwrap_or_default(),
             save_password: false,
+            gssapi_enabled: false,
             gssapi_server_identity: String::new(),
             gssapi_delegate_credentials: false,
         },
@@ -321,6 +337,7 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
                 .map(|value| std::mem::take(&mut **value))
                 .unwrap_or_default(),
             save_password: false,
+            gssapi_enabled: false,
             gssapi_server_identity: String::new(),
             gssapi_delegate_credentials: false,
         },
@@ -338,6 +355,7 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
                 .map(|value| std::mem::take(&mut **value))
                 .unwrap_or_default(),
             save_password: false,
+            gssapi_enabled: false,
             gssapi_server_identity: String::new(),
             gssapi_delegate_credentials: false,
         },
@@ -356,6 +374,7 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
                 .map(|value| std::mem::take(&mut **value))
                 .unwrap_or_default(),
             save_password: false,
+            gssapi_enabled: false,
             gssapi_server_identity: String::new(),
             gssapi_delegate_credentials: false,
         },
@@ -367,6 +386,7 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
             cert_path: String::new(),
             passphrase: String::new(),
             save_password: false,
+            gssapi_enabled: false,
             gssapi_server_identity: String::new(),
             gssapi_delegate_credentials: false,
         },
@@ -378,23 +398,21 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
             cert_path: String::new(),
             passphrase: String::new(),
             save_password: false,
+            gssapi_enabled: false,
             gssapi_server_identity: String::new(),
             gssapi_delegate_credentials: false,
         },
-        AuthMethod::Gssapi {
+        AuthMethod::KerberosPreferred {
             server_identity,
             delegate_credentials,
-        } => RuntimeAuthFormFields {
-            auth_tab: SshAuthTab::Gssapi,
-            password: String::new(),
-            key_path: String::new(),
-            managed_key_id: String::new(),
-            cert_path: String::new(),
-            passphrase: String::new(),
-            save_password: false,
-            gssapi_server_identity: server_identity.unwrap_or_default(),
-            gssapi_delegate_credentials: delegate_credentials,
-        },
+            fallback,
+        } => {
+            let mut fields = runtime_auth_form_fields(*fallback);
+            fields.gssapi_enabled = true;
+            fields.gssapi_server_identity = server_identity.unwrap_or_default();
+            fields.gssapi_delegate_credentials = delegate_credentials;
+            fields
+        }
     }
 }
 
@@ -525,6 +543,7 @@ mod runtime_save_tests {
             identity_agent: Some("/tmp/jump-agent.sock".to_string()),
             agent_forwarding_socket: Some("/tmp/jump-forward.sock".to_string()),
             legacy_ssh_compatibility: true,
+            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
             strict_host_key_checking: true,
             trust_host_key: None,
             expected_host_key_fingerprint: None,
@@ -555,6 +574,7 @@ mod runtime_save_tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
             strict_host_key_checking: true,
             trust_host_key: None,
             expected_host_key_fingerprint: None,

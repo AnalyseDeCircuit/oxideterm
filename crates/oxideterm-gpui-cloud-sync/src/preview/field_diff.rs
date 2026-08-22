@@ -35,15 +35,25 @@ pub(super) fn push_upload_connection_field_diffs(
             continue;
         };
         seen_ids.insert(record.id.as_str());
-        let remote_payload = remote_records
+        let remote_record = remote_records
             .get(record.id.as_str())
             .copied()
-            .filter(|record| !record.deleted)
-            .and_then(|record| record.payload.as_ref());
-        let fields = remote_payload
+            .filter(|record| !record.deleted);
+        let mut fields = remote_record
+            .and_then(|record| record.payload.as_ref())
             .map(|remote_payload| connection_changed_fields(remote_payload, local_payload))
             .unwrap_or_else(|| connection_summary_fields(local_payload));
-        let status = if remote_payload.is_some() {
+        let local_options = record.options.clone().unwrap_or_default();
+        if let Some(remote_record) = remote_record {
+            let remote_options = remote_record.options.clone().unwrap_or_default();
+            fields.extend(connection_options_changed_fields(
+                &remote_options,
+                &local_options,
+            ));
+        } else {
+            fields.extend(connection_options_summary_fields(&local_options));
+        }
+        let status = if remote_record.is_some() {
             CloudSyncFieldDiffStatus::Modified
         } else {
             CloudSyncFieldDiffStatus::Added
@@ -137,7 +147,7 @@ pub(super) fn push_connection_field_diffs(
                 })
             })
             .unwrap_or_else(|| remote_payload.clone());
-        let fields = match (base_payload, local_payload) {
+        let mut fields = match (base_payload, local_payload) {
             (Some(base_payload), Some(local_payload)) => connection_merge_fields(
                 base_payload,
                 local_payload,
@@ -148,6 +158,38 @@ pub(super) fn push_connection_field_diffs(
             (_, Some(local_payload)) => connection_changed_fields(local_payload, &effective_remote),
             _ => connection_summary_fields(remote_payload),
         };
+        let base_options = base_records
+            .get(record.id.as_str())
+            .and_then(|record| record.options.clone())
+            .unwrap_or_default();
+        let local_options = local_record
+            .and_then(|record| record.options.clone())
+            .unwrap_or_default();
+        let remote_options = record.options.clone().unwrap_or_default();
+        let effective_options = if base_payload.is_some() && local_payload.is_some() {
+            merge_structured_model_fields(
+                &base_options,
+                &local_options,
+                &remote_options,
+                conflict_strategy,
+            )
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| remote_options.clone())
+        } else {
+            remote_options.clone()
+        };
+        fields.extend(match (base_payload, local_payload) {
+            (Some(_), Some(_)) => connection_options_merge_fields(
+                &base_options,
+                &local_options,
+                &remote_options,
+                &effective_options,
+                conflict_strategy,
+            ),
+            (_, Some(_)) => connection_options_changed_fields(&local_options, &effective_options),
+            _ => connection_options_summary_fields(&remote_options),
+        });
         let status = if local_payload.is_some() {
             CloudSyncFieldDiffStatus::Modified
         } else {

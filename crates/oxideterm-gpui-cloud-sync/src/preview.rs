@@ -13,7 +13,7 @@ use oxideterm_cloud_sync::{
     state::CloudSyncPersistedState,
 };
 use oxideterm_connections::{
-    ConnectionInfo, MoshProfilesSyncSnapshot, RemoteDesktopProfilesSyncSnapshot,
+    ConnectionInfo, ConnectionOptions, MoshProfilesSyncSnapshot, RemoteDesktopProfilesSyncSnapshot,
     SavedConnectionsSyncSnapshot, SerialProfile, SerialProfilesSyncSnapshot,
     TelnetProfilesSyncSnapshot, oxide_file::AppSettingsSectionPreview,
 };

@@ -4,8 +4,9 @@ use oxideterm_connections::{
     AuthType, ConnectionInfo, ConnectionTerminalOptions, ConnectionX11ForwardingOptions,
     DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS, MoshIpFamily, MoshPredictionMode, MoshProfile,
     MoshUdpPortSelection, RemoteDesktopProfile, SavedAuth, SavedConnection, SavedProxyHop,
-    SavedUpstreamProxyProtocol, SerialProfile, StandaloneSftpTransferMode, TelnetProfile,
-    TransportUsernameTransition, transport_port_replacement, transport_username_transition,
+    SavedUpstreamProxyProtocol, SerialProfile, SshAlgorithmPreferences, StandaloneSftpTransferMode,
+    TelnetProfile, TransportUsernameTransition, transport_port_replacement,
+    transport_username_transition,
 };
 pub(in crate::workspace) use oxideterm_connections::{
     ConnectionTransport as NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
@@ -32,7 +33,6 @@ pub(in crate::workspace) enum SshAuthTab {
     Certificate,
     Agent,
     TwoFactor,
-    Gssapi,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -41,7 +41,6 @@ pub(in crate::workspace) enum SshAuthFamily {
     Key,
     Agent,
     TwoFactor,
-    Gssapi,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -61,7 +60,6 @@ pub(in crate::workspace) fn auth_family_from_tab(tab: SshAuthTab) -> SshAuthFami
         | SshAuthTab::Certificate => SshAuthFamily::Key,
         SshAuthTab::Agent => SshAuthFamily::Agent,
         SshAuthTab::TwoFactor => SshAuthFamily::TwoFactor,
-        SshAuthTab::Gssapi => SshAuthFamily::Gssapi,
     }
 }
 
@@ -71,9 +69,7 @@ pub(in crate::workspace) fn key_source_from_tab(tab: SshAuthTab) -> Option<SshKe
         SshAuthTab::SshKey => Some(SshKeyAuthSource::SshKey),
         SshAuthTab::ManagedKey => Some(SshKeyAuthSource::ManagedKey),
         SshAuthTab::Certificate => Some(SshKeyAuthSource::Certificate),
-        SshAuthTab::Password | SshAuthTab::Agent | SshAuthTab::TwoFactor | SshAuthTab::Gssapi => {
-            None
-        }
+        SshAuthTab::Password | SshAuthTab::Agent | SshAuthTab::TwoFactor => None,
     }
 }
 
@@ -94,7 +90,6 @@ pub(in crate::workspace) fn default_auth_tab_for_family(family: SshAuthFamily) -
         SshAuthFamily::Key => SshAuthTab::SshKey,
         SshAuthFamily::Agent => SshAuthTab::Agent,
         SshAuthFamily::TwoFactor => SshAuthTab::TwoFactor,
-        SshAuthFamily::Gssapi => SshAuthTab::Gssapi,
     }
 }
 
@@ -218,6 +213,7 @@ pub(in crate::workspace) enum NewConnectionField {
     Group,
     Notes,
     InitialRemotePath,
+    ConnectTimeoutSeconds,
     StandaloneSftpSecondaryHost,
     StandaloneSftpSecondaryPort,
     StandaloneSftpSecondaryUsername,
@@ -229,6 +225,7 @@ pub(in crate::workspace) enum NewConnectionField {
     StandaloneSftpSecondaryGssapiServerIdentity,
     StandaloneSftpSecondaryIdentityAgent,
     StandaloneSftpSecondaryInitialRemotePath,
+    StandaloneSftpSecondaryConnectTimeoutSeconds,
     StandaloneSftpSecondaryProxyCommand,
     StandaloneSftpSecondaryUpstreamProxyHost,
     StandaloneSftpSecondaryUpstreamProxyPort,
@@ -377,12 +374,14 @@ pub(in crate::workspace) struct NewConnectionProxyHop {
     pub(in crate::workspace) managed_key_id: String,
     pub(in crate::workspace) cert_path: String,
     pub(in crate::workspace) passphrase: String,
+    pub(in crate::workspace) gssapi_enabled: bool,
     pub(in crate::workspace) gssapi_server_identity: String,
     pub(in crate::workspace) gssapi_delegate_credentials: bool,
     pub(in crate::workspace) agent_forwarding: bool,
     pub(in crate::workspace) identity_agent: String,
     pub(in crate::workspace) agent_forwarding_socket: Option<String>,
     pub(in crate::workspace) legacy_ssh_compatibility: bool,
+    pub(in crate::workspace) ssh_algorithms: SshAlgorithmPreferences,
 }
 
 impl fmt::Debug for NewConnectionProxyHop {
@@ -400,6 +399,7 @@ impl fmt::Debug for NewConnectionProxyHop {
             .field("managed_key_id", &self.managed_key_id)
             .field("cert_path", &self.cert_path)
             .field("passphrase", &"[redacted secret]")
+            .field("gssapi_enabled", &self.gssapi_enabled)
             .field(
                 "gssapi_server_identity_configured",
                 &!self.gssapi_server_identity.trim().is_empty(),
@@ -436,12 +436,14 @@ impl NewConnectionProxyHop {
             managed_key_id: String::new(),
             cert_path: String::new(),
             passphrase: String::new(),
+            gssapi_enabled: false,
             gssapi_server_identity: String::new(),
             gssapi_delegate_credentials: false,
             agent_forwarding: false,
             identity_agent: String::new(),
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
         }
     }
 
@@ -462,6 +464,7 @@ impl NewConnectionProxyHop {
             managed_key_id: hop.auth.managed_key_id().unwrap_or_default().to_string(),
             cert_path: hop.auth.cert_path().unwrap_or_default().to_string(),
             passphrase: String::new(),
+            gssapi_enabled: hop.auth.gssapi_options().is_some(),
             gssapi_server_identity: hop
                 .auth
                 .gssapi_options()
@@ -475,6 +478,7 @@ impl NewConnectionProxyHop {
             identity_agent: hop.identity_agent.clone().unwrap_or_default(),
             agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
             legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+            ssh_algorithms: hop.ssh_algorithms.clone(),
         }
     }
 
@@ -489,7 +493,7 @@ impl NewConnectionProxyHop {
             | SshAuthTab::SshKey
             | SshAuthTab::ManagedKey
             | SshAuthTab::Certificate => !self.passphrase.is_empty(),
-            SshAuthTab::Agent | SshAuthTab::TwoFactor | SshAuthTab::Gssapi => false,
+            SshAuthTab::Agent | SshAuthTab::TwoFactor => false,
         }
     }
 
@@ -547,7 +551,6 @@ impl NewConnectionProxyHop {
             AuthType::Certificate => SshAuthTab::Certificate,
             AuthType::KeyboardInteractive => SshAuthTab::TwoFactor,
             AuthType::Agent => SshAuthTab::Agent,
-            AuthType::Gssapi => SshAuthTab::Gssapi,
         };
         // ConnectionInfo is metadata-only. Keep keychain-backed passwords and
         // passphrases out of the form when reusing a saved connection as a hop.
@@ -556,6 +559,7 @@ impl NewConnectionProxyHop {
         self.key_path = connection.key_path.clone().unwrap_or_default();
         self.cert_path = connection.cert_path.clone().unwrap_or_default();
         self.managed_key_id = connection.managed_key_id.clone().unwrap_or_default();
+        self.gssapi_enabled = connection.gssapi_authentication;
         self.gssapi_server_identity = connection
             .gssapi_server_identity
             .clone()
@@ -565,11 +569,12 @@ impl NewConnectionProxyHop {
         self.identity_agent = connection.identity_agent.clone().unwrap_or_default();
         self.agent_forwarding_socket = connection.agent_forwarding_socket.clone();
         self.legacy_ssh_compatibility = connection.legacy_ssh_compatibility;
+        self.ssh_algorithms = connection.ssh_algorithms.clone();
     }
 }
 
 pub(in crate::workspace) fn ssh_auth_tab_from_saved_auth(auth: &SavedAuth) -> SshAuthTab {
-    match auth {
+    match auth.conventional_fallback() {
         SavedAuth::Password { .. } => SshAuthTab::Password,
         SavedAuth::Key { key_path, .. } if key_path.is_empty() => SshAuthTab::DefaultKey,
         SavedAuth::Key { .. } => SshAuthTab::SshKey,
@@ -577,7 +582,7 @@ pub(in crate::workspace) fn ssh_auth_tab_from_saved_auth(auth: &SavedAuth) -> Ss
         SavedAuth::Certificate { .. } => SshAuthTab::Certificate,
         SavedAuth::KeyboardInteractive => SshAuthTab::TwoFactor,
         SavedAuth::Agent => SshAuthTab::Agent,
-        SavedAuth::Gssapi { .. } => SshAuthTab::Gssapi,
+        SavedAuth::KerberosPreferred { .. } => unreachable!("fallback authentication is flattened"),
     }
 }
 
@@ -600,6 +605,7 @@ pub(in crate::workspace) struct StandaloneSftpSecondaryForm {
     pub(in crate::workspace) managed_key_id: String,
     pub(in crate::workspace) cert_path: String,
     pub(in crate::workspace) passphrase: String,
+    pub(in crate::workspace) gssapi_enabled: bool,
     pub(in crate::workspace) gssapi_server_identity: String,
     pub(in crate::workspace) gssapi_delegate_credentials: bool,
     pub(in crate::workspace) passphrase_visible: bool,
@@ -607,7 +613,10 @@ pub(in crate::workspace) struct StandaloneSftpSecondaryForm {
     pub(in crate::workspace) identity_agent: String,
     pub(in crate::workspace) agent_available: Option<bool>,
     pub(in crate::workspace) legacy_ssh_compatibility: bool,
+    pub(in crate::workspace) ssh_algorithms: SshAlgorithmPreferences,
     pub(in crate::workspace) connect_timeout_seconds: u64,
+    /// Preserves transient invalid input while the numeric value fails closed at zero.
+    pub(in crate::workspace) connect_timeout_seconds_text: String,
     pub(in crate::workspace) initial_remote_path: String,
     pub(in crate::workspace) proxy_hops: Vec<NewConnectionProxyHop>,
     pub(in crate::workspace) proxy_chain_expanded: bool,
@@ -640,6 +649,7 @@ impl Default for StandaloneSftpSecondaryForm {
             managed_key_id: String::new(),
             cert_path: String::new(),
             passphrase: String::new(),
+            gssapi_enabled: false,
             gssapi_server_identity: String::new(),
             gssapi_delegate_credentials: false,
             passphrase_visible: false,
@@ -647,7 +657,9 @@ impl Default for StandaloneSftpSecondaryForm {
             identity_agent: String::new(),
             agent_available: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
             connect_timeout_seconds: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
+            connect_timeout_seconds_text: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS.to_string(),
             initial_remote_path: String::new(),
             proxy_hops: Vec::new(),
             proxy_chain_expanded: false,
@@ -682,6 +694,7 @@ impl fmt::Debug for StandaloneSftpSecondaryForm {
             .field("managed_key_id", &self.managed_key_id)
             .field("cert_path", &self.cert_path)
             .field("passphrase", &"[redacted secret]")
+            .field("gssapi_enabled", &self.gssapi_enabled)
             .field(
                 "gssapi_server_identity_configured",
                 &!self.gssapi_server_identity.trim().is_empty(),
@@ -748,8 +761,11 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) port: String,
     pub(in crate::workspace) username: String,
     pub(in crate::workspace) auth_tab: SshAuthTab,
+    pub(in crate::workspace) gssapi_enabled: bool,
     pub(in crate::workspace) gssapi_server_identity: String,
     pub(in crate::workspace) gssapi_delegate_credentials: bool,
+    pub(in crate::workspace) gssapi_credentials_available: Option<bool>,
+    pub(in crate::workspace) gssapi_credentials_check_pending: bool,
     pub(in crate::workspace) password: String,
     pub(in crate::workspace) remote_desktop_session_options: RemoteDesktopSessionOptions,
     /// Identifies an existing RDP/VNC asset without overloading SSH edit state.
@@ -827,7 +843,12 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) identity_agent: String,
     pub(in crate::workspace) agent_forwarding_socket: Option<String>,
     pub(in crate::workspace) legacy_ssh_compatibility: bool,
+    pub(in crate::workspace) ssh_algorithms: SshAlgorithmPreferences,
+    pub(in crate::workspace) ssh_algorithm_editor_open: bool,
+    pub(in crate::workspace) ssh_algorithm_editor_category: oxideterm_ssh::SshAlgorithmCategory,
     pub(in crate::workspace) connect_timeout_seconds: u64,
+    /// Preserves transient invalid input while the numeric value fails closed at zero.
+    pub(in crate::workspace) connect_timeout_seconds_text: String,
     pub(in crate::workspace) dedicated_new_terminal_connection: bool,
     pub(in crate::workspace) x11_forwarding: ConnectionX11ForwardingOptions,
     pub(in crate::workspace) terminal: ConnectionTerminalOptions,
@@ -869,6 +890,11 @@ impl fmt::Debug for NewConnectionForm {
             .field("port", &self.port)
             .field("username", &self.username)
             .field("auth_tab", &self.auth_tab)
+            .field("gssapi_enabled", &self.gssapi_enabled)
+            .field(
+                "gssapi_credentials_available",
+                &self.gssapi_credentials_available,
+            )
             .field("password", &"[redacted secret]")
             .field(
                 "remote_desktop_session_options",
@@ -1034,8 +1060,11 @@ impl Default for NewConnectionForm {
             port: SSH_DEFAULT_PORT_TEXT.to_string(),
             username: "root".to_string(),
             auth_tab: SshAuthTab::Password,
+            gssapi_enabled: false,
             gssapi_server_identity: String::new(),
             gssapi_delegate_credentials: false,
+            gssapi_credentials_available: None,
+            gssapi_credentials_check_pending: false,
             password: String::new(),
             remote_desktop_session_options: RemoteDesktopSessionOptions::default(),
             remote_desktop_profile_id: None,
@@ -1101,7 +1130,11 @@ impl Default for NewConnectionForm {
             identity_agent: String::new(),
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
+            ssh_algorithm_editor_open: false,
+            ssh_algorithm_editor_category: oxideterm_ssh::SshAlgorithmCategory::Kex,
             connect_timeout_seconds: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
+            connect_timeout_seconds_text: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS.to_string(),
             dedicated_new_terminal_connection: false,
             x11_forwarding: ConnectionX11ForwardingOptions::default(),
             terminal: ConnectionTerminalOptions::default(),
@@ -1209,12 +1242,15 @@ pub(in crate::workspace) fn form_from_mosh_profile(
     form.port = profile.ssh_port.to_string();
     form.username = profile.username.clone();
     form.auth_tab = ssh_auth_tab_from_saved_auth(&profile.auth);
-    form.saved_password_keychain_id = match &profile.auth {
+    form.saved_password_keychain_id = match profile.auth.conventional_fallback() {
         SavedAuth::Password { keychain_id, .. } => keychain_id.clone(),
         _ => None,
     };
     // Password-profile editors default to persisting a replacement credential.
-    form.save_password = matches!(profile.auth, SavedAuth::Password { .. });
+    form.save_password = matches!(
+        profile.auth.conventional_fallback(),
+        SavedAuth::Password { .. }
+    );
     form.password_loaded = true;
     form.key_path = profile.auth.key_path().unwrap_or_default().to_string();
     form.managed_key_id = profile
@@ -1223,6 +1259,7 @@ pub(in crate::workspace) fn form_from_mosh_profile(
         .unwrap_or_default()
         .to_string();
     form.cert_path = profile.auth.cert_path().unwrap_or_default().to_string();
+    form.gssapi_enabled = profile.auth.gssapi_options().is_some();
     form.gssapi_server_identity = profile
         .auth
         .gssapi_options()
@@ -1241,6 +1278,7 @@ pub(in crate::workspace) fn form_from_mosh_profile(
     form.agent_available =
         oxideterm_ssh::ssh_agent_available(identity_agent_selector(&form.identity_agent));
     form.legacy_ssh_compatibility = profile.legacy_ssh_compatibility;
+    form.ssh_algorithms = profile.ssh_algorithms.clone();
     form.proxy_hops = profile
         .proxy_chain
         .iter()
@@ -1433,6 +1471,7 @@ pub(in crate::workspace) fn apply_transport_default_username(
 pub(in crate::workspace) fn next_connection_field(
     field: NewConnectionField,
     auth_tab: SshAuthTab,
+    gssapi_enabled: bool,
     transport: NewConnectionTransport,
     upstream_proxy_policy: NewConnectionUpstreamProxyPolicy,
     upstream_proxy_auth: NewConnectionUpstreamProxyAuth,
@@ -1593,17 +1632,10 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::Username,
             NewConnectionField::PostConnectCommand,
         ],
-        SshAuthTab::Gssapi => vec![
-            NewConnectionField::Name,
-            NewConnectionField::Group,
-            NewConnectionField::Notes,
-            NewConnectionField::Host,
-            NewConnectionField::Port,
-            NewConnectionField::Username,
-            NewConnectionField::GssapiServerIdentity,
-            NewConnectionField::PostConnectCommand,
-        ],
     };
+    if gssapi_enabled {
+        fields.insert(6, NewConnectionField::GssapiServerIdentity);
+    }
     if transport == NewConnectionTransport::Mosh {
         fields.retain(|field| {
             !matches!(
@@ -1622,6 +1654,7 @@ pub(in crate::workspace) fn next_connection_field(
         fields.retain(|field| *field != NewConnectionField::PostConnectCommand);
         fields.push(NewConnectionField::InitialRemotePath);
     }
+    fields.push(NewConnectionField::ConnectTimeoutSeconds);
     if upstream_proxy_policy == NewConnectionUpstreamProxyPolicy::Custom
         && matches!(
             transport,
@@ -1657,9 +1690,10 @@ pub(in crate::workspace) fn next_connection_field(
 pub(in crate::workspace) fn next_jump_connection_field(
     field: NewConnectionField,
     auth_tab: SshAuthTab,
+    gssapi_enabled: bool,
     forward: bool,
 ) -> NewConnectionField {
-    let fields: Vec<NewConnectionField> = match auth_tab {
+    let mut fields: Vec<NewConnectionField> = match auth_tab {
         SshAuthTab::Password => vec![
             NewConnectionField::JumpHost,
             NewConnectionField::JumpPort,
@@ -1704,13 +1738,10 @@ pub(in crate::workspace) fn next_jump_connection_field(
             NewConnectionField::JumpPort,
             NewConnectionField::JumpUsername,
         ],
-        SshAuthTab::Gssapi => vec![
-            NewConnectionField::JumpHost,
-            NewConnectionField::JumpPort,
-            NewConnectionField::JumpUsername,
-            NewConnectionField::JumpGssapiServerIdentity,
-        ],
     };
+    if gssapi_enabled {
+        fields.insert(3, NewConnectionField::JumpGssapiServerIdentity);
+    }
     let index = fields
         .iter()
         .position(|candidate| *candidate == field)
@@ -1732,8 +1763,16 @@ pub(in crate::workspace) fn next_standalone_sftp_field(
     fn append_auth_fields(
         fields: &mut Vec<NewConnectionField>,
         auth_tab: SshAuthTab,
+        gssapi_enabled: bool,
         secondary: bool,
     ) {
+        if gssapi_enabled {
+            fields.push(if secondary {
+                NewConnectionField::StandaloneSftpSecondaryGssapiServerIdentity
+            } else {
+                NewConnectionField::GssapiServerIdentity
+            });
+        }
         match (auth_tab, secondary) {
             (SshAuthTab::Password, false) => fields.push(NewConnectionField::Password),
             (SshAuthTab::Password, true) => {
@@ -1773,10 +1812,6 @@ pub(in crate::workspace) fn next_standalone_sftp_field(
                 fields.push(NewConnectionField::StandaloneSftpSecondaryIdentityAgent)
             }
             (SshAuthTab::TwoFactor, _) => {}
-            (SshAuthTab::Gssapi, false) => fields.push(NewConnectionField::GssapiServerIdentity),
-            (SshAuthTab::Gssapi, true) => {
-                fields.push(NewConnectionField::StandaloneSftpSecondaryGssapiServerIdentity)
-            }
         }
     }
 
@@ -1788,16 +1823,23 @@ pub(in crate::workspace) fn next_standalone_sftp_field(
         NewConnectionField::Port,
         NewConnectionField::Username,
     ];
-    append_auth_fields(&mut fields, form.auth_tab, false);
+    append_auth_fields(&mut fields, form.auth_tab, form.gssapi_enabled, false);
     fields.push(NewConnectionField::InitialRemotePath);
+    fields.push(NewConnectionField::ConnectTimeoutSeconds);
     if form.standalone_sftp_transfer_mode == StandaloneSftpTransferMode::RemoteRemote {
         fields.extend([
             NewConnectionField::StandaloneSftpSecondaryHost,
             NewConnectionField::StandaloneSftpSecondaryPort,
             NewConnectionField::StandaloneSftpSecondaryUsername,
         ]);
-        append_auth_fields(&mut fields, form.standalone_sftp_secondary.auth_tab, true);
+        append_auth_fields(
+            &mut fields,
+            form.standalone_sftp_secondary.auth_tab,
+            form.standalone_sftp_secondary.gssapi_enabled,
+            true,
+        );
         fields.push(NewConnectionField::StandaloneSftpSecondaryInitialRemotePath);
+        fields.push(NewConnectionField::StandaloneSftpSecondaryConnectTimeoutSeconds);
     }
     let index = fields
         .iter()
@@ -1831,6 +1873,7 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::Group => &mut form.group,
         NewConnectionField::Notes => &mut form.notes,
         NewConnectionField::InitialRemotePath => &mut form.sftp_initial_remote_path,
+        NewConnectionField::ConnectTimeoutSeconds => &mut form.connect_timeout_seconds_text,
         NewConnectionField::StandaloneSftpSecondaryHost => &mut form.standalone_sftp_secondary.host,
         NewConnectionField::StandaloneSftpSecondaryPort => &mut form.standalone_sftp_secondary.port,
         NewConnectionField::StandaloneSftpSecondaryUsername => {
@@ -1859,6 +1902,9 @@ pub(in crate::workspace) fn current_connection_field_mut(
         }
         NewConnectionField::StandaloneSftpSecondaryInitialRemotePath => {
             &mut form.standalone_sftp_secondary.initial_remote_path
+        }
+        NewConnectionField::StandaloneSftpSecondaryConnectTimeoutSeconds => {
+            &mut form.standalone_sftp_secondary.connect_timeout_seconds_text
         }
         NewConnectionField::StandaloneSftpSecondaryProxyCommand => {
             &mut form.standalone_sftp_secondary.proxy_command
@@ -1984,6 +2030,7 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::Group => &form.group,
         NewConnectionField::Notes => &form.notes,
         NewConnectionField::InitialRemotePath => &form.sftp_initial_remote_path,
+        NewConnectionField::ConnectTimeoutSeconds => &form.connect_timeout_seconds_text,
         NewConnectionField::StandaloneSftpSecondaryHost => &form.standalone_sftp_secondary.host,
         NewConnectionField::StandaloneSftpSecondaryPort => &form.standalone_sftp_secondary.port,
         NewConnectionField::StandaloneSftpSecondaryUsername => {
@@ -2012,6 +2059,9 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         }
         NewConnectionField::StandaloneSftpSecondaryInitialRemotePath => {
             &form.standalone_sftp_secondary.initial_remote_path
+        }
+        NewConnectionField::StandaloneSftpSecondaryConnectTimeoutSeconds => {
+            &form.standalone_sftp_secondary.connect_timeout_seconds_text
         }
         NewConnectionField::StandaloneSftpSecondaryProxyCommand => {
             &form.standalone_sftp_secondary.proxy_command
@@ -2144,18 +2194,21 @@ pub(in crate::workspace) fn insert_text_into_current_connection_field(
     form: &mut NewConnectionForm,
     text: &str,
 ) {
+    let focused_field = form.focused_field;
     let replacing_selection = form.selected_field == Some(form.focused_field);
     if replacing_selection {
         current_connection_field_mut(form).clear();
     }
     current_connection_field_mut(form).push_str(text);
     form.selected_field = None;
+    refresh_connection_timeout_seconds(form, focused_field);
     refresh_focused_identity_agent_availability(form);
 }
 
 pub(in crate::workspace) fn backspace_current_connection_field(
     form: &mut NewConnectionForm,
 ) -> bool {
+    let focused_field = form.focused_field;
     let selection_was_visible = form.selected_field.is_some();
     if form.selected_field == Some(form.focused_field) {
         // Clearing a selected field also clears visible selection state. Track
@@ -2165,6 +2218,7 @@ pub(in crate::workspace) fn backspace_current_connection_field(
         field.clear();
         form.selected_field = None;
         if text_changed {
+            refresh_connection_timeout_seconds(form, focused_field);
             refresh_focused_identity_agent_availability(form);
         }
         text_changed || selection_was_visible
@@ -2172,6 +2226,7 @@ pub(in crate::workspace) fn backspace_current_connection_field(
         let text_changed = current_connection_field_mut(form).pop().is_some();
         form.selected_field = None;
         if text_changed {
+            refresh_connection_timeout_seconds(form, focused_field);
             refresh_focused_identity_agent_availability(form);
         }
         text_changed || selection_was_visible
@@ -2179,9 +2234,59 @@ pub(in crate::workspace) fn backspace_current_connection_field(
 }
 
 pub(in crate::workspace) fn clear_current_connection_field(form: &mut NewConnectionForm) {
+    let focused_field = form.focused_field;
     current_connection_field_mut(form).clear();
     form.selected_field = None;
+    refresh_connection_timeout_seconds(form, focused_field);
     refresh_focused_identity_agent_availability(form);
+}
+
+pub(in crate::workspace) fn refresh_connection_timeout_seconds(
+    form: &mut NewConnectionForm,
+    field: NewConnectionField,
+) {
+    // Invalid drafts map to zero so keyboard submission cannot reuse a stale valid timeout.
+    let parsed = match field {
+        NewConnectionField::ConnectTimeoutSeconds => form
+            .connect_timeout_seconds_text
+            .trim()
+            .parse::<u64>()
+            .ok()
+            .filter(|seconds| *seconds > 0),
+        NewConnectionField::StandaloneSftpSecondaryConnectTimeoutSeconds => form
+            .standalone_sftp_secondary
+            .connect_timeout_seconds_text
+            .trim()
+            .parse::<u64>()
+            .ok()
+            .filter(|seconds| *seconds > 0),
+        _ => return,
+    }
+    .unwrap_or(0);
+    match field {
+        NewConnectionField::ConnectTimeoutSeconds => form.connect_timeout_seconds = parsed,
+        NewConnectionField::StandaloneSftpSecondaryConnectTimeoutSeconds => {
+            form.standalone_sftp_secondary.connect_timeout_seconds = parsed;
+        }
+        _ => {}
+    }
+}
+
+pub(in crate::workspace) fn connection_timeout_drafts_valid(form: &NewConnectionForm) -> bool {
+    let primary_valid = form
+        .connect_timeout_seconds_text
+        .trim()
+        .parse::<u64>()
+        .is_ok_and(|seconds| seconds > 0);
+    let secondary_valid = form
+        .standalone_sftp_secondary
+        .connect_timeout_seconds_text
+        .trim()
+        .parse::<u64>()
+        .is_ok_and(|seconds| seconds > 0);
+    primary_valid
+        && (form.standalone_sftp_transfer_mode != StandaloneSftpTransferMode::RemoteRemote
+            || secondary_valid)
 }
 
 pub(in crate::workspace) fn text_from_keystroke(keystroke: &gpui::Keystroke) -> Option<&str> {
@@ -2417,6 +2522,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
         });
 
         let form = form_from_mosh_profile(&profile, "Ungrouped".to_string());
@@ -2642,6 +2748,7 @@ mod tests {
             cert_path: Some("~/.ssh/id_ed25519-cert.pub".to_string()),
             managed_key_id: None,
             managed_key_name: None,
+            gssapi_authentication: false,
             gssapi_server_identity: None,
             gssapi_delegate_credentials: false,
             proxy_chain: Vec::new(),
@@ -2656,6 +2763,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: true,
+            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
             post_connect_command: None,
         };
         let mut hop = NewConnectionProxyHop::new();

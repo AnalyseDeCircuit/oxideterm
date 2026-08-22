@@ -46,7 +46,8 @@ use oxideterm_gpui_settings_view::{
     terminal_backspace_sequence_label, terminal_delete_sequence_label, terminal_encoding_label,
 };
 use oxideterm_gpui_ui::{
-    ButtonTone, CheckboxOptions, TextInputView, button,
+    ActionChipOptions, ButtonTone, CheckboxOptions, ScrollableElement, StatusPillOptions,
+    StatusTone, TextInputView, action_chip, button,
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
         ToolbarButtonOptions,
@@ -58,7 +59,7 @@ use oxideterm_gpui_ui::{
         SelectAnchorId, select_anchor_probe, select_option, select_option_action,
         select_overlay_popup_with_max_height, select_trigger_with_focus_visible,
     },
-    text_input,
+    status_pill, text_input,
     text_input::{
         text_caret, text_input_value_segments, text_input_value_segments_with_marked_range,
     },
@@ -74,6 +75,7 @@ use oxideterm_settings_model::{settings_multiline_line_ranges, settings_multilin
 mod field_controls;
 mod form_modal;
 mod proxy_chain_view;
+mod ssh_algorithm_editor;
 mod standalone_sftp_modal;
 
 use field_controls::{AuthSelectorContext, ConnectionFormSection, serial_port_display_label};
@@ -97,6 +99,9 @@ const TAURI_PROXY_CHAIN_CONNECTOR_THICKNESS: f32 = 2.0; // Tauri w-0.5 h-0.5
 const TAURI_PROXY_CHAIN_CARD_PADDING: f32 = 12.0; // Tauri p-3
 const TAURI_SERIAL_GRID_GAP: f32 = 16.0; // Tauri serial grid gap-4
 const NEW_CONNECTION_TYPE_SIDEBAR_WIDTH: f32 = 160.0;
+const SSH_ALGORITHM_CATEGORY_COLUMN_WIDTH: f32 = 208.0;
+const SSH_ALGORITHM_DETAIL_COLUMN_WIDTH: f32 = 420.0;
+const NEW_CONNECTION_MODAL_VIEWPORT_MARGIN: f32 = 32.0;
 const CONNECTION_TERMINAL_CONTROL_MIN_WIDTH: f32 = 220.0;
 const CONNECTION_ICON_COLOR_CONTROL_MIN_WIDTH: f32 = 220.0;
 
@@ -289,6 +294,7 @@ impl WorkspaceApp {
                         next_jump_connection_field(
                             form.focused_field,
                             jump_form.auth_tab,
+                            jump_form.gssapi_enabled,
                             !modifiers.shift,
                         )
                     } else if form.transport == NewConnectionTransport::StandaloneSftp {
@@ -297,6 +303,7 @@ impl WorkspaceApp {
                         next_connection_field(
                             form.focused_field,
                             form.auth_tab,
+                            form.gssapi_enabled,
                             form.transport,
                             form.upstream_proxy_policy,
                             form.upstream_proxy_auth,

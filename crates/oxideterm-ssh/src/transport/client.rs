@@ -347,6 +347,7 @@ impl SshTransportClient {
             config,
             prompt_handler: None,
             managed_key_resolver: None,
+            connection_progress: None,
         }
     }
 
@@ -358,6 +359,17 @@ impl SshTransportClient {
     pub fn with_managed_key_resolver(mut self, resolver: ManagedKeyResolver) -> Self {
         self.managed_key_resolver = Some(resolver);
         self
+    }
+
+    pub fn with_connection_progress(mut self, reporter: ConnectionProgressReporter) -> Self {
+        self.connection_progress = Some(reporter);
+        self
+    }
+
+    fn report_connection_progress(&self, stage: ConnectionTraceStage) {
+        if let Some(reporter) = self.connection_progress.as_ref() {
+            reporter.report(stage);
+        }
     }
 
     pub async fn connect_shell(self) -> Result<SshPtyHandle, SshTransportError> {
@@ -749,6 +761,7 @@ impl SshTransportClient {
                 ));
             }
 
+            self.report_connection_progress(ConnectionTraceStage::OpeningTransport);
             let stream = {
                 let parent_handle = &parent_pooled.target;
                 open_direct_tcpip_stream(parent_handle, &self.config.host, self.config.port)
@@ -765,14 +778,19 @@ impl SshTransportClient {
                 self.config.agent_forwarding_socket.clone(),
                 remote_forward_handler.clone(),
                 x11_forward_handler.clone(),
-            )?;
+            )?
+            .with_connection_progress(self.connection_progress.clone());
             let auth_banners = handler.auth_banners();
             let agent_forwarding_accepted = handler.agent_forwarding_acceptance();
             let x11_dispatcher = handler.x11_dispatcher();
+            self.report_connection_progress(ConnectionTraceStage::SshHandshake);
             let mut target = tokio::time::timeout(
                 Duration::from_secs(self.config.timeout_secs),
                 client::connect_stream(
-                    Arc::new(ssh_client_config(self.config.legacy_ssh_compatibility)),
+                    Arc::new(ssh_client_config(
+                        self.config.legacy_ssh_compatibility,
+                        &self.config.ssh_algorithms,
+                    )?),
                     stream,
                     handler,
                 ),
@@ -782,11 +800,13 @@ impl SshTransportClient {
             .map_err(|error| {
                 error.with_context("failed to connect child node via parent tunnel")
             })?;
+            self.report_connection_progress(ConnectionTraceStage::Authentication);
             authenticate(
                 &mut target,
                 &self.config,
                 self.prompt_handler.as_deref(),
                 self.managed_key_resolver.as_ref(),
+                self.connection_progress.as_ref(),
             )
             .await?;
             Ok(Arc::new(PooledSshConnection::tunneled(
@@ -901,6 +921,7 @@ impl SshTransportClient {
             legacy_ssh_compatibility = config.legacy_ssh_compatibility,
             "SSH direct connection starting"
         );
+        self.report_connection_progress(ConnectionTraceStage::OpeningTransport);
         let stream: BoxedSshForwardStream = if let Some(proxy_command) = &config.proxy_command {
             if config.upstream_proxy.is_some() {
                 return Err(SshTransportError::ConnectionFailed(
@@ -926,7 +947,10 @@ impl SshTransportClient {
             "SSH TCP stream established"
         );
 
-        let client_config = ssh_client_config(config.legacy_ssh_compatibility);
+        let client_config = ssh_client_config(
+            config.legacy_ssh_compatibility,
+            &config.ssh_algorithms,
+        )?;
         let handler = NativeClientHandler::new(
             config.host.clone(),
             config.port,
@@ -938,7 +962,8 @@ impl SshTransportClient {
             config.agent_forwarding_socket.clone(),
             remote_forward_handler,
             x11_forward_handler,
-        )?;
+        )?
+        .with_connection_progress(self.connection_progress.clone());
         let auth_banners = handler.auth_banners();
         let agent_forwarding_accepted = handler.agent_forwarding_acceptance();
         let x11_dispatcher = handler.x11_dispatcher();
@@ -947,6 +972,7 @@ impl SshTransportClient {
             target_port = config.port,
             "SSH protocol handshake starting"
         );
+        self.report_connection_progress(ConnectionTraceStage::SshHandshake);
         let mut handle = tokio::time::timeout(
             Duration::from_secs(config.timeout_secs),
             client::connect_stream(Arc::new(client_config), stream, handler),
@@ -960,11 +986,13 @@ impl SshTransportClient {
             "SSH protocol handshake established"
         );
 
+        self.report_connection_progress(ConnectionTraceStage::Authentication);
         authenticate(
             &mut handle,
             config,
             self.prompt_handler.as_deref(),
             self.managed_key_resolver.as_ref(),
+            self.connection_progress.as_ref(),
         )
         .await?;
         tracing::debug!(
@@ -1098,7 +1126,10 @@ impl SshTransportClient {
         let mut handle = tokio::time::timeout(
             Duration::from_secs(self.config.timeout_secs),
             client::connect_stream(
-                Arc::new(ssh_client_config(hop.legacy_ssh_compatibility)),
+                Arc::new(ssh_client_config(
+                    hop.legacy_ssh_compatibility,
+                    &hop.ssh_algorithms,
+                )?),
                 stream,
                 handler,
             ),
@@ -1137,7 +1168,10 @@ impl SshTransportClient {
         let mut handle = tokio::time::timeout(
             Duration::from_secs(self.config.timeout_secs),
             client::connect_stream(
-                Arc::new(ssh_client_config(hop.legacy_ssh_compatibility)),
+                Arc::new(ssh_client_config(
+                    hop.legacy_ssh_compatibility,
+                    &hop.ssh_algorithms,
+                )?),
                 stream,
                 handler,
             ),
@@ -1205,7 +1239,10 @@ impl SshTransportClient {
         let mut handle = tokio::time::timeout(
             Duration::from_secs(timeout_secs),
             client::connect_stream(
-                Arc::new(ssh_client_config(self.config.legacy_ssh_compatibility)),
+                Arc::new(ssh_client_config(
+                    self.config.legacy_ssh_compatibility,
+                    &self.config.ssh_algorithms,
+                )?),
                 stream,
                 handler,
             ),
@@ -1221,6 +1258,7 @@ impl SshTransportClient {
             &self.config,
             self.prompt_handler.as_deref(),
             self.managed_key_resolver.as_ref(),
+            self.connection_progress.as_ref(),
         )
         .await?;
         tracing::debug!(

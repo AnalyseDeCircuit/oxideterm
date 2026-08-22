@@ -799,9 +799,20 @@ impl WorkspaceApp {
         parent_id: Option<&NodeId>,
         cx: &mut Context<Self>,
     ) {
-        let label = self.ssh_nodes.get(node_id).map(|node| node.title.clone());
+        let connection_identity = self.ssh_nodes.get(node_id).map(|node| {
+            (
+                node.title.clone(),
+                format!(
+                    "{}@{}:{}",
+                    node.endpoint.username, node.endpoint.host, node.endpoint.port
+                ),
+            )
+        });
+        let (label, endpoint) = connection_identity
+            .map(|(label, endpoint)| (Some(label), Some(endpoint)))
+            .unwrap_or_default();
         self.workspace_runtime.update(cx, |runtime, cx| {
-            runtime.begin_connection_trace(node_id, label, plan, parent_id, cx);
+            runtime.begin_connection_trace(node_id, label, endpoint, plan, parent_id, cx);
         });
     }
 

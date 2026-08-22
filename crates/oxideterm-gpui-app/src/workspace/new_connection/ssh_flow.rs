@@ -36,8 +36,8 @@ use super::{
         NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
         NewConnectionSubmitAction, NewConnectionTransport, NewConnectionUpstreamProxyAuth,
         NewConnectionUpstreamProxyPolicy, SavedConnectionPromptAction, SshAuthTab,
-        StandaloneSftpSecondaryForm, identity_agent_from_form, identity_agent_selector,
-        ssh_auth_tab_from_saved_auth,
+        StandaloneSftpSecondaryForm, connection_timeout_drafts_valid, identity_agent_from_form,
+        identity_agent_selector, ssh_auth_tab_from_saved_auth,
     },
     host_key_dialog::HostKeyChallenge,
 };
@@ -307,6 +307,53 @@ impl SshPromptHandler for NativeSshPromptHandler {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn ensure_kerberos_credentials_availability(
+        &self,
+        cx: &mut Context<Self>,
+    ) {
+        let should_check = self.update_connection_form_state(cx, |state| {
+            let Some(form) = state.form.as_mut() else {
+                return false;
+            };
+            let kerberos_enabled = form.gssapi_enabled
+                || form.standalone_sftp_secondary.gssapi_enabled
+                || form
+                    .jump_server_form
+                    .as_ref()
+                    .is_some_and(|jump| jump.gssapi_enabled);
+            if !kerberos_enabled
+                || form.gssapi_credentials_available.is_some()
+                || form.gssapi_credentials_check_pending
+            {
+                return false;
+            }
+            form.gssapi_credentials_check_pending = true;
+            true
+        });
+        if !should_check {
+            return;
+        }
+
+        let runtime = self.forwarding_runtime.handle().clone();
+        cx.spawn(async move |weak, cx| {
+            // Platform credential discovery may call GSSAPI or SSPI and must stay off GPUI.
+            let available = runtime
+                .spawn_blocking(oxideterm_ssh::kerberos_credentials_available)
+                .await
+                .unwrap_or(false);
+            let _ = weak.update(cx, |this, cx| {
+                this.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.gssapi_credentials_check_pending = false;
+                        form.gssapi_credentials_available = Some(available);
+                    }
+                });
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// Borrows the entity-owned form state without copying secret drafts.
     pub(in crate::workspace) fn connection_form_state<'a>(
         &self,

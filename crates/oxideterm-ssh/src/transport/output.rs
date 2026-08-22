@@ -224,8 +224,9 @@ mod tests {
 
     #[test]
     fn ssh_client_config_enables_legacy_algorithms_only_when_requested() {
-        let modern = ssh_client_config(false);
-        let legacy = ssh_client_config(true);
+        let preferences = oxideterm_connections::SshAlgorithmPreferences::default();
+        let modern = ssh_client_config(false, &preferences).unwrap();
+        let legacy = ssh_client_config(true, &preferences).unwrap();
 
         assert!(!modern.preferred.kex.contains(&russh::kex::DH_G14_SHA1));
         assert!(legacy.preferred.kex.contains(&russh::kex::DH_G14_SHA1));
@@ -243,6 +244,7 @@ mod tests {
                 identity_agent: None,
                 agent_forwarding_socket: None,
                 legacy_ssh_compatibility: false,
+                ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
                 strict_host_key_checking: true,
                 trust_host_key: None,
                 expected_host_key_fingerprint: None,

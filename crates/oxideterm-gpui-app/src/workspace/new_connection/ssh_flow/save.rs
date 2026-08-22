@@ -18,6 +18,38 @@ struct PreparedMoshConnect {
     options: MoshConnectionOptions,
 }
 
+fn saved_authentication_plan(
+    fallback: SavedAuth,
+    enabled: bool,
+    server_identity: &str,
+    delegate_credentials: bool,
+) -> SavedAuth {
+    if !enabled {
+        return fallback;
+    }
+    SavedAuth::with_kerberos_preferred(
+        fallback,
+        (!server_identity.trim().is_empty()).then(|| server_identity.trim().to_string()),
+        delegate_credentials,
+    )
+}
+
+fn runtime_authentication_plan(
+    fallback: AuthMethod,
+    enabled: bool,
+    server_identity: &str,
+    delegate_credentials: bool,
+) -> AuthMethod {
+    if !enabled {
+        return fallback;
+    }
+    AuthMethod::kerberos_preferred(
+        fallback,
+        (!server_identity.trim().is_empty()).then(|| server_identity.trim().to_string()),
+        delegate_credentials,
+    )
+}
+
 fn parse_mosh_udp_port(value: &str) -> anyhow::Result<SavedMoshUdpPortSelection> {
     let value = value.trim();
     if value.is_empty() {
@@ -61,6 +93,7 @@ fn standalone_sftp_secondary_auth_matches(
     auth: &SavedAuth,
 ) -> bool {
     form.auth_tab == ssh_auth_tab_from_saved_auth(auth)
+        && form.gssapi_enabled == auth.gssapi_options().is_some()
         && form.key_path.trim() == auth.key_path().unwrap_or_default()
         && form.cert_path.trim() == auth.cert_path().unwrap_or_default()
         && form.managed_key_id.trim() == auth.managed_key_id().unwrap_or_default()
@@ -88,7 +121,7 @@ fn saved_standalone_sftp_proxy_hop_from_form(
         .ok()
         .filter(|port| *port > 0)
         .ok_or_else(|| anyhow::anyhow!("Proxy port is invalid"))?;
-    let auth = match hop.auth_tab {
+    let fallback = match hop.auth_tab {
         SshAuthTab::Password => SavedAuth::Password {
             keychain_id: None,
             plaintext_password: Some(SecretString::from(std::mem::take(&mut hop.password))),
@@ -123,12 +156,13 @@ fn saved_standalone_sftp_proxy_hop_from_form(
                 .then(|| SecretString::from(std::mem::take(&mut hop.passphrase))),
         },
         SshAuthTab::TwoFactor => SavedAuth::KeyboardInteractive,
-        SshAuthTab::Gssapi => SavedAuth::Gssapi {
-            server_identity: (!hop.gssapi_server_identity.trim().is_empty())
-                .then(|| hop.gssapi_server_identity.trim().to_string()),
-            delegate_credentials: hop.gssapi_delegate_credentials,
-        },
     };
+    let auth = saved_authentication_plan(
+        fallback,
+        hop.gssapi_enabled,
+        &hop.gssapi_server_identity,
+        hop.gssapi_delegate_credentials,
+    );
     Ok(SavedProxyHop {
         host,
         port,
@@ -138,6 +172,7 @@ fn saved_standalone_sftp_proxy_hop_from_form(
         identity_agent: identity_agent_from_form(&hop.identity_agent),
         agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+        ssh_algorithms: hop.ssh_algorithms.clone(),
     })
 }
 
@@ -265,7 +300,7 @@ fn saved_standalone_sftp_secondary_endpoint_from_form(
     let auth = if can_preserve_auth {
         existing.expect("checked above").auth.clone()
     } else {
-        match form.auth_tab {
+        let fallback = match form.auth_tab {
             SshAuthTab::Password => SavedAuth::Password {
                 keychain_id: None,
                 plaintext_password: (form.save_password && !form.password.is_empty())
@@ -301,12 +336,13 @@ fn saved_standalone_sftp_secondary_endpoint_from_form(
                     .then(|| SecretString::from(std::mem::take(&mut form.passphrase))),
             },
             SshAuthTab::TwoFactor => SavedAuth::KeyboardInteractive,
-            SshAuthTab::Gssapi => SavedAuth::Gssapi {
-                server_identity: (!form.gssapi_server_identity.trim().is_empty())
-                    .then(|| form.gssapi_server_identity.trim().to_string()),
-                delegate_credentials: form.gssapi_delegate_credentials,
-            },
-        }
+        };
+        saved_authentication_plan(
+            fallback,
+            form.gssapi_enabled,
+            &form.gssapi_server_identity,
+            form.gssapi_delegate_credentials,
+        )
     };
     let (proxy_chain, upstream_proxy, proxy_command) =
         saved_standalone_sftp_secondary_route_from_form(
@@ -322,6 +358,7 @@ fn saved_standalone_sftp_secondary_endpoint_from_form(
     endpoint.connect_timeout_seconds = form.connect_timeout_seconds;
     endpoint.identity_agent = identity_agent_from_form(&form.identity_agent);
     endpoint.legacy_ssh_compatibility = form.legacy_ssh_compatibility;
+    endpoint.ssh_algorithms = form.ssh_algorithms.clone();
     endpoint.initial_remote_path = (!form.initial_remote_path.trim().is_empty())
         .then(|| form.initial_remote_path.trim().to_string());
     endpoint.validate()?;
@@ -329,7 +366,7 @@ fn saved_standalone_sftp_secondary_endpoint_from_form(
 }
 
 fn saved_mosh_auth_from_form(form: &mut NewConnectionForm) -> SavedAuth {
-    match form.auth_tab {
+    let fallback = match form.auth_tab {
         SshAuthTab::Password => {
             // Editing follows SSH property semantics: a newly entered password is
             // an explicit replacement and crosses directly into protected storage.
@@ -375,16 +412,17 @@ fn saved_mosh_auth_from_form(form: &mut NewConnectionForm) -> SavedAuth {
                 .then(|| SecretString::from(std::mem::take(&mut form.passphrase))),
         },
         SshAuthTab::TwoFactor => SavedAuth::KeyboardInteractive,
-        SshAuthTab::Gssapi => SavedAuth::Gssapi {
-            server_identity: (!form.gssapi_server_identity.trim().is_empty())
-                .then(|| form.gssapi_server_identity.trim().to_string()),
-            delegate_credentials: form.gssapi_delegate_credentials,
-        },
-    }
+    };
+    saved_authentication_plan(
+        fallback,
+        form.gssapi_enabled,
+        &form.gssapi_server_identity,
+        form.gssapi_delegate_credentials,
+    )
 }
 
 fn runtime_mosh_auth_from_form(form: &mut NewConnectionForm) -> AuthMethod {
-    match form.auth_tab {
+    let fallback = match form.auth_tab {
         SshAuthTab::Password => {
             AuthMethod::password_secret(take_zeroizing_secret(&mut form.password))
         }
@@ -407,18 +445,31 @@ fn runtime_mosh_auth_from_form(form: &mut NewConnectionForm) -> AuthMethod {
             (!form.passphrase.is_empty()).then(|| take_zeroizing_secret(&mut form.passphrase)),
         ),
         SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
-        SshAuthTab::Gssapi => AuthMethod::gssapi(
-            (!form.gssapi_server_identity.trim().is_empty())
-                .then(|| form.gssapi_server_identity.trim().to_string()),
-            form.gssapi_delegate_credentials,
-        ),
-    }
+    };
+    runtime_authentication_plan(
+        fallback,
+        form.gssapi_enabled,
+        &form.gssapi_server_identity,
+        form.gssapi_delegate_credentials,
+    )
 }
 
 fn runtime_mosh_auth_from_saved(
     auth: &SavedAuth,
     secret: Option<SecretString>,
 ) -> Option<AuthMethod> {
+    if let SavedAuth::KerberosPreferred {
+        server_identity,
+        delegate_credentials,
+        fallback,
+    } = auth
+    {
+        return Some(AuthMethod::kerberos_preferred(
+            runtime_mosh_auth_from_saved(fallback, secret)?,
+            server_identity.clone(),
+            *delegate_credentials,
+        ));
+    }
     let secret = secret.map(SecretString::into_zeroizing);
     Some(match auth {
         SavedAuth::Password { .. } => AuthMethod::password_secret(secret?),
@@ -433,10 +484,7 @@ fn runtime_mosh_auth_from_saved(
         } => AuthMethod::certificate_secret(key_path.clone(), cert_path.clone(), secret),
         SavedAuth::KeyboardInteractive => AuthMethod::KeyboardInteractive,
         SavedAuth::Agent => AuthMethod::Agent,
-        SavedAuth::Gssapi {
-            server_identity,
-            delegate_credentials,
-        } => AuthMethod::gssapi(server_identity.clone(), *delegate_credentials),
+        SavedAuth::KerberosPreferred { .. } => unreachable!("handled above"),
     })
 }
 
@@ -464,6 +512,7 @@ fn runtime_mosh_config_from_saved(
                 identity_agent: hop.identity_agent.clone(),
                 agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
                 legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+                ssh_algorithms: hop.ssh_algorithms.clone(),
                 strict_host_key_checking: true,
                 trust_host_key: None,
                 expected_host_key_fingerprint: None,
@@ -478,6 +527,7 @@ fn runtime_mosh_config_from_saved(
         proxy_chain: (!proxy_chain.is_empty()).then_some(proxy_chain),
         identity_agent: profile.identity_agent.clone(),
         legacy_ssh_compatibility: profile.legacy_ssh_compatibility,
+        ssh_algorithms: profile.ssh_algorithms.clone(),
         strict_host_key_checking: true,
         ..SshConfig::default()
     })
@@ -691,20 +741,14 @@ fn proxy_hop_auth_target_matches(left: &SavedProxyHop, right: &SavedProxyHop) ->
     left.host == right.host
         && left.port == right.port
         && left.username == right.username
-        && match (&left.auth, &right.auth) {
+        && left.auth.gssapi_options() == right.auth.gssapi_options()
+        && match (
+            left.auth.conventional_fallback(),
+            right.auth.conventional_fallback(),
+        ) {
             (SavedAuth::Password { .. }, SavedAuth::Password { .. })
             | (SavedAuth::KeyboardInteractive, SavedAuth::KeyboardInteractive)
             | (SavedAuth::Agent, SavedAuth::Agent) => true,
-            (
-                SavedAuth::Gssapi {
-                    server_identity: left_identity,
-                    delegate_credentials: left_delegate,
-                },
-                SavedAuth::Gssapi {
-                    server_identity: right_identity,
-                    delegate_credentials: right_delegate,
-                },
-            ) => left_identity == right_identity && left_delegate == right_delegate,
             (
                 SavedAuth::Key {
                     key_path: left_path,
@@ -851,6 +895,7 @@ impl WorkspaceApp {
                         identity_agent: config.identity_agent,
                         agent_forwarding_socket: config.agent_forwarding_socket,
                         legacy_ssh_compatibility: config.legacy_ssh_compatibility,
+                        ssh_algorithms: config.ssh_algorithms,
                         strict_host_key_checking: true,
                         trust_host_key: None,
                         expected_host_key_fingerprint: None,
@@ -910,6 +955,28 @@ impl WorkspaceApp {
                 state.mode(),
             )
         };
+        if matches!(
+            transport,
+            Some(
+                NewConnectionTransport::Ssh
+                    | NewConnectionTransport::Mosh
+                    | NewConnectionTransport::StandaloneSftp
+            )
+        ) && self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .is_some_and(|form| !connection_timeout_drafts_valid(form))
+        {
+            let message = self.i18n.t("ssh.form.connect_timeout_invalid");
+            self.update_connection_form_state(cx, |state| {
+                if let Some(form) = state.form.as_mut() {
+                    form.error = Some(message);
+                }
+            });
+            cx.notify();
+            return;
+        }
         if transport == Some(NewConnectionTransport::LocalTerminal)
             && drill_down_parent_id.is_none()
             && mode == NewConnectionFormMode::NewConnection
@@ -1679,6 +1746,7 @@ impl WorkspaceApp {
                     proxy_chain,
                     identity_agent: identity_agent_from_form(&form.identity_agent),
                     legacy_ssh_compatibility: form.legacy_ssh_compatibility,
+                    ssh_algorithms: form.ssh_algorithms.clone(),
                     strict_host_key_checking: true,
                     ..SshConfig::default()
                 };
@@ -1765,6 +1833,7 @@ impl WorkspaceApp {
                 locale: options.locale,
                 identity_agent: identity_agent_from_form(&form.identity_agent),
                 legacy_ssh_compatibility: form.legacy_ssh_compatibility,
+                ssh_algorithms: form.ssh_algorithms.clone(),
             };
             form.pending = true;
             form.error = None;
@@ -1947,6 +2016,7 @@ impl WorkspaceApp {
                 proxy_command: base_request.proxy_command,
                 identity_agent: base_request.identity_agent,
                 legacy_ssh_compatibility: base_request.legacy_ssh_compatibility,
+                ssh_algorithms: base_request.ssh_algorithms,
                 initial_remote_path: (!form.sftp_initial_remote_path.trim().is_empty())
                     .then(|| form.sftp_initial_remote_path.trim().to_string()),
                 transfer_mode: form.standalone_sftp_transfer_mode,
@@ -3035,7 +3105,6 @@ impl WorkspaceApp {
                         | SshAuthTab::ManagedKey
                         | SshAuthTab::Certificate => NewConnectionField::Passphrase,
                         SshAuthTab::Agent | SshAuthTab::TwoFactor => NewConnectionField::Name,
-                        SshAuthTab::Gssapi => NewConnectionField::GssapiServerIdentity,
                     };
                     form.field_focused = false;
                 }
@@ -3142,6 +3211,7 @@ mod saved_connection_open_tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
         }
     }
 

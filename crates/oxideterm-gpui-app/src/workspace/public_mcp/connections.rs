@@ -306,6 +306,9 @@ fn save_profile(
                         identity_agent: hop.identity_agent.clone(),
                         agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
                         legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+                        ssh_algorithms: matching_hop
+                            .map(|hop| hop.ssh_algorithms.clone())
+                            .unwrap_or_default(),
                     })
                 })
                 .collect::<Result<Vec<_>, String>>()?;
@@ -336,6 +339,9 @@ fn save_profile(
                 identity_agent: profile.identity_agent.clone(),
                 agent_forwarding_socket: profile.agent_forwarding_socket.clone(),
                 legacy_ssh_compatibility: profile.legacy_ssh_compatibility,
+                ssh_algorithms: existing
+                    .map(|connection| connection.options.ssh_algorithms.clone())
+                    .unwrap_or_default(),
                 dedicated_new_terminal_connection: profile.dedicated_new_terminal_connection,
                 x11_forwarding: ConnectionX11ForwardingOptions {
                     enabled: profile.x11_forwarding.enabled,
@@ -431,6 +437,9 @@ fn save_profile(
                         identity_agent: hop.identity_agent.clone(),
                         agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
                         legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+                        ssh_algorithms: matching_hop
+                            .map(|hop| hop.ssh_algorithms.clone())
+                            .unwrap_or_default(),
                     })
                 })
                 .collect::<Result<Vec<_>, String>>()?;
@@ -472,6 +481,9 @@ fn save_profile(
                     locale: profile.locale.clone(),
                     identity_agent: profile.identity_agent.clone(),
                     legacy_ssh_compatibility: profile.legacy_ssh_compatibility,
+                    ssh_algorithms: existing
+                        .map(|profile| profile.ssh_algorithms.clone())
+                        .unwrap_or_default(),
                 })
                 .map_err(public_store_error)?;
             Ok(format!("{CONNECTION_KEY_MOSH_PREFIX}{}", saved.id))
@@ -614,17 +626,19 @@ fn saved_auth(
         }
         PublicConnectionAuth::KeyboardInteractive => Ok(SavedAuth::KeyboardInteractive),
         PublicConnectionAuth::Agent => Ok(SavedAuth::Agent),
-        PublicConnectionAuth::Gssapi {
+        PublicConnectionAuth::KerberosPreferred {
             server_identity,
             delegate_credentials,
-        } => Ok(SavedAuth::Gssapi {
-            server_identity: server_identity
+            fallback,
+        } => Ok(SavedAuth::with_kerberos_preferred(
+            saved_auth(fallback, existing.map(SavedAuth::conventional_fallback))?,
+            server_identity
                 .as_deref()
                 .map(str::trim)
                 .filter(|identity| !identity.is_empty())
                 .map(ToOwned::to_owned),
-            delegate_credentials: *delegate_credentials,
-        }),
+            *delegate_credentials,
+        )),
     }
 }
 
@@ -925,7 +939,7 @@ fn credential_status(store: &oxideterm_connections::ConnectionStore, key: &str) 
 }
 
 fn auth_status(slot_kind: &str, index: Option<u32>, auth: &SavedAuth) -> Value {
-    let (credential_kind, configured, writable) = match auth {
+    let (credential_kind, configured, writable) = match auth.conventional_fallback() {
         SavedAuth::Password { keychain_id, .. } => ("password", keychain_id.is_some(), true),
         SavedAuth::Key {
             passphrase_keychain_id,
@@ -941,7 +955,7 @@ fn auth_status(slot_kind: &str, index: Option<u32>, auth: &SavedAuth) -> Value {
         } => ("passphrase", passphrase_keychain_id.is_some(), true),
         SavedAuth::KeyboardInteractive => ("interactive", false, false),
         SavedAuth::Agent => ("agent", false, false),
-        SavedAuth::Gssapi { .. } => ("gssapi", false, false),
+        SavedAuth::KerberosPreferred { .. } => unreachable!("fallback auth is conventional"),
     };
     let slot = index.map_or_else(
         || json!({ "kind": slot_kind }),
@@ -1053,6 +1067,19 @@ pub(super) fn ssh_connection_projection(
 }
 
 pub(super) fn auth_projection(auth: &SavedAuth) -> Value {
+    if let SavedAuth::KerberosPreferred {
+        server_identity,
+        delegate_credentials,
+        fallback,
+    } = auth
+    {
+        return json!({
+            "kind": "kerberos_preferred",
+            "server_identity": server_identity,
+            "delegate_credentials": delegate_credentials,
+            "fallback": auth_projection(fallback),
+        });
+    }
     match auth {
         SavedAuth::Password { keychain_id, .. } => json!({
             "kind": "password",
@@ -1095,15 +1122,7 @@ pub(super) fn auth_projection(auth: &SavedAuth) -> Value {
             "kind": "agent",
             "credential_configured": false,
         }),
-        SavedAuth::Gssapi {
-            server_identity,
-            delegate_credentials,
-        } => json!({
-            "kind": "gssapi",
-            "server_identity": server_identity,
-            "delegate_credentials": delegate_credentials,
-            "credential_configured": false,
-        }),
+        SavedAuth::KerberosPreferred { .. } => unreachable!("handled above"),
     }
 }
 

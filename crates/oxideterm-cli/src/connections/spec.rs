@@ -54,10 +54,11 @@ enum ConnectionAuthSpec {
         passphrase_env: Option<String>,
     },
     Agent,
-    Gssapi {
+    KerberosPreferred {
         server_identity: Option<String>,
         #[serde(default)]
         delegate_credentials: bool,
+        fallback: Box<ConnectionAuthSpec>,
     },
 }
 
@@ -208,6 +209,9 @@ pub(super) fn connection_request_from_spec(
                 .map(|connection| connection.options.legacy_ssh_compatibility)
                 .unwrap_or(false)
         }),
+        ssh_algorithms: existing
+            .map(|connection| connection.options.ssh_algorithms.clone())
+            .unwrap_or_default(),
         dedicated_new_terminal_connection: existing
             .map(|connection| connection.options.dedicated_new_terminal_connection)
             .unwrap_or(false),
@@ -297,13 +301,15 @@ fn saved_auth_from_connection_spec(
             }
         }
         ConnectionAuthSpec::Agent => SavedAuth::Agent,
-        ConnectionAuthSpec::Gssapi {
+        ConnectionAuthSpec::KerberosPreferred {
             server_identity,
             delegate_credentials,
-        } => SavedAuth::Gssapi {
-            server_identity: server_identity.filter(|identity| !identity.trim().is_empty()),
+            fallback,
+        } => SavedAuth::with_kerberos_preferred(
+            saved_auth_from_connection_spec(*fallback, existing_auth, json)?,
+            server_identity.filter(|identity| !identity.trim().is_empty()),
             delegate_credentials,
-        },
+        ),
     })
 }
 
@@ -317,6 +323,7 @@ fn saved_proxy_hop_from_spec(spec: ConnectionProxyHopSpec, json: bool) -> CliRes
         identity_agent: None,
         agent_forwarding_socket: None,
         legacy_ssh_compatibility: spec.legacy_ssh_compatibility,
+        ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
     })
 }
 

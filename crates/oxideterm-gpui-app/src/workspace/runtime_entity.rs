@@ -887,6 +887,16 @@ impl WorkspaceRuntimeEntity {
         let worker_node_id = node_id.clone();
         let worker_connection_id = connection_id.clone();
         let prompt_handler = Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
+        let progress_tx = reconnect_tx.clone();
+        let progress_node_id = worker_node_id.clone();
+        // The node attempt owns progress delivery; terminal panes only observe the resulting trace.
+        let connection_progress = ConnectionProgressReporter::new(move |stage| {
+            let _ = progress_tx.send(ReconnectWorkerResult::NodeConnectionProgress {
+                node_id: progress_node_id.clone(),
+                stage,
+                attempt_id,
+            });
+        });
         let task = self.task_runtime.spawn(async move {
             // This task owns the node transport independently from terminal panes and pages.
             if force_reconnect {
@@ -894,7 +904,8 @@ impl WorkspaceRuntimeEntity {
             }
             let client = SshTransportClient::new(config)
                 .with_prompt_handler(prompt_handler)
-                .with_managed_key_resolver(managed_key_resolver);
+                .with_managed_key_resolver(managed_key_resolver)
+                .with_connection_progress(connection_progress);
             let parent = if let Some(parent_id) = parent_id {
                 let parent_consumer =
                     ConnectionConsumer::NodeRouter(format!("{}:ancestor", worker_node_id.0));
@@ -1824,12 +1835,13 @@ impl WorkspaceRuntimeEntity {
         &mut self,
         node_id: &NodeId,
         label: Option<String>,
+        endpoint: Option<String>,
         plan: Option<&ConnectionTracePlan>,
-        parent_id: Option<&NodeId>,
+        _parent_id: Option<&NodeId>,
         cx: &mut Context<Self>,
     ) {
         self.connection_trace_state
-            .begin(node_id.clone(), label, plan);
+            .begin(node_id.clone(), label, endpoint, plan);
         self.push_connection_trace_event(
             node_id,
             ConnectionTraceStage::Queued,
@@ -1846,38 +1858,6 @@ impl WorkspaceRuntimeEntity {
             None,
             cx,
         );
-        self.push_connection_trace_event(
-            node_id,
-            ConnectionTraceStage::OpeningTransport,
-            ConnectionTraceStatus::Running,
-            28.0,
-            None,
-            cx,
-        );
-        self.push_connection_trace_event(
-            node_id,
-            ConnectionTraceStage::HostKey,
-            ConnectionTraceStatus::Running,
-            38.0,
-            None,
-            cx,
-        );
-        self.push_connection_trace_event(
-            node_id,
-            ConnectionTraceStage::SshHandshake,
-            ConnectionTraceStatus::Running,
-            48.0,
-            parent_id.map(|parent_id| format!("via {}", parent_id.0)),
-            cx,
-        );
-        self.push_connection_trace_event(
-            node_id,
-            ConnectionTraceStage::Authentication,
-            ConnectionTraceStatus::Running,
-            62.0,
-            None,
-            cx,
-        );
     }
 
     pub(in crate::workspace) fn finish_connection_trace_success(
@@ -1888,22 +1868,6 @@ impl WorkspaceRuntimeEntity {
         if !self.connection_trace_state.contains(node_id) {
             return;
         }
-        self.push_connection_trace_event(
-            node_id,
-            ConnectionTraceStage::Pty,
-            ConnectionTraceStatus::Running,
-            86.0,
-            None,
-            cx,
-        );
-        self.push_connection_trace_event(
-            node_id,
-            ConnectionTraceStage::ShellReady,
-            ConnectionTraceStatus::Running,
-            96.0,
-            None,
-            cx,
-        );
         self.push_connection_trace_event(
             node_id,
             ConnectionTraceStage::Ready,
@@ -1924,7 +1888,20 @@ impl WorkspaceRuntimeEntity {
         if !self.connection_trace_state.contains(node_id) {
             return;
         }
-        let stage = oxideterm_ssh::connection_trace_failure_stage(detail.as_deref());
+        let classified_stage = oxideterm_ssh::connection_trace_failure_stage(detail.as_deref());
+        let stage = self
+            .connection_trace_state
+            .current_stage(node_id)
+            .map(|current_stage| {
+                if connection_trace_progress(current_stage)
+                    >= connection_trace_progress(classified_stage)
+                {
+                    current_stage
+                } else {
+                    classified_stage
+                }
+            })
+            .unwrap_or(classified_stage);
         self.push_connection_trace_event(
             node_id,
             stage,
@@ -2547,6 +2524,23 @@ impl WorkspaceRuntimeEntity {
         cx: &mut Context<Self>,
     ) -> Option<ReconnectRuntimeEffect> {
         match result {
+            ReconnectWorkerResult::NodeConnectionProgress {
+                node_id,
+                stage,
+                attempt_id,
+            } => {
+                if self.node_transport_result_is_current(&node_id, attempt_id) {
+                    self.push_connection_trace_event(
+                        &node_id,
+                        stage,
+                        ConnectionTraceStatus::Running,
+                        connection_trace_progress(stage),
+                        None,
+                        cx,
+                    );
+                }
+                None
+            }
             ReconnectWorkerResult::NodeConnected {
                 node_id,
                 connection_id,
@@ -2941,6 +2935,23 @@ fn reconnect_error_is_non_retryable(error: &str) -> bool {
     ]
     .iter()
     .any(|needle| error.contains(needle))
+}
+
+fn connection_trace_progress(stage: ConnectionTraceStage) -> f32 {
+    match stage {
+        ConnectionTraceStage::Queued => 5.0,
+        ConnectionTraceStage::Preparing => 15.0,
+        ConnectionTraceStage::OpeningTransport => 30.0,
+        ConnectionTraceStage::SshHandshake => 50.0,
+        ConnectionTraceStage::HostKey => 65.0,
+        ConnectionTraceStage::Authentication => 72.0,
+        ConnectionTraceStage::KerberosCredentials => 76.0,
+        ConnectionTraceStage::GssapiExchange => 80.0,
+        ConnectionTraceStage::FallbackAuthentication => 84.0,
+        ConnectionTraceStage::Pty => 90.0,
+        ConnectionTraceStage::ShellReady => 96.0,
+        ConnectionTraceStage::Ready => 100.0,
+    }
 }
 
 fn runtime_effect_targets_node_transport(
@@ -3442,6 +3453,7 @@ mod tests {
             entity.begin_connection_trace(
                 &node_id,
                 Some("Node A".to_string()),
+                Some("user@node-a:22".to_string()),
                 Some(&plan),
                 None,
                 cx,
@@ -3450,21 +3462,21 @@ mod tests {
         assert_eq!(ready_events.load(Ordering::Acquire), 1);
 
         let started_events = entity.update(cx, |entity, cx| take_trace_effects(entity, cx));
-        assert_eq!(started_events.len(), 6);
+        assert_eq!(started_events.len(), 2);
         assert_eq!(
             started_events.first().map(|event| event.stage),
             Some(ConnectionTraceStage::Queued)
         );
         assert_eq!(
             started_events.last().map(|event| event.stage),
-            Some(ConnectionTraceStage::Authentication)
+            Some(ConnectionTraceStage::Preparing)
         );
 
         entity.update(cx, |entity, cx| {
             entity.finish_connection_trace_success(&node_id, cx);
         });
         let finished_events = entity.update(cx, |entity, cx| take_trace_effects(entity, cx));
-        assert_eq!(finished_events.len(), 3);
+        assert_eq!(finished_events.len(), 1);
         assert_eq!(
             finished_events.last().map(|event| event.status),
             Some(ConnectionTraceStatus::Ready)
@@ -3487,8 +3499,17 @@ mod tests {
         let cancelled_node_id = NodeId::new("node-cancelled");
 
         entity.update(cx, |entity, cx| {
-            entity.begin_connection_trace(&failed_node_id, None, None, None, cx);
-            entity.begin_connection_trace(&cancelled_node_id, None, None, None, cx);
+            entity.begin_connection_trace(&failed_node_id, None, None, None, None, cx);
+            entity.begin_connection_trace(&cancelled_node_id, None, None, None, None, cx);
+            let _ = take_trace_effects(entity, cx);
+            entity.push_connection_trace_event(
+                &failed_node_id,
+                ConnectionTraceStage::Authentication,
+                ConnectionTraceStatus::Running,
+                connection_trace_progress(ConnectionTraceStage::Authentication),
+                None,
+                cx,
+            );
             let _ = take_trace_effects(entity, cx);
             entity.finish_connection_trace_failed(
                 &failed_node_id,
@@ -3501,7 +3522,9 @@ mod tests {
         let terminal_events = entity.update(cx, |entity, cx| take_trace_effects(entity, cx));
         assert_eq!(terminal_events.len(), 2);
         assert!(terminal_events.iter().any(|event| {
-            event.node_id == failed_node_id && event.status == ConnectionTraceStatus::Failed
+            event.node_id == failed_node_id
+                && event.status == ConnectionTraceStatus::Failed
+                && event.stage == ConnectionTraceStage::Authentication
         }));
         assert!(terminal_events.iter().any(|event| {
             event.node_id == cancelled_node_id && event.status == ConnectionTraceStatus::Cancelled

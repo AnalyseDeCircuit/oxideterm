@@ -1,4 +1,7 @@
-fn ssh_client_config(legacy_ssh_compatibility: bool) -> client::Config {
+fn ssh_client_config(
+    legacy_ssh_compatibility: bool,
+    ssh_algorithms: &oxideterm_connections::SshAlgorithmPreferences,
+) -> Result<client::Config, SshTransportError> {
     let mut config = client::Config {
         inactivity_timeout: None,
         keepalive_interval: Some(Duration::from_secs(30)),
@@ -7,12 +10,11 @@ fn ssh_client_config(legacy_ssh_compatibility: bool) -> client::Config {
         maximum_packet_size: 256 * 1024,
         ..client::Config::default()
     };
-    if legacy_ssh_compatibility {
-        // This is a per-connection opt-in so the default SSH security posture
-        // never offers SHA-1 DH, CBC ciphers, or SHA-1 MACs automatically.
-        config.preferred = russh::Preferred::legacy_compatibility();
-    }
-    config
+    // The persisted policy is compiled once per physical connection. Invalid
+    // names fail before the handshake instead of silently widening the offer.
+    config.preferred = crate::preferred_algorithms(legacy_ssh_compatibility, ssh_algorithms)
+        .map_err(|error| SshTransportError::ConnectionFailed(error.to_string()))?;
+    Ok(config)
 }
 
 async fn open_direct_tcpip_stream(
@@ -92,6 +94,7 @@ async fn authenticate_proxy_hop(
         &config,
         prompt_handler,
         managed_key_resolver,
+        None,
         // Proxy hops use the same KBI prompt and fallback rules as target
         // hosts so bastions and MFA jump boxes do not become a special case.
         AuthenticationOptions::default(),
@@ -116,6 +119,7 @@ struct NativeClientHandler {
     x11_forward_semaphore: Arc<Semaphore>,
     x11_forward_tasks: JoinSet<()>,
     auth_banners: AuthBannerSink,
+    connection_progress: Option<ConnectionProgressReporter>,
 }
 
 impl NativeClientHandler {
@@ -158,7 +162,16 @@ impl NativeClientHandler {
             x11_forward_semaphore: Arc::new(Semaphore::new(X11_CHANNEL_LIMIT)),
             x11_forward_tasks: JoinSet::new(),
             auth_banners: new_auth_banner_sink(),
+            connection_progress: None,
         })
+    }
+
+    fn with_connection_progress(
+        mut self,
+        connection_progress: Option<ConnectionProgressReporter>,
+    ) -> Self {
+        self.connection_progress = connection_progress;
+        self
     }
 
     fn auth_banners(&self) -> AuthBannerSink {
@@ -215,6 +228,10 @@ impl client::Handler for NativeClientHandler {
         &mut self,
         server_key: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
+        // Host-key progress is an initial-handshake signal and must not retain the attempt sink.
+        if let Some(reporter) = self.connection_progress.take() {
+            reporter.report(ConnectionTraceStage::HostKey);
+        }
         let russh::keys::PublicKeyOrCertificate::PublicKey {
             key: server_public_key,
             ..
@@ -466,12 +483,14 @@ async fn authenticate(
     config: &SshConfig,
     prompt_handler: Option<&dyn SshPromptHandler>,
     managed_key_resolver: Option<&ManagedKeyResolver>,
+    connection_progress: Option<&ConnectionProgressReporter>,
 ) -> Result<(), SshTransportError> {
     authenticate_with_options(
         handle,
         config,
         prompt_handler,
         managed_key_resolver,
+        connection_progress,
         AuthenticationOptions::default(),
     )
     .await
@@ -497,6 +516,7 @@ async fn authenticate_with_options(
     config: &SshConfig,
     prompt_handler: Option<&dyn SshPromptHandler>,
     managed_key_resolver: Option<&ManagedKeyResolver>,
+    connection_progress: Option<&ConnectionProgressReporter>,
     options: AuthenticationOptions,
 ) -> Result<(), SshTransportError> {
     tracing::debug!(
@@ -510,7 +530,34 @@ async fn authenticate_with_options(
         return Ok(());
     }
 
-    let result = match &config.auth {
+    let auth = match &config.auth {
+        AuthMethod::KerberosPreferred {
+            server_identity,
+            delegate_credentials,
+            fallback,
+        } => {
+            match try_kerberos_authentication(
+                handle,
+                config,
+                server_identity.as_deref(),
+                *delegate_credentials,
+                connection_progress,
+            )
+            .await?
+            {
+                KerberosAuthenticationOutcome::Authenticated => return Ok(()),
+                KerberosAuthenticationOutcome::Fallback => {
+                    if let Some(reporter) = connection_progress {
+                        reporter.report(ConnectionTraceStage::FallbackAuthentication);
+                    }
+                    fallback.as_ref()
+                }
+            }
+        }
+        auth => auth,
+    };
+
+    let result = match auth {
         AuthMethod::Password { password } => {
             tracing::debug!("SSH password authentication starting");
             let result = authenticate_password(handle, config, password).await?;
@@ -655,39 +702,7 @@ async fn authenticate_with_options(
             log_auth_result("keyboard-interactive", &result);
             result
         }
-        AuthMethod::Gssapi {
-            server_identity,
-            delegate_credentials,
-        } => {
-            tracing::debug!(
-                server_identity_configured = server_identity.is_some(),
-                delegate_credentials,
-                "SSH Kerberos authentication starting"
-            );
-            let mut authenticator = gssapi::KerberosAuthenticator::new(
-                &config.host,
-                server_identity.as_deref(),
-                *delegate_credentials,
-            )
-            .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))?;
-            let result = tokio::time::timeout(
-                GSSAPI_AUTH_TIMEOUT,
-                handle.authenticate_gssapi_with_mic(
-                    config.username.clone(),
-                    gssapi::KerberosAuthenticator::mechanism_oids(),
-                    &mut authenticator,
-                ),
-            )
-            .await
-            .map_err(|_| {
-                SshTransportError::AuthenticationFailed(
-                    "Kerberos authentication timed out".to_string(),
-                )
-            })?
-            .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))?;
-            log_auth_result("gssapi-with-mic", &result);
-            result
-        }
+        AuthMethod::KerberosPreferred { .. } => unreachable!("Kerberos plans are unwrapped above"),
     };
 
     if result.success() {
@@ -715,7 +730,68 @@ fn auth_method_label(auth: &AuthMethod) -> &'static str {
         AuthMethod::ManagedKey { .. } => "managed-key",
         AuthMethod::Certificate { .. } => "certificate",
         AuthMethod::KeyboardInteractive => "keyboard-interactive",
-        AuthMethod::Gssapi { .. } => "gssapi-with-mic",
+        AuthMethod::KerberosPreferred { .. } => "kerberos-preferred",
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum KerberosAuthenticationOutcome {
+    Authenticated,
+    Fallback,
+}
+
+async fn try_kerberos_authentication(
+    handle: &mut client::Handle<NativeClientHandler>,
+    config: &SshConfig,
+    server_identity: Option<&str>,
+    delegate_credentials: bool,
+    connection_progress: Option<&ConnectionProgressReporter>,
+) -> Result<KerberosAuthenticationOutcome, SshTransportError> {
+    if let Some(reporter) = connection_progress {
+        reporter.report(ConnectionTraceStage::KerberosCredentials);
+    }
+    tracing::debug!(
+        server_identity_configured = server_identity.is_some(),
+        delegate_credentials,
+        "SSH preferred Kerberos authentication starting"
+    );
+    let mut authenticator = gssapi::KerberosAuthenticator::new(
+        &config.host,
+        server_identity,
+        delegate_credentials,
+    )
+    .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))?;
+    if let Some(reporter) = connection_progress {
+        reporter.report(ConnectionTraceStage::GssapiExchange);
+    }
+    let result = tokio::time::timeout(
+        GSSAPI_AUTH_TIMEOUT,
+        handle.authenticate_gssapi_with_mic(
+            config.username.clone(),
+            gssapi::KerberosAuthenticator::mechanism_oids(),
+            &mut authenticator,
+        ),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(result)) if result.success() => Ok(KerberosAuthenticationOutcome::Authenticated),
+        Ok(Ok(_)) if authenticator.allows_authentication_fallback() => {
+            tracing::debug!("Kerberos authentication unavailable; using configured fallback");
+            Ok(KerberosAuthenticationOutcome::Fallback)
+        }
+        Ok(Ok(_)) => Err(SshTransportError::AuthenticationFailed(
+            "Kerberos integrity exchange was rejected".to_string(),
+        )),
+        Ok(Err(error)) if error.allows_authentication_fallback() => {
+            tracing::debug!("Kerberos credentials unavailable; using configured fallback");
+            Ok(KerberosAuthenticationOutcome::Fallback)
+        }
+        Ok(Err(error)) => Err(SshTransportError::AuthenticationFailed(error.to_string())),
+        Err(_) => {
+            tracing::debug!("Kerberos authentication timed out; using configured fallback");
+            Ok(KerberosAuthenticationOutcome::Fallback)
+        }
     }
 }
 

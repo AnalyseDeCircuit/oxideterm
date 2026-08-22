@@ -20,10 +20,16 @@ use windows as platform;
 /// RFC 4462 transports the complete DER encoding, including the OID tag and length.
 pub(crate) const KERBEROS_V5_OID_DER: &[u8] = b"\x06\x09\x2a\x86\x48\x86\xf7\x12\x01\x02\x02";
 
+pub(crate) fn credentials_available() -> bool {
+    platform::credentials_available()
+}
+
 pub(crate) struct KerberosAuthenticator {
     server_identity: String,
     delegate_credentials: bool,
     context: Option<platform::PlatformContext>,
+    integrity_exchange_completed: bool,
+    server_error_received: bool,
 }
 
 impl KerberosAuthenticator {
@@ -40,11 +46,17 @@ impl KerberosAuthenticator {
             server_identity: server_identity.to_string(),
             delegate_credentials,
             context: None,
+            integrity_exchange_completed: false,
+            server_error_received: false,
         })
     }
 
     pub(crate) fn mechanism_oids() -> Vec<Vec<u8>> {
         vec![KERBEROS_V5_OID_DER.to_vec()]
+    }
+
+    pub(crate) fn allows_authentication_fallback(&self) -> bool {
+        !self.integrity_exchange_completed && !self.server_error_received
     }
 }
 
@@ -71,6 +83,12 @@ pub(crate) enum KerberosAuthError {
     WorkerUnavailable,
     #[error(transparent)]
     Platform(#[from] platform::PlatformError),
+}
+
+impl KerberosAuthError {
+    pub(crate) fn allows_authentication_fallback(&self) -> bool {
+        matches!(self, Self::Platform(error) if error.allows_authentication_fallback())
+    }
 }
 
 impl GssapiAuthenticator for KerberosAuthenticator {
@@ -102,6 +120,9 @@ impl GssapiAuthenticator for KerberosAuthenticator {
         })
         .await
         .map_err(|_| KerberosAuthError::WorkerUnavailable)??;
+        if matches!(&step, GssapiStep::Complete { mic: Some(_), .. }) {
+            self.integrity_exchange_completed = true;
+        }
         self.context = Some(context);
         Ok(step)
     }
@@ -109,6 +130,7 @@ impl GssapiAuthenticator for KerberosAuthenticator {
     async fn gssapi_error(&mut self, _error: GssapiError) {
         // Server-provided status text and error tokens are untrusted and may
         // contain identity data, so the integration deliberately does not log them.
+        self.server_error_received = true;
     }
 }
 
@@ -122,5 +144,21 @@ mod tests {
         let authenticator = KerberosAuthenticator::new("host", Some(identity), false).unwrap();
 
         assert!(!format!("{authenticator:?}").contains(identity));
+    }
+
+    #[test]
+    fn fallback_is_limited_to_unavailable_credentials_before_integrity_exchange() {
+        let mut authenticator = KerberosAuthenticator::new("host", None, false).unwrap();
+        assert!(
+            KerberosAuthError::Platform(platform::PlatformError::NoCredentials)
+                .allows_authentication_fallback()
+        );
+        assert!(
+            !KerberosAuthError::Platform(platform::PlatformError::IntegrityUnavailable)
+                .allows_authentication_fallback()
+        );
+
+        authenticator.server_error_received = true;
+        assert!(!authenticator.allows_authentication_fallback());
     }
 }

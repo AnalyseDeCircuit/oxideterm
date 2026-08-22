@@ -36,6 +36,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
             x11_forwarding: ConnectionX11ForwardingOptions::default(),
             dedicated_new_terminal_connection: false,
             post_connect_command: None,
@@ -97,6 +98,7 @@ mod tests {
             locale: None,
             identity_agent: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
         }
     }
 
@@ -122,6 +124,7 @@ mod tests {
             proxy_command: None,
             identity_agent: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
             initial_remote_path: Some(" /srv/archive ".to_string()),
             transfer_mode: StandaloneSftpTransferMode::LocalRemote,
             secondary_endpoint: None,
@@ -176,6 +179,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
         });
         request.upstream_proxy = SavedUpstreamProxyPolicy::Custom {
             proxy: SavedUpstreamProxyConfig {
@@ -210,6 +214,7 @@ mod tests {
             proxy_command: None,
             identity_agent: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
             initial_remote_path: Some(" /srv/mirror ".to_string()),
         });
 
@@ -627,6 +632,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
         });
         request.upstream_proxy = SavedUpstreamProxyPolicy::Custom {
             proxy: SavedUpstreamProxyConfig {
@@ -1318,6 +1324,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: true,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
         }];
 
         store.upsert(req).unwrap();
@@ -1375,6 +1382,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
         });
         let (_connection, runtime_secrets) = store
             .upsert_with_runtime_secrets(destination)
@@ -1473,6 +1481,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
         }];
         store.upsert(req).unwrap();
 
@@ -1768,6 +1777,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
         }];
         store.upsert(req).unwrap();
         let previous_keychain_id = match &store.get("conn-1").unwrap().proxy_chain[0].auth {
@@ -1793,6 +1803,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
         }];
         store.upsert(update).unwrap();
 
@@ -1826,6 +1837,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
         }];
         store.upsert(req).unwrap();
         let existing_hop = store.get("conn-1").unwrap().proxy_chain[0].clone();
@@ -2351,6 +2363,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: true,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
             x11_forwarding: ConnectionX11ForwardingOptions {
                 enabled: true,
                 mode: ConnectionX11ForwardingMode::Untrusted,

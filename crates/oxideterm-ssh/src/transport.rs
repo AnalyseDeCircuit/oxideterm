@@ -43,8 +43,9 @@ use tokio::{
 use zeroize::Zeroizing;
 
 use crate::{
-    AuthMethod, ConnectionConsumer, ConnectionState, ConnectionTransportStatus,
-    KeepaliveProbeResult, ProxyHopConfig, SshConfig, SshConnectionHandle, SshConnectionRegistry,
+    AuthMethod, ConnectionConsumer, ConnectionProgressReporter, ConnectionState,
+    ConnectionTraceStage, ConnectionTransportStatus, KeepaliveProbeResult, ProxyHopConfig,
+    SshConfig, SshConnectionHandle, SshConnectionRegistry,
     agent_endpoint::{
         SshAgentEndpoint, resolve_ssh_agent_endpoint, resolve_ssh_agent_forwarding_endpoint,
     },
@@ -56,6 +57,10 @@ use crate::{
 };
 
 mod gssapi;
+
+pub fn kerberos_credentials_available() -> bool {
+    gssapi::credentials_available()
+}
 
 pub const DEFAULT_PTY_MODES: &[(Pty, u32)] = &[
     (Pty::VINTR, 0x03),
@@ -697,6 +702,7 @@ pub struct SshTransportClient {
     config: SshConfig,
     prompt_handler: Option<Arc<dyn SshPromptHandler>>,
     managed_key_resolver: Option<ManagedKeyResolver>,
+    connection_progress: Option<ConnectionProgressReporter>,
 }
 
 include!("transport/connection.rs");

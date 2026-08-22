@@ -637,6 +637,21 @@ fn build_saved_connection_from_sync_payload(
         saved_auth_from_connection_info(payload)
     };
     let proxy_chain = build_synced_proxy_chain(&payload.proxy_chain, existing, preserve_auth);
+    for hop in &proxy_chain {
+        hop.ssh_algorithms.validate()?;
+    }
+    let options = synced_options
+        .cloned()
+        .unwrap_or_else(|| ConnectionOptions {
+            // Older snapshots exposed only these option fields through
+            // ConnectionInfo, so retain that wire-compatible fallback.
+            agent_forwarding: payload.agent_forwarding,
+            legacy_ssh_compatibility: payload.legacy_ssh_compatibility,
+            ssh_algorithms: payload.ssh_algorithms.clone(),
+            post_connect_command: payload.post_connect_command.clone(),
+            ..Default::default()
+        });
+    options.ssh_algorithms.validate()?;
 
     Ok(SavedConnection {
         id: payload.id.clone(),
@@ -656,16 +671,7 @@ fn build_saved_connection_from_sync_payload(
         ),
         // ProxyCommand text is device-local protected data and never enters cloud snapshots.
         proxy_command: existing.and_then(|connection| connection.proxy_command.clone()),
-        options: synced_options
-            .cloned()
-            .unwrap_or_else(|| ConnectionOptions {
-                // Older snapshots exposed only these three option fields through
-                // ConnectionInfo, so retain that wire-compatible fallback.
-                agent_forwarding: payload.agent_forwarding,
-                legacy_ssh_compatibility: payload.legacy_ssh_compatibility,
-                post_connect_command: payload.post_connect_command.clone(),
-                ..Default::default()
-            }),
+        options,
         created_at: parse_connection_sync_timestamp(&payload.created_at, "connection created_at")?,
         last_used_at: payload
             .last_used_at
@@ -864,31 +870,28 @@ fn portable_mosh_auth(auth: &SavedAuth) -> SavedAuth {
         },
         SavedAuth::KeyboardInteractive => SavedAuth::KeyboardInteractive,
         SavedAuth::Agent => SavedAuth::Agent,
-        SavedAuth::Gssapi {
+        SavedAuth::KerberosPreferred {
             server_identity,
             delegate_credentials,
-        } => SavedAuth::Gssapi {
-            server_identity: server_identity.clone(),
-            delegate_credentials: *delegate_credentials,
-        },
+            fallback,
+        } => SavedAuth::with_kerberos_preferred(
+            portable_mosh_auth(fallback),
+            server_identity.clone(),
+            *delegate_credentials,
+        ),
     }
 }
 
 fn mosh_auth_target_matches(left: &SavedAuth, right: &SavedAuth) -> bool {
+    if left.gssapi_options() != right.gssapi_options() {
+        return false;
+    }
+    let left = left.conventional_fallback();
+    let right = right.conventional_fallback();
     match (left, right) {
         (SavedAuth::Password { .. }, SavedAuth::Password { .. })
         | (SavedAuth::KeyboardInteractive, SavedAuth::KeyboardInteractive)
         | (SavedAuth::Agent, SavedAuth::Agent) => true,
-        (
-            SavedAuth::Gssapi {
-                server_identity: left_identity,
-                delegate_credentials: left_delegate,
-            },
-            SavedAuth::Gssapi {
-                server_identity: right_identity,
-                delegate_credentials: right_delegate,
-            },
-        ) => left_identity == right_identity && left_delegate == right_delegate,
         (
             SavedAuth::Key { key_path: left, .. },
             SavedAuth::Key { key_path: right, .. },
@@ -1094,7 +1097,7 @@ fn parse_connection_sync_timestamp(value: &str, field_name: &str) -> Result<Date
 }
 
 fn saved_auth_from_connection_info(payload: &ConnectionInfo) -> SavedAuth {
-    match payload.auth_type {
+    let fallback = match payload.auth_type {
         AuthType::Password => SavedAuth::Password {
             keychain_id: None,
             plaintext_password: None,
@@ -1119,15 +1122,20 @@ fn saved_auth_from_connection_info(payload: &ConnectionInfo) -> SavedAuth {
         },
         AuthType::KeyboardInteractive => SavedAuth::KeyboardInteractive,
         AuthType::Agent => SavedAuth::Agent,
-        AuthType::Gssapi => SavedAuth::Gssapi {
-            server_identity: payload.gssapi_server_identity.clone(),
-            delegate_credentials: payload.gssapi_delegate_credentials,
-        },
+    };
+    if payload.gssapi_authentication {
+        SavedAuth::with_kerberos_preferred(
+            fallback,
+            payload.gssapi_server_identity.clone(),
+            payload.gssapi_delegate_credentials,
+        )
+    } else {
+        fallback
     }
 }
 
 fn saved_auth_from_proxy_hop_info(hop: &ProxyHopInfo) -> SavedAuth {
-    match hop.auth_type {
+    let fallback = match hop.auth_type {
         AuthType::Password => SavedAuth::Password {
             keychain_id: None,
             plaintext_password: None,
@@ -1152,10 +1160,15 @@ fn saved_auth_from_proxy_hop_info(hop: &ProxyHopInfo) -> SavedAuth {
         },
         AuthType::KeyboardInteractive => SavedAuth::KeyboardInteractive,
         AuthType::Agent => SavedAuth::Agent,
-        AuthType::Gssapi => SavedAuth::Gssapi {
-            server_identity: hop.gssapi_server_identity.clone(),
-            delegate_credentials: hop.gssapi_delegate_credentials,
-        },
+    };
+    if hop.gssapi_authentication {
+        SavedAuth::with_kerberos_preferred(
+            fallback,
+            hop.gssapi_server_identity.clone(),
+            hop.gssapi_delegate_credentials,
+        )
+    } else {
+        fallback
     }
 }
 
@@ -1191,6 +1204,7 @@ fn build_synced_proxy_chain(
                 identity_agent: hop.identity_agent.clone(),
                 agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
                 legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+                ssh_algorithms: hop.ssh_algorithms.clone(),
             }
         })
         .collect()
@@ -1314,6 +1328,7 @@ mod mosh_tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
         });
         let data = ConnectionStoreData {
             mosh_profiles: vec![profile],
@@ -1355,6 +1370,7 @@ mod mosh_tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
         });
         let mut incoming = local.clone();
         incoming.name = "Renamed mobile shell".to_string();

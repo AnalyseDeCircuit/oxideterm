@@ -8452,6 +8452,7 @@ dependencies = [
  "libgssapi",
  "oxideterm-backend-classification",
  "oxideterm-connection-monitor",
+ "oxideterm-connections",
  "oxideterm-portable-runtime",
  "oxideterm-sftp",
  "oxideterm-topology",

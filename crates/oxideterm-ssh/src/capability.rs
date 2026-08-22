@@ -3,6 +3,8 @@
 
 use serde::Serialize;
 
+use crate::{SshAlgorithmCategory, visible_algorithm_names};
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshCapabilityReport {
@@ -68,31 +70,11 @@ pub fn ssh_capability_report() -> SshCapabilityReport {
 
 fn algorithm_offer(preferred: &russh::Preferred) -> SshAlgorithmOffer {
     SshAlgorithmOffer {
-        kex: preferred
-            .kex
-            .iter()
-            .map(|algorithm| algorithm.as_ref().to_string())
-            .collect(),
-        host_key_algorithms: preferred
-            .key
-            .iter()
-            .map(|algorithm| algorithm.as_str().to_string())
-            .collect(),
-        ciphers: preferred
-            .cipher
-            .iter()
-            .map(|algorithm| algorithm.as_ref().to_string())
-            .collect(),
-        macs: preferred
-            .mac
-            .iter()
-            .map(|algorithm| algorithm.as_ref().to_string())
-            .collect(),
-        compression: preferred
-            .compression
-            .iter()
-            .map(|algorithm| algorithm.as_ref().to_string())
-            .collect(),
+        kex: visible_algorithm_names(preferred, SshAlgorithmCategory::Kex),
+        host_key_algorithms: visible_algorithm_names(preferred, SshAlgorithmCategory::HostKey),
+        ciphers: visible_algorithm_names(preferred, SshAlgorithmCategory::Cipher),
+        macs: visible_algorithm_names(preferred, SshAlgorithmCategory::Mac),
+        compression: visible_algorithm_names(preferred, SshAlgorithmCategory::Compression),
     }
 }
 

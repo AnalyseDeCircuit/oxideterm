@@ -7,7 +7,6 @@ const NEW_CONNECTION_TRANSPORT_ROW_GAP: f32 = 4.0;
 const NEW_CONNECTION_ADVANCED_GROUP_HEIGHT: f32 = 28.0;
 const NEW_CONNECTION_ADVANCED_GROUP_OFFSET: f32 =
     NEW_CONNECTION_ADVANCED_GROUP_HEIGHT + NEW_CONNECTION_TRANSPORT_ROW_GAP;
-const SSH_CONNECT_TIMEOUT_OPTIONS_SECONDS: [u64; 5] = [10, 30, 60, 120, 300];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ConnectionFormSection {
@@ -310,6 +309,15 @@ fn toggle_secondary_sftp_password_persistence(form: &mut NewConnectionForm) {
 
 fn toggle_primary_sftp_gssapi_delegation(form: &mut NewConnectionForm) {
     form.gssapi_delegate_credentials = !form.gssapi_delegate_credentials;
+}
+
+fn toggle_primary_sftp_gssapi(form: &mut NewConnectionForm) {
+    form.gssapi_enabled = !form.gssapi_enabled;
+}
+
+fn toggle_secondary_sftp_gssapi(form: &mut NewConnectionForm) {
+    let endpoint = &mut form.standalone_sftp_secondary;
+    endpoint.gssapi_enabled = !endpoint.gssapi_enabled;
 }
 
 fn toggle_secondary_sftp_gssapi_delegation(form: &mut NewConnectionForm) {
@@ -623,6 +631,31 @@ impl WorkspaceApp {
                 self.i18n.t("ssh.form.agent_not_detected"),
             ),
             None => (self.tokens.ui.text_muted, "...".to_string()),
+        };
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .child(div().size(px(8.0)).rounded_full().bg(rgb(color)))
+            .child(div().text_color(rgb(color)).child(label))
+            .into_any_element()
+    }
+
+    pub(super) fn render_kerberos_credentials_status(&self, available: Option<bool>) -> AnyElement {
+        let (color, label) = match available {
+            Some(true) => (
+                self.tokens.ui.success,
+                self.i18n.t("ssh.form.kerberos_credentials_available"),
+            ),
+            Some(false) => (
+                self.tokens.ui.warning,
+                self.i18n.t("ssh.form.kerberos_credentials_unavailable"),
+            ),
+            None => (
+                self.tokens.ui.text_muted,
+                self.i18n.t("ssh.form.kerberos_credentials_checking"),
+            ),
         };
         div()
             .flex()
@@ -1676,8 +1709,10 @@ impl WorkspaceApp {
         managed_key_id: &str,
         cert_path: &str,
         identity_agent: &str,
+        gssapi_enabled: bool,
         gssapi_server_identity: &str,
         gssapi_delegate_credentials: bool,
+        gssapi_credentials_available: Option<bool>,
         agent_available: Option<bool>,
         saved_credential_present: bool,
         save_password: bool,
@@ -1723,6 +1758,60 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(self.tokens.metrics.modal_section_gap))
+            .child(self.render_connection_checkbox(
+                self.i18n.t("ssh.form.kerberos_preferred"),
+                gssapi_enabled,
+                if secondary {
+                    toggle_secondary_sftp_gssapi
+                } else {
+                    toggle_primary_sftp_gssapi
+                },
+                cx,
+            ))
+            .when(gssapi_enabled, |content| {
+                content
+                    .child(self.render_connection_hint(self.i18n.t("ssh.form.gssapi_desc")))
+                    .child(self.render_connection_field(
+                        self.i18n.t("ssh.form.gssapi_server_identity"),
+                        gssapi_server_identity,
+                        self.i18n.t("ssh.form.gssapi_server_identity_placeholder"),
+                        gssapi_server_identity_field,
+                        false,
+                        cx,
+                    ))
+                    .child(self.render_connection_hint(
+                        self.i18n.t("ssh.form.gssapi_server_identity_hint"),
+                    ))
+                    .child(self.render_kerberos_credentials_status(gssapi_credentials_available))
+                    .child(self.render_connection_checkbox_with_warning(
+                        if secondary {
+                            "secondary-sftp-kerberos-delegation-help"
+                        } else {
+                            "primary-sftp-kerberos-delegation-help"
+                        },
+                        if secondary {
+                            "secondary-sftp-kerberos-delegation-tooltip"
+                        } else {
+                            "primary-sftp-kerberos-delegation-tooltip"
+                        },
+                        "ssh.form.gssapi_delegate_credentials",
+                        "ssh.form.gssapi_delegation_warning",
+                        gssapi_delegate_credentials,
+                        if secondary {
+                            toggle_secondary_sftp_gssapi_delegation
+                        } else {
+                            toggle_primary_sftp_gssapi_delegation
+                        },
+                        cx,
+                    ))
+            })
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(self.i18n.t("ssh.form.fallback_authentication")),
+            )
             .child(self.render_auth_selector(active_tab, context, false, cx))
             .when(active_tab == SshAuthTab::Password, |content| {
                 content
@@ -1848,37 +1937,6 @@ impl WorkspaceApp {
                         self.tokens.ui.warning,
                     ))
             })
-            .when(active_tab == SshAuthTab::Gssapi, |content| {
-                content
-                    .child(self.render_connection_hint(self.i18n.t("ssh.form.gssapi_desc")))
-                    .child(self.render_connection_field(
-                        self.i18n.t("ssh.form.gssapi_server_identity"),
-                        gssapi_server_identity,
-                        self.i18n.t("ssh.form.gssapi_server_identity_placeholder"),
-                        gssapi_server_identity_field,
-                        false,
-                        cx,
-                    ))
-                    .child(self.render_connection_hint(
-                        self.i18n.t("ssh.form.gssapi_server_identity_hint"),
-                    ))
-                    .child(self.render_connection_checkbox(
-                        self.i18n.t("ssh.form.gssapi_delegate_credentials"),
-                        gssapi_delegate_credentials,
-                        if secondary {
-                            toggle_secondary_sftp_gssapi_delegation
-                        } else {
-                            toggle_primary_sftp_gssapi_delegation
-                        },
-                        cx,
-                    ))
-                    .when(gssapi_delegate_credentials, |content| {
-                        content.child(self.render_connection_hint_with_color(
-                            self.i18n.t("ssh.form.gssapi_delegation_warning"),
-                            self.tokens.ui.warning,
-                        ))
-                    })
-            })
             .into_any_element()
     }
 
@@ -1890,26 +1948,22 @@ impl WorkspaceApp {
                 (SshAuthFamily::Agent, "ssh.drill_down.auth_agent"),
                 (SshAuthFamily::Key, "ssh.drill_down.auth_key"),
                 (SshAuthFamily::Password, "ssh.drill_down.auth_password"),
-                (SshAuthFamily::Gssapi, "ssh.auth.gssapi"),
             ],
             AuthSelectorContext::Jump => &[
                 (SshAuthFamily::Password, "ssh.auth.password"),
                 (SshAuthFamily::Key, "ssh.auth.key"),
                 (SshAuthFamily::Agent, "ssh.auth.agent"),
-                (SshAuthFamily::Gssapi, "ssh.auth.gssapi"),
             ],
             AuthSelectorContext::EditProperties | AuthSelectorContext::Prompt => &[
                 (SshAuthFamily::Password, "ssh.auth.password"),
                 (SshAuthFamily::Key, "ssh.auth.key"),
                 (SshAuthFamily::Agent, "ssh.auth.agent"),
-                (SshAuthFamily::Gssapi, "ssh.auth.gssapi"),
             ],
             AuthSelectorContext::Standard | AuthSelectorContext::StandaloneSftpSecondary => &[
                 (SshAuthFamily::Password, "ssh.auth.password"),
                 (SshAuthFamily::Key, "ssh.auth.key"),
                 (SshAuthFamily::Agent, "ssh.auth.agent"),
                 (SshAuthFamily::TwoFactor, "ssh.auth.two_factor"),
-                (SshAuthFamily::Gssapi, "ssh.auth.gssapi"),
             ],
         }
     }
@@ -2103,7 +2157,6 @@ impl WorkspaceApp {
             SshAuthFamily::Password => SshAuthTab::Password,
             SshAuthFamily::Agent => SshAuthTab::Agent,
             SshAuthFamily::TwoFactor => SshAuthTab::TwoFactor,
-            SshAuthFamily::Gssapi => SshAuthTab::Gssapi,
             SshAuthFamily::Key => {
                 // A top-level switch into Key should land on the file-key form,
                 // while repeated clicks preserve the selected key source.
@@ -2171,9 +2224,6 @@ impl WorkspaceApp {
                 SshAuthTab::Agent | SshAuthTab::TwoFactor => {
                     NewConnectionField::StandaloneSftpSecondaryHost
                 }
-                SshAuthTab::Gssapi => {
-                    NewConnectionField::StandaloneSftpSecondaryGssapiServerIdentity
-                }
             }
         } else if jump_form {
             match tab {
@@ -2183,7 +2233,6 @@ impl WorkspaceApp {
                 SshAuthTab::DefaultKey | SshAuthTab::Agent | SshAuthTab::TwoFactor => {
                     NewConnectionField::JumpHost
                 }
-                SshAuthTab::Gssapi => NewConnectionField::JumpGssapiServerIdentity,
             }
         } else {
             match tab {
@@ -2192,7 +2241,6 @@ impl WorkspaceApp {
                 SshAuthTab::ManagedKey => NewConnectionField::ManagedKeyId,
                 SshAuthTab::DefaultKey => NewConnectionField::Passphrase,
                 SshAuthTab::Agent | SshAuthTab::TwoFactor => NewConnectionField::Host,
-                SshAuthTab::Gssapi => NewConnectionField::GssapiServerIdentity,
             }
         }
     }
@@ -2916,6 +2964,7 @@ impl WorkspaceApp {
                         ),
                     )),
             )
+            .child(self.render_ssh_algorithms_navigation_row(cx))
             .into_any_element()
     }
 
@@ -3691,7 +3740,7 @@ impl WorkspaceApp {
         self.track_new_connection_select_anchor(select_id, trigger, cx)
     }
 
-    fn render_connection_checkbox_with_help(
+    pub(super) fn render_connection_checkbox_with_help(
         &self,
         trigger_id: &'static str,
         tooltip_id: &'static str,
@@ -3709,6 +3758,31 @@ impl WorkspaceApp {
             .gap(px(self.tokens.spacing.two))
             .child(self.render_connection_checkbox(self.i18n.t(label_key), checked, toggle, cx))
             .child(self.render_connection_help_icon(trigger_id, tooltip_id, hint_key, cx))
+            .into_any_element()
+    }
+
+    pub(super) fn render_connection_checkbox_with_warning(
+        &self,
+        trigger_id: &'static str,
+        tooltip_id: &'static str,
+        label_key: &'static str,
+        hint_key: &'static str,
+        checked: bool,
+        toggle: fn(&mut NewConnectionForm),
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(self.tokens.spacing.two))
+            .child(self.render_connection_checkbox(self.i18n.t(label_key), checked, toggle, cx))
+            .child(self.render_connection_help_icon_with_icon(
+                trigger_id,
+                tooltip_id,
+                hint_key,
+                LucideIcon::AlertCircle,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -3736,6 +3810,23 @@ impl WorkspaceApp {
         hint_key: &'static str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.render_connection_help_icon_with_icon(
+            trigger_id,
+            tooltip_id,
+            hint_key,
+            LucideIcon::Info,
+            cx,
+        )
+    }
+
+    fn render_connection_help_icon_with_icon(
+        &self,
+        trigger_id: &'static str,
+        tooltip_id: &'static str,
+        hint_key: &'static str,
+        icon: LucideIcon,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         // All advanced SSH explanations share one existing tooltip interaction
         // so dense forms do not alternate between inline and hidden help text.
         div()
@@ -3746,7 +3837,7 @@ impl WorkspaceApp {
             .justify_center()
             .cursor_pointer()
             .child(Self::render_lucide_icon(
-                LucideIcon::Info,
+                icon,
                 14.0,
                 rgb(self.tokens.ui.warning),
             ))
@@ -3972,43 +4063,16 @@ impl WorkspaceApp {
         legacy_ssh_compatibility: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some((connect_timeout_seconds, x11_forwarding)) = self
-            .connection_form_state(cx)
-            .form
-            .as_ref()
-            .map(|form| (form.connect_timeout_seconds, form.x11_forwarding))
+        let Some((connect_timeout_seconds_text, x11_forwarding)) =
+            self.connection_form_state(cx).form.as_ref().map(|form| {
+                (
+                    form.connect_timeout_seconds_text.clone(),
+                    form.x11_forwarding,
+                )
+            })
         else {
             return div().into_any_element();
         };
-        let mut timeout_options = SSH_CONNECT_TIMEOUT_OPTIONS_SECONDS.to_vec();
-        if !timeout_options.contains(&connect_timeout_seconds) {
-            timeout_options.push(connect_timeout_seconds);
-            timeout_options.sort_unstable();
-        }
-        let timeout_tabs = timeout_options
-            .into_iter()
-            .map(|seconds| {
-                segmented_tab(
-                    &self.tokens,
-                    self.i18n
-                        .t("ssh.form.connect_timeout_value")
-                        .replace("{{seconds}}", &seconds.to_string()),
-                    connect_timeout_seconds == seconds,
-                )
-                .id(SharedString::from(format!("ssh-connect-timeout-{seconds}")))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.update_connection_form_state(cx, |state| {
-                            if let Some(form) = state.form.as_mut() {
-                                form.connect_timeout_seconds = seconds;
-                            }
-                        });
-                        cx.notify();
-                    }),
-                )
-            })
-            .collect::<Vec<_>>();
         let x11_mode_options = [
             (
                 ConnectionX11ForwardingMode::Untrusted,
@@ -4083,7 +4147,13 @@ impl WorkspaceApp {
                     "ssh.form.connect_timeout_hint",
                     cx,
                 ),
-                segmented_tabs(&self.tokens).children(timeout_tabs),
+                self.render_connection_input(
+                    &connect_timeout_seconds_text,
+                    oxideterm_connections::DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS.to_string(),
+                    NewConnectionField::ConnectTimeoutSeconds,
+                    false,
+                    cx,
+                ),
             ))
             .child(self.render_connection_checkbox_with_help(
                 "new-connection-agent-forwarding-help",
@@ -4142,18 +4212,19 @@ impl WorkspaceApp {
                 |form| form.legacy_ssh_compatibility = !form.legacy_ssh_compatibility,
                 cx,
             ))
+            .child(self.render_ssh_algorithms_navigation_row(cx))
             .into_any_element()
     }
 
     pub(super) fn render_standalone_sftp_options(
         &self,
         initial_remote_path: &str,
-        connect_timeout_seconds: u64,
+        connect_timeout_seconds_text: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.render_standalone_sftp_endpoint_options(
             initial_remote_path,
-            connect_timeout_seconds,
+            connect_timeout_seconds_text,
             false,
             cx,
         )
@@ -4162,12 +4233,12 @@ impl WorkspaceApp {
     pub(super) fn render_standalone_sftp_secondary_options(
         &self,
         initial_remote_path: &str,
-        connect_timeout_seconds: u64,
+        connect_timeout_seconds_text: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.render_standalone_sftp_endpoint_options(
             initial_remote_path,
-            connect_timeout_seconds,
+            connect_timeout_seconds_text,
             true,
             cx,
         )
@@ -4176,48 +4247,10 @@ impl WorkspaceApp {
     fn render_standalone_sftp_endpoint_options(
         &self,
         initial_remote_path: &str,
-        connect_timeout_seconds: u64,
+        connect_timeout_seconds_text: &str,
         secondary: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut timeout_options = SSH_CONNECT_TIMEOUT_OPTIONS_SECONDS.to_vec();
-        if !timeout_options.contains(&connect_timeout_seconds) {
-            timeout_options.push(connect_timeout_seconds);
-            timeout_options.sort_unstable();
-        }
-        let timeout_tabs = timeout_options
-            .into_iter()
-            .map(|seconds| {
-                segmented_tab(
-                    &self.tokens,
-                    self.i18n
-                        .t("ssh.form.connect_timeout_value")
-                        .replace("{{seconds}}", &seconds.to_string()),
-                    connect_timeout_seconds == seconds,
-                )
-                .id(SharedString::from(format!(
-                    "standalone-sftp-{}-connect-timeout-{seconds}",
-                    if secondary { "secondary" } else { "primary" }
-                )))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.update_connection_form_state(cx, |state| {
-                            if let Some(form) = state.form.as_mut() {
-                                if secondary {
-                                    form.standalone_sftp_secondary.connect_timeout_seconds =
-                                        seconds;
-                                } else {
-                                    form.connect_timeout_seconds = seconds;
-                                }
-                            }
-                        });
-                        cx.notify();
-                    }),
-                )
-            })
-            .collect::<Vec<_>>();
-
         div()
             .flex()
             .flex_col()
@@ -4235,8 +4268,19 @@ impl WorkspaceApp {
                 cx,
             ))
             .child(self.render_connection_hint(self.i18n.t("sftp.standalone.initial_path_hint")))
-            .child(self.render_connection_hint(self.i18n.t("ssh.form.connect_timeout")))
-            .child(segmented_tabs(&self.tokens).children(timeout_tabs))
+            .child(self.render_connection_field(
+                self.i18n.t("ssh.form.connect_timeout"),
+                connect_timeout_seconds_text,
+                oxideterm_connections::DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS.to_string(),
+                if secondary {
+                    NewConnectionField::StandaloneSftpSecondaryConnectTimeoutSeconds
+                } else {
+                    NewConnectionField::ConnectTimeoutSeconds
+                },
+                false,
+                cx,
+            ))
+            .child(self.render_connection_hint(self.i18n.t("ssh.form.connect_timeout_hint")))
             .into_any_element()
     }
 

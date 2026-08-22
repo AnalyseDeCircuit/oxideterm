@@ -3,11 +3,18 @@
 
 use libgssapi::{
     context::{ClientCtx, CtxFlags, SecurityContext},
+    credential::{Cred, CredUsage},
     error::{Error as GssError, MajorFlags},
     name::Name,
-    oid::{GSS_MECH_KRB5, GSS_NT_HOSTBASED_SERVICE},
+    oid::{GSS_MECH_KRB5, GSS_NT_HOSTBASED_SERVICE, OidSet},
     util::Buf,
 };
+
+pub(super) fn credentials_available() -> bool {
+    let mut mechanisms = OidSet::new();
+    mechanisms.add(GSS_MECH_KRB5).is_ok()
+        && Cred::acquire(None, None, CredUsage::Initiate, Some(&mechanisms)).is_ok()
+}
 use russh::GssapiStep;
 use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
@@ -64,6 +71,15 @@ impl From<GssError> for PlatformError {
     }
 }
 
+impl PlatformError {
+    pub(super) fn allows_authentication_fallback(&self) -> bool {
+        matches!(
+            self,
+            Self::NoCredentials | Self::CredentialsExpired | Self::ServiceUnavailable
+        )
+    }
+}
+
 fn copy_and_wipe(mut buffer: Buf) -> Zeroizing<Vec<u8>> {
     let copy = Zeroizing::new(buffer.to_vec());
     buffer.zeroize();
@@ -74,11 +90,7 @@ fn new_context(
     server_identity: &str,
     delegate_credentials: bool,
 ) -> Result<PlatformContext, PlatformError> {
-    let target = if server_identity.starts_with("host@") {
-        server_identity.to_string()
-    } else {
-        format!("host@{server_identity}")
-    };
+    let target = host_based_service_name(server_identity);
     let target = Name::new(target.as_bytes(), Some(GSS_NT_HOSTBASED_SERVICE))?;
     let mut flags = CtxFlags::GSS_C_INTEG_FLAG;
     if delegate_credentials {
@@ -87,6 +99,17 @@ fn new_context(
     Ok(PlatformContext {
         inner: ClientCtx::new(None, target, flags, Some(GSS_MECH_KRB5)),
     })
+}
+
+/// Converts the shared SSH service identity into the spelling expected by GSSAPI.
+fn host_based_service_name(server_identity: &str) -> String {
+    if server_identity.starts_with("host@") {
+        server_identity.to_string()
+    } else if let Some(server) = server_identity.strip_prefix("host/") {
+        format!("host@{server}")
+    } else {
+        format!("host@{server_identity}")
+    }
 }
 
 pub(super) fn advance(
@@ -129,4 +152,25 @@ pub(super) fn advance(
             mic: Some(mic),
         },
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::host_based_service_name;
+
+    #[test]
+    fn service_identity_accepts_shared_and_native_spellings() {
+        assert_eq!(
+            host_based_service_name("server.example.com"),
+            "host@server.example.com"
+        );
+        assert_eq!(
+            host_based_service_name("host/server.example.com"),
+            "host@server.example.com"
+        );
+        assert_eq!(
+            host_based_service_name("host@server.example.com"),
+            "host@server.example.com"
+        );
+    }
 }

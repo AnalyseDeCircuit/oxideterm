@@ -16,6 +16,7 @@ mod tests {
             elapsed_ms: 0,
             detail: None,
             label: None,
+            endpoint: None,
             step_index: Some(1),
             total_steps: Some(1),
             mode: ConnectionTraceMode::Connect,

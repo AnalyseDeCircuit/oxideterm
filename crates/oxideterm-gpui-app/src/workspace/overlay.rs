@@ -6,10 +6,10 @@ use gpui::Task;
 
 const WORKSPACE_NOTICE_TTL: Duration = Duration::from_secs(4);
 const TOOLTIP_DELAY: Duration = Duration::from_millis(300);
-const CONNECTION_TRACE_DISPLAY_DELAY: Duration = Duration::from_millis(1200);
 const CONNECTION_TRACE_UPDATE_COALESCE: Duration = Duration::from_millis(300);
-const CONNECTION_TRACE_SUCCESS_TTL: Duration = Duration::from_millis(1800);
-const CONNECTION_TRACE_FAILURE_TTL: Duration = Duration::from_secs(16);
+const CONNECTION_TRACE_SUCCESS_TTL: Duration = Duration::from_millis(900);
+const CONNECTION_TRACE_HISTORY_LIMIT: usize = 12;
+const CONNECTION_CARD_LAYER_PRIORITY: usize = 40;
 const TERMINAL_FONT_SIZE_HUD_HORIZONTAL_PADDING: f32 = 20.0;
 const TERMINAL_FONT_SIZE_HUD_VERTICAL_PADDING: f32 = 12.0;
 const TERMINAL_FONT_SIZE_HUD_VALUE_TEXT_SIZE: f32 = 24.0;
@@ -114,13 +114,12 @@ struct TerminalFontSizeHud {
 }
 
 #[derive(Clone, Debug)]
-struct ActiveConnectionTrace {
+struct ActiveConnectionCard {
     visible: bool,
     latest: ConnectionTraceEvent,
     displayed: Option<ConnectionTraceEvent>,
+    history: VecDeque<ConnectionTraceEvent>,
     started_at: Instant,
-    show_deadline: Option<(Instant, u64)>,
-    show_generation: u64,
     flush_deadline: Option<(Instant, u64)>,
     flush_generation: u64,
     expires_at: Option<Instant>,
@@ -158,7 +157,7 @@ pub(in crate::workspace) struct WorkspaceOverlayEntity {
     next_toast_id: u64,
     standard_toasts: Vec<OverlayToast>,
     plugin_progress_toasts: HashMap<String, OverlayToast>,
-    connection_trace_toasts: HashMap<String, ActiveConnectionTrace>,
+    connection_trace_cards: HashMap<String, ActiveConnectionCard>,
     tooltip: Option<WorkspaceTooltip>,
     tooltip_pending: Option<WorkspaceTooltipPending>,
     tooltip_generation: u64,
@@ -215,7 +214,7 @@ impl WorkspaceOverlayEntity {
             next_toast_id: 1,
             standard_toasts: Vec::new(),
             plugin_progress_toasts: HashMap::new(),
-            connection_trace_toasts: HashMap::new(),
+            connection_trace_cards: HashMap::new(),
             tooltip: None,
             tooltip_pending: None,
             tooltip_generation: 0,
@@ -568,15 +567,14 @@ impl WorkspaceOverlayEntity {
         for event in coalesce_connection_trace_running_events(events) {
             let attempt_id = event.attempt_id.clone();
             let trace = self
-                .connection_trace_toasts
+                .connection_trace_cards
                 .entry(attempt_id.clone())
-                .or_insert_with(|| ActiveConnectionTrace {
+                .or_insert_with(|| ActiveConnectionCard {
                     visible: false,
                     latest: event.clone(),
                     displayed: None,
+                    history: VecDeque::from([event.clone()]),
                     started_at: now,
-                    show_deadline: None,
-                    show_generation: 0,
                     flush_deadline: None,
                     flush_generation: 0,
                     expires_at: None,
@@ -586,16 +584,26 @@ impl WorkspaceOverlayEntity {
             if trace.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
                 trace.presence.reopen();
             }
+            if trace.history.back().is_none_or(|previous| {
+                previous.stage != event.stage || previous.status != event.status
+            }) {
+                trace.history.push_back(event.clone());
+                if trace.history.len() > CONNECTION_TRACE_HISTORY_LIMIT {
+                    trace.history.pop_front();
+                }
+            }
             trace.latest = event.clone();
             trace.expires_at = None;
             trace.remove_at = None;
 
             match event.status {
                 ConnectionTraceStatus::Running => {
-                    if !trace.visible && trace.show_deadline.is_none() {
-                        trace.show_generation = trace.show_generation.wrapping_add(1);
-                        trace.show_deadline =
-                            Some((now + CONNECTION_TRACE_DISPLAY_DELAY, trace.show_generation));
+                    if !trace.visible {
+                        // Show the first stage immediately so a fast connection cannot finish
+                        // before the card has ever entered the rendered overlay tree.
+                        trace.visible = true;
+                        trace.displayed = Some(event);
+                        changed = true;
                     } else {
                         trace.flush_generation = trace.flush_generation.wrapping_add(1);
                         trace.flush_deadline = Some((
@@ -605,40 +613,33 @@ impl WorkspaceOverlayEntity {
                     }
                 }
                 ConnectionTraceStatus::Ready => {
-                    trace.show_deadline = None;
                     trace.flush_deadline = None;
-                    if trace.visible {
-                        let mut success = event;
-                        success.elapsed_ms = trace
-                            .started_at
-                            .elapsed()
-                            .as_millis()
-                            .min(u128::from(u64::MAX))
-                            as u64;
-                        trace.latest = success.clone();
-                        trace.displayed = Some(success);
-                        trace.expires_at = Some(now + CONNECTION_TRACE_SUCCESS_TTL);
-                    } else {
-                        self.connection_trace_toasts.remove(&attempt_id);
-                    }
+                    let mut success = event;
+                    success.elapsed_ms = trace
+                        .started_at
+                        .elapsed()
+                        .as_millis()
+                        .min(u128::from(u64::MAX)) as u64;
+                    trace.visible = true;
+                    trace.latest = success.clone();
+                    trace.displayed = Some(success);
+                    trace.expires_at = Some(now + CONNECTION_TRACE_SUCCESS_TTL);
                     changed = true;
                 }
                 ConnectionTraceStatus::Failed => {
                     trace.visible = true;
-                    trace.show_deadline = None;
                     trace.flush_deadline = None;
                     trace.latest = event.clone();
                     trace.displayed = Some(event);
-                    trace.expires_at = Some(now + CONNECTION_TRACE_FAILURE_TTL);
+                    trace.expires_at = None;
                     changed = true;
                 }
                 ConnectionTraceStatus::Cancelled => {
-                    trace.show_deadline = None;
                     trace.flush_deadline = None;
                     if trace.displayed.is_some() {
                         self.begin_trace_exit(&attempt_id, now);
                     } else {
-                        self.connection_trace_toasts.remove(&attempt_id);
+                        self.connection_trace_cards.remove(&attempt_id);
                     }
                     changed = true;
                 }
@@ -682,7 +683,7 @@ impl WorkspaceOverlayEntity {
     }
 
     fn begin_trace_exit(&mut self, attempt_id: &str, now: Instant) -> bool {
-        let Some(trace) = self.connection_trace_toasts.get_mut(attempt_id) else {
+        let Some(trace) = self.connection_trace_cards.get_mut(attempt_id) else {
             return false;
         };
         if trace.presence.begin_exit().is_none() {
@@ -690,7 +691,7 @@ impl WorkspaceOverlayEntity {
         }
         trace.expires_at = None;
         if self.control_exit_duration.is_zero() {
-            self.connection_trace_toasts.remove(attempt_id);
+            self.connection_trace_cards.remove(attempt_id);
         } else {
             trace.remove_at = Some(now + self.control_exit_duration);
         }
@@ -801,27 +802,14 @@ impl WorkspaceOverlayEntity {
         }
 
         let trace_ids = self
-            .connection_trace_toasts
+            .connection_trace_cards
             .keys()
             .cloned()
             .collect::<Vec<_>>();
         for attempt_id in trace_ids {
-            let Some(trace) = self.connection_trace_toasts.get_mut(&attempt_id) else {
+            let Some(trace) = self.connection_trace_cards.get_mut(&attempt_id) else {
                 continue;
             };
-            if let Some((show_at, generation)) = trace.show_deadline
-                && show_at <= now
-            {
-                trace.show_deadline = None;
-                if trace.show_generation == generation
-                    && !trace.visible
-                    && trace.latest.status == ConnectionTraceStatus::Running
-                {
-                    trace.visible = true;
-                    trace.displayed = Some(trace.latest.clone());
-                    changed = true;
-                }
-            }
             if let Some((flush_at, generation)) = trace.flush_deadline
                 && flush_at <= now
             {
@@ -841,13 +829,13 @@ impl WorkspaceOverlayEntity {
             }
         }
         let trace_remove = self
-            .connection_trace_toasts
+            .connection_trace_cards
             .iter()
             .filter(|(_, trace)| trace.remove_at.is_some_and(|remove_at| remove_at <= now))
             .map(|(attempt_id, _)| attempt_id.clone())
             .collect::<Vec<_>>();
         for attempt_id in trace_remove {
-            self.connection_trace_toasts.remove(&attempt_id);
+            self.connection_trace_cards.remove(&attempt_id);
             changed = true;
         }
         changed
@@ -877,8 +865,7 @@ impl WorkspaceOverlayEntity {
                 },
             );
         }
-        for trace in self.connection_trace_toasts.values() {
-            next = min_deadline(next, trace.show_deadline.map(|(deadline, _)| deadline));
+        for trace in self.connection_trace_cards.values() {
             next = min_deadline(next, trace.flush_deadline.map(|(deadline, _)| deadline));
             next = min_deadline(next, trace.expires_at);
             next = min_deadline(next, trace.remove_at);
@@ -904,8 +891,11 @@ impl WorkspaceOverlayEntity {
         {
             layers.push(render_zen_hint(tokens, i18n));
         }
-        if let Some(toasts) = self.render_toasts(tokens, i18n, native_update, cx) {
+        if let Some(toasts) = self.render_toasts(tokens, native_update, cx) {
             layers.push(toasts);
+        }
+        if let Some(connection_cards) = self.render_connection_cards(tokens, i18n, cx) {
+            layers.push(connection_cards);
         }
         if let Some(hud) = self.terminal_font_size_hud {
             layers.push(render_terminal_font_size_hud(
@@ -920,16 +910,11 @@ impl WorkspaceOverlayEntity {
     fn render_toasts(
         &self,
         tokens: &ThemeTokens,
-        i18n: &I18n,
         native_update: Option<ToastView>,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         if self.standard_toasts.is_empty()
             && self.plugin_progress_toasts.is_empty()
-            && !self
-                .connection_trace_toasts
-                .values()
-                .any(|trace| trace.displayed.is_some())
             && native_update.is_none()
         {
             return None;
@@ -989,50 +974,59 @@ impl WorkspaceOverlayEntity {
                 ),
             }
         });
-        let traces = self
-            .connection_trace_toasts
+        Some(toaster(tokens, standard.chain(plugin).chain(native_update)).into_any_element())
+    }
+
+    fn render_connection_cards(
+        &self,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let overlay = cx.entity();
+        let cards = self
+            .connection_trace_cards
             .iter()
             .filter_map(|(attempt_id, trace)| {
-                trace
-                    .displayed
-                    .as_ref()
-                    .map(|event| (attempt_id.clone(), event, trace.presence.phase()))
+                let event = trace.displayed.as_ref()?;
+                Some(render_connection_card(
+                    tokens,
+                    i18n,
+                    attempt_id,
+                    event,
+                    &trace.history,
+                    trace.presence.phase(),
+                    overlay.clone(),
+                ))
             })
-            .map(|(attempt_id, event, phase)| {
-                let overlay = overlay.clone();
-                ToastView {
-                    id: format!("connection-{attempt_id}"),
-                    phase,
-                    title: connection_trace_title(i18n, event),
-                    description: connection_trace_description(i18n, event),
-                    status_text: Some(connection_trace_status_text(i18n, event)),
-                    progress: Some(event.progress),
-                    variant: match event.status {
-                        ConnectionTraceStatus::Ready => ToastVariant::Success,
-                        ConnectionTraceStatus::Failed => ToastVariant::Error,
-                        _ => ToastVariant::Default,
-                    },
-                    actions: None,
-                    close: Some(
-                        toast_close(tokens)
-                            .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
-                                let _ = overlay.update(cx, |overlay, cx| {
-                                    if overlay.begin_trace_exit(&attempt_id, Instant::now()) {
-                                        overlay.schedule_next_deadline(cx);
-                                        cx.notify();
-                                    }
-                                });
-                                cx.stop_propagation();
-                            })
-                            .into_any_element(),
-                    ),
-                }
-            });
+            .collect::<Vec<_>>();
+        if cards.is_empty() {
+            return None;
+        }
+
         Some(
-            toaster(
-                tokens,
-                standard.chain(plugin).chain(traces).chain(native_update),
+            deferred(
+                div()
+                    .absolute()
+                    .top_0()
+                    .right_0()
+                    .bottom_0()
+                    .left_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .p(px(24.0))
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w(px(720.0))
+                            .flex()
+                            .flex_col()
+                            .gap(px(tokens.spacing.three))
+                            .children(cards),
+                    ),
             )
+            .with_priority(CONNECTION_CARD_LAYER_PRIORITY)
             .into_any_element(),
         )
     }
@@ -1040,6 +1034,337 @@ impl WorkspaceOverlayEntity {
     #[cfg(test)]
     fn notice_wake(&self) -> delivery::ActiveDeliveryWake {
         self._notice_wake.clone()
+    }
+}
+
+fn render_connection_card(
+    tokens: &ThemeTokens,
+    i18n: &I18n,
+    attempt_id: &str,
+    event: &ConnectionTraceEvent,
+    history: &VecDeque<ConnectionTraceEvent>,
+    phase: oxideterm_gpui_ui::motion::ExitPhase,
+    overlay: Entity<WorkspaceOverlayEntity>,
+) -> AnyElement {
+    let status_color = match event.status {
+        ConnectionTraceStatus::Ready => tokens.ui.success,
+        ConnectionTraceStatus::Failed => tokens.ui.error,
+        ConnectionTraceStatus::Running | ConnectionTraceStatus::Cancelled => tokens.ui.accent,
+    };
+    let title = connection_trace_title(i18n, event);
+    let status = connection_trace_status_text(i18n, event);
+    let endpoint = event.endpoint.clone();
+    let attempt_id_for_close = attempt_id.to_string();
+    let close = (event.status == ConnectionTraceStatus::Failed).then(|| {
+        toast_close(tokens)
+            .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+                let _ = overlay.update(cx, |overlay, cx| {
+                    if overlay.begin_trace_exit(&attempt_id_for_close, Instant::now()) {
+                        overlay.schedule_next_deadline(cx);
+                        cx.notify();
+                    }
+                });
+                cx.stop_propagation();
+            })
+            .into_any_element()
+    });
+
+    let header = div()
+        .w_full()
+        .flex()
+        .items_center()
+        .gap(px(tokens.spacing.three))
+        .child(
+            div()
+                .size(px(44.0))
+                .flex_none()
+                .rounded(px(tokens.radii.md))
+                .bg(rgba((status_color << 8) | 0x24))
+                .border_1()
+                .border_color(rgba((status_color << 8) | 0x66))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(12.0))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(rgb(status_color))
+                .child("SSH"),
+        )
+        .child(
+            div()
+                .min_w_0()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .gap(px(3.0))
+                .child(
+                    div()
+                        .text_size(px(18.0))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(tokens.ui.text))
+                        .child(title),
+                )
+                .when_some(endpoint, |header, endpoint| {
+                    header.child(
+                        div()
+                            .text_size(px(12.0))
+                            .text_color(rgb(tokens.ui.text_muted))
+                            .child(format!("SSH  {endpoint}")),
+                    )
+                })
+                .child(
+                    div()
+                        .text_size(px(13.0))
+                        .text_color(rgb(status_color))
+                        .child(status),
+                ),
+        )
+        .when_some(close, |header, close| header.child(close));
+
+    let mut card = oxideterm_gpui_ui::semantic_surface(
+        tokens,
+        oxideterm_gpui_ui::SurfaceOptions::new(oxideterm_gpui_ui::SurfaceKind::TerminalOverlay)
+            .padding(oxideterm_gpui_ui::SurfacePadding::Spacious),
+    )
+    .w_full()
+    .flex()
+    .flex_col()
+    .gap(px(tokens.spacing.three * 2.0))
+    .occlude()
+    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+        cx.stop_propagation();
+    })
+    .child(header)
+    .child(render_connection_stage_path(
+        tokens, i18n, attempt_id, event,
+    ));
+
+    if let Some(description) = connection_trace_description(i18n, event) {
+        card = card.child(
+            div()
+                .text_size(px(13.0))
+                .line_height(px(19.0))
+                .text_color(rgb(tokens.ui.error))
+                .child(description),
+        );
+    }
+    card = card.child(render_connection_history(tokens, i18n, history));
+
+    oxideterm_gpui_ui::motion::fade(
+        tokens,
+        format!("connection-card-{attempt_id}"),
+        card,
+        oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        phase == oxideterm_gpui_ui::motion::ExitPhase::Visible,
+    )
+}
+
+fn render_connection_stage_path(
+    tokens: &ThemeTokens,
+    i18n: &I18n,
+    attempt_id: &str,
+    event: &ConnectionTraceEvent,
+) -> AnyElement {
+    const STAGES: [(ConnectionTraceStage, &str); 4] = [
+        (
+            ConnectionTraceStage::OpeningTransport,
+            "connections.trace.stage.opening_transport",
+        ),
+        (
+            ConnectionTraceStage::SshHandshake,
+            "connections.trace.stage.ssh_handshake",
+        ),
+        (
+            ConnectionTraceStage::Authentication,
+            "connections.trace.stage.authentication",
+        ),
+        (ConnectionTraceStage::Ready, "connections.trace.stage.ready"),
+    ];
+    let current = connection_trace_path_index(event.stage);
+    let failed = event.status == ConnectionTraceStatus::Failed;
+    let ready = event.status == ConnectionTraceStatus::Ready;
+
+    let nodes = STAGES
+        .iter()
+        .enumerate()
+        .map(|(index, (_, label_key))| {
+            let completed = ready || index < current;
+            let active = !ready && index == current;
+            let color = if failed && active {
+                tokens.ui.error
+            } else if completed {
+                tokens.ui.success
+            } else if active {
+                tokens.ui.accent
+            } else {
+                tokens.ui.text_muted
+            };
+            let marker_text = if completed { "✓" } else { "" };
+            let marker = div()
+                .size(px(30.0))
+                .flex_none()
+                .rounded_full()
+                .border_1()
+                .border_color(rgba((color << 8) | 0xaa))
+                .bg(rgb(tokens.ui.bg_elevated))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(14.0))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(rgb(color))
+                .child(marker_text);
+            let marker = if active && !failed && tokens.motion.enabled {
+                marker
+                    .with_animation(
+                        format!("connection-stage-{attempt_id}-{index}"),
+                        Animation::new(Duration::from_millis(1200)).repeat(),
+                        |marker, progress| {
+                            let wave = if progress < 0.5 {
+                                progress * 2.0
+                            } else {
+                                (1.0 - progress) * 2.0
+                            };
+                            marker.opacity(0.7 + wave * 0.3)
+                        },
+                    )
+                    .into_any_element()
+            } else {
+                marker.into_any_element()
+            };
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(tokens.spacing.two))
+                .child(marker)
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(rgb(color))
+                        .whitespace_nowrap()
+                        .child(i18n.t(label_key)),
+                )
+                .into_any_element()
+        })
+        .collect::<Vec<_>>();
+
+    let current_connector = current.min(STAGES.len() - 1);
+    let connectors = (0..STAGES.len() - 1)
+        .map(|index| {
+            let complete = ready || index < current_connector;
+            div()
+                .absolute()
+                .top(px(14.0))
+                .left(relative((index as f32 + 0.5) / STAGES.len() as f32))
+                .w(relative(1.0 / STAGES.len() as f32))
+                .h(px(2.0))
+                .bg(rgb(if complete {
+                    tokens.ui.success
+                } else {
+                    tokens.ui.border
+                }))
+                .into_any_element()
+        })
+        .collect::<Vec<_>>();
+
+    div()
+        .relative()
+        .w_full()
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .children(connectors),
+        )
+        .child(div().relative().w_full().flex().children(nodes))
+        .into_any_element()
+}
+
+fn render_connection_history(
+    tokens: &ThemeTokens,
+    i18n: &I18n,
+    history: &VecDeque<ConnectionTraceEvent>,
+) -> AnyElement {
+    let rows = history.iter().map(|entry| {
+        let color = match entry.status {
+            ConnectionTraceStatus::Ready => tokens.ui.success,
+            ConnectionTraceStatus::Failed => tokens.ui.error,
+            ConnectionTraceStatus::Running | ConnectionTraceStatus::Cancelled => {
+                tokens.ui.text_muted
+            }
+        };
+        let detail = entry.detail.clone().filter(|detail| !detail.is_empty());
+        div()
+            .w_full()
+            .flex()
+            .items_start()
+            .gap(px(tokens.spacing.two))
+            .child(
+                div()
+                    .mt(px(7.0))
+                    .size(px(6.0))
+                    .flex_none()
+                    .rounded_full()
+                    .bg(rgb(color)),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .text_size(px(12.0))
+                    .line_height(px(18.0))
+                    .text_color(rgb(tokens.ui.text_muted))
+                    .child(i18n.t(connection_trace_stage_key(entry.stage)))
+                    .when_some(detail, |row, detail| {
+                        row.child(
+                            div()
+                                .text_color(rgb(if entry.status == ConnectionTraceStatus::Failed {
+                                    tokens.ui.error
+                                } else {
+                                    tokens.ui.text_muted
+                                }))
+                                .child(detail),
+                        )
+                    }),
+            )
+    });
+
+    oxideterm_gpui_ui::semantic_surface(
+        tokens,
+        oxideterm_gpui_ui::SurfaceOptions::new(oxideterm_gpui_ui::SurfaceKind::InsetGroup)
+            .padding(oxideterm_gpui_ui::SurfacePadding::Normal),
+    )
+    .w_full()
+    .max_h(px(210.0))
+    .overflow_y_scrollbar()
+    .flex()
+    .flex_col()
+    .gap(px(tokens.spacing.two))
+    .children(rows)
+    .into_any_element()
+}
+
+fn connection_trace_path_index(stage: ConnectionTraceStage) -> usize {
+    match stage {
+        ConnectionTraceStage::Queued
+        | ConnectionTraceStage::Preparing
+        | ConnectionTraceStage::OpeningTransport => 0,
+        ConnectionTraceStage::SshHandshake | ConnectionTraceStage::HostKey => 1,
+        ConnectionTraceStage::Authentication
+        | ConnectionTraceStage::KerberosCredentials
+        | ConnectionTraceStage::GssapiExchange
+        | ConnectionTraceStage::FallbackAuthentication => 2,
+        ConnectionTraceStage::Pty
+        | ConnectionTraceStage::ShellReady
+        | ConnectionTraceStage::Ready => 3,
     }
 }
 
@@ -1290,6 +1615,11 @@ pub(in crate::workspace) fn connection_trace_stage_key(
         ConnectionTraceStage::SshHandshake => "connections.trace.stage.ssh_handshake",
         ConnectionTraceStage::HostKey => "connections.trace.stage.host_key",
         ConnectionTraceStage::Authentication => "connections.trace.stage.authentication",
+        ConnectionTraceStage::KerberosCredentials => "connections.trace.stage.kerberos_credentials",
+        ConnectionTraceStage::GssapiExchange => "connections.trace.stage.gssapi_exchange",
+        ConnectionTraceStage::FallbackAuthentication => {
+            "connections.trace.stage.fallback_authentication"
+        }
         ConnectionTraceStage::Pty => "connections.trace.stage.pty",
         ConnectionTraceStage::ShellReady => "connections.trace.stage.shell_ready",
         ConnectionTraceStage::Ready => "connections.trace.stage.ready",
@@ -1318,6 +1648,53 @@ mod tests {
             progress: None,
             variant: TerminalNoticeVariant::Default,
         }
+    }
+
+    #[gpui::test]
+    fn fast_connection_keeps_its_completed_card_visible(cx: &mut TestAppContext) {
+        let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::ZERO, cx));
+        let event = |stage, status, progress| ConnectionTraceEvent {
+            attempt_id: "fast-attempt".to_string(),
+            node_id: NodeId::new("fast-node"),
+            stage,
+            status,
+            progress,
+            elapsed_ms: 0,
+            detail: None,
+            label: None,
+            endpoint: None,
+            step_index: Some(1),
+            total_steps: Some(1),
+            mode: ConnectionTraceMode::Connect,
+        };
+
+        overlay.update(cx, |overlay, _cx| {
+            let now = Instant::now();
+            overlay.apply_connection_trace_events(
+                vec![
+                    event(
+                        ConnectionTraceStage::Queued,
+                        ConnectionTraceStatus::Running,
+                        5.0,
+                    ),
+                    event(
+                        ConnectionTraceStage::Ready,
+                        ConnectionTraceStatus::Ready,
+                        100.0,
+                    ),
+                ],
+                now,
+            );
+
+            assert_eq!(
+                overlay
+                    .connection_trace_cards
+                    .get("fast-attempt")
+                    .and_then(|trace| trace.displayed.as_ref())
+                    .map(|event| event.status),
+                Some(ConnectionTraceStatus::Ready)
+            );
+        });
     }
 
     #[gpui::test]
