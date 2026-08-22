@@ -79,8 +79,8 @@ pub(super) fn append_terminal_semantics_for_rows(
                     continue;
                 };
                 // Semantic colors fill only genuinely unstyled terminal text.
-                if cell.style_origin.foreground_explicit
-                    || cell.style_origin.background_explicit
+                if cell.style_origin.foreground_explicit()
+                    || cell.style_origin.background_explicit()
                     || cell.attrs != TerminalAttrs::default()
                 {
                     continue;
@@ -220,16 +220,12 @@ mod tests {
     fn cell(ch: char, foreground_explicit: bool) -> TerminalCell {
         TerminalCell {
             ch,
-            zerowidth: String::new(),
             wide: false,
             fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
             bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
-            style_origin: TerminalStyleOrigin {
-                foreground_explicit,
-                background_explicit: false,
-            },
+            style_origin: TerminalStyleOrigin::new(foreground_explicit, false),
             attrs: TerminalAttrs::default(),
-            hyperlink: None,
+            extra: None,
             cursor: false,
         }
     }

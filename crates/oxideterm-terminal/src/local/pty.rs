@@ -905,19 +905,22 @@ fn snapshot_row_from_source<T: EventListener>(
         let attrs = attrs_from_flags(cell.flags);
         let (fg, bg) = style_colors_for_cell(cell.fg, cell.bg, ch, attrs);
         let style_origin = style_origin_for_cell(cell.fg, cell.bg, attrs);
-        cells.push(TerminalCell {
+        let zerowidth = cell.zerowidth().into_iter().flatten().copied().collect();
+        let hyperlink = cell
+            .hyperlink()
+            .map(|hyperlink| hyperlink.uri().to_string());
+        let mut snapshot_cell = TerminalCell {
             ch,
-            zerowidth: cell.zerowidth().into_iter().flatten().copied().collect(),
             wide: cell.flags.contains(Flags::WIDE_CHAR),
             fg,
             bg,
             style_origin,
             attrs,
-            hyperlink: cell
-                .hyperlink()
-                .map(|hyperlink| hyperlink.uri().to_string()),
+            extra: None,
             cursor: false,
-        });
+        };
+        snapshot_cell.set_extra(zerowidth, hyperlink);
+        cells.push(snapshot_cell);
     }
     cells.resize(size.cols, blank_terminal_cell());
     let mut snapshot_row = TerminalRow {
@@ -950,13 +953,12 @@ fn blank_snapshot_row(size: TerminalSize, display_offset: usize, row: usize) -> 
 fn blank_terminal_cell() -> TerminalCell {
     TerminalCell {
         ch: ' ',
-        zerowidth: String::new(),
         wide: false,
         fg: OXIDETERM_DARK_THEME.foreground,
         bg: OXIDETERM_DARK_THEME.ansi_background,
         style_origin: TerminalStyleOrigin::default(),
         attrs: TerminalAttrs::default(),
-        hyperlink: None,
+        extra: None,
         cursor: false,
     }
 }

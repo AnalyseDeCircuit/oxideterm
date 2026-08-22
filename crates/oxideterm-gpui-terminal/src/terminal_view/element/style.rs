@@ -12,13 +12,13 @@ pub(crate) fn text_run_for_cell(
     link: bool,
     metrics: &TerminalMetrics,
 ) -> TextRun {
-    let text_len = cell.ch.len_utf8() + cell.zerowidth.len();
-    let weight = if cell.attrs.bold {
+    let text_len = cell.ch.len_utf8() + cell.zerowidth().len();
+    let weight = if cell.attrs.bold() {
         FontWeight::BOLD
     } else {
         FontWeight::default()
     };
-    let style = if cell.attrs.italic {
+    let style = if cell.attrs.italic() {
         FontStyle::Italic
     } else {
         FontStyle::Normal
@@ -35,12 +35,12 @@ pub(crate) fn text_run_for_cell(
         },
         color: if link { rgb(0x61afef).into() } else { color },
         background_color: None,
-        underline: (cell.attrs.underline || link).then_some(UnderlineStyle {
+        underline: (cell.attrs.underline() || link).then_some(UnderlineStyle {
             thickness: px(1.0),
             color: Some(if link { rgb(0x61afef).into() } else { color }),
             wavy: false,
         }),
-        strikethrough: cell.attrs.strikeout.then_some(StrikethroughStyle {
+        strikethrough: cell.attrs.strikeout().then_some(StrikethroughStyle {
             thickness: px(1.0),
             color: Some(color),
         }),

@@ -128,7 +128,7 @@ fn link_text_for_row(row: &oxideterm_terminal::TerminalRow) -> LinkText {
         text.push(cell.ch);
         last_end_col = col + if cell.wide { 2 } else { 1 };
 
-        for ch in cell.zerowidth.chars() {
+        for ch in cell.zerowidth().chars() {
             boundaries.push(col);
             text.push(ch);
         }
@@ -157,16 +157,14 @@ pub(crate) fn detect_osc8_ranges(
     let mut ranges = Vec::new();
     let mut col = 0;
     while col < terminal_row.cells.len() {
-        let Some(uri) = terminal_row.cells[col].hyperlink.as_deref() else {
+        let Some(uri) = terminal_row.cells[col].hyperlink() else {
             col += 1;
             continue;
         };
 
         let start_col = col;
         col += 1;
-        while col < terminal_row.cells.len()
-            && terminal_row.cells[col].hyperlink.as_deref() == Some(uri)
-        {
+        while col < terminal_row.cells.len() && terminal_row.cells[col].hyperlink() == Some(uri) {
             col += 1;
         }
 

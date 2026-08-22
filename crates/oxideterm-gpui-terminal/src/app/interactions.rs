@@ -827,7 +827,7 @@ impl TerminalPane {
             link.row == point.row
                 && point.col >= link.start_col
                 && point.col < link.end_col
-                && (cell.hyperlink.is_some() || is_link_stylable_cell(cell))
+                && (cell.hyperlink().is_some() || is_link_stylable_cell(cell))
         })
     }
 
@@ -2686,13 +2686,12 @@ mod tests {
     fn test_cell(ch: char) -> TerminalCell {
         TerminalCell {
             ch,
-            zerowidth: String::new(),
             wide: false,
             fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
             bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
             style_origin: Default::default(),
             attrs: TerminalAttrs::default(),
-            hyperlink: None,
+            extra: None,
             cursor: false,
         }
     }

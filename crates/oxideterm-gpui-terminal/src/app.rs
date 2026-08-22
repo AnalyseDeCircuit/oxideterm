@@ -3530,12 +3530,12 @@ fn terminal_row_timestamp_signature(row: &TerminalRow) -> u64 {
     row.wrapped.hash(&mut hasher);
     for cell in row.cells.iter() {
         cell.ch.hash(&mut hasher);
-        cell.zerowidth.hash(&mut hasher);
+        cell.zerowidth().hash(&mut hasher);
         cell.wide.hash(&mut hasher);
         cell.fg.hash(&mut hasher);
         cell.bg.hash(&mut hasher);
         cell.attrs.hash(&mut hasher);
-        cell.hyperlink.hash(&mut hasher);
+        cell.hyperlink().hash(&mut hasher);
     }
     hasher.finish()
 }
@@ -3543,7 +3543,7 @@ fn terminal_row_timestamp_signature(row: &TerminalRow) -> u64 {
 fn terminal_row_has_timestamp_content(row: &TerminalRow) -> bool {
     row.cells
         .iter()
-        .any(|cell| !cell.ch.is_whitespace() || !cell.zerowidth.is_empty())
+        .any(|cell| !cell.ch.is_whitespace() || !cell.zerowidth().is_empty())
 }
 
 fn hex_color(color: u32) -> String {
@@ -3775,13 +3775,12 @@ mod tests {
     fn timestamp_test_cell(ch: char) -> TerminalCell {
         TerminalCell {
             ch,
-            zerowidth: String::new(),
             wide: false,
             fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
             bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
             style_origin: Default::default(),
             attrs: TerminalAttrs::default(),
-            hyperlink: None,
+            extra: None,
             cursor: false,
         }
     }

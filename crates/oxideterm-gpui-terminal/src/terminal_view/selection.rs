@@ -513,7 +513,7 @@ pub(crate) fn selected_text_for_block_selection(
 pub(crate) fn cell_text(cell: &TerminalCell) -> String {
     let mut text = String::new();
     text.push(cell.ch);
-    text.push_str(&cell.zerowidth);
+    text.push_str(cell.zerowidth());
     text
 }
 

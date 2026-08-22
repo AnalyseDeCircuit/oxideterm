@@ -130,13 +130,12 @@ mod tests {
     fn test_cell(ch: char) -> TerminalCell {
         TerminalCell {
             ch,
-            zerowidth: String::new(),
             wide: false,
             fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
             bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
             style_origin: TerminalStyleOrigin::default(),
             attrs: TerminalAttrs::default(),
-            hyperlink: None,
+            extra: None,
             cursor: false,
         }
     }

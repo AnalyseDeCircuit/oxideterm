@@ -246,7 +246,7 @@ fn content_span(row: &TerminalRow) -> Option<Range<usize>> {
 }
 
 fn is_content_cell(cell: &TerminalCell) -> bool {
-    cell.ch != ' ' || !cell.zerowidth.is_empty() || cell.cursor || cell.hyperlink.is_some()
+    cell.ch != ' ' || !cell.zerowidth().is_empty() || cell.cursor || cell.hyperlink().is_some()
 }
 
 fn row_clusters(row: &TerminalRow, span: Range<usize>) -> Vec<SourceCluster> {
@@ -288,12 +288,12 @@ fn normalized_cell_text(cell: &TerminalCell) -> String {
 }
 
 fn cell_text(cell: &TerminalCell) -> String {
-    if cell.zerowidth.is_empty() {
+    if cell.zerowidth().is_empty() {
         cell.ch.to_string()
     } else {
-        let mut text = String::with_capacity(cell.ch.len_utf8() + cell.zerowidth.len());
+        let mut text = String::with_capacity(cell.ch.len_utf8() + cell.zerowidth().len());
         text.push(cell.ch);
-        text.push_str(&cell.zerowidth);
+        text.push_str(cell.zerowidth());
         text
     }
 }
@@ -313,7 +313,7 @@ fn row_contains_bidi_text(row: &TerminalRow, span: Range<usize>) -> bool {
         .get(span)
         .unwrap_or_default()
         .iter()
-        .flat_map(|cell| std::iter::once(cell.ch).chain(cell.zerowidth.chars()))
+        .flat_map(|cell| std::iter::once(cell.ch).chain(cell.zerowidth().chars()))
         .any(|ch| {
             matches!(
                 unicode_bidi::bidi_class(ch),
@@ -374,13 +374,12 @@ mod tests {
                 text.chars()
                     .map(|ch| TerminalCell {
                         ch,
-                        zerowidth: String::new(),
                         wide: false,
                         fg: TerminalColor::rgb(0xff, 0xff, 0xff),
                         bg: TerminalColor::rgb(0, 0, 0),
                         style_origin: Default::default(),
                         attrs: TerminalAttrs::default(),
-                        hyperlink: None,
+                        extra: None,
                         cursor: false,
                     })
                     .collect(),
@@ -442,13 +441,12 @@ mod tests {
         while row.cells.len() < 16 {
             row.cells_mut().push(TerminalCell {
                 ch: ' ',
-                zerowidth: String::new(),
                 wide: false,
                 fg: TerminalColor::rgb(0xff, 0xff, 0xff),
                 bg: TerminalColor::rgb(0, 0, 0),
                 style_origin: Default::default(),
                 attrs: TerminalAttrs::default(),
-                hyperlink: None,
+                extra: None,
                 cursor: false,
             });
         }

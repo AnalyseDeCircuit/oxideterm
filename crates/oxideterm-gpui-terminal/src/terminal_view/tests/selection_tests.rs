@@ -315,7 +315,7 @@ fn selection_rects_track_grid_lines_when_scrollback_offset_changes() {
 #[test]
 fn selected_text_preserves_zero_width_marks() {
     let mut snapshot = selection_snapshot("e");
-    snapshot.lines[0].cells_mut()[0].zerowidth = "\u{301}".to_string();
+    snapshot.lines[0].cells_mut()[0].set_zerowidth("\u{301}".to_string());
     snapshot.lines[0].refresh_signature();
     let selection = TerminalSelection {
         anchor: TerminalGridPoint { line: 0, col: 0 },

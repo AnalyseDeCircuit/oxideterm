@@ -1063,10 +1063,12 @@ impl TerminalElement {
                 continue;
             }
 
-            if cell.ch != ' ' || !cell.zerowidth.is_empty() || (self.cursor_visible && cell.cursor)
+            if cell.ch != ' '
+                || !cell.zerowidth().is_empty()
+                || (self.cursor_visible && cell.cursor)
             {
                 let link = !block_cursor
-                    && (cell.hyperlink.is_some() || is_link_stylable_cell(cell))
+                    && (cell.hyperlink().is_some() || is_link_stylable_cell(cell))
                     && link_should_be_styled(
                         link_ranges,
                         self.hovered_link.as_ref(),
@@ -1074,7 +1076,7 @@ impl TerminalElement {
                         col_index,
                     );
                 let style = text_run_for_cell(cell, fg, link, &self.metrics);
-                if cell.zerowidth.is_empty() && powerline_separator(cell.ch).is_some() {
+                if cell.zerowidth().is_empty() && powerline_separator(cell.ch).is_some() {
                     if let Some(run) = current_run.take() {
                         text_runs.push(run);
                     }
@@ -1840,7 +1842,7 @@ fn push_visual_text_runs(
         let Some(cell) = row.cells.get(cluster.logical_col) else {
             continue;
         };
-        if cell.ch == ' ' && cell.zerowidth.is_empty() {
+        if cell.ch == ' ' && cell.zerowidth().is_empty() {
             if let Some(run) = current_run.take() {
                 text_runs.push(run);
             }
@@ -1859,7 +1861,7 @@ fn push_visual_text_runs(
             to_hsla(cell.fg)
         };
         let link = !block_cursor
-            && (cell.hyperlink.is_some() || is_link_stylable_cell(cell))
+            && (cell.hyperlink().is_some() || is_link_stylable_cell(cell))
             && link_should_be_styled(
                 link_ranges,
                 hovered_link,
@@ -1867,7 +1869,7 @@ fn push_visual_text_runs(
                 cluster.logical_col,
             );
         let style = text_run_for_cell(cell, fg, link, metrics);
-        if cell.zerowidth.is_empty() && powerline_separator(cell.ch).is_some() {
+        if cell.zerowidth().is_empty() && powerline_separator(cell.ch).is_some() {
             if let Some(run) = current_run.take() {
                 text_runs.push(run);
             }
@@ -1942,11 +1944,11 @@ fn cell_text(cell: &oxideterm_terminal::TerminalCell) -> String {
 
 fn push_cell_text(text: &mut String, cell: &oxideterm_terminal::TerminalCell) {
     text.push(cell.ch);
-    text.push_str(&cell.zerowidth);
+    text.push_str(cell.zerowidth());
 }
 
 fn cell_text_len(cell: &oxideterm_terminal::TerminalCell) -> usize {
-    cell.ch.len_utf8() + cell.zerowidth.len()
+    cell.ch.len_utf8() + cell.zerowidth().len()
 }
 
 impl IntoElement for TerminalElement {
@@ -2205,25 +2207,23 @@ mod cache_tests {
             .enumerate()
             .map(|(col, ch)| TerminalCell {
                 ch,
-                zerowidth: String::new(),
                 wide: false,
                 fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
                 bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
                 style_origin: Default::default(),
                 attrs: Default::default(),
-                hyperlink: None,
+                extra: None,
                 cursor: col == cursor_col,
             })
             .collect::<Vec<_>>();
         cells.resize_with(cursor_col.saturating_add(1), || TerminalCell {
             ch: ' ',
-            zerowidth: String::new(),
             wide: false,
             fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
             bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
             style_origin: Default::default(),
             attrs: Default::default(),
-            hyperlink: None,
+            extra: None,
             cursor: false,
         });
         if let Some(cursor_cell) = cells.get_mut(cursor_col) {

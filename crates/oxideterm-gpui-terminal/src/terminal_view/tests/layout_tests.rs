@@ -138,7 +138,7 @@ fn terminal_element_hides_autosuggest_ghost_text_during_ime_composition() {
 #[test]
 fn terminal_element_shapes_zero_width_marks_with_base_cell() {
     let mut snapshot = selection_snapshot("e");
-    snapshot.lines[0].cells_mut()[0].zerowidth = "\u{301}".to_string();
+    snapshot.lines[0].cells_mut()[0].set_zerowidth("\u{301}".to_string());
     snapshot.lines[0].refresh_signature();
     let layout = TerminalElement::new(
         snapshot,
@@ -164,7 +164,7 @@ fn terminal_element_shapes_zero_width_marks_with_base_cell() {
 fn terminal_element_keeps_emoji_zwj_cluster_in_one_wide_cell() {
     let mut snapshot = selection_snapshot(" ");
     snapshot.lines[0].cells_mut()[0].ch = '👨';
-    snapshot.lines[0].cells_mut()[0].zerowidth = "\u{200d}👩\u{200d}👧\u{200d}👦".to_string();
+    snapshot.lines[0].cells_mut()[0].set_zerowidth("\u{200d}👩\u{200d}👧\u{200d}👦".to_string());
     snapshot.lines[0].cells_mut()[0].wide = true;
     snapshot.lines[0].refresh_signature();
     let layout = TerminalElement::new(

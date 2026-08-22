@@ -36,7 +36,7 @@ fn disabling_path_detection_preserves_urls_and_osc8_links() {
     let osc_start = source.find("click").unwrap();
     let mut snapshot = selection_snapshot(source);
     for cell in &mut snapshot.lines[0].cells_mut()[osc_start..osc_start + "click".len()] {
-        cell.hyperlink = Some("file:///tmp/report.txt".to_string());
+        cell.set_hyperlink(Some("file:///tmp/report.txt".to_string()));
     }
     snapshot.lines[0].refresh_signature();
 
@@ -135,7 +135,7 @@ fn display_links_skip_path_like_text_on_wrapped_active_input_rows() {
 fn link_detection_prefers_osc8_hyperlink_ranges() {
     let mut snapshot = selection_snapshot("click");
     for cell in &mut snapshot.lines[0].cells_mut()[..5] {
-        cell.hyperlink = Some("https://example.com/osc8".to_string());
+        cell.set_hyperlink(Some("https://example.com/osc8".to_string()));
     }
     snapshot.lines[0].refresh_signature();
 
@@ -156,7 +156,7 @@ fn link_detection_prefers_osc8_hyperlink_ranges() {
 fn link_detection_does_not_duplicate_url_inside_osc8_range() {
     let mut snapshot = selection_snapshot("https://example.com");
     for cell in &mut snapshot.lines[0].cells_mut()[..19] {
-        cell.hyperlink = Some("https://example.com/osc8".to_string());
+        cell.set_hyperlink(Some("https://example.com/osc8".to_string()));
     }
     snapshot.lines[0].refresh_signature();
 
@@ -175,7 +175,7 @@ fn terminal_element_underlines_osc8_links_even_on_colored_cells() {
     let mut snapshot = selection_snapshot("click");
     for cell in &mut snapshot.lines[0].cells_mut()[..5] {
         cell.bg = TerminalColor::rgb(0x61, 0xaf, 0xef);
-        cell.hyperlink = Some("https://example.com/osc8".to_string());
+        cell.set_hyperlink(Some("https://example.com/osc8".to_string()));
     }
     snapshot.lines[0].refresh_signature();
 

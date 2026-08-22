@@ -295,7 +295,7 @@ fn append_row_text(
             col,
             cells,
         });
-        for ch in cell.zerowidth.chars() {
+        for ch in cell.zerowidth().chars() {
             text.push(ch);
             map.push(TextCell {
                 row: row_index,

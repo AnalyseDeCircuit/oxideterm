@@ -51,24 +51,22 @@ fn cursor_snapshot() -> TerminalSnapshot {
         cells: Arc::new(vec![
             TerminalCell {
                 ch: ' ',
-                zerowidth: String::new(),
                 wide: false,
                 fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
                 bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
                 style_origin: Default::default(),
                 attrs: Default::default(),
-                hyperlink: None,
+                extra: None,
                 cursor: true,
             },
             TerminalCell {
                 ch: 'x',
-                zerowidth: String::new(),
                 wide: false,
                 fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
                 bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
                 style_origin: Default::default(),
                 attrs: Default::default(),
-                hyperlink: None,
+                extra: None,
                 cursor: false,
             },
         ]),
@@ -84,26 +82,24 @@ fn row_from_text(text: &str, cols: usize) -> oxideterm_terminal::TerminalRow {
     for ch in text.chars().take(cols) {
         cells.push(TerminalCell {
             ch,
-            zerowidth: String::new(),
             wide: false,
             fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
             bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
             style_origin: Default::default(),
             attrs: Default::default(),
-            hyperlink: None,
+            extra: None,
             cursor: false,
         });
     }
     while cells.len() < cols {
         cells.push(TerminalCell {
             ch: ' ',
-            zerowidth: String::new(),
             wide: false,
             fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
             bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
             style_origin: Default::default(),
             attrs: Default::default(),
-            hyperlink: None,
+            extra: None,
             cursor: false,
         });
     }
@@ -144,25 +140,23 @@ fn row_from_text_with_wide_spacers(text: &str) -> oxideterm_terminal::TerminalRo
         );
         cells.push(TerminalCell {
             ch,
-            zerowidth: String::new(),
             wide,
             fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
             bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
             style_origin: Default::default(),
             attrs: Default::default(),
-            hyperlink: None,
+            extra: None,
             cursor: false,
         });
         if wide {
             cells.push(TerminalCell {
                 ch: ' ',
-                zerowidth: String::new(),
                 wide: false,
                 fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
                 bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
                 style_origin: Default::default(),
                 attrs: Default::default(),
-                hyperlink: None,
+                extra: None,
                 cursor: false,
             });
         }

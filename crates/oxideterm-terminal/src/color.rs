@@ -54,14 +54,14 @@ pub(crate) const OXIDETERM_DARK_THEME: OxideTermTheme = OxideTermTheme {
 
 pub(crate) const DEFAULT_MINIMUM_CONTRAST_SCORE: f32 = 45.0;
 pub(crate) fn attrs_from_flags(flags: Flags) -> TerminalAttrs {
-    TerminalAttrs {
-        bold: flags.contains(Flags::BOLD),
-        dim: flags.contains(Flags::DIM),
-        italic: flags.contains(Flags::ITALIC),
-        underline: flags.intersects(Flags::ALL_UNDERLINES),
-        strikeout: flags.contains(Flags::STRIKEOUT),
-        inverse: flags.contains(Flags::INVERSE),
-    }
+    TerminalAttrs::new(
+        flags.contains(Flags::BOLD),
+        flags.contains(Flags::DIM),
+        flags.contains(Flags::ITALIC),
+        flags.intersects(Flags::ALL_UNDERLINES),
+        flags.contains(Flags::STRIKEOUT),
+        flags.contains(Flags::INVERSE),
+    )
 }
 
 pub(crate) fn color_to_rgb(color: Color) -> TerminalColor {
@@ -192,7 +192,7 @@ pub(crate) fn style_colors_for_cell(
 ) -> (TerminalColor, TerminalColor) {
     let mut fg_color = fg;
     let mut bg_color = bg;
-    if attrs.inverse {
+    if attrs.inverse() {
         std::mem::swap(&mut fg_color, &mut bg_color);
     }
 
@@ -203,7 +203,7 @@ pub(crate) fn style_colors_for_cell(
         fg = ensure_minimum_contrast(fg, bg, DEFAULT_MINIMUM_CONTRAST_SCORE);
     }
 
-    if attrs.dim {
+    if attrs.dim() {
         fg = dim_color(fg);
     }
 
@@ -215,13 +215,13 @@ pub(crate) fn style_origin_for_cell(
     mut background: Color,
     attrs: TerminalAttrs,
 ) -> TerminalStyleOrigin {
-    if attrs.inverse {
+    if attrs.inverse() {
         std::mem::swap(&mut foreground, &mut background);
     }
-    TerminalStyleOrigin {
-        foreground_explicit: !matches!(foreground, Color::Named(NamedColor::Foreground)),
-        background_explicit: !matches!(background, Color::Named(NamedColor::Background)),
-    }
+    TerminalStyleOrigin::new(
+        !matches!(foreground, Color::Named(NamedColor::Foreground)),
+        !matches!(background, Color::Named(NamedColor::Background)),
+    )
 }
 
 #[cfg(test)]
@@ -241,10 +241,10 @@ mod style_origin_tests {
             TerminalAttrs::default(),
         );
 
-        assert!(!default.foreground_explicit);
-        assert!(!default.background_explicit);
-        assert!(explicit.foreground_explicit);
-        assert!(!explicit.background_explicit);
+        assert!(!default.foreground_explicit());
+        assert!(!default.background_explicit());
+        assert!(explicit.foreground_explicit());
+        assert!(!explicit.background_explicit());
     }
 }
 
