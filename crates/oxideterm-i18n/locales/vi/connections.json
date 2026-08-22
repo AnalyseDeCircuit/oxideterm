@@ -126,6 +126,9 @@
       },
       "stage": {
         "authentication": "Đang xác thực",
+        "kerberos_credentials": "Đang kiểm tra thông tin Kerberos",
+        "gssapi_exchange": "Đang trao đổi token GSSAPI",
+        "fallback_authentication": "Đang thử xác thực dự phòng",
         "host_key": "Đang kiểm tra khóa host",
         "opening_transport": "Đang mở kênh truyền",
         "preparing": "Đang chuẩn bị kết nối",

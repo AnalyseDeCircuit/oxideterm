@@ -126,6 +126,9 @@
       },
       "stage": {
         "authentication": "Authentification",
+        "kerberos_credentials": "Vérification des identifiants Kerberos",
+        "gssapi_exchange": "Échange des jetons GSSAPI",
+        "fallback_authentication": "Tentative d’authentification de secours",
         "host_key": "Vérification de la clé d'hôte",
         "opening_transport": "Ouverture du transport",
         "preparing": "Préparation de la connexion",

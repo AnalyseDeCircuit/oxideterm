@@ -126,6 +126,9 @@
       },
       "stage": {
         "authentication": "認証中",
+        "kerberos_credentials": "Kerberos 資格情報を確認中",
+        "gssapi_exchange": "GSSAPI トークンを交換中",
+        "fallback_authentication": "代替認証を試行中",
         "host_key": "ホスト鍵を確認中",
         "opening_transport": "トランスポートを開いています",
         "preparing": "接続を準備中",

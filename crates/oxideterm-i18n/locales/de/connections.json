@@ -126,6 +126,9 @@
       },
       "stage": {
         "authentication": "Authentifizierung",
+        "kerberos_credentials": "Kerberos-Anmeldedaten werden geprüft",
+        "gssapi_exchange": "GSSAPI-Token werden ausgetauscht",
+        "fallback_authentication": "Ersatzauthentifizierung wird versucht",
         "host_key": "Hostschlüssel wird geprüft",
         "opening_transport": "Transport wird geöffnet",
         "preparing": "Verbindung wird vorbereitet",

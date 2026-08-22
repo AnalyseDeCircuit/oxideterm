@@ -126,6 +126,9 @@
       },
       "stage": {
         "authentication": "인증 중",
+        "kerberos_credentials": "Kerberos 자격 증명 확인 중",
+        "gssapi_exchange": "GSSAPI 토큰 교환 중",
+        "fallback_authentication": "대체 인증 시도 중",
         "host_key": "호스트 키 확인 중",
         "opening_transport": "전송 채널 여는 중",
         "preparing": "연결 준비 중",
