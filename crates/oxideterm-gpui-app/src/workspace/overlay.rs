@@ -9,6 +9,7 @@ const TOOLTIP_DELAY: Duration = Duration::from_millis(300);
 const CONNECTION_TRACE_UPDATE_COALESCE: Duration = Duration::from_millis(300);
 const CONNECTION_TRACE_SUCCESS_TTL: Duration = Duration::from_millis(900);
 const CONNECTION_TRACE_HISTORY_LIMIT: usize = 12;
+const DISMISSED_CONNECTION_TRACE_LIMIT: usize = 64;
 const CONNECTION_CARD_LAYER_PRIORITY: usize = 40;
 const TERMINAL_FONT_SIZE_HUD_HORIZONTAL_PADDING: f32 = 20.0;
 const TERMINAL_FONT_SIZE_HUD_VERTICAL_PADDING: f32 = 12.0;
@@ -158,6 +159,7 @@ pub(in crate::workspace) struct WorkspaceOverlayEntity {
     standard_toasts: Vec<OverlayToast>,
     plugin_progress_toasts: HashMap<String, OverlayToast>,
     connection_trace_cards: HashMap<String, ActiveConnectionCard>,
+    dismissed_connection_traces: VecDeque<String>,
     tooltip: Option<WorkspaceTooltip>,
     tooltip_pending: Option<WorkspaceTooltipPending>,
     tooltip_generation: u64,
@@ -215,6 +217,7 @@ impl WorkspaceOverlayEntity {
             standard_toasts: Vec::new(),
             plugin_progress_toasts: HashMap::new(),
             connection_trace_cards: HashMap::new(),
+            dismissed_connection_traces: VecDeque::new(),
             tooltip: None,
             tooltip_pending: None,
             tooltip_generation: 0,
@@ -566,6 +569,16 @@ impl WorkspaceOverlayEntity {
         let mut changed = false;
         for event in coalesce_connection_trace_running_events(events) {
             let attempt_id = event.attempt_id.clone();
+            if let Some(position) = self
+                .dismissed_connection_traces
+                .iter()
+                .position(|dismissed| dismissed == &attempt_id)
+            {
+                if event.status != ConnectionTraceStatus::Running {
+                    self.dismissed_connection_traces.remove(position);
+                }
+                continue;
+            }
             let trace = self
                 .connection_trace_cards
                 .entry(attempt_id.clone())
@@ -696,6 +709,26 @@ impl WorkspaceOverlayEntity {
             trace.remove_at = Some(now + self.control_exit_duration);
         }
         true
+    }
+
+    fn dismiss_connection_trace(&mut self, attempt_id: &str, now: Instant) -> bool {
+        let Some(trace) = self.connection_trace_cards.get(attempt_id) else {
+            return false;
+        };
+        // Keep a bounded tombstone so late progress cannot reopen a card the user dismissed.
+        if trace.latest.status == ConnectionTraceStatus::Running
+            && !self
+                .dismissed_connection_traces
+                .iter()
+                .any(|dismissed| dismissed == attempt_id)
+        {
+            self.dismissed_connection_traces
+                .push_back(attempt_id.to_string());
+            if self.dismissed_connection_traces.len() > DISMISSED_CONNECTION_TRACE_LIMIT {
+                self.dismissed_connection_traces.pop_front();
+            }
+        }
+        self.begin_trace_exit(attempt_id, now)
     }
 
     fn schedule_next_deadline(&mut self, cx: &mut Context<Self>) {
@@ -1055,19 +1088,17 @@ fn render_connection_card(
     let status = connection_trace_status_text(i18n, event);
     let endpoint = event.endpoint.clone();
     let attempt_id_for_close = attempt_id.to_string();
-    let close = (event.status == ConnectionTraceStatus::Failed).then(|| {
-        toast_close(tokens)
-            .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
-                let _ = overlay.update(cx, |overlay, cx| {
-                    if overlay.begin_trace_exit(&attempt_id_for_close, Instant::now()) {
-                        overlay.schedule_next_deadline(cx);
-                        cx.notify();
-                    }
-                });
-                cx.stop_propagation();
-            })
-            .into_any_element()
-    });
+    let close = toast_close(tokens)
+        .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+            let _ = overlay.update(cx, |overlay, cx| {
+                if overlay.dismiss_connection_trace(&attempt_id_for_close, Instant::now()) {
+                    overlay.schedule_next_deadline(cx);
+                    cx.notify();
+                }
+            });
+            cx.stop_propagation();
+        })
+        .into_any_element();
 
     let header = div()
         .w_full()
@@ -1119,7 +1150,7 @@ fn render_connection_card(
                         .child(status),
                 ),
         )
-        .when_some(close, |header, close| header.child(close));
+        .child(close);
 
     let mut card = oxideterm_gpui_ui::semantic_surface(
         tokens,
@@ -1694,6 +1725,62 @@ mod tests {
                     .map(|event| event.status),
                 Some(ConnectionTraceStatus::Ready)
             );
+        });
+    }
+
+    #[gpui::test]
+    fn dismissed_connection_card_stays_hidden_until_the_attempt_finishes(cx: &mut TestAppContext) {
+        let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::ZERO, cx));
+        let event = |stage, status, progress| ConnectionTraceEvent {
+            attempt_id: "dismissed-attempt".to_string(),
+            node_id: NodeId::new("dismissed-node"),
+            stage,
+            status,
+            progress,
+            elapsed_ms: 0,
+            detail: None,
+            label: None,
+            endpoint: None,
+            step_index: Some(1),
+            total_steps: Some(1),
+            mode: ConnectionTraceMode::Connect,
+        };
+
+        overlay.update(cx, |overlay, _cx| {
+            let now = Instant::now();
+            overlay.apply_connection_trace_events(
+                vec![event(
+                    ConnectionTraceStage::Queued,
+                    ConnectionTraceStatus::Running,
+                    5.0,
+                )],
+                now,
+            );
+            assert!(overlay.dismiss_connection_trace("dismissed-attempt", now));
+
+            overlay.apply_connection_trace_events(
+                vec![event(
+                    ConnectionTraceStage::Authentication,
+                    ConnectionTraceStatus::Running,
+                    72.0,
+                )],
+                now,
+            );
+            assert!(
+                !overlay
+                    .connection_trace_cards
+                    .contains_key("dismissed-attempt")
+            );
+
+            overlay.apply_connection_trace_events(
+                vec![event(
+                    ConnectionTraceStage::Ready,
+                    ConnectionTraceStatus::Ready,
+                    100.0,
+                )],
+                now,
+            );
+            assert!(overlay.dismissed_connection_traces.is_empty());
         });
     }
 
