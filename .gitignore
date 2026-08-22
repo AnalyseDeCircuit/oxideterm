@@ -32,13 +32,11 @@ __pycache__/
 /docs/NodeSeek/
 .codex-private/
 .deps
-AGENTS.md
 tasks/*
 .deepseek/*
 docs/design/*
 !docs/design/public-mcp-server-contract.zh-Hans.md
-audit-evidence-archive/
-.agents/skills/
+audit-evidence-archive/ 
 docs/remote-agent-terminal-awareness-design.md
 .qoder/
 .hallmark/

@@ -2,11 +2,11 @@
 
 This file lists third-party Rust crates and detected licenses, including transitive dependencies.
 It is generated from `cargo deny list -f json -l crate`.
-Generated: 2026-08-19T17:58:51.928373Z
+Generated: 2026-08-22T10:13:37.880828Z
 
 ## Summary
 
-- MIT: 1066
+- MIT: 1068
 - Apache-2.0: 857
 - Apache-2.0 WITH LLVM-exception: 60
 - Zlib: 45
@@ -530,6 +530,8 @@ This section is a review prompt for binary distribution; it does not replace leg
 | libc | 0.2.186 | MIT, Apache-2.0 | https://crates.io/crates/libc |
 | libdbus-sys | 0.2.7 | Apache-2.0, MIT | https://crates.io/crates/libdbus-sys |
 | libfuzzer-sys | 0.4.12 | MIT, Apache-2.0, NCSA | https://crates.io/crates/libfuzzer-sys |
+| libgssapi | 0.11.0 | MIT | https://crates.io/crates/libgssapi |
+| libgssapi-sys | 0.3.4 | MIT | https://crates.io/crates/libgssapi-sys |
 | libloading | 0.8.9 | ISC | https://crates.io/crates/libloading |
 | libm | 0.2.16 | MIT | https://crates.io/crates/libm |
 | libredox | 0.1.16 | MIT | https://crates.io/crates/libredox |
@@ -808,8 +810,8 @@ This section is a review prompt for binary distribution; it does not replace leg
 | rodio | 0.21.1 | MIT, Apache-2.0 | https://crates.io/crates/rodio |
 | roxmltree | 0.20.0 | MIT, Apache-2.0 | https://crates.io/crates/roxmltree |
 | rsa | 0.10.0-rc.18 | MIT, Apache-2.0 | https://crates.io/crates/rsa |
-| russh | 0.61.2 | Apache-2.0 | vendored in repository |
-| russh-cryptovec | 0.61.0 | Apache-2.0 | https://crates.io/crates/russh-cryptovec |
+| russh | 0.63.0 | Apache-2.0 | vendored in repository |
+| russh-cryptovec | 0.62.0 | Apache-2.0 | https://crates.io/crates/russh-cryptovec |
 | russh-util | 0.52.0 | Apache-2.0 | https://crates.io/crates/russh-util |
 | rust-embed | 8.11.0 | MIT | https://crates.io/crates/rust-embed |
 | rust-embed-impl | 8.11.0 | MIT | https://crates.io/crates/rust-embed-impl |
@@ -905,7 +907,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | sponge-cursor | 0.1.0 | MIT, Apache-2.0 | https://crates.io/crates/sponge-cursor |
 | sse-stream | 0.2.5 | MIT, Apache-2.0 | https://crates.io/crates/sse-stream |
 | ssh-cipher | 0.3.0-rc.9 | Apache-2.0, MIT | https://crates.io/crates/ssh-cipher |
-| ssh-encoding | 0.3.0-rc.9 | Apache-2.0, MIT | https://crates.io/crates/ssh-encoding |
+| ssh-encoding | 0.3.0 | Apache-2.0, MIT | https://crates.io/crates/ssh-encoding |
 | ssh-key | 0.7.0-rc.10 | Apache-2.0, MIT | https://crates.io/crates/ssh-key |
 | sspi | 0.21.1 | MIT, Apache-2.0 | https://crates.io/crates/sspi |
 | stable_deref_trait | 1.2.1 | MIT, Apache-2.0 | https://crates.io/crates/stable_deref_trait |
