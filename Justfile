@@ -8,6 +8,10 @@ default:
 fmt:
     cargo fmt --all -- --check
 
+# Run OxideTerm with optional Cargo arguments.
+run *args:
+    cargo run {{ args }}
+
 # Generate the aggregated third-party license notices.
 notices:
     {{ python }} scripts/release/generate_third_party_notices.py
