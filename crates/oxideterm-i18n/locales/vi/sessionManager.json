@@ -3,9 +3,7 @@
     "title": "Quản lý phiên",
     "toolbar": {
       "search_placeholder": "Tìm kiếm kết nối...",
-      "new_connection": "Kết nối mới",
-      "import": "Nhập",
-      "export": "Xuất"
+      "new_connection": "Kết nối mới"
     },
     "folder_tree": {
       "all_connections": "Tất cả kết nối",

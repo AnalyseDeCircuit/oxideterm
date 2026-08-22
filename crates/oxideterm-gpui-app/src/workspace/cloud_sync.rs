@@ -301,6 +301,8 @@ pub(super) enum CloudSyncUiIntent {
     StartGithubOauth,
     StartMicrosoftOauth,
     StartGoogleOauth,
+    ImportLocalBackup,
+    ExportLocalBackup,
     StartUploadPreview,
     CheckRemote,
     PullPreview,

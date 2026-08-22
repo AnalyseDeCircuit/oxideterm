@@ -37,8 +37,8 @@
       "import_connections": "匯入連線",
       "import_connections_hint": "匯入 SSH 設定與支援應用程式的資料",
       "open_session_manager": "工作階段管理器",
-      "open_session_manager_hint": "瀏覽、編輯、匯入與匯出已儲存連線",
-      "cloud_sync_hint": "將加密的工作區資料備份到自建服務"
+      "open_session_manager_hint": "瀏覽、編輯與匯入已儲存連線",
+      "cloud_sync_hint": "將加密的工作區資料備份到本機或自建服務"
     },
     "connection_monitor": {
       "title": "連線監控"
@@ -237,7 +237,9 @@
         "enable_sensitive_sync": "啟用敏感同步",
         "github_oauth_login": "GitHub 登入",
         "microsoft_oauth_login": "Microsoft 登入",
-        "google_oauth_login": "Google 登入"
+        "google_oauth_login": "Google 登入",
+        "import_local": "從本機檔案匯入",
+        "export_local": "匯出到本機檔案"
       },
       "fields": {
         "backend": "後端類型",
@@ -276,6 +278,8 @@
         "sync_coverage": "同步覆蓋範圍",
         "sync_preflight": "同步前檢查",
         "sync_health": "同步健康狀態",
+        "local_backup": "本機備份與還原",
+        "local_backup_description": "無需設定雲端同步，即可透過加密的 .oxide 檔案備份或還原資料。",
         "notes": "注意事項",
         "version_info": "版本資訊"
       },

@@ -3,9 +3,7 @@
     "title": "Sitzungsmanager",
     "toolbar": {
       "search_placeholder": "Verbindungen suchen...",
-      "new_connection": "Neue Verbindung",
-      "import": "Importieren",
-      "export": "Exportieren"
+      "new_connection": "Neue Verbindung"
     },
     "folder_tree": {
       "all_connections": "Alle Verbindungen",

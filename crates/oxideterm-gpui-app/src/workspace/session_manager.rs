@@ -257,12 +257,6 @@ const SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS: [SessionManagerBasicDialogFoo
     SessionManagerBasicDialogFooterAction::Primary,
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum SessionTransferAction {
-    ImportOxide,
-    ExportOxide,
-}
-
 pub(super) enum SessionManagerWorkspaceEvent {
     OxideEffectsReady(oxide_actions::OxideWorkspaceEffects),
     RefreshOxideExportPreflight,

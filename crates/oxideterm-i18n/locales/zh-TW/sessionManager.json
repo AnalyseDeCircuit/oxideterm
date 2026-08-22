@@ -3,9 +3,7 @@
     "title": "工作階段管理器",
     "toolbar": {
       "search_placeholder": "搜尋連線...",
-      "new_connection": "新建連線",
-      "import": "匯入",
-      "export": "匯出"
+      "new_connection": "新建連線"
     },
     "folder_tree": {
       "all_connections": "所有連線",

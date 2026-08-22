@@ -37,8 +37,8 @@
       "import_connections": "연결 가져오기",
       "import_connections_hint": "SSH 설정과 지원되는 앱 데이터를 가져옵니다",
       "open_session_manager": "세션 관리자",
-      "open_session_manager_hint": "저장된 연결 탐색, 편집, 가져오기 및 내보내기",
-      "cloud_sync_hint": "암호화된 작업 공간 데이터를 자체 서비스에 백업"
+      "open_session_manager_hint": "저장된 연결 탐색, 편집 및 가져오기",
+      "cloud_sync_hint": "암호화된 작업 공간 데이터를 로컬 또는 자체 서비스에 백업"
     },
     "connection_monitor": {
       "title": "연결 모니터"
@@ -237,7 +237,9 @@
         "enable_sensitive_sync": "민감 동기화 켜기",
         "github_oauth_login": "GitHub 로그인",
         "microsoft_oauth_login": "Microsoft 로그인",
-        "google_oauth_login": "Google 로그인"
+        "google_oauth_login": "Google 로그인",
+        "import_local": "로컬 파일에서 가져오기",
+        "export_local": "로컬 파일로 내보내기"
       },
       "fields": {
         "backend": "백엔드",
@@ -276,6 +278,8 @@
         "sync_coverage": "동기화 범위 상세",
         "sync_preflight": "동기화 전 점검",
         "sync_health": "동기화 상태 점검",
+        "local_backup": "로컬 백업 및 복원",
+        "local_backup_description": "클라우드 동기화를 구성하지 않고 암호화된 .oxide 파일을 백업하거나 복원합니다.",
         "notes": "참고 사항",
         "version_info": "버전 정보"
       },

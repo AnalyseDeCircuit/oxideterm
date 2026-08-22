@@ -37,8 +37,8 @@
       "import_connections": "Importa connessioni",
       "import_connections_hint": "Importa la configurazione SSH e i dati delle app supportate",
       "open_session_manager": "Gestore sessioni",
-      "open_session_manager_hint": "Sfoglia, modifica, importa ed esporta le connessioni salvate",
-      "cloud_sync_hint": "Salva i dati cifrati dello spazio di lavoro sul tuo servizio"
+      "open_session_manager_hint": "Sfoglia, modifica e importa le connessioni salvate",
+      "cloud_sync_hint": "Salva i dati cifrati dello spazio di lavoro localmente o sul tuo servizio"
     },
     "connection_monitor": {
       "title": "Monitor Connessioni"
@@ -237,7 +237,9 @@
         "enable_sensitive_sync": "Attiva sincronizzazione sensibile",
         "github_oauth_login": "Accesso GitHub",
         "microsoft_oauth_login": "Accesso Microsoft",
-        "google_oauth_login": "Accesso Google"
+        "google_oauth_login": "Accesso Google",
+        "import_local": "Importa da file locale",
+        "export_local": "Esporta in un file locale"
       },
       "fields": {
         "backend": "Backend",
@@ -276,6 +278,8 @@
         "sync_coverage": "Copertura sincronizzazione",
         "sync_preflight": "Controllo pre-sincronizzazione",
         "sync_health": "Stato sincronizzazione",
+        "local_backup": "Backup e ripristino locali",
+        "local_backup_description": "Esegui il backup o il ripristino di un file .oxide crittografato senza configurare la sincronizzazione cloud.",
         "notes": "Note",
         "version_info": "Informazioni versione"
       },

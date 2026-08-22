@@ -37,8 +37,8 @@
       "import_connections": "接続をインポート",
       "import_connections_hint": "SSH 設定と対応アプリのデータを取り込みます",
       "open_session_manager": "セッションマネージャー",
-      "open_session_manager_hint": "保存済み接続の閲覧、編集、インポート、エクスポート",
-      "cloud_sync_hint": "暗号化したワークスペースデータを独自サービスにバックアップ"
+      "open_session_manager_hint": "保存済み接続の閲覧、編集、インポート",
+      "cloud_sync_hint": "暗号化したワークスペースデータをローカルまたは独自サービスにバックアップ"
     },
     "connection_monitor": {
       "title": "接続モニター"
@@ -237,7 +237,9 @@
         "enable_sensitive_sync": "機密同期を有効化",
         "github_oauth_login": "GitHub ログイン",
         "microsoft_oauth_login": "Microsoft ログイン",
-        "google_oauth_login": "Google ログイン"
+        "google_oauth_login": "Google ログイン",
+        "import_local": "ローカルファイルからインポート",
+        "export_local": "ローカルファイルへエクスポート"
       },
       "fields": {
         "backend": "バックエンド",
@@ -276,6 +278,8 @@
         "sync_coverage": "同期対象範囲",
         "sync_preflight": "同期前チェック",
         "sync_health": "同期ヘルス",
+        "local_backup": "ローカルのバックアップと復元",
+        "local_backup_description": "クラウド同期を設定せずに、暗号化された .oxide ファイルをバックアップまたは復元します。",
         "notes": "注意事項",
         "version_info": "バージョン情報"
       },

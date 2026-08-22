@@ -3,9 +3,7 @@
     "title": "会话管理器",
     "toolbar": {
       "search_placeholder": "搜索连接...",
-      "new_connection": "新建连接",
-      "import": "导入",
-      "export": "导出"
+      "new_connection": "新建连接"
     },
     "folder_tree": {
       "all_connections": "所有连接",

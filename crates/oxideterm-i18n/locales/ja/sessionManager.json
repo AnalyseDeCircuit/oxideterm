@@ -3,9 +3,7 @@
     "title": "セッションマネージャー",
     "toolbar": {
       "search_placeholder": "接続を検索...",
-      "new_connection": "新規接続",
-      "import": "インポート",
-      "export": "エクスポート"
+      "new_connection": "新規接続"
     },
     "folder_tree": {
       "all_connections": "すべての接続",

@@ -37,8 +37,8 @@
       "import_connections": "Import connections",
       "import_connections_hint": "Bring in SSH config and supported app data",
       "open_session_manager": "Session Manager",
-      "open_session_manager_hint": "Browse, edit, import, and export saved connections",
-      "cloud_sync_hint": "Back up encrypted workspace data to your own service"
+      "open_session_manager_hint": "Browse, edit, and import saved connections",
+      "cloud_sync_hint": "Back up encrypted workspace data locally or to your own service"
     },
     "connection_monitor": {
       "title": "Connection Monitor"
@@ -229,7 +229,9 @@
         "enable_sensitive_sync": "Enable Sensitive Sync",
         "github_oauth_login": "GitHub Login",
         "microsoft_oauth_login": "Microsoft Login",
-        "google_oauth_login": "Google Login"
+        "google_oauth_login": "Google Login",
+        "import_local": "Import from Local File",
+        "export_local": "Export to Local File"
       },
       "fields": {
         "backend": "Backend",
@@ -268,6 +270,8 @@
         "sync_coverage": "Sync Coverage",
         "sync_preflight": "Sync preflight",
         "sync_health": "Sync health",
+        "local_backup": "Local Backup and Restore",
+        "local_backup_description": "Back up or restore an encrypted .oxide file without configuring cloud sync.",
         "version_info": "Version Info",
         "notes": "Notes"
       },

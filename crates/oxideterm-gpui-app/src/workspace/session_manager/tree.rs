@@ -14,7 +14,7 @@ impl WorkspaceApp {
         };
         let viewport_width = f32::from(window.viewport_size().width);
         let show_primary_labels = viewport_width >= MANAGER_RESPONSIVE_SM;
-        let show_transfer_labels = viewport_width >= MANAGER_RESPONSIVE_MD;
+        let show_secondary_labels = viewport_width >= MANAGER_RESPONSIVE_MD;
         let workspace = cx.entity();
         div()
             .min_h(px(48.0))
@@ -53,28 +53,12 @@ impl WorkspaceApp {
                 )
                 .flex_none(),
             )
-            .when(cfg!(target_os = "windows"), |toolbar| {
-                toolbar.child(
-                    self.render_toolbar_button(
-                        LucideIcon::AppWindow,
-                        self.i18n.t("graphics.tab_title"),
-                        ButtonVariant::Outline,
-                        has_background,
-                        show_primary_labels,
-                        cx.listener(|this, _event, window, cx| {
-                            this.open_graphics_tab(window, cx);
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .flex_none(),
-                )
-            })
             .child(
                 div()
                     .flex_none()
                     .child(self.render_session_manager_sort_trigger(
                         has_background,
-                        show_transfer_labels,
+                        show_secondary_labels,
                         cx,
                     )),
             )
@@ -83,7 +67,7 @@ impl WorkspaceApp {
                     .flex_none()
                     .child(self.render_session_manager_view_mode_trigger(
                         has_background,
-                        show_transfer_labels,
+                        show_secondary_labels,
                         cx,
                     )),
             )
@@ -140,30 +124,6 @@ impl WorkspaceApp {
                         ),
                 )
             })
-            // This is the only expanding toolbar segment. Keeping it separate
-            // from real controls preserves browser flex-wrap behavior.
-            .child(div().flex_1().min_w(px(0.0)))
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(px(22.0))
-                    .child(div().flex_none().child(self.render_toolbar_link_icon(
-                        LucideIcon::Download,
-                        "sessionManager.toolbar.import",
-                        SessionTransferAction::ImportOxide,
-                        show_transfer_labels,
-                        cx,
-                    )))
-                    .child(div().flex_none().child(self.render_toolbar_link_icon(
-                        LucideIcon::Upload,
-                        "sessionManager.toolbar.export",
-                        SessionTransferAction::ExportOxide,
-                        show_transfer_labels,
-                        cx,
-                    ))),
-            )
             .into_any_element()
     }
 

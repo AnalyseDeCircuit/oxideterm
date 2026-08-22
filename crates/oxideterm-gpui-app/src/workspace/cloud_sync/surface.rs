@@ -811,6 +811,59 @@ impl CloudSyncPageRenderer {
                                 self.intent_listener(CloudSyncUiIntent::SaveConfiguration),
                             )),
                     ),
+            )
+            .child(
+                div()
+                    .pt(px(12.0))
+                    .border_t_1()
+                    .border_color(rgb(theme.border))
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .min_w(px(240.0))
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.0))
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(rgb(theme.text))
+                                    .child(self.i18n.t("plugin.cloud_sync.sections.local_backup")),
+                            )
+                            .child(
+                                div().text_color(rgb(theme.text_muted)).child(
+                                    self.i18n
+                                        .t("plugin.cloud_sync.sections.local_backup_description"),
+                                ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .justify_end()
+                            .gap(px(8.0))
+                            .child(self.render_cloud_sync_toolbar_button(
+                                LucideIcon::Upload,
+                                "plugin.cloud_sync.actions.import_local",
+                                CloudSyncActionTone::Muted,
+                                busy,
+                                self.intent_listener(CloudSyncUiIntent::ImportLocalBackup),
+                            ))
+                            .child(self.render_cloud_sync_toolbar_button(
+                                LucideIcon::Download,
+                                "plugin.cloud_sync.actions.export_local",
+                                CloudSyncActionTone::Muted,
+                                busy,
+                                self.intent_listener(CloudSyncUiIntent::ExportLocalBackup),
+                            )),
+                    ),
             );
 
         if let Some(progress) = cloud_sync.controller.progress.as_ref() {

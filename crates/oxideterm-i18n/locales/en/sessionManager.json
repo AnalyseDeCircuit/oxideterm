@@ -3,9 +3,7 @@
     "title": "Session Manager",
     "toolbar": {
       "search_placeholder": "Search connections...",
-      "new_connection": "New Connection",
-      "import": "Import",
-      "export": "Export"
+      "new_connection": "New Connection"
     },
     "folder_tree": {
       "all_connections": "All Connections",

@@ -3,9 +3,7 @@
     "title": "세션 관리자",
     "toolbar": {
       "search_placeholder": "연결 검색...",
-      "new_connection": "새 연결",
-      "import": "가져오기",
-      "export": "내보내기"
+      "new_connection": "새 연결"
     },
     "folder_tree": {
       "all_connections": "모든 연결",

@@ -37,8 +37,8 @@
       "import_connections": "Nhập kết nối",
       "import_connections_hint": "Nhập cấu hình SSH và dữ liệu từ ứng dụng được hỗ trợ",
       "open_session_manager": "Trình quản lý phiên",
-      "open_session_manager_hint": "Duyệt, sửa, nhập và xuất các kết nối đã lưu",
-      "cloud_sync_hint": "Sao lưu dữ liệu không gian làm việc đã mã hóa lên dịch vụ của bạn"
+      "open_session_manager_hint": "Duyệt, sửa và nhập các kết nối đã lưu",
+      "cloud_sync_hint": "Sao lưu dữ liệu không gian làm việc đã mã hóa cục bộ hoặc lên dịch vụ của bạn"
     },
     "connection_monitor": {
       "title": "Giám sát kết nối"
@@ -237,7 +237,9 @@
         "enable_sensitive_sync": "Bật đồng bộ nhạy cảm",
         "github_oauth_login": "Đăng nhập GitHub",
         "microsoft_oauth_login": "Đăng nhập Microsoft",
-        "google_oauth_login": "Đăng nhập Google"
+        "google_oauth_login": "Đăng nhập Google",
+        "import_local": "Nhập từ tệp cục bộ",
+        "export_local": "Xuất ra tệp cục bộ"
       },
       "fields": {
         "backend": "Backend",
@@ -276,6 +278,8 @@
         "sync_coverage": "Phạm vi được đồng bộ",
         "sync_preflight": "Kiểm tra trước đồng bộ",
         "sync_health": "Tình trạng đồng bộ",
+        "local_backup": "Sao lưu và khôi phục cục bộ",
+        "local_backup_description": "Sao lưu hoặc khôi phục tệp .oxide đã mã hóa mà không cần cấu hình đồng bộ đám mây.",
         "notes": "Ghi chú",
         "version_info": "Thông tin phiên bản"
       },

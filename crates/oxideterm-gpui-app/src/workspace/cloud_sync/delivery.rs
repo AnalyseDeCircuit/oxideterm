@@ -826,6 +826,10 @@ impl WorkspaceApp {
             CloudSyncUiIntent::StartGithubOauth => self.start_cloud_sync_github_oauth(cx),
             CloudSyncUiIntent::StartMicrosoftOauth => self.start_cloud_sync_microsoft_oauth(cx),
             CloudSyncUiIntent::StartGoogleOauth => self.start_cloud_sync_google_oauth(cx),
+            // Local .oxide transfers reuse the workspace-owned encrypted file flow and
+            // remain available without configuring a cloud backend.
+            CloudSyncUiIntent::ImportLocalBackup => self.open_oxide_import_dialog(cx),
+            CloudSyncUiIntent::ExportLocalBackup => self.open_oxide_export_dialog(cx),
             CloudSyncUiIntent::StartUploadPreview => self.start_cloud_sync_upload_preview(cx),
             CloudSyncUiIntent::CheckRemote => self.start_cloud_sync_check(cx),
             CloudSyncUiIntent::PullPreview => self.start_cloud_sync_pull_preview(cx),

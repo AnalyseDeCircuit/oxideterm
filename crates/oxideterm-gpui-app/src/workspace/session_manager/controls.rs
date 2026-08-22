@@ -62,55 +62,6 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn render_toolbar_link_icon(
-        &self,
-        icon: LucideIcon,
-        label_key: &str,
-        transfer_action: SessionTransferAction,
-        show_label: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let label = self.i18n.t(label_key);
-        self.workspace_toolbar_action_button(
-            label,
-            Some(Self::render_lucide_icon(
-                icon,
-                16.0,
-                rgb(self.tokens.ui.text),
-            )),
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Link,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled: false,
-                },
-                show_label,
-                icon_gap: Some(6.0),
-                text_color: Some(rgb(self.tokens.ui.text)),
-                hover_background: Some(rgba(0x00000000)),
-                // Tauri renders these import/export affordances as toolbar links,
-                // not selectable labels. Reuse the shared button boundary while
-                // preserving the old no-fill hover behavior.
-                ..ToolbarButtonOptions::compact_text(
-                    ButtonVariant::Link,
-                    ButtonRadius::Md,
-                    32.0,
-                    0.0,
-                    self.tokens.metrics.ui_text_sm,
-                )
-            },
-            cx.listener(move |this, _event, _window, cx| {
-                match transfer_action {
-                    SessionTransferAction::ImportOxide => this.open_oxide_import_dialog(cx),
-                    SessionTransferAction::ExportOxide => this.open_oxide_export_dialog(cx),
-                }
-                cx.stop_propagation();
-            }),
-        )
-        .into_any_element()
-    }
-
     pub(in crate::workspace) fn render_session_text_input(
         &self,
         target: SessionManagerInput,

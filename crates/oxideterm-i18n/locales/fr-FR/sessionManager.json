@@ -3,9 +3,7 @@
     "title": "Gestionnaire de sessions",
     "toolbar": {
       "search_placeholder": "Rechercher des connexions...",
-      "new_connection": "Nouvelle connexion",
-      "import": "Importer",
-      "export": "Exporter"
+      "new_connection": "Nouvelle connexion"
     },
     "folder_tree": {
       "all_connections": "Toutes les connexions",
