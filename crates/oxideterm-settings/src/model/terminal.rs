@@ -7,6 +7,11 @@ pub struct GeneralSettings {
         default = "default_minimize_to_tray_on_close"
     )]
     pub minimize_to_tray_on_close: bool,
+    #[serde(
+        rename = "externalConnectionUrisEnabled",
+        default = "default_external_connection_uris_enabled"
+    )]
+    pub external_connection_uris_enabled: bool,
     #[serde(default)]
     pub update_proxy: UpdateProxySettings,
     #[serde(flatten)]
@@ -19,6 +24,7 @@ impl Default for GeneralSettings {
             language: Language::ZhCn,
             update_channel: UpdateChannel::default(),
             minimize_to_tray_on_close: default_minimize_to_tray_on_close(),
+            external_connection_uris_enabled: default_external_connection_uris_enabled(),
             update_proxy: UpdateProxySettings::default(),
             extra: ExtraFields::new(),
         }
@@ -27,6 +33,11 @@ impl Default for GeneralSettings {
 
 fn default_minimize_to_tray_on_close() -> bool {
     true
+}
+
+fn default_external_connection_uris_enabled() -> bool {
+    // External applications should not open connections until the user opts in.
+    false
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

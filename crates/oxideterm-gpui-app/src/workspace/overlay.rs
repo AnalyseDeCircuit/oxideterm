@@ -579,6 +579,17 @@ impl WorkspaceOverlayEntity {
                 }
                 continue;
             }
+            let final_step_ready = event.status == ConnectionTraceStatus::Ready
+                && event
+                    .step_index
+                    .zip(event.total_steps)
+                    .is_none_or(|(step, total)| step >= total);
+            if final_step_ready {
+                // A ready terminal is already the success confirmation. Remove
+                // its overlay in the same delivery instead of covering the pane.
+                changed |= self.connection_trace_cards.remove(&attempt_id).is_some();
+                continue;
+            }
             let trace = self
                 .connection_trace_cards
                 .entry(attempt_id.clone())
@@ -1085,7 +1096,8 @@ fn render_connection_card(
         ConnectionTraceStatus::Running | ConnectionTraceStatus::Cancelled => tokens.ui.accent,
     };
     let title = connection_trace_title(i18n, event);
-    let status = connection_trace_status_text(i18n, event);
+    let status = (event.status != ConnectionTraceStatus::Failed)
+        .then(|| connection_trace_status_text(i18n, event));
     let endpoint = event.endpoint.clone();
     let attempt_id_for_close = attempt_id.to_string();
     let close = toast_close(tokens)
@@ -1143,12 +1155,14 @@ fn render_connection_card(
                             .child(format!("SSH  {endpoint}")),
                     )
                 })
-                .child(
-                    div()
-                        .text_size(px(13.0))
-                        .text_color(rgb(status_color))
-                        .child(status),
-                ),
+                .when_some(status, |header, status| {
+                    header.child(
+                        div()
+                            .text_size(px(13.0))
+                            .text_color(rgb(status_color))
+                            .child(status),
+                    )
+                }),
         )
         .child(close);
 
@@ -1170,14 +1184,8 @@ fn render_connection_card(
         tokens, i18n, attempt_id, event,
     ));
 
-    if let Some(description) = connection_trace_description(i18n, event) {
-        card = card.child(
-            div()
-                .text_size(px(13.0))
-                .line_height(px(19.0))
-                .text_color(rgb(tokens.ui.error))
-                .child(description),
-        );
+    if let Some(error_log) = render_connection_error_log(tokens, event) {
+        card = card.child(error_log);
     }
     card = card.child(render_connection_history(tokens, i18n, history));
 
@@ -1329,7 +1337,16 @@ fn render_connection_history(
                 tokens.ui.text_muted
             }
         };
-        let detail = entry.detail.clone().filter(|detail| !detail.is_empty());
+        let detail = entry
+            .detail
+            .clone()
+            .filter(|detail| !detail.is_empty())
+            .filter(|_| entry.status != ConnectionTraceStatus::Failed);
+        let text_color = if entry.status == ConnectionTraceStatus::Failed {
+            tokens.ui.error
+        } else {
+            tokens.ui.text_muted
+        };
         div()
             .w_full()
             .flex()
@@ -1352,7 +1369,7 @@ fn render_connection_history(
                     .gap(px(2.0))
                     .text_size(px(12.0))
                     .line_height(px(18.0))
-                    .text_color(rgb(tokens.ui.text_muted))
+                    .text_color(rgb(text_color))
                     .child(i18n.t(connection_trace_stage_key(entry.stage)))
                     .when_some(detail, |row, detail| {
                         row.child(
@@ -1381,6 +1398,34 @@ fn render_connection_history(
     .gap(px(tokens.spacing.two))
     .children(rows)
     .into_any_element()
+}
+
+fn render_connection_error_log(
+    tokens: &ThemeTokens,
+    event: &ConnectionTraceEvent,
+) -> Option<AnyElement> {
+    if event.status != ConnectionTraceStatus::Failed {
+        return None;
+    }
+    let detail = event.detail.clone().filter(|detail| !detail.is_empty())?;
+    Some(
+        oxideterm_gpui_ui::semantic_surface(
+            tokens,
+            oxideterm_gpui_ui::SurfaceOptions::new(oxideterm_gpui_ui::SurfaceKind::InsetGroup)
+                .padding(oxideterm_gpui_ui::SurfacePadding::Normal),
+        )
+        .w_full()
+        .max_h(px(210.0))
+        .overflow_y_scrollbar()
+        .border_color(rgba((tokens.ui.error << 8) | 0x88))
+        .bg(rgba((tokens.ui.error << 8) | 0x12))
+        .text_size(px(13.0))
+        .line_height(px(19.0))
+        .text_color(rgb(tokens.ui.error))
+        .whitespace_normal()
+        .child(detail)
+        .into_any_element(),
+    )
 }
 
 fn connection_trace_path_index(stage: ConnectionTraceStage) -> usize {
@@ -1564,16 +1609,6 @@ fn connection_trace_title(i18n: &I18n, event: &ConnectionTraceEvent) -> String {
     }
 }
 
-fn connection_trace_description(i18n: &I18n, event: &ConnectionTraceEvent) -> Option<String> {
-    if event.status != ConnectionTraceStatus::Failed {
-        return None;
-    }
-    event
-        .detail
-        .as_deref()
-        .and_then(|detail| ssh_algorithm_diagnostic_parts(i18n, detail).map(|(summary, _)| summary))
-}
-
 fn connection_trace_status_text(i18n: &I18n, event: &ConnectionTraceEvent) -> String {
     if event.status == ConnectionTraceStatus::Ready {
         return i18n.t("connections.trace.connected").replace(
@@ -1581,48 +1616,10 @@ fn connection_trace_status_text(i18n: &I18n, event: &ConnectionTraceEvent) -> St
             &format_connection_trace_elapsed(event.elapsed_ms),
         );
     }
-    if event.status == ConnectionTraceStatus::Failed
-        && let Some(detail) = event.detail.as_deref()
-        && let Some((_, diagnostic_detail)) = ssh_algorithm_diagnostic_parts(i18n, detail)
-    {
-        return diagnostic_detail;
-    }
     event
         .detail
         .clone()
         .unwrap_or_else(|| i18n.t(connection_trace_stage_key(event.stage)))
-}
-
-fn ssh_algorithm_diagnostic_parts(i18n: &I18n, error: &str) -> Option<(String, String)> {
-    let diagnostic = oxideterm_ssh::parse_algorithm_negotiation_error(error)?;
-    let kind_label = i18n.t(ssh_algorithm_kind_label_key(diagnostic.kind));
-    let summary_key = ssh_algorithm_summary_key(diagnostic.kind, &diagnostic.server_algorithms);
-    let summary = i18n.t(summary_key).replace("{{kind}}", &kind_label);
-    let no_common = i18n
-        .t("connections.trace.diagnostics.no_common")
-        .replace("{{kind}}", &kind_label);
-    let replace = |key: &str, name: &str, value: String| {
-        i18n.t(key).replace(&format!("{{{{{name}}}}}"), &value)
-    };
-    let detail = [
-        replace(
-            "connections.trace.diagnostics.client_offered",
-            "algorithms",
-            format_algorithm_list(&diagnostic.client_algorithms),
-        ),
-        replace(
-            "connections.trace.diagnostics.server_offered",
-            "algorithms",
-            format_algorithm_list(&diagnostic.server_algorithms),
-        ),
-        replace(
-            "connections.trace.diagnostics.missing_match",
-            "reason",
-            no_common,
-        ),
-    ]
-    .join("\n");
-    Some((summary, detail))
 }
 
 pub(in crate::workspace) fn toast_variant_from_terminal(
@@ -1682,7 +1679,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn fast_connection_keeps_its_completed_card_visible(cx: &mut TestAppContext) {
+    fn fast_connection_removes_its_completed_card_immediately(cx: &mut TestAppContext) {
         let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::ZERO, cx));
         let event = |stage, status, progress| ConnectionTraceEvent {
             attempt_id: "fast-attempt".to_string(),
@@ -1717,14 +1714,7 @@ mod tests {
                 now,
             );
 
-            assert_eq!(
-                overlay
-                    .connection_trace_cards
-                    .get("fast-attempt")
-                    .and_then(|trace| trace.displayed.as_ref())
-                    .map(|event| event.status),
-                Some(ConnectionTraceStatus::Ready)
-            );
+            assert!(!overlay.connection_trace_cards.contains_key("fast-attempt"));
         });
     }
 

@@ -355,7 +355,18 @@ impl WorkspaceApp {
                 ])
             }
             3 => self.launch_at_login_settings_card(cx),
-            4 if cfg!(any(target_os = "windows", target_os = "macos")) => {
+            4 => self.settings_card(
+                "settings_view.general.connection_uri_integration",
+                "settings_view.general.connection_uri_integration_hint",
+                vec![self.general_checkbox_row(
+                    "settings_view.general.external_connection_uris",
+                    "settings_view.general.external_connection_uris_hint",
+                    settings.general.external_connection_uris_enabled,
+                    |settings, enabled| settings.general.external_connection_uris_enabled = enabled,
+                    cx,
+                )],
+            ),
+            5 if cfg!(any(target_os = "windows", target_os = "macos")) => {
                 let (label_key, hint_key) = close_to_background_label_keys();
                 self.settings_card(
                     "settings_view.general.window_behavior",
@@ -369,10 +380,10 @@ impl WorkspaceApp {
                     )],
                 )
             }
-            5 if cfg!(any(target_os = "windows", target_os = "macos")) => {
+            6 if cfg!(any(target_os = "windows", target_os = "macos")) => {
                 self.render_app_lock_settings_card(cx)
             }
-            4 => self.render_app_lock_settings_card(cx),
+            5 => self.render_app_lock_settings_card(cx),
             _ => div().into_any_element(),
         }
     }

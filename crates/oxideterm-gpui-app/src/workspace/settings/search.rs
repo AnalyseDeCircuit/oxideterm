@@ -106,6 +106,16 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             ],
         ),
         settings_search_entry(
+            SettingsTab::General,
+            4,
+            "settings_view.general.connection_uri_integration",
+            &[
+                "settings_view.general.connection_uri_integration_hint",
+                "settings_view.general.external_connection_uris",
+                "settings_view.general.external_connection_uris_hint",
+            ],
+        ),
+        settings_search_entry(
             SettingsTab::Portable,
             0,
             "settings_view.general.portable_runtime",
@@ -656,16 +666,16 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     specs.push(settings_search_entry(
         SettingsTab::General,
-        4,
+        5,
         "settings_view.general.window_behavior",
         &["settings_view.general.window_behavior_hint"],
     ));
     specs.push(settings_search_entry(
         SettingsTab::General,
         if cfg!(any(target_os = "windows", target_os = "macos")) {
-            5
+            6
         } else {
-            4
+            5
         },
         "settings_view.general.app_lock_title",
         &[

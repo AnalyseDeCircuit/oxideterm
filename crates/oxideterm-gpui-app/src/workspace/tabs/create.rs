@@ -1,7 +1,12 @@
 use super::*;
 use crate::workspace::new_connection::{MoshConnectionOptions, SshTerminalConnectionOptions};
 use crate::workspace::root::init::terminal_preference_overrides;
+use oxideterm_remote_desktop::{
+    RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopProtocol,
+    RemoteDesktopSecret,
+};
 use oxideterm_session_adapter::managed_key_resolver_from_store;
+use oxideterm_ssh_launch::{RemoteDesktopLaunchProtocol, TemporaryRemoteDesktopLaunch};
 
 fn attach_saved_owner_to_reused_ssh_node(
     node: &mut WorkspaceSshNode,
@@ -78,7 +83,44 @@ impl WorkspaceApp {
                 self.open_temporary_telnet_launch(launch, window, cx)
             }
             NativeConnectionLaunch::Mosh(launch) => self.open_temporary_mosh_launch(launch, cx),
+            NativeConnectionLaunch::RemoteDesktop(launch) => {
+                self.open_temporary_remote_desktop_launch(launch, window, cx);
+                Ok(())
+            }
         }
+    }
+
+    fn open_temporary_remote_desktop_launch(
+        &mut self,
+        launch: TemporaryRemoteDesktopLaunch,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let protocol = match launch.protocol {
+            RemoteDesktopLaunchProtocol::Rdp => RemoteDesktopProtocol::Rdp,
+            RemoteDesktopLaunchProtocol::Vnc => RemoteDesktopProtocol::Vnc,
+        };
+        let endpoint = RemoteDesktopEndpoint::new(launch.host, launch.port);
+        let profile = RemoteDesktopConnectionProfile {
+            id: format!("native-remote-desktop-{}", uuid::Uuid::new_v4()),
+            label: format!(
+                "{}://{}",
+                launch.protocol.scheme(),
+                endpoint.format_authority()
+            ),
+            protocol,
+            endpoint,
+            transport_endpoint: None,
+            username: launch.username,
+            domain: launch.domain,
+            credential_ref: None,
+            read_only: false,
+            session_options: Default::default(),
+        };
+        // The remote-desktop tab becomes the sole runtime owner of the URI
+        // password; it is never copied into the ephemeral profile or a store.
+        let password = launch.password.map(RemoteDesktopSecret::from);
+        self.open_remote_desktop_connection_tab(profile, password, window, cx);
     }
 
     pub(in crate::workspace) fn create_local_terminal_tab(

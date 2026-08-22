@@ -26,6 +26,7 @@ pub(in crate::workspace) enum WindowIntentAction {
     CheckForUpdates,
     Quit,
     OpenNativeConnection(NativeConnectionLaunch),
+    OpenExternalConnectionUri(NativeConnectionLaunch),
 }
 
 /// Moves a platform action into the root window adapter exactly once.
@@ -351,6 +352,9 @@ impl WorkspaceWindowIntentEntity {
                 crate::single_instance::SingleInstanceEvent::OpenNativeConnection(launch) => {
                     WindowIntentAction::OpenNativeConnection(launch)
                 }
+                crate::single_instance::SingleInstanceEvent::OpenExternalConnectionUri(launch) => {
+                    WindowIntentAction::OpenExternalConnectionUri(launch)
+                }
             };
             cx.emit(WindowIntent::new(action));
         }
@@ -439,6 +443,21 @@ impl WorkspaceApp {
                 oxideterm_desktop_presence::show_main_window();
                 if let Err(error) = self.open_native_connection_launch(launch, window, cx) {
                     eprintln!("failed to open forwarded connection launch: {error:#}");
+                }
+                window.activate_window();
+            }
+            WindowIntentAction::OpenExternalConnectionUri(launch) => {
+                if !self
+                    .settings_store
+                    .settings()
+                    .general
+                    .external_connection_uris_enabled
+                {
+                    return;
+                }
+                oxideterm_desktop_presence::show_main_window();
+                if let Err(error) = self.open_native_connection_launch(launch, window, cx) {
+                    eprintln!("failed to open external connection URI: {error:#}");
                 }
                 window.activate_window();
             }

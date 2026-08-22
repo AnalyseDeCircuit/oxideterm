@@ -17,6 +17,11 @@ use zeroize::Zeroizing;
 pub const DEFAULT_SSH_PORT: u16 = 22;
 pub const DEFAULT_TELNET_PORT: u16 = 23;
 pub const DEFAULT_MOSH_SSH_PORT: u16 = 22;
+pub const DEFAULT_RDP_PORT: u16 = 3389;
+pub const DEFAULT_VNC_PORT: u16 = 5900;
+
+/// URI schemes accepted by native startup and operating-system deep links.
+pub const SUPPORTED_CONNECTION_URI_SCHEMES: [&str; 5] = ["ssh", "telnet", "mosh", "rdp", "vnc"];
 
 /// A native application launch request carried by an owner-only handoff.
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -26,6 +31,7 @@ pub enum NativeConnectionLaunch {
     Ssh(TemporarySshLaunch),
     Telnet(TemporaryTelnetLaunch),
     Mosh(TemporaryMoshLaunch),
+    RemoteDesktop(TemporaryRemoteDesktopLaunch),
 }
 
 /// Selects a saved SSH profile without copying its connection properties or secrets.
@@ -120,6 +126,67 @@ impl fmt::Debug for TemporaryMoshLaunch {
             .field("username", &self.username)
             .field("host", &self.host)
             .field("ssh_port", &self.ssh_port)
+            .field(
+                "password",
+                &self.password.as_ref().map(|_| "[redacted secret]"),
+            )
+            .finish()
+    }
+}
+
+/// Selects the existing native remote-desktop runtime without coupling this
+/// process-boundary crate to its GPUI or protocol implementation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteDesktopLaunchProtocol {
+    Rdp,
+    Vnc,
+}
+
+impl RemoteDesktopLaunchProtocol {
+    pub const fn scheme(self) -> &'static str {
+        match self {
+            Self::Rdp => "rdp",
+            Self::Vnc => "vnc",
+        }
+    }
+
+    pub const fn default_port(self) -> u16 {
+        match self {
+            Self::Rdp => DEFAULT_RDP_PORT,
+            Self::Vnc => DEFAULT_VNC_PORT,
+        }
+    }
+}
+
+#[derive(Eq, PartialEq, Serialize, Deserialize)]
+pub struct TemporaryRemoteDesktopLaunch {
+    pub protocol: RemoteDesktopLaunchProtocol,
+    pub host: String,
+    pub port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<Zeroizing<String>>,
+}
+
+impl fmt::Debug for TemporaryRemoteDesktopLaunch {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TemporaryRemoteDesktopLaunch")
+            .field("protocol", &self.protocol)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field(
+                "username",
+                &self.username.as_ref().map(|_| "[redacted userinfo]"),
+            )
+            .field(
+                "domain",
+                &self.domain.as_ref().map(|_| "[redacted userinfo]"),
+            )
             .field(
                 "password",
                 &self.password.as_ref().map(|_| "[redacted secret]"),
@@ -233,8 +300,62 @@ pub fn parse_connection_uri(
                 password,
             }))
         }
+        "rdp" => parse_remote_desktop_launch(
+            RemoteDesktopLaunchProtocol::Rdp,
+            username,
+            password,
+            host,
+            explicit_port,
+        ),
+        "vnc" => parse_remote_desktop_launch(
+            RemoteDesktopLaunchProtocol::Vnc,
+            username,
+            password,
+            host,
+            explicit_port,
+        ),
         _ => Err(ParseConnectionUriError::UnsupportedScheme),
     }
+}
+
+fn parse_remote_desktop_launch(
+    protocol: RemoteDesktopLaunchProtocol,
+    username: String,
+    password: Option<Zeroizing<String>>,
+    host: String,
+    explicit_port: Option<u16>,
+) -> Result<NativeConnectionLaunch, ParseConnectionUriError> {
+    if protocol == RemoteDesktopLaunchProtocol::Rdp && password.is_some() && username.is_empty() {
+        return Err(ParseConnectionUriError::MissingUsername);
+    }
+    let (username, domain) = split_remote_desktop_identity(protocol, username);
+    Ok(NativeConnectionLaunch::RemoteDesktop(
+        TemporaryRemoteDesktopLaunch {
+            protocol,
+            host,
+            port: explicit_port.unwrap_or_else(|| protocol.default_port()),
+            username,
+            domain,
+            password,
+        },
+    ))
+}
+
+fn split_remote_desktop_identity(
+    protocol: RemoteDesktopLaunchProtocol,
+    username: String,
+) -> (Option<String>, Option<String>) {
+    if username.is_empty() {
+        return (None, None);
+    }
+    if protocol == RemoteDesktopLaunchProtocol::Rdp
+        && let Some((domain, username)) = username.split_once('\\')
+        && !domain.is_empty()
+        && !username.is_empty()
+    {
+        return (Some(username.to_string()), Some(domain.to_string()));
+    }
+    (Some(username), None)
 }
 
 fn parse_uri_host_authority(
@@ -557,6 +678,36 @@ mod tests {
                 ..
             }) if username == "local-user"
         ));
+
+        let rdp =
+            parse_connection_uri("rdp://CORP%5Calice:p%40ss@desktop.example.com", None).unwrap();
+        assert!(matches!(
+            rdp,
+            NativeConnectionLaunch::RemoteDesktop(TemporaryRemoteDesktopLaunch {
+                protocol: RemoteDesktopLaunchProtocol::Rdp,
+                host,
+                port: DEFAULT_RDP_PORT,
+                username: Some(username),
+                domain: Some(domain),
+                password: Some(password),
+            }) if host == "desktop.example.com"
+                && username == "alice"
+                && domain == "CORP"
+                && password.as_str() == "p@ss"
+        ));
+
+        let vnc = parse_connection_uri("vnc://:screen-secret@[::1]:5901", None).unwrap();
+        assert!(matches!(
+            vnc,
+            NativeConnectionLaunch::RemoteDesktop(TemporaryRemoteDesktopLaunch {
+                protocol: RemoteDesktopLaunchProtocol::Vnc,
+                host,
+                port: 5901,
+                username: None,
+                domain: None,
+                password: Some(password),
+            }) if host == "::1" && password.as_str() == "screen-secret"
+        ));
     }
 
     #[test]
@@ -569,6 +720,7 @@ mod tests {
             "ssh://example.com:0",
             "ssh://user:bad%ZZpassword@example.com",
             "telnet://:password@example.com",
+            "rdp://:password@example.com",
         ] {
             assert!(parse_connection_uri(uri, None).is_err(), "accepted {uri}");
         }
@@ -586,6 +738,18 @@ mod tests {
         .unwrap();
         assert!(!format!("{temporary:?}").contains("wire-secret"));
         assert!(matches!(temporary, NativeConnectionLaunch::Ssh(_)));
+
+        let remote_desktop: NativeConnectionLaunch = serde_json::from_value(serde_json::json!({
+            "kind": "remote_desktop",
+            "protocol": "rdp",
+            "host": "desktop.example.com",
+            "port": 3389,
+            "username": "alice",
+            "domain": "CORP",
+            "password": "remote-secret"
+        }))
+        .unwrap();
+        assert!(!format!("{remote_desktop:?}").contains("remote-secret"));
 
         let saved: NativeConnectionLaunch = serde_json::from_value(serde_json::json!({
             "kind": "saved_connection",

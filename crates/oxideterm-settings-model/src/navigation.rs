@@ -197,9 +197,9 @@ pub fn settings_tab_section_count(
     match tab {
         SettingsTab::General => {
             if cfg!(any(target_os = "windows", target_os = "macos")) {
-                6
+                7
             } else {
-                5
+                6
             }
         }
         SettingsTab::Portable => 1,

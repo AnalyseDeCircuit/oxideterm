@@ -141,12 +141,25 @@ fn main() {
                 eprintln!("failed to read connection launch request: {error}");
                 std::process::exit(2);
             });
-    let native_connection_launch = startup_launch.or(handoff_launch);
     let startup_settings_store = SettingsStore::load_default();
     let startup_settings = startup_settings_store
         .as_ref()
         .map(|store| store.settings().clone())
         .unwrap_or_default();
+    if startup_launch.is_some()
+        && handoff_launch.is_none()
+        && !startup_settings.general.external_connection_uris_enabled
+    {
+        // A disabled external URI must not open an unrelated workspace window.
+        return;
+    }
+    let native_connection_launch = handoff_launch.or_else(|| {
+        startup_settings
+            .general
+            .external_connection_uris_enabled
+            .then_some(startup_launch)
+            .flatten()
+    });
     let _log_guard = match logging::init_file_logging(
         &startup_settings,
         startup_settings_store
@@ -164,6 +177,12 @@ fn main() {
     let application = oxideterm_gpui_platform::application().with_assets(NativeAssets);
     let url_event_receiver = single_instance_rx.clone();
     application.on_open_urls(move |urls, cx| {
+        let settings = SettingsStore::load_default()
+            .map(|store| store.settings().clone())
+            .unwrap_or_default();
+        if !settings.general.external_connection_uris_enabled {
+            return;
+        }
         let default_username = whoami::username();
         let mut launches = Vec::new();
         for url in urls {
@@ -189,9 +208,8 @@ fn main() {
             return;
         }
         for launch in launches {
-            let _ = url_event_receiver.publish(
-                single_instance::SingleInstanceEvent::OpenNativeConnection(launch),
-            );
+            let _ = url_event_receiver
+                .publish(single_instance::SingleInstanceEvent::OpenExternalConnectionUri(launch));
         }
     });
     let reopen_single_instance_rx = single_instance_rx.clone();
@@ -422,7 +440,7 @@ fn looks_like_connection_uri(value: &str) -> bool {
         .trim_start()
         .split_once(':')
         .is_some_and(|(scheme, _)| {
-            ["ssh", "telnet", "mosh"]
+            oxideterm_ssh_launch::SUPPORTED_CONNECTION_URI_SCHEMES
                 .iter()
                 .any(|candidate| scheme.eq_ignore_ascii_case(candidate))
         })

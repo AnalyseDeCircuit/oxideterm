@@ -68,6 +68,7 @@ pub(crate) enum SingleInstanceOutcome {
 pub(crate) enum SingleInstanceEvent {
     ShowMainWindow,
     OpenNativeConnection(NativeConnectionLaunch),
+    OpenExternalConnectionUri(NativeConnectionLaunch),
 }
 
 pub(crate) struct SingleInstanceGuard {
@@ -381,8 +382,9 @@ fn events_from_stream(
             "single-instance request has multiple connection launches"
         ));
     }
-    let mut events = vec![SingleInstanceEvent::ShowMainWindow];
+    let mut events = Vec::new();
     if let Some(path) = request.connection_launch_file {
+        events.push(SingleInstanceEvent::ShowMainWindow);
         match read_connection_launch_file(Some(path)) {
             Ok(Some(launch)) => events.push(SingleInstanceEvent::OpenNativeConnection(launch)),
             Ok(None) => {}
@@ -390,7 +392,12 @@ fn events_from_stream(
         }
     }
     if let Some(launch) = request.connection_launch {
-        events.push(SingleInstanceEvent::OpenNativeConnection(launch));
+        // Direct in-memory launches originate from operating-system URI
+        // callbacks, while explicit CLI requests use the owner-only file path.
+        events.push(SingleInstanceEvent::OpenExternalConnectionUri(launch));
+    }
+    if events.is_empty() {
+        events.push(SingleInstanceEvent::ShowMainWindow);
     }
     Ok(events)
 }
@@ -470,22 +477,14 @@ mod tests {
             SingleInstanceOutcome::Forwarded
         ));
 
-        assert!(matches!(
-            receiver
-                .lock()
-                .unwrap()
-                .recv_timeout(Duration::from_secs(1))
-                .unwrap(),
-            SingleInstanceEvent::ShowMainWindow
-        ));
-        let SingleInstanceEvent::OpenNativeConnection(NativeConnectionLaunch::Ssh(launch)) =
+        let SingleInstanceEvent::OpenExternalConnectionUri(NativeConnectionLaunch::Ssh(launch)) =
             receiver
                 .lock()
                 .unwrap()
                 .recv_timeout(Duration::from_secs(1))
                 .unwrap()
         else {
-            panic!("forwarded URI launch was not delivered");
+            panic!("forwarded external URI launch was not delivered");
         };
         assert_eq!(launch.username, "uri-user");
         assert_eq!(launch.password.unwrap().as_str(), "uri-password");

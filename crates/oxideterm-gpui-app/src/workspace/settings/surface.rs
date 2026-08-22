@@ -426,15 +426,19 @@ impl WorkspaceApp {
                 launch_at_login.pending.hash(&mut hasher);
                 launch_at_login.error.hash(&mut hasher);
                 settings.general.minimize_to_tray_on_close.hash(&mut hasher);
+                settings
+                    .general
+                    .external_connection_uris_enabled
+                    .hash(&mut hasher);
                 let cli = self.settings_workspace.read(cx).cli_companion_snapshot();
                 cli.loading.hash(&mut hasher);
                 cli.error.is_some().hash(&mut hasher);
                 cli.status.hash(&mut hasher);
                 let app_lock_section_index =
                     if cfg!(any(target_os = "windows", target_os = "macos")) {
-                        5
+                        6
                     } else {
-                        4
+                        5
                     };
                 if index
                     == oxideterm_settings_model::SETTINGS_SECTION_HEADER_ITEM_COUNT

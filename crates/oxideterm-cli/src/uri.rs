@@ -16,7 +16,7 @@ use crate::{
 pub struct ConnectionUriArgs {
     #[arg(
         value_name = "URI",
-        help = "Connection URI using ssh://, telnet://, or mosh://"
+        help = "Connection URI using ssh://, telnet://, mosh://, rdp://, or vnc://"
     )]
     pub uri: String,
 }
