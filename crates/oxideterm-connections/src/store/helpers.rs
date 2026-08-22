@@ -385,6 +385,7 @@ fn collect_keychain_ids_for_parts(
 }
 
 fn collect_keychain_ids_for_auth(auth: &SavedAuth) -> Vec<String> {
+    let auth = auth.conventional_fallback();
     match auth {
         SavedAuth::Password {
             keychain_id: Some(keychain_id),

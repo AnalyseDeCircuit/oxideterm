@@ -730,6 +730,7 @@
         "key_path": "Percorso chiave",
         "cert_path": "Percorso certificato",
         "managed_key": "Chiave gestita",
+        "gssapi_authentication": "Preferisci Kerberos",
         "gssapi_server_identity": "Nome server Kerberos",
         "gssapi_delegate_credentials": "Delega credenziali Kerberos",
         "proxy_chain": "Catena proxy",

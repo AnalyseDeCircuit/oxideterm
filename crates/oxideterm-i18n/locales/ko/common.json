@@ -730,6 +730,7 @@
         "key_path": "키 경로",
         "cert_path": "인증서 경로",
         "managed_key": "관리 키",
+        "gssapi_authentication": "Kerberos 우선 사용",
         "gssapi_server_identity": "Kerberos 서버 이름",
         "gssapi_delegate_credentials": "Kerberos 자격 증명 위임",
         "proxy_chain": "프록시 체인",

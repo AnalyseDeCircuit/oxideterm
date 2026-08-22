@@ -282,6 +282,11 @@ mod tests {
         ] {
             assert!(!portable_json.contains(secret));
         }
+        snapshot.records[0].auth = SavedAuth::with_kerberos_preferred(
+            snapshot.records[0].auth.clone(),
+            Some("host/sftp.example.test".to_string()),
+            true,
+        );
         snapshot.records[0].notes = Some("Synced metadata".to_string());
         snapshot.records[0].updated_at += Duration::seconds(1);
         assert_eq!(store.apply_standalone_sftp_profiles_snapshot(snapshot).unwrap(), 1);
@@ -289,6 +294,10 @@ mod tests {
             .load_standalone_sftp_profile_runtime_secrets("sftp-1")
             .unwrap();
         assert_eq!(loaded_after_sync.auth.as_ref().unwrap(), PRIMARY_SECRET);
+        assert_eq!(
+            store.standalone_sftp_profiles()[0].auth.gssapi_options(),
+            Some((Some("host/sftp.example.test"), true))
+        );
         assert_eq!(loaded_after_sync.proxy_chain[0].as_ref().unwrap(), HOP_SECRET);
         assert_eq!(
             loaded_after_sync.upstream_proxy.as_ref().unwrap(),
@@ -2004,6 +2013,66 @@ mod tests {
         assert_eq!(outcome.result.applied, 1);
         assert_eq!(outcome.deleted_connection_ids, vec!["conn-1".to_string()]);
         assert!(target.get("conn-1").is_none());
+    }
+
+    #[test]
+    fn saved_connection_sync_merge_applies_kerberos_policy_and_keeps_local_fallback_secret() {
+        let mut target = load_empty_store("sync-kerberos-target");
+        target
+            .upsert(request(
+                "conn-1",
+                SavedAuth::Password {
+                    keychain_id: None,
+                    plaintext_password: Some(SecretString::from("local-fallback-secret")),
+                },
+            ))
+            .unwrap();
+        let local_keychain_id = match &target.get("conn-1").unwrap().auth {
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                ..
+            } => keychain_id.clone(),
+            other => panic!("unexpected auth: {other:?}"),
+        };
+
+        let mut source = load_empty_store("sync-kerberos-source");
+        source
+            .upsert(request(
+                "conn-1",
+                SavedAuth::with_kerberos_preferred(
+                    SavedAuth::Password {
+                        keychain_id: None,
+                        plaintext_password: None,
+                    },
+                    Some("host/server.example.test".to_string()),
+                    true,
+                ),
+            ))
+            .unwrap();
+
+        target
+            .apply_saved_connections_snapshot(
+                source.export_saved_connections_snapshot().unwrap(),
+                SavedConnectionsConflictStrategy::Merge,
+            )
+            .unwrap();
+
+        assert!(matches!(
+            &target.get("conn-1").unwrap().auth,
+            SavedAuth::KerberosPreferred {
+                server_identity: Some(identity),
+                delegate_credentials: true,
+                fallback,
+            } if identity == "host/server.example.test"
+                && matches!(fallback.as_ref(), SavedAuth::Password {
+                    keychain_id: Some(keychain_id),
+                    plaintext_password: None,
+                } if keychain_id == &local_keychain_id)
+        ));
+        assert_eq!(
+            target.keychain.get(&local_keychain_id).unwrap(),
+            "local-fallback-secret"
+        );
     }
 
     #[test]

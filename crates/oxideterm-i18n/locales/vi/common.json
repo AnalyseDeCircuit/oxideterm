@@ -730,6 +730,7 @@
         "key_path": "Đường dẫn khóa",
         "cert_path": "Đường dẫn chứng chỉ",
         "managed_key": "Khóa được quản lý",
+        "gssapi_authentication": "Ưu tiên Kerberos",
         "gssapi_server_identity": "Tên máy chủ Kerberos",
         "gssapi_delegate_credentials": "Ủy quyền thông tin Kerberos",
         "proxy_chain": "Chuỗi proxy",

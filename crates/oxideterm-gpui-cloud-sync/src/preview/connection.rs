@@ -102,6 +102,12 @@ pub(super) fn connection_changed_fields(
     );
     push_changed(
         &mut fields,
+        "plugin.cloud_sync.diff_fields.gssapi_authentication",
+        Some(before.gssapi_authentication.to_string()),
+        Some(after.gssapi_authentication.to_string()),
+    );
+    push_changed(
+        &mut fields,
         "plugin.cloud_sync.diff_fields.gssapi_server_identity",
         before.gssapi_server_identity.clone(),
         after.gssapi_server_identity.clone(),
@@ -238,6 +244,15 @@ pub(super) fn connection_merge_fields(
         local.managed_key_id.clone(),
         remote.managed_key_id.clone(),
         effective.managed_key_id.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.gssapi_authentication",
+        Some(base.gssapi_authentication.to_string()),
+        Some(local.gssapi_authentication.to_string()),
+        Some(remote.gssapi_authentication.to_string()),
+        Some(effective.gssapi_authentication.to_string()),
         conflict_strategy,
     );
     push_merge_changed(
