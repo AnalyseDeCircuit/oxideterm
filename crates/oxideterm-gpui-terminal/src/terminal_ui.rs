@@ -107,6 +107,7 @@ pub struct TerminalUiPreferences {
     pub modem_labels: TerminalModemLabels,
     pub trzsz_labels: TerminalTrzszLabels,
     pub serial_control_labels: TerminalSerialControlLabels,
+    pub tmux_labels: TerminalTmuxLabels,
     pub session_log_options: Option<TerminalSessionLogOptions>,
     pub session_log_automatic: bool,
     pub session_log_labels: TerminalSessionLogLabels,
@@ -218,6 +219,7 @@ impl Default for TerminalUiPreferences {
             modem_labels: TerminalModemLabels::default(),
             trzsz_labels: TerminalTrzszLabels::default(),
             serial_control_labels: TerminalSerialControlLabels::default(),
+            tmux_labels: TerminalTmuxLabels::default(),
             session_log_options: None,
             session_log_automatic: false,
             session_log_labels: TerminalSessionLogLabels::default(),
@@ -441,6 +443,69 @@ pub struct TerminalSerialControlLabels {
     pub line_ending_cr: String,
     pub line_ending_none: String,
     pub reconnect_failed: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct TerminalTmuxLabels {
+    pub tmux: String,
+    pub initializing: String,
+    pub previous_window: String,
+    pub next_window: String,
+    pub new_session: String,
+    pub close_session: String,
+    pub new_window: String,
+    pub split_horizontal: String,
+    pub split_vertical: String,
+    pub close_pane: String,
+    pub close_window: String,
+    pub detach: String,
+    pub resize_left: String,
+    pub resize_right: String,
+    pub resize_up: String,
+    pub resize_down: String,
+    pub cancel_mode: String,
+    pub command_failed: String,
+    pub rename_session: String,
+    pub rename_window: String,
+    pub command: String,
+    pub command_prompt: String,
+    pub command_placeholder: String,
+    pub name_placeholder: String,
+    pub confirm: String,
+    pub cancel: String,
+}
+
+impl Default for TerminalTmuxLabels {
+    fn default() -> Self {
+        Self {
+            tmux: "tmux".to_string(),
+            initializing: "Initializing".to_string(),
+            previous_window: "Previous window".to_string(),
+            next_window: "Next window".to_string(),
+            new_session: "New session".to_string(),
+            close_session: "Close session".to_string(),
+            new_window: "New window".to_string(),
+            split_horizontal: "Split horizontally".to_string(),
+            split_vertical: "Split vertically".to_string(),
+            close_pane: "Close pane".to_string(),
+            close_window: "Close window".to_string(),
+            detach: "Detach".to_string(),
+            resize_left: "Resize left".to_string(),
+            resize_right: "Resize right".to_string(),
+            resize_up: "Resize up".to_string(),
+            resize_down: "Resize down".to_string(),
+            cancel_mode: "Exit mode".to_string(),
+            command_failed: "tmux command failed".to_string(),
+            rename_session: "Rename session".to_string(),
+            rename_window: "Rename window".to_string(),
+            command: "Command".to_string(),
+            command_prompt: "Run tmux command".to_string(),
+            command_placeholder: "Enter a tmux command".to_string(),
+            name_placeholder: "Enter a name".to_string(),
+            confirm: "Confirm".to_string(),
+            cancel: "Cancel".to_string(),
+        }
+    }
 }
 
 impl Default for TerminalSerialControlLabels {

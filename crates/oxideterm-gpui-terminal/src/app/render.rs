@@ -19,13 +19,14 @@ use oxideterm_terminal::{
     DetectedModemProtocol, ModemTransferDirection, SerialControlLine, SerialDisplayMode,
     SerialFlowControl, SerialLineEnding, SerialParity, SerialSendMode, SerialSessionConfig,
     TermMode, TerminalCommandMark, TerminalCursorShape, TerminalLifecycle, TerminalSessionKind,
-    TerminalSnapshot,
+    TerminalSnapshot, TmuxAction, TmuxUiState,
 };
 
 use super::{
     BACKGROUND_IMAGE_COMPLETION_POLL_INTERVAL, ImageRenderCache, ModemProgressState,
     SmoothScrollSnapshotCache, TerminalCommandNavigationDirection, TerminalContextAction,
-    TerminalContextMenu, TerminalPane, TerminalPaneEvent, command_mark_ui_available,
+    TerminalContextMenu, TerminalPane, TerminalPaneEvent, TmuxPromptKind, TmuxPromptState,
+    command_mark_ui_available,
 };
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
@@ -42,6 +43,7 @@ const TERMINAL_CONTEXT_MENU_ACTIONS_BEFORE_MODEM: f32 = 9.0;
 const TERMINAL_CONTEXT_MENU_SEPARATORS_BEFORE_MODEM: f32 = 2.0;
 const TERMINAL_CONTEXT_MENU_MARGIN: f32 = 8.0;
 const SERIAL_CONTROL_BAR_HEIGHT: f32 = 34.0;
+const TMUX_CONTROL_BAR_HEIGHT: f32 = 34.0;
 const SERIAL_CONTROL_BUTTON_RADIUS: f32 = 999.0;
 // Keep diagnostic chrome away from the prompt and command text at the left edge.
 const TERMINAL_PERFORMANCE_OVERLAY_INSET: f32 = 8.0;
@@ -155,7 +157,20 @@ impl Render for TerminalPane {
             self.render_snapshot_for_smooth_scroll();
         snapshot.cursor_shape =
             terminal_cursor_shape_for_render(snapshot.cursor_shape, self.preferences.cursor_shape);
-        let terminal_mode = self.terminal.lock().mode();
+        let (terminal_mode, tmux_state) = {
+            let terminal = self.terminal.lock();
+            (terminal.mode(), terminal.tmux_state())
+        };
+        let tmux_message = tmux_state.as_ref().and_then(|state| {
+            (state.message_generation > self.dismissed_tmux_message_generation)
+                .then(|| {
+                    state
+                        .message
+                        .clone()
+                        .map(|message| (state.message_generation, message))
+                })
+                .flatten()
+        });
         let decode_images = self
             .preferences
             .render_policy
@@ -294,7 +309,9 @@ impl Render for TerminalPane {
             0.0
         })
         .layout_cache(self.layout_cache.clone());
-        let terminal_top = if self.is_serial_transport() {
+        let terminal_top = if tmux_state.is_some() {
+            TMUX_CONTROL_BAR_HEIGHT
+        } else if self.is_serial_transport() {
             SERIAL_CONTROL_BAR_HEIGHT
         } else {
             0.0
@@ -392,6 +409,15 @@ impl Render for TerminalPane {
             .when(self.is_serial_transport(), |pane| {
                 pane.child(self.render_serial_control_bar(cx))
             })
+            .when_some(tmux_state, |pane, state| {
+                pane.child(self.render_tmux_control_bar(&state, cx))
+            })
+            .when_some(tmux_message, |pane, message| {
+                pane.child(self.render_tmux_message(message, cx))
+            })
+            .when_some(self.tmux_prompt.clone(), |pane, prompt| {
+                pane.child(self.render_tmux_prompt_overlay(&prompt, cx))
+            })
             .when_some(self.pending_paste.clone(), |pane, paste| {
                 pane.child(self.render_paste_confirm_overlay(&paste, cx))
             })
@@ -426,6 +452,425 @@ impl TerminalPane {
             // Background blur images use the same atlas path as terminal images.
             cx.drop_image(image, Some(window));
         }
+    }
+
+    fn send_tmux_action(&mut self, action: TmuxAction, cx: &mut Context<Self>) {
+        if self.terminal.lock().tmux_action(action).unwrap_or(false) {
+            self.snapshot_dirty = true;
+            cx.notify();
+        }
+    }
+
+    fn open_tmux_prompt(&mut self, kind: TmuxPromptKind, value: String, cx: &mut Context<Self>) {
+        self.tmux_prompt = Some(TmuxPromptState { kind, value });
+        self.marked_text = None;
+        cx.notify();
+    }
+
+    pub(super) fn cancel_tmux_prompt(&mut self, cx: &mut Context<Self>) {
+        self.tmux_prompt = None;
+        self.marked_text = None;
+        cx.notify();
+    }
+
+    pub(super) fn submit_tmux_prompt(&mut self, cx: &mut Context<Self>) {
+        let Some(prompt) = self.tmux_prompt.take() else {
+            return;
+        };
+        let input_is_empty = match &prompt.kind {
+            TmuxPromptKind::Command => prompt.value.trim().is_empty(),
+            _ => prompt.value.is_empty(),
+        };
+        if input_is_empty {
+            self.tmux_prompt = Some(prompt);
+            return;
+        }
+        let action = match prompt.kind {
+            TmuxPromptKind::RenameSession(id) => TmuxAction::RenameSession {
+                id,
+                name: prompt.value,
+            },
+            TmuxPromptKind::RenameWindow(id) => TmuxAction::RenameWindow {
+                id,
+                name: prompt.value,
+            },
+            TmuxPromptKind::Command => TmuxAction::RunCommand(prompt.value),
+        };
+        self.marked_text = None;
+        self.send_tmux_action(action, cx);
+    }
+
+    fn render_tmux_control_bar(&self, state: &TmuxUiState, cx: &mut Context<Self>) -> AnyElement {
+        let labels = &self.preferences.tmux_labels;
+        let mut controls = Vec::<AnyElement>::new();
+        controls.push(self.render_serial_status_chip(if state.ready {
+            labels.tmux.clone()
+        } else {
+            format!("{} · {}", labels.tmux, labels.initializing)
+        }));
+        for session in &state.sessions {
+            let session_id = session.id;
+            controls.push(
+                self.render_serial_control_button(
+                    format!("${session_id} {}", session.name),
+                    state.ready,
+                    session.active,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.send_tmux_action(TmuxAction::SelectSession(session_id), cx);
+                    }),
+                )
+                .into_any_element(),
+            );
+        }
+        if let Some(session) = state.sessions.iter().find(|session| session.active) {
+            let session_id = session.id;
+            let session_name = session.name.clone();
+            controls.push(
+                self.render_serial_control_button(
+                    labels.rename_session.clone(),
+                    state.ready,
+                    false,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.open_tmux_prompt(
+                            TmuxPromptKind::RenameSession(session_id),
+                            session_name.clone(),
+                            cx,
+                        );
+                    }),
+                )
+                .into_any_element(),
+            );
+        }
+        for tmux_window in &state.windows {
+            let window_id = tmux_window.id;
+            controls.push(
+                self.render_serial_control_button(
+                    format!(
+                        "{}:{}{}",
+                        tmux_window.index, tmux_window.name, tmux_window.flags
+                    ),
+                    state.ready,
+                    tmux_window.active,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.send_tmux_action(TmuxAction::SelectWindow(window_id), cx);
+                    }),
+                )
+                .into_any_element(),
+            );
+        }
+        if let Some(tmux_window) = state.windows.iter().find(|window| window.active) {
+            let window_id = tmux_window.id;
+            let window_name = tmux_window.name.clone();
+            controls.push(
+                self.render_serial_control_button(labels.rename_window.clone(), state.ready, false)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            this.open_tmux_prompt(
+                                TmuxPromptKind::RenameWindow(window_id),
+                                window_name.clone(),
+                                cx,
+                            );
+                        }),
+                    )
+                    .into_any_element(),
+            );
+        }
+        controls.push(
+            self.render_serial_control_button(labels.command.clone(), state.ready, false)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.open_tmux_prompt(TmuxPromptKind::Command, String::new(), cx);
+                    }),
+                )
+                .into_any_element(),
+        );
+
+        let actions = [
+            (
+                labels.previous_window.clone(),
+                TmuxAction::PreviousWindow,
+                true,
+            ),
+            (labels.next_window.clone(), TmuxAction::NextWindow, true),
+            (labels.new_session.clone(), TmuxAction::NewSession, true),
+            (
+                labels.close_session.clone(),
+                TmuxAction::CloseSession,
+                state.sessions.len() > 1,
+            ),
+            (labels.new_window.clone(), TmuxAction::NewWindow, true),
+            (
+                labels.split_horizontal.clone(),
+                TmuxAction::SplitHorizontal,
+                true,
+            ),
+            (
+                labels.split_vertical.clone(),
+                TmuxAction::SplitVertical,
+                true,
+            ),
+            (
+                labels.resize_left.clone(),
+                TmuxAction::ResizePaneLeft,
+                state.pane_count > 1,
+            ),
+            (
+                labels.resize_right.clone(),
+                TmuxAction::ResizePaneRight,
+                state.pane_count > 1,
+            ),
+            (
+                labels.resize_up.clone(),
+                TmuxAction::ResizePaneUp,
+                state.pane_count > 1,
+            ),
+            (
+                labels.resize_down.clone(),
+                TmuxAction::ResizePaneDown,
+                state.pane_count > 1,
+            ),
+            (
+                labels.close_pane.clone(),
+                TmuxAction::ClosePane,
+                state.pane_count > 1,
+            ),
+            (
+                labels.close_window.clone(),
+                TmuxAction::CloseWindow,
+                !state.windows.is_empty(),
+            ),
+            (labels.detach.clone(), TmuxAction::Detach, true),
+        ];
+        if state.pane_in_mode {
+            controls.push(
+                self.render_serial_control_button(labels.cancel_mode.clone(), state.ready, true)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            this.send_tmux_action(TmuxAction::CancelPaneMode, cx);
+                        }),
+                    )
+                    .into_any_element(),
+            );
+        }
+        for (label, action, enabled) in actions {
+            controls.push(
+                self.render_serial_control_button(label, state.ready && enabled, false)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            if enabled {
+                                this.send_tmux_action(action.clone(), cx);
+                            }
+                        }),
+                    )
+                    .into_any_element(),
+            );
+        }
+        if let Some(error) = &state.error {
+            controls.push(self.render_serial_status_chip(if error.is_empty() {
+                labels.command_failed.clone()
+            } else {
+                format!("{} · {error}", labels.command_failed)
+            }));
+        }
+
+        let control_row = div()
+            .size_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(6.0))
+            .px(px(8.0))
+            .children(controls);
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .h(px(TMUX_CONTROL_BAR_HEIGHT))
+            .border_b_1()
+            .border_color(rgba(serial_color_alpha(self.theme.foreground, 0x33)))
+            .bg(rgba(serial_color_alpha(self.theme.background, 0xf0)))
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx: &mut App| {
+                cx.stop_propagation();
+            })
+            .child(div().size_full().overflow_x_scrollbar().child(control_row))
+            .into_any_element()
+    }
+
+    fn render_tmux_prompt_overlay(
+        &self,
+        prompt: &TmuxPromptState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let labels = &self.preferences.tmux_labels;
+        let title = match prompt.kind {
+            TmuxPromptKind::RenameSession(_) => labels.rename_session.clone(),
+            TmuxPromptKind::RenameWindow(_) => labels.rename_window.clone(),
+            TmuxPromptKind::Command => labels.command_prompt.clone(),
+        };
+        let placeholder = match prompt.kind {
+            TmuxPromptKind::Command => labels.command_placeholder.clone(),
+            _ => labels.name_placeholder.clone(),
+        };
+        let mut value = prompt.value.clone();
+        if let Some(marked_text) = &self.marked_text {
+            value.push_str(marked_text);
+        }
+        let input_text = if value.is_empty() { placeholder } else { value };
+        let input_color = if prompt.value.is_empty() && self.marked_text.is_none() {
+            serial_color_alpha(self.theme.foreground, 0x77)
+        } else {
+            self.theme.foreground
+        };
+        let submit_enabled = match &prompt.kind {
+            TmuxPromptKind::Command => !prompt.value.trim().is_empty(),
+            _ => !prompt.value.is_empty(),
+        };
+
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(rgba(0x00000055))
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx: &mut App| {
+                cx.stop_propagation();
+            })
+            .child(
+                div()
+                    .w(px(480.0))
+                    .rounded(px(8.0))
+                    .border_1()
+                    .border_color(rgba(serial_color_alpha(self.theme.foreground, 0x44)))
+                    .bg(rgba(serial_color_alpha(self.theme.background, 0xfa)))
+                    .shadow_lg()
+                    .p(px(16.0))
+                    .child(
+                        div()
+                            .mb(px(12.0))
+                            .text_size(px(14.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .h(px(36.0))
+                            .px(px(10.0))
+                            .flex()
+                            .items_center()
+                            .rounded(px(4.0))
+                            .border_1()
+                            .border_color(rgba(serial_color_alpha(self.theme.foreground, 0x55)))
+                            .bg(rgba(serial_color_alpha(self.theme.background, 0xff)))
+                            .text_color(rgb(input_color))
+                            .overflow_hidden()
+                            .child(input_text),
+                    )
+                    .child(
+                        div()
+                            .mt(px(14.0))
+                            .flex()
+                            .justify_end()
+                            .gap(px(8.0))
+                            .child(
+                                self.render_serial_control_button(
+                                    labels.cancel.clone(),
+                                    true,
+                                    false,
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _event, _window, cx| {
+                                        this.cancel_tmux_prompt(cx);
+                                    }),
+                                ),
+                            )
+                            .child(
+                                self.render_serial_control_button(
+                                    labels.confirm.clone(),
+                                    submit_enabled,
+                                    true,
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        if submit_enabled {
+                                            this.submit_tmux_prompt(cx);
+                                        }
+                                    }),
+                                ),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_tmux_message(
+        &self,
+        (generation, message): (u64, String),
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .absolute()
+            .top(px(TMUX_CONTROL_BAR_HEIGHT + 8.0))
+            .right(px(8.0))
+            .max_w(px(520.0))
+            .rounded(px(6.0))
+            .border_1()
+            .border_color(rgba(serial_color_alpha(self.theme.foreground, 0x44)))
+            .bg(rgba(serial_color_alpha(self.theme.background, 0xf5)))
+            .shadow_lg()
+            .px(px(12.0))
+            .py(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .child(div().flex_1().child(message))
+            .child(
+                div()
+                    .cursor_pointer()
+                    .text_color(rgba(serial_color_alpha(self.theme.foreground, 0x99)))
+                    .child("×")
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.dismissed_tmux_message_generation = generation;
+                            cx.notify();
+                        }),
+                    ),
+            )
+            .into_any_element()
     }
 
     fn render_serial_control_bar(&self, cx: &mut Context<Self>) -> AnyElement {

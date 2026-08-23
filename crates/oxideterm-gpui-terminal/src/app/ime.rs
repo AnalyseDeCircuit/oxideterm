@@ -23,7 +23,12 @@ impl TerminalPane {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
-        if self.terminal.lock().mode().contains(TermMode::ALT_SCREEN) {
+        if self.tmux_prompt.is_some() {
+            Some(UTF16Selection {
+                range: 0..0,
+                reversed: false,
+            })
+        } else if self.terminal.lock().mode().contains(TermMode::ALT_SCREEN) {
             None
         } else {
             Some(UTF16Selection {

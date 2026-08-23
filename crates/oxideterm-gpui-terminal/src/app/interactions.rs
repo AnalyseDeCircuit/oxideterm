@@ -18,7 +18,7 @@ use unicode_width::UnicodeWidthStr;
 use super::{
     FreeTypeDragAction, FreeTypeDragState, PendingTerminalEditorClipboard, ScrollbarDrag,
     ScrollbarGeometry, SmoothScrollAnimation, TerminalContextMenu, TerminalPane, TerminalPaneEvent,
-    command_mark_ui_available,
+    TmuxSeparatorDirection, TmuxSeparatorDrag, command_mark_ui_available,
 };
 use crate::command_facts::TerminalAutosuggestInputState;
 use crate::terminal_ui::*;
@@ -54,6 +54,32 @@ impl TerminalPane {
     pub(crate) fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
+
+        if self.tmux_prompt.is_some() {
+            match key {
+                "enter" if !modifiers.platform && !modifiers.control && !modifiers.alt => {
+                    self.submit_tmux_prompt(cx);
+                    return true;
+                }
+                "escape" => {
+                    self.cancel_tmux_prompt(cx);
+                    return true;
+                }
+                "backspace" if !modifiers.platform && !modifiers.control && !modifiers.alt => {
+                    if let Some(prompt) = self.tmux_prompt.as_mut()
+                        && let Some((index, _)) = prompt.value.grapheme_indices(true).next_back()
+                    {
+                        prompt.value.truncate(index);
+                        cx.notify();
+                    }
+                    return true;
+                }
+                _ => {}
+            }
+            // Printable input is committed through GPUI's input handler. Do
+            // not let unhandled prompt keys reach the tmux pane underneath.
+            return false;
+        }
 
         if self.context_menu.is_some() {
             self.dismiss_terminal_context_menu(cx);
@@ -278,7 +304,7 @@ impl TerminalPane {
             if rows == 0 {
                 return;
             }
-            let point = self.terminal_point_for_position(event.position);
+            let point = self.tmux_local_point(self.terminal_point_for_position(event.position));
             let report_count = rows.unsigned_abs().max(1);
             if let Some(report) = mouse_scroll_report(point, event, mode) {
                 for _ in 0..report_count {
@@ -807,6 +833,11 @@ impl TerminalPane {
         }
     }
 
+    fn tmux_local_point(&self, point: TerminalPoint) -> TerminalPoint {
+        let (col, row) = self.terminal.lock().tmux_local_point(point.col, point.row);
+        TerminalPoint { row, col }
+    }
+
     fn link_at_position(&self, position: gpui::Point<Pixels>) -> Option<TerminalLinkRange> {
         let point = self.terminal_point_for_position(position);
         let cell = self
@@ -1144,7 +1175,42 @@ impl TerminalPane {
             return;
         }
 
+        if event.button == MouseButton::Left && event.click_count <= 1 {
+            let point = self.terminal_point_for_position(event.position);
+            if let Some(separator) = self.terminal.lock().tmux_separator_at(point.col, point.row) {
+                self.tmux_separator_drag = Some(TmuxSeparatorDrag {
+                    separator,
+                    last_point: point,
+                });
+                self.selection = None;
+                self.selecting = false;
+                cx.notify();
+                return;
+            }
+        }
+
+        let mut selected_tmux_pane = false;
+        if event.button == MouseButton::Left && event.click_count <= 1 {
+            let point = self.terminal_point_for_position(event.position);
+            let selected_snapshot = {
+                let mut terminal = self.terminal.lock();
+                terminal
+                    .select_tmux_pane_at(point.col, point.row)
+                    .unwrap_or(false)
+                    .then(|| terminal.snapshot())
+            };
+            if let Some(snapshot) = selected_snapshot {
+                self.selection = None;
+                self.snapshot = self.stamp_snapshot(snapshot);
+                selected_tmux_pane = true;
+                cx.notify();
+            }
+        }
+
         let mode = self.terminal.lock().mode();
+        if selected_tmux_pane && !mouse_mode(mode, event.modifiers.shift) {
+            return;
+        }
         if event.button == MouseButton::Middle
             && self.settings.middle_click_paste
             && !mouse_tracking_active(mode)
@@ -1163,7 +1229,7 @@ impl TerminalPane {
         }
 
         if mouse_mode(mode, event.modifiers.shift) {
-            let point = self.terminal_point_for_position(event.position);
+            let point = self.tmux_local_point(self.terminal_point_for_position(event.position));
             self.last_mouse_report_point = Some(point);
             if let Some(report) =
                 mouse_button_report(point, event.button, event.modifiers, true, mode)
@@ -1247,6 +1313,32 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if let Some(drag) = self.tmux_separator_drag
+            && event.pressed_button == Some(MouseButton::Left)
+        {
+            let point = self.terminal_point_for_position(event.position);
+            let delta = match drag.separator.direction {
+                TmuxSeparatorDirection::LeftRight => point.col as i64 - drag.last_point.col as i64,
+                TmuxSeparatorDirection::TopBottom => point.row as i64 - drag.last_point.row as i64,
+            };
+            let delta = delta.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+            if delta != 0
+                && self
+                    .terminal
+                    .lock()
+                    .resize_tmux_separator(drag.separator, delta)
+                    .unwrap_or(false)
+            {
+                self.tmux_separator_drag = Some(TmuxSeparatorDrag {
+                    last_point: point,
+                    ..drag
+                });
+                self.snapshot_dirty = true;
+                cx.notify();
+            }
+            return;
+        }
+
         let mode = self.terminal.lock().mode();
         let can_hover_terminal_content = !self.selecting
             && self.scrollbar_drag.is_none()
@@ -1282,7 +1374,7 @@ impl TerminalPane {
         }
 
         if mouse_mode(mode, event.modifiers.shift) {
-            let point = self.terminal_point_for_position(event.position);
+            let point = self.tmux_local_point(self.terminal_point_for_position(event.position));
             if self.last_mouse_report_point == Some(point) {
                 return;
             }
@@ -1300,6 +1392,11 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_mouse_up(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
+        if self.tmux_separator_drag.take().is_some() {
+            cx.notify();
+            return;
+        }
+
         if self.scrollbar_drag.take().is_some() {
             cx.notify();
             return;
@@ -1327,7 +1424,7 @@ impl TerminalPane {
         }
 
         if mouse_mode(mode, event.modifiers.shift) {
-            let point = self.terminal_point_for_position(event.position);
+            let point = self.tmux_local_point(self.terminal_point_for_position(event.position));
             self.last_mouse_report_point = None;
             if let Some(report) =
                 mouse_button_report(point, event.button, event.modifiers, false, mode)

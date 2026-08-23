@@ -30,7 +30,8 @@ use oxideterm_terminal::{
     TerminalEditorApplication, TerminalEditorClipboardOperation, TerminalEditorIntegrationEvent,
     TerminalEvent, TerminalLifecycle, TerminalOutputProcessor, TerminalProcessInfo,
     TerminalProcessProbe, TerminalRow, TerminalSearchMatch, TerminalSession, TerminalSessionKind,
-    TerminalSnapshot, TrzszTransferDirection, TrzszTransferSelection, serial_list_ports,
+    TerminalSnapshot, TmuxSeparator, TmuxSeparatorDirection, TrzszTransferDirection,
+    TrzszTransferSelection, serial_list_ports,
 };
 use oxideterm_trzsz::TrzszState;
 use parking_lot::Mutex;
@@ -71,6 +72,25 @@ use image_cache::ImageRenderCache;
 pub(crate) use image_cache::TerminalRenderedImage;
 pub(crate) use ime::TerminalInputHandler;
 use scrollbar::{ScrollbarDrag, ScrollbarGeometry};
+
+#[derive(Clone, Debug)]
+enum TmuxPromptKind {
+    RenameSession(u64),
+    RenameWindow(u64),
+    Command,
+}
+
+#[derive(Clone, Debug)]
+struct TmuxPromptState {
+    kind: TmuxPromptKind,
+    value: String,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TmuxSeparatorDrag {
+    separator: TmuxSeparator,
+    last_point: TerminalPoint,
+}
 
 pub type SharedTerminalSession = Arc<Mutex<TerminalSession>>;
 pub type TerminalInputInterceptor =
@@ -396,6 +416,9 @@ pub struct TerminalPane {
     selection: Option<TerminalSelection>,
     pending_paste: Option<String>,
     pending_paste_prefix: Option<Vec<u8>>,
+    // Control-mode prompts stay pane-owned so text never reaches the hosted shell.
+    tmux_prompt: Option<TmuxPromptState>,
+    dismissed_tmux_message_generation: u64,
     context_menu: Option<TerminalContextMenu>,
     context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence,
     context_action_requested: Option<TerminalContextAction>,
@@ -448,6 +471,7 @@ pub struct TerminalPane {
     smooth_scroll_animation: Option<SmoothScrollAnimation>,
     smooth_scroll_snapshot_cache: Option<SmoothScrollSnapshotCache>,
     scrollbar_drag: Option<ScrollbarDrag>,
+    tmux_separator_drag: Option<TmuxSeparatorDrag>,
     selection_autoscroll_position: Option<Point<Pixels>>,
     selection_autoscroll_scheduled: bool,
     copy_on_select_generation: u64,
@@ -1014,6 +1038,8 @@ impl TerminalPane {
             selection: None,
             pending_paste: None,
             pending_paste_prefix: None,
+            tmux_prompt: None,
+            dismissed_tmux_message_generation: 0,
             context_menu: None,
             context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             context_action_requested: None,
@@ -1071,6 +1097,7 @@ impl TerminalPane {
             smooth_scroll_animation: None,
             smooth_scroll_snapshot_cache: None,
             scrollbar_drag: None,
+            tmux_separator_drag: None,
             selection_autoscroll_position: None,
             selection_autoscroll_scheduled: false,
             copy_on_select_generation: 0,
@@ -2382,6 +2409,15 @@ impl TerminalPane {
     }
 
     pub fn paste_from_clipboard(&mut self, cx: &mut Context<Self>) {
+        if let Some(prompt) = self.tmux_prompt.as_mut() {
+            if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                prompt
+                    .value
+                    .extend(text.chars().filter(|character| !character.is_control()));
+                cx.notify();
+            }
+            return;
+        }
         self.paste_from_clipboard_after(&[], cx);
     }
 
@@ -3293,6 +3329,13 @@ impl TerminalPane {
 
     fn commit_text(&mut self, text: &str, cx: &mut Context<Self>) {
         self.marked_text = None;
+        if let Some(prompt) = self.tmux_prompt.as_mut() {
+            prompt
+                .value
+                .extend(text.chars().filter(|character| !character.is_control()));
+            cx.notify();
+            return;
+        }
         if self.commit_text_without_broadcast(text, cx) {
             self.broadcast_user_input(TerminalBroadcastInputKind::Text, text.as_bytes(), cx);
         }

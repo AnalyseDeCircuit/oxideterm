@@ -175,9 +175,9 @@ use oxideterm_gpui_terminal::{
     TerminalRecordingState, TerminalRecordingStatus, TerminalSearchStatus,
     TerminalSerialControlLabels, TerminalSessionLogContext, TerminalSessionLogLabels,
     TerminalSessionLogOptions, TerminalSessionLogState, TerminalSessionLogStatus,
-    TerminalTrzszLabels, TerminalUiPreferenceOverrides, TerminalUiPreferences, TerminalUiTheme,
-    TerminalWorkingDirectorySource, detect_custom_privilege_prompt, prune_terminal_session_logs,
-    resolved_terminal_semantic_scheme,
+    TerminalTmuxLabels, TerminalTrzszLabels, TerminalUiPreferenceOverrides, TerminalUiPreferences,
+    TerminalUiTheme, TerminalWorkingDirectorySource, detect_custom_privilege_prompt,
+    prune_terminal_session_logs, resolved_terminal_semantic_scheme,
 };
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{

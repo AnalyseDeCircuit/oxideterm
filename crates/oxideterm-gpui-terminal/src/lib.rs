@@ -36,7 +36,7 @@ pub use terminal_ui::{
     TerminalBackgroundFit, TerminalBackgroundPreferences, TerminalCommandSelectionLabels,
     TerminalHighlightMatchScope, TerminalHighlightRenderMode, TerminalHighlightRule,
     TerminalHighlightRuleSetOverride, TerminalModemLabels, TerminalNotice, TerminalNoticeVariant,
-    TerminalPasteLabels, TerminalSerialControlLabels, TerminalSessionLogLabels,
+    TerminalPasteLabels, TerminalSerialControlLabels, TerminalSessionLogLabels, TerminalTmuxLabels,
     TerminalTrzszLabels, TerminalUiPreferenceOverrides, TerminalUiPreferences, TerminalUiTheme,
     resolved_terminal_semantic_scheme,
 };
