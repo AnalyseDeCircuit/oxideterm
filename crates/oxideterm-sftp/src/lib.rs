@@ -49,9 +49,9 @@ pub use scp::{
 };
 pub use session::{SftpChannelOpener, SftpSession, WriteContentResult};
 pub use tar_transfer::{
-    SftpExecChannelOpener, TarCapabilities, TarCompression, TarDirectoryProfile, TarTransferOptions,
-    TarTransferResult, probe_tar_capabilities, probe_tar_compression, probe_tar_support,
-    profile_local_directory, tar_download_directory, tar_upload_directory,
+    SftpExecChannelOpener, TarCapabilities, TarCompression, TarDirectoryProfile,
+    TarTransferOptions, TarTransferResult, probe_tar_capabilities, probe_tar_compression,
+    probe_tar_support, profile_local_directory, tar_download_directory, tar_upload_directory,
 };
 pub use text_diff::{
     TextDiffLine, TextDiffLineKind, TextDiffStats, compute_text_diff, text_diff_stats,

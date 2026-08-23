@@ -18,6 +18,8 @@ manifest, and source files are retained from the published package.
 
 ## Local Patch Inventory
 
+- `rustfmt.toml` prevents workspace formatting from rewriting the imported
+  source.
 - `src/lib.rs` adds `Perform::print_text` with a scalar default and dispatches
   printable ground-state spans through it while preserving control ordering and
   the existing partial UTF-8 state machine. A single ASCII byte keeps a direct

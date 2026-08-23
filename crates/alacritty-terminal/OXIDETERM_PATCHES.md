@@ -20,6 +20,8 @@ source files are retained from the published package.
 
 ## Local Patch Inventory
 
+- `rustfmt.toml` prevents workspace formatting from rewriting the imported
+  source.
 - `src/term/mod.rs` implements `Handler::input_text` for printable ASCII spans.
 - The fast path is restricted to the ASCII charset, line-wrap mode, overwrite
   mode, single-column printable ASCII, and destinations without wide-cell

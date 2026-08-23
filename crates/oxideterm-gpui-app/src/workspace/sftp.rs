@@ -36,8 +36,8 @@ use oxideterm_sftp::{
     SortOrder as RemoteSortOrder, StoredTransferProgress, TarCapabilities, TarTransferOptions,
     TransferDirection as SftpTransferDirection, TransferProgress,
     TransferProtocol as RemoteTransferProtocol, TransferStrategy as RemoteTransferStrategy,
-    TransferType as RemoteTransferType, encode_to_encoding, scp_download_directory,
-    profile_local_directory, scp_download_file, scp_upload_directory, scp_upload_file,
+    TransferType as RemoteTransferType, encode_to_encoding, profile_local_directory,
+    scp_download_directory, scp_download_file, scp_upload_directory, scp_upload_file,
     tar_download_directory, tar_upload_directory,
 };
 pub(in crate::workspace::sftp) use oxideterm_sftp::{
