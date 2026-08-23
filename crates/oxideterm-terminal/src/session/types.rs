@@ -196,6 +196,28 @@ pub trait TerminalSessionBackend: Send {
     fn interrupt_modem_transfer(&mut self) {}
     fn finish_modem_transfer(&mut self) {}
     fn mode(&self) -> TermMode;
+    fn select_tmux_pane_at(&mut self, _col: usize, _row: usize) -> Result<bool> {
+        Ok(false)
+    }
+    fn tmux_local_point(&self, col: usize, row: usize) -> (usize, usize) {
+        (col, row)
+    }
+    fn tmux_state(&self) -> Option<crate::TmuxUiState> {
+        None
+    }
+    fn tmux_action(&mut self, _action: crate::TmuxAction) -> Result<bool> {
+        Ok(false)
+    }
+    fn tmux_separator_at(&self, _col: usize, _row: usize) -> Option<crate::TmuxSeparator> {
+        None
+    }
+    fn resize_tmux_separator(
+        &mut self,
+        _separator: crate::TmuxSeparator,
+        _delta: i32,
+    ) -> Result<bool> {
+        Ok(false)
+    }
     fn set_focused(&mut self, focused: bool) -> Result<()>;
     fn resize_with_cell_size(&mut self, resize: TerminalResize) -> Result<()>;
     fn scroll_lines(&mut self, delta: i32);

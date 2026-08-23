@@ -424,6 +424,34 @@ impl TerminalSession {
         self.backend.mode()
     }
 
+    pub fn select_tmux_pane_at(&mut self, col: usize, row: usize) -> Result<bool> {
+        self.backend.select_tmux_pane_at(col, row)
+    }
+
+    pub fn tmux_local_point(&self, col: usize, row: usize) -> (usize, usize) {
+        self.backend.tmux_local_point(col, row)
+    }
+
+    pub fn tmux_state(&self) -> Option<crate::TmuxUiState> {
+        self.backend.tmux_state()
+    }
+
+    pub fn tmux_action(&mut self, action: crate::TmuxAction) -> Result<bool> {
+        self.backend.tmux_action(action)
+    }
+
+    pub fn tmux_separator_at(&self, col: usize, row: usize) -> Option<crate::TmuxSeparator> {
+        self.backend.tmux_separator_at(col, row)
+    }
+
+    pub fn resize_tmux_separator(
+        &mut self,
+        separator: crate::TmuxSeparator,
+        delta: i32,
+    ) -> Result<bool> {
+        self.backend.resize_tmux_separator(separator, delta)
+    }
+
     pub fn set_focused(&mut self, focused: bool) -> Result<()> {
         self.backend.set_focused(focused)
     }

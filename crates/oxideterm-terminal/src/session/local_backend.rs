@@ -105,6 +105,34 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::mode(self)
     }
 
+    fn select_tmux_pane_at(&mut self, col: usize, row: usize) -> Result<bool> {
+        LocalPtySession::select_tmux_pane_at(self, col, row)
+    }
+
+    fn tmux_local_point(&self, col: usize, row: usize) -> (usize, usize) {
+        LocalPtySession::tmux_local_point(self, col, row)
+    }
+
+    fn tmux_state(&self) -> Option<crate::TmuxUiState> {
+        LocalPtySession::tmux_state(self)
+    }
+
+    fn tmux_action(&mut self, action: crate::TmuxAction) -> Result<bool> {
+        LocalPtySession::tmux_action(self, action)
+    }
+
+    fn tmux_separator_at(&self, col: usize, row: usize) -> Option<crate::TmuxSeparator> {
+        LocalPtySession::tmux_separator_at(self, col, row)
+    }
+
+    fn resize_tmux_separator(
+        &mut self,
+        separator: crate::TmuxSeparator,
+        delta: i32,
+    ) -> Result<bool> {
+        LocalPtySession::resize_tmux_separator(self, separator, delta)
+    }
+
     fn set_focused(&mut self, focused: bool) -> Result<()> {
         LocalPtySession::set_focused(self, focused)
     }
@@ -158,12 +186,14 @@ impl TerminalSessionBackend for LocalPtySession {
     }
 
     fn buffer_text(&self) -> String {
-        let term = self.term.lock();
+        let term = self.display_term();
+        let term = term.lock();
         terminal_buffer_text_from_term(&term, self.size.cols)
     }
 
     fn command_output_text(&self, mark: &TerminalCommandMark) -> String {
-        let term = self.term.lock();
+        let term = self.display_term();
+        let term = term.lock();
         command_output_text_from_term(&term, mark)
     }
 

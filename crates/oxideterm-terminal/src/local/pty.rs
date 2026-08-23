@@ -19,6 +19,7 @@ pub struct LocalPtySession {
     graphics: TerminalGraphicsState,
     encoding: TerminalEncoding,
     input_encoder: TerminalInputEncoder,
+    tmux_display: Arc<crate::tmux::TmuxDisplay>,
 }
 
 pub type LocalTerminal = LocalPtySession;
@@ -93,6 +94,7 @@ impl LocalPtySession {
         let shell_args = launch.args;
 
         let (listener, event_rx) = local_event_channel();
+        let tmux_display = Arc::new(crate::tmux::TmuxDisplay::default());
         let (graphics_tx, graphics_rx) = unbounded();
         let (magic_tx, magic_rx) = unbounded();
         let (terminal_event_tx, terminal_event_rx) = unbounded();
@@ -143,9 +145,10 @@ impl LocalPtySession {
         #[cfg(target_os = "windows")]
         let pty_master = None;
         let process = ProcessState::new(shell_pid, pty_master, cwd);
+        let tmux_graphics_options = graphics_options.clone();
         let event_loop = LocalGraphicsEventLoop::new(
             term.clone(),
-            listener,
+            listener.clone(),
             pty,
             true,
             graphics_tx,
@@ -155,6 +158,14 @@ impl LocalPtySession {
             size,
             graphics_options,
             encoding,
+            crate::tmux::TmuxController::new(
+                tmux_display.clone(),
+                listener.clone(),
+                size,
+                encoding,
+                scrollback_lines,
+                tmux_graphics_options,
+            ),
         )
         .context("failed to create terminal event loop")?;
         let pty_tx = event_loop.channel();
@@ -182,6 +193,7 @@ impl LocalPtySession {
             graphics: TerminalGraphicsState::default(),
             encoding,
             input_encoder: TerminalInputEncoder::new(encoding),
+            tmux_display,
         })
     }
 
@@ -264,19 +276,44 @@ impl LocalPtySession {
     }
 
     pub fn write_input(&mut self, bytes: &[u8]) -> Result<()> {
-        self.write_protocol_bytes(bytes)
+        if let Some(commands) = self.tmux_display.input_commands(bytes) {
+            for command in commands {
+                self.write_control_bytes(command)?;
+            }
+            return Ok(());
+        }
+        self.write_transport_bytes(bytes)
     }
 
     pub fn write_protocol_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        if let Some(commands) = self.tmux_display.protocol_commands(bytes) {
+            for command in commands {
+                self.write_control_bytes(command)?;
+            }
+            return Ok(());
+        }
+        self.write_transport_bytes(bytes)
+    }
+
+    fn write_transport_bytes(&mut self, bytes: &[u8]) -> Result<()> {
         if self.lifecycle.is_running() && !bytes.is_empty() {
             self.notifier.notify(Cow::Owned(bytes.to_vec()));
         }
         Ok(())
     }
 
+    fn write_control_bytes(&mut self, bytes: Vec<u8>) -> Result<()> {
+        if self.lifecycle.is_running() && !bytes.is_empty() {
+            self.notifier
+                .0
+                .send(LocalGraphicsMsg::ControlInput(Cow::Owned(bytes)))?;
+        }
+        Ok(())
+    }
+
     pub fn write_text(&mut self, text: &str) -> Result<()> {
         let encoded = self.input_encoder.encode_text(text);
-        self.write_protocol_bytes(encoded.as_ref())
+        self.write_input(encoded.as_ref())
     }
 
     pub fn set_encoding(&mut self, encoding: TerminalEncoding) {
@@ -357,7 +394,7 @@ impl LocalPtySession {
     pub fn buffer_line_count(&self) -> usize {
         // Line-count consumers do not need an immutable cell snapshot. Reading the emulator's
         // geometry avoids copying the full scrollback for hidden or detached local sessions.
-        self.term.lock().total_lines()
+        self.display_term().lock().total_lines()
     }
 
     pub fn process_info_probe(&self) -> Option<TerminalProcessProbe> {
@@ -375,10 +412,16 @@ impl LocalPtySession {
     }
 
     pub fn terminate_active_task(&mut self) -> Result<()> {
+        if self.tmux_display.is_active() {
+            return self.write_input(b"\x03");
+        }
         self.signal_active_task(TerminalSignal::Terminate)
     }
 
     pub fn kill_active_task(&mut self) -> Result<()> {
+        if self.tmux_display.is_active() {
+            return self.write_input(b"\x03");
+        }
         self.signal_active_task(TerminalSignal::Kill)
     }
 
@@ -397,16 +440,71 @@ impl LocalPtySession {
         let bytes = self
             .input_encoder
             .encode_paste(text, self.mode().contains(TermMode::BRACKETED_PASTE));
-        self.write_protocol_bytes(&bytes)
+        if let Some(commands) = self.tmux_display.paste_commands(&bytes) {
+            for command in commands {
+                self.write_control_bytes(command)?;
+            }
+            return Ok(());
+        }
+        self.write_input(&bytes)
     }
 
     pub fn mode(&self) -> TermMode {
-        *self.term.lock().mode()
+        let term = self.display_term();
+        *term.lock().mode()
+    }
+
+    pub fn select_tmux_pane_at(&mut self, col: usize, row: usize) -> Result<bool> {
+        let Some(command) = self.tmux_display.select_pane_command(col, row) else {
+            return Ok(false);
+        };
+        self.write_control_bytes(command)?;
+        Ok(true)
+    }
+
+    pub fn tmux_local_point(&self, col: usize, row: usize) -> (usize, usize) {
+        self.tmux_display.local_point(col, row)
+    }
+
+    pub fn tmux_state(&self) -> Option<crate::TmuxUiState> {
+        self.tmux_display.ui_state()
+    }
+
+    pub fn tmux_action(&mut self, action: crate::TmuxAction) -> Result<bool> {
+        let Some(command) = self.tmux_display.action_command(action) else {
+            return Ok(false);
+        };
+        self.write_control_bytes(command)?;
+        Ok(true)
+    }
+
+    pub fn tmux_separator_at(&self, col: usize, row: usize) -> Option<crate::TmuxSeparator> {
+        self.tmux_display.separator_at(col, row)
+    }
+
+    pub fn resize_tmux_separator(
+        &mut self,
+        separator: crate::TmuxSeparator,
+        delta: i32,
+    ) -> Result<bool> {
+        let Some(command) = self
+            .tmux_display
+            .resize_separator_command(separator, delta)
+        else {
+            return Ok(false);
+        };
+        self.write_control_bytes(command)?;
+        Ok(true)
+    }
+
+    fn display_term(&self) -> Arc<FairMutex<Term<LocalEventListener>>> {
+        self.tmux_display.term().unwrap_or_else(|| self.term.clone())
     }
 
     pub fn set_focused(&mut self, focused: bool) -> Result<()> {
         let should_report = {
-            let mut term = self.term.lock();
+            let term = self.display_term();
+            let mut term = term.lock();
             term.is_focused = focused;
             term.mode().contains(TermMode::FOCUS_IN_OUT)
         };
@@ -439,7 +537,7 @@ impl LocalPtySession {
                 true
             }
             AlacEvent::CursorBlinkingChange => {
-                let blinking = self.term.lock().cursor_style().blinking;
+                let blinking = self.display_term().lock().cursor_style().blinking;
                 self.pending_events
                     .push(TerminalEvent::BlinkChanged(blinking));
                 true
@@ -460,7 +558,7 @@ impl LocalPtySession {
             }
             AlacEvent::ColorRequest(index, formatter) => {
                 let override_color = (index <= 268)
-                    .then(|| self.term.lock().colors()[index])
+                    .then(|| self.display_term().lock().colors()[index])
                     .flatten();
                 let color = color_for_alacritty_request_with_override(index, override_color);
                 let _ = self.write_protocol_bytes(formatter(color).as_bytes());
@@ -472,6 +570,7 @@ impl LocalPtySession {
                 false
             }
             AlacEvent::ChildExit(status) => {
+                self.tmux_display.reset();
                 let code = status.code();
                 self.lifecycle = TerminalLifecycle::Exited(code);
                 self.process.mark_exited();
@@ -504,6 +603,7 @@ impl LocalPtySession {
         }
 
         self.lifecycle = TerminalLifecycle::Closed;
+        self.tmux_display.reset();
         self.process.mark_exited();
         self._shell_integration.take();
     }
@@ -562,13 +662,16 @@ impl LocalPtySession {
             self.term.lock().resize(next);
         }
         self.notifier.on_resize(window_size(next));
+        if let Some(command) = self.tmux_display.resize_command(next.cols, next.rows) {
+            self.write_control_bytes(command)?;
+        }
         self.size = next;
         Ok(())
     }
 
     pub fn scroll_lines(&mut self, delta: i32) {
         if delta != 0 {
-            self.term.lock().scroll_display(Scroll::Delta(delta));
+            self.display_term().lock().scroll_display(Scroll::Delta(delta));
         }
     }
 
@@ -577,28 +680,36 @@ impl LocalPtySession {
         delta: i32,
         previous: &TerminalSnapshot,
     ) -> TerminalSnapshot {
-        let mut term = self.term.lock();
+        if self.tmux_display.is_active() {
+            self.scroll_lines(delta);
+            if let Some(snapshot) = self.tmux_display.snapshot(self.size, Some(previous)) {
+                return snapshot;
+            }
+        }
+        let term = self.display_term();
+        let mut term = term.lock();
         scroll_snapshot_from_term(&mut term, self.size, &self.graphics, delta, previous)
     }
 
     pub fn page_up(&mut self) {
-        self.term.lock().scroll_display(Scroll::PageUp);
+        self.display_term().lock().scroll_display(Scroll::PageUp);
     }
 
     pub fn page_down(&mut self) {
-        self.term.lock().scroll_display(Scroll::PageDown);
+        self.display_term().lock().scroll_display(Scroll::PageDown);
     }
 
     pub fn scroll_to_top(&mut self) {
-        self.term.lock().scroll_display(Scroll::Top);
+        self.display_term().lock().scroll_display(Scroll::Top);
     }
 
     pub fn scroll_to_bottom(&mut self) {
-        self.term.lock().scroll_display(Scroll::Bottom);
+        self.display_term().lock().scroll_display(Scroll::Bottom);
     }
 
     pub fn scroll_to_display_offset(&mut self, offset: usize) {
-        let mut term = self.term.lock();
+        let term = self.display_term();
+        let mut term = term.lock();
         let max_offset = term.total_lines().saturating_sub(term.screen_lines());
         let target = offset.min(max_offset);
         let current = term.grid().display_offset();
@@ -609,27 +720,37 @@ impl LocalPtySession {
     }
 
     pub fn search_matches(&self, query: &str) -> Vec<TerminalSearchMatch> {
-        let term = self.term.lock();
+        let term = self.display_term();
+        let term = term.lock();
         search_matches_from_term(&term, self.size.cols, query)
     }
 
     pub fn search_source(&self) -> TerminalSearchSource {
-        TerminalSearchSource::new(self.term.clone(), self.size.cols)
+        TerminalSearchSource::new(self.display_term(), self.size.cols)
     }
 
     pub fn clear_buffer(&mut self) {
-        let mut term = self.term.lock();
+        let term = self.display_term();
+        let mut term = term.lock();
         crate::session::clear_terminal_buffer(&mut term);
         self.graphics.clear();
     }
 
     pub fn snapshot(&self) -> TerminalSnapshot {
-        let term = self.term.lock();
+        if let Some(snapshot) = self.tmux_display.snapshot(self.size, None) {
+            return snapshot;
+        }
+        let term = self.display_term();
+        let term = term.lock();
         snapshot_from_term(&term, self.size, &self.graphics)
     }
 
     pub fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
-        let mut term = self.term.lock();
+        if let Some(snapshot) = self.tmux_display.snapshot(self.size, Some(previous)) {
+            return snapshot;
+        }
+        let term = self.display_term();
+        let mut term = term.lock();
         incremental_snapshot_from_term(&mut term, self.size, &self.graphics, previous)
     }
 
@@ -638,7 +759,12 @@ impl LocalPtySession {
         display_offset: usize,
         rows: usize,
     ) -> TerminalSnapshot {
-        let term = self.term.lock();
+        let requested_size = TerminalSize { rows, ..self.size };
+        if let Some(snapshot) = self.tmux_display.snapshot(requested_size, None) {
+            return snapshot;
+        }
+        let term = self.display_term();
+        let term = term.lock();
         snapshot_from_term_with_display_offset(
             &term,
             self.size,

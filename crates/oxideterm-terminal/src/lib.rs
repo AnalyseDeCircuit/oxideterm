@@ -41,6 +41,11 @@ mod search;
 mod session;
 mod shell_completion;
 mod shell_integration;
+mod tmux;
+
+pub use tmux::{
+    TmuxAction, TmuxSeparator, TmuxSeparatorDirection, TmuxSessionInfo, TmuxUiState, TmuxWindowInfo,
+};
 
 pub use activity::TerminalActivityReceiver;
 pub use alacritty_terminal::term::TermMode;

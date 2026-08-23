@@ -50,6 +50,9 @@ pub struct SshPtySession {
     trzsz_consumer: Option<TrzszConsumer>,
     modem_consumer: ModemConsumer,
     shell_integration: TerminalShellIntegration,
+    tmux_display: Arc<crate::tmux::TmuxDisplay>,
+    tmux_controller: Option<crate::tmux::TmuxController>,
+    tmux_command_queue: VecDeque<Vec<u8>>,
 }
 
 impl SshPtySession {
@@ -111,9 +114,14 @@ impl SshPtySession {
         };
         let (listener, event_rx) = local_event_channel();
         let activity = listener.activity_sender();
+        let tmux_display = Arc::new(crate::tmux::TmuxDisplay::default());
 
         let term_config = interactive_terminal_config(scrollback_lines);
-        let term = Arc::new(FairMutex::new(Term::new(term_config, &size, listener)));
+        let term = Arc::new(FairMutex::new(Term::new(
+            term_config,
+            &size,
+            listener.clone(),
+        )));
 
         // GPUI owns a backend runtime for SSH-adjacent work; standalone
         // terminal sessions keep this fallback runtime alive for compatibility.
@@ -237,6 +245,7 @@ impl SshPtySession {
         }
 
         let trzsz_consumer = config.trzsz_policy().map(TrzszConsumer::new);
+        let tmux_graphics_options = graphics_options.clone();
         Self {
             config,
             term,
@@ -269,6 +278,16 @@ impl SshPtySession {
             trzsz_consumer,
             modem_consumer: ModemConsumer::new(),
             shell_integration: TerminalShellIntegration::default(),
+            tmux_display: tmux_display.clone(),
+            tmux_controller: Some(crate::tmux::TmuxController::new(
+                tmux_display,
+                listener,
+                size,
+                encoding,
+                scrollback_lines,
+                tmux_graphics_options,
+            )),
+            tmux_command_queue: VecDeque::new(),
         }
     }
 
@@ -309,6 +328,7 @@ impl SshPtySession {
             }
             Err(error) => {
                 self.lifecycle = TerminalLifecycle::Exited(None);
+                self.tmux_display.reset();
                 self.feed_utf8_terminal_output(
                     format!("\r\nSSH connection failed: {error}\r\n").as_bytes(),
                 );
@@ -367,6 +387,39 @@ impl SshPtySession {
     }
 
     fn feed_plain_transport_output_to_terminal(&mut self, bytes: &[u8]) {
+        let mut controller = self
+            .tmux_controller
+            .take()
+            .expect("SSH tmux controller must remain owned by its terminal session");
+        let record_output = self.output_events_enabled;
+        let mut tmux_events = Vec::new();
+        let result = controller.advance(
+            bytes,
+            |terminal_bytes| self.feed_normal_transport_output_to_terminal(terminal_bytes),
+            record_output,
+            |event| tmux_events.push(event),
+        );
+        self.tmux_controller = Some(controller);
+        self.pending_events.extend(tmux_events);
+        match result {
+            Ok(outcome) => {
+                if outcome.entered {
+                    self.graphics.clear();
+                    self.graphics_alt_screen_active = false;
+                }
+                self.queue_tmux_commands(outcome.commands);
+                if outcome.changed {
+                    self.pending_events.push(TerminalEvent::Wakeup);
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "tmux control stream was rejected");
+                self.queue_tmux_commands(vec![b"\n".to_vec()]);
+            }
+        }
+    }
+
+    fn feed_normal_transport_output_to_terminal(&mut self, bytes: &[u8]) {
         // In-band protocols own raw transport bytes. Plugin output transforms
         // are applied only after modem/trzsz consumers release display data.
         let processed_output = self.process_terminal_output(bytes);
@@ -612,6 +665,7 @@ impl SshPtySession {
                 Err(TryRecvError::Disconnected) => {
                     if self.lifecycle.is_running() {
                         self.lifecycle = TerminalLifecycle::Exited(None);
+                        self.tmux_display.reset();
                         self.pending_events.push(TerminalEvent::ChildExited(None));
                     }
                     report.mark_changed();
@@ -648,7 +702,7 @@ impl SshPtySession {
                 true
             }
             AlacEvent::CursorBlinkingChange => {
-                let blinking = self.term.lock().cursor_style().blinking;
+                let blinking = self.display_term().lock().cursor_style().blinking;
                 self.pending_events
                     .push(TerminalEvent::BlinkChanged(blinking));
                 true
@@ -686,6 +740,49 @@ impl SshPtySession {
             .try_send(command)
             .map_err(|error| anyhow::anyhow!(error.to_string()))
     }
+
+    fn write_transport_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        if self.lifecycle.is_running() && !bytes.is_empty() {
+            self.send_command(SshTransportCommand::Data(bytes.to_vec()))?;
+        }
+        Ok(())
+    }
+
+    fn queue_tmux_commands(&mut self, commands: impl IntoIterator<Item = Vec<u8>>) {
+        self.tmux_command_queue.extend(commands);
+        self.flush_tmux_commands();
+    }
+
+    fn flush_tmux_commands(&mut self) -> bool {
+        let Some(handle) = self.handle.as_mut() else {
+            return false;
+        };
+        let mut changed = false;
+        while let Some(command) = self.tmux_command_queue.pop_front() {
+            match handle
+                .command_tx
+                .try_send(SshTransportCommand::Data(command))
+            {
+                Ok(()) => changed = true,
+                Err(tokio::sync::mpsc::error::TrySendError::Full(
+                    SshTransportCommand::Data(command),
+                )) => {
+                    self.tmux_command_queue.push_front(command);
+                    break;
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    self.tmux_command_queue.clear();
+                    break;
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => unreachable!(),
+            }
+        }
+        changed
+    }
+
+    fn display_term(&self) -> Arc<FairMutex<Term<LocalEventListener>>> {
+        self.tmux_display.term().unwrap_or_else(|| self.term.clone())
+    }
 }
 
 impl TerminalSessionBackend for SshPtySession {
@@ -714,6 +811,7 @@ impl TerminalSessionBackend for SshPtySession {
     fn read_pending(&mut self) -> bool {
         let mut changed = self.process_connect_result();
         changed |= self.drain_transport_output().changed;
+        changed |= self.flush_tmux_commands();
         changed |= self.flush_trzsz_server_writes();
         changed |= self.flush_modem_server_writes();
         while let Ok(event) = self.event_rx.try_recv() {
@@ -731,6 +829,9 @@ impl TerminalSessionBackend for SshPtySession {
             report.mark_changed();
         }
         report.combine(self.drain_transport_output_with_budget(budget));
+        if self.flush_tmux_commands() {
+            report.mark_changed();
+        }
         if self.flush_trzsz_server_writes() {
             report.mark_changed();
         }
@@ -766,29 +867,38 @@ impl TerminalSessionBackend for SshPtySession {
     }
 
     fn write_input(&mut self, bytes: &[u8]) -> Result<()> {
-        self.write_protocol_bytes(bytes)
+        if let Some(commands) = self.tmux_display.input_commands(bytes) {
+            self.queue_tmux_commands(commands);
+            return Ok(());
+        }
+        self.write_transport_bytes(bytes)
     }
 
     fn write_protocol_bytes(&mut self, bytes: &[u8]) -> Result<()> {
-        if self.lifecycle.is_running() && !bytes.is_empty() {
-            self.send_command(SshTransportCommand::Data(bytes.to_vec()))?;
+        if let Some(commands) = self.tmux_display.protocol_commands(bytes) {
+            self.queue_tmux_commands(commands);
+            return Ok(());
         }
-        Ok(())
+        self.write_transport_bytes(bytes)
     }
 
     fn write_text(&mut self, text: &str) -> Result<()> {
-        if self.route_trzsz_text_input(text) {
+        if !self.tmux_display.is_active() && self.route_trzsz_text_input(text) {
             return Ok(());
         }
         let encoded = self.input_encoder.encode_text(text);
-        self.write_protocol_bytes(encoded.as_ref())
+        self.write_input(encoded.as_ref())
     }
 
     fn paste_text(&mut self, text: &str) -> Result<()> {
         let bytes = self
             .input_encoder
             .encode_paste(text, self.mode().contains(TermMode::BRACKETED_PASTE));
-        self.write_protocol_bytes(&bytes)
+        if let Some(commands) = self.tmux_display.paste_commands(&bytes) {
+            self.queue_tmux_commands(commands);
+            return Ok(());
+        }
+        self.write_input(&bytes)
     }
 
     fn set_encoding(&mut self, encoding: TerminalEncoding) {
@@ -801,6 +911,9 @@ impl TerminalSessionBackend for SshPtySession {
         self.privilege_prompt = TerminalPrivilegePromptStream::default();
         self.input_encoder.set_encoding(encoding);
         self.encoding_detector.set_encoding(encoding);
+        if let Some(controller) = self.tmux_controller.as_mut() {
+            controller.set_encoding(encoding);
+        }
     }
 
     fn set_output_processor(&mut self, processor: Option<TerminalOutputProcessor>) {
@@ -875,12 +988,57 @@ impl TerminalSessionBackend for SshPtySession {
     }
 
     fn mode(&self) -> TermMode {
-        *self.term.lock().mode()
+        let term = self.display_term();
+        *term.lock().mode()
+    }
+
+    fn select_tmux_pane_at(&mut self, col: usize, row: usize) -> Result<bool> {
+        let Some(command) = self.tmux_display.select_pane_command(col, row) else {
+            return Ok(false);
+        };
+        self.queue_tmux_commands([command]);
+        Ok(true)
+    }
+
+    fn tmux_local_point(&self, col: usize, row: usize) -> (usize, usize) {
+        self.tmux_display.local_point(col, row)
+    }
+
+    fn tmux_state(&self) -> Option<crate::TmuxUiState> {
+        self.tmux_display.ui_state()
+    }
+
+    fn tmux_action(&mut self, action: crate::TmuxAction) -> Result<bool> {
+        let Some(command) = self.tmux_display.action_command(action) else {
+            return Ok(false);
+        };
+        self.queue_tmux_commands([command]);
+        Ok(true)
+    }
+
+    fn tmux_separator_at(&self, col: usize, row: usize) -> Option<crate::TmuxSeparator> {
+        self.tmux_display.separator_at(col, row)
+    }
+
+    fn resize_tmux_separator(
+        &mut self,
+        separator: crate::TmuxSeparator,
+        delta: i32,
+    ) -> Result<bool> {
+        let Some(command) = self
+            .tmux_display
+            .resize_separator_command(separator, delta)
+        else {
+            return Ok(false);
+        };
+        self.queue_tmux_commands([command]);
+        Ok(true)
     }
 
     fn set_focused(&mut self, focused: bool) -> Result<()> {
         let should_report = {
-            let mut term = self.term.lock();
+            let term = self.display_term();
+            let mut term = term.lock();
             term.is_focused = focused;
             term.mode().contains(TermMode::FOCUS_IN_OUT)
         };
@@ -907,10 +1065,16 @@ impl TerminalSessionBackend for SshPtySession {
             cell_height: resize.cell_height,
         };
         self.term.lock().resize(size);
+        if let Some(controller) = self.tmux_controller.as_mut() {
+            controller.resize(size);
+        }
         let _ = self.send_command(SshTransportCommand::Resize {
             cols: resize.cols as u16,
             rows: resize.rows as u16,
         });
+        if let Some(command) = self.tmux_display.resize_command(resize.cols, resize.rows) {
+            self.queue_tmux_commands([command]);
+        }
         // Deferred SSH sessions use this first real GPUI layout resize as the
         // remote PTY allocation boundary. Post-connect input must follow it so
         // the transport cannot fall back to a synthetic 120x40 shell.
@@ -920,7 +1084,7 @@ impl TerminalSessionBackend for SshPtySession {
 
     fn scroll_lines(&mut self, delta: i32) {
         if delta != 0 {
-            self.term.lock().scroll_display(Scroll::Delta(delta));
+            self.display_term().lock().scroll_display(Scroll::Delta(delta));
         }
     }
 
@@ -929,7 +1093,20 @@ impl TerminalSessionBackend for SshPtySession {
         delta: i32,
         previous: &TerminalSnapshot,
     ) -> TerminalSnapshot {
-        let mut term = self.term.lock();
+        if self.tmux_display.is_active() {
+            self.scroll_lines(delta);
+            let size = TerminalSize {
+                cols: self.resize.cols,
+                rows: self.resize.rows,
+                cell_width: self.resize.cell_width,
+                cell_height: self.resize.cell_height,
+            };
+            if let Some(snapshot) = self.tmux_display.snapshot(size, Some(previous)) {
+                return snapshot;
+            }
+        }
+        let term = self.display_term();
+        let mut term = term.lock();
         scroll_snapshot_from_term(
             &mut term,
             TerminalSize {
@@ -945,23 +1122,24 @@ impl TerminalSessionBackend for SshPtySession {
     }
 
     fn page_up(&mut self) {
-        self.term.lock().scroll_display(Scroll::PageUp);
+        self.display_term().lock().scroll_display(Scroll::PageUp);
     }
 
     fn page_down(&mut self) {
-        self.term.lock().scroll_display(Scroll::PageDown);
+        self.display_term().lock().scroll_display(Scroll::PageDown);
     }
 
     fn scroll_to_top(&mut self) {
-        self.term.lock().scroll_display(Scroll::Top);
+        self.display_term().lock().scroll_display(Scroll::Top);
     }
 
     fn scroll_to_bottom(&mut self) {
-        self.term.lock().scroll_display(Scroll::Bottom);
+        self.display_term().lock().scroll_display(Scroll::Bottom);
     }
 
     fn scroll_to_display_offset(&mut self, offset: usize) {
-        let mut term = self.term.lock();
+        let term = self.display_term();
+        let mut term = term.lock();
         let max_offset = term.total_lines().saturating_sub(term.screen_lines());
         let target = offset.min(max_offset);
         let current = term.grid().display_offset();
@@ -972,60 +1150,65 @@ impl TerminalSessionBackend for SshPtySession {
     }
 
     fn search_matches(&self, query: &str) -> Vec<TerminalSearchMatch> {
-        let term = self.term.lock();
+        let term = self.display_term();
+        let term = term.lock();
         search_matches_from_term(&term, self.resize.cols, query)
     }
 
     fn search_source(&self) -> Option<crate::TerminalSearchSource> {
         Some(crate::TerminalSearchSource::new(
-            self.term.clone(),
+            self.display_term(),
             self.resize.cols,
         ))
     }
 
     fn clear_buffer(&mut self) {
-        let mut term = self.term.lock();
+        let term = self.display_term();
+        let mut term = term.lock();
         clear_terminal_buffer(&mut term);
         self.graphics.clear();
     }
 
     fn command_output_text(&self, mark: &TerminalCommandMark) -> String {
-        let term = self.term.lock();
+        let term = self.display_term();
+        let term = term.lock();
         command_output_text_from_term(&term, mark)
     }
 
     fn buffer_text(&self) -> String {
-        let term = self.term.lock();
+        let term = self.display_term();
+        let term = term.lock();
         terminal_buffer_text_from_term(&term, self.resize.cols)
     }
 
     fn snapshot(&self) -> TerminalSnapshot {
-        let term = self.term.lock();
-        snapshot_from_term(
-            &term,
-            TerminalSize {
-                cols: self.resize.cols,
-                rows: self.resize.rows,
-                cell_width: self.resize.cell_width,
-                cell_height: self.resize.cell_height,
-            },
-            &self.graphics,
-        )
+        let size = TerminalSize {
+            cols: self.resize.cols,
+            rows: self.resize.rows,
+            cell_width: self.resize.cell_width,
+            cell_height: self.resize.cell_height,
+        };
+        if let Some(snapshot) = self.tmux_display.snapshot(size, None) {
+            return snapshot;
+        }
+        let term = self.display_term();
+        let term = term.lock();
+        snapshot_from_term(&term, size, &self.graphics)
     }
 
     fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
-        let mut term = self.term.lock();
-        incremental_snapshot_from_term(
-            &mut term,
-            TerminalSize {
-                cols: self.resize.cols,
-                rows: self.resize.rows,
-                cell_width: self.resize.cell_width,
-                cell_height: self.resize.cell_height,
-            },
-            &self.graphics,
-            previous,
-        )
+        let size = TerminalSize {
+            cols: self.resize.cols,
+            rows: self.resize.rows,
+            cell_width: self.resize.cell_width,
+            cell_height: self.resize.cell_height,
+        };
+        if let Some(snapshot) = self.tmux_display.snapshot(size, Some(previous)) {
+            return snapshot;
+        }
+        let term = self.display_term();
+        let mut term = term.lock();
+        incremental_snapshot_from_term(&mut term, size, &self.graphics, previous)
     }
 
     fn snapshot_with_display_offset(
@@ -1033,14 +1216,22 @@ impl TerminalSessionBackend for SshPtySession {
         display_offset: usize,
         rows: usize,
     ) -> TerminalSnapshot {
-        let term = self.term.lock();
+        let size = TerminalSize {
+            cols: self.resize.cols,
+            rows,
+            cell_width: self.resize.cell_width,
+            cell_height: self.resize.cell_height,
+        };
+        if let Some(snapshot) = self.tmux_display.snapshot(size, None) {
+            return snapshot;
+        }
+        let term = self.display_term();
+        let term = term.lock();
         snapshot_from_term_with_display_offset(
             &term,
             TerminalSize {
-                cols: self.resize.cols,
                 rows: self.resize.rows,
-                cell_width: self.resize.cell_width,
-                cell_height: self.resize.cell_height,
+                ..size
             },
             &self.graphics,
             display_offset,
@@ -1064,6 +1255,7 @@ impl TerminalSessionBackend for SshPtySession {
         self.handle = None;
         self.runtime = None;
         self.lifecycle = TerminalLifecycle::Closed;
+        self.tmux_display.reset();
     }
 
     fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {

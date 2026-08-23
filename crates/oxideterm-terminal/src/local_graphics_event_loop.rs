@@ -56,6 +56,7 @@ const PTY_CHILD_EVENT_TOKEN: usize = 1;
 
 pub(crate) enum LocalGraphicsMsg {
     Input(Cow<'static, [u8]>),
+    ControlInput(Cow<'static, [u8]>),
     Shutdown,
     Resize(WindowSize),
     SetEncoding(TerminalEncoding),
@@ -95,6 +96,7 @@ pub(crate) struct LocalGraphicsEventLoop<U: EventListener> {
     size: TerminalSize,
     graphics_options: GraphicsOptions,
     encoding: TerminalEncoding,
+    tmux_controller: Option<crate::tmux::TmuxController>,
 }
 
 impl<U> LocalGraphicsEventLoop<U>
@@ -113,6 +115,7 @@ where
         size: TerminalSize,
         graphics_options: GraphicsOptions,
         encoding: TerminalEncoding,
+        tmux_controller: crate::tmux::TmuxController,
     ) -> io::Result<Self> {
         let (tx, rx) = mpsc::channel();
         Ok(Self {
@@ -130,6 +133,7 @@ where
             size,
             graphics_options,
             encoding,
+            tmux_controller: Some(tmux_controller),
         })
     }
 
@@ -289,17 +293,51 @@ where
         for event in events {
             match event {
                 ModemConsumerEvent::WriteTerminal(bytes) => {
-                    let (bytes, changed) = Self::advance_plain_output(
-                        state,
-                        terminal,
+                    let byte_len = bytes.len();
+                    let mut controller = state
+                        .tmux_controller
+                        .take()
+                        .expect("local tmux controller must remain owned by the reader state");
+                    let record_output = state.output_events_enabled;
+                    let result = controller.advance(
                         &bytes,
-                        size,
-                        magic_tx,
-                        event_tx,
-                        graphics_tx,
+                        |terminal_bytes| {
+                            let (_, changed) = Self::advance_plain_output(
+                                state,
+                                terminal,
+                                terminal_bytes,
+                                size,
+                                magic_tx,
+                                event_tx,
+                                graphics_tx,
+                            );
+                            graphics_changed |= changed;
+                        },
+                        record_output,
+                        |event| {
+                            let _ = event_tx.send(event);
+                        },
                     );
-                    parsed_bytes += bytes;
-                    graphics_changed |= changed;
+                    state.tmux_controller = Some(controller);
+                    match result {
+                        Ok(outcome) => {
+                            if outcome.entered {
+                                state.utf8_guard = Utf8ResidualGuard::default();
+                                let _ =
+                                    graphics_tx.send(TerminalGraphicsEvent::Delete { id: None });
+                            }
+                            state.push_priority_writes(
+                                outcome.commands.into_iter().map(Cow::Owned).collect(),
+                            );
+                            graphics_changed |= outcome.changed;
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, "tmux control stream was rejected");
+                            // An empty control command asks tmux to detach this client.
+                            state.push_priority_write(Cow::Borrowed(b"\n"));
+                        }
+                    }
+                    parsed_bytes = parsed_bytes.saturating_add(byte_len);
                 }
                 ModemConsumerEvent::SendServer(bytes) => {
                     state.push_priority_write(Cow::Owned(bytes));
@@ -330,6 +368,9 @@ where
                 LocalGraphicsMsg::Input(input) => {
                     state.write_list.push_back(Writing::new(input));
                 }
+                LocalGraphicsMsg::ControlInput(input) => {
+                    state.push_priority_write(input);
+                }
                 LocalGraphicsMsg::Resize(window_size) => {
                     let grid_changed = self.size.cols != window_size.num_cols as usize
                         || self.size.rows != window_size.num_lines as usize;
@@ -347,6 +388,9 @@ where
                             });
                     }
                     self.pty.on_resize(window_size);
+                    if let Some(controller) = state.tmux_controller.as_mut() {
+                        controller.resize(self.size);
+                    }
                 }
                 LocalGraphicsMsg::SetEncoding(encoding) => {
                     state.set_encoding(encoding);
@@ -599,6 +643,9 @@ where
                         // poller when they enqueue protocol bytes for the PTY.
                         let _ = modem_poller.notify();
                     }),
+                    self.tmux_controller
+                        .take()
+                        .expect("local tmux controller must be transferred once"),
                 );
                 let mut buf = [0u8; LOCAL_PTY_READ_BUFFER_BYTES];
                 let poll_opts = PollMode::Level;
@@ -795,6 +842,7 @@ impl LocalGraphicsEventLoopSender {
 }
 
 struct LocalGraphicsState {
+    priority_writes: VecDeque<Writing>,
     write_list: VecDeque<Writing>,
     writing: Option<Writing>,
     parser: ansi::Processor,
@@ -810,6 +858,7 @@ struct LocalGraphicsState {
     shell_integration: TerminalShellIntegration,
     modem_consumer: ModemConsumer,
     alt_screen_active: bool,
+    tmux_controller: Option<crate::tmux::TmuxController>,
 }
 
 impl LocalGraphicsState {
@@ -817,8 +866,10 @@ impl LocalGraphicsState {
         graphics_options: GraphicsOptions,
         encoding: TerminalEncoding,
         modem_wake: Arc<dyn Fn() + Send + Sync + 'static>,
+        tmux_controller: crate::tmux::TmuxController,
     ) -> Self {
         Self {
+            priority_writes: VecDeque::new(),
             write_list: VecDeque::new(),
             writing: None,
             parser: ansi::Processor::new(),
@@ -834,6 +885,7 @@ impl LocalGraphicsState {
             shell_integration: TerminalShellIntegration::default(),
             modem_consumer: ModemConsumer::with_wake(modem_wake),
             alt_screen_active: false,
+            tmux_controller: Some(tmux_controller),
         }
     }
 
@@ -842,6 +894,9 @@ impl LocalGraphicsState {
         self.output_decoder.reset();
         self.privilege_prompt = TerminalPrivilegePromptStream::default();
         self.encoding_detector.set_encoding(encoding);
+        if let Some(controller) = self.tmux_controller.as_mut() {
+            controller.set_encoding(encoding);
+        }
     }
 
     fn process_output<'a>(&self, bytes: &'a [u8]) -> Cow<'a, [u8]> {
@@ -860,7 +915,10 @@ impl LocalGraphicsState {
     }
 
     fn goto_next(&mut self) {
-        self.writing = self.write_list.pop_front();
+        self.writing = self
+            .priority_writes
+            .pop_front()
+            .or_else(|| self.write_list.pop_front());
     }
 
     fn take_current(&mut self) -> Option<Writing> {
@@ -868,7 +926,7 @@ impl LocalGraphicsState {
     }
 
     fn needs_write(&self) -> bool {
-        self.writing.is_some() || !self.write_list.is_empty()
+        self.writing.is_some() || !self.priority_writes.is_empty() || !self.write_list.is_empty()
     }
 
     fn set_current(&mut self, next: Option<Writing>) {
@@ -880,15 +938,15 @@ impl LocalGraphicsState {
             return;
         }
 
-        self.write_list.push_front(Writing::new(bytes));
+        self.priority_writes.push_back(Writing::new(bytes));
         self.ensure_next();
     }
 
     fn push_priority_writes(&mut self, writes: Vec<Cow<'static, [u8]>>) {
-        // Insert the batch ahead of ordinary input without reversing its FIFO order.
-        for bytes in writes.into_iter().rev() {
+        // Protocol replies preempt ordinary input while retaining their wire order.
+        for bytes in writes {
             if !bytes.is_empty() {
-                self.write_list.push_front(Writing::new(bytes));
+                self.priority_writes.push_back(Writing::new(bytes));
             }
         }
         self.ensure_next();
@@ -898,13 +956,14 @@ impl LocalGraphicsState {
         if bytes.is_empty() {
             return;
         }
-        self.write_list
-            .push_front(Writing::new_modem(bytes, transfer));
+        self.priority_writes
+            .push_back(Writing::new_modem(bytes, transfer));
         self.ensure_next();
     }
 
     fn has_modem_write(&self) -> bool {
         self.writing.as_ref().is_some_and(Writing::is_modem)
+            || self.priority_writes.iter().any(Writing::is_modem)
             || self.write_list.iter().any(Writing::is_modem)
     }
 
