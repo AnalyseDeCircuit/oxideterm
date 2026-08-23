@@ -1412,16 +1412,47 @@ impl AiOrchestratorRuntimeSnapshot {
                     strategy_for_task.clone(),
                 );
 
-                if strategy_for_task == TransferStrategy::DirectoryTar {
-                    if direction_for_task == "upload" {
-                        {
+                if strategy_for_task == TransferStrategy::DirectoryTar
+                    && tar_capabilities.supports_tar
+                {
+                    let profile = match direction_for_task.as_str() {
+                        "upload" => profile_local_directory(std::path::Path::new(
+                            &local_path_for_task,
+                        ))
+                        .await
+                        .ok(),
+                        "download" => {
+                            let sftp = owner_session.lock().await;
+                            match sftp
+                                .profile_remote_directory(
+                                    &remote_path_for_task,
+                                    &transfer_id_for_task,
+                                    &Some(manager.clone()),
+                                )
+                                .await
+                            {
+                                Ok(profile) => Some(profile),
+                                Err(error) if error.is_transfer_control() => {
+                                    return Err(error.to_string());
+                                }
+                                Err(_) => None,
+                            }
+                        }
+                        _ => unreachable!(),
+                    };
+                    manager
+                        .check_control(&transfer_id_for_task)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    if let Some(profile) = profile.filter(|profile| profile.prefers_tar()) {
+                        if direction_for_task == "upload" {
                             let sftp = owner_session.lock().await;
                             for prefix in ai_remote_directory_prefixes(&remote_path_for_task) {
                                 let _ = sftp.mkdir(&prefix).await;
                             }
                         }
-                    }
-                    if tar_capabilities.supports_tar {
+                        let compression =
+                            profile.recommended_compression(tar_capabilities.compression);
                         let tar_result = match direction_for_task.as_str() {
                             "upload" => tar_upload_directory(
                                 &connection_handle,
@@ -1430,7 +1461,10 @@ impl AiOrchestratorRuntimeSnapshot {
                                 &transfer_id_for_task,
                                 None,
                                 Some(manager.clone()),
-                                Some(tar_capabilities.compression),
+                                TarTransferOptions {
+                                    profile,
+                                    compression,
+                                },
                             )
                             .await,
                             "download" => tar_download_directory(
@@ -1440,14 +1474,24 @@ impl AiOrchestratorRuntimeSnapshot {
                                 &transfer_id_for_task,
                                 None,
                                 Some(manager.clone()),
-                                Some(tar_capabilities.compression),
+                                TarTransferOptions {
+                                    profile,
+                                    compression,
+                                },
                             )
                             .await,
                             _ => unreachable!(),
                         };
                         match tar_result {
-                            Ok(count) => return Ok((count, TransferStrategy::DirectoryTar, false)),
-                            Err(error) if !control.is_cancelled() => {
+                            Ok(result) => {
+                                return Ok((
+                                    result.item_count,
+                                    TransferStrategy::DirectoryTar,
+                                    false,
+                                ));
+                            }
+                            Err(error) if !error.is_transfer_control() =>
+                            {
                                 manager.update_background_transfer_strategy(
                                     &transfer_id_for_task,
                                     TransferStrategy::DirectoryRecursive,

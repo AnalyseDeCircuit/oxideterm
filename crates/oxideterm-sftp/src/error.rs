@@ -38,6 +38,14 @@ pub enum SftpError {
 }
 
 impl SftpError {
+    /// Control-flow failures must stop the current strategy instead of triggering fallback I/O.
+    pub fn is_transfer_control(&self) -> bool {
+        matches!(
+            self,
+            Self::TransferCancelled | Self::TransferInterrupted(_) | Self::TransferShutdown
+        )
+    }
+
     pub fn is_channel_recoverable(&self) -> bool {
         match self {
             Self::ChannelError(_) | Self::ProtocolError(_) | Self::SubsystemNotAvailable(_) => true,

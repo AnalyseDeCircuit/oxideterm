@@ -406,6 +406,46 @@ impl SftpSession {
         result
     }
 
+    /// Profiles regular files without opening their contents; symlinks are
+    /// excluded so archive and recursive directory transfers select identically.
+    pub async fn profile_remote_directory(
+        &self,
+        remote_path: &str,
+        transfer_id: &str,
+        transfer_manager: &Option<Arc<SftpTransferManager>>,
+    ) -> Result<TarDirectoryProfile, SftpError> {
+        const MAX_DEPTH: u32 = 64;
+        let canonical_remote = self.resolve_path(remote_path).await?;
+        let mut profile = TarDirectoryProfile::default();
+        let mut stack = VecDeque::from([(canonical_remote, 0)]);
+        while let Some((remote_dir, depth)) = stack.pop_back() {
+            check_transfer_control(transfer_manager, transfer_id).await?;
+            if depth >= MAX_DEPTH {
+                return Err(SftpError::TransferError(format!(
+                    "directory profile recursion depth {MAX_DEPTH} reached at {remote_dir}"
+                )));
+            }
+            for entry in self
+                .list_dir(
+                    &remote_dir,
+                    Some(ListFilter {
+                        show_hidden: true,
+                        pattern: None,
+                        sort: SortOrder::Name,
+                    }),
+                )
+                .await?
+            {
+                match entry.file_type {
+                    FileType::Directory => stack.push_back((entry.path, depth + 1)),
+                    FileType::File => profile.record_file(Path::new(&entry.name), entry.size),
+                    FileType::Symlink | FileType::Unknown => {}
+                }
+            }
+        }
+        Ok(profile)
+    }
+
     pub async fn upload_dir(
         &self,
         local_path: &str,

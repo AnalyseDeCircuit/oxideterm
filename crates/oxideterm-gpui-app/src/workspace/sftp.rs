@@ -33,12 +33,12 @@ use oxideterm_sftp::{
     BackgroundTransferState, FileInfo as RemoteFileInfo, FileType as RemoteFileType,
     ListFilter as RemoteListFilter, LocalDownloadDisposition, PreviewContent,
     RemoteRelayProgressContext, SftpError, SftpSession, SftpTransferGuard,
-    SortOrder as RemoteSortOrder, StoredTransferProgress, TarCapabilities,
+    SortOrder as RemoteSortOrder, StoredTransferProgress, TarCapabilities, TarTransferOptions,
     TransferDirection as SftpTransferDirection, TransferProgress,
     TransferProtocol as RemoteTransferProtocol, TransferStrategy as RemoteTransferStrategy,
     TransferType as RemoteTransferType, encode_to_encoding, scp_download_directory,
-    scp_download_file, scp_upload_directory, scp_upload_file, tar_download_directory,
-    tar_upload_directory,
+    profile_local_directory, scp_download_file, scp_upload_directory, scp_upload_file,
+    tar_download_directory, tar_upload_directory,
 };
 pub(in crate::workspace::sftp) use oxideterm_sftp::{
     TextDiffLine as SftpDiffLine, TextDiffLineKind as SftpDiffLineKind,

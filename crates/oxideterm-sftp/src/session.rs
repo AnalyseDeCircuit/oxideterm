@@ -40,8 +40,8 @@ use super::{
 };
 use crate::{
     ProgressStore, RemoteRelayProgressContext, SftpTransferGuard, SftpTransferManager,
-    StoredRemoteRelayProgress, StoredTransferProgress, TransferProtocol, TransferStrategy,
-    TransferType,
+    StoredRemoteRelayProgress, StoredTransferProgress, TarDirectoryProfile, TransferProtocol,
+    TransferStrategy, TransferType,
 };
 
 const SFTP_DOWNLOAD_MAX_REQUESTS: usize = 64;

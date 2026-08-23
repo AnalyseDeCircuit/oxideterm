@@ -9,8 +9,9 @@ use std::{
 };
 
 use oxideterm_sftp::{
-    ListFilter, PreviewContent, SftpError, SftpSession, SftpTransferManager, encode_to_encoding,
-    probe_tar_support, tar_download_directory, tar_upload_directory,
+    ListFilter, PreviewContent, SftpError, SftpSession, SftpTransferManager, TarCompression,
+    TarTransferOptions, encode_to_encoding, probe_tar_support, profile_local_directory,
+    tar_download_directory, tar_upload_directory,
 };
 use oxideterm_ssh::{NodeId, NodeRouter};
 use serde_json::{Value, json};
@@ -374,18 +375,24 @@ async fn native_plugin_sftp_result(
                 .resolve_connection(&node_id)
                 .await
                 .map_err(native_plugin_route_error)?;
-            let item_count = tar_upload_directory(
+            let profile = profile_local_directory(Path::new(&local_path))
+                .await
+                .map_err(native_plugin_sftp_error)?;
+            let result = tar_upload_directory(
                 &resolved.handle,
                 &local_path,
                 &remote_path,
                 &transfer_id,
                 None,
                 transfer_manager,
-                None,
+                TarTransferOptions {
+                    profile,
+                    compression: TarCompression::None,
+                },
             )
             .await
             .map_err(native_plugin_sftp_error)?;
-            Ok(json!(item_count))
+            Ok(json!(result.item_count))
         }
         "tarDownload" => {
             let node_id = native_plugin_sftp_node_id_arg(args)?;
@@ -396,18 +403,32 @@ async fn native_plugin_sftp_result(
                 .resolve_connection(&node_id)
                 .await
                 .map_err(native_plugin_route_error)?;
-            let item_count = tar_download_directory(
+            let profile = native_plugin_with_sftp(router, &node_id, |sftp| {
+                let remote_path = remote_path.clone();
+                let transfer_id = transfer_id.clone();
+                let transfer_manager = transfer_manager.clone();
+                Box::pin(async move {
+                    let sftp = sftp.lock().await;
+                    sftp.profile_remote_directory(&remote_path, &transfer_id, &transfer_manager)
+                        .await
+                })
+            })
+            .await?;
+            let result = tar_download_directory(
                 &resolved.handle,
                 &remote_path,
                 &local_path,
                 &transfer_id,
                 None,
                 transfer_manager,
-                None,
+                TarTransferOptions {
+                    profile,
+                    compression: TarCompression::None,
+                },
             )
             .await
             .map_err(native_plugin_sftp_error)?;
-            Ok(json!(item_count))
+            Ok(json!(result.item_count))
         }
         "rename" => {
             let node_id = native_plugin_sftp_node_id_arg(args)?;

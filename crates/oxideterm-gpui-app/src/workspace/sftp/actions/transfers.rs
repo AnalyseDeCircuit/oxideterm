@@ -1189,17 +1189,46 @@ impl WorkspaceApp {
                             &resolved_handle,
                         )
                         .await;
-                        tar_upload_directory(
-                            &resolved_handle,
-                            &local_path,
-                            &remote_path,
-                            &transfer_id,
-                            Some(progress_tx),
-                            Some(manager.clone()),
-                            Some(capabilities.compression),
-                        )
-                        .await
-                        .map_err(|error| error.to_string())?
+                        if capabilities.supports_tar {
+                            let profile = profile_local_directory(Path::new(&local_path))
+                                .await
+                                .map_err(|error| error.to_string())?;
+                            let compression =
+                                profile.recommended_compression(capabilities.compression);
+                            tar_upload_directory(
+                                &resolved_handle,
+                                &local_path,
+                                &remote_path,
+                                &transfer_id,
+                                Some(progress_tx),
+                                Some(manager.clone()),
+                                TarTransferOptions {
+                                    profile,
+                                    compression,
+                                },
+                            )
+                            .await
+                            .map_err(|error| error.to_string())?
+                            .item_count
+                        } else {
+                            manager.update_background_transfer_strategy(
+                                &transfer_id,
+                                RemoteTransferStrategy::DirectoryRecursive,
+                            );
+                            let sftp = backend
+                                .acquire_transfer_sftp()
+                                .await
+                                .map_err(|error| error.to_string())?;
+                            sftp.upload_dir(
+                                &local_path,
+                                &remote_path,
+                                &transfer_id,
+                                Some(progress_tx),
+                                Some(manager.clone()),
+                            )
+                            .await
+                            .map_err(|error| error.to_string())?
+                        }
                     }
                     (
                         SftpTransferDirection::Upload,
@@ -1226,7 +1255,16 @@ impl WorkspaceApp {
                             &resolved_handle,
                         )
                         .await;
-                        if capabilities.supports_tar {
+                        let profile = if capabilities.supports_tar {
+                            profile_local_directory(Path::new(&local_path)).await.ok()
+                        } else {
+                            None
+                        };
+                        manager
+                            .check_control(&transfer_id)
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        if let Some(profile) = profile.filter(|profile| profile.prefers_tar()) {
                             {
                                 let shared = backend
                                     .acquire_sftp()
@@ -1241,6 +1279,8 @@ impl WorkspaceApp {
                                 &transfer_id,
                                 RemoteTransferStrategy::DirectoryTar,
                             );
+                            let compression =
+                                profile.recommended_compression(capabilities.compression);
                             let tar_result = tar_upload_directory(
                                 &resolved_handle,
                                 &local_path,
@@ -1248,15 +1288,15 @@ impl WorkspaceApp {
                                 &transfer_id,
                                 Some(progress_tx.clone()),
                                 Some(manager.clone()),
-                                Some(capabilities.compression),
+                                TarTransferOptions {
+                                    profile,
+                                    compression,
+                                },
                             )
                             .await;
                             match tar_result {
-                                Ok(count) => count,
-                                Err(error)
-                                    if !manager
-                                        .get_control(&transfer_id)
-                                        .is_some_and(|control| control.is_cancelled()) =>
+                                Ok(result) => result.item_count,
+                                Err(error) if !error.is_transfer_control() =>
                                 {
                                     manager.update_background_transfer_strategy(
                                         &transfer_id,
@@ -1329,17 +1369,58 @@ impl WorkspaceApp {
                             &resolved_handle,
                         )
                         .await;
-                        tar_download_directory(
-                            &resolved_handle,
-                            &remote_path,
-                            &local_path,
-                            &transfer_id,
-                            Some(progress_tx),
-                            Some(manager.clone()),
-                            Some(capabilities.compression),
-                        )
-                        .await
-                        .map_err(|error| error.to_string())?
+                        if capabilities.supports_tar {
+                            let profile = {
+                                let shared = backend
+                                    .acquire_sftp()
+                                    .await
+                                    .map_err(|error| error.to_string())?;
+                                let shared = shared.lock().await;
+                                shared
+                                    .profile_remote_directory(
+                                        &remote_path,
+                                        &transfer_id,
+                                        &Some(manager.clone()),
+                                    )
+                                    .await
+                                    .map_err(|error| error.to_string())?
+                            };
+                            let compression =
+                                profile.recommended_compression(capabilities.compression);
+                            tar_download_directory(
+                                &resolved_handle,
+                                &remote_path,
+                                &local_path,
+                                &transfer_id,
+                                Some(progress_tx),
+                                Some(manager.clone()),
+                                TarTransferOptions {
+                                    profile,
+                                    compression,
+                                },
+                            )
+                            .await
+                            .map_err(|error| error.to_string())?
+                            .item_count
+                        } else {
+                            manager.update_background_transfer_strategy(
+                                &transfer_id,
+                                RemoteTransferStrategy::DirectoryRecursive,
+                            );
+                            let sftp = backend
+                                .acquire_transfer_sftp()
+                                .await
+                                .map_err(|error| error.to_string())?;
+                            sftp.download_dir(
+                                &remote_path,
+                                &local_path,
+                                &transfer_id,
+                                Some(progress_tx),
+                                Some(manager.clone()),
+                            )
+                            .await
+                            .map_err(|error| error.to_string())?
+                        }
                     }
                     (
                         SftpTransferDirection::Download,
@@ -1366,11 +1447,36 @@ impl WorkspaceApp {
                             &resolved_handle,
                         )
                         .await;
-                        if capabilities.supports_tar {
+                        let profile = if capabilities.supports_tar {
+                            let shared = backend
+                                .acquire_sftp()
+                                .await
+                                .map_err(|error| error.to_string())?;
+                            let shared = shared.lock().await;
+                            match shared
+                                .profile_remote_directory(
+                                    &remote_path,
+                                    &transfer_id,
+                                    &Some(manager.clone()),
+                                )
+                                .await
+                            {
+                                Ok(profile) => Some(profile),
+                                Err(error) if error.is_transfer_control() => {
+                                    return Err(error.to_string());
+                                }
+                                Err(_) => None,
+                            }
+                        } else {
+                            None
+                        };
+                        if let Some(profile) = profile.filter(|profile| profile.prefers_tar()) {
                             manager.update_background_transfer_strategy(
                                 &transfer_id,
                                 RemoteTransferStrategy::DirectoryTar,
                             );
+                            let compression =
+                                profile.recommended_compression(capabilities.compression);
                             let tar_result = tar_download_directory(
                                 &resolved_handle,
                                 &remote_path,
@@ -1378,15 +1484,15 @@ impl WorkspaceApp {
                                 &transfer_id,
                                 Some(progress_tx.clone()),
                                 Some(manager.clone()),
-                                Some(capabilities.compression),
+                                TarTransferOptions {
+                                    profile,
+                                    compression,
+                                },
                             )
                             .await;
                             match tar_result {
-                                Ok(count) => count,
-                                Err(error)
-                                    if !manager
-                                        .get_control(&transfer_id)
-                                        .is_some_and(|control| control.is_cancelled()) =>
+                                Ok(result) => result.item_count,
+                                Err(error) if !error.is_transfer_control() =>
                                 {
                                     manager.update_background_transfer_strategy(
                                         &transfer_id,

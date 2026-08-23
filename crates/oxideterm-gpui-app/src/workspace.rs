@@ -225,8 +225,8 @@ use oxideterm_settings_model::{
 use oxideterm_sftp::{
     BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
     BackgroundTransferState, LazyProgressStore, ProgressStore, RemoteRelayDisposition,
-    SftpTransferGuard, SftpTransferManager, StoredTransferProgress, TransferStrategy,
-    tar_download_directory, tar_upload_directory,
+    SftpTransferGuard, SftpTransferManager, StoredTransferProgress, TarTransferOptions,
+    TransferStrategy, profile_local_directory, tar_download_directory, tar_upload_directory,
 };
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ConnectionProgressReporter,
