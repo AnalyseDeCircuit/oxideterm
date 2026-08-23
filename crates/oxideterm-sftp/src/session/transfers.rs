@@ -887,14 +887,14 @@ impl SftpSession {
             SFTP_UPLOAD_MAX_REQUESTS,
             SFTP_SINGLE_FILE_MAX_INFLIGHT_BYTES,
         );
-        let mut buffer = vec![0u8; AdaptiveChunkSizer::MAX_CHUNK];
+        let mut buffer = vec![0u8; upload_buffer_len(job.total_bytes, 0)];
         let started = Instant::now();
         let mut transferred = 0u64;
         let mut last_progress = Instant::now();
         let mut diagnostics = LocalSftpDiagnostics::new();
         loop {
             check_transfer_control(transfer_manager, transfer_id).await?;
-            let chunk_size = remote_writer.target_chunk_len();
+            let chunk_size = remote_writer.target_chunk_len().min(buffer.len());
             let read_started = Instant::now();
             let read = local_file
                 .read(&mut buffer[..chunk_size])
@@ -1138,7 +1138,7 @@ impl SftpSession {
             SFTP_UPLOAD_MAX_REQUESTS,
             SFTP_SINGLE_FILE_MAX_INFLIGHT_BYTES,
         );
-        let mut buffer = vec![0u8; AdaptiveChunkSizer::MAX_CHUNK];
+        let mut buffer = vec![0u8; upload_buffer_len(job.total_bytes, offset)];
         let started = Instant::now();
         let mut transferred = offset;
         let mut last_progress = Instant::now();
@@ -1146,7 +1146,7 @@ impl SftpSession {
         let mut diagnostics = LocalSftpDiagnostics::new();
         loop {
             check_transfer_control(transfer_manager, transfer_id).await?;
-            let chunk_size = remote_writer.target_chunk_len();
+            let chunk_size = remote_writer.target_chunk_len().min(buffer.len());
             let read_started = Instant::now();
             let read = local_file
                 .read(&mut buffer[..chunk_size])
@@ -1249,6 +1249,13 @@ fn should_retry_upload_without_temporary_file(
             error,
             SftpError::PermissionDenied(path) if path == temporary_remote_path
         )
+}
+
+fn upload_buffer_len(total_bytes: u64, offset: u64) -> usize {
+    // Tiny uploads should not allocate and zero the full large-file work buffer.
+    total_bytes
+        .saturating_sub(offset)
+        .clamp(1, AdaptiveChunkSizer::MAX_CHUNK as u64) as usize
 }
 
 #[cfg(test)]
@@ -1384,5 +1391,26 @@ mod transfer_safety_tests {
             "/virtual/host/file.txt.oxide-part",
             0
         ));
+    }
+
+    #[test]
+    fn upload_buffer_matches_small_remaining_payloads() {
+        assert_eq!(upload_buffer_len(4 * 1024, 0), 4 * 1024);
+        assert_eq!(upload_buffer_len(8 * 1024, 6 * 1024), 2 * 1024);
+    }
+
+    #[test]
+    fn upload_buffer_keeps_empty_and_completed_uploads_readable() {
+        assert_eq!(upload_buffer_len(0, 0), 1);
+        assert_eq!(upload_buffer_len(4 * 1024, 4 * 1024), 1);
+        assert_eq!(upload_buffer_len(4 * 1024, 8 * 1024), 1);
+    }
+
+    #[test]
+    fn upload_buffer_caps_large_payloads_at_the_adaptive_maximum() {
+        assert_eq!(
+            upload_buffer_len(AdaptiveChunkSizer::MAX_CHUNK as u64 + 1, 0),
+            AdaptiveChunkSizer::MAX_CHUNK
+        );
     }
 }
