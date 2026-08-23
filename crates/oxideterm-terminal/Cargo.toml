@@ -18,6 +18,7 @@ oxideterm-terminal-encoding = { path = "../oxideterm-terminal-encoding" }
 oxideterm-terminal-graphics = { path = "../oxideterm-terminal-graphics" }
 oxideterm-terminal-model = { path = "../oxideterm-terminal-model" }
 oxideterm-terminal-triggers = { path = "../oxideterm-terminal-triggers" }
+oxideterm-tmux = { path = "../oxideterm-tmux" }
 oxideterm-trzsz = { path = "../oxideterm-trzsz" }
 polling.workspace = true
 serialport.workspace = true

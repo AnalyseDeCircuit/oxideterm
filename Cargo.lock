@@ -8502,6 +8502,7 @@ dependencies = [
  "oxideterm-terminal-graphics",
  "oxideterm-terminal-model",
  "oxideterm-terminal-triggers",
+ "oxideterm-tmux",
  "oxideterm-trzsz",
  "polling",
  "serialport",
@@ -8582,6 +8583,13 @@ name = "oxideterm-theme"
 version = "2.0.23"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "oxideterm-tmux"
+version = "2.0.23"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

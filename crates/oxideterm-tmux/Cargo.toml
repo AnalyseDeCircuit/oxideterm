@@ -1,0 +1,8 @@
+[package]
+name = "oxideterm-tmux"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+memchr.workspace = true

@@ -75,6 +75,7 @@ members = [
   "crates/oxideterm-terminal-semantic",
   "crates/oxideterm-terminal-unicode",
   "crates/oxideterm-theme",
+  "crates/oxideterm-tmux",
   "crates/oxideterm-trzsz",
   "crates/oxideterm-workspace",
   "crates/oxideterm-x11-forwarding",
@@ -180,6 +181,7 @@ libc = "0.2"
 log = { version = "0.4.16", features = ["kv_unstable_serde", "serde"] }
 mach2 = "0.5"
 media = { path = "crates/gpui-ce/gpui_media", version = "0.2.2", package = "gpui_media" }
+memchr = "2.7"
 memmap2 = "0.9"
 metal = "0.33"
 minisign-verify = "0.2"
