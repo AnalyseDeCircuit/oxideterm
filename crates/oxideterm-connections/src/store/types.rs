@@ -179,6 +179,23 @@ pub enum ConnectionTerminalDeleteSequence {
     ControlH,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConnectionTerminalSessionLogPolicy {
+    #[default]
+    Inherit,
+    Automatic,
+    // Manual keeps the terminal action available without starting a log on connect.
+    Manual,
+    Disabled,
+}
+
+impl ConnectionTerminalSessionLogPolicy {
+    fn is_inherit(&self) -> bool {
+        *self == Self::Inherit
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionTerminalOptions {
@@ -192,6 +209,11 @@ pub struct ConnectionTerminalOptions {
     pub semantic_scheme: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub highlight_rule_set: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "ConnectionTerminalSessionLogPolicy::is_inherit"
+    )]
+    pub session_log_policy: ConnectionTerminalSessionLogPolicy,
 }
 
 impl ConnectionTerminalOptions {
@@ -201,6 +223,7 @@ impl ConnectionTerminalOptions {
             && self.delete_sequence.is_none()
             && self.semantic_scheme.is_none()
             && self.highlight_rule_set.is_none()
+            && self.session_log_policy == ConnectionTerminalSessionLogPolicy::Inherit
     }
 }
 
@@ -821,6 +844,11 @@ pub struct SerialProfile {
     pub stop_bits: u8,
     pub parity: SerialParity,
     pub flow_control: SerialFlowControl,
+    #[serde(
+        default,
+        skip_serializing_if = "ConnectionTerminalOptions::inherits_application_defaults"
+    )]
+    pub terminal: ConnectionTerminalOptions,
     #[serde(default, skip_serializing_if = "is_false")]
     pub connect_on_open: bool,
     pub created_at: DateTime<Utc>,
@@ -844,6 +872,7 @@ pub struct SaveSerialProfileRequest {
     pub stop_bits: Option<u8>,
     pub parity: Option<SerialParity>,
     pub flow_control: Option<SerialFlowControl>,
+    pub terminal: ConnectionTerminalOptions,
     pub connect_on_open: Option<bool>,
 }
 
@@ -960,6 +989,11 @@ pub struct MoshProfile {
     pub legacy_ssh_compatibility: bool,
     #[serde(default)]
     pub ssh_algorithms: SshAlgorithmPreferences,
+    #[serde(
+        default,
+        skip_serializing_if = "ConnectionTerminalOptions::inherits_application_defaults"
+    )]
+    pub terminal: ConnectionTerminalOptions,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -993,6 +1027,7 @@ pub struct SaveMoshProfileRequest {
     pub identity_agent: Option<String>,
     pub legacy_ssh_compatibility: bool,
     pub ssh_algorithms: SshAlgorithmPreferences,
+    pub terminal: ConnectionTerminalOptions,
 }
 
 /// Carries a newly saved Mosh auth secret directly into one bootstrap attempt.
@@ -1378,6 +1413,7 @@ impl SerialProfile {
             stop_bits: 1,
             parity: SerialParity::None,
             flow_control: SerialFlowControl::None,
+            terminal: ConnectionTerminalOptions::default(),
             connect_on_open: false,
             created_at: now,
             updated_at: now,
@@ -1474,6 +1510,7 @@ impl MoshProfile {
             identity_agent: None,
             legacy_ssh_compatibility: false,
             ssh_algorithms: SshAlgorithmPreferences::default(),
+            terminal: ConnectionTerminalOptions::default(),
             created_at: now,
             updated_at: now,
             last_used_at: None,

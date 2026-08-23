@@ -29,6 +29,7 @@ serde_json.workspace = true
 tempfile = "3.23"
 unicode-segmentation.workspace = true
 unicode-width.workspace = true
+vte.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]

@@ -293,6 +293,21 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             ],
         ),
         terminal_search_entry(
+            TerminalSettingsPage::Logging,
+            1,
+            "settings_view.terminal.session_log_title",
+            &[
+                "settings_view.terminal.session_log_automatic",
+                "settings_view.terminal.session_log_file_name_template",
+                "settings_view.terminal.session_log_file_mode",
+                "settings_view.terminal.session_log_content_template",
+                "settings_view.terminal.session_log_control_sequences",
+                "settings_view.terminal.session_log_retention_days",
+                "settings_view.terminal.session_log_max_file_size",
+                "settings_view.terminal.session_log_directory",
+            ],
+        ),
+        terminal_search_entry(
             TerminalSettingsPage::Highlight,
             1,
             "settings_view.terminal.highlight_rules.title",

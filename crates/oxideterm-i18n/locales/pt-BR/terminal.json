@@ -96,6 +96,21 @@
       "search_no_results": "No results",
       "player_empty": "No playback output yet"
     },
+    "session_log": {
+      "title": "Registro de sessão",
+      "started": "Registro de sessão iniciado",
+      "start_failed": "Não foi possível iniciar o registro de sessão",
+      "write_failed": "O registro de sessão foi interrompido porque o arquivo não pôde ser gravado",
+      "stopped": "Registro de sessão salvo",
+      "stop_failed": "Não foi possível finalizar o registro de sessão",
+      "start": "Iniciar registro de sessão",
+      "pause": "Pausar registro de sessão",
+      "resume": "Retomar registro de sessão",
+      "stop": "Parar registro de sessão",
+      "open_file": "Abrir registro atual",
+      "open_directory": "Abrir pasta de registros",
+      "open_failed": "Não foi possível abrir o registro de sessão"
+    },
     "highlight_override": {
       "title": "Destaque",
       "source_global_base": "Usando regras base globais",

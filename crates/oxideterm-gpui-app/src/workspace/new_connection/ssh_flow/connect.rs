@@ -1296,7 +1296,13 @@ impl WorkspaceApp {
                     },
                     task_runtime: self.workspace_runtime.read(cx).task_runtime(),
                 };
-                match self.create_mosh_terminal_tab(terminal_config, title, window, cx) {
+                match self.create_mosh_terminal_tab(
+                    terminal_config,
+                    options.terminal,
+                    title,
+                    window,
+                    cx,
+                ) {
                     Ok(session_id) => {
                         if let Some(saved_profile_id) = options.saved_profile_id {
                             self.register_terminal_saved_connection(

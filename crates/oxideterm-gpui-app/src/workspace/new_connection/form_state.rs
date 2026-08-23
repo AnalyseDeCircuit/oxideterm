@@ -175,6 +175,7 @@ pub(in crate::workspace) enum NewConnectionSelect {
     TerminalDeleteSequence,
     TerminalSemanticScheme,
     TerminalHighlightRuleSet,
+    TerminalSessionLogPolicy,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1296,6 +1297,7 @@ pub(in crate::workspace) fn form_from_mosh_profile(
     form.mosh_locale = profile.locale.clone().unwrap_or_default();
     form.mosh_ip_family = profile.ip_family;
     form.mosh_prediction = profile.prediction;
+    form.terminal = profile.terminal.clone();
     form.focused_field = NewConnectionField::Name;
     form
 }
@@ -1346,6 +1348,7 @@ pub(in crate::workspace) fn form_from_serial_profile(
     form.serial_stop_bits = profile.stop_bits;
     form.serial_parity = terminal_serial_parity_from_profile(&profile.parity);
     form.serial_flow_control = terminal_serial_flow_from_profile(&profile.flow_control);
+    form.terminal = profile.terminal.clone();
     form.focused_field = NewConnectionField::SerialProfileName;
     form
 }

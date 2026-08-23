@@ -96,6 +96,21 @@
       "search_no_results": "沒有結果",
       "player_empty": "尚無回放輸出"
     },
+    "session_log": {
+      "title": "工作階段日誌",
+      "started": "工作階段日誌已開始",
+      "start_failed": "無法開始工作階段日誌",
+      "write_failed": "無法寫入檔案，工作階段日誌已停止",
+      "stopped": "工作階段日誌已儲存",
+      "stop_failed": "無法完成工作階段日誌",
+      "start": "開始工作階段日誌",
+      "pause": "暫停工作階段日誌",
+      "resume": "繼續工作階段日誌",
+      "stop": "停止工作階段日誌",
+      "open_file": "開啟目前日誌",
+      "open_directory": "開啟日誌資料夾",
+      "open_failed": "無法開啟工作階段日誌"
+    },
     "highlight_override": {
       "title": "醒目提示",
       "source_global_base": "正在使用全域基礎規則",

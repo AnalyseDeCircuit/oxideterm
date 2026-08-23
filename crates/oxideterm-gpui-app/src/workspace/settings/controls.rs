@@ -478,6 +478,29 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Terminal, SettingsSelect::TerminalSessionLogFileMode) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for &mode in terminal_session_log_file_mode_options() {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            terminal_session_log_file_mode_label(mode, &self.i18n),
+                            mode == settings.terminal.session_log.file_mode,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_settings_select();
+                            this.edit_settings(
+                                |settings| settings.terminal.session_log.file_mode = mode,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
             (SettingsTab::Terminal, SettingsSelect::TerminalBackspaceSequence) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &sequence in terminal_backspace_sequence_options() {

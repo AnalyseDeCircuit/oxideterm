@@ -5,7 +5,10 @@ use anyhow::{Context, Result};
 use serde_json::{Map, Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::model::*;
+use crate::{
+    ParsedTerminalSessionLogTemplate, TerminalSessionLogTemplateError, model::*,
+    parse_terminal_session_log_content_template, parse_terminal_session_log_file_name_template,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SanitizedSettings {
@@ -737,10 +740,47 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
             100 * 1024 * 1024,
             100 * 1024 * 1024 * 1024,
         ),
+        ("terminal.sessionLog.retentionDays", 30, 0, 3650),
+        ("terminal.sessionLog.maxFileSizeMib", 100, 1, 4096),
     ] {
         let segments: Vec<_> = path.split('.').collect();
         if let Some(value) = get_path_mut(&mut settings, &segments) {
             clamp_i64(value, fallback, min, max, path, &mut validation_warnings);
+        }
+    }
+
+    for (path, fallback, validator) in [
+        (
+            "terminal.sessionLog.fileNameTemplate",
+            "{date}_{time}_{protocol}_{session}.log",
+            parse_terminal_session_log_file_name_template
+                as fn(
+                    &str,
+                ) -> std::result::Result<
+                    ParsedTerminalSessionLogTemplate,
+                    TerminalSessionLogTemplateError,
+                >,
+        ),
+        (
+            "terminal.sessionLog.contentTemplate",
+            "[{timestamp}] {text}",
+            parse_terminal_session_log_content_template
+                as fn(
+                    &str,
+                ) -> std::result::Result<
+                    ParsedTerminalSessionLogTemplate,
+                    TerminalSessionLogTemplateError,
+                >,
+        ),
+    ] {
+        let segments: Vec<_> = path.split('.').collect();
+        if let Some(value) = get_path_mut(&mut settings, &segments)
+            && value
+                .as_str()
+                .is_none_or(|template| validator(template).is_err())
+        {
+            *value = json!(fallback);
+            validation_warnings.push(format!("Reset invalid {path}"));
         }
     }
 
@@ -813,6 +853,13 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
         &["terminal", "renderer"],
         &["auto", "webgl", "canvas"],
         if cfg!(windows) { "canvas" } else { "auto" },
+        &mut validation_warnings,
+    );
+    sanitize_enum(
+        &mut settings,
+        &["terminal", "sessionLog", "fileMode"],
+        &["unique", "append", "overwrite"],
+        "unique",
         &mut validation_warnings,
     );
     sanitize_enum(
@@ -985,6 +1032,29 @@ mod tests {
         );
         assert!(sanitized.settings.terminal.semantic_custom_scheme.is_none());
         assert!(!sanitized.validation_warnings.is_empty());
+    }
+
+    #[test]
+    fn invalid_session_log_templates_and_mode_fall_back_to_safe_defaults() {
+        let sanitized = sanitize_settings_value(json!({
+            "terminal": {
+                "sessionLog": {
+                    "fileNameTemplate": "../escape.log",
+                    "contentTemplate": "missing text variable",
+                    "fileMode": "replaceAnything"
+                }
+            }
+        }))
+        .expect("sanitize settings");
+
+        let session_log = sanitized.settings.terminal.session_log;
+        assert_eq!(
+            session_log.file_name_template,
+            "{date}_{time}_{protocol}_{session}.log"
+        );
+        assert_eq!(session_log.content_template, "[{timestamp}] {text}");
+        assert_eq!(session_log.file_mode, TerminalSessionLogFileMode::Unique);
+        assert_eq!(sanitized.validation_warnings.len(), 3);
     }
 
     #[test]

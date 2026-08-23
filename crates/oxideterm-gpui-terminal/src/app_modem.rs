@@ -272,6 +272,10 @@ impl TerminalPane {
 
 impl Drop for TerminalPane {
     fn drop(&mut self) {
+        if let Some(log) = self.session_log.take() {
+            // Pane teardown flushes its file sink without changing shared connection ownership.
+            let _ = log.finish();
+        }
         if self.modem_prompt_active || self.modem_worker.is_some() {
             // Pane teardown cancels only its logical modem consumer. It must not
             // disconnect a shared SSH node or any unrelated session consumer.

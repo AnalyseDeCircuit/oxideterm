@@ -96,6 +96,21 @@
       "search_no_results": "No results",
       "player_empty": "No playback output yet"
     },
+    "session_log": {
+      "title": "Nhật ký phiên",
+      "started": "Đã bắt đầu nhật ký phiên",
+      "start_failed": "Không thể bắt đầu nhật ký phiên",
+      "write_failed": "Nhật ký phiên đã dừng vì không thể ghi tệp",
+      "stopped": "Đã lưu nhật ký phiên",
+      "stop_failed": "Không thể hoàn tất nhật ký phiên",
+      "start": "Bắt đầu nhật ký phiên",
+      "pause": "Tạm dừng nhật ký phiên",
+      "resume": "Tiếp tục nhật ký phiên",
+      "stop": "Dừng nhật ký phiên",
+      "open_file": "Mở nhật ký hiện tại",
+      "open_directory": "Mở thư mục nhật ký",
+      "open_failed": "Không thể mở nhật ký phiên"
+    },
     "highlight_override": {
       "title": "Tô sáng",
       "source_global_base": "Đang dùng quy tắc cơ sở toàn cục",

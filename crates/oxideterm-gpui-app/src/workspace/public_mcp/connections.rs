@@ -2,21 +2,21 @@ use chrono::SecondsFormat;
 use oxideterm_connections::{
     ConnectionCredentialSlot, ConnectionTerminalBackspaceSequence,
     ConnectionTerminalDeleteSequence, ConnectionTerminalEncoding, ConnectionTerminalOptions,
-    ConnectionX11ForwardingMode, ConnectionX11ForwardingOptions,
-    DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS, DEFAULT_X11_UNTRUSTED_TIMEOUT_SECONDS, MoshIpFamily,
-    MoshPredictionMode, MoshUdpPortSelection, SaveConnectionRequest, SaveMoshProfileRequest,
-    SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest, SaveTelnetProfileRequest, SavedAuth,
-    SavedConnection, SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig,
-    SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol, SecretString, SerialFlowControl,
-    SerialParity,
+    ConnectionTerminalSessionLogPolicy, ConnectionX11ForwardingMode,
+    ConnectionX11ForwardingOptions, DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
+    DEFAULT_X11_UNTRUSTED_TIMEOUT_SECONDS, MoshIpFamily, MoshPredictionMode, MoshUdpPortSelection,
+    SaveConnectionRequest, SaveMoshProfileRequest, SaveRemoteDesktopProfileRequest,
+    SaveSerialProfileRequest, SaveTelnetProfileRequest, SavedAuth, SavedConnection, SavedProxyHop,
+    SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
+    SavedUpstreamProxyProtocol, SecretString, SerialFlowControl, SerialParity,
 };
 use oxideterm_public_mcp::{
     ClientRef, ConnectionRef, DomainRequest, PublicConnectionAuth, PublicCredentialSlot,
     PublicMoshIpFamily, PublicMoshPredictionMode, PublicMoshUdpPortSelection,
     PublicRemoteDesktopOptions, PublicSavedConnectionProfile, PublicSerialFlowControl,
     PublicSerialParity, PublicTerminalBackspaceSequence, PublicTerminalDeleteSequence,
-    PublicTerminalEncoding, PublicTerminalOptions, PublicToolCall, PublicUpstreamProxy,
-    PublicUpstreamProxyProtocol, PublicVncCompression, PublicVncImageQuality,
+    PublicTerminalEncoding, PublicTerminalOptions, PublicTerminalSessionLogPolicy, PublicToolCall,
+    PublicUpstreamProxy, PublicUpstreamProxyProtocol, PublicVncCompression, PublicVncImageQuality,
     PublicVncSecurityPolicy, PublicVncSessionMode, PublicX11ForwardingMode, ToolEnvelope,
 };
 use oxideterm_remote_desktop::{
@@ -388,6 +388,7 @@ fn save_profile(
                         PublicSerialFlowControl::Software => SerialFlowControl::Software,
                         PublicSerialFlowControl::Hardware => SerialFlowControl::Hardware,
                     }),
+                    terminal: terminal_options(&profile.terminal),
                     connect_on_open: Some(profile.connect_on_open),
                 })
                 .map_err(public_store_error)?;
@@ -484,6 +485,7 @@ fn save_profile(
                     ssh_algorithms: existing
                         .map(|profile| profile.ssh_algorithms.clone())
                         .unwrap_or_default(),
+                    terminal: terminal_options(&profile.terminal),
                 })
                 .map_err(public_store_error)?;
             Ok(format!("{CONNECTION_KEY_MOSH_PREFIX}{}", saved.id))
@@ -729,6 +731,16 @@ fn terminal_options(options: &PublicTerminalOptions) -> ConnectionTerminalOption
         }),
         semantic_scheme: None,
         highlight_rule_set: None,
+        session_log_policy: match options.session_log_policy {
+            PublicTerminalSessionLogPolicy::Inherit => ConnectionTerminalSessionLogPolicy::Inherit,
+            PublicTerminalSessionLogPolicy::Automatic => {
+                ConnectionTerminalSessionLogPolicy::Automatic
+            }
+            PublicTerminalSessionLogPolicy::Manual => ConnectionTerminalSessionLogPolicy::Manual,
+            PublicTerminalSessionLogPolicy::Disabled => {
+                ConnectionTerminalSessionLogPolicy::Disabled
+            }
+        },
     }
 }
 

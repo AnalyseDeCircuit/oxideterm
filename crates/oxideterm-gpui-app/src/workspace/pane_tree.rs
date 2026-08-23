@@ -146,6 +146,11 @@ impl WorkspaceApp {
                     self.sync_active_terminal_recording_elapsed_tick(cx);
                 }
             }
+            TerminalPaneEvent::SessionLogStatusChanged => {
+                if self.active_pane_id(cx) == Some(pane_id) {
+                    cx.notify();
+                }
+            }
             TerminalPaneEvent::SearchStatusChanged => {
                 if self.active_pane_id(cx) == Some(pane_id)
                     && self.search.visible

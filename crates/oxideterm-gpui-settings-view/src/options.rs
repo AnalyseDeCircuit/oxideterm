@@ -5,8 +5,8 @@ use oxideterm_i18n::I18n;
 use oxideterm_settings::{
     AiThinkingStyle, AnimationSpeed, BackgroundFit, ConflictAction,
     CursorStyle as SettingsCursorStyle, FontFamily, IdeAgentMode, Language, PersistedSettings,
-    TerminalBackspaceSequence, TerminalDeleteSequence, TerminalEncoding, UiDensity, UpdateChannel,
-    UpdateProxyMode, UpdateProxyProtocol,
+    TerminalBackspaceSequence, TerminalDeleteSequence, TerminalEncoding,
+    TerminalSessionLogFileMode, UiDensity, UpdateChannel, UpdateProxyMode, UpdateProxyProtocol,
 };
 pub use oxideterm_settings_model::theme_display_name;
 use oxideterm_theme::BUILT_IN_THEMES;
@@ -75,6 +75,39 @@ pub fn set_free_type_mode(settings: &mut PersistedSettings, value: bool) {
 
 pub fn set_font_ligatures(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.font_ligatures = value;
+}
+
+pub fn set_terminal_session_log_automatic(settings: &mut PersistedSettings, value: bool) {
+    settings.terminal.session_log.automatic = value;
+}
+
+pub fn set_terminal_session_log_include_control_sequences(
+    settings: &mut PersistedSettings,
+    value: bool,
+) {
+    settings.terminal.session_log.include_control_sequences = value;
+}
+
+pub fn terminal_session_log_file_mode_options() -> &'static [TerminalSessionLogFileMode] {
+    &[
+        TerminalSessionLogFileMode::Unique,
+        TerminalSessionLogFileMode::Append,
+        TerminalSessionLogFileMode::Overwrite,
+    ]
+}
+
+pub fn terminal_session_log_file_mode_label(
+    mode: TerminalSessionLogFileMode,
+    i18n: &I18n,
+) -> String {
+    let key = match mode {
+        TerminalSessionLogFileMode::Unique => "settings_view.terminal.session_log_file_mode_unique",
+        TerminalSessionLogFileMode::Append => "settings_view.terminal.session_log_file_mode_append",
+        TerminalSessionLogFileMode::Overwrite => {
+            "settings_view.terminal.session_log_file_mode_overwrite"
+        }
+    };
+    i18n.t(key)
 }
 
 pub fn compact_decimal(value: f64) -> String {

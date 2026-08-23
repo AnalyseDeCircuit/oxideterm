@@ -175,6 +175,21 @@
       "search_no_results": "No results",
       "player_empty": "No playback output yet"
     },
+    "session_log": {
+      "title": "Session log",
+      "started": "Session logging started",
+      "start_failed": "Could not start session logging",
+      "write_failed": "Session logging stopped because the file could not be written",
+      "stopped": "Session log saved",
+      "stop_failed": "Could not finish the session log",
+      "start": "Start Session Log",
+      "pause": "Pause Session Log",
+      "resume": "Resume Session Log",
+      "stop": "Stop Session Log",
+      "open_file": "Open Current Log",
+      "open_directory": "Open Log Folder",
+      "open_failed": "Could not open the session log"
+    },
     "highlight_override": {
       "title": "Highlighting",
       "source_global_base": "Using global base rules",

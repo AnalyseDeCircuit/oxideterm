@@ -1724,6 +1724,156 @@ impl WorkspaceApp {
             .unwrap_or_default()
     }
 
+    pub(super) fn active_terminal_session_log_status(&self, cx: &App) -> TerminalSessionLogStatus {
+        self.active_pane(cx)
+            .map(|pane| pane.read(cx).session_log_status())
+            .unwrap_or_default()
+    }
+
+    pub(super) fn active_terminal_session_log_available(&self, cx: &App) -> bool {
+        self.active_pane(cx)
+            .is_some_and(|pane| pane.read(cx).session_log_available())
+    }
+
+    pub(super) fn start_active_terminal_session_log(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_terminal_recording_menu();
+        let Some(pane) = self.active_pane(cx) else {
+            return;
+        };
+        let result = pane.update(cx, |pane, cx| pane.start_session_log(cx));
+        let (title_key, variant) = if result.is_ok() {
+            (
+                "terminal.session_log.started",
+                TerminalNoticeVariant::Success,
+            )
+        } else {
+            (
+                "terminal.session_log.start_failed",
+                TerminalNoticeVariant::Error,
+            )
+        };
+        self.push_workspace_notice(
+            TerminalNotice {
+                title: self.i18n.t(title_key),
+                description: None,
+                status_text: None,
+                progress: None,
+                variant,
+            },
+            cx,
+        );
+        cx.notify();
+    }
+
+    pub(super) fn pause_active_terminal_session_log(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_terminal_recording_menu();
+        if let Some(pane) = self.active_pane(cx) {
+            let _ = pane.update(cx, |pane, cx| pane.pause_session_log(cx));
+        }
+        cx.notify();
+    }
+
+    pub(super) fn resume_active_terminal_session_log(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_terminal_recording_menu();
+        if let Some(pane) = self.active_pane(cx) {
+            pane.update(cx, |pane, cx| pane.resume_session_log(cx));
+        }
+        cx.notify();
+    }
+
+    pub(super) fn stop_active_terminal_session_log(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_terminal_recording_menu();
+        let Some(pane) = self.active_pane(cx) else {
+            return;
+        };
+        let result = pane.update(cx, |pane, cx| pane.stop_session_log(cx));
+        let (title_key, description, variant) = match result {
+            Ok(Some(path)) => (
+                "terminal.session_log.stopped",
+                Some(path.to_string_lossy().to_string()),
+                TerminalNoticeVariant::Success,
+            ),
+            Ok(None) => return,
+            Err(_) => (
+                "terminal.session_log.stop_failed",
+                None,
+                TerminalNoticeVariant::Error,
+            ),
+        };
+        self.push_workspace_notice(
+            TerminalNotice {
+                title: self.i18n.t(title_key),
+                description,
+                status_text: None,
+                progress: None,
+                variant,
+            },
+            cx,
+        );
+        cx.notify();
+    }
+
+    pub(super) fn open_active_terminal_session_log(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_terminal_recording_menu();
+        let Some(pane) = self.active_pane(cx) else {
+            return;
+        };
+        let status = pane.read(cx).session_log_status();
+        let writer_failed = status.failed;
+        let Some(path) = status.path else {
+            return;
+        };
+        let flush_result = if writer_failed {
+            Ok(())
+        } else {
+            pane.update(cx, |pane, _cx| pane.flush_session_log())
+        };
+        let result = flush_result
+            .and_then(|()| settings::open_path_external(&path).map_err(|error| error.to_string()));
+        if result.is_err() {
+            self.push_workspace_notice(
+                TerminalNotice {
+                    title: self.i18n.t("terminal.session_log.open_failed"),
+                    description: None,
+                    status_text: None,
+                    progress: None,
+                    variant: TerminalNoticeVariant::Error,
+                },
+                cx,
+            );
+        }
+    }
+
+    pub(super) fn open_terminal_session_log_directory(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_terminal_recording_menu();
+        let directory = self
+            .active_terminal_session_log_status(cx)
+            .path
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+            .unwrap_or_else(|| {
+                self.settings_store
+                    .path()
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join("logs")
+                    .join("terminal")
+            });
+        let result =
+            fs::create_dir_all(&directory).and_then(|()| settings::open_path_external(&directory));
+        if result.is_err() {
+            self.push_workspace_notice(
+                TerminalNotice {
+                    title: self.i18n.t("terminal.session_log.open_failed"),
+                    description: None,
+                    status_text: None,
+                    progress: None,
+                    variant: TerminalNoticeVariant::Error,
+                },
+                cx,
+            );
+        }
+    }
+
     pub(in crate::workspace) fn sync_active_terminal_recording_elapsed_tick(
         &mut self,
         cx: &mut App,

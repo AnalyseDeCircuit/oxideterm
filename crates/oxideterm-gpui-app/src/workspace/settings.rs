@@ -44,6 +44,8 @@ use oxideterm_settings_model::{
 use oxideterm_ssh::{HostKeyStatus, UpstreamProxyConfig, probe_upstream_proxy_route};
 use oxideterm_theme::BUILT_IN_THEMES;
 
+pub(in crate::workspace) use pages::open_path_external;
+
 use super::*;
 use super::{ai_state::AiSettingsViewSection, ime::WorkspaceImeTarget};
 use oxideterm_ai::{

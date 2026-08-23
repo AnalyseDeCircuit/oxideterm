@@ -96,6 +96,21 @@
       "search_no_results": "No results",
       "player_empty": "No playback output yet"
     },
+    "session_log": {
+      "title": "セッションログ",
+      "started": "セッションログを開始しました",
+      "start_failed": "セッションログを開始できませんでした",
+      "write_failed": "ファイルに書き込めないため、セッションログを停止しました",
+      "stopped": "セッションログを保存しました",
+      "stop_failed": "セッションログを完了できませんでした",
+      "start": "セッションログを開始",
+      "pause": "セッションログを一時停止",
+      "resume": "セッションログを再開",
+      "stop": "セッションログを停止",
+      "open_file": "現在のログを開く",
+      "open_directory": "ログフォルダーを開く",
+      "open_failed": "セッションログを開けませんでした"
+    },
     "highlight_override": {
       "title": "ハイライト",
       "source_global_base": "グローバル基本ルールを使用中",

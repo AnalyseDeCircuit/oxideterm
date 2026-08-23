@@ -96,6 +96,21 @@
       "search_no_results": "No results",
       "player_empty": "No playback output yet"
     },
+    "session_log": {
+      "title": "세션 로그",
+      "started": "세션 로그를 시작했습니다",
+      "start_failed": "세션 로그를 시작할 수 없습니다",
+      "write_failed": "파일에 쓸 수 없어 세션 로그가 중지되었습니다",
+      "stopped": "세션 로그를 저장했습니다",
+      "stop_failed": "세션 로그를 완료할 수 없습니다",
+      "start": "세션 로그 시작",
+      "pause": "세션 로그 일시 중지",
+      "resume": "세션 로그 계속",
+      "stop": "세션 로그 중지",
+      "open_file": "현재 로그 열기",
+      "open_directory": "로그 폴더 열기",
+      "open_failed": "세션 로그를 열 수 없습니다"
+    },
     "highlight_override": {
       "title": "강조 표시",
       "source_global_base": "전역 기본 규칙 사용 중",

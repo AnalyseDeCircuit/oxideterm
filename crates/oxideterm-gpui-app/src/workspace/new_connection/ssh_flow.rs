@@ -196,6 +196,7 @@ pub(in crate::workspace) struct MoshConnectionOptions {
     pub(in crate::workspace) ip_family: SavedMoshIpFamily,
     pub(in crate::workspace) prediction: MoshPredictionMode,
     pub(in crate::workspace) locale: Option<String>,
+    pub(in crate::workspace) terminal: ConnectionTerminalOptions,
     // Correlates an asynchronous verified Mosh launch without exposing a GPUI identity.
     pub(in crate::workspace) public_mcp_open_token: Option<String>,
 }

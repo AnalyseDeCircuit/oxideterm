@@ -30,6 +30,20 @@ impl WorkspaceApp {
         let connection_store = ConnectionStore::load(default_connections_path())?;
         let settings = settings_store.settings().clone();
         let i18n = I18n::new(locale_from_settings(settings.general.language));
+        let session_log_directory = settings_store
+            .path()
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("logs")
+            .join("terminal");
+        let session_log_retention_days = settings.terminal.session_log.retention_days.max(0) as u64;
+        cx.background_executor()
+            .spawn(async move {
+                // Cleanup is one-shot and non-fatal; it never owns or observes a terminal connection.
+                let _ =
+                    prune_terminal_session_logs(&session_log_directory, session_log_retention_days);
+            })
+            .detach();
         oxideterm_network_proxy::install_application_proxy_policy_from_settings(
             &settings,
             &connection_store,
@@ -939,13 +953,22 @@ impl WorkspaceApp {
         &self,
         saved_connection_id: Option<&str>,
     ) -> TerminalUiPreferenceOverrides {
-        let Some(options) = saved_connection_id
+        let Some(connection) = saved_connection_id
             .and_then(|saved_connection_id| self.connection_store.get(saved_connection_id))
-            .map(|connection| connection.options.terminal.clone())
         else {
             return TerminalUiPreferenceOverrides::default();
         };
-        terminal_preference_overrides(options, &self.settings_store.settings().terminal)
+        let mut overrides = terminal_preference_overrides(
+            connection.options.terminal.clone(),
+            &self.settings_store.settings().terminal,
+        );
+        overrides.session_log_context = Some(TerminalSessionLogContext {
+            session: connection.name.clone(),
+            host: connection.host.clone(),
+            username: connection.username.clone(),
+            protocol: "ssh".to_string(),
+        });
+        overrides
     }
 
     pub(in crate::workspace) fn terminal_preference_overrides_for_local_shell(
@@ -978,6 +1001,12 @@ impl WorkspaceApp {
             semantic_scheme_id,
             semantic_shell: Some(semantic_shell_dialect(&shell.id)),
             local_shell_id: Some(shell.id.clone()),
+            session_log_context: Some(TerminalSessionLogContext {
+                session: shell.label.clone(),
+                host: "localhost".to_string(),
+                username: String::new(),
+                protocol: "local".to_string(),
+            }),
             ..TerminalUiPreferenceOverrides::default()
         }
     }
@@ -993,10 +1022,17 @@ impl WorkspaceApp {
             return self
                 .terminal_preference_overrides_for_saved_connection(Some(saved_connection_id));
         }
-        terminal_preference_overrides(
+        let mut overrides = terminal_preference_overrides(
             node.terminal_options.clone(),
             &self.settings_store.settings().terminal,
-        )
+        );
+        overrides.session_log_context = Some(TerminalSessionLogContext {
+            session: node.title.clone(),
+            host: node.endpoint.host.clone(),
+            username: node.endpoint.username.clone(),
+            protocol: "ssh".to_string(),
+        });
+        overrides
     }
 
     pub(in crate::workspace) fn apply_saved_connection_terminal_preferences(
@@ -1065,6 +1101,14 @@ impl WorkspaceApp {
         let clear_screen_shortcut = clear_screen_shortcut
             .as_ref()
             .map(crate::keybindings::format_combo);
+        let session_log_directory = self
+            .settings_store
+            .path()
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("logs")
+            .join("terminal");
+        let session_log_settings = &terminal.session_log;
         TerminalUiPreferences {
             font_family: terminal
                 .font_family
@@ -1178,6 +1222,22 @@ impl WorkspaceApp {
                 line_ending_cr: self.i18n.t("terminal.serial_control.line_ending_cr"),
                 line_ending_none: self.i18n.t("terminal.serial_control.line_ending_none"),
                 reconnect_failed: self.i18n.t("terminal.serial_control.reconnect_failed"),
+            },
+            session_log_options: Some(TerminalSessionLogOptions {
+                directory: session_log_directory,
+                include_control_sequences: session_log_settings.include_control_sequences,
+                retention_days: session_log_settings.retention_days.max(0) as u64,
+                max_file_bytes: (session_log_settings.max_file_size_mib.max(1) as u64)
+                    .saturating_mul(1024 * 1024),
+                file_name_template: session_log_settings.file_name_template.clone(),
+                content_template: session_log_settings.content_template.clone(),
+                file_mode: session_log_settings.file_mode,
+                context: TerminalSessionLogContext::default(),
+            }),
+            session_log_automatic: session_log_settings.automatic,
+            session_log_labels: TerminalSessionLogLabels {
+                start_failed: self.i18n.t("terminal.session_log.start_failed"),
+                write_failed: self.i18n.t("terminal.session_log.write_failed"),
             },
             trzsz_labels: TerminalTrzszLabels {
                 select_upload_directory_title: self
@@ -1381,6 +1441,19 @@ pub(in crate::workspace) fn terminal_preference_overrides(
         highlight_rule_set_id,
         semantic_shell: None,
         local_shell_id: None,
+        session_log_available: match options.session_log_policy {
+            ConnectionTerminalSessionLogPolicy::Disabled => Some(false),
+            ConnectionTerminalSessionLogPolicy::Automatic
+            | ConnectionTerminalSessionLogPolicy::Manual => Some(true),
+            ConnectionTerminalSessionLogPolicy::Inherit => None,
+        },
+        session_log_automatic: match options.session_log_policy {
+            ConnectionTerminalSessionLogPolicy::Disabled => Some(false),
+            ConnectionTerminalSessionLogPolicy::Automatic => Some(true),
+            ConnectionTerminalSessionLogPolicy::Manual => Some(false),
+            ConnectionTerminalSessionLogPolicy::Inherit => None,
+        },
+        session_log_context: None,
     }
 }
 
@@ -1485,6 +1558,45 @@ mod semantic_scheme_tests {
                 .map(|rule| rule.pattern.as_str()),
             Some("ERROR")
         );
+    }
+
+    #[test]
+    fn connection_session_log_policy_controls_availability_and_automatic_start() {
+        let terminal = oxideterm_settings::TerminalSettings::default();
+        let automatic = terminal_preference_overrides(
+            ConnectionTerminalOptions {
+                session_log_policy: ConnectionTerminalSessionLogPolicy::Automatic,
+                ..ConnectionTerminalOptions::default()
+            },
+            &terminal,
+        );
+        assert_eq!(automatic.session_log_available, Some(true));
+        assert_eq!(automatic.session_log_automatic, Some(true));
+
+        let manual = terminal_preference_overrides(
+            ConnectionTerminalOptions {
+                session_log_policy: ConnectionTerminalSessionLogPolicy::Manual,
+                ..ConnectionTerminalOptions::default()
+            },
+            &terminal,
+        );
+        assert_eq!(manual.session_log_available, Some(true));
+        assert_eq!(manual.session_log_automatic, Some(false));
+
+        let disabled = terminal_preference_overrides(
+            ConnectionTerminalOptions {
+                session_log_policy: ConnectionTerminalSessionLogPolicy::Disabled,
+                ..ConnectionTerminalOptions::default()
+            },
+            &terminal,
+        );
+        assert_eq!(disabled.session_log_available, Some(false));
+        assert_eq!(disabled.session_log_automatic, Some(false));
+
+        let inherited =
+            terminal_preference_overrides(ConnectionTerminalOptions::default(), &terminal);
+        assert_eq!(inherited.session_log_available, None);
+        assert_eq!(inherited.session_log_automatic, None);
     }
 }
 

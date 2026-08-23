@@ -1,4 +1,5 @@
 use super::*;
+use oxideterm_connections::ConnectionTerminalSessionLogPolicy;
 
 struct JumpServerRenderSnapshot {
     saved_connection_id: String,
@@ -672,6 +673,56 @@ impl WorkspaceApp {
                                 Some(id.clone()),
                                 cx,
                             );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+            }
+            NewConnectionSelect::TerminalSessionLogPolicy => {
+                let selected = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .map(|form| form.terminal.session_log_policy)
+                    .unwrap_or_default();
+                let inherited_mode = if self
+                    .settings_store
+                    .settings()
+                    .terminal
+                    .session_log
+                    .automatic
+                {
+                    self.i18n.t("ssh.form.terminal_session_log_automatic")
+                } else {
+                    self.i18n.t("ssh.form.terminal_session_log_manual")
+                };
+                for (policy, label) in [
+                    (
+                        ConnectionTerminalSessionLogPolicy::Inherit,
+                        self.i18n
+                            .t("ssh.form.terminal_use_application_default")
+                            .replace("{{value}}", &inherited_mode),
+                    ),
+                    (
+                        ConnectionTerminalSessionLogPolicy::Automatic,
+                        self.i18n.t("ssh.form.terminal_session_log_automatic"),
+                    ),
+                    (
+                        ConnectionTerminalSessionLogPolicy::Manual,
+                        self.i18n.t("ssh.form.terminal_session_log_manual"),
+                    ),
+                    (
+                        ConnectionTerminalSessionLogPolicy::Disabled,
+                        self.i18n.t("ssh.form.terminal_session_log_disabled"),
+                    ),
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(&self.tokens, label, selected == policy),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_new_connection_select(cx);
+                            this.set_new_connection_terminal_session_log_policy(policy, cx);
                             cx.stop_propagation();
                         }),
                     ));

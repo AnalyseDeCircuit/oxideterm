@@ -237,10 +237,16 @@ impl WorkspaceApp {
         let tab_id = self.alloc_tab_id(cx);
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
-        let preference_overrides = terminal_preference_overrides(
+        let mut preference_overrides = terminal_preference_overrides(
             terminal_options,
             &self.settings_store.settings().terminal,
         );
+        preference_overrides.session_log_context = Some(TerminalSessionLogContext {
+            session: title.clone(),
+            host: config.host.clone(),
+            username: String::new(),
+            protocol: "telnet".to_string(),
+        });
         let mut preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
         preference_overrides.apply_to(&mut preferences);
@@ -285,16 +291,18 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn create_serial_terminal_tab(
         &mut self,
         config: SerialSessionConfig,
+        terminal_options: ConnectionTerminalOptions,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
         let title = format!("Serial {}", config.port_path);
-        self.create_serial_terminal_tab_with_title(config, title, window, cx)
+        self.create_serial_terminal_tab_with_title(config, terminal_options, title, window, cx)
     }
 
     pub(in crate::workspace) fn create_serial_terminal_tab_with_title(
         &mut self,
         config: SerialSessionConfig,
+        terminal_options: ConnectionTerminalOptions,
         title: String,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -302,12 +310,24 @@ impl WorkspaceApp {
         let tab_id = self.alloc_tab_id(cx);
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
-        let preferences =
+        let mut preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
+        let mut preference_overrides = terminal_preference_overrides(
+            terminal_options,
+            &self.settings_store.settings().terminal,
+        );
+        preference_overrides.session_log_context = Some(TerminalSessionLogContext {
+            session: title.clone(),
+            host: config.port_path.clone(),
+            username: String::new(),
+            protocol: "serial".to_string(),
+        });
+        preference_overrides.apply_to(&mut preferences);
         let pane_config = config.clone();
         let pane = cx.new(|cx| {
             TerminalPane::new_serial_with_preferences(pane_config, preferences, window, cx)
                 .expect("failed to initialize Serial terminal pane")
+                .with_preference_overrides(preference_overrides)
         });
 
         // Serial mirrors Tauri local-terminal transport semantics: it is not
@@ -339,6 +359,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn create_mosh_terminal_tab(
         &mut self,
         mut config: MoshTerminalConfig,
+        terminal_options: ConnectionTerminalOptions,
         title: String,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -348,11 +369,23 @@ impl WorkspaceApp {
         let session_id = self.alloc_session_id(cx);
         // The bootstrap consumer identifier is local runtime metadata, not a remote session name.
         config.bootstrap.session_id = format!("mosh-{}", session_id.0);
-        let preferences =
+        let mut preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::MoshTerminal, cx);
+        let mut preference_overrides = terminal_preference_overrides(
+            terminal_options,
+            &self.settings_store.settings().terminal,
+        );
+        preference_overrides.session_log_context = Some(TerminalSessionLogContext {
+            session: title.clone(),
+            host: String::new(),
+            username: String::new(),
+            protocol: "mosh".to_string(),
+        });
+        preference_overrides.apply_to(&mut preferences);
         let pane = cx.new(|cx| {
             TerminalPane::new_mosh_with_preferences(config, preferences, window, cx)
                 .expect("failed to initialize Mosh terminal pane")
+                .with_preference_overrides(preference_overrides)
         });
 
         // Mosh owns one UDP terminal and deliberately has no SSH node capabilities.
@@ -867,6 +900,7 @@ impl WorkspaceApp {
                 ip_family: SavedMoshIpFamily::Auto,
                 prediction: MoshPredictionMode::Adaptive,
                 locale: None,
+                terminal: ConnectionTerminalOptions::default(),
                 public_mcp_open_token: None,
             }),
             cx,

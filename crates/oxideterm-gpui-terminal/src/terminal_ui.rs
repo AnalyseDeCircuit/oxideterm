@@ -17,6 +17,8 @@ use oxideterm_terminal_semantic::{
 };
 use oxideterm_theme::{ThemeTokens, default_tokens};
 
+use crate::session_log::{TerminalSessionLogContext, TerminalSessionLogOptions};
+
 pub const MAX_HIGHLIGHT_RULES: usize = 32;
 pub const MAX_HIGHLIGHT_PATTERN_LENGTH: usize = 512;
 
@@ -105,6 +107,9 @@ pub struct TerminalUiPreferences {
     pub modem_labels: TerminalModemLabels,
     pub trzsz_labels: TerminalTrzszLabels,
     pub serial_control_labels: TerminalSerialControlLabels,
+    pub session_log_options: Option<TerminalSessionLogOptions>,
+    pub session_log_automatic: bool,
+    pub session_log_labels: TerminalSessionLogLabels,
     pub notice_sink: Option<Arc<dyn Fn(TerminalNotice) + Send + Sync + 'static>>,
     pub highlight_rules: Arc<[TerminalHighlightRule]>,
     pub trzsz_policy: Option<TrzszTransferPolicy>,
@@ -122,6 +127,9 @@ pub struct TerminalUiPreferenceOverrides {
     pub semantic_shell: Option<SemanticShellDialect>,
     // Retain the local shell identity so settings refreshes can resolve its Scheme again.
     pub local_shell_id: Option<String>,
+    pub session_log_available: Option<bool>,
+    pub session_log_automatic: Option<bool>,
+    pub session_log_context: Option<TerminalSessionLogContext>,
 }
 
 impl TerminalUiPreferenceOverrides {
@@ -146,6 +154,17 @@ impl TerminalUiPreferenceOverrides {
         }
         if let Some(semantic_shell) = self.semantic_shell {
             preferences.semantic_shell = semantic_shell;
+        }
+        if self.session_log_available == Some(false) {
+            preferences.session_log_options = None;
+        }
+        if let Some(automatic) = self.session_log_automatic {
+            preferences.session_log_automatic = automatic;
+        }
+        if let Some(context) = &self.session_log_context
+            && let Some(options) = preferences.session_log_options.as_mut()
+        {
+            options.context = context.clone();
         }
     }
 }
@@ -199,6 +218,9 @@ impl Default for TerminalUiPreferences {
             modem_labels: TerminalModemLabels::default(),
             trzsz_labels: TerminalTrzszLabels::default(),
             serial_control_labels: TerminalSerialControlLabels::default(),
+            session_log_options: None,
+            session_log_automatic: false,
+            session_log_labels: TerminalSessionLogLabels::default(),
             notice_sink: None,
             highlight_rules: Arc::from(Vec::<TerminalHighlightRule>::new()),
             trzsz_policy: None,
@@ -455,6 +477,12 @@ impl Default for TerminalSerialControlLabels {
             reconnect_failed: "Serial reconnect failed".to_string(),
         }
     }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TerminalSessionLogLabels {
+    pub start_failed: String,
+    pub write_failed: String,
 }
 
 #[derive(Clone, Debug)]

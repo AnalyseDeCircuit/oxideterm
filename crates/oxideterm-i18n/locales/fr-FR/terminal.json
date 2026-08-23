@@ -96,6 +96,21 @@
       "search_no_results": "No results",
       "player_empty": "No playback output yet"
     },
+    "session_log": {
+      "title": "Journal de session",
+      "started": "Journal de session démarré",
+      "start_failed": "Impossible de démarrer le journal de session",
+      "write_failed": "Le journal de session a été arrêté car le fichier ne pouvait pas être écrit",
+      "stopped": "Journal de session enregistré",
+      "stop_failed": "Impossible de terminer le journal de session",
+      "start": "Démarrer le journal de session",
+      "pause": "Suspendre le journal de session",
+      "resume": "Reprendre le journal de session",
+      "stop": "Arrêter le journal de session",
+      "open_file": "Ouvrir le journal actuel",
+      "open_directory": "Ouvrir le dossier des journaux",
+      "open_failed": "Impossible d’ouvrir le journal de session"
+    },
     "highlight_override": {
       "title": "Surlignage",
       "source_global_base": "Utilisation des règles globales de base",

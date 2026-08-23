@@ -96,6 +96,21 @@
       "search_no_results": "No results",
       "player_empty": "No playback output yet"
     },
+    "session_log": {
+      "title": "Registro della sessione",
+      "started": "Registrazione della sessione avviata",
+      "start_failed": "Impossibile avviare il registro della sessione",
+      "write_failed": "Il registro della sessione è stato arrestato perché il file non può essere scritto",
+      "stopped": "Registro della sessione salvato",
+      "stop_failed": "Impossibile completare il registro della sessione",
+      "start": "Avvia registro sessione",
+      "pause": "Sospendi registro sessione",
+      "resume": "Riprendi registro sessione",
+      "stop": "Arresta registro sessione",
+      "open_file": "Apri registro corrente",
+      "open_directory": "Apri cartella dei registri",
+      "open_failed": "Impossibile aprire il registro della sessione"
+    },
     "highlight_override": {
       "title": "Evidenziazione",
       "source_global_base": "Uso delle regole di base globali",

@@ -4,8 +4,9 @@ mod tests {
     use std::fs;
 
     use crate::{
-        ConnectionTerminalOptions, PrivilegeCredentialKind, SavePrivilegeCredentialRequest,
-        MoshIpFamily, MoshPredictionMode, MoshUdpPortSelection, SaveMoshProfileRequest,
+        ConnectionTerminalOptions, ConnectionTerminalSessionLogPolicy, MoshIpFamily,
+        MoshPredictionMode, MoshUdpPortSelection, PrivilegeCredentialKind, SaveMoshProfileRequest,
+        SavePrivilegeCredentialRequest,
         SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest, SaveTelnetProfileRequest,
         SavedUpstreamProxyProtocol, SerialFlowControl, SerialProfile, SerialProfilesSyncSnapshot,
     };
@@ -346,6 +347,10 @@ mod tests {
                 name: "Lab console".to_string(),
                 port_path: "/dev/cu.usbserial-1".to_string(),
                 flow_control: Some(SerialFlowControl::Hardware),
+                terminal: ConnectionTerminalOptions {
+                    session_log_policy: ConnectionTerminalSessionLogPolicy::Manual,
+                    ..ConnectionTerminalOptions::default()
+                },
                 ..SaveSerialProfileRequest::default()
             })
             .unwrap();
@@ -358,6 +363,10 @@ mod tests {
                 name: "Router console".to_string(),
                 host: "router.example.test".to_string(),
                 port: 2323,
+                terminal: ConnectionTerminalOptions {
+                    session_log_policy: ConnectionTerminalSessionLogPolicy::Disabled,
+                    ..ConnectionTerminalOptions::default()
+                },
                 ..SaveTelnetProfileRequest::default()
             })
             .unwrap();
@@ -446,6 +455,10 @@ mod tests {
                 ip_family: MoshIpFamily::Auto,
                 prediction: MoshPredictionMode::Adaptive,
                 locale: Some("en_US.UTF-8".to_string()),
+                terminal: ConnectionTerminalOptions {
+                    session_log_policy: ConnectionTerminalSessionLogPolicy::Automatic,
+                    ..ConnectionTerminalOptions::default()
+                },
                 identity_agent: None,
                 legacy_ssh_compatibility: false,
                 ssh_algorithms: SshAlgorithmPreferences::default(),
@@ -491,6 +504,10 @@ mod tests {
             Some("Intermittent link")
         );
         assert!(matches!(target.mosh_profiles()[0].auth, SavedAuth::Agent));
+        assert_eq!(
+            target.mosh_profiles()[0].terminal.session_log_policy,
+            ConnectionTerminalSessionLogPolicy::Automatic
+        );
     }
 
     #[test]

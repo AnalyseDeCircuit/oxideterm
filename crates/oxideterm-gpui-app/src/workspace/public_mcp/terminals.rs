@@ -1,4 +1,5 @@
 use gpui::{App, Context, Entity, Window};
+use oxideterm_connections::ConnectionTerminalOptions;
 use oxideterm_gpui_terminal::{TerminalPane, TerminalSerialAction, TerminalTelnetAction};
 use oxideterm_public_mcp::{
     DomainRequest, PublicTelnetControl, PublicToolCall, TerminalControlAction, TerminalOpenSource,
@@ -524,7 +525,13 @@ impl WorkspaceApp {
                 parity: terminal_serial_parity_from_profile(&profile.parity),
                 flow_control: terminal_serial_flow_from_profile(&profile.flow_control),
             };
-            match self.create_serial_terminal_tab_with_title(config, title.clone(), window, cx) {
+            match self.create_serial_terminal_tab_with_title(
+                config,
+                ConnectionTerminalOptions::default(),
+                title.clone(),
+                window,
+                cx,
+            ) {
                 Ok(session_id) => {
                     self.register_terminal_saved_connection(
                         session_id,

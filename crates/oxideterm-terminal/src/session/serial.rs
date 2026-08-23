@@ -594,8 +594,7 @@ impl SerialSession {
 
     fn push_output_event(&mut self, bytes: &[u8]) {
         if self.output_events_enabled && !bytes.is_empty() {
-            // Terminal recording is the only consumer of raw display-output events;
-            // keep this allocation off the normal rendering path.
+            // File consumers are opt-in, so keep this allocation off the normal rendering path.
             self.pending_events.push(TerminalEvent::Output(bytes.to_vec()));
         }
     }

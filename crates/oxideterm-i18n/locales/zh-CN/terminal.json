@@ -175,6 +175,21 @@
       "search_no_results": "没有结果",
       "player_empty": "暂无回放输出"
     },
+    "session_log": {
+      "title": "会话日志",
+      "started": "会话日志已开始",
+      "start_failed": "无法开始会话日志",
+      "write_failed": "无法写入文件，会话日志已停止",
+      "stopped": "会话日志已保存",
+      "stop_failed": "无法完成会话日志",
+      "start": "开始会话日志",
+      "pause": "暂停会话日志",
+      "resume": "继续会话日志",
+      "stop": "停止会话日志",
+      "open_file": "打开当前日志",
+      "open_directory": "打开日志文件夹",
+      "open_failed": "无法打开会话日志"
+    },
     "highlight_override": {
       "title": "高亮",
       "source_global_base": "正在使用全局基础规则",

@@ -891,6 +891,7 @@ impl ConnectionStore {
         profile.stop_bits = request.stop_bits.unwrap_or(1);
         profile.parity = request.parity.unwrap_or(SerialParity::None);
         profile.flow_control = request.flow_control.unwrap_or(SerialFlowControl::None);
+        profile.terminal = request.terminal;
         profile.connect_on_open = request.connect_on_open.unwrap_or(false);
         if !self
             .data
@@ -1086,6 +1087,7 @@ impl ConnectionStore {
         profile.locale = normalize_optional_text(request.locale);
         profile.identity_agent = normalize_optional_text(request.identity_agent);
         profile.legacy_ssh_compatibility = request.legacy_ssh_compatibility;
+        profile.terminal = request.terminal;
         profile.updated_at = now;
         profile.validate()?;
 

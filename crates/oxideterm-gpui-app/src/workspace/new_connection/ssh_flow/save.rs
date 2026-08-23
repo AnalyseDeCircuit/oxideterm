@@ -544,6 +544,7 @@ pub(in crate::workspace) fn mosh_options_from_profile(
         ip_family: profile.ip_family,
         prediction: profile.prediction,
         locale: profile.locale.clone(),
+        terminal: profile.terminal.clone(),
         public_mcp_open_token: None,
     }
 }
@@ -1348,7 +1349,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((config, mut save_request)) =
+        let Some((config, terminal_options, mut save_request)) =
             self.with_connection_form_mut(cx, |this, form, cx| {
                 let form = form?;
                 let port_path = form.serial_port_path.trim().to_string();
@@ -1399,11 +1400,12 @@ impl WorkspaceApp {
                     stop_bits: Some(form.serial_stop_bits),
                     parity: Some(serial_profile_parity_from_terminal(form.serial_parity)),
                     flow_control: Some(serial_profile_flow_from_terminal(form.serial_flow_control)),
+                    terminal: form.terminal.clone(),
                     connect_on_open: existing_connect_on_open,
                 });
                 form.pending = true;
                 form.error = None;
-                Some((config, save_request))
+                Some((config, form.terminal.clone(), save_request))
             })
         else {
             return;
@@ -1455,7 +1457,7 @@ impl WorkspaceApp {
             }
         }
 
-        match self.create_serial_terminal_tab(config, window, cx) {
+        match self.create_serial_terminal_tab(config, terminal_options, window, cx) {
             Ok(session_id) => {
                 if let Some(request) = save_request {
                     match self.connection_store.upsert_serial_profile(request) {
@@ -1718,6 +1720,7 @@ impl WorkspaceApp {
                 prediction: form.mosh_prediction,
                 locale: (!form.mosh_locale.trim().is_empty())
                     .then(|| form.mosh_locale.trim().to_string()),
+                terminal: form.terminal.clone(),
                 public_mcp_open_token: None,
             };
             let ssh_port = ssh_port.expect("validated Mosh SSH port must exist");
@@ -1834,6 +1837,7 @@ impl WorkspaceApp {
                 identity_agent: identity_agent_from_form(&form.identity_agent),
                 legacy_ssh_compatibility: form.legacy_ssh_compatibility,
                 ssh_algorithms: form.ssh_algorithms.clone(),
+                terminal: form.terminal.clone(),
             };
             form.pending = true;
             form.error = None;

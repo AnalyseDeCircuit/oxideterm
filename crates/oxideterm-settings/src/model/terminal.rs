@@ -319,6 +319,42 @@ pub struct TerminalBroadcastGroup {
     pub members: Vec<TerminalBroadcastTargetRef>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TerminalSessionLogFileMode {
+    #[default]
+    Unique,
+    Append,
+    Overwrite,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TerminalSessionLogSettings {
+    // Automatic logging remains opt-in because terminal output may contain sensitive data.
+    pub automatic: bool,
+    pub include_control_sequences: bool,
+    pub retention_days: i64,
+    pub max_file_size_mib: i64,
+    pub file_name_template: String,
+    pub content_template: String,
+    pub file_mode: TerminalSessionLogFileMode,
+}
+
+impl Default for TerminalSessionLogSettings {
+    fn default() -> Self {
+        Self {
+            automatic: false,
+            include_control_sequences: false,
+            retention_days: 30,
+            max_file_size_mib: 100,
+            file_name_template: "{date}_{time}_{protocol}_{session}.log".to_string(),
+            content_template: "[{timestamp}] {text}".to_string(),
+            file_mode: TerminalSessionLogFileMode::Unique,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
@@ -377,6 +413,8 @@ pub struct TerminalSettings {
     pub command_bar: TerminalCommandBarSettings,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub broadcast_groups: Vec<TerminalBroadcastGroup>,
+    #[serde(default)]
+    pub session_log: TerminalSessionLogSettings,
     #[serde(default)]
     pub triggers: TerminalTriggerSettings,
     #[serde(default)]
@@ -495,6 +533,7 @@ impl Default for TerminalSettings {
             autosuggest: TerminalAutosuggestSettings::default(),
             command_bar: TerminalCommandBarSettings::default(),
             broadcast_groups: Vec::new(),
+            session_log: TerminalSessionLogSettings::default(),
             triggers: TerminalTriggerSettings::default(),
             remote_shell_integration_mode: RemoteShellIntegrationMode::Ask,
             command_marks: TerminalCommandMarksSettings::default(),
@@ -560,6 +599,34 @@ mod tests {
         let settings: TerminalSettings = serde_json::from_value(value).expect("legacy settings");
 
         assert!(settings.broadcast_groups.is_empty());
+    }
+
+    #[test]
+    fn terminal_session_log_uses_safe_defaults_when_section_is_absent() {
+        let mut value = serde_json::to_value(TerminalSettings::default()).expect("settings value");
+        value
+            .as_object_mut()
+            .expect("terminal settings object")
+            .remove("sessionLog");
+
+        let settings: TerminalSettings = serde_json::from_value(value).expect("terminal settings");
+
+        assert!(!settings.session_log.automatic);
+        assert!(!settings.session_log.include_control_sequences);
+        assert_eq!(settings.session_log.retention_days, 30);
+        assert_eq!(settings.session_log.max_file_size_mib, 100);
+        assert_eq!(
+            settings.session_log.file_name_template,
+            "{date}_{time}_{protocol}_{session}.log"
+        );
+        assert_eq!(
+            settings.session_log.content_template,
+            "[{timestamp}] {text}"
+        );
+        assert_eq!(
+            settings.session_log.file_mode,
+            TerminalSessionLogFileMode::Unique
+        );
     }
 
     #[test]

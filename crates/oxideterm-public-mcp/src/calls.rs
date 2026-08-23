@@ -115,6 +115,20 @@ pub enum PublicTerminalDeleteSequence {
     ControlH,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicTerminalSessionLogPolicy {
+    #[default]
+    /// Use the application-wide automatic logging choice.
+    Inherit,
+    /// Start a log whenever this connection opens.
+    Automatic,
+    /// Allow logging from the terminal menu without starting it automatically.
+    Manual,
+    /// Prevent this connection from creating a session log.
+    Disabled,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PublicTerminalOptions {
@@ -124,6 +138,8 @@ pub struct PublicTerminalOptions {
     pub backspace_sequence: Option<PublicTerminalBackspaceSequence>,
     #[serde(default)]
     pub delete_sequence: Option<PublicTerminalDeleteSequence>,
+    #[serde(default)]
+    pub session_log_policy: PublicTerminalSessionLogPolicy,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
@@ -270,6 +286,8 @@ pub struct PublicSerialProfile {
     #[serde(default)]
     pub flow_control: Option<PublicSerialFlowControl>,
     #[serde(default)]
+    pub terminal: PublicTerminalOptions,
+    #[serde(default)]
     pub connect_on_open: bool,
     #[serde(default)]
     pub color: Option<String>,
@@ -361,6 +379,8 @@ pub struct PublicMoshProfile {
     pub prediction: PublicMoshPredictionMode,
     #[serde(default)]
     pub locale: Option<String>,
+    #[serde(default)]
+    pub terminal: PublicTerminalOptions,
     #[serde(default)]
     pub identity_agent: Option<String>,
     #[serde(default)]

@@ -922,7 +922,7 @@ impl WorkspaceApp {
             parity: terminal_serial_parity_from_profile(&profile.parity),
             flow_control: terminal_serial_flow_from_profile(&profile.flow_control),
         };
-        match self.create_serial_terminal_tab(config, window, cx) {
+        match self.create_serial_terminal_tab(config, profile.terminal.clone(), window, cx) {
             Ok(session_id) => {
                 self.register_terminal_saved_connection(
                     session_id,

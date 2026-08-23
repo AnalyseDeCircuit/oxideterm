@@ -96,6 +96,21 @@
       "search_no_results": "No results",
       "player_empty": "No playback output yet"
     },
+    "session_log": {
+      "title": "Sitzungsprotokoll",
+      "started": "Sitzungsprotokollierung gestartet",
+      "start_failed": "Sitzungsprotokollierung konnte nicht gestartet werden",
+      "write_failed": "Sitzungsprotokollierung wurde wegen eines Schreibfehlers beendet",
+      "stopped": "Sitzungsprotokoll gespeichert",
+      "stop_failed": "Sitzungsprotokoll konnte nicht abgeschlossen werden",
+      "start": "Sitzungsprotokoll starten",
+      "pause": "Sitzungsprotokoll pausieren",
+      "resume": "Sitzungsprotokoll fortsetzen",
+      "stop": "Sitzungsprotokoll beenden",
+      "open_file": "Aktuelles Protokoll öffnen",
+      "open_directory": "Protokollordner öffnen",
+      "open_failed": "Sitzungsprotokoll konnte nicht geöffnet werden"
+    },
     "highlight_override": {
       "title": "Hervorhebung",
       "source_global_base": "Globale Basisregeln werden verwendet",

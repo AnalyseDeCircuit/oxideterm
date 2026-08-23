@@ -45,6 +45,7 @@ use crate::privilege_prompt::{
     PrivilegeInputObservation, PrivilegePromptMatch, PrivilegePromptSnapshot,
     PrivilegePromptTracker,
 };
+use crate::session_log::TerminalSessionLog;
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
 use oxideterm_terminal_recording::{
@@ -99,6 +100,8 @@ pub enum TerminalPaneEvent {
     CurrentDirectoryChanged,
     // Recording contents stay pane-owned; consumers only reschedule visible elapsed chrome.
     RecordingStatusChanged,
+    // Session log contents and paths stay pane-owned; consumers only refresh log controls.
+    SessionLogStatusChanged,
     // Prompt text and credentials stay pane-owned; consumers only recompute the active hint.
     PrivilegePromptStateChanged,
     // The event carries intent only; Workspace resolves any credential in the active scope.
@@ -310,6 +313,42 @@ fn viewport_needs_live_output_restore(
         || smooth_scroll_animation_active
 }
 
+fn populate_default_session_log_context(
+    context: &mut crate::session_log::TerminalSessionLogContext,
+    session_kind: TerminalSessionKind,
+) {
+    let protocol = match session_kind {
+        TerminalSessionKind::LocalPty => "local",
+        TerminalSessionKind::SshPty => "ssh",
+        TerminalSessionKind::Telnet => "telnet",
+        TerminalSessionKind::Mosh => "mosh",
+        TerminalSessionKind::Serial => "serial",
+    };
+    if context.protocol.is_empty() {
+        context.protocol = protocol.to_string();
+    }
+    if context.session.is_empty() {
+        context.session = protocol.to_string();
+    }
+    if context.host.is_empty() {
+        context.host = if session_kind == TerminalSessionKind::LocalPty {
+            "localhost".to_string()
+        } else {
+            "unknown".to_string()
+        };
+    }
+    if context.username.is_empty() {
+        // Environment-derived identity is metadata only and never includes authentication input.
+        context.username = if session_kind == TerminalSessionKind::LocalPty {
+            env::var("USER")
+                .or_else(|_| env::var("USERNAME"))
+                .unwrap_or_else(|_| "unknown".to_string())
+        } else {
+            "unknown".to_string()
+        };
+    }
+}
+
 fn terminal_latency_percentiles(samples: &VecDeque<u64>) -> (u64, u64, u64) {
     if samples.is_empty() {
         return (0, 0, 0);
@@ -400,6 +439,8 @@ pub struct TerminalPane {
     privilege_prompt_expiry_task: Option<gpui::Task<()>>,
     command_fact_ledger: CommandFactLedger,
     recorder: Option<TerminalRecorder>,
+    session_log: Option<TerminalSessionLog>,
+    last_session_log_path: Option<std::path::PathBuf>,
     bell_flash: bool,
     terminal_exited: bool,
     scroll_input_remainder_px: Pixels,
@@ -635,6 +676,7 @@ fn reconcile_snapshot_line_ids(
 }
 
 include!("app_recording.rs");
+include!("app_session_log.rs");
 include!("app_command_marks.rs");
 include!("app_modem.rs");
 include!("app_trzsz.rs");
@@ -799,10 +841,13 @@ impl TerminalPane {
     pub fn new_recording_playback(
         cols: usize,
         rows: usize,
-        preferences: TerminalUiPreferences,
+        mut preferences: TerminalUiPreferences,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Self> {
+        // Playback is not a live terminal connection and must never create an automatic audit log.
+        preferences.session_log_automatic = false;
+        preferences.session_log_options = None;
         let terminal = Arc::new(Mutex::new(TerminalSession::recording_playback(
             cols,
             rows,
@@ -814,7 +859,7 @@ impl TerminalPane {
 
     fn from_session(
         terminal: SharedTerminalSession,
-        preferences: TerminalUiPreferences,
+        mut preferences: TerminalUiPreferences,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Self> {
@@ -833,6 +878,9 @@ impl TerminalPane {
             session_kind,
             cwd_integration_launch_state,
         );
+        if let Some(options) = preferences.session_log_options.as_mut() {
+            populate_default_session_log_context(&mut options.context, session_kind);
+        }
         let focus_handle = cx.focus_handle();
         let metrics = TerminalMetrics::measure_with_preferences(window, &preferences);
         window.focus(&focus_handle, cx);
@@ -917,7 +965,31 @@ impl TerminalPane {
         })
         .detach();
 
-        Ok(Self {
+        let session_log = if preferences.session_log_automatic {
+            preferences.session_log_options.clone().and_then(|options| {
+                match TerminalSessionLog::start(options) {
+                    Ok(log) => Some(log),
+                    Err(_) => {
+                        if let Some(sink) = &preferences.notice_sink
+                            && !preferences.session_log_labels.start_failed.is_empty()
+                        {
+                            sink(TerminalNotice {
+                                title: preferences.session_log_labels.start_failed.clone(),
+                                description: None,
+                                status_text: None,
+                                progress: None,
+                                variant: TerminalNoticeVariant::Error,
+                            });
+                        }
+                        None
+                    }
+                }
+            })
+        } else {
+            None
+        };
+
+        let mut pane = Self {
             terminal,
             session_kind,
             serial_reconnect_config: None,
@@ -990,6 +1062,8 @@ impl TerminalPane {
             privilege_prompt_expiry_task: None,
             command_fact_ledger: CommandFactLedger::default(),
             recorder: None,
+            session_log,
+            last_session_log_path: None,
             bell_flash: false,
             terminal_exited: false,
             scroll_input_remainder_px: px(0.0),
@@ -1049,7 +1123,9 @@ impl TerminalPane {
             modem_transfer: None,
             modem_worker: None,
             _subscriptions: vec![focus_in, focus_out],
-        })
+        };
+        pane.sync_terminal_output_events_enabled();
+        Ok(pane)
     }
 
     pub fn title(&self) -> SharedString {
@@ -1298,11 +1374,14 @@ impl TerminalPane {
             .recorder
             .as_ref()
             .is_some_and(|recorder| recorder.status().state == TerminalRecordingState::Recording);
+        let session_log_requires_output = self.session_log.as_ref().is_some_and(|log| {
+            log.status().state == crate::session_log::TerminalSessionLogState::Logging
+        });
         // Privilege prompts use compact semantic events at the session output
-        // boundary. Full decoded output is duplicated only for recording.
+        // boundary. Full decoded output is duplicated only for active file consumers.
         self.terminal
             .lock()
-            .set_output_events_enabled(recording_requires_output);
+            .set_output_events_enabled(recording_requires_output || session_log_requires_output);
     }
 
     fn finish_privilege_prompt_tracker_update(
@@ -1374,6 +1453,10 @@ impl TerminalPane {
     pub fn set_preferences(&mut self, preferences: TerminalUiPreferences, cx: &mut Context<Self>) {
         let mut preferences = preferences;
         self.preference_overrides.apply_to(&mut preferences);
+        if preferences.session_log_options.is_none() && self.session_log.is_some() {
+            // An explicit connection-level disable takes effect immediately for an active pane.
+            let _ = self.stop_session_log(cx);
+        }
         if let Some(highlight_override) = &self.session_highlight_override {
             preferences.highlight_rules = highlight_override.rules.clone();
         }
@@ -2697,6 +2780,29 @@ impl TerminalPane {
             TerminalEvent::Output(bytes) => {
                 if let Some(recorder) = self.recorder.as_mut() {
                     recorder.record_output(&bytes);
+                }
+                let session_log_failed = self
+                    .session_log
+                    .as_mut()
+                    .is_some_and(|log| log.write_output(bytes).is_err());
+                if session_log_failed {
+                    // Failure drops only this pane's file sink and leaves the terminal session alive.
+                    self.last_session_log_path =
+                        self.session_log.as_ref().and_then(|log| log.status().path);
+                    self.session_log.take();
+                    self.sync_terminal_output_events_enabled();
+                    cx.emit(TerminalPaneEvent::SessionLogStatusChanged);
+                    if let Some(sink) = &self.preferences.notice_sink
+                        && !self.preferences.session_log_labels.write_failed.is_empty()
+                    {
+                        sink(TerminalNotice {
+                            title: self.preferences.session_log_labels.write_failed.clone(),
+                            description: None,
+                            status_text: None,
+                            progress: None,
+                            variant: TerminalNoticeVariant::Error,
+                        });
+                    }
                 }
                 TerminalEventEffect::default()
             }

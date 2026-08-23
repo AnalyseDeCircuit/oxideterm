@@ -14,7 +14,8 @@ use oxideterm_settings::{
     DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND, DEFAULT_AI_TOOL_MAX_ROUNDS,
     MAX_AI_TOOL_MAX_CALLS_PER_ROUND, MAX_AI_TOOL_MAX_ROUNDS, MIN_AI_TOOL_MAX_CALLS_PER_ROUND,
     MIN_AI_TOOL_MAX_ROUNDS, PersistedSettings, RECOMMENDED_FOCUS_HANDOFF_COMMANDS,
-    SettingsUpstreamProxyAuth, UpdateProxyMode, reindex_highlight_rules,
+    SettingsUpstreamProxyAuth, UpdateProxyMode, parse_terminal_session_log_content_template,
+    parse_terminal_session_log_file_name_template, reindex_highlight_rules,
 };
 use oxideterm_terminal_semantic::SEMANTIC_CLASSES;
 
@@ -118,6 +119,18 @@ pub fn persisted_settings_input_value(
             .in_band_transfer
             .max_total_bytes
             .to_string(),
+        SettingsInput::TerminalSessionLogRetentionDays => {
+            settings.terminal.session_log.retention_days.to_string()
+        }
+        SettingsInput::TerminalSessionLogMaxFileSizeMib => {
+            settings.terminal.session_log.max_file_size_mib.to_string()
+        }
+        SettingsInput::TerminalSessionLogFileNameTemplate => {
+            settings.terminal.session_log.file_name_template.clone()
+        }
+        SettingsInput::TerminalSessionLogContentTemplate => {
+            settings.terminal.session_log.content_template.clone()
+        }
         SettingsInput::TerminalCommandBarFocusHandoff => settings
             .terminal
             .command_bar
@@ -421,6 +434,28 @@ pub fn apply_persisted_settings_input_draft(
         SettingsInput::InBandTransferMaxTotalBytes => parse_i64(draft)
             .map(|value| settings.terminal.in_band_transfer.max_total_bytes = value.max(1024))
             .into(),
+        SettingsInput::TerminalSessionLogRetentionDays => parse_i64(draft)
+            .map(|value| settings.terminal.session_log.retention_days = value.clamp(0, 3650))
+            .into(),
+        SettingsInput::TerminalSessionLogMaxFileSizeMib => parse_i64(draft)
+            .map(|value| settings.terminal.session_log.max_file_size_mib = value.clamp(1, 4096))
+            .into(),
+        SettingsInput::TerminalSessionLogFileNameTemplate => {
+            if parse_terminal_session_log_file_name_template(draft).is_err() {
+                SettingsInputDraftApply::Invalid
+            } else {
+                settings.terminal.session_log.file_name_template = draft.to_string();
+                SettingsInputDraftApply::Applied
+            }
+        }
+        SettingsInput::TerminalSessionLogContentTemplate => {
+            if parse_terminal_session_log_content_template(draft).is_err() {
+                SettingsInputDraftApply::Invalid
+            } else {
+                settings.terminal.session_log.content_template = draft.to_string();
+                SettingsInputDraftApply::Applied
+            }
+        }
         SettingsInput::TerminalCommandBarFocusHandoff => {
             let mut commands = settings
                 .terminal
@@ -824,6 +859,31 @@ mod tests {
     }
 
     #[test]
+    fn session_log_limits_accept_forever_retention_and_bound_file_size() {
+        let mut settings = PersistedSettings::default();
+
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::TerminalSessionLogRetentionDays,
+                "-1",
+            ),
+            SettingsInputDraftApply::Applied
+        );
+        assert_eq!(settings.terminal.session_log.retention_days, 0);
+
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::TerminalSessionLogMaxFileSizeMib,
+                "99999",
+            ),
+            SettingsInputDraftApply::Applied
+        );
+        assert_eq!(settings.terminal.session_log.max_file_size_mib, 4096);
+    }
+
+    #[test]
     fn focus_handoff_custom_draft_preserves_selected_presets() {
         let mut settings = PersistedSettings::default();
         settings
@@ -986,6 +1046,51 @@ mod tests {
         assert_eq!(ranges[0].1.as_str(), "vim");
         assert_eq!(ranges[1].0, 4..4);
         assert!(ranges[1].1.is_empty());
+    }
+
+    #[test]
+    fn session_log_template_drafts_validate_before_mutating_settings() {
+        let mut settings = PersistedSettings::default();
+        let original_file_name = settings.terminal.session_log.file_name_template.clone();
+        let original_content = settings.terminal.session_log.content_template.clone();
+
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::TerminalSessionLogFileNameTemplate,
+                "../outside.log",
+            ),
+            SettingsInputDraftApply::Invalid
+        );
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::TerminalSessionLogContentTemplate,
+                "[{timestamp}]",
+            ),
+            SettingsInputDraftApply::Invalid
+        );
+        assert_eq!(
+            settings.terminal.session_log.file_name_template,
+            original_file_name
+        );
+        assert_eq!(
+            settings.terminal.session_log.content_template,
+            original_content
+        );
+
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::TerminalSessionLogContentTemplate,
+                "{protocol}: {text}",
+            ),
+            SettingsInputDraftApply::Applied
+        );
+        assert_eq!(
+            settings.terminal.session_log.content_template,
+            "{protocol}: {text}"
+        );
     }
 
     #[test]
