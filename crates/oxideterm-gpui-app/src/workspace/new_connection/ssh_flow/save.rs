@@ -1460,7 +1460,7 @@ impl WorkspaceApp {
                 if let Some(request) = save_request {
                     match self.connection_store.upsert_serial_profile(request) {
                         Ok(profile) => {
-                            self.register_terminal_trigger_saved_connection(
+                            self.register_terminal_saved_connection(
                                 session_id,
                                 oxideterm_terminal_triggers::SavedConnectionKind::Serial,
                                 profile.id,
@@ -1622,7 +1622,7 @@ impl WorkspaceApp {
                 if let Some(profile_id) = connected_profile_id {
                     self.telnet_terminal_profile_ids
                         .insert(session_id, profile_id.clone());
-                    self.register_terminal_trigger_saved_connection(
+                    self.register_terminal_saved_connection(
                         session_id,
                         oxideterm_terminal_triggers::SavedConnectionKind::Telnet,
                         profile_id,

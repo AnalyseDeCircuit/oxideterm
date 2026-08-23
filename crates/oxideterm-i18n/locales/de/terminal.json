@@ -378,6 +378,8 @@
       "current": "Aktuell",
       "all": "Alle",
       "selected": "Ausgewählt",
+      "group": "Gruppe",
+      "no_groups": "Keine Broadcast-Gruppen",
       "start": "Starten",
       "stop": "Stoppen",
       "idle": "Bereit",
@@ -393,6 +395,13 @@
       "error_busy": "Ein Ziel wird von einem anderen Sender verwendet"
     },
     "broadcast": {
+      "groups": "Broadcast-Gruppen",
+      "create_group": "Neue Gruppe",
+      "no_groups": "Noch keine benannten Gruppen",
+      "temporary_group": "Temporäre Auswahl",
+      "group_name_placeholder": "Gruppenname",
+      "group_members": "Gruppenmitglieder",
+      "unsaved_target": "Nicht gespeichert",
       "current": "Aktuell",
       "deselect_all": "Alle abwählen",
       "no_targets": "Keine anderen Terminals verfügbar",

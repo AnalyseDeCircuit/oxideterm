@@ -378,6 +378,8 @@
       "current": "現在",
       "all": "すべて",
       "selected": "指定",
+      "group": "グループ",
+      "no_groups": "ブロードキャストグループがありません",
       "start": "開始",
       "stop": "停止",
       "idle": "準備完了",
@@ -393,6 +395,13 @@
       "error_busy": "送信先は別の送信タスクで使用中です"
     },
     "broadcast": {
+      "groups": "ブロードキャストグループ",
+      "create_group": "新しいグループ",
+      "no_groups": "名前付きグループはありません",
+      "temporary_group": "一時選択",
+      "group_name_placeholder": "グループ名",
+      "group_members": "グループメンバー",
+      "unsaved_target": "未保存",
       "current": "現在",
       "deselect_all": "すべて解除",
       "no_targets": "他に利用可能なターミナルがありません",

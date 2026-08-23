@@ -118,6 +118,7 @@ pub(super) enum WorkspaceImeTarget {
     TerminalGitBranchSearch,
     TerminalGitCommitMessage,
     TerminalProjectSearch,
+    TerminalBroadcastGroupName,
     TerminalCastSearch,
     HostProcessSearch,
     HostProcessRenice,
@@ -489,6 +490,7 @@ impl WorkspaceImeTarget {
             Self::TerminalGitBranchSearch => 17,
             Self::TerminalGitCommitMessage => 20,
             Self::TerminalProjectSearch => 19,
+            Self::TerminalBroadcastGroupName => 21,
             Self::TerminalCastSearch => 3,
             Self::HostProcessSearch => 6,
             Self::HostProcessRenice => 7,
@@ -991,6 +993,9 @@ impl WorkspaceApp {
 
         let terminal_tab_visible = self.active_tab(cx).is_some_and(is_terminal_tab);
         if terminal_tab_visible {
+            if self.terminal.read(cx).broadcast_group_editor().is_some() {
+                return Some(WorkspaceImeTarget::TerminalBroadcastGroupName);
+            }
             let quick_command_input = {
                 let quick_commands = &self.terminal.read(cx).quick_commands;
                 quick_commands
@@ -1817,6 +1822,11 @@ impl WorkspaceApp {
                     .project_panel_open()
                     .then(|| terminal.project_query().to_string())
             }
+            WorkspaceImeTarget::TerminalBroadcastGroupName => self
+                .terminal
+                .read(cx)
+                .broadcast_group_editor()
+                .map(|(_, value)| value.to_string()),
             WorkspaceImeTarget::TerminalCastSearch => self
                 .terminal
                 .read(cx)
@@ -2618,6 +2628,14 @@ impl WorkspaceApp {
                         terminal.replace_project_query(&key, replacement_range, text)
                     })
                 {
+                    self.show_active_input_caret(cx);
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::TerminalBroadcastGroupName => {
+                if self.terminal.update(cx, |terminal, _cx| {
+                    terminal.replace_broadcast_group_editor_text(replacement_range, text)
+                }) {
                     self.show_active_input_caret(cx);
                     cx.notify();
                 }

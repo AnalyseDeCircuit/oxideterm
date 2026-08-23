@@ -378,6 +378,8 @@
       "current": "目前",
       "all": "全部",
       "selected": "指定",
+      "group": "群組",
+      "no_groups": "沒有廣播群組",
       "start": "開始",
       "stop": "停止",
       "idle": "就緒",
@@ -393,6 +395,13 @@
       "error_busy": "目標正由另一個傳送工作使用"
     },
     "broadcast": {
+      "groups": "廣播群組",
+      "create_group": "新增群組",
+      "no_groups": "尚無命名群組",
+      "temporary_group": "暫時選擇",
+      "group_name_placeholder": "群組名稱",
+      "group_members": "群組成員",
+      "unsaved_target": "未儲存",
       "current": "目前",
       "deselect_all": "取消全選",
       "no_targets": "沒有其他可用終端",

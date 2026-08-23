@@ -1071,7 +1071,7 @@ impl WorkspaceApp {
         });
         self.register_terminal_pane(pane_id, session_id, pane, window, cx);
         if let Some(saved_connection_id) = saved_connection_id {
-            self.register_terminal_trigger_saved_connection(
+            self.register_terminal_saved_connection(
                 session_id,
                 oxideterm_terminal_triggers::SavedConnectionKind::Ssh,
                 saved_connection_id,

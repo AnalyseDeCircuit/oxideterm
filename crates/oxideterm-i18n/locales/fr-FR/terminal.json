@@ -378,6 +378,8 @@
       "current": "Actuel",
       "all": "Tous",
       "selected": "Sélectionnés",
+      "group": "Groupe",
+      "no_groups": "Aucun groupe de diffusion",
       "start": "Démarrer",
       "stop": "Arrêter",
       "idle": "Prêt",
@@ -393,6 +395,13 @@
       "error_busy": "Une cible est utilisée par un autre émetteur"
     },
     "broadcast": {
+      "groups": "Groupes de diffusion",
+      "create_group": "Nouveau groupe",
+      "no_groups": "Aucun groupe nommé",
+      "temporary_group": "Sélection temporaire",
+      "group_name_placeholder": "Nom du groupe",
+      "group_members": "Membres du groupe",
+      "unsaved_target": "Non enregistrée",
       "current": "Actuel",
       "deselect_all": "Tout désélectionner",
       "no_targets": "Aucun autre terminal disponible",

@@ -378,6 +378,8 @@
       "current": "Hiện tại",
       "all": "Tất cả",
       "selected": "Đã chọn",
+      "group": "Nhóm",
+      "no_groups": "Không có nhóm phát lệnh",
       "start": "Bắt đầu",
       "stop": "Dừng",
       "idle": "Sẵn sàng",
@@ -393,6 +395,13 @@
       "error_busy": "Một đích đang được tác vụ gửi khác sử dụng"
     },
     "broadcast": {
+      "groups": "Nhóm phát lệnh",
+      "create_group": "Nhóm mới",
+      "no_groups": "Chưa có nhóm được đặt tên",
+      "temporary_group": "Lựa chọn tạm thời",
+      "group_name_placeholder": "Tên nhóm",
+      "group_members": "Thành viên nhóm",
+      "unsaved_target": "Chưa lưu",
       "current": "Hiện tại",
       "deselect_all": "Bỏ chọn tất cả",
       "no_targets": "Không có terminal nào khác",

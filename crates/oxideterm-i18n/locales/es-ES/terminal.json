@@ -378,6 +378,8 @@
       "current": "Actual",
       "all": "Todos",
       "selected": "Seleccionados",
+      "group": "Grupo",
+      "no_groups": "No hay grupos de difusión",
       "start": "Iniciar",
       "stop": "Detener",
       "idle": "Listo",
@@ -393,6 +395,13 @@
       "error_busy": "Otro emisor está usando un destino"
     },
     "broadcast": {
+      "groups": "Grupos de difusión",
+      "create_group": "Nuevo grupo",
+      "no_groups": "Aún no hay grupos con nombre",
+      "temporary_group": "Selección temporal",
+      "group_name_placeholder": "Nombre del grupo",
+      "group_members": "Miembros del grupo",
+      "unsaved_target": "No guardada",
       "current": "Actual",
       "deselect_all": "Deseleccionar todo",
       "no_targets": "No hay otros terminales disponibles",

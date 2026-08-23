@@ -748,7 +748,8 @@ pub(crate) struct WorkspaceApp {
     terminal_trigger_shell_confirmation_pending: bool,
     terminal_triggers: settings::TerminalTriggersSettingsState,
     terminal_trigger_runtime: terminal_triggers_runtime::TerminalTriggerRuntimeState,
-    terminal_trigger_saved_connections:
+    // Runtime panes share one stable saved-profile identity index across triggers and broadcasts.
+    terminal_saved_connection_refs:
         HashMap<TerminalSessionId, oxideterm_terminal_triggers::SavedConnectionRef>,
     terminal_semantic_highlight_section_expanded: bool,
     terminal_rule_highlight_section_expanded: bool,

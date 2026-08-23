@@ -1299,7 +1299,7 @@ impl WorkspaceApp {
                 match self.create_mosh_terminal_tab(terminal_config, title, window, cx) {
                     Ok(session_id) => {
                         if let Some(saved_profile_id) = options.saved_profile_id {
-                            self.register_terminal_trigger_saved_connection(
+                            self.register_terminal_saved_connection(
                                 session_id,
                                 oxideterm_terminal_triggers::SavedConnectionKind::Mosh,
                                 saved_profile_id.clone(),

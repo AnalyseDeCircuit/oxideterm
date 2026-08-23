@@ -622,7 +622,7 @@ impl WorkspaceApp {
             terminal_triggers,
             terminal_trigger_runtime:
                 terminal_triggers_runtime::TerminalTriggerRuntimeState::default(),
-            terminal_trigger_saved_connections: HashMap::new(),
+            terminal_saved_connection_refs: HashMap::new(),
             terminal_semantic_highlight_section_expanded: true,
             terminal_rule_highlight_section_expanded: true,
             terminal_command_context_highlight_section_expanded: true,

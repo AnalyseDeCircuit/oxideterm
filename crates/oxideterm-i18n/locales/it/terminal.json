@@ -378,6 +378,8 @@
       "current": "Corrente",
       "all": "Tutte",
       "selected": "Selezionate",
+      "group": "Gruppo",
+      "no_groups": "Nessun gruppo di broadcast",
       "start": "Avvia",
       "stop": "Ferma",
       "idle": "Pronto",
@@ -393,6 +395,13 @@
       "error_busy": "Una destinazione è usata da un altro invio"
     },
     "broadcast": {
+      "groups": "Gruppi di broadcast",
+      "create_group": "Nuovo gruppo",
+      "no_groups": "Nessun gruppo denominato",
+      "temporary_group": "Selezione temporanea",
+      "group_name_placeholder": "Nome del gruppo",
+      "group_members": "Membri del gruppo",
+      "unsaved_target": "Non salvata",
       "current": "Corrente",
       "deselect_all": "Deseleziona tutto",
       "no_targets": "Nessun altro terminale disponibile",

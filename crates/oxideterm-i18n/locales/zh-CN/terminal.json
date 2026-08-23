@@ -57,6 +57,8 @@
       "current": "当前",
       "all": "全部",
       "selected": "指定",
+      "group": "分组",
+      "no_groups": "暂无广播组",
       "start": "开始",
       "stop": "停止",
       "idle": "就绪",
@@ -72,6 +74,13 @@
       "error_busy": "目标正在被另一个发送任务使用"
     },
     "broadcast": {
+      "groups": "广播组",
+      "create_group": "新建组",
+      "no_groups": "暂无命名组",
+      "temporary_group": "临时选择",
+      "group_name_placeholder": "组名称",
+      "group_members": "组成员",
+      "unsaved_target": "未保存",
       "select_targets": "广播目标",
       "no_targets": "没有其他终端",
       "current": "当前",

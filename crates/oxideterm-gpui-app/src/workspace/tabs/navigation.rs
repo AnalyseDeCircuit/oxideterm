@@ -1022,7 +1022,7 @@ impl WorkspaceApp {
             self.release_public_mcp_terminal_for_closed_session(session_id, cx);
             self.serial_terminal_configs.remove(&session_id);
             self.telnet_terminal_profile_ids.remove(&session_id);
-            self.terminal_trigger_saved_connections.remove(&session_id);
+            self.terminal_saved_connection_refs.remove(&session_id);
             self.clear_terminal_trigger_session_overrides(session_id);
             self.unregister_ssh_terminal_session(session_id, cx);
         }

@@ -12,6 +12,7 @@ oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-terminal-semantic = { path = "../oxideterm-terminal-semantic", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tempfile = "3.23"

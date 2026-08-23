@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
+use gpui::StatefulInteractiveElement;
 use oxideterm_gpui_ui::dropdown_menu::{
     DropdownMenuItemKind, dropdown_menu_content, dropdown_menu_item,
 };
@@ -738,11 +739,18 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let entries = self.terminal_broadcast_entries(cx);
+        let groups = self.terminal_broadcast_groups().to_vec();
         let active_pane_id = self.active_pane_id(cx);
+        let selected_group_id = self.terminal.read(cx).selected_broadcast_group_id();
+        let group_editor = self
+            .terminal
+            .read(cx)
+            .broadcast_group_editor()
+            .map(|(kind, value)| (kind, value.to_string()));
         let selectable = entries
             .iter()
-            .filter(|(pane_id, _, _)| Some(*pane_id) != active_pane_id)
-            .map(|(pane_id, _, _)| *pane_id)
+            .filter(|entry| Some(entry.pane_id) != active_pane_id)
+            .map(|entry| entry.pane_id)
             .collect::<Vec<_>>();
         let all_selected = !selectable.is_empty() && {
             let terminal = self.terminal.read(cx);
@@ -766,8 +774,7 @@ impl WorkspaceApp {
             let menu = div()
                 .absolute()
                 .w(px(TERMINAL_BROADCAST_MENU_WIDTH))
-                .max_h(px(320.0))
-                .overflow_hidden()
+                .max_h(px(TERMINAL_BROADCAST_MENU_MAX_HEIGHT))
                 .rounded(px(self.tokens.radii.lg))
                 .border_1()
                 .border_color(rgb(theme.border))
@@ -781,20 +788,380 @@ impl WorkspaceApp {
                 menu.right(px(12.0))
             }
         })
+        .id("terminal-broadcast-menu-scroll")
+        .overflow_y_scroll()
         .child(
             div()
+                .flex()
+                .items_center()
+                .justify_between()
                 .px(px(6.0))
                 .py(px(4.0))
                 .text_size(px(11.0))
                 .text_color(rgb(theme.text_muted))
-                .child(self.i18n.t("terminal.broadcast.select_targets")),
+                .child(self.i18n.t("terminal.broadcast.groups"))
+                .child(
+                    div()
+                        .h(px(24.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0))
+                        .px(px(6.0))
+                        .rounded(px(self.tokens.radii.sm))
+                        .cursor_pointer()
+                        .hover(|button| button.bg(rgb(theme.bg_hover)))
+                        .child(Self::render_lucide_icon(
+                            LucideIcon::Plus,
+                            12.0,
+                            rgb(theme.accent),
+                        ))
+                        .child(self.i18n.t("terminal.broadcast.create_group"))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, window, cx| {
+                                this.begin_terminal_broadcast_group_create(window, cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                ),
         );
         menu = match placement {
             TerminalBroadcastMenuPlacement::Bottom(offset) => menu.bottom(px(offset)),
             TerminalBroadcastMenuPlacement::Top(offset) => menu.top(px(offset)),
         };
 
-        if entries.len() <= 1 {
+        if groups.is_empty() && group_editor.is_none() {
+            menu = menu.child(
+                div()
+                    .px(px(8.0))
+                    .pb(px(8.0))
+                    .text_size(px(11.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.i18n.t("terminal.broadcast.no_groups")),
+            );
+        }
+
+        menu = menu.child(
+            div()
+                .h(px(30.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .px(px(8.0))
+                .rounded(px(self.tokens.radii.md))
+                .cursor_pointer()
+                .when(selected_group_id.is_none(), |row| {
+                    row.bg(rgba((theme.accent << 8) | 0x1f))
+                })
+                .hover(|row| row.bg(rgb(theme.bg_hover)))
+                .child(if selected_group_id.is_none() {
+                    Self::render_lucide_icon(LucideIcon::Check, 12.0, rgb(theme.accent))
+                } else {
+                    div().size(px(12.0)).into_any_element()
+                })
+                .child(self.i18n.t("terminal.broadcast.temporary_group"))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.terminal.update(cx, |terminal, _cx| {
+                            terminal.clear_selected_broadcast_group();
+                        });
+                        cx.notify();
+                        cx.stop_propagation();
+                    }),
+                ),
+        );
+
+        for group in &groups {
+            let group_id = group.id;
+            let selected = selected_group_id == Some(group_id);
+            let member_count = self.resolve_terminal_broadcast_group(group_id, cx).len();
+            let name = group.name.clone();
+            menu = menu.child(
+                div()
+                    .h(px(30.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .px(px(8.0))
+                    .rounded(px(self.tokens.radii.md))
+                    .cursor_pointer()
+                    .when(selected, |row| row.bg(rgba((theme.accent << 8) | 0x1f)))
+                    .hover(|row| row.bg(rgb(theme.bg_hover)))
+                    .child(if selected {
+                        Self::render_lucide_icon(LucideIcon::Check, 12.0, rgb(theme.accent))
+                    } else {
+                        div().size(px(12.0)).into_any_element()
+                    })
+                    .child(div().flex_1().truncate().child(name))
+                    .child(
+                        div()
+                            .text_size(px(10.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(member_count.to_string()),
+                    )
+                    .child(
+                        div()
+                            .size(px(22.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.sm))
+                            .hover(|button| button.bg(rgb(theme.bg_panel)))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::Pencil,
+                                11.0,
+                                rgb(theme.text_muted),
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, window, cx| {
+                                    this.begin_terminal_broadcast_group_rename(
+                                        group_id, window, cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .size(px(22.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.sm))
+                            .hover(|button| button.bg(rgba((theme.error << 8) | 0x22)))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::Trash2,
+                                11.0,
+                                rgb(theme.error),
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.delete_terminal_broadcast_group(group_id, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.select_terminal_broadcast_group(group_id, cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+            );
+        }
+
+        if let Some((edit_kind, value)) = group_editor {
+            let target = WorkspaceImeTarget::TerminalBroadcastGroupName;
+            let workspace = cx.entity();
+            let valid = self.terminal_broadcast_group_name_valid(edit_kind, &value);
+            menu = menu.child(
+                div()
+                    .mt(px(4.0))
+                    .px(px(6.0))
+                    .pb(px(6.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(text_input_anchor_probe(
+                        target.anchor_id(),
+                        text_input(
+                            &self.tokens,
+                            TextInputView {
+                                value: &value,
+                                placeholder: self
+                                    .i18n
+                                    .t("terminal.broadcast.group_name_placeholder"),
+                                focused: true,
+                                caret_visible: self.input_caret.visible(),
+                                secret: false,
+                                selected_all: false,
+                                selected_range: self.ime_selected_range_for_target(target, cx),
+                                marked_text: self.marked_text_for_target(target, cx),
+                            },
+                        )
+                        .h(px(28.0))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, event, window, cx| {
+                                window.focus(&this.focus_handle, cx);
+                                this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                        move |anchor, _window, cx| {
+                            let _ = workspace.update(cx, |this, cx| {
+                                this.update_text_input_anchor(anchor, cx);
+                            });
+                        },
+                    ))
+                    .child(
+                        div()
+                            .size(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.sm))
+                            .when(valid, |button| {
+                                button
+                                    .cursor_pointer()
+                                    .hover(|button| button.bg(rgb(theme.bg_hover)))
+                            })
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::Save,
+                                12.0,
+                                rgb(if valid {
+                                    theme.accent
+                                } else {
+                                    theme.text_muted
+                                }),
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    if valid {
+                                        this.commit_terminal_broadcast_group_edit(cx);
+                                    }
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .size(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.sm))
+                            .cursor_pointer()
+                            .hover(|button| button.bg(rgb(theme.bg_hover)))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::X,
+                                12.0,
+                                rgb(theme.text_muted),
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.terminal.update(cx, |terminal, _cx| {
+                                        terminal.cancel_broadcast_group_edit();
+                                    });
+                                    this.clear_ime_selection();
+                                    cx.notify();
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    ),
+            );
+        }
+
+        menu = menu.child(
+            div()
+                .mt(px(4.0))
+                .pt(px(6.0))
+                .border_t_1()
+                .border_color(rgba((theme.border << 8) | 0x99))
+                .px(px(6.0))
+                .py(px(4.0))
+                .text_size(px(11.0))
+                .text_color(rgb(theme.text_muted))
+                .child(if selected_group_id.is_some() {
+                    self.i18n.t("terminal.broadcast.group_members")
+                } else {
+                    self.i18n.t("terminal.broadcast.select_targets")
+                }),
+        );
+
+        if let Some(group_id) = selected_group_id {
+            // Membership editing follows the active terminal surface; closed members stay
+            // persisted but cannot cause a connection to open.
+            if entries.is_empty() {
+                menu = menu.child(
+                    div()
+                        .px(px(8.0))
+                        .py(px(12.0))
+                        .text_align(gpui::TextAlign::Center)
+                        .text_color(rgb(theme.text_muted))
+                        .child(self.i18n.t("terminal.broadcast.no_targets")),
+                );
+            } else {
+                let selected_members = groups
+                    .iter()
+                    .find(|group| group.id == group_id)
+                    .map(|group| group.members.as_slice())
+                    .unwrap_or_default();
+                for entry in entries {
+                    let target = entry.saved_connection;
+                    let checked = target
+                        .as_ref()
+                        .is_some_and(|target| selected_members.contains(target));
+                    let unavailable = target.is_none();
+                    let badge = match entry.kind {
+                        TabKind::LocalTerminal => self.i18n.t("terminal.typeLocal"),
+                        TabKind::SshTerminal => self.i18n.t("terminal.typeSsh"),
+                        TabKind::MoshTerminal => self.i18n.t("terminal.typeMosh"),
+                        _ => String::new(),
+                    };
+                    menu = menu.child(
+                        self.render_terminal_broadcast_menu_action(
+                            div()
+                                .h(px(30.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .px(px(8.0))
+                                .rounded(px(self.tokens.radii.md))
+                                .child(if checked {
+                                    Self::render_lucide_icon(
+                                        LucideIcon::Check,
+                                        12.0,
+                                        rgb(theme.accent),
+                                    )
+                                } else {
+                                    div().size(px(12.0)).into_any_element()
+                                })
+                                .child(div().flex_1().truncate().child(entry.label))
+                                .when(!badge.is_empty(), |row| {
+                                    row.child(
+                                        div()
+                                            .px(px(5.0))
+                                            .py(px(1.0))
+                                            .rounded(px(self.tokens.radii.md))
+                                            .text_size(px(10.0))
+                                            .text_color(rgb(theme.text_muted))
+                                            .bg(rgba((theme.bg_panel << 8) | 0x99))
+                                            .child(badge),
+                                    )
+                                })
+                                .when(unavailable, |row| {
+                                    row.child(
+                                        div()
+                                            .text_size(px(10.0))
+                                            .text_color(rgb(theme.text_muted))
+                                            .child(
+                                                self.i18n.t("terminal.broadcast.unsaved_target"),
+                                            ),
+                                    )
+                                }),
+                            unavailable,
+                            false,
+                            Some(rgb(theme.bg_hover)),
+                            move |this, _event, _window, cx| {
+                                if let Some(target) = target.clone() {
+                                    this.toggle_terminal_broadcast_group_member(
+                                        group_id, target, cx,
+                                    );
+                                }
+                            },
+                            cx,
+                        ),
+                    );
+                }
+            }
+        } else if entries.len() <= 1 {
             menu = menu.child(
                 div()
                     .px(px(8.0))
@@ -804,7 +1171,10 @@ impl WorkspaceApp {
                     .child(self.i18n.t("terminal.broadcast.no_targets")),
             );
         } else {
-            for (pane_id, label, kind) in entries {
+            for entry in entries {
+                let pane_id = entry.pane_id;
+                let label = entry.label;
+                let kind = entry.kind;
                 let is_current = Some(pane_id) == active_pane_id;
                 let checked = self.terminal.read(cx).broadcast_target_selected(pane_id);
                 let badge = match kind {

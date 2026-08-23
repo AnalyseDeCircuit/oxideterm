@@ -40,8 +40,22 @@ enum TerminalGitProbeDelivery {
 /// Keeps broadcast selection semantics together so stale targets cannot widen a command.
 struct TerminalBroadcastState {
     enabled: bool,
+    // Named groups resolve to a runtime snapshot so membership never owns connection startup.
     targets: HashSet<PaneId>,
+    selected_group_id: Option<uuid::Uuid>,
+    group_editor: Option<TerminalBroadcastGroupEditor>,
     menu_open: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum TerminalBroadcastGroupEditKind {
+    Create,
+    Rename(uuid::Uuid),
+}
+
+struct TerminalBroadcastGroupEditor {
+    kind: TerminalBroadcastGroupEditKind,
+    value: String,
 }
 
 /// Owns terminal-wide delivery channels and their foreground cancellation lifecycle.
@@ -177,17 +191,99 @@ impl WorkspaceTerminalEntity {
         self.broadcast.targets.contains(&pane_id)
     }
 
+    pub(in crate::workspace) fn selected_broadcast_group_id(&self) -> Option<uuid::Uuid> {
+        self.broadcast.selected_group_id
+    }
+
+    pub(in crate::workspace) fn broadcast_group_editor(
+        &self,
+    ) -> Option<(TerminalBroadcastGroupEditKind, &str)> {
+        self.broadcast
+            .group_editor
+            .as_ref()
+            .map(|editor| (editor.kind, editor.value.as_str()))
+    }
+
+    pub(in crate::workspace) fn begin_broadcast_group_create(&mut self) {
+        self.broadcast.group_editor = Some(TerminalBroadcastGroupEditor {
+            kind: TerminalBroadcastGroupEditKind::Create,
+            value: String::new(),
+        });
+        self.broadcast.menu_open = true;
+    }
+
+    pub(in crate::workspace) fn begin_broadcast_group_rename(
+        &mut self,
+        group_id: uuid::Uuid,
+        name: String,
+    ) {
+        self.broadcast.group_editor = Some(TerminalBroadcastGroupEditor {
+            kind: TerminalBroadcastGroupEditKind::Rename(group_id),
+            value: name,
+        });
+        self.broadcast.menu_open = true;
+    }
+
+    pub(in crate::workspace) fn replace_broadcast_group_editor_text(
+        &mut self,
+        replacement_range: Option<Range<usize>>,
+        text: &str,
+    ) -> bool {
+        let Some(editor) = self.broadcast.group_editor.as_mut() else {
+            return false;
+        };
+        replace_utf16(&mut editor.value, replacement_range, text);
+        true
+    }
+
+    pub(in crate::workspace) fn cancel_broadcast_group_edit(&mut self) -> bool {
+        self.broadcast.group_editor.take().is_some()
+    }
+
     pub(in crate::workspace) fn toggle_broadcast(&mut self) {
-        self.broadcast.enabled = !self.broadcast.enabled;
+        self.broadcast.enabled = if self.broadcast.enabled {
+            false
+        } else {
+            self.broadcast.selected_group_id.is_none() || !self.broadcast.targets.is_empty()
+        };
         self.broadcast.menu_open = false;
-        if !self.broadcast.enabled {
-            self.broadcast.targets.clear();
+    }
+
+    pub(in crate::workspace) fn select_broadcast_group(
+        &mut self,
+        group_id: uuid::Uuid,
+        targets: &[PaneId],
+    ) {
+        self.broadcast.selected_group_id = Some(group_id);
+        self.broadcast.targets.clear();
+        self.broadcast.targets.extend(targets.iter().copied());
+        self.broadcast.enabled = !self.broadcast.targets.is_empty();
+    }
+
+    pub(in crate::workspace) fn clear_selected_broadcast_group(&mut self) {
+        self.broadcast.selected_group_id = None;
+        self.broadcast.targets.clear();
+        self.broadcast.enabled = false;
+    }
+
+    pub(in crate::workspace) fn refresh_selected_broadcast_group(
+        &mut self,
+        group_id: uuid::Uuid,
+        targets: &[PaneId],
+    ) {
+        if self.broadcast.selected_group_id != Some(group_id) {
+            return;
         }
+        let was_enabled = self.broadcast.enabled;
+        self.broadcast.targets.clear();
+        self.broadcast.targets.extend(targets.iter().copied());
+        self.broadcast.enabled = was_enabled && !self.broadcast.targets.is_empty();
     }
 
     pub(in crate::workspace) fn dismiss_broadcast_menu(&mut self) -> bool {
         let was_open = self.broadcast.menu_open;
         self.broadcast.menu_open = false;
+        self.broadcast.group_editor = None;
         was_open
     }
 
@@ -196,6 +292,7 @@ impl WorkspaceTerminalEntity {
     }
 
     pub(in crate::workspace) fn toggle_broadcast_target(&mut self, pane_id: PaneId) {
+        self.broadcast.selected_group_id = None;
         if !self.broadcast.targets.remove(&pane_id) {
             self.broadcast.targets.insert(pane_id);
         }
@@ -204,6 +301,7 @@ impl WorkspaceTerminalEntity {
     }
 
     pub(in crate::workspace) fn set_broadcast_targets(&mut self, targets: &[PaneId]) {
+        self.broadcast.selected_group_id = None;
         self.broadcast.targets.clear();
         self.broadcast.targets.extend(targets.iter().copied());
         self.broadcast.enabled = !self.broadcast.targets.is_empty();
@@ -229,7 +327,11 @@ impl WorkspaceTerminalEntity {
         candidates: Vec<PaneId>,
     ) -> Vec<PaneId> {
         if self.broadcast.targets.is_empty() {
-            candidates
+            if self.broadcast.selected_group_id.is_some() {
+                Vec::new()
+            } else {
+                candidates
+            }
         } else {
             candidates
                 .into_iter()
@@ -1035,5 +1137,41 @@ mod tests {
         assert!(terminal.read_with(cx, |terminal, _cx| {
             terminal.project_store.snapshot(&key).is_some()
         }));
+    }
+
+    #[gpui::test]
+    fn named_broadcast_group_never_widens_after_targets_close(cx: &mut TestAppContext) {
+        let terminal = new_terminal_entity(cx);
+        let group_id = uuid::Uuid::new_v4();
+        let target = PaneId(42);
+
+        terminal.update(cx, |terminal, _cx| {
+            terminal.select_broadcast_group(group_id, &[target]);
+            assert!(terminal.broadcast_enabled());
+            terminal.toggle_broadcast();
+            assert!(!terminal.broadcast_enabled());
+            assert_eq!(terminal.selected_broadcast_group_id(), Some(group_id));
+            terminal.toggle_broadcast();
+            assert!(terminal.broadcast_enabled());
+            terminal.retain_live_broadcast_targets(&HashSet::new());
+            assert!(!terminal.broadcast_enabled());
+            assert!(
+                terminal
+                    .filter_broadcast_targets(vec![PaneId(7)])
+                    .is_empty()
+            );
+            assert_eq!(terminal.selected_broadcast_group_id(), Some(group_id));
+        });
+    }
+
+    #[gpui::test]
+    fn empty_named_broadcast_group_stays_disabled(cx: &mut TestAppContext) {
+        let terminal = new_terminal_entity(cx);
+        terminal.update(cx, |terminal, _cx| {
+            terminal.select_broadcast_group(uuid::Uuid::new_v4(), &[]);
+            assert!(!terminal.broadcast_enabled());
+            terminal.toggle_broadcast();
+            assert!(!terminal.broadcast_enabled());
+        });
     }
 }

@@ -924,7 +924,7 @@ impl WorkspaceApp {
         };
         match self.create_serial_terminal_tab(config, window, cx) {
             Ok(session_id) => {
-                self.register_terminal_trigger_saved_connection(
+                self.register_terminal_saved_connection(
                     session_id,
                     oxideterm_terminal_triggers::SavedConnectionKind::Serial,
                     profile.id.clone(),
@@ -991,7 +991,7 @@ impl WorkspaceApp {
             Ok(session_id) => {
                 self.telnet_terminal_profile_ids
                     .insert(session_id, profile.id.clone());
-                self.register_terminal_trigger_saved_connection(
+                self.register_terminal_saved_connection(
                     session_id,
                     oxideterm_terminal_triggers::SavedConnectionKind::Telnet,
                     profile.id.clone(),

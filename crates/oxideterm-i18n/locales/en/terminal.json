@@ -57,6 +57,8 @@
       "current": "Current",
       "all": "All",
       "selected": "Selected",
+      "group": "Group",
+      "no_groups": "No broadcast groups",
       "start": "Start",
       "stop": "Stop",
       "idle": "Ready",
@@ -72,6 +74,13 @@
       "error_busy": "A target is used by another sender"
     },
     "broadcast": {
+      "groups": "Broadcast groups",
+      "create_group": "New group",
+      "no_groups": "No named groups yet",
+      "temporary_group": "Temporary selection",
+      "group_name_placeholder": "Group name",
+      "group_members": "Group members",
+      "unsaved_target": "Not saved",
       "select_targets": "Broadcast targets",
       "no_targets": "No other terminals",
       "current": "Current",

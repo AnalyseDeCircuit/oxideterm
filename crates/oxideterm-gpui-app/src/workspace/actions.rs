@@ -24,6 +24,56 @@ pub(super) enum TerminalBroadcastMenuPlacement {
     Top(f32),
 }
 
+#[derive(Clone)]
+pub(in crate::workspace) struct TerminalBroadcastEntry {
+    pub(in crate::workspace) pane_id: PaneId,
+    pub(in crate::workspace) label: String,
+    pub(in crate::workspace) kind: TabKind,
+    pub(in crate::workspace) saved_connection:
+        Option<oxideterm_settings::TerminalBroadcastTargetRef>,
+}
+
+pub(in crate::workspace) fn terminal_broadcast_target_ref(
+    saved: &oxideterm_terminal_triggers::SavedConnectionRef,
+) -> oxideterm_settings::TerminalBroadcastTargetRef {
+    let kind = match saved.kind {
+        oxideterm_terminal_triggers::SavedConnectionKind::Ssh => {
+            oxideterm_settings::TerminalBroadcastTargetKind::Ssh
+        }
+        oxideterm_terminal_triggers::SavedConnectionKind::Mosh => {
+            oxideterm_settings::TerminalBroadcastTargetKind::Mosh
+        }
+        oxideterm_terminal_triggers::SavedConnectionKind::Telnet => {
+            oxideterm_settings::TerminalBroadcastTargetKind::Telnet
+        }
+        oxideterm_terminal_triggers::SavedConnectionKind::Serial => {
+            oxideterm_settings::TerminalBroadcastTargetKind::Serial
+        }
+    };
+    oxideterm_settings::TerminalBroadcastTargetRef {
+        kind,
+        saved_connection_id: saved.id.clone(),
+    }
+}
+
+fn resolve_terminal_broadcast_entries(
+    members: &[oxideterm_settings::TerminalBroadcastTargetRef],
+    entries: Vec<TerminalBroadcastEntry>,
+) -> Vec<PaneId> {
+    // Membership is durable, but delivery borrows only currently registered pane consumers.
+    let members = members.iter().collect::<HashSet<_>>();
+    entries
+        .into_iter()
+        .filter_map(|entry| {
+            entry
+                .saved_connection
+                .as_ref()
+                .filter(|target| members.contains(target))
+                .map(|_| entry.pane_id)
+        })
+        .collect()
+}
+
 #[derive(Default)]
 pub(super) struct SearchBarState {
     pub(super) visible: bool,
@@ -503,8 +553,22 @@ impl WorkspaceApp {
     }
 
     pub(super) fn toggle_terminal_broadcast(&mut self, cx: &mut Context<Self>) {
-        self.terminal
-            .update(cx, |terminal, _cx| terminal.toggle_broadcast());
+        let (enabled, selected_group_id) = {
+            let terminal = self.terminal.read(cx);
+            (
+                terminal.broadcast_enabled(),
+                terminal.selected_broadcast_group_id(),
+            )
+        };
+        if !enabled && let Some(group_id) = selected_group_id {
+            self.select_terminal_broadcast_group(group_id, cx);
+            self.terminal.update(cx, |terminal, _cx| {
+                terminal.set_broadcast_menu_open(false);
+            });
+        } else {
+            self.terminal
+                .update(cx, |terminal, _cx| terminal.toggle_broadcast());
+        }
         cx.notify();
     }
 
@@ -566,6 +630,28 @@ impl WorkspaceApp {
 
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
+
+        if self.terminal.read(cx).broadcast_group_editor().is_some()
+            && !modifiers.platform
+            && !modifiers.control
+            && !modifiers.alt
+        {
+            match key {
+                "escape" => {
+                    self.terminal.update(cx, |terminal, _cx| {
+                        terminal.cancel_broadcast_group_edit();
+                    });
+                    self.clear_ime_selection();
+                    cx.notify();
+                    return;
+                }
+                "enter" => {
+                    self.commit_terminal_broadcast_group_edit(cx);
+                    return;
+                }
+                _ => {}
+            }
+        }
 
         if self.handle_native_plugin_confirm_key(event, cx) {
             return;
@@ -1864,7 +1950,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn terminal_broadcast_entries(
         &self,
         cx: &App,
-    ) -> Vec<(PaneId, String, TabKind)> {
+    ) -> Vec<TerminalBroadcastEntry> {
         let tab_host = self.tab_host.read(cx);
         let mut entries = Vec::new();
         for tab in self.tabs(cx) {
@@ -1882,10 +1968,213 @@ impl WorkspaceApp {
                 } else {
                     tab.title.clone()
                 };
-                entries.push((pane_id, label, tab.kind.clone()));
+                let saved_connection = root
+                    .session_id_for_pane(pane_id)
+                    .and_then(|session_id| self.terminal_saved_connection_refs.get(&session_id))
+                    .map(terminal_broadcast_target_ref);
+                entries.push(TerminalBroadcastEntry {
+                    pane_id,
+                    label,
+                    kind: tab.kind.clone(),
+                    saved_connection,
+                });
             }
         }
         entries
+    }
+
+    pub(in crate::workspace) fn terminal_broadcast_groups(
+        &self,
+    ) -> &[oxideterm_settings::TerminalBroadcastGroup] {
+        &self.settings_store.settings().terminal.broadcast_groups
+    }
+
+    pub(in crate::workspace) fn select_terminal_broadcast_group(
+        &mut self,
+        group_id: uuid::Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let targets = self.resolve_terminal_broadcast_group(group_id, cx);
+        self.terminal.update(cx, |terminal, _cx| {
+            terminal.select_broadcast_group(group_id, &targets);
+        });
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn resolve_terminal_broadcast_group(
+        &self,
+        group_id: uuid::Uuid,
+        cx: &App,
+    ) -> Vec<PaneId> {
+        let Some(group) = self
+            .terminal_broadcast_groups()
+            .iter()
+            .find(|group| group.id == group_id)
+        else {
+            return Vec::new();
+        };
+        resolve_terminal_broadcast_entries(&group.members, self.terminal_broadcast_entries(cx))
+    }
+
+    pub(in crate::workspace) fn begin_terminal_broadcast_group_create(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.terminal.update(cx, |terminal, _cx| {
+            terminal.begin_broadcast_group_create();
+        });
+        self.ime_marked_text = None;
+        self.clear_ime_selection();
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn begin_terminal_broadcast_group_rename(
+        &mut self,
+        group_id: uuid::Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(name) = self
+            .terminal_broadcast_groups()
+            .iter()
+            .find(|group| group.id == group_id)
+            .map(|group| group.name.clone())
+        else {
+            return;
+        };
+        self.terminal.update(cx, |terminal, _cx| {
+            terminal.begin_broadcast_group_rename(group_id, name);
+        });
+        self.ime_marked_text = None;
+        self.selected_ime_target = Some(WorkspaceImeTarget::TerminalBroadcastGroupName);
+        self.clear_ime_selection();
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn terminal_broadcast_group_name_valid(
+        &self,
+        edit_kind: terminal_entity::TerminalBroadcastGroupEditKind,
+        name: &str,
+    ) -> bool {
+        let name = name.trim();
+        !name.is_empty()
+            && self.terminal_broadcast_groups().iter().all(|group| {
+                matches!(
+                    edit_kind,
+                    terminal_entity::TerminalBroadcastGroupEditKind::Rename(group_id)
+                        if group.id == group_id
+                ) || !group.name.eq_ignore_ascii_case(name)
+            })
+    }
+
+    pub(in crate::workspace) fn commit_terminal_broadcast_group_edit(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((edit_kind, value)) = self
+            .terminal
+            .read(cx)
+            .broadcast_group_editor()
+            .map(|(kind, value)| (kind, value.trim().to_string()))
+        else {
+            return;
+        };
+        if !self.terminal_broadcast_group_name_valid(edit_kind, &value) {
+            return;
+        }
+
+        let group_id = match edit_kind {
+            terminal_entity::TerminalBroadcastGroupEditKind::Create => uuid::Uuid::new_v4(),
+            terminal_entity::TerminalBroadcastGroupEditKind::Rename(group_id) => group_id,
+        };
+        self.edit_settings(
+            |settings| match edit_kind {
+                terminal_entity::TerminalBroadcastGroupEditKind::Create => {
+                    settings.terminal.broadcast_groups.push(
+                        oxideterm_settings::TerminalBroadcastGroup {
+                            id: group_id,
+                            name: value,
+                            members: Vec::new(),
+                        },
+                    );
+                }
+                terminal_entity::TerminalBroadcastGroupEditKind::Rename(_) => {
+                    if let Some(group) = settings
+                        .terminal
+                        .broadcast_groups
+                        .iter_mut()
+                        .find(|group| group.id == group_id)
+                    {
+                        group.name = value;
+                    }
+                }
+            },
+            cx,
+        );
+        self.terminal.update(cx, |terminal, _cx| {
+            terminal.cancel_broadcast_group_edit();
+        });
+        self.clear_ime_selection();
+        if matches!(
+            edit_kind,
+            terminal_entity::TerminalBroadcastGroupEditKind::Create
+        ) {
+            self.select_terminal_broadcast_group(group_id, cx);
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn delete_terminal_broadcast_group(
+        &mut self,
+        group_id: uuid::Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        self.edit_settings(
+            |settings| {
+                settings
+                    .terminal
+                    .broadcast_groups
+                    .retain(|group| group.id != group_id);
+            },
+            cx,
+        );
+        self.terminal.update(cx, |terminal, _cx| {
+            if terminal.selected_broadcast_group_id() == Some(group_id) {
+                terminal.clear_selected_broadcast_group();
+            }
+            terminal.cancel_broadcast_group_edit();
+        });
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn toggle_terminal_broadcast_group_member(
+        &mut self,
+        group_id: uuid::Uuid,
+        target: oxideterm_settings::TerminalBroadcastTargetRef,
+        cx: &mut Context<Self>,
+    ) {
+        self.edit_settings(
+            |settings| {
+                let Some(group) = settings
+                    .terminal
+                    .broadcast_groups
+                    .iter_mut()
+                    .find(|group| group.id == group_id)
+                else {
+                    return;
+                };
+                if let Some(index) = group.members.iter().position(|member| member == &target) {
+                    group.members.remove(index);
+                } else {
+                    group.members.push(target);
+                }
+            },
+            cx,
+        );
+        self.select_terminal_broadcast_group(group_id, cx);
     }
 
     fn terminal_command_should_handoff_focus(&self, command: &str) -> bool {
@@ -2312,6 +2601,54 @@ mod terminal_command_bar_behavior_tests {
             Some("nvim")
         );
         assert_eq!(terminal_command_executable("A=1 B=2").as_deref(), None);
+    }
+
+    #[test]
+    fn named_broadcast_resolution_isolated_and_skips_offline_members() {
+        let ssh_one = oxideterm_settings::TerminalBroadcastTargetRef {
+            kind: oxideterm_settings::TerminalBroadcastTargetKind::Ssh,
+            saved_connection_id: "ssh-one".to_string(),
+        };
+        let ssh_two = oxideterm_settings::TerminalBroadcastTargetRef {
+            kind: oxideterm_settings::TerminalBroadcastTargetKind::Ssh,
+            saved_connection_id: "ssh-two".to_string(),
+        };
+        let offline = oxideterm_settings::TerminalBroadcastTargetRef {
+            kind: oxideterm_settings::TerminalBroadcastTargetKind::Mosh,
+            saved_connection_id: "offline".to_string(),
+        };
+        let entries = vec![
+            TerminalBroadcastEntry {
+                pane_id: PaneId(1),
+                label: "one".to_string(),
+                kind: TabKind::SshTerminal,
+                saved_connection: Some(ssh_one.clone()),
+            },
+            TerminalBroadcastEntry {
+                pane_id: PaneId(2),
+                label: "two".to_string(),
+                kind: TabKind::SshTerminal,
+                saved_connection: Some(ssh_two.clone()),
+            },
+            TerminalBroadcastEntry {
+                pane_id: PaneId(3),
+                label: "temporary".to_string(),
+                kind: TabKind::SshTerminal,
+                saved_connection: None,
+            },
+        ];
+
+        assert_eq!(
+            resolve_terminal_broadcast_entries(
+                &[ssh_one.clone(), ssh_one, offline],
+                entries.clone(),
+            ),
+            vec![PaneId(1)]
+        );
+        assert_eq!(
+            resolve_terminal_broadcast_entries(&[ssh_two], entries),
+            vec![PaneId(2)]
+        );
     }
 }
 

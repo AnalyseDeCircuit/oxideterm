@@ -278,18 +278,18 @@ impl WorkspaceApp {
             .is_some_and(|pane| pane.read(cx).session_kind() == TerminalSessionKind::LocalPty);
         let saved_connection = self
             .session_id_for_pane(pane_id, cx)
-            .and_then(|session_id| self.terminal_trigger_saved_connections.get(&session_id));
+            .and_then(|session_id| self.terminal_saved_connection_refs.get(&session_id));
         terminal_trigger_scope_applies(&trigger.scope, is_local, saved_connection)
     }
 
-    pub(in crate::workspace) fn register_terminal_trigger_saved_connection(
+    pub(in crate::workspace) fn register_terminal_saved_connection(
         &mut self,
         session_id: TerminalSessionId,
         kind: SavedConnectionKind,
         id: String,
         cx: &mut Context<Self>,
     ) {
-        self.terminal_trigger_saved_connections
+        self.terminal_saved_connection_refs
             .insert(session_id, SavedConnectionRef { kind, id });
         if let Some(location) = self.tab_host.read(cx).terminal_location(session_id) {
             self.refresh_terminal_trigger_pane(location.pane_id, cx);
