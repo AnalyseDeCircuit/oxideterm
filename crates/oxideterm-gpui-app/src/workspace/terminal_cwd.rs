@@ -4,6 +4,7 @@
 use std::{
     cell::RefCell,
     collections::hash_map::DefaultHasher,
+    future::Future,
     hash::{Hash, Hasher},
     ops::Range,
     time::Duration,
@@ -22,7 +23,7 @@ use oxideterm_ssh::NodeId;
 
 use super::*;
 
-const TERMINAL_CWD_REMOTE_LIST_TIMEOUT: Duration = Duration::from_millis(1_200);
+const TERMINAL_CWD_REMOTE_LIST_TIMEOUT: Duration = Duration::from_secs(15);
 const TERMINAL_CWD_REPORT_POLL_INTERVAL: Duration = Duration::from_millis(40);
 const TERMINAL_CWD_REPORT_POLL_ATTEMPTS: usize = 30;
 const TERMINAL_CWD_MAX_ENTRIES: usize = 160;
@@ -56,6 +57,20 @@ pub(in crate::workspace) enum TerminalCwdListOutcome {
 pub(in crate::workspace) enum TerminalCwdError {
     Unavailable,
     RemoteListFailed,
+}
+
+async fn run_terminal_cwd_remote_stages<H, T, AcquireError, ListError>(
+    acquire: impl Future<Output = Result<H, AcquireError>>,
+    list_timeout: Duration,
+    list: impl AsyncFnOnce(H) -> Result<T, ListError>,
+) -> Result<T, ()> {
+    // Shared SFTP initialization is registry-owned and is not cancellation-safe,
+    // so only the directory request receives an outer timeout.
+    let handle = acquire.await.map_err(|_| ())?;
+    tokio::time::timeout(list_timeout, list(handle))
+        .await
+        .map_err(|_| ())?
+        .map_err(|_| ())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -499,26 +514,26 @@ impl WorkspaceTerminalEntity {
         let tx = self.cwd_tx.clone();
         let cwd = key.path().to_string();
         self.runtime.spawn(async move {
-            let outcome = tokio::time::timeout(TERMINAL_CWD_REMOTE_LIST_TIMEOUT, async {
-                // Acquire the registry-owned SFTP consumer; picker lifetime must
-                // never create or disconnect an unmanaged SSH transport.
-                let shared = node_router
-                    .acquire_sftp(&node_id)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let entries = {
-                    let sftp = shared.lock().await;
-                    sftp.list_dir_with_cwd(
-                        &cwd,
-                        Some(ListFilter {
-                            show_hidden: true,
-                            pattern: None,
-                            sort: SortOrder::Name,
-                        }),
-                    )
-                    .await
-                    .map_err(|error| error.to_string())?
-                };
+            let remote_result = async {
+                // The picker borrows the registry-owned shared session; it never
+                // creates or disconnects a transport tied to picker lifetime.
+                let entries = run_terminal_cwd_remote_stages(
+                    node_router.acquire_sftp(&node_id),
+                    TERMINAL_CWD_REMOTE_LIST_TIMEOUT,
+                    async move |shared| {
+                        let sftp = shared.lock().await;
+                        sftp.list_dir_with_cwd(
+                            &cwd,
+                            Some(ListFilter {
+                                show_hidden: true,
+                                pattern: None,
+                                sort: SortOrder::Name,
+                            }),
+                        )
+                        .await
+                    },
+                )
+                .await?;
                 let (_, entries) = entries;
                 let mut rows = entries
                     .into_iter()
@@ -535,13 +550,12 @@ impl WorkspaceTerminalEntity {
                     .collect::<Vec<_>>();
                 sort_current_directory_entries(&mut rows);
                 rows.truncate(TERMINAL_CWD_MAX_ENTRIES);
-                Ok::<Vec<CurrentDirectoryEntry>, String>(rows)
-            })
-            .await
-            .ok()
-            .and_then(|result| result.ok())
-            .map(TerminalCwdListOutcome::Ready)
-            .unwrap_or(TerminalCwdListOutcome::RemoteListFailed);
+                Ok::<_, ()>(rows)
+            }
+            .await;
+            let outcome = remote_result
+                .map(TerminalCwdListOutcome::Ready)
+                .unwrap_or(TerminalCwdListOutcome::RemoteListFailed);
             let _ = tx.send(TerminalCwdDelivery::DirectoryList {
                 key,
                 generation,
@@ -1065,6 +1079,31 @@ fn terminal_cwd_entry_confirms_directory(kind: TerminalCwdVisibleEntryKind) -> b
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn remote_cwd_acquisition_is_not_limited_by_the_list_timeout() {
+        let result = run_terminal_cwd_remote_stages(
+            async {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                Ok::<_, ()>("shared-session")
+            },
+            Duration::from_millis(1),
+            async |session| Ok::<_, ()>(session.len()),
+        )
+        .await;
+
+        assert_eq!(result, Ok("shared-session".len()));
+    }
+
+    #[tokio::test]
+    async fn remote_cwd_listing_respects_its_timeout() {
+        let result =
+            run_terminal_cwd_remote_stages(async { Ok::<_, ()>(()) }, Duration::ZERO, async |_| {
+                std::future::pending::<Result<(), ()>>().await
+            })
+            .await;
+        assert_eq!(result, Err(()));
+    }
 
     #[test]
     fn only_resolved_rows_update_cwd_optimistically() {
