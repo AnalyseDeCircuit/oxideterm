@@ -341,9 +341,63 @@ fn benchmark_terminal_input_breakdown(criterion: &mut Criterion) {
     group.finish();
 }
 
+fn snapshot_benchmark_session() -> TerminalSession {
+    let mut terminal = TerminalSession::recording_playback(
+        BENCHMARK_COLS,
+        BENCHMARK_ROWS,
+        GraphicsOptions::default(),
+        20_000,
+    );
+    terminal.feed_recording_output(&terminal_corpus(5_000));
+    terminal
+}
+
+fn benchmark_terminal_snapshots(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("terminal_snapshots");
+    group.throughput(Throughput::Elements(
+        (BENCHMARK_ROWS * BENCHMARK_COLS) as u64,
+    ));
+
+    group.bench_function("full_visible_grid", |bencher| {
+        let terminal = snapshot_benchmark_session();
+        bencher.iter(|| black_box(terminal.snapshot()));
+    });
+
+    group.bench_function("incremental_unchanged", |bencher| {
+        let terminal = snapshot_benchmark_session();
+        let previous = terminal.snapshot();
+        let previous = terminal.snapshot_incremental(&previous);
+        bencher.iter(|| black_box(terminal.snapshot_incremental(&previous)));
+    });
+
+    group.bench_function("incremental_one_row", |bencher| {
+        let mut terminal = snapshot_benchmark_session();
+        let previous = terminal.snapshot();
+        let mut previous = terminal.snapshot_incremental(&previous);
+        let mut revision = 0u64;
+        bencher.iter_custom(|iterations| {
+            let mut measured = Duration::ZERO;
+            for _ in 0..iterations {
+                let row = format!(
+                    "\rupdated terminal snapshot row revision {revision:08} with ASCII output"
+                );
+                terminal.feed_recording_output(black_box(row.as_bytes()));
+                revision = revision.wrapping_add(1);
+                let started = Instant::now();
+                previous = black_box(terminal.snapshot_incremental(&previous));
+                measured += started.elapsed();
+            }
+            measured
+        });
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     benchmark_terminal_pipeline,
-    benchmark_terminal_input_breakdown
+    benchmark_terminal_input_breakdown,
+    benchmark_terminal_snapshots
 );
 criterion_main!(benches);
