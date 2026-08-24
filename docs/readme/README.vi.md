@@ -118,6 +118,19 @@ OxideTerm giữ kết nối, tệp, chuyển tiếp, công cụ máy chủ, tự
 
 ---
 
+## Cài đặt
+
+[Tải bản phát hành mới nhất](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+
+- macOS: chọn tệp `.dmg` phù hợp với Apple Silicon hoặc Intel.
+- Windows: dùng trình cài đặt x64 hoặc ARM64.
+- Linux: chọn AppImage, `.deb` hoặc `.rpm`.
+- Xác minh tệp tải xuống bằng `sha256sums.txt` trên trang phát hành.
+
+Để biên dịch từ mã nguồn, hãy xem phần « Chạy từ mã nguồn » bên dưới.
+
+---
+
 ## Kiến trúc
 
 OxideTerm hợp nhất terminal, SSH, Telnet, RDP, VNC, SFTP, chuyển tiếp, IDE, AI, plugin và CLI trong một kiến trúc Rust. Chi tiết kỹ thuật được trình bày bên dưới.

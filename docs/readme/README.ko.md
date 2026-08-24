@@ -114,6 +114,19 @@ OxideTerm는 연결, 파일, 포워딩, 호스트 도구, 자동화, AI 컨텍�
 
 ---
 
+## 설치
+
+[최신 릴리스 다운로드](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+
+- macOS: Apple Silicon 또는 Intel에 맞는 `.dmg`를 선택합니다.
+- Windows: x64 또는 ARM64 설치 프로그램을 사용합니다.
+- Linux: AppImage, `.deb`, `.rpm` 중에서 선택합니다.
+- 릴리스 페이지의 `sha256sums.txt`로 다운로드를 검증할 수 있습니다.
+
+소스에서 빌드하려면 아래의 “소스에서 실행” 섹션을 계속 읽으세요.
+
+---
+
 ## 아키텍처
 
 OxideTerm는 터미널, SSH, Telnet, RDP, VNC, SFTP, 포워딩, IDE, AI, 플러그인, CLI를 하나의 Rust 아키텍처에 통합합니다. 기술 세부 사항은 아래에 설명합니다.

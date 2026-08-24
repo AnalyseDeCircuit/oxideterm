@@ -118,6 +118,19 @@ OxideTerm mantiene conexiones, archivos, reenvío, herramientas del host, automa
 
 ---
 
+## Instalación
+
+[Descargar la última versión](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+
+- macOS: elige el archivo `.dmg` para Apple Silicon o Intel.
+- Windows: usa el instalador x64 o ARM64.
+- Linux: elige AppImage, `.deb` o `.rpm`.
+- Verifica las descargas con el archivo `sha256sums.txt` de la página de publicación.
+
+Para compilar desde el código fuente, consulta la sección « Ejecutar desde el código fuente » más abajo.
+
+---
+
 ## Arquitectura
 
 OxideTerm reúne terminal, SSH, Telnet, RDP, VNC, SFTP, reenvío, IDE, IA, plugins y CLI en una arquitectura Rust. Los detalles técnicos aparecen a continuación.

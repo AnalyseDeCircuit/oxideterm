@@ -118,6 +118,19 @@ OxideTerm 將連線、檔案、轉發、主機工具、自動化與 AI 上下文
 
 ---
 
+## 安裝
+
+[下載最新版本](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+
+- macOS：選擇適合 Apple Silicon 或 Intel 的 `.dmg`。
+- Windows：選擇 x64 或 ARM64 安裝程式。
+- Linux：選擇 AppImage、`.deb` 或 `.rpm`。
+- 可使用發布頁中的 `sha256sums.txt` 驗證下載檔案。
+
+需要從原始碼建置？請繼續閱讀下方的「從原始碼執行」章節。
+
+---
+
 ## 內部實作
 
 OxideTerm 將終端、SSH、Telnet、RDP、VNC、SFTP、轉發、IDE、AI、插件和 CLI 整合在同一套 Rust 架構中。下方列出了面向開發者的技術細節。

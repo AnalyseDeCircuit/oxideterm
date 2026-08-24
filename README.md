@@ -118,6 +118,19 @@ OxideTerm keeps terminal rendering, connection state, reconnect orchestration, f
 
 ---
 
+## Install
+
+[Download the latest release](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+
+- macOS: download the `.dmg` matching Apple Silicon or Intel.
+- Windows: use the x64 or ARM64 installer.
+- Linux: choose AppImage, `.deb`, or `.rpm`.
+- Verify downloads with the `sha256sums.txt` asset on the release page.
+
+Need to build from source? Continue to [Run From Source](#run-from-source).
+
+---
+
 ## Under the Hood
 
 OxideTerm keeps terminal, SSH, Telnet, RDP, VNC, SFTP, forwarding, editing, AI, plugins, and CLI in one Rust architecture. The implementation notes below are for readers who want the engineering details.

@@ -118,6 +118,19 @@ OxideTerm mantiene connessioni, file, forwarding, strumenti host, automazione e 
 
 ---
 
+## Installazione
+
+[Scarica l’ultima versione](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+
+- macOS: scegli il file `.dmg` per Apple Silicon o Intel.
+- Windows: usa il programma di installazione x64 o ARM64.
+- Linux: scegli AppImage, `.deb` o `.rpm`.
+- Verifica i download con il file `sha256sums.txt` nella pagina della release.
+
+Per compilare dal codice sorgente, consulta la sezione « Esegui dal codice sorgente » qui sotto.
+
+---
+
 ## Architettura
 
 OxideTerm rimuove il bridge WebView e mantiene terminale, SSH, Telnet, RDP, VNC, SFTP, forwarding, IDE, AI, plugin e CLI in una architettura Rust-native. I dettagli completi sono conservati sotto.
