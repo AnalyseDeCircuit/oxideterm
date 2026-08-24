@@ -17,8 +17,10 @@ use oxideterm_gpui_ui::{
     status_pill,
     text_input::{TextInputView, text_input_anchor_probe, text_input_with_viewport},
 };
+use oxideterm_i18n::I18n;
 use oxideterm_quick_commands::{
-    QuickCommandRisk, classify_command_risk, quick_command_category_draft_can_save,
+    QuickCommandRisk, QuickCommandTemplateError, classify_command_risk,
+    quick_command_category_draft_can_save, quick_command_has_runtime_substitutions,
     validate_quick_command_template,
 };
 use zeroize::Zeroizing;
@@ -125,6 +127,8 @@ fn quick_command_editor_can_save(draft: &QuickCommandEditorDraft) -> bool {
             || (parameter.kind == QuickCommandParameterKind::Choice
                 && !default_value.is_empty()
                 && !choices.iter().any(|choice| choice == default_value))
+            || (parameter.kind == QuickCommandParameterKind::Secret
+                && (!default_value.is_empty() || !choices.is_empty()))
         {
             return false;
         }
@@ -132,8 +136,14 @@ fn quick_command_editor_can_save(draft: &QuickCommandEditorDraft) -> bool {
             name: name.to_string(),
             label: parameter.label.trim().to_string(),
             kind: parameter.kind,
-            default_value: (!default_value.is_empty()).then(|| default_value.to_string()),
-            choices,
+            default_value: (parameter.kind != QuickCommandParameterKind::Secret
+                && !default_value.is_empty())
+            .then(|| default_value.to_string()),
+            choices: if parameter.kind == QuickCommandParameterKind::Secret {
+                Vec::new()
+            } else {
+                choices
+            },
             required: parameter.required,
         });
     }
@@ -164,13 +174,93 @@ fn quick_command_risk_tone(risk: QuickCommandRisk) -> StatusTone {
     }
 }
 
-fn quick_command_risk_label(risk: QuickCommandRisk) -> &'static str {
-    // Keep display labels in the UI adapter so localization can remain separate
-    // from domain classification while preserving the current English badges.
+fn quick_command_risk_label(i18n: &I18n, risk: QuickCommandRisk) -> String {
     match risk {
-        QuickCommandRisk::High => "high",
-        QuickCommandRisk::Medium => "medium",
+        QuickCommandRisk::High => i18n.t("terminal.quick_commands.risk_high"),
+        QuickCommandRisk::Medium => i18n.t("terminal.quick_commands.risk_medium"),
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum QuickCommandRiskBadge {
+    Classified(QuickCommandRisk),
+    Dynamic,
+}
+
+fn quick_command_risk_badge(template: &str) -> Option<QuickCommandRiskBadge> {
+    classify_command_risk(template)
+        .map(QuickCommandRiskBadge::Classified)
+        .or_else(|| {
+            quick_command_has_runtime_substitutions(template)
+                .then_some(QuickCommandRiskBadge::Dynamic)
+        })
+}
+
+fn quick_command_risk_badge_label(i18n: &I18n, badge: QuickCommandRiskBadge) -> String {
+    match badge {
+        QuickCommandRiskBadge::Classified(risk) => quick_command_risk_label(i18n, risk),
+        QuickCommandRiskBadge::Dynamic => i18n.t("terminal.quick_commands.risk_dynamic"),
+    }
+}
+
+fn quick_command_risk_badge_tone(badge: QuickCommandRiskBadge) -> StatusTone {
+    match badge {
+        QuickCommandRiskBadge::Classified(risk) => quick_command_risk_tone(risk),
+        QuickCommandRiskBadge::Dynamic => StatusTone::Warning,
+    }
+}
+
+fn quick_command_template_error_label(i18n: &I18n, error: &QuickCommandTemplateError) -> String {
+    let (key, replacements) = match error {
+        QuickCommandTemplateError::UnterminatedToken => (
+            "terminal.quick_commands.error_unterminated_token",
+            Vec::new(),
+        ),
+        QuickCommandTemplateError::UnknownToken(token) => (
+            "terminal.quick_commands.error_unknown_token",
+            vec![("{{token}}", token.as_str())],
+        ),
+        QuickCommandTemplateError::UnknownModifier(modifier) => (
+            "terminal.quick_commands.error_unknown_modifier",
+            vec![("{{modifier}}", modifier.as_str())],
+        ),
+        QuickCommandTemplateError::UnknownParameter(parameter) => (
+            "terminal.quick_commands.error_unknown_parameter",
+            vec![("{{parameter}}", parameter.as_str())],
+        ),
+        QuickCommandTemplateError::TooManyParameterValues => (
+            "terminal.quick_commands.error_too_many_parameter_values",
+            Vec::new(),
+        ),
+        QuickCommandTemplateError::ParameterValueTooLong(parameter) => (
+            "terminal.quick_commands.error_parameter_value_too_long",
+            vec![("{{parameter}}", parameter.as_str())],
+        ),
+        QuickCommandTemplateError::ExpandedCommandTooLong { target } => (
+            "terminal.quick_commands.error_expanded_command_too_long",
+            vec![("{{target}}", target.as_str())],
+        ),
+        QuickCommandTemplateError::MissingParameter(parameter) => (
+            "terminal.quick_commands.error_missing_parameter",
+            vec![("{{parameter}}", parameter.as_str())],
+        ),
+        QuickCommandTemplateError::InvalidChoice { parameter } => (
+            "terminal.quick_commands.error_invalid_choice",
+            vec![("{{parameter}}", parameter.as_str())],
+        ),
+        QuickCommandTemplateError::MissingContext { target, field } => (
+            "terminal.quick_commands.error_missing_context",
+            vec![
+                ("{{target}}", target.as_str()),
+                ("{{field}}", field.as_str()),
+            ],
+        ),
+    };
+    replacements
+        .into_iter()
+        .fold(i18n.t(key), |label, (placeholder, value)| {
+            label.replace(placeholder, value)
+        })
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -643,8 +733,10 @@ impl TerminalQuickCommandsState {
                 fields.extend([
                     QuickCommandInput::ParameterName(index),
                     QuickCommandInput::ParameterLabel(index),
-                    QuickCommandInput::ParameterDefault(index),
                 ]);
+                if parameter.kind != QuickCommandParameterKind::Secret {
+                    fields.push(QuickCommandInput::ParameterDefault(index));
+                }
                 if parameter.kind == QuickCommandParameterKind::Choice {
                     fields.push(QuickCommandInput::ParameterChoices(index));
                 }
@@ -798,6 +890,11 @@ impl TerminalQuickCommandsState {
             .and_then(|draft| draft.parameters.get_mut(index))
         {
             parameter.kind = kind;
+            if kind == QuickCommandParameterKind::Secret {
+                // Secret values exist only in the execution dialog and never in persisted drafts.
+                parameter.default_value.clear();
+                parameter.choices.clear();
+            }
         }
     }
 
@@ -1613,7 +1710,7 @@ impl WorkspaceApp {
                     .overflow_y_scrollbar()
                     .child(category_list),
             )
-            .when_some(snapshot.last_persist_error.as_ref(), |sidebar, error| {
+            .when(snapshot.last_persist_error.is_some(), |sidebar| {
                 sidebar.child(
                     div()
                         .rounded(px(self.tokens.radii.md))
@@ -1623,7 +1720,7 @@ impl WorkspaceApp {
                         .p(px(6.0))
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .text_color(rgba(0xfca5a5ff))
-                        .child(error.clone()),
+                        .child(self.i18n.t("terminal.quick_commands.persist_failed")),
                 )
             })
             .into_any_element()
@@ -1767,8 +1864,25 @@ impl WorkspaceApp {
             let value = execution
                 .parameter_values
                 .get(index)
-                .map(|value| value.to_string())
+                .cloned()
                 .unwrap_or_default();
+            let input = if parameter.kind == QuickCommandParameterKind::Secret {
+                self.render_quick_command_secret_input(
+                    QuickCommandInput::ParameterDefault(index),
+                    &value,
+                    snapshot.focused_input,
+                    parameter.label.clone(),
+                    cx,
+                )
+            } else {
+                self.render_quick_command_text_input(
+                    QuickCommandInput::ParameterDefault(index),
+                    value.to_string(),
+                    snapshot.focused_input,
+                    parameter.label.clone(),
+                    cx,
+                )
+            };
             let mut field = div()
                 .flex()
                 .flex_col()
@@ -1779,18 +1893,12 @@ impl WorkspaceApp {
                         .text_color(rgb(theme.text_muted))
                         .child(parameter.label.clone()),
                 )
-                .child(self.render_quick_command_text_input(
-                    QuickCommandInput::ParameterDefault(index),
-                    value.clone(),
-                    snapshot.focused_input,
-                    parameter.label.clone(),
-                    cx,
-                ));
+                .child(input);
             if parameter.kind == QuickCommandParameterKind::Choice {
                 let mut choices = div().flex().items_center().gap(px(4.0)).flex_wrap();
                 for choice in &parameter.choices {
                     let choice_for_click = choice.clone();
-                    let selected = *choice == value;
+                    let selected = choice == value.as_str();
                     choices = choices.child(
                         self.quick_command_text_button(
                             choice.clone(),
@@ -1817,6 +1925,14 @@ impl WorkspaceApp {
             }
             parameters = parameters.child(field);
         }
+        let contains_secret_values = execution
+            .command
+            .parameters
+            .iter()
+            .zip(&execution.parameter_values)
+            .any(|(parameter, value)| {
+                parameter.kind == QuickCommandParameterKind::Secret && !value.is_empty()
+            });
         let preview = match &prepared {
             Ok(prepared) => {
                 let mut rows = div().flex().flex_col().gap(px(6.0));
@@ -1846,7 +1962,8 @@ impl WorkspaceApp {
                                     .when_some(risk, |row, risk| {
                                         row.child(status_pill(
                                             &self.tokens,
-                                            quick_command_risk_label(risk).to_uppercase(),
+                                            quick_command_risk_label(&self.i18n, risk)
+                                                .to_uppercase(),
                                             StatusPillOptions::new(quick_command_risk_tone(risk))
                                                 .compact(),
                                         ))
@@ -1859,9 +1976,14 @@ impl WorkspaceApp {
                                         self.settings_store.settings(),
                                     ))
                                     .text_color(rgb(theme.accent))
-                                    // GPUI text owns one frame-local display copy; the
-                                    // runtime source remains zeroizing and is cleared on close.
-                                    .child(target.command.to_string()),
+                                    .child(if contains_secret_values {
+                                        self.i18n
+                                            .t("terminal.quick_commands.preview_contains_secrets")
+                                    } else {
+                                        // GPUI owns one frame-local display copy; the runtime
+                                        // source remains zeroizing and is cleared on close.
+                                        target.command.to_string()
+                                    }),
                             ),
                     );
                 }
@@ -1892,7 +2014,7 @@ impl WorkspaceApp {
                 .child(
                     errors
                         .iter()
-                        .map(ToString::to_string)
+                        .map(|error| quick_command_template_error_label(&self.i18n, error))
                         .collect::<Vec<_>>()
                         .join("; "),
                 )
@@ -2070,7 +2192,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let risk = classify_command_risk(&command.command);
+        let risk = quick_command_risk_badge(&command.command);
         let command_for_insert = command.command.clone();
         let command_for_run = command.clone();
         let command_for_primary_action = command.clone();
@@ -2168,8 +2290,9 @@ impl WorkspaceApp {
                                 row.child(
                                     status_pill(
                                         &self.tokens,
-                                        quick_command_risk_label(risk).to_uppercase(),
-                                        StatusPillOptions::new(quick_command_risk_tone(risk))
+                                        quick_command_risk_badge_label(&self.i18n, risk)
+                                            .to_uppercase(),
+                                        StatusPillOptions::new(quick_command_risk_badge_tone(risk))
                                             .compact()
                                             .strong(),
                                     ),
@@ -2672,13 +2795,15 @@ impl WorkspaceApp {
                                 cx,
                             ))),
                     )
-                    .child(self.render_quick_command_text_input(
-                        QuickCommandInput::ParameterDefault(index),
-                        parameter.default_value.clone(),
-                        snapshot.focused_input,
-                        self.i18n.t("terminal.quick_commands.parameter_default"),
-                        cx,
-                    ))
+                    .when(kind != QuickCommandParameterKind::Secret, |row| {
+                        row.child(self.render_quick_command_text_input(
+                            QuickCommandInput::ParameterDefault(index),
+                            parameter.default_value.clone(),
+                            snapshot.focused_input,
+                            self.i18n.t("terminal.quick_commands.parameter_default"),
+                            cx,
+                        ))
+                    })
                     .when(kind == QuickCommandParameterKind::Choice, |row| {
                         row.child(self.render_quick_command_text_input(
                             QuickCommandInput::ParameterChoices(index),
@@ -2694,17 +2819,29 @@ impl WorkspaceApp {
                             .items_center()
                             .gap(px(6.0))
                             .child(self.quick_command_text_button(
-                                self.i18n.t(if kind == QuickCommandParameterKind::Choice {
-                                    "terminal.quick_commands.parameter_choice"
-                                } else {
-                                    "terminal.quick_commands.parameter_text"
+                                self.i18n.t(match kind {
+                                    QuickCommandParameterKind::Text => {
+                                        "terminal.quick_commands.parameter_text"
+                                    }
+                                    QuickCommandParameterKind::Choice => {
+                                        "terminal.quick_commands.parameter_choice"
+                                    }
+                                    QuickCommandParameterKind::Secret => {
+                                        "terminal.quick_commands.parameter_secret"
+                                    }
                                 }),
                                 true,
                                 cx.listener(move |this, _event, _window, cx| {
-                                    let next = if kind == QuickCommandParameterKind::Choice {
-                                        QuickCommandParameterKind::Text
-                                    } else {
-                                        QuickCommandParameterKind::Choice
+                                    let next = match kind {
+                                        QuickCommandParameterKind::Text => {
+                                            QuickCommandParameterKind::Choice
+                                        }
+                                        QuickCommandParameterKind::Choice => {
+                                            QuickCommandParameterKind::Secret
+                                        }
+                                        QuickCommandParameterKind::Secret => {
+                                            QuickCommandParameterKind::Text
+                                        }
                                     };
                                     this.terminal.update(cx, |terminal, _cx| {
                                         terminal
@@ -2825,6 +2962,29 @@ impl WorkspaceApp {
         placeholder: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.render_quick_command_input(input, &value, focused_input, placeholder, false, cx)
+    }
+
+    fn render_quick_command_secret_input(
+        &self,
+        input: QuickCommandInput,
+        value: &Zeroizing<String>,
+        focused_input: Option<QuickCommandInput>,
+        placeholder: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_quick_command_input(input, value, focused_input, placeholder, true, cx)
+    }
+
+    fn render_quick_command_input(
+        &self,
+        input: QuickCommandInput,
+        value: &str,
+        focused_input: Option<QuickCommandInput>,
+        placeholder: String,
+        secret: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let focused = focused_input == Some(input);
         let target = WorkspaceImeTarget::QuickCommand(input);
         let workspace = cx.entity();
@@ -2835,11 +2995,11 @@ impl WorkspaceApp {
             text_input_with_viewport(
                 &self.tokens,
                 TextInputView {
-                    value: &value,
+                    value,
                     placeholder,
                     focused,
                     caret_visible: self.input_caret.visible(),
-                    secret: false,
+                    secret,
                     selected_all: false,
                     selected_range: self.ime_selected_range_for_target(target, cx),
                     marked_text: self.marked_text_for_target(target, cx),
@@ -2932,7 +3092,8 @@ mod terminal_command_bar_quick_command_tests {
     use super::{
         QuickCommandCategoryDraft, QuickCommandConfirmationPolicy, QuickCommandEditorDraft,
         QuickCommandIcon, QuickCommandParameterEditorDraft, QuickCommandParameterKind,
-        quick_command_category_draft_can_save, quick_command_editor_can_save,
+        QuickCommandRiskBadge, quick_command_category_draft_can_save,
+        quick_command_editor_can_save, quick_command_risk_badge,
         quick_command_space_inserts_literal,
     };
 
@@ -2988,5 +3149,39 @@ mod terminal_command_bar_quick_command_tests {
         assert!(!quick_command_editor_can_save(&draft));
         draft.command = "deploy {{param.service|sh}}".to_string();
         assert!(quick_command_editor_can_save(&draft));
+    }
+
+    #[test]
+    fn quick_command_editor_rejects_secret_defaults() {
+        let draft = QuickCommandEditorDraft {
+            id: None,
+            name: "Login".to_string(),
+            command: "login {{param.password}}".to_string(),
+            category: "custom".to_string(),
+            description: String::new(),
+            host_patterns: String::new(),
+            parameters: vec![QuickCommandParameterEditorDraft {
+                name: "password".to_string(),
+                label: "Password".to_string(),
+                kind: QuickCommandParameterKind::Secret,
+                default_value: "must-not-persist".to_string(),
+                choices: String::new(),
+                required: true,
+            }],
+            protocols: Vec::new(),
+            confirmation: QuickCommandConfirmationPolicy::Inherit,
+            created_at: 1,
+            sort_order: 0,
+        };
+
+        assert!(!quick_command_editor_can_save(&draft));
+    }
+
+    #[test]
+    fn parameterized_commands_show_dynamic_risk_until_expansion() {
+        assert_eq!(
+            quick_command_risk_badge("echo {{param.value}}"),
+            Some(QuickCommandRiskBadge::Dynamic)
+        );
     }
 }

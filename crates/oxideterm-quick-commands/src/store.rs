@@ -608,6 +608,13 @@ fn sanitize_parameter(
             "Quick Commands choice parameter {name} has an invalid default value"
         ));
     }
+    if parameter.kind == QuickCommandParameterKind::Secret
+        && (default_value.is_some() || !choices.is_empty())
+    {
+        return Err(format!(
+            "Quick Commands secret parameter {name} cannot persist defaults or choices"
+        ));
+    }
     Ok(QuickCommandParameter {
         name,
         label: bounded_required(
@@ -919,6 +926,23 @@ mod tests {
         assert_eq!(result.imported, 0);
         assert_eq!(result.errors.len(), 1);
         assert_eq!(fs::read(&path).unwrap(), previous);
+    }
+
+    #[test]
+    fn secret_parameter_defaults_are_rejected_before_persistence() {
+        let settings_path = temp_settings_path("secret-default");
+        let mut snapshot = default_snapshot();
+        snapshot.commands[0].parameters = vec![QuickCommandParameter {
+            name: "password".to_string(),
+            label: "Password".to_string(),
+            kind: QuickCommandParameterKind::Secret,
+            default_value: Some("must-not-persist".to_string()),
+            choices: Vec::new(),
+            required: true,
+        }];
+
+        assert!(save_snapshot(&settings_path, &snapshot).is_err());
+        assert!(!quick_commands_path(&settings_path).exists());
     }
 
     #[test]

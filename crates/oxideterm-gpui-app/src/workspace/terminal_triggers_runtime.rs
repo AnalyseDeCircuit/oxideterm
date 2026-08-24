@@ -420,9 +420,7 @@ impl WorkspaceApp {
         else {
             self.push_workspace_notice(
                 TerminalNotice {
-                    title: self
-                        .i18n
-                        .t("terminal.triggers.quick_command_data_missing"),
+                    title: self.i18n.t("terminal.triggers.quick_command_data_missing"),
                     description: None,
                     status_text: None,
                     progress: None,

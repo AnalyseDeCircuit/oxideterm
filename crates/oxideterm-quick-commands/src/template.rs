@@ -182,6 +182,31 @@ pub fn quick_command_can_run_non_interactively(command: &QuickCommand) -> bool {
         })
 }
 
+pub fn quick_command_has_runtime_substitutions(template: &str) -> bool {
+    let mut cursor = 0;
+    while cursor < template.len() {
+        let remainder = &template[cursor..];
+        let Some(token_offset) = remainder.find("{{") else {
+            return false;
+        };
+        let token_start = cursor + token_offset;
+        if template[..token_start].ends_with('\\') {
+            cursor = token_start + 2;
+            continue;
+        }
+        cursor = token_start + 2;
+        let Some(token_end) = template[cursor..].find("}}") else {
+            return false;
+        };
+        let token = template[cursor..cursor + token_end].trim();
+        if token.starts_with("param.") || token.starts_with("ctx.") {
+            return true;
+        }
+        cursor += token_end + 2;
+    }
+    false
+}
+
 pub fn validate_quick_command_template(
     template: &str,
     command_parameters: &[QuickCommandParameter],
@@ -669,5 +694,16 @@ mod tests {
         assert!(!quick_command_can_run_non_interactively(&command));
         command.parameters[0].default_value = Some("sshd".to_string());
         assert!(quick_command_can_run_non_interactively(&command));
+    }
+
+    #[test]
+    fn runtime_substitution_detection_ignores_escaped_tokens() {
+        assert!(quick_command_has_runtime_substitutions(
+            "echo {{ param.name | sh }}"
+        ));
+        assert!(quick_command_has_runtime_substitutions("echo {{ctx.host}}"));
+        assert!(!quick_command_has_runtime_substitutions(
+            "echo \\{{param.name}}"
+        ));
     }
 }

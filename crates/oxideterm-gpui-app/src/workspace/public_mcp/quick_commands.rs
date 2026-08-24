@@ -179,6 +179,9 @@ impl WorkspaceApp {
                                 PublicQuickCommandParameterKind::Choice => {
                                     QuickCommandParameterKind::Choice
                                 }
+                                PublicQuickCommandParameterKind::Secret => {
+                                    QuickCommandParameterKind::Secret
+                                }
                             },
                             default_value: parameter.default_value.clone(),
                             choices: parameter.choices.clone(),
@@ -494,7 +497,14 @@ impl super::PublicMcpWorkspaceBridge {
             protocols: command.availability.protocols,
             parameter_count: command.parameters.len(),
             confirmation: command.confirmation,
-            risk: classify_command_risk(&command.command).map(quick_command_risk_name),
+            risk: classify_command_risk(&command.command)
+                .map(quick_command_risk_name)
+                .or_else(|| {
+                    oxideterm_quick_commands::quick_command_has_runtime_substitutions(
+                        &command.command,
+                    )
+                    .then_some("dynamic")
+                }),
             updated_at: command.updated_at,
         }
     }
@@ -537,6 +547,7 @@ fn public_quick_command_parameter(parameter: QuickCommandParameter) -> PublicQui
         kind: match parameter.kind {
             QuickCommandParameterKind::Text => PublicQuickCommandParameterKind::Text,
             QuickCommandParameterKind::Choice => PublicQuickCommandParameterKind::Choice,
+            QuickCommandParameterKind::Secret => PublicQuickCommandParameterKind::Secret,
         },
         default_value: parameter.default_value,
         choices: parameter.choices,

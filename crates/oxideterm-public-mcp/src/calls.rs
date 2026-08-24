@@ -1211,6 +1211,7 @@ pub enum PublicQuickCommandParameterKind {
     #[default]
     Text,
     Choice,
+    Secret,
 }
 
 #[derive(Clone, Deserialize, JsonSchema, Serialize)]

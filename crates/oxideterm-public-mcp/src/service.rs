@@ -2540,6 +2540,13 @@ fn quick_commands_save_metadata_is_bounded(metadata: &QuickCommandsSaveMetadata)
         {
             return false;
         }
+        if matches!(
+            parameter.kind,
+            crate::PublicQuickCommandParameterKind::Secret
+        ) && (parameter.default_value.is_some() || !parameter.choices.is_empty())
+        {
+            return false;
+        }
         total_bytes = total_bytes
             .saturating_add(parameter.name.len())
             .saturating_add(parameter.label.len())
@@ -2828,6 +2835,28 @@ mod tests {
         assert_eq!(parsed.protocols.as_ref().map(Vec::len), Some(2));
         assert_eq!(parsed.parameters.as_ref().map(Vec::len), Some(1));
         assert!(!format!("{parsed:?}").contains(secret_default));
+    }
+
+    #[test]
+    fn quick_command_save_rejects_persisted_defaults_for_secret_parameters() {
+        let arguments = json!({
+            "name": "Login",
+            "command": "login {{param.password}}",
+            "category": "custom",
+            "expected_revision": 7,
+            "parameters": [{
+                "name": "password",
+                "label": "Password",
+                "kind": "secret",
+                "default_value": "must-not-persist",
+                "required": true
+            }]
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
+
+        assert!(parse_quick_commands_save(arguments).is_err());
     }
 
     #[tokio::test]

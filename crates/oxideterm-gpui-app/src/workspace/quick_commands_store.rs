@@ -104,8 +104,14 @@ impl QuickCommandsState {
                     name: parameter.name.trim().to_string(),
                     label: parameter.label.trim().to_string(),
                     kind: parameter.kind,
-                    default_value: trimmed_optional(parameter.default_value),
-                    choices: split_choices(&parameter.choices),
+                    default_value: (parameter.kind != super::QuickCommandParameterKind::Secret)
+                        .then(|| trimmed_optional(parameter.default_value))
+                        .flatten(),
+                    choices: if parameter.kind == super::QuickCommandParameterKind::Secret {
+                        Vec::new()
+                    } else {
+                        split_choices(&parameter.choices)
+                    },
                     required: parameter.required,
                 })
                 .collect(),

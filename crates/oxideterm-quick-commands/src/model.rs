@@ -30,6 +30,7 @@ pub enum QuickCommandParameterKind {
     #[default]
     Text,
     Choice,
+    Secret,
 }
 
 #[derive(Clone, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
