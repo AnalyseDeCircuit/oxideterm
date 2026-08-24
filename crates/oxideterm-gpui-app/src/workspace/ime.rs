@@ -973,6 +973,19 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::ShortcutsModalSearch);
         }
 
+        let quick_command_manager_input = {
+            let quick_commands = &self.terminal.read(cx).quick_commands;
+            quick_commands
+                .manager_open()
+                .then(|| quick_commands.focused_input())
+                .flatten()
+        };
+        if let Some(input) = quick_command_manager_input {
+            // The workspace manager owns IME independently from the compact
+            // terminal launcher, which deliberately keeps `open` false.
+            return Some(WorkspaceImeTarget::QuickCommand(input));
+        }
+
         if self.host_tools_visibility(cx).main_window_is_visible()
             && let Some(input) = self.host_tools.read(cx).ui.focused_input
         {
@@ -1779,7 +1792,9 @@ impl WorkspaceApp {
                 // across long JSON and command lines.
                 super::settings_mono_font_family(self.settings_store.settings())
             }
-            WorkspaceImeTarget::QuickCommand(_) => {
+            WorkspaceImeTarget::QuickCommand(input)
+                if super::quick_commands::quick_command_input_uses_monospace(input) =>
+            {
                 super::settings_mono_font_family(self.settings_store.settings())
             }
             _ => tauri_ui_font_family(&self.settings_store.settings().appearance.ui_font_family),

@@ -15,7 +15,6 @@ use oxideterm_forwarding::{
     ApplySavedForwardsSyncSnapshotResult, ForwardType, ForwardingRegistry,
     SavedForwardsSyncSnapshot,
 };
-use oxideterm_quick_commands::QuickCommandsSnapshot;
 use oxideterm_settings::{PersistedSettings, SettingsStore, export_oxide_settings_snapshot_json};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -76,8 +75,9 @@ pub fn build_local_snapshot(
     let forwards_snapshot = forwarding_registry.export_saved_forwards_snapshot()?;
     let quick_commands_json = oxideterm_quick_commands::export_snapshot_json(settings_store.path())
         .map_err(anyhow::Error::msg)?;
-    let quick_commands_snapshot: oxideterm_quick_commands::QuickCommandsSnapshot =
-        serde_json::from_str(&quick_commands_json)
+    let quick_commands_snapshot =
+        oxideterm_quick_commands::decode_snapshot_json(&quick_commands_json)
+            .map_err(anyhow::Error::msg)
             .context("failed to decode quick commands snapshot")?;
     let serial_profiles_snapshot = connection_store.export_serial_profiles_snapshot()?;
     let telnet_profiles_snapshot = connection_store.export_telnet_profiles_snapshot()?;
@@ -487,17 +487,9 @@ fn preflight_structured_snapshots(
         validate_forwards_snapshot(snapshot)?;
     }
     if let Some(snapshot_json) = quick_commands_snapshot_json {
-        let incoming: QuickCommandsSnapshot = serde_json::from_str(snapshot_json)
+        oxideterm_quick_commands::decode_snapshot_json(snapshot_json)
+            .map_err(anyhow::Error::msg)
             .context("failed to decode quick commands snapshot")?;
-        let supported_version = oxideterm_quick_commands::load_snapshot(settings_store.path())
-            .map_err(anyhow::Error::msg)?
-            .version;
-        if incoming.version != supported_version {
-            bail!(
-                "unsupported quick commands snapshot version {}",
-                incoming.version
-            );
-        }
     }
     for profile in serial_profiles_snapshot
         .into_iter()

@@ -41,7 +41,8 @@ fn count_quick_commands(snapshot_json: Option<&str>) -> (bool, usize, usize) {
         .and_then(Value::as_array)
         .map_or(0, Vec::len);
     let categories = value
-        .get("categories")
+        .get("collections")
+        .or_else(|| value.get("categories"))
         .and_then(Value::as_array)
         .map_or(0, Vec::len);
     (true, commands, categories)

@@ -1129,6 +1129,14 @@ impl WorkspaceApp {
                 // ownership so the settings list never contains a nested editor.
                 root.child(self.render_terminal_command_specs_editor_modal(cx))
             })
+            .when(
+                self.terminal.read(cx).quick_commands.manager_open(),
+                |root| {
+                    // Quick command editing is independent from the compact
+                    // command-bar launcher and must cover all workspace chrome.
+                    root.child(self.render_quick_commands_manager_modal(cx))
+                },
+            )
             .when(self.ai_text_editor_dialog.is_some(), |root| {
                 // Long AI documents use workspace-wide modal ownership so the
                 // settings list keeps compact, independently measured cards.

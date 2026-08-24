@@ -91,9 +91,9 @@ impl WorkspaceApp {
                             .commands
                             .iter()
                             .find(|command| command.id == command_id)
-                            .map(|command| command.command.clone())
+                            .cloned()
                     {
-                        self.run_quick_command(&command, window, cx);
+                        self.run_quick_command_model(&command, window, cx);
                     }
                 }
                 _ => {

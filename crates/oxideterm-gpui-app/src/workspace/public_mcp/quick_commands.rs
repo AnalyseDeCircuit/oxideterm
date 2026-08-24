@@ -1,13 +1,14 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use gpui::Context;
 use oxideterm_public_mcp::{
     ClientRef, DomainRequest, PublicToolCall, QuickCommandRef, ToolEnvelope, ToolGroup,
 };
 use oxideterm_quick_commands::{
-    QuickCommand, QuickCommandDraft, QuickCommandRisk, QuickCommandsSnapshot,
-    classify_command_risk, delete_quick_command, load_snapshot, match_quick_command_host_pattern,
-    new_quick_command_id, now_ms, save_snapshot, upsert_quick_command,
+    QuickCommand, QuickCommandContextValues, QuickCommandDraft, QuickCommandRisk,
+    QuickCommandTargetContext, QuickCommandTargetProtocol, QuickCommandsSnapshot,
+    classify_command_risk, delete_quick_command, load_snapshot, new_quick_command_id, now_ms,
+    prepare_quick_command, save_snapshot, upsert_quick_command,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -100,7 +101,7 @@ impl WorkspaceApp {
                 "command": command.command,
                 "category": command.category,
                 "description": command.description,
-                "host_pattern": command.host_pattern,
+                "host_pattern": command.availability.host_patterns.first(),
                 "revision": snapshot.updated_at,
             }),
         );
@@ -293,16 +294,63 @@ impl WorkspaceApp {
             metadata.username.clone(),
             format!("{}@{}", metadata.username, metadata.host),
         ];
-        if !match_quick_command_host_pattern(command.host_pattern.as_deref(), &target_fields) {
+        if !oxideterm_quick_commands::match_quick_command_host_patterns(
+            &command.availability.host_patterns,
+            &target_fields,
+        ) {
             request.finish(ToolEnvelope::failed(
                 "The Quick Command host pattern does not allow this node",
             ));
             return;
         }
+        let parameter_values = command
+            .parameters
+            .iter()
+            .filter_map(|parameter| {
+                parameter
+                    .default_value
+                    .clone()
+                    .map(|value| (parameter.name.clone(), Zeroizing::new(value)))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let saved_connection = metadata
+            .connection_id
+            .as_deref()
+            .and_then(|connection_id| self.connection_store.get(connection_id));
+        let context = QuickCommandTargetContext {
+            target_id: node_ref.to_string(),
+            label: saved_connection
+                .map(|connection| connection.name.clone())
+                .unwrap_or_else(|| metadata.host.clone()),
+            protocol: QuickCommandTargetProtocol::Ssh,
+            values: QuickCommandContextValues {
+                host: Some(Zeroizing::new(metadata.host.clone())),
+                username: Some(Zeroizing::new(metadata.username.clone())),
+                port: Some(metadata.port),
+                connection: saved_connection
+                    .map(|connection| Zeroizing::new(connection.name.clone())),
+                group: saved_connection
+                    .and_then(|connection| connection.group.clone())
+                    .map(Zeroizing::new),
+                ..QuickCommandContextValues::default()
+            },
+        };
+        let Ok(prepared) = prepare_quick_command(&command, &[context], &parameter_values) else {
+            request.finish(ToolEnvelope::failed(
+                "The Quick Command requires interactive parameters or unavailable context",
+            ));
+            return;
+        };
+        let Some(prepared) = prepared.targets.into_iter().next() else {
+            request.finish(ToolEnvelope::failed(
+                "The Quick Command is not available for this node",
+            ));
+            return;
+        };
         self.start_public_mcp_node_command(
             request,
             node_ref,
-            Zeroizing::new(command.command),
+            prepared.command,
             ToolGroup::QuickCommandExecute,
         );
     }
@@ -370,7 +418,7 @@ impl super::PublicMcpWorkspaceBridge {
             name: command.name,
             category: command.category,
             description: command.description,
-            host_pattern: command.host_pattern,
+            host_pattern: command.availability.host_patterns.first().cloned(),
             risk: classify_command_risk(&command.command).map(quick_command_risk_name),
             updated_at: command.updated_at,
         }

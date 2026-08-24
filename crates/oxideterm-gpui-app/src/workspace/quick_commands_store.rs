@@ -1,13 +1,15 @@
 use std::path::Path;
 
 use super::{
-    QUICK_COMMANDS_SCHEMA_VERSION, QuickCommand, QuickCommandCategoryDraft, QuickCommandDraft,
-    QuickCommandImportResult, QuickCommandImportStrategy, QuickCommandsSnapshot,
-    QuickCommandsState, default_quick_command_categories, default_quick_commands, now_ms,
+    QUICK_COMMANDS_SCHEMA_VERSION, QuickCommand, QuickCommandAvailability,
+    QuickCommandCategoryDraft, QuickCommandEditorDraft, QuickCommandImportResult,
+    QuickCommandImportStrategy, QuickCommandsSnapshot, QuickCommandsState,
+    default_quick_command_categories, default_quick_commands, now_ms,
 };
 use oxideterm_quick_commands::{
-    delete_quick_command, delete_quick_command_category, ensure_active_quick_command_category,
-    upsert_quick_command, upsert_quick_command_category, visible_quick_commands,
+    QuickCommandDraft, delete_quick_command, delete_quick_command_category,
+    ensure_active_quick_command_category, new_quick_command_id, upsert_quick_command,
+    upsert_quick_command_category, visible_quick_commands, visible_quick_commands_for_management,
 };
 
 impl QuickCommandsState {
@@ -50,9 +52,86 @@ impl QuickCommandsState {
         )
     }
 
+    pub(super) fn visible_commands_for_management(&self) -> Vec<QuickCommand> {
+        visible_quick_commands_for_management(&self.commands, &self.active_category, &self.query)
+    }
+
     pub(in crate::workspace) fn upsert_command(&mut self, draft: QuickCommandDraft) {
         if upsert_quick_command(&mut self.commands, &self.categories, draft, now_ms()) {
             self.persist();
+        }
+    }
+
+    pub(in crate::workspace) fn upsert_editor_command(
+        &mut self,
+        draft: QuickCommandEditorDraft,
+    ) -> bool {
+        let updated_at = now_ms();
+        let command = QuickCommand {
+            id: draft.id.unwrap_or_else(new_quick_command_id),
+            name: draft.name.trim().to_string(),
+            command: draft.command.trim().to_string(),
+            category: if self
+                .categories
+                .iter()
+                .any(|category| category.id == draft.category)
+            {
+                draft.category
+            } else {
+                "custom".to_string()
+            },
+            description: trimmed_optional(draft.description),
+            parameters: draft
+                .parameters
+                .into_iter()
+                .map(|parameter| super::QuickCommandParameter {
+                    name: parameter.name.trim().to_string(),
+                    label: parameter.label.trim().to_string(),
+                    kind: parameter.kind,
+                    default_value: trimmed_optional(parameter.default_value),
+                    choices: split_choices(&parameter.choices),
+                    required: parameter.required,
+                })
+                .collect(),
+            availability: QuickCommandAvailability {
+                protocols: draft.protocols,
+                host_patterns: split_host_patterns(&draft.host_patterns),
+            },
+            confirmation: draft.confirmation,
+            sort_order: draft.sort_order,
+            created_at: draft.created_at,
+            updated_at,
+        };
+        if command.name.is_empty() || command.command.is_empty() {
+            return false;
+        }
+        // Persist the candidate snapshot before exposing it to readers so a
+        // validation or I/O failure cannot leave unsaved editor state active.
+        let mut commands = self.commands.clone();
+        if let Some(existing) = commands
+            .iter_mut()
+            .find(|existing| existing.id == command.id)
+        {
+            *existing = command;
+        } else {
+            commands.push(command);
+        }
+        let snapshot = QuickCommandsSnapshot {
+            version: QUICK_COMMANDS_SCHEMA_VERSION,
+            categories: self.categories.clone(),
+            commands: commands.clone(),
+            updated_at,
+        };
+        match oxideterm_quick_commands::save_snapshot(&self.settings_path, &snapshot) {
+            Ok(()) => {
+                self.commands = commands;
+                self.last_persist_error = None;
+                true
+            }
+            Err(error) => {
+                self.last_persist_error = Some(error);
+                false
+            }
         }
     }
 
@@ -134,6 +213,29 @@ impl QuickCommandsState {
     fn ensure_active_category(&mut self) {
         ensure_active_quick_command_category(&self.categories, &mut self.active_category);
     }
+}
+
+fn trimmed_optional(value: String) -> Option<String> {
+    let value = value.trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+fn split_host_patterns(value: &str) -> Vec<String> {
+    value
+        .split([',', '\n'])
+        .map(str::trim)
+        .filter(|pattern| !pattern.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn split_choices(value: &str) -> Vec<String> {
+    value
+        .split([',', '\n'])
+        .map(str::trim)
+        .filter(|choice| !choice.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 #[cfg(test)]
@@ -251,6 +353,7 @@ mod quick_command_tests {
                 id: "files".to_string(),
                 name: "Files".to_string(),
                 icon: QuickCommandIcon::Folder,
+                sort_order: 0,
             }],
             commands: vec![QuickCommand {
                 id: "qc-ls-la".to_string(),
@@ -258,7 +361,10 @@ mod quick_command_tests {
                 command: "exa -la".to_string(),
                 category: "files".to_string(),
                 description: None,
-                host_pattern: None,
+                parameters: Vec::new(),
+                availability: oxideterm_quick_commands::QuickCommandAvailability::default(),
+                confirmation: oxideterm_quick_commands::QuickCommandConfirmationPolicy::Inherit,
+                sort_order: 0,
                 created_at: 1,
                 updated_at: 1,
             }],
@@ -322,7 +428,10 @@ mod quick_command_tests {
             command: "echo synced".to_string(),
             category: "custom".to_string(),
             description: None,
-            host_pattern: None,
+            parameters: Vec::new(),
+            availability: oxideterm_quick_commands::QuickCommandAvailability::default(),
+            confirmation: oxideterm_quick_commands::QuickCommandConfirmationPolicy::Inherit,
+            sort_order: 0,
             created_at: 1,
             updated_at: 1,
         });

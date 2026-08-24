@@ -4,11 +4,12 @@
 //! Pure quick-command editing and filtering behavior shared by UI adapters.
 
 use crate::{
-    MAX_CATEGORIES, QuickCommand, QuickCommandCategory, QuickCommandIcon,
+    MAX_CATEGORIES, QuickCommand, QuickCommandAvailability, QuickCommandCategory,
+    QuickCommandConfirmationPolicy, QuickCommandIcon, QuickCommandTargetProtocol,
     default_quick_command_categories, new_quick_category_id, new_quick_command_id,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct QuickCommandDraft {
     pub id: Option<String>,
     pub name: String,
@@ -39,27 +40,44 @@ pub fn visible_quick_commands(
     query: &str,
     target_fields: &[String],
 ) -> Vec<QuickCommand> {
-    // Normalize once so filtering remains independent from UI input state.
     let normalized_query = query.trim().to_lowercase();
     commands
         .iter()
         .filter(|command| command.category == active_category)
         .filter(|command| {
-            match_quick_command_host_pattern(command.host_pattern.as_deref(), target_fields)
+            match_quick_command_host_patterns(&command.availability.host_patterns, target_fields)
         })
-        .filter(|command| {
-            normalized_query.is_empty()
-                || command.name.to_lowercase().contains(&normalized_query)
-                || command.command.to_lowercase().contains(&normalized_query)
-                || command
-                    .description
-                    .as_deref()
-                    .unwrap_or_default()
-                    .to_lowercase()
-                    .contains(&normalized_query)
-        })
+        .filter(|command| quick_command_matches_query(command, &normalized_query))
         .cloned()
         .collect()
+}
+
+pub fn visible_quick_commands_for_management(
+    commands: &[QuickCommand],
+    active_category: &str,
+    query: &str,
+) -> Vec<QuickCommand> {
+    // Management must expose unavailable commands so users can repair their
+    // host and protocol constraints without switching terminal context.
+    let normalized_query = query.trim().to_lowercase();
+    commands
+        .iter()
+        .filter(|command| command.category == active_category)
+        .filter(|command| quick_command_matches_query(command, &normalized_query))
+        .cloned()
+        .collect()
+}
+
+fn quick_command_matches_query(command: &QuickCommand, normalized_query: &str) -> bool {
+    normalized_query.is_empty()
+        || command.name.to_lowercase().contains(normalized_query)
+        || command.command.to_lowercase().contains(normalized_query)
+        || command
+            .description
+            .as_deref()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains(normalized_query)
 }
 
 pub fn upsert_quick_command(
@@ -69,12 +87,23 @@ pub fn upsert_quick_command(
     now: u64,
 ) -> bool {
     // Creation time is stable across edits; update time records each accepted draft.
-    let existing_created_at = draft.id.as_ref().and_then(|id| {
-        commands
-            .iter()
-            .find(|command| &command.id == id)
-            .map(|command| command.created_at)
-    });
+    let existing = draft
+        .id
+        .as_ref()
+        .and_then(|id| commands.iter().find(|command| &command.id == id));
+    let existing_created_at = existing.map(|command| command.created_at);
+    let existing_parameters = existing
+        .map(|command| command.parameters.clone())
+        .unwrap_or_default();
+    let existing_protocols = existing
+        .map(|command| command.availability.protocols.clone())
+        .unwrap_or_default();
+    let existing_confirmation = existing
+        .map(|command| command.confirmation)
+        .unwrap_or(QuickCommandConfirmationPolicy::Inherit);
+    let existing_sort_order = existing
+        .map(|command| command.sort_order)
+        .unwrap_or_else(|| next_command_sort_order(commands));
     let command = QuickCommand {
         id: draft.id.unwrap_or_else(new_quick_command_id),
         name: draft.name.trim().to_string(),
@@ -85,7 +114,13 @@ pub fn upsert_quick_command(
             "custom".to_string()
         },
         description: trim_optional(&draft.description),
-        host_pattern: trim_optional(&draft.host_pattern),
+        parameters: existing_parameters,
+        availability: QuickCommandAvailability {
+            protocols: existing_protocols,
+            host_patterns: trim_optional(&draft.host_pattern).into_iter().collect(),
+        },
+        confirmation: existing_confirmation,
+        sort_order: existing_sort_order,
         created_at: existing_created_at.unwrap_or(now),
         updated_at: now,
     };
@@ -112,10 +147,17 @@ pub fn upsert_quick_command_category(
     draft: QuickCommandCategoryDraft,
     current_active_category: &str,
 ) -> String {
+    let existing_sort_order = draft
+        .id
+        .as_ref()
+        .and_then(|id| categories.iter().find(|category| &category.id == id))
+        .map(|category| category.sort_order)
+        .unwrap_or_else(|| next_category_sort_order(categories));
     let category = QuickCommandCategory {
         id: draft.id.unwrap_or_else(new_quick_category_id),
         name: draft.name.trim().to_string(),
         icon: draft.icon,
+        sort_order: existing_sort_order,
     };
     if category.name.is_empty() {
         return current_active_category.to_string();
@@ -172,6 +214,48 @@ pub fn match_quick_command_host_pattern(pattern: Option<&str>, target_fields: &[
         .any(|field| wildcard_match(&normalized_pattern, &field.to_lowercase()))
 }
 
+pub fn match_quick_command_host_patterns(patterns: &[String], target_fields: &[String]) -> bool {
+    patterns.is_empty()
+        || patterns
+            .iter()
+            .any(|pattern| match_quick_command_host_pattern(Some(pattern.as_str()), target_fields))
+}
+
+pub fn quick_command_available_for_target(
+    command: &QuickCommand,
+    protocol: QuickCommandTargetProtocol,
+    host: Option<&str>,
+) -> bool {
+    let protocol_matches = command.availability.protocols.is_empty()
+        || command.availability.protocols.contains(&protocol);
+    let host_matches = command.availability.host_patterns.is_empty()
+        || host.is_some_and(|host| {
+            match_quick_command_host_patterns(
+                &command.availability.host_patterns,
+                &[host.to_string()],
+            )
+        });
+    protocol_matches && host_matches
+}
+
+fn next_command_sort_order(commands: &[QuickCommand]) -> i64 {
+    commands
+        .iter()
+        .map(|command| command.sort_order)
+        .max()
+        .unwrap_or(-1)
+        .saturating_add(1)
+}
+
+fn next_category_sort_order(categories: &[QuickCommandCategory]) -> i64 {
+    categories
+        .iter()
+        .map(|category| category.sort_order)
+        .max()
+        .unwrap_or(-1)
+        .saturating_add(1)
+}
+
 fn wildcard_match(pattern: &str, value: &str) -> bool {
     let parts = pattern.split('*').collect::<Vec<_>>();
     if parts.len() == 1 {
@@ -211,7 +295,10 @@ mod tests {
             command: "old".to_string(),
             category: "custom".to_string(),
             description: None,
-            host_pattern: None,
+            parameters: Vec::new(),
+            availability: QuickCommandAvailability::default(),
+            confirmation: QuickCommandConfirmationPolicy::Inherit,
+            sort_order: 0,
             created_at: 7,
             updated_at: 7,
         }];
@@ -232,7 +319,7 @@ mod tests {
         assert_eq!(commands[0].category, "custom");
         assert_eq!(commands[0].created_at, 7);
         assert_eq!(commands[0].updated_at, 11);
-        assert_eq!(commands[0].host_pattern.as_deref(), Some("*.example.com"));
+        assert_eq!(commands[0].availability.host_patterns, ["*.example.com"]);
     }
 
     #[test]

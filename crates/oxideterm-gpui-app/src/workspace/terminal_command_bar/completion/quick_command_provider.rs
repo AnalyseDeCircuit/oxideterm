@@ -23,13 +23,15 @@ impl WorkspaceApp {
             .commands
             .iter()
             .filter(|command| {
-                match_quick_command_host_pattern(command.host_pattern.as_deref(), &target_fields)
-                    && (command.name.to_lowercase().contains(&query)
-                        || command.command.to_lowercase().contains(&query)
-                        || command
-                            .description
-                            .as_ref()
-                            .is_some_and(|description| description.to_lowercase().contains(&query)))
+                oxideterm_quick_commands::match_quick_command_host_patterns(
+                    &command.availability.host_patterns,
+                    &target_fields,
+                ) && (command.name.to_lowercase().contains(&query)
+                    || command.command.to_lowercase().contains(&query)
+                    || command
+                        .description
+                        .as_ref()
+                        .is_some_and(|description| description.to_lowercase().contains(&query)))
             })
             .take(8)
             .map(|command| {

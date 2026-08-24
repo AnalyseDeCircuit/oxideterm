@@ -9,3 +9,4 @@ oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+zeroize.workspace = true

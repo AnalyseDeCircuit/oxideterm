@@ -720,13 +720,12 @@ fn filter_structured_preview_for_selection(
             .retain(|record| selection.selected_forward_ids.contains(&record.id));
     }
     if let Some(json) = preview.quick_commands_snapshot_json.as_mut()
-        && let Ok(mut snapshot) =
-            serde_json::from_str::<oxideterm_quick_commands::QuickCommandsSnapshot>(json)
+        && let Ok(mut snapshot) = oxideterm_quick_commands::decode_snapshot_json(json)
     {
         snapshot
             .commands
             .retain(|command| selection.selected_quick_command_ids.contains(&command.id));
-        if let Ok(next_json) = serde_json::to_string(&snapshot) {
+        if let Ok(next_json) = oxideterm_quick_commands::encode_snapshot_json(&snapshot) {
             *json = next_json;
         }
     }

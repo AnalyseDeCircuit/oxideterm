@@ -651,7 +651,11 @@ fn read_and_embed_key(path: &str) -> Result<Option<Zeroizing<String>>, OxideFile
 fn count_quick_commands_for_export(snapshot_json: Option<&str>) -> Option<(usize, usize)> {
     let value = serde_json::from_str::<Value>(snapshot_json?).ok()?;
     let commands = value.get("commands")?.as_array()?.len();
-    let categories = value.get("categories")?.as_array()?.len();
+    let categories = value
+        .get("collections")
+        .or_else(|| value.get("categories"))?
+        .as_array()?
+        .len();
     Some((commands, categories))
 }
 

@@ -35,8 +35,26 @@ pub(super) fn quick_command_changed_fields(
     push_changed(
         &mut fields,
         "plugin.cloud_sync.diff_fields.host_pattern",
-        before.host_pattern.clone(),
-        after.host_pattern.clone(),
+        serialized_field(&before.availability.host_patterns),
+        serialized_field(&after.availability.host_patterns),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.protocols",
+        serialized_field(&before.availability.protocols),
+        serialized_field(&after.availability.protocols),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.parameters",
+        parameter_field(&before.parameters),
+        parameter_field(&after.parameters),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.confirmation",
+        serialized_field(&before.confirmation),
+        serialized_field(&after.confirmation),
     );
     fields
 }
@@ -88,13 +106,69 @@ pub(super) fn quick_command_merge_fields(
     push_merge_changed(
         &mut fields,
         "plugin.cloud_sync.diff_fields.host_pattern",
-        base.host_pattern.clone(),
-        local.host_pattern.clone(),
-        remote.host_pattern.clone(),
-        effective.host_pattern.clone(),
+        serialized_field(&base.availability.host_patterns),
+        serialized_field(&local.availability.host_patterns),
+        serialized_field(&remote.availability.host_patterns),
+        serialized_field(&effective.availability.host_patterns),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.protocols",
+        serialized_field(&base.availability.protocols),
+        serialized_field(&local.availability.protocols),
+        serialized_field(&remote.availability.protocols),
+        serialized_field(&effective.availability.protocols),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.parameters",
+        parameter_field(&base.parameters),
+        parameter_field(&local.parameters),
+        parameter_field(&remote.parameters),
+        parameter_field(&effective.parameters),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.confirmation",
+        serialized_field(&base.confirmation),
+        serialized_field(&local.confirmation),
+        serialized_field(&remote.confirmation),
+        serialized_field(&effective.confirmation),
         conflict_strategy,
     );
     fields
+}
+
+fn serialized_field(value: &impl std::fmt::Debug) -> Option<String> {
+    Some(format!("{value:?}"))
+}
+
+fn parameter_field(
+    parameters: &[oxideterm_quick_commands::QuickCommandParameter],
+) -> Option<String> {
+    // Default values can contain credentials; cloud-sync diffs expose only the
+    // structural parameter contract and never the stored substitution value.
+    Some(
+        parameters
+            .iter()
+            .map(|parameter| {
+                format!(
+                    "{} ({:?}, {})",
+                    parameter.name,
+                    parameter.kind,
+                    if parameter.required {
+                        "required"
+                    } else {
+                        "optional"
+                    }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
 }
 
 pub(super) fn quick_command_summary_fields(value: &QuickCommand) -> Vec<CloudSyncFieldDiffField> {

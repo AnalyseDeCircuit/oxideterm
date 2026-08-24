@@ -153,16 +153,14 @@ pub(super) fn filter_quick_commands_snapshot_json(
     selected_ids: Option<&BTreeSet<String>>,
 ) -> usize {
     // Keep filtering at the serialized snapshot boundary so upload writes exactly the chosen object.
-    let Ok(mut snapshot) =
-        serde_json::from_str::<oxideterm_quick_commands::QuickCommandsSnapshot>(snapshot_json)
-    else {
+    let Ok(mut snapshot) = oxideterm_quick_commands::decode_snapshot_json(snapshot_json) else {
         return 0;
     };
     if let Some(selected_ids) = selected_ids {
         snapshot
             .commands
             .retain(|command| selected_ids.contains(&command.id));
-        if let Ok(filtered_json) = serde_json::to_string(&snapshot) {
+        if let Ok(filtered_json) = oxideterm_quick_commands::encode_snapshot_json(&snapshot) {
             *snapshot_json = filtered_json;
         }
     }

@@ -486,9 +486,12 @@ pub(super) fn merge_quick_command_records(
     conflict_strategy: &ConflictStrategy,
     merged_at: u64,
 ) -> Result<bool> {
-    let base = serde_json::from_str::<QuickCommandsSnapshot>(base_json)?;
-    let local = serde_json::from_str::<QuickCommandsSnapshot>(local_json)?;
-    let mut remote = serde_json::from_str::<QuickCommandsSnapshot>(remote_json)?;
+    let base =
+        oxideterm_quick_commands::decode_snapshot_json(base_json).map_err(anyhow::Error::msg)?;
+    let local =
+        oxideterm_quick_commands::decode_snapshot_json(local_json).map_err(anyhow::Error::msg)?;
+    let mut remote =
+        oxideterm_quick_commands::decode_snapshot_json(remote_json).map_err(anyhow::Error::msg)?;
     let mut changed = false;
     changed |= merge_quick_command_categories(
         &mut remote.categories,
@@ -505,7 +508,8 @@ pub(super) fn merge_quick_command_records(
     )?;
     if changed {
         remote.updated_at = merged_at;
-        *remote_json = serde_json::to_string(&remote)?;
+        *remote_json =
+            oxideterm_quick_commands::encode_snapshot_json(&remote).map_err(anyhow::Error::msg)?;
     }
     Ok(changed)
 }

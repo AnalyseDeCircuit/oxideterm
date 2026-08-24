@@ -23,7 +23,7 @@ use oxideterm_connections::{
     },
 };
 use oxideterm_forwarding::{ForwardingRegistry, SavedForwardsSyncSnapshot};
-use oxideterm_quick_commands::{QuickCommand, QuickCommandCategory, QuickCommandsSnapshot};
+use oxideterm_quick_commands::{QuickCommand, QuickCommandCategory};
 use oxideterm_settings::{SettingsStore, export_oxide_settings_snapshot_json};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;

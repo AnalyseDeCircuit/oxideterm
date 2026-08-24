@@ -5,8 +5,12 @@ use oxideterm_gpui_ui::text_input::{
     text_caret, text_input_anchor_probe, text_input_value_segments_with_color,
 };
 use oxideterm_quick_commands::{
-    QuickCommandRisk, classify_command_risk as classify_quick_command_risk,
+    PreparedQuickCommand, QuickCommand, QuickCommandContextValues, QuickCommandRisk,
+    QuickCommandTargetContext, QuickCommandTargetProtocol,
+    classify_command_risk as classify_quick_command_risk, prepare_quick_command,
 };
+use oxideterm_terminal::TerminalSessionKind;
+use zeroize::Zeroizing;
 
 const TERMINAL_FONT_SIZE_MIN: i64 = 8;
 const TERMINAL_FONT_SIZE_MAX: i64 = 32;
@@ -1644,74 +1648,304 @@ impl WorkspaceApp {
         }
     }
 
-    fn submit_terminal_command_line(
+    pub(super) fn run_quick_command_model(
         &mut self,
-        command: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if let Some(source_pane_id) = self.active_pane_id(cx) {
-            self.send_terminal_command_to_pane(
-                source_pane_id,
-                command,
-                TerminalCommandMarkDetectionSource::CommandBar,
-                cx,
-            );
-            self.broadcast_terminal_command(source_pane_id, command, cx);
-        } else {
-            return false;
-        }
-
-        if self.terminal_command_should_handoff_focus(command) {
-            self.focus_active_pane(window, cx);
-        }
-        true
-    }
-
-    pub(super) fn run_quick_command(
-        &mut self,
-        command: &str,
+        command: &QuickCommand,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let settings = &self.settings_store.settings().terminal.command_bar;
-        let risk = classify_command_risk(command);
-        if settings.quick_commands_confirm_before_run || risk.is_some() {
+        if self.terminal.read(cx).broadcast_enabled() {
+            self.retain_live_terminal_broadcast_targets(cx);
+        }
+        let parameter_values = command
+            .parameters
+            .iter()
+            .filter_map(|parameter| {
+                parameter
+                    .default_value
+                    .clone()
+                    .map(|value| (parameter.name.clone(), Zeroizing::new(value)))
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let target_contexts = self.quick_command_target_contexts(cx);
+        let contexts = target_contexts
+            .iter()
+            .map(|(_, context)| context.clone())
+            .collect::<Vec<_>>();
+        let prepared = prepare_quick_command(command, &contexts, &parameter_values);
+        let global_confirmation = self
+            .settings_store
+            .settings()
+            .terminal
+            .command_bar
+            .quick_commands_confirm_before_run;
+        let needs_dialog = !command.parameters.is_empty()
+            || command.command.contains("{{")
+            || target_contexts.len() > 1
+            || global_confirmation
+            || prepared.as_ref().is_ok_and(|prepared| {
+                prepared.confirmation_required
+                    || prepared.targets.is_empty()
+                    || !prepared.unavailable_targets.is_empty()
+            });
+        if needs_dialog || prepared.is_err() {
             self.terminal.update(cx, |terminal, _cx| {
-                terminal
-                    .quick_commands
-                    .request_confirmation(command.to_string())
+                terminal.quick_commands.request_execution(command.clone())
             });
             cx.notify();
             return;
         }
-        self.execute_quick_command(command, window, cx);
+        if let Ok(prepared) = prepared {
+            self.execute_prepared_quick_command(prepared, &target_contexts, window, cx);
+        }
     }
 
-    pub(in crate::workspace) fn execute_quick_command(
+    pub(super) fn quick_command_target_contexts(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Vec<(PaneId, QuickCommandTargetContext)> {
+        let Some(active_pane_id) = self.active_pane_id(cx) else {
+            return Vec::new();
+        };
+        let mut pane_ids = vec![active_pane_id];
+        if self.terminal.read(cx).broadcast_enabled() {
+            pane_ids.extend(self.terminal_broadcast_target_panes(active_pane_id, cx));
+        }
+        pane_ids
+            .into_iter()
+            .filter_map(|pane_id| {
+                self.quick_command_context_for_pane(pane_id, cx)
+                    .map(|context| (pane_id, context))
+            })
+            .collect()
+    }
+
+    pub(super) fn quick_command_context_for_pane(
+        &self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) -> Option<QuickCommandTargetContext> {
+        // Context uses user-visible metadata and the explicit terminal selection;
+        // protected connection credentials are never read into this path.
+        let pane_entity = self.tab_host.read(cx).panes().get(&pane_id).cloned()?;
+        let pane = pane_entity.read(cx);
+        let entry = self
+            .terminal_broadcast_entries(cx)
+            .into_iter()
+            .find(|entry| entry.pane_id == pane_id);
+        let selected_group_name = self
+            .terminal
+            .read(cx)
+            .selected_broadcast_group_id()
+            .and_then(|group_id| {
+                self.settings_store
+                    .settings()
+                    .terminal
+                    .broadcast_groups
+                    .iter()
+                    .find(|group| group.id == group_id)
+                    .map(|group| group.name.clone())
+            });
+        let mut values = QuickCommandContextValues {
+            cwd: pane.current_working_directory().map(Zeroizing::new),
+            host: pane.current_working_directory_host().map(Zeroizing::new),
+            connection: Some(Zeroizing::new(pane.title().to_string())),
+            group: selected_group_name.map(Zeroizing::new),
+            selection: pane.selected_text_snapshot().map(Zeroizing::new),
+            ..QuickCommandContextValues::default()
+        };
+        let mut protocol = match pane.session_kind() {
+            TerminalSessionKind::LocalPty => QuickCommandTargetProtocol::Local,
+            TerminalSessionKind::SshPty => QuickCommandTargetProtocol::Ssh,
+            TerminalSessionKind::Telnet => QuickCommandTargetProtocol::Telnet,
+            TerminalSessionKind::Mosh => QuickCommandTargetProtocol::Mosh,
+            TerminalSessionKind::Serial => QuickCommandTargetProtocol::Serial,
+        };
+        if pane.is_tmux_control_mode() {
+            protocol = QuickCommandTargetProtocol::Tmux;
+        }
+        if let Some(saved) = entry
+            .as_ref()
+            .and_then(|entry| entry.saved_connection.as_ref())
+        {
+            self.apply_saved_quick_command_context(saved, &mut values);
+        }
+        Some(QuickCommandTargetContext {
+            target_id: pane_id.to_string(),
+            label: entry
+                .map(|entry| entry.label)
+                .unwrap_or_else(|| pane.title().to_string()),
+            protocol,
+            values,
+        })
+    }
+
+    fn apply_saved_quick_command_context(
+        &self,
+        saved: &oxideterm_settings::TerminalBroadcastTargetRef,
+        values: &mut QuickCommandContextValues,
+    ) {
+        use oxideterm_settings::TerminalBroadcastTargetKind;
+        match saved.kind {
+            TerminalBroadcastTargetKind::Ssh => {
+                if let Some(connection) = self.connection_store.get(&saved.saved_connection_id) {
+                    values.host = Some(Zeroizing::new(connection.host.clone()));
+                    values.username = Some(Zeroizing::new(connection.username.clone()));
+                    values.port = Some(connection.port);
+                    values.connection = Some(Zeroizing::new(connection.name.clone()));
+                    values.group = connection
+                        .group
+                        .clone()
+                        .map(Zeroizing::new)
+                        .or_else(|| values.group.clone());
+                }
+            }
+            TerminalBroadcastTargetKind::Mosh => {
+                if let Some(profile) = self
+                    .connection_store
+                    .get_mosh_profile(&saved.saved_connection_id)
+                {
+                    values.host = Some(Zeroizing::new(profile.host.clone()));
+                    values.username = Some(Zeroizing::new(profile.username.clone()));
+                    values.port = Some(profile.ssh_port);
+                    values.connection = Some(Zeroizing::new(profile.name.clone()));
+                    values.group = profile
+                        .group
+                        .clone()
+                        .map(Zeroizing::new)
+                        .or_else(|| values.group.clone());
+                }
+            }
+            TerminalBroadcastTargetKind::Telnet => {
+                if let Some(profile) = self
+                    .connection_store
+                    .telnet_profiles()
+                    .iter()
+                    .find(|profile| profile.id == saved.saved_connection_id)
+                {
+                    values.host = Some(Zeroizing::new(profile.host.clone()));
+                    values.port = Some(profile.port);
+                    values.connection = Some(Zeroizing::new(profile.name.clone()));
+                    values.group = profile
+                        .group
+                        .clone()
+                        .map(Zeroizing::new)
+                        .or_else(|| values.group.clone());
+                }
+            }
+            TerminalBroadcastTargetKind::Serial => {
+                if let Some(profile) = self
+                    .connection_store
+                    .serial_profiles()
+                    .iter()
+                    .find(|profile| profile.id == saved.saved_connection_id)
+                {
+                    values.host = Some(Zeroizing::new(profile.port_path.clone()));
+                    values.connection = Some(Zeroizing::new(profile.name.clone()));
+                    values.group = profile
+                        .group
+                        .clone()
+                        .map(Zeroizing::new)
+                        .or_else(|| values.group.clone());
+                }
+            }
+        }
+    }
+
+    pub(super) fn confirm_quick_command_execution(
         &mut self,
-        command: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.submit_terminal_command_line(command, window, cx)
-            && self
+        let Some(execution) = self
+            .terminal
+            .read(cx)
+            .quick_commands
+            .pending_execution
+            .clone()
+        else {
+            return;
+        };
+        let parameter_values = execution
+            .command
+            .parameters
+            .iter()
+            .zip(execution.parameter_values)
+            .map(|(parameter, value)| (parameter.name.clone(), value))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let target_contexts = self.quick_command_target_contexts(cx);
+        let contexts = target_contexts
+            .iter()
+            .map(|(_, context)| context.clone())
+            .collect::<Vec<_>>();
+        if let Ok(prepared) =
+            prepare_quick_command(&execution.command, &contexts, &parameter_values)
+        {
+            self.execute_prepared_quick_command(prepared, &target_contexts, window, cx);
+        }
+    }
+
+    fn execute_prepared_quick_command(
+        &mut self,
+        prepared: PreparedQuickCommand,
+        target_contexts: &[(PaneId, QuickCommandTargetContext)],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Expansion is target-specific, so broadcast delivery cannot reuse the
+        // old single-string path without losing per-pane context semantics.
+        let active_pane_id = self.active_pane_id(cx);
+        let focus_command = prepared
+            .targets
+            .first()
+            .map(|target| target.command.clone());
+        let mut sent = false;
+        for target in prepared.targets {
+            let Some((pane_id, _)) = target_contexts
+                .iter()
+                .find(|(_, context)| context.target_id == target.target_id)
+            else {
+                continue;
+            };
+            self.send_terminal_command_to_pane(
+                *pane_id,
+                &target.command,
+                if Some(*pane_id) == active_pane_id {
+                    TerminalCommandMarkDetectionSource::CommandBar
+                } else {
+                    TerminalCommandMarkDetectionSource::Broadcast
+                },
+                cx,
+            );
+            sent = true;
+        }
+        if sent {
+            if focus_command
+                .as_deref()
+                .is_some_and(|command| self.terminal_command_should_handoff_focus(command))
+            {
+                self.focus_active_pane(window, cx);
+            }
+            if self
                 .settings_store
                 .settings()
                 .terminal
                 .command_bar
                 .quick_commands_show_toast
-        {
-            self.push_workspace_notice(
-                TerminalNotice {
-                    title: self.i18n.t("terminal.quick_commands.toast_executed"),
-                    description: Some(command.to_string()),
-                    status_text: None,
-                    progress: None,
-                    variant: TerminalNoticeVariant::Success,
-                },
-                cx,
-            );
+            {
+                self.push_workspace_notice(
+                    TerminalNotice {
+                        title: self.i18n.t("terminal.quick_commands.toast_executed"),
+                        // The preview is the only UI boundary allowed to display
+                        // expanded commands; notifications retain no command text.
+                        description: None,
+                        status_text: None,
+                        progress: None,
+                        variant: TerminalNoticeVariant::Success,
+                    },
+                    cx,
+                );
+            }
         }
         self.finish_terminal_quick_command_execution(cx);
         self.ime_marked_text = None;
@@ -2041,33 +2275,6 @@ impl WorkspaceApp {
                 pane.begin_command_mark(command, mark_source, cx);
                 pane.send_command_line(command, cx);
             });
-        }
-    }
-
-    fn broadcast_terminal_command(
-        &mut self,
-        source_pane_id: PaneId,
-        command: &str,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.terminal.read(cx).broadcast_enabled() {
-            return;
-        }
-
-        self.retain_live_terminal_broadcast_targets(cx);
-        // Pruning the final selected target disables broadcast rather than
-        // reinterpreting the now-empty selection as "all terminals".
-        if !self.terminal.read(cx).broadcast_enabled() {
-            return;
-        }
-        let targets = self.terminal_broadcast_target_panes(source_pane_id, cx);
-        for pane_id in targets {
-            self.send_terminal_command_to_pane(
-                pane_id,
-                command,
-                TerminalCommandMarkDetectionSource::Broadcast,
-                cx,
-            );
         }
     }
 

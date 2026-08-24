@@ -1,7 +1,9 @@
 pub(super) use oxideterm_quick_commands::{
-    QUICK_COMMANDS_SCHEMA_VERSION, QuickCommand, QuickCommandCategory, QuickCommandCategoryDraft,
-    QuickCommandDraft, QuickCommandIcon, QuickCommandImportResult, QuickCommandImportStrategy,
-    QuickCommandsSnapshot, default_quick_command_categories, default_quick_commands, now_ms,
+    QUICK_COMMANDS_SCHEMA_VERSION, QuickCommand, QuickCommandAvailability, QuickCommandCategory,
+    QuickCommandCategoryDraft, QuickCommandConfirmationPolicy, QuickCommandIcon,
+    QuickCommandImportResult, QuickCommandImportStrategy, QuickCommandParameter,
+    QuickCommandParameterKind, QuickCommandTargetProtocol, QuickCommandsSnapshot,
+    default_quick_command_categories, default_quick_commands, now_ms,
 };
 use std::{cell::RefCell, collections::HashMap, path::Path, path::PathBuf};
 
@@ -21,6 +23,10 @@ pub(super) enum QuickCommandInput {
     CommandText,
     CommandDescription,
     CommandHostPattern,
+    ParameterName(usize),
+    ParameterLabel(usize),
+    ParameterDefault(usize),
+    ParameterChoices(usize),
     CategoryName,
 }
 
@@ -33,8 +39,45 @@ impl QuickCommandInput {
             Self::CommandDescription => 4,
             Self::CommandHostPattern => 5,
             Self::CategoryName => 6,
+            Self::ParameterName(index) => 100 + index as u64 * 4,
+            Self::ParameterLabel(index) => 101 + index as u64 * 4,
+            Self::ParameterDefault(index) => 102 + index as u64 * 4,
+            Self::ParameterChoices(index) => 103 + index as u64 * 4,
         }
     }
+}
+
+#[derive(Clone)]
+pub(super) struct QuickCommandParameterEditorDraft {
+    pub name: String,
+    pub label: String,
+    pub kind: QuickCommandParameterKind,
+    pub default_value: String,
+    pub choices: String,
+    pub required: bool,
+}
+
+#[derive(Clone)]
+pub(super) struct QuickCommandEditorDraft {
+    pub id: Option<String>,
+    pub name: String,
+    pub command: String,
+    pub category: String,
+    pub description: String,
+    pub host_patterns: String,
+    pub parameters: Vec<QuickCommandParameterEditorDraft>,
+    pub protocols: Vec<QuickCommandTargetProtocol>,
+    pub confirmation: QuickCommandConfirmationPolicy,
+    pub created_at: u64,
+    pub sort_order: i64,
+}
+
+#[derive(Clone)]
+pub(super) struct QuickCommandExecutionDraft {
+    pub command: QuickCommand,
+    // Runtime substitutions may contain credentials, so dialog ownership is
+    // also the zeroization boundary for every entered value.
+    pub parameter_values: Vec<Zeroizing<String>>,
 }
 
 fn quick_command_icon_source_id(icon: QuickCommandIcon) -> &'static str {
@@ -47,7 +90,7 @@ fn quick_command_icon_source_id(icon: QuickCommandIcon) -> &'static str {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(super) struct QuickCommandsState {
     settings_path: PathBuf,
     pub categories: Vec<QuickCommandCategory>,
@@ -59,7 +102,7 @@ pub(super) struct QuickCommandsState {
     // stealing the row click target; store the stable command id instead of a
     // transient index so filtering and category changes cannot select a stale row.
     pub highlighted_command: Option<String>,
-    pub command_editor: Option<QuickCommandDraft>,
+    pub command_editor: Option<QuickCommandEditorDraft>,
     pub category_editor: Option<QuickCommandCategoryDraft>,
     pub last_persist_error: Option<String>,
 }
@@ -68,8 +111,9 @@ pub(super) struct QuickCommandsState {
 pub(in crate::workspace) struct TerminalQuickCommandsState {
     pub(super) store: QuickCommandsState,
     pub(super) open: bool,
+    pub(super) manager_open: bool,
     pub(super) pinned: bool,
-    pub(super) pending_command: Option<Zeroizing<String>>,
+    pub(super) pending_execution: Option<QuickCommandExecutionDraft>,
     pub(super) list_state: ListState,
     pub(super) list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) input_viewports: RefCell<HashMap<QuickCommandInput, TextInputViewport>>,
@@ -80,8 +124,9 @@ impl TerminalQuickCommandsState {
         Self {
             store: QuickCommandsState::load(settings_path),
             open: false,
+            manager_open: false,
             pinned: false,
-            pending_command: None,
+            pending_execution: None,
             // User-defined command sets are unbounded, so the surface owns a
             // virtual list instead of rebuilding every row on root repaint.
             list_state: ListState::new(
@@ -117,3 +162,4 @@ mod store;
 mod view;
 
 pub(in crate::workspace) use oxideterm_quick_commands::match_quick_command_host_pattern;
+pub(in crate::workspace) use view::quick_command_input_uses_monospace;

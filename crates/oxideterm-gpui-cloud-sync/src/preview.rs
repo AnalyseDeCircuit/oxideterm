@@ -209,7 +209,7 @@ pub struct CloudSyncSectionDiffItem {
     pub count: Option<usize>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct CloudSyncLocalFieldDiffSnapshot {
     pub connections: Option<SavedConnectionsSyncSnapshot>,
     pub forwards: Option<SavedForwardsSyncSnapshot>,

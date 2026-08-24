@@ -467,10 +467,7 @@ impl WorkspaceApp {
         let quick_commands =
             oxideterm_quick_commands::export_snapshot_json(self.settings_store.path())
                 .ok()
-                .and_then(|json| {
-                    serde_json::from_str::<oxideterm_quick_commands::QuickCommandsSnapshot>(&json)
-                        .ok()
-                });
+                .and_then(|json| oxideterm_quick_commands::decode_snapshot_json(&json).ok());
         CloudSyncLocalFieldDiffSnapshot {
             connections: self
                 .connection_store

@@ -109,6 +109,7 @@ pub(in crate::workspace) enum ActiveWindowModalOwner {
         phase: oxideterm_gpui_ui::motion::ExitPhase,
     },
     TerminalCommandSpecsEditor,
+    QuickCommandsManager,
     AiTextEditor,
     OxideImport {
         phase: oxideterm_gpui_ui::motion::ExitPhase,
@@ -170,17 +171,18 @@ impl ActiveWindowModalOwner {
             Self::ThemeEditor { .. } => 32,
             Self::SettingsSshConfigImport { .. } => 33,
             Self::TerminalCommandSpecsEditor => 34,
-            Self::AiTextEditor => 35,
-            Self::OxideImport { .. } => 36,
-            Self::OxideExport { .. } => 37,
-            Self::CommandPalette => 38,
-            Self::VersionMigration => 39,
-            Self::Onboarding => 40,
-            Self::LegalNotice { .. } => 41,
-            Self::NativeUpdateReleaseNotes { .. } => 42,
-            Self::Shortcuts => 43,
-            Self::AppLockDialog => 44,
-            Self::MermaidZoom => 45,
+            Self::QuickCommandsManager => 35,
+            Self::AiTextEditor => 36,
+            Self::OxideImport { .. } => 37,
+            Self::OxideExport { .. } => 38,
+            Self::CommandPalette => 39,
+            Self::VersionMigration => 40,
+            Self::Onboarding => 41,
+            Self::LegalNotice { .. } => 42,
+            Self::NativeUpdateReleaseNotes { .. } => 43,
+            Self::Shortcuts => 44,
+            Self::AppLockDialog => 45,
+            Self::MermaidZoom => 46,
         }
     }
 
@@ -225,6 +227,7 @@ impl ActiveWindowModalOwner {
             | Self::TabRename
             | Self::TerminalCastPlayer
             | Self::TerminalCommandSpecsEditor
+            | Self::QuickCommandsManager
             | Self::AiTextEditor
             | Self::CommandPalette
             | Self::VersionMigration
@@ -251,6 +254,7 @@ impl ActiveWindowModalOwner {
                 | Self::ThemeEditor { .. }
                 | Self::SettingsSshConfigImport { .. }
                 | Self::TerminalCommandSpecsEditor
+                | Self::QuickCommandsManager
                 | Self::AiTextEditor
                 | Self::OxideImport { .. }
                 | Self::OxideExport { .. }
@@ -324,6 +328,7 @@ pub(in crate::workspace) struct ActiveWindowModalProjection {
     pub(in crate::workspace) settings_ssh_import_phase:
         Option<oxideterm_gpui_ui::motion::ExitPhase>,
     pub(in crate::workspace) terminal_command_specs_editor_open: bool,
+    pub(in crate::workspace) quick_commands_manager_open: bool,
     pub(in crate::workspace) ai_text_editor_open: bool,
     pub(in crate::workspace) oxide_import_phase: Option<oxideterm_gpui_ui::motion::ExitPhase>,
     pub(in crate::workspace) oxide_export_phase: Option<oxideterm_gpui_ui::motion::ExitPhase>,
@@ -471,6 +476,9 @@ impl ActiveWindowModalProjection {
         let command_specs_owner = self
             .terminal_command_specs_editor_open
             .then_some(ActiveWindowModalOwner::TerminalCommandSpecsEditor);
+        let quick_commands_manager_owner = self
+            .quick_commands_manager_open
+            .then_some(ActiveWindowModalOwner::QuickCommandsManager);
         let ai_text_editor_owner = self
             .ai_text_editor_open
             .then_some(ActiveWindowModalOwner::AiTextEditor);
@@ -526,6 +534,7 @@ impl ActiveWindowModalProjection {
             theme_editor_owner,
             ssh_import_owner,
             command_specs_owner,
+            quick_commands_manager_owner,
             ai_text_editor_owner,
             oxide_import_owner,
             oxide_export_owner,
@@ -679,6 +688,7 @@ impl WorkspaceApp {
             theme_editor_phase,
             settings_ssh_import_phase,
             terminal_command_specs_editor_open: self.terminal_command_specs_editor_open,
+            quick_commands_manager_open: self.terminal.read(cx).quick_commands.manager_open(),
             ai_text_editor_open: self.ai_text_editor_dialog.is_some(),
             oxide_import_phase,
             oxide_export_phase,
@@ -990,6 +1000,19 @@ impl WorkspaceApp {
             ActiveWindowModalOwner::TerminalCommandSpecsEditor => {
                 if event.keystroke.key.as_str() == "escape" {
                     self.close_terminal_command_specs_editor(cx);
+                }
+            }
+            ActiveWindowModalOwner::QuickCommandsManager => {
+                if self
+                    .terminal
+                    .read(cx)
+                    .quick_commands
+                    .focused_input()
+                    .is_some()
+                {
+                    self.handle_quick_commands_key(event, cx);
+                } else if event.keystroke.key.as_str() == "escape" {
+                    self.close_quick_commands_manager(cx);
                 }
             }
             ActiveWindowModalOwner::AiTextEditor => {

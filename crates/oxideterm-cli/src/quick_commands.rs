@@ -3,7 +3,10 @@
 
 use std::fs;
 
-use oxideterm_quick_commands::{QuickCommand, QuickCommandsSnapshot, load_snapshot, save_snapshot};
+use oxideterm_quick_commands::{
+    QuickCommand, QuickCommandAvailability, QuickCommandConfirmationPolicy, QuickCommandsSnapshot,
+    decode_snapshot_json, load_snapshot, save_snapshot,
+};
 use serde::Serialize;
 
 use crate::{
@@ -127,7 +130,19 @@ fn create(args: QuickCommandCreateArgs) -> CliResult<i32> {
         command: args.command,
         category: args.category,
         description: args.description,
-        host_pattern: args.host_pattern,
+        parameters: Vec::new(),
+        availability: QuickCommandAvailability {
+            protocols: Vec::new(),
+            host_patterns: args.host_pattern.into_iter().collect(),
+        },
+        confirmation: QuickCommandConfirmationPolicy::Inherit,
+        sort_order: snapshot
+            .commands
+            .iter()
+            .map(|command| command.sort_order)
+            .max()
+            .unwrap_or(-1)
+            .saturating_add(1),
         created_at: now,
         updated_at: now,
     };
@@ -165,7 +180,7 @@ fn edit(args: QuickCommandEditArgs) -> CliResult<i32> {
         command.description = Some(description);
     }
     if let Some(host_pattern) = args.host_pattern {
-        command.host_pattern = Some(host_pattern);
+        command.availability.host_patterns = vec![host_pattern];
     }
     command.updated_at = now_ms();
     let after = format_quick_command_identity(command);
@@ -231,7 +246,7 @@ fn import(args: QuickCommandImportArgs) -> CliResult<i32> {
             args.write.json,
         )
     })?;
-    let snapshot = serde_json::from_str::<QuickCommandsSnapshot>(&contents).map_err(|error| {
+    let snapshot = decode_snapshot_json(&contents).map_err(|error| {
         CliError::new(
             "quick_commands_import_failed",
             format!(

@@ -592,7 +592,7 @@ impl CloudSyncPreviewSelection {
                 .quick_commands_snapshot_json
                 .as_deref()
                 .and_then(|json| {
-                    serde_json::from_str::<oxideterm_quick_commands::QuickCommandsSnapshot>(json)
+                    oxideterm_quick_commands::decode_snapshot_json(json)
                         .ok()
                         .map(|snapshot| snapshot.commands.len())
                 });
@@ -1028,9 +1028,7 @@ fn preview_quick_command_ids(preview: &CloudSyncPendingPreview) -> BTreeSet<Stri
         CloudSyncPendingPreview::Structured(preview) => preview
             .quick_commands_snapshot_json
             .as_deref()
-            .and_then(|json| {
-                serde_json::from_str::<oxideterm_quick_commands::QuickCommandsSnapshot>(json).ok()
-            })
+            .and_then(|json| oxideterm_quick_commands::decode_snapshot_json(json).ok())
             .map(|snapshot| {
                 snapshot
                     .commands

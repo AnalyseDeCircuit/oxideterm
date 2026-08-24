@@ -1634,6 +1634,12 @@ impl TerminalPane {
         self.session_kind
     }
 
+    pub fn is_tmux_control_mode(&self) -> bool {
+        // Control mode changes the command target semantics while retaining the
+        // transport session kind, so callers need an explicit runtime signal.
+        self.terminal.lock().tmux_state().is_some()
+    }
+
     pub fn is_serial_transport(&self) -> bool {
         self.serial_reconnect_config.is_some()
     }

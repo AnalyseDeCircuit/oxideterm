@@ -531,12 +531,12 @@ pub fn cloud_sync_apply_field_diff_items(
     }
     if selection.import_quick_commands
         && let Some(remote_json) = preview.quick_commands_snapshot_json.as_deref()
-        && let Ok(remote) = serde_json::from_str::<QuickCommandsSnapshot>(remote_json)
+        && let Ok(remote) = oxideterm_quick_commands::decode_snapshot_json(remote_json)
     {
         let base = preview
             .base_quick_commands_snapshot_json
             .as_deref()
-            .and_then(|json| serde_json::from_str::<QuickCommandsSnapshot>(json).ok());
+            .and_then(|json| oxideterm_quick_commands::decode_snapshot_json(json).ok());
         push_quick_command_field_diffs(
             &mut items,
             &remote,
@@ -600,7 +600,7 @@ pub fn cloud_sync_upload_field_diff_items(
         let remote = remote_preview
             .quick_commands_snapshot_json
             .as_deref()
-            .and_then(|json| serde_json::from_str::<QuickCommandsSnapshot>(json).ok());
+            .and_then(|json| oxideterm_quick_commands::decode_snapshot_json(json).ok());
         push_upload_quick_command_field_diffs(&mut items, remote.as_ref(), local);
     }
     if scope.sync_serial_profiles

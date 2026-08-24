@@ -166,7 +166,7 @@ fn upload_diff_items_show_scope_exclusions_that_remove_remote_sections() {
 fn apply_field_diff_items_show_changed_quick_command_fields() {
     let preview = structured_preview(
         QuickCommandsSnapshot {
-            version: 1,
+            version: oxideterm_quick_commands::QUICK_COMMANDS_SCHEMA_VERSION,
             categories: Vec::new(),
             commands: vec![quick_command("cmd-1", "Deploy", "deploy --prod")],
             updated_at: 2,
@@ -180,7 +180,7 @@ fn apply_field_diff_items_show_changed_quick_command_fields() {
     };
     let local = CloudSyncLocalFieldDiffSnapshot {
         quick_commands: Some(QuickCommandsSnapshot {
-            version: 1,
+            version: oxideterm_quick_commands::QUICK_COMMANDS_SCHEMA_VERSION,
             categories: Vec::new(),
             commands: vec![quick_command("cmd-1", "Deploy", "deploy --staging")],
             updated_at: 1,
@@ -208,13 +208,13 @@ fn apply_field_diff_items_show_effective_field_merge_result() {
     remote_command.command = "deploy --prod".to_string();
     let preview = structured_preview(
         QuickCommandsSnapshot {
-            version: 1,
+            version: oxideterm_quick_commands::QUICK_COMMANDS_SCHEMA_VERSION,
             categories: Vec::new(),
             commands: vec![remote_command],
             updated_at: 2,
         },
         Some(QuickCommandsSnapshot {
-            version: 1,
+            version: oxideterm_quick_commands::QUICK_COMMANDS_SCHEMA_VERSION,
             categories: Vec::new(),
             commands: vec![base_command],
             updated_at: 1,
@@ -227,7 +227,7 @@ fn apply_field_diff_items_show_effective_field_merge_result() {
     };
     let local = CloudSyncLocalFieldDiffSnapshot {
         quick_commands: Some(QuickCommandsSnapshot {
-            version: 1,
+            version: oxideterm_quick_commands::QUICK_COMMANDS_SCHEMA_VERSION,
             categories: Vec::new(),
             commands: vec![local_command],
             updated_at: 3,
@@ -256,7 +256,7 @@ fn apply_field_diff_items_show_effective_field_merge_result() {
 fn upload_field_diff_items_show_local_after_remote_before() {
     let preview = structured_preview(
         QuickCommandsSnapshot {
-            version: 1,
+            version: oxideterm_quick_commands::QUICK_COMMANDS_SCHEMA_VERSION,
             categories: Vec::new(),
             commands: vec![quick_command("cmd-1", "Deploy", "deploy --prod")],
             updated_at: 2,
@@ -266,7 +266,7 @@ fn upload_field_diff_items_show_local_after_remote_before() {
 
     let local = CloudSyncLocalFieldDiffSnapshot {
         quick_commands: Some(QuickCommandsSnapshot {
-            version: 1,
+            version: oxideterm_quick_commands::QUICK_COMMANDS_SCHEMA_VERSION,
             categories: Vec::new(),
             commands: vec![quick_command("cmd-1", "Deploy", "deploy --staging")],
             updated_at: 3,
@@ -347,7 +347,10 @@ fn quick_command(id: &str, name: &str, command: &str) -> QuickCommand {
         command: command.to_string(),
         category: "default".to_string(),
         description: None,
-        host_pattern: None,
+        parameters: Vec::new(),
+        availability: oxideterm_quick_commands::QuickCommandAvailability::default(),
+        confirmation: oxideterm_quick_commands::QuickCommandConfirmationPolicy::Inherit,
+        sort_order: 0,
         created_at: 1,
         updated_at: 1,
     }

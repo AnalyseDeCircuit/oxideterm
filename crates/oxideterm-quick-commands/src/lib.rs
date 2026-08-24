@@ -9,23 +9,34 @@
 mod editing;
 pub mod model;
 mod risk;
+mod snapshot;
 pub mod store;
+mod template;
+mod v1;
 
 pub use editing::{
     QuickCommandCategoryDraft, QuickCommandDraft, delete_quick_command,
     delete_quick_command_category, ensure_active_quick_command_category,
-    match_quick_command_host_pattern, quick_command_category_draft_can_save,
+    match_quick_command_host_pattern, match_quick_command_host_patterns,
+    quick_command_available_for_target, quick_command_category_draft_can_save,
     quick_command_draft_can_save, upsert_quick_command, upsert_quick_command_category,
-    visible_quick_commands,
+    visible_quick_commands, visible_quick_commands_for_management,
 };
 pub use model::{
-    QUICK_COMMANDS_SCHEMA_VERSION, QuickCommand, QuickCommandCategory, QuickCommandIcon,
-    QuickCommandImportResult, QuickCommandImportStrategy, QuickCommandsSnapshot,
+    QUICK_COMMANDS_SCHEMA_VERSION, QuickCommand, QuickCommandAvailability, QuickCommandCategory,
+    QuickCommandConfirmationPolicy, QuickCommandIcon, QuickCommandImportResult,
+    QuickCommandImportStrategy, QuickCommandParameter, QuickCommandParameterKind,
+    QuickCommandTargetProtocol, QuickCommandsSnapshot,
 };
 pub use risk::{QuickCommandRisk, classify_command_risk};
+pub use snapshot::{decode_snapshot_json, encode_snapshot_json};
 pub use store::{
     MAX_CATEGORIES, QuickCommandsCheckpoint, apply_snapshot_json, capture_checkpoint,
     default_quick_command_categories, default_quick_commands, export_snapshot_json,
     is_builtin_category_id, load_snapshot, new_quick_category_id, new_quick_command_id, now_ms,
     quick_commands_path, restore_checkpoint, save_snapshot,
+};
+pub use template::{
+    PreparedQuickCommand, PreparedQuickCommandTarget, QuickCommandContextValues,
+    QuickCommandTargetContext, QuickCommandTemplateError, prepare_quick_command,
 };

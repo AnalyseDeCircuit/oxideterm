@@ -478,7 +478,7 @@ fn native_plugin_quick_command_metadata(
             "name": command.name,
             "category": command.category,
             "hasDescription": command.description.as_ref().is_some_and(|value| !value.is_empty()),
-            "hostRestricted": command.host_pattern.as_ref().is_some_and(|value| !value.is_empty()),
+            "hostRestricted": !command.availability.host_patterns.is_empty(),
         })).collect::<Vec<_>>(),
     })
 }
@@ -627,6 +627,7 @@ mod tests {
             id: "ops".to_string(),
             name: "Operations".to_string(),
             icon: QuickCommandIcon::Server,
+            sort_order: 0,
         }];
         let commands = vec![QuickCommand {
             id: "restart".to_string(),
@@ -634,7 +635,13 @@ mod tests {
             command: "private executable command".to_string(),
             category: "ops".to_string(),
             description: Some("Restarts the service".to_string()),
-            host_pattern: Some("private-host-*".to_string()),
+            parameters: Vec::new(),
+            availability: oxideterm_quick_commands::QuickCommandAvailability {
+                protocols: Vec::new(),
+                host_patterns: vec!["private-host-*".to_string()],
+            },
+            confirmation: oxideterm_quick_commands::QuickCommandConfirmationPolicy::Inherit,
+            sort_order: 0,
             created_at: 1,
             updated_at: 2,
         }];

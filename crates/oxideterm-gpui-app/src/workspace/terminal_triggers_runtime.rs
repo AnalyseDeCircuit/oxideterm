@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::Path, process::Stdio, time::Duration};
 
 use gpui::{AnyElement, App, Context, EntityId, Task, Timer, WeakEntity, div, prelude::*};
 use oxideterm_gpui_terminal::TerminalPane;
-use oxideterm_quick_commands::{QuickCommandRisk, classify_command_risk};
+use oxideterm_quick_commands::{QuickCommandRisk, prepare_quick_command};
 use oxideterm_terminal::TerminalSessionKind;
 use oxideterm_terminal_triggers::{
     ExpandedLocalProcessSpec, ExpandedTriggerAction, SavedConnectionKind, SavedConnectionRef,
@@ -387,7 +387,7 @@ impl WorkspaceApp {
         matched: &TriggerMatched,
         cx: &mut Context<Self>,
     ) {
-        let Some(quick_command) = self
+        let Some(mut quick_command) = self
             .terminal
             .read(cx)
             .quick_commands
@@ -399,11 +399,34 @@ impl WorkspaceApp {
         else {
             return;
         };
-        let Ok(command) = expand_template(&quick_command.command, matched) else {
+        let Ok(command_template) = expand_template(&quick_command.command, matched) else {
             return;
         };
-        let risk = classify_command_risk(&command);
-        let requires_confirmation = risk.is_some()
+        quick_command.command = command_template.to_string();
+        let parameter_values = quick_command
+            .parameters
+            .iter()
+            .filter_map(|parameter| {
+                parameter
+                    .default_value
+                    .clone()
+                    .map(|value| (parameter.name.clone(), zeroize::Zeroizing::new(value)))
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let Some(context) = self.quick_command_context_for_pane(target.pane_id, cx) else {
+            return;
+        };
+        let Ok(prepared) = prepare_quick_command(&quick_command, &[context], &parameter_values)
+        else {
+            return;
+        };
+        let template_requires_confirmation = prepared.confirmation_required;
+        let Some(prepared_target) = prepared.targets.into_iter().next() else {
+            return;
+        };
+        let command = prepared_target.command;
+        let risk = prepared_target.risk;
+        let requires_confirmation = template_requires_confirmation
             || self
                 .settings_store
                 .settings()

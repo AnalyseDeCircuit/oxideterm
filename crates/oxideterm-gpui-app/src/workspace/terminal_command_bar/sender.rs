@@ -1178,11 +1178,15 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let target_fields = self.terminal_command_context(cx).target_fields();
+        let protocol = self
+            .active_pane_id(cx)
+            .and_then(|pane_id| self.quick_command_context_for_pane(pane_id, cx))
+            .map(|context| context.protocol);
         let (categories, commands) = self
             .terminal
             .read(cx)
             .quick_commands
-            .quick_bar_snapshot(&target_fields);
+            .quick_bar_snapshot(&target_fields, protocol);
         if commands.is_empty() {
             return div().into_any_element();
         }
@@ -1219,7 +1223,7 @@ impl WorkspaceApp {
                     .child(category.name),
             );
             for command in category_commands {
-                let command_text = command.command;
+                let command_for_run = command.clone();
                 content_row = content_row.child(
                     action_chip(
                         &self.tokens,
@@ -1234,7 +1238,7 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, window, cx| {
-                            this.run_quick_command(&command_text, window, cx);
+                            this.run_quick_command_model(&command_for_run, window, cx);
                             cx.stop_propagation();
                         }),
                     ),
