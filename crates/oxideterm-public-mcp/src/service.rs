@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use base64::Engine;
 use http::{header::AUTHORIZATION, request::Parts};
@@ -327,6 +330,27 @@ struct QuickCommandsSaveMetadata {
     expected_revision: u64,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[expect(
+    dead_code,
+    reason = "this type exists only to generate the public tool schema"
+)]
+struct QuickCommandsRunSchema {
+    quickcommand_ref: crate::QuickCommandRef,
+    node_ref: NodeRef,
+    expected_revision: u64,
+    #[serde(default)]
+    arguments: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QuickCommandsRunMetadata {
+    quickcommand_ref: crate::QuickCommandRef,
+    node_ref: NodeRef,
+    expected_revision: u64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct CatalogEntry {
     name: String,
@@ -437,6 +461,7 @@ impl PublicMcpService {
                 expected_approval_mode,
                 client_ref.clone(),
                 call,
+                authorization,
             )
             .await;
         match response {
@@ -1178,15 +1203,11 @@ impl ServerHandler for PublicMcpService {
                 }
                 Err(error) => *error,
             },
-            "quickcommands_run" => match parse_arguments::<QuickCommandsRunArgs>(arguments) {
-                Ok(args) if args.arguments.is_empty() => {
+            "quickcommands_run" => match parse_quick_commands_run(arguments) {
+                Ok(args) => {
                     self.execute_call(&client, PublicToolCall::QuickCommandsRun(args))
                         .await
                 }
-                Ok(_) => tool_error(
-                    "unsupported_arguments",
-                    "Saved Quick Commands do not define parameters in the current format",
-                ),
                 Err(error) => *error,
             },
             "addons_list" => match parse_arguments::<AddonsListArgs>(arguments) {
@@ -1872,7 +1893,7 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             false,
             true,
         ),
-        define_tool::<QuickCommandsRunArgs>(
+        define_tool::<QuickCommandsRunSchema>(
             "quickcommands_run",
             "Execute one unchanged saved Quick Command on an acquired SSH node.",
             ToolGroup::QuickCommandExecute,
@@ -2377,6 +2398,37 @@ fn parse_quick_commands_save(
     })
 }
 
+fn parse_quick_commands_run(
+    mut arguments: JsonObject,
+) -> Result<QuickCommandsRunArgs, Box<CallToolResult>> {
+    let parameter_values = match arguments.remove("arguments") {
+        None | Some(Value::Null) => BTreeMap::new(),
+        Some(Value::Object(values)) => values
+            .into_iter()
+            .map(|(name, value)| match value {
+                Value::String(value) => Ok((name, Zeroizing::new(value))),
+                _ => Err(Box::new(tool_error(
+                    "invalid_arguments",
+                    "Quick Command argument values must be strings",
+                ))),
+            })
+            .collect::<Result<_, _>>()?,
+        Some(_) => {
+            return Err(Box::new(tool_error(
+                "invalid_arguments",
+                "Quick Command arguments must be an object",
+            )));
+        }
+    };
+    let metadata = parse_arguments::<QuickCommandsRunMetadata>(arguments)?;
+    Ok(QuickCommandsRunArgs {
+        quickcommand_ref: metadata.quickcommand_ref,
+        node_ref: metadata.node_ref,
+        expected_revision: metadata.expected_revision,
+        arguments: parameter_values,
+    })
+}
+
 fn managed_addon_install_args_are_valid(args: &AddonsInstallArgs) -> bool {
     let expected_identity = args.expected_identity.trim();
     let checksum = args
@@ -2580,5 +2632,26 @@ mod tests {
                 "tagged enum alternatives must be preserved"
             );
         }
+    }
+
+    #[test]
+    fn quick_command_run_parses_and_redacts_parameter_values() {
+        let secret_value = "sensitive-token";
+        let quickcommand_ref = crate::QuickCommandRef::new();
+        let node_ref = NodeRef::new();
+        let arguments = json!({
+            "quickcommand_ref": quickcommand_ref,
+            "node_ref": node_ref,
+            "expected_revision": 7,
+            "arguments": { "token": secret_value }
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
+
+        let parsed = parse_quick_commands_run(arguments).unwrap();
+
+        assert_eq!(parsed.arguments["token"].as_str(), secret_value);
+        assert!(!format!("{parsed:?}").contains(secret_value));
     }
 }

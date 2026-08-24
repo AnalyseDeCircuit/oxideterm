@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
 use gpui::Context;
 use oxideterm_public_mcp::{
@@ -303,16 +303,6 @@ impl WorkspaceApp {
             ));
             return;
         }
-        let parameter_values = command
-            .parameters
-            .iter()
-            .filter_map(|parameter| {
-                parameter
-                    .default_value
-                    .clone()
-                    .map(|value| (parameter.name.clone(), Zeroizing::new(value)))
-            })
-            .collect::<BTreeMap<_, _>>();
         let saved_connection = metadata
             .connection_id
             .as_deref()
@@ -335,22 +325,30 @@ impl WorkspaceApp {
                 ..QuickCommandContextValues::default()
             },
         };
-        let Ok(prepared) = prepare_quick_command(&command, &[context], &parameter_values) else {
+        // The request retains zeroizing inputs only until expansion creates the owned command.
+        let Ok(prepared) = prepare_quick_command(&command, &[context], &args.arguments) else {
             request.finish(ToolEnvelope::failed(
                 "The Quick Command requires interactive parameters or unavailable context",
             ));
             return;
         };
-        let Some(prepared) = prepared.targets.into_iter().next() else {
+        let confirmation_required = prepared.confirmation_required;
+        let Some(prepared_target) = prepared.targets.into_iter().next() else {
             request.finish(ToolEnvelope::failed(
                 "The Quick Command is not available for this node",
             ));
             return;
         };
+        if confirmation_required && !request.was_app_approved() {
+            request.finish(ToolEnvelope::failed(
+                "This Quick Command requires in-app approval before execution",
+            ));
+            return;
+        }
         self.start_public_mcp_node_command(
             request,
             node_ref,
-            prepared.command,
+            prepared_target.command,
             ToolGroup::QuickCommandExecute,
         );
     }

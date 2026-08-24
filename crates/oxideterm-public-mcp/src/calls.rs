@@ -1236,13 +1236,25 @@ pub struct QuickCommandsRemoveArgs {
     pub expected_revision: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Clone)]
 pub struct QuickCommandsRunArgs {
     pub quickcommand_ref: QuickCommandRef,
     pub node_ref: NodeRef,
     pub expected_revision: u64,
-    #[serde(default)]
-    pub arguments: BTreeMap<String, String>,
+    pub arguments: BTreeMap<String, Zeroizing<String>>,
+}
+
+impl fmt::Debug for QuickCommandsRunArgs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("QuickCommandsRunArgs")
+            .field("quickcommand_ref", &self.quickcommand_ref)
+            .field("node_ref", &self.node_ref)
+            .field("expected_revision", &self.expected_revision)
+            // Values may contain credentials or other shell-sensitive material.
+            .field("arguments", &self.arguments.keys().collect::<Vec<_>>())
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
