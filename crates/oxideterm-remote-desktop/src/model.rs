@@ -111,11 +111,59 @@ pub struct NegotiatedCapabilities {
     #[serde(default)]
     pub vendor_files: NegotiatedCapabilityStatus,
     #[serde(default)]
+    pub vendor_file_list: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub vendor_file_download: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub vendor_file_upload: NegotiatedCapabilityStatus,
+    #[serde(default)]
     pub extended_key_events: NegotiatedCapabilityStatus,
     #[serde(default)]
     pub extended_mouse_buttons: NegotiatedCapabilityStatus,
     #[serde(default)]
     pub lock_key_sync: NegotiatedCapabilityStatus,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteDesktopFileConflictPolicy {
+    Overwrite,
+    Skip,
+    Rename,
+}
+
+impl Default for RemoteDesktopFileConflictPolicy {
+    fn default() -> Self {
+        // Keeping both is the only default that cannot destroy or silently
+        // omit a user-selected local file.
+        Self::Rename
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteDesktopRemoteFileKind {
+    File,
+    Directory,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopRemoteFileEntry {
+    pub name: String,
+    pub path: String,
+    pub kind: RemoteDesktopRemoteFileKind,
+    pub size: Option<u64>,
+    pub modified_seconds: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteDesktopFileTransferFailureKind {
+    Remote,
+    Local,
+    Protocol,
+    Canceled,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -160,10 +208,27 @@ pub struct RemoteDesktopDisplayOptions {
     pub use_all_monitors: bool,
 }
 
-/// RDP-specific compatibility controls persisted with a connection profile.
+/// RDP network and visual quality policy persisted with a connection profile.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteDesktopRdpNetworkProfile {
+    /// Lets the RDP peer negotiate the effective network characteristics.
+    #[default]
+    Automatic,
+    /// Preserves all supported visual effects on a local network.
+    Lan,
+    /// Retains text quality while reducing expensive desktop effects.
+    Broadband,
+    /// Disables nonessential visual effects for constrained links.
+    LowBandwidth,
+}
+
+/// RDP-specific controls persisted with a connection profile.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteDesktopRdpOptions {
+    #[serde(default)]
+    pub network_profile: RemoteDesktopRdpNetworkProfile,
     /// Disables the EGFX dynamic channel so the server falls back to bitmap updates.
     #[serde(default)]
     pub disable_graphics_pipeline: bool,

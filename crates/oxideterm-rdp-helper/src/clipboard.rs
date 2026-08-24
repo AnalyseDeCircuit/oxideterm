@@ -36,9 +36,11 @@ struct RemoteClipboardDownload {
     transfer_id: String,
     directory: PathBuf,
     descriptors: Vec<FileDescriptor>,
+    file_indices: Vec<usize>,
     clip_data_id: Option<u32>,
-    file_index: usize,
+    file_cursor: usize,
     completed_paths: Vec<PathBuf>,
+    completed_bytes: u64,
     phase: RemoteClipboardDownloadPhase,
     next_stream_id: u32,
 }
@@ -47,7 +49,9 @@ struct RemoteClipboardDownload {
 struct LocalClipboardFile {
     path: PathBuf,
     name: String,
+    relative_path: Option<String>,
     size: u64,
+    directory: bool,
 }
 
 impl fmt::Debug for LocalClipboardFile {
@@ -56,6 +60,7 @@ impl fmt::Debug for LocalClipboardFile {
             .debug_struct("LocalClipboardFile")
             .field("name", &"<redacted>")
             .field("size", &self.size)
+            .field("directory", &self.directory)
             .finish()
     }
 }
@@ -149,56 +154,23 @@ impl ClientClipboardBackend {
         if !self.options.files {
             return Err("RDP clipboard file redirection is disabled.".to_string());
         }
-        if paths.is_empty() || paths.len() > RDP_CLIPBOARD_MAX_FILE_COUNT {
-            return Err("RDP clipboard file count is outside the supported range.".to_string());
-        }
-
-        let mut seen = HashSet::new();
-        let mut total_size = 0_u64;
-        let mut files = Vec::with_capacity(paths.len());
-        for (index, path) in paths.into_iter().enumerate() {
-            let original_metadata = std::fs::symlink_metadata(&path)
-                .map_err(|_| format!("RDP clipboard file {index} is unavailable."))?;
-            if original_metadata.file_type().is_symlink() || !original_metadata.is_file() {
-                return Err(format!(
-                    "RDP clipboard item {index} must be a regular, non-symbolic-link file."
-                ));
-            }
-            let canonical_path = std::fs::canonicalize(&path)
-                .map_err(|_| format!("RDP clipboard file {index} could not be resolved."))?;
-            if !seen.insert(canonical_path.clone()) {
-                return Err("RDP clipboard contains duplicate files.".to_string());
-            }
-            let metadata = std::fs::metadata(&canonical_path)
-                .map_err(|_| format!("RDP clipboard file {index} is unavailable."))?;
-            if metadata.len() > RDP_CLIPBOARD_MAX_FILE_SIZE {
-                return Err(format!("RDP clipboard file {index} is too large."));
-            }
-            total_size = total_size
-                .checked_add(metadata.len())
-                .ok_or_else(|| "RDP clipboard transfer size overflowed.".to_string())?;
-            if total_size > RDP_CLIPBOARD_MAX_TRANSFER_SIZE {
-                return Err("RDP clipboard transfer is too large.".to_string());
-            }
-            let name = canonical_path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .filter(|name| !name.is_empty() && name.chars().count() <= 259)
-                .ok_or_else(|| format!("RDP clipboard file {index} has an unsupported file name."))?
-                .to_string();
-            files.push(LocalClipboardFile {
-                path: canonical_path,
-                name,
-                size: metadata.len(),
-            });
-        }
+        let files = collect_local_clipboard_files(paths)?;
 
         let descriptors = files
             .iter()
             .map(|file| {
-                FileDescriptor::new(file.name.clone())
-                    .with_attributes(ClipboardFileAttributes::NORMAL)
-                    .with_file_size(file.size)
+                let attributes = if file.directory {
+                    ClipboardFileAttributes::DIRECTORY
+                } else {
+                    ClipboardFileAttributes::NORMAL
+                };
+                let mut descriptor = FileDescriptor::new(file.name.clone())
+                    .with_attributes(attributes)
+                    .with_file_size(file.size);
+                if let Some(relative_path) = file.relative_path.as_ref() {
+                    descriptor = descriptor.with_relative_path(relative_path.clone());
+                }
+                descriptor
             })
             .collect();
         self.local_text = None;
@@ -401,7 +373,8 @@ impl ClientClipboardBackend {
             return FileContentsResponse::new_size_response(request.stream_id, file.size)
                 .into_owned();
         }
-        if request.flags != FileContentsFlags::RANGE
+        if file.directory
+            || request.flags != FileContentsFlags::RANGE
             || request.requested_size > RDP_CLIPBOARD_MAX_REQUEST_BYTES
             || request.position > file.size
         {
@@ -436,9 +409,14 @@ impl ClientClipboardBackend {
             clip_data_id,
         );
         match result {
-            Ok((download, request)) => {
+            Ok(RemoteClipboardDownloadStart::Request(download, request)) => {
                 self.remote_download = Some(download);
                 self.send_clipboard_message(ClipboardMessage::SendFileContentsRequest(request));
+            }
+            Ok(RemoteClipboardDownloadStart::Complete(paths)) => {
+                let _ = self.output_tx.send_control(ClientRdpOutput::Event(
+                    RemoteDesktopHelperEvent::ClipboardFilesReady { transfer_id, paths },
+                ));
             }
             Err(message) => self.report_file_transfer_failure(transfer_id, message),
         }
@@ -484,8 +462,118 @@ impl ClientClipboardBackend {
     }
 }
 
+fn collect_local_clipboard_files(paths: Vec<PathBuf>) -> Result<Vec<LocalClipboardFile>, String> {
+    // Directory descriptors and regular files share one ordered list because
+    // subsequent CLIPRDR content requests address that original list by index.
+    if paths.is_empty() || paths.len() > RDP_CLIPBOARD_MAX_FILE_COUNT {
+        return Err("RDP clipboard root item count is outside the supported range.".to_string());
+    }
+
+    let mut seen_roots = HashSet::new();
+    let mut seen_wire_paths = HashSet::new();
+    let mut total_size = 0_u64;
+    let mut files = Vec::new();
+    let mut pending = Vec::new();
+    for (index, path) in paths.into_iter().enumerate() {
+        let metadata = std::fs::symlink_metadata(&path)
+            .map_err(|_| format!("RDP clipboard item {index} is unavailable."))?;
+        if metadata.file_type().is_symlink() || (!metadata.is_file() && !metadata.is_dir()) {
+            return Err(format!(
+                "RDP clipboard item {index} must be a regular file or directory without symbolic links."
+            ));
+        }
+        let canonical_path = std::fs::canonicalize(&path)
+            .map_err(|_| format!("RDP clipboard item {index} could not be resolved."))?;
+        if !seen_roots.insert(canonical_path.clone()) {
+            return Err("RDP clipboard contains duplicate root items.".to_string());
+        }
+        let name = local_clipboard_file_name(&canonical_path, index)?;
+        pending.push((canonical_path, name, None));
+    }
+
+    while let Some((path, name, relative_path)) = pending.pop() {
+        if files.len() >= RDP_CLIPBOARD_MAX_FILE_COUNT {
+            return Err("RDP clipboard item count exceeds the supported limit.".to_string());
+        }
+        let metadata = std::fs::symlink_metadata(&path)
+            .map_err(|_| "RDP clipboard item became unavailable.".to_string())?;
+        if metadata.file_type().is_symlink() || (!metadata.is_file() && !metadata.is_dir()) {
+            return Err(
+                "RDP clipboard directory tree contains an unsupported symbolic link or item."
+                    .to_string(),
+            );
+        }
+        let wire_path = clipboard_wire_path(relative_path.as_deref(), &name);
+        if wire_path.encode_utf16().count() > 259
+            || !seen_wire_paths.insert(wire_path.to_lowercase())
+        {
+            return Err(
+                "RDP clipboard directory tree contains a duplicate or overlong path.".to_string(),
+            );
+        }
+        let directory = metadata.is_dir();
+        let size = if directory { 0 } else { metadata.len() };
+        if size > RDP_CLIPBOARD_MAX_FILE_SIZE {
+            return Err("RDP clipboard file is too large.".to_string());
+        }
+        total_size = total_size
+            .checked_add(size)
+            .filter(|total| *total <= RDP_CLIPBOARD_MAX_TRANSFER_SIZE)
+            .ok_or_else(|| "RDP clipboard transfer is too large.".to_string())?;
+        files.push(LocalClipboardFile {
+            path: path.clone(),
+            name: name.clone(),
+            relative_path: relative_path.clone(),
+            size,
+            directory,
+        });
+
+        if directory {
+            let mut children = std::fs::read_dir(&path)
+                .map_err(|_| "RDP clipboard directory could not be read.".to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| "RDP clipboard directory entry could not be read.".to_string())?;
+            children.sort_by_key(std::fs::DirEntry::file_name);
+            for child in children.into_iter().rev() {
+                let child_path = child.path();
+                let child_name = child
+                    .file_name()
+                    .to_str()
+                    .filter(|name| remote_clipboard_file_name_is_safe(name))
+                    .ok_or_else(|| {
+                        "RDP clipboard directory contains an unsupported file name.".to_string()
+                    })?
+                    .to_string();
+                pending.push((child_path, child_name, Some(wire_path.clone())));
+            }
+        }
+    }
+
+    Ok(files)
+}
+
+fn local_clipboard_file_name(path: &std::path::Path, index: usize) -> Result<String, String> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| remote_clipboard_file_name_is_safe(name))
+        .map(str::to_string)
+        .ok_or_else(|| format!("RDP clipboard item {index} has an unsupported file name."))
+}
+
+fn clipboard_wire_path(relative_path: Option<&str>, name: &str) -> String {
+    match relative_path {
+        Some(relative_path) if !relative_path.is_empty() => format!("{relative_path}\\{name}"),
+        _ => name.to_string(),
+    }
+}
+
 enum RemoteClipboardDownloadAdvance {
     Request(FileContentsRequest),
+    Complete(Vec<PathBuf>),
+}
+
+enum RemoteClipboardDownloadStart {
+    Request(RemoteClipboardDownload, FileContentsRequest),
     Complete(Vec<PathBuf>),
 }
 
@@ -528,40 +616,64 @@ fn prepare_remote_clipboard_download(
     transfer_id: String,
     files: &[FileDescriptor],
     clip_data_id: Option<u32>,
-) -> Result<(RemoteClipboardDownload, FileContentsRequest), String> {
+) -> Result<RemoteClipboardDownloadStart, String> {
+    // Validate the complete remote tree before creating any file so relative
+    // paths can never escape or reinterpret an earlier regular-file entry.
     if files.is_empty() || files.len() > RDP_CLIPBOARD_MAX_FILE_COUNT {
         return Err("Remote clipboard file count is outside the supported range.".to_string());
     }
     let mut total_size = 0_u64;
-    let mut names = HashSet::new();
+    let mut wire_paths = HashSet::new();
+    let mut file_paths = HashSet::new();
+    let mut top_level_names = HashSet::new();
+    let mut top_level_paths = Vec::new();
     let mut descriptors = Vec::with_capacity(files.len());
+    let mut descriptor_components = Vec::with_capacity(files.len());
+    let mut file_indices = Vec::new();
     for (index, descriptor) in files.iter().enumerate() {
-        if descriptor.relative_path.is_some()
-            || !remote_clipboard_file_name_is_safe(&descriptor.name)
-            || !names.insert(descriptor.name.to_lowercase())
-        {
-            return Err(format!(
-                "Remote clipboard file {index} has an unsupported file name."
-            ));
+        let components = remote_clipboard_descriptor_components(descriptor).ok_or_else(|| {
+            format!("Remote clipboard item {index} has an unsupported relative path.")
+        })?;
+        let normalized_path = components.join("\\").to_lowercase();
+        if !wire_paths.insert(normalized_path.clone()) {
+            return Err("Remote clipboard contains duplicate paths.".to_string());
         }
-        if descriptor
+        let directory = descriptor
             .attributes
-            .is_some_and(|attributes| attributes.contains(ClipboardFileAttributes::DIRECTORY))
-        {
-            return Err("Remote clipboard directories are not supported yet.".to_string());
+            .is_some_and(|attributes| attributes.contains(ClipboardFileAttributes::DIRECTORY));
+        if !directory {
+            file_paths.insert(normalized_path);
         }
         if let Some(size) = descriptor.file_size {
-            if size > RDP_CLIPBOARD_MAX_FILE_SIZE {
+            if !directory && size > RDP_CLIPBOARD_MAX_FILE_SIZE {
                 return Err(format!("Remote clipboard file {index} is too large."));
             }
-            total_size = total_size
-                .checked_add(size)
-                .ok_or_else(|| "Remote clipboard transfer size overflowed.".to_string())?;
-            if total_size > RDP_CLIPBOARD_MAX_TRANSFER_SIZE {
-                return Err("Remote clipboard transfer is too large.".to_string());
+            if !directory {
+                total_size = total_size
+                    .checked_add(size)
+                    .filter(|total| *total <= RDP_CLIPBOARD_MAX_TRANSFER_SIZE)
+                    .ok_or_else(|| "Remote clipboard transfer is too large.".to_string())?;
             }
         }
+        if !directory {
+            file_indices.push(index);
+        }
+        if top_level_names.insert(components[0].to_lowercase()) {
+            top_level_paths.push(components[0].clone());
+        }
         descriptors.push(descriptor.clone());
+        descriptor_components.push(components);
+    }
+
+    for components in &descriptor_components {
+        for ancestor_length in 1..components.len() {
+            let ancestor = components[..ancestor_length].join("\\").to_lowercase();
+            if file_paths.contains(&ancestor) {
+                return Err(
+                    "Remote clipboard path places an item below a regular file.".to_string()
+                );
+            }
+        }
     }
 
     let directory = session_directory.join(&transfer_id);
@@ -573,21 +685,71 @@ fn prepare_remote_clipboard_download(
         std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))
             .map_err(|_| "Remote clipboard staging permissions could not be set.".to_string())?;
     }
+
+    for (descriptor, components) in descriptors.iter().zip(&descriptor_components) {
+        let path = components
+            .iter()
+            .fold(directory.clone(), |path, component| path.join(component));
+        let is_directory = descriptor
+            .attributes
+            .is_some_and(|attributes| attributes.contains(ClipboardFileAttributes::DIRECTORY));
+        if is_directory {
+            std::fs::create_dir_all(&path)
+                .map_err(|_| "Remote clipboard directory could not be created.".to_string())?;
+        } else if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|_| {
+                "Remote clipboard parent directory could not be created.".to_string()
+            })?;
+        }
+    }
+    let completed_paths = top_level_paths
+        .into_iter()
+        .map(|name| directory.join(name))
+        .collect::<Vec<_>>();
+    if file_indices.is_empty() {
+        return Ok(RemoteClipboardDownloadStart::Complete(completed_paths));
+    }
+
     let stream_id = 1;
-    let request = remote_clipboard_size_request(0, stream_id, clip_data_id);
-    Ok((
+    let request = remote_clipboard_size_request(file_indices[0], stream_id, clip_data_id);
+    Ok(RemoteClipboardDownloadStart::Request(
         RemoteClipboardDownload {
             transfer_id,
             directory,
             descriptors,
+            file_indices,
             clip_data_id,
-            file_index: 0,
-            completed_paths: Vec::new(),
+            file_cursor: 0,
+            completed_paths,
+            completed_bytes: 0,
             phase: RemoteClipboardDownloadPhase::Size { stream_id },
             next_stream_id: stream_id + 1,
         },
         request,
     ))
+}
+
+fn remote_clipboard_descriptor_components(descriptor: &FileDescriptor) -> Option<Vec<String>> {
+    let mut components = Vec::new();
+    if let Some(relative_path) = descriptor.relative_path.as_deref() {
+        if relative_path.is_empty()
+            || relative_path.starts_with(['/', '\\'])
+            || relative_path.encode_utf16().count() > 259
+        {
+            return None;
+        }
+        for component in relative_path.split(['/', '\\']) {
+            if !remote_clipboard_file_name_is_safe(component) {
+                return None;
+            }
+            components.push(component.to_string());
+        }
+    }
+    if !remote_clipboard_file_name_is_safe(&descriptor.name) {
+        return None;
+    }
+    components.push(descriptor.name.clone());
+    (components.join("\\").encode_utf16().count() <= 259).then_some(components)
 }
 
 fn advance_remote_clipboard_download(
@@ -605,7 +767,8 @@ fn advance_remote_clipboard_download(
             let size = response.data_as_size().map_err(|_| {
                 "The RDP server returned an invalid clipboard file size.".to_string()
             })?;
-            let descriptor = &download.descriptors[download.file_index];
+            let descriptor_index = download.file_indices[download.file_cursor];
+            let descriptor = &download.descriptors[descriptor_index];
             if size > RDP_CLIPBOARD_MAX_FILE_SIZE
                 || descriptor
                     .file_size
@@ -615,15 +778,9 @@ fn advance_remote_clipboard_download(
                     "The RDP server returned an unexpected clipboard file size.".to_string()
                 );
             }
-            let completed_total = download
-                .completed_paths
-                .iter()
-                .try_fold(0_u64, |total, path| {
-                    std::fs::metadata(path).map(|metadata| total.saturating_add(metadata.len()))
-                });
-            if completed_total
-                .ok()
-                .and_then(|total| total.checked_add(size))
+            if download
+                .completed_bytes
+                .checked_add(size)
                 .is_none_or(|total| total > RDP_CLIPBOARD_MAX_TRANSFER_SIZE)
             {
                 return Err("Remote clipboard transfer is too large.".to_string());
@@ -635,13 +792,13 @@ fn advance_remote_clipboard_download(
                 .open(&part_path)
                 .map_err(|_| "Remote clipboard staging file could not be created.".to_string())?;
             if size == 0 {
-                return finish_remote_clipboard_file(download);
+                return finish_remote_clipboard_file(download, 0);
             }
             let requested_size =
                 u32::try_from(size.min(u64::from(RDP_CLIPBOARD_DOWNLOAD_CHUNK_BYTES)))
                     .unwrap_or(RDP_CLIPBOARD_DOWNLOAD_CHUNK_BYTES);
             let request = remote_clipboard_range_request(
-                download.file_index,
+                descriptor_index,
                 download.next_stream_id,
                 0,
                 requested_size,
@@ -681,14 +838,14 @@ fn advance_remote_clipboard_download(
                 .and_then(|mut file| file.write_all(response.data()))
                 .map_err(|_| "Remote clipboard file could not be written.".to_string())?;
             if next_position == file_size {
-                return finish_remote_clipboard_file(download);
+                return finish_remote_clipboard_file(download, file_size);
             }
             let remaining = file_size - next_position;
             let requested_size =
                 u32::try_from(remaining.min(u64::from(RDP_CLIPBOARD_DOWNLOAD_CHUNK_BYTES)))
                     .unwrap_or(RDP_CLIPBOARD_DOWNLOAD_CHUNK_BYTES);
             let request = remote_clipboard_range_request(
-                download.file_index,
+                download.file_indices[download.file_cursor],
                 download.next_stream_id,
                 next_position,
                 requested_size,
@@ -708,16 +865,18 @@ fn advance_remote_clipboard_download(
 
 fn finish_remote_clipboard_file(
     download: &mut RemoteClipboardDownload,
+    file_size: u64,
 ) -> Result<RemoteClipboardDownloadAdvance, String> {
     let part_path = remote_clipboard_part_path(download);
-    let final_path = download
-        .directory
-        .join(&download.descriptors[download.file_index].name);
+    let final_path = remote_clipboard_final_path(download);
     std::fs::rename(&part_path, &final_path)
         .map_err(|_| "Remote clipboard file could not be finalized.".to_string())?;
-    download.completed_paths.push(final_path);
-    download.file_index += 1;
-    if download.file_index == download.descriptors.len() {
+    download.completed_bytes = download
+        .completed_bytes
+        .checked_add(file_size)
+        .ok_or_else(|| "Remote clipboard transfer size overflowed.".to_string())?;
+    download.file_cursor += 1;
+    if download.file_cursor == download.file_indices.len() {
         return Ok(RemoteClipboardDownloadAdvance::Complete(
             download.completed_paths.clone(),
         ));
@@ -726,7 +885,11 @@ fn finish_remote_clipboard_file(
     download.next_stream_id = download.next_stream_id.saturating_add(1).max(1);
     download.phase = RemoteClipboardDownloadPhase::Size { stream_id };
     Ok(RemoteClipboardDownloadAdvance::Request(
-        remote_clipboard_size_request(download.file_index, stream_id, download.clip_data_id),
+        remote_clipboard_size_request(
+            download.file_indices[download.file_cursor],
+            stream_id,
+            download.clip_data_id,
+        ),
     ))
 }
 
@@ -763,10 +926,24 @@ fn remote_clipboard_range_request(
 }
 
 fn remote_clipboard_part_path(download: &RemoteClipboardDownload) -> PathBuf {
-    download.directory.join(format!(
-        ".{}.part",
-        download.descriptors[download.file_index].name
+    let final_path = remote_clipboard_final_path(download);
+    // The transfer UUID is not disclosed to the peer, so a remote descriptor
+    // cannot collide with this sibling staging name deliberately.
+    final_path.with_file_name(format!(
+        ".oxideterm-{}-{}.part",
+        download.transfer_id, download.file_cursor
     ))
+}
+
+fn remote_clipboard_final_path(download: &RemoteClipboardDownload) -> PathBuf {
+    let descriptor = &download.descriptors[download.file_indices[download.file_cursor]];
+    let mut path = download.directory.clone();
+    if let Some(relative_path) = descriptor.relative_path.as_deref() {
+        for component in relative_path.split(['/', '\\']) {
+            path.push(component);
+        }
+    }
+    path.join(&descriptor.name)
 }
 
 fn cleanup_remote_clipboard_download(download: &RemoteClipboardDownload) {
@@ -776,7 +953,9 @@ fn cleanup_remote_clipboard_download(download: &RemoteClipboardDownload) {
 fn remote_clipboard_file_name_is_safe(name: &str) -> bool {
     !name.is_empty()
         && name.chars().count() <= 259
-        && !name.contains(['/', '\\', '\0'])
+        && !name
+            .chars()
+            .any(|character| character.is_control() || "<>:\"/\\|?*".contains(character))
         && !matches!(name, "." | "..")
         && !name.ends_with(['.', ' '])
         && !ironrdp::cliprdr::is_windows_device_name(name)
@@ -790,13 +969,17 @@ mod file_transfer_tests {
     fn remote_file_download_requests_size_then_bounded_data() {
         let directory = tempfile::tempdir().unwrap();
         let descriptor = FileDescriptor::new("example.txt").with_file_size(5);
-        let (mut download, size_request) = prepare_remote_clipboard_download(
-            directory.path().to_path_buf(),
-            "transfer".to_string(),
-            &[descriptor],
-            Some(7),
-        )
-        .unwrap();
+        let RemoteClipboardDownloadStart::Request(mut download, size_request) =
+            prepare_remote_clipboard_download(
+                directory.path().to_path_buf(),
+                "transfer".to_string(),
+                &[descriptor],
+                Some(7),
+            )
+            .unwrap()
+        else {
+            panic!("regular file download completed before requesting content");
+        };
 
         assert_eq!(size_request.flags, FileContentsFlags::SIZE);
         let data_request = match advance_remote_clipboard_download(
@@ -824,13 +1007,9 @@ mod file_transfer_tests {
     }
 
     #[test]
-    fn remote_file_download_rejects_unsafe_names_and_directories() {
+    fn clipboard_directories_preserve_relative_paths_in_both_directions() {
         let directory = tempfile::tempdir().unwrap();
         let unsafe_name = FileDescriptor::new("../secret.txt").with_file_size(1);
-        let directory_entry = FileDescriptor::new("folder")
-            .with_attributes(ClipboardFileAttributes::DIRECTORY)
-            .with_file_size(0);
-
         assert!(
             prepare_remote_clipboard_download(
                 directory.path().to_path_buf(),
@@ -840,14 +1019,74 @@ mod file_transfer_tests {
             )
             .is_err()
         );
-        assert!(
+
+        let local_root = directory.path().join("folder");
+        let local_nested = local_root.join("nested");
+        std::fs::create_dir_all(&local_nested).unwrap();
+        std::fs::write(local_nested.join("example.txt"), b"hello").unwrap();
+        let local_files = collect_local_clipboard_files(vec![local_root]).unwrap();
+        assert!(local_files.iter().any(|file| {
+            file.name == "example.txt"
+                && file.relative_path.as_deref() == Some("folder\\nested")
+                && !file.directory
+        }));
+
+        let directory_entry = FileDescriptor::new("folder")
+            .with_attributes(ClipboardFileAttributes::DIRECTORY)
+            .with_file_size(0);
+        let RemoteClipboardDownloadStart::Complete(empty_directory_paths) =
+            prepare_remote_clipboard_download(
+                directory.path().to_path_buf(),
+                "empty-directory".to_string(),
+                std::slice::from_ref(&directory_entry),
+                None,
+            )
+            .unwrap()
+        else {
+            panic!("empty directory requested file content");
+        };
+        assert!(empty_directory_paths[0].is_dir());
+        let nested_entry = FileDescriptor::new("nested")
+            .with_relative_path("folder")
+            .with_attributes(ClipboardFileAttributes::DIRECTORY)
+            .with_file_size(0);
+        let file_entry = FileDescriptor::new("example.txt")
+            .with_relative_path("folder\\nested")
+            .with_file_size(5);
+
+        let RemoteClipboardDownloadStart::Request(mut download, size_request) =
             prepare_remote_clipboard_download(
                 directory.path().to_path_buf(),
                 "directory".to_string(),
-                &[directory_entry],
+                &[directory_entry, nested_entry, file_entry],
                 None,
             )
-            .is_err()
+            .unwrap()
+        else {
+            panic!("directory with a file completed before requesting content");
+        };
+        assert_eq!(size_request.index, 2);
+        let data_request = match advance_remote_clipboard_download(
+            &mut download,
+            FileContentsResponse::new_size_response(size_request.stream_id, 5),
+        )
+        .unwrap()
+        {
+            RemoteClipboardDownloadAdvance::Request(request) => request,
+            RemoteClipboardDownloadAdvance::Complete(_) => panic!("size response completed early"),
+        };
+        let paths = match advance_remote_clipboard_download(
+            &mut download,
+            FileContentsResponse::new_data_response(data_request.stream_id, b"hello".to_vec()),
+        )
+        .unwrap()
+        {
+            RemoteClipboardDownloadAdvance::Complete(paths) => paths,
+            RemoteClipboardDownloadAdvance::Request(_) => panic!("directory did not complete"),
+        };
+        assert_eq!(
+            std::fs::read(paths[0].join("nested").join("example.txt")).unwrap(),
+            b"hello"
         );
     }
 }

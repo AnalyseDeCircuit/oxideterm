@@ -1529,24 +1529,14 @@ pub(in crate::workspace) fn next_connection_field(
         transport,
         NewConnectionTransport::Rdp | NewConnectionTransport::Vnc
     ) {
-        let fields = if transport == NewConnectionTransport::Rdp {
-            vec![
-                NewConnectionField::Name,
-                NewConnectionField::Group,
-                NewConnectionField::Host,
-                NewConnectionField::Port,
-                NewConnectionField::Username,
-                NewConnectionField::Password,
-            ]
-        } else {
-            vec![
-                NewConnectionField::Name,
-                NewConnectionField::Group,
-                NewConnectionField::Host,
-                NewConnectionField::Port,
-                NewConnectionField::Password,
-            ]
-        };
+        let fields = [
+            NewConnectionField::Name,
+            NewConnectionField::Group,
+            NewConnectionField::Host,
+            NewConnectionField::Port,
+            NewConnectionField::Username,
+            NewConnectionField::Password,
+        ];
         let index = fields
             .iter()
             .position(|candidate| *candidate == field)
@@ -2314,7 +2304,7 @@ mod tests {
     };
     use oxideterm_remote_desktop::{
         RemoteDesktopAudioOptions, RemoteDesktopClipboardOptions, RemoteDesktopDisplayOptions,
-        RemoteDesktopProtocol, RemoteDesktopRdpOptions,
+        RemoteDesktopProtocol, RemoteDesktopRdpNetworkProfile, RemoteDesktopRdpOptions,
     };
 
     use super::{
@@ -2432,6 +2422,7 @@ mod tests {
                 use_all_monitors: true,
             },
             rdp: RemoteDesktopRdpOptions {
+                network_profile: RemoteDesktopRdpNetworkProfile::Broadband,
                 disable_graphics_pipeline: true,
             },
             vnc: RemoteDesktopVncOptions {

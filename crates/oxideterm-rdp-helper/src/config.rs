@@ -9,6 +9,8 @@ pub(super) fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<Client
     let height = u16::try_from(requested_size.height).unwrap_or(u16::MAX);
     let codecs = client_codecs_capabilities(RDP_CLIENT_BITMAP_CODECS)
         .map_err(|error| format!("RDP bitmap codec setup failed: {error}"))?;
+    let (connection_type, performance_flags) =
+        rdp_network_profile_config(config.session_options.rdp.network_profile);
     let connector = connector::Config {
         // A smart-card placeholder prevents IronRDP from emitting the
         // username-derived mstshash cookie during certificate preflight.
@@ -28,7 +30,7 @@ pub(super) fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<Client
         keyboard_subtype: 0,
         keyboard_layout: 0,
         keyboard_functional_keys_count: 12,
-        connection_type: ConnectionType::Lan,
+        connection_type,
         ime_file_name: String::new(),
         bitmap: Some(connector::BitmapConfig {
             lossy_compression: true,
@@ -52,7 +54,7 @@ pub(super) fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<Client
         multitransport_flags: None,
         support_dyn_vc_gfx_protocol: !config.session_options.rdp.disable_graphics_pipeline,
         compression_type: Some(CompressionType::Rdp61),
-        performance_flags: PerformanceFlags::default(),
+        performance_flags,
         timezone_info: TimezoneInfo::default(),
     };
     log_rdp_client_graphics_config(&connector);
@@ -71,6 +73,38 @@ pub(super) fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<Client
         session_options: config.session_options,
         monitor_layout: config.monitor_layout.clone(),
     })
+}
+
+pub(super) fn rdp_network_profile_config(
+    profile: RemoteDesktopRdpNetworkProfile,
+) -> (ConnectionType, PerformanceFlags) {
+    // These flags describe the intended link once during capability exchange;
+    // they do not add work to frame decoding or presentation.
+    match profile {
+        RemoteDesktopRdpNetworkProfile::Automatic => {
+            (ConnectionType::Autodetect, PerformanceFlags::default())
+        }
+        RemoteDesktopRdpNetworkProfile::Lan => (
+            ConnectionType::Lan,
+            PerformanceFlags::ENABLE_FONT_SMOOTHING | PerformanceFlags::ENABLE_DESKTOP_COMPOSITION,
+        ),
+        RemoteDesktopRdpNetworkProfile::Broadband => (
+            ConnectionType::BroadbandHigh,
+            PerformanceFlags::DISABLE_WALLPAPER
+                | PerformanceFlags::DISABLE_FULLWINDOWDRAG
+                | PerformanceFlags::DISABLE_MENUANIMATIONS
+                | PerformanceFlags::ENABLE_FONT_SMOOTHING,
+        ),
+        RemoteDesktopRdpNetworkProfile::LowBandwidth => (
+            ConnectionType::BroadbandLow,
+            PerformanceFlags::DISABLE_WALLPAPER
+                | PerformanceFlags::DISABLE_FULLWINDOWDRAG
+                | PerformanceFlags::DISABLE_MENUANIMATIONS
+                | PerformanceFlags::DISABLE_THEMING
+                | PerformanceFlags::DISABLE_CURSOR_SHADOW
+                | PerformanceFlags::DISABLE_CURSORSETTINGS,
+        ),
+    }
 }
 
 pub(super) fn log_rdp_client_graphics_config(config: &connector::Config) {

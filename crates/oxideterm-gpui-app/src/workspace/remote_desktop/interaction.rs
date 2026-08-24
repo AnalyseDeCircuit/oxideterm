@@ -213,7 +213,7 @@ impl RemoteDesktopSessionEntity {
                         .negotiated_capabilities
                         .as_ref()
                         .is_some_and(|capabilities| {
-                            capabilities.vendor_files == NegotiatedCapabilityStatus::Supported
+                            capabilities.vendor_file_upload == NegotiatedCapabilityStatus::Supported
                         }));
             if files_enabled {
                 self.send_request(RemoteDesktopHelperRequest::ClipboardFiles {

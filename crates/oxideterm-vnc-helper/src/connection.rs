@@ -55,6 +55,7 @@ impl VncConnection {
     pub(super) fn complete(
         config: &VncSessionConfig,
         preflight: &mut VncSecurityPreflight,
+        username: Option<&str>,
         password: Option<&RemoteDesktopSecret>,
         event_writer: SharedEventWriter,
         diagnostics: VncDiagnostics,
@@ -68,8 +69,11 @@ impl VncConnection {
             &config.monitor_layout,
         )
         .map_err(VncError::configuration)?;
-        let mut transport =
-            preflight.finish_authentication(password, config.session_options.vnc.session_mode)?;
+        let mut transport = preflight.finish_authentication(
+            username,
+            password,
+            config.session_options.vnc.session_mode,
+        )?;
         transport.set_phase_timeout(Some(VNC_IO_MESSAGE_TIMEOUT));
         let (width, height, tight_interaction) =
             read_server_init(&mut transport, preflight.tight_active)?;
@@ -114,6 +118,25 @@ impl VncConnection {
                 NegotiatedCapabilityStatus::Unknown
             },
             vendor_files: if preflight.tight_active {
+                known_capability(
+                    file_capabilities.list
+                        || file_capabilities.download
+                        || file_capabilities.upload,
+                )
+            } else {
+                NegotiatedCapabilityStatus::Unknown
+            },
+            vendor_file_list: if preflight.tight_active {
+                known_capability(file_capabilities.list)
+            } else {
+                NegotiatedCapabilityStatus::Unknown
+            },
+            vendor_file_download: if preflight.tight_active {
+                known_capability(file_capabilities.download)
+            } else {
+                NegotiatedCapabilityStatus::Unknown
+            },
+            vendor_file_upload: if preflight.tight_active {
                 known_capability(file_capabilities.upload)
             } else {
                 NegotiatedCapabilityStatus::Unknown
@@ -309,9 +332,56 @@ impl VncConnection {
             .vendor_files
             .lock()
             .map_err(|_| "VNC file transfer state lock is poisoned.".to_string())?
-            .cancel(transfer_id);
+            .cancel_upload(transfer_id);
         if let Some(message) = message {
             write_vnc_message(&self.writer, &message)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn request_remote_files(
+        &self,
+        request_id: String,
+        path: String,
+    ) -> Result<(), String> {
+        let message = self
+            .vendor_files
+            .lock()
+            .map_err(|_| "VNC file transfer state lock is poisoned.".to_string())?
+            .request_list(request_id, path)?;
+        write_vnc_owned_message(&self.writer, message)
+    }
+
+    pub(super) fn download_remote_files(
+        &self,
+        transfer_id: String,
+        remote_paths: Vec<String>,
+        destination: std::path::PathBuf,
+        conflict_policy: RemoteDesktopFileConflictPolicy,
+    ) -> Result<(), String> {
+        let actions = self
+            .vendor_files
+            .lock()
+            .map_err(|_| "VNC file transfer state lock is poisoned.".to_string())?
+            .start_download(transfer_id, remote_paths, destination, conflict_policy)?;
+        self.dispatch_vendor_file_actions(actions)
+    }
+
+    pub(super) fn cancel_file_transfer(&self, transfer_id: String) -> Result<(), String> {
+        let actions = self
+            .vendor_files
+            .lock()
+            .map_err(|_| "VNC file transfer state lock is poisoned.".to_string())?
+            .cancel_download(transfer_id);
+        self.dispatch_vendor_file_actions(actions)
+    }
+
+    fn dispatch_vendor_file_actions(&self, actions: VncVendorFileActions) -> Result<(), String> {
+        for message in actions.messages {
+            write_vnc_owned_message(&self.writer, message)?;
+        }
+        for event in actions.events {
+            send_event(&self.event_writer, event)?;
         }
         Ok(())
     }
@@ -465,8 +535,22 @@ fn run_vnc_io_owner(
             }
         };
         transport.set_phase_timeout(Some(VNC_IO_MESSAGE_TIMEOUT));
-        if message_type == FILE_UPLOAD_CANCEL.code as u8 {
-            let file_events = match vendor_files
+        let is_vendor_file_message = match vendor_files.lock() {
+            Ok(files) => files.accepts_server_message(message_type),
+            Err(_) => {
+                publish_vnc_disconnect(
+                    &event_writer,
+                    diagnostics,
+                    &canceled,
+                    generation,
+                    &active_generation,
+                    "VNC file transfer state lock is poisoned.".to_string(),
+                );
+                break;
+            }
+        };
+        if is_vendor_file_message {
+            let file_actions = match vendor_files
                 .lock()
                 .map_err(|_| "VNC file transfer state lock is poisoned.".to_string())
                 .and_then(|mut files| files.observe_server_message(message_type, &mut transport))
@@ -485,8 +569,26 @@ fn run_vnc_io_owner(
                 }
             };
             transport.set_phase_timeout(None);
+            let mut write_failed = None;
+            for message in file_actions.messages {
+                if let Err(error) = transport.write_all(&message) {
+                    write_failed = Some(format!("VNC file transfer control write failed: {error}"));
+                    break;
+                }
+            }
+            if let Some(error) = write_failed {
+                publish_vnc_disconnect(
+                    &event_writer,
+                    diagnostics,
+                    &canceled,
+                    generation,
+                    &active_generation,
+                    error,
+                );
+                break;
+            }
             if active_generation.load(Ordering::Acquire) == generation {
-                for event in file_events {
+                for event in file_actions.events {
                     let _ = send_event(&event_writer, event);
                 }
             }

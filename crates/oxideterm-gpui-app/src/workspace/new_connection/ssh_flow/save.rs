@@ -2208,9 +2208,8 @@ impl WorkspaceApp {
                     return None;
                 }
                 let label = remote_desktop_profile_label(&form.name, protocol, &host, port);
-                let username = (protocol == RemoteDesktopProtocol::Rdp)
-                    .then(|| form.username.trim().to_string())
-                    .filter(|username| !username.is_empty());
+                let username =
+                    Some(form.username.trim().to_string()).filter(|username| !username.is_empty());
                 let password = if !form.password.is_empty() {
                     // Move the UI draft into a zeroizing type before saving or starting a worker.
                     Some(SecretString::from(std::mem::take(&mut form.password)))

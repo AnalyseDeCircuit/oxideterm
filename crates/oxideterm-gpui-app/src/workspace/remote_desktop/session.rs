@@ -36,6 +36,7 @@ impl RemoteDesktopSessionEntity {
     }
 
     fn shutdown_worker(&mut self) {
+        self.reset_vnc_file_browser_connection();
         if let Some(mut worker) = self.worker.take() {
             worker.shutdown();
         }
@@ -250,6 +251,16 @@ impl RemoteDesktopSessionEntity {
                             // details. Only a typed, content-free failure crosses
                             // into the workspace notification adapter.
                             intents.push(RemoteDesktopDeliveryIntent::ClipboardTransferFailed);
+                            changed = true;
+                        }
+                        event @ (RemoteDesktopHelperEvent::VncRemoteFilesListed { .. }
+                        | RemoteDesktopHelperEvent::VncRemoteFileListFailed { .. }
+                        | RemoteDesktopHelperEvent::VncFileTransferProgress { .. }
+                        | RemoteDesktopHelperEvent::VncFileTransferCompleted { .. }
+                        | RemoteDesktopHelperEvent::VncFileTransferFailed { .. }) => {
+                            if let Some(intent) = self.apply_vnc_file_event(event) {
+                                intents.push(intent);
+                            }
                             changed = true;
                         }
                         RemoteDesktopHelperEvent::ConnectionFailure { message, category } => {
@@ -854,7 +865,9 @@ impl RemoteDesktopSessionEntity {
             let generation = match event {
                 RemoteDesktopSessionEvent::DeliveryReady { generation }
                 | RemoteDesktopSessionEvent::FrameApplyReady { generation } => generation,
-                RemoteDesktopSessionEvent::ClipboardTransferFailed => return,
+                RemoteDesktopSessionEvent::ClipboardTransferFailed
+                | RemoteDesktopSessionEvent::VncFileTransferCompleted
+                | RemoteDesktopSessionEvent::VncFileTransferFailed(_) => return,
             };
             let window_handle = session
                 .update(cx, |session, _cx| {
@@ -883,6 +896,16 @@ impl RemoteDesktopSessionEntity {
                                     RemoteDesktopDeliveryIntent::ClipboardTransferFailed => {
                                         cx.emit(RemoteDesktopSessionEvent::ClipboardTransferFailed);
                                     }
+                                    RemoteDesktopDeliveryIntent::VncFileTransferCompleted => {
+                                        cx.emit(
+                                            RemoteDesktopSessionEvent::VncFileTransferCompleted,
+                                        );
+                                    }
+                                    RemoteDesktopDeliveryIntent::VncFileTransferFailed(kind) => {
+                                        cx.emit(RemoteDesktopSessionEvent::VncFileTransferFailed(
+                                            kind,
+                                        ));
+                                    }
                                 }
                             }
                             if outcome.backlog_remaining
@@ -896,7 +919,9 @@ impl RemoteDesktopSessionEntity {
                                 cx.notify();
                             }
                         }
-                        RemoteDesktopSessionEvent::ClipboardTransferFailed => {}
+                        RemoteDesktopSessionEvent::ClipboardTransferFailed
+                        | RemoteDesktopSessionEvent::VncFileTransferCompleted
+                        | RemoteDesktopSessionEvent::VncFileTransferFailed(_) => {}
                     }
                 });
             });
@@ -956,14 +981,54 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         debug_assert_eq!(session_entity.read(cx).tab_id, tab_id);
-        if matches!(event, RemoteDesktopSessionEvent::ClipboardTransferFailed) {
-            self.push_command_palette_toast(
-                self.i18n.t("remote_desktop.clipboard_file_failed"),
-                None,
-                TerminalNoticeVariant::Error,
-                cx,
-            );
-            return;
+        match event {
+            RemoteDesktopSessionEvent::ClipboardTransferFailed => {
+                self.push_command_palette_toast(
+                    self.i18n.t("remote_desktop.clipboard_file_failed"),
+                    None,
+                    TerminalNoticeVariant::Error,
+                    cx,
+                );
+                return;
+            }
+            RemoteDesktopSessionEvent::VncFileTransferCompleted => {
+                self.push_command_palette_toast(
+                    self.i18n.t("remote_desktop.file_download_completed"),
+                    None,
+                    TerminalNoticeVariant::Success,
+                    cx,
+                );
+                return;
+            }
+            RemoteDesktopSessionEvent::VncFileTransferFailed(kind) => {
+                let key = match kind {
+                    RemoteDesktopFileTransferFailureKind::Remote => {
+                        "remote_desktop.file_download_failed_remote"
+                    }
+                    RemoteDesktopFileTransferFailureKind::Local => {
+                        "remote_desktop.file_download_failed_local"
+                    }
+                    RemoteDesktopFileTransferFailureKind::Protocol => {
+                        "remote_desktop.file_download_failed_protocol"
+                    }
+                    RemoteDesktopFileTransferFailureKind::Canceled => {
+                        "remote_desktop.file_download_canceled"
+                    }
+                };
+                self.push_command_palette_toast(
+                    self.i18n.t(key),
+                    None,
+                    if *kind == RemoteDesktopFileTransferFailureKind::Canceled {
+                        TerminalNoticeVariant::Default
+                    } else {
+                        TerminalNoticeVariant::Error
+                    },
+                    cx,
+                );
+                return;
+            }
+            RemoteDesktopSessionEvent::DeliveryReady { .. }
+            | RemoteDesktopSessionEvent::FrameApplyReady { .. } => {}
         }
 
         let visible = self.remote_desktop_tab_visible(tab_id, cx);
@@ -1367,6 +1432,7 @@ impl WorkspaceApp {
             NegotiatedCapabilityStatus::Unknown => self.i18n.t("remote_desktop.resize_unknown"),
         };
         let resize_menu_open = self.remote_desktop_resize_menu_tab_id == Some(tab_id);
+        let vnc_file_download_available = session.vnc_file_download_available();
         let vnc_capability_presentation =
             (snapshot.protocol == RemoteDesktopProtocol::Vnc).then(|| {
                 self.remote_desktop_vnc_capability_presentation(
@@ -1455,6 +1521,31 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap(px(self.tokens.spacing.one))
+                    .when(vnc_file_download_available, |actions| {
+                        actions.child(self.workspace_toolbar_action_button(
+                            self.i18n.t("remote_desktop.file_browser"),
+                            Some(Self::render_lucide_icon(
+                                LucideIcon::FolderOpen,
+                                12.0,
+                                rgb(theme.text_muted),
+                            )),
+                            ToolbarButtonOptions {
+                                button: ButtonOptions {
+                                    variant: ButtonVariant::Secondary,
+                                    size: ButtonSize::Sm,
+                                    radius: ButtonRadius::Md,
+                                    disabled: false,
+                                },
+                                height: Some(24.0),
+                                padding_x: Some(8.0),
+                                font_size: Some(self.tokens.metrics.ui_text_xs),
+                                ..ToolbarButtonOptions::default()
+                            },
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_vnc_file_browser(tab_id, cx);
+                            }),
+                        ))
+                    })
                     .child(self.workspace_toolbar_action_button(
                         self.i18n.t("remote_desktop.force_recover"),
                         Some(Self::render_lucide_icon(

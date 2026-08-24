@@ -22,11 +22,13 @@ use flate2::{Decompress, FlushDecompress, Status};
 use oxideterm_remote_desktop::{
     NegotiatedCapabilities, NegotiatedCapabilityStatus, RemoteDesktopClipboardData,
     RemoteDesktopCursorShape, RemoteDesktopEndpoint, RemoteDesktopErrorCategory,
-    RemoteDesktopFakeBackend, RemoteDesktopFrame, RemoteDesktopFrameFormat,
+    RemoteDesktopFakeBackend, RemoteDesktopFileConflictPolicy,
+    RemoteDesktopFileTransferFailureKind, RemoteDesktopFrame, RemoteDesktopFrameFormat,
     RemoteDesktopFrameUpdate, RemoteDesktopFrameUpdateBatch, RemoteDesktopHelperEvent,
     RemoteDesktopHelperRequest, RemoteDesktopKey, RemoteDesktopKeyState, RemoteDesktopLockKeys,
     RemoteDesktopMonitorLayout, RemoteDesktopMouseButton, RemoteDesktopMouseButtonState,
-    RemoteDesktopProtocol, RemoteDesktopRect, RemoteDesktopSecret, RemoteDesktopServerCertificate,
+    RemoteDesktopProtocol, RemoteDesktopRect, RemoteDesktopRemoteFileEntry,
+    RemoteDesktopRemoteFileKind, RemoteDesktopSecret, RemoteDesktopServerCertificate,
     RemoteDesktopServerIdentityKind, RemoteDesktopSessionOptions, RemoteDesktopSessionStatus,
     RemoteDesktopSize, RemoteDesktopWheelDelta, read_request_line, run_fake_backend_stdio,
     write_event_line,
@@ -75,6 +77,24 @@ struct VncSessionConfig {
     initial_size: RemoteDesktopSize,
     monitor_layout: RemoteDesktopMonitorLayout,
     password_available: bool,
+    username_available: bool,
+}
+
+struct VncAuthentication {
+    // The helper owns this transient copy only until the TLS authentication
+    // exchange completes, then Zeroizing clears it before framebuffer I/O.
+    username: Option<Zeroizing<String>>,
+    password: Option<RemoteDesktopSecret>,
+}
+
+impl VncAuthentication {
+    fn username(&self) -> Option<&str> {
+        self.username.as_deref().map(String::as_str)
+    }
+
+    fn password(&self) -> Option<&RemoteDesktopSecret> {
+        self.password.as_ref()
+    }
 }
 
 enum VncIoCommand {
@@ -109,8 +129,12 @@ enum VncSecuritySelection {
     VncAuth,
     TlsNone,
     TlsVnc,
+    TlsPlain,
+    TlsSasl,
     X509None,
     X509Vnc,
+    X509Plain,
+    X509Sasl,
 }
 
 #[derive(Default)]
@@ -164,13 +188,41 @@ impl VncSecuritySelection {
             Self::VncAuth => "vnc-auth",
             Self::TlsNone => "tls-none",
             Self::TlsVnc => "tls-vnc",
+            Self::TlsPlain => "tls-plain",
+            Self::TlsSasl => "tls-sasl",
             Self::X509None => "x509-none",
             Self::X509Vnc => "x509-vnc",
+            Self::X509Plain => "x509-plain",
+            Self::X509Sasl => "x509-sasl",
         }
     }
 
     fn requires_password(self) -> bool {
+        matches!(
+            self,
+            Self::VncAuth
+                | Self::TlsVnc
+                | Self::TlsPlain
+                | Self::TlsSasl
+                | Self::X509Vnc
+                | Self::X509Plain
+                | Self::X509Sasl
+        )
+    }
+
+    fn requires_username(self) -> bool {
+        matches!(
+            self,
+            Self::TlsPlain | Self::TlsSasl | Self::X509Plain | Self::X509Sasl
+        )
+    }
+
+    fn uses_vnc_password_challenge(self) -> bool {
         matches!(self, Self::VncAuth | Self::TlsVnc | Self::X509Vnc)
+    }
+
+    fn uses_sasl(self) -> bool {
+        matches!(self, Self::TlsSasl | Self::X509Sasl)
     }
 }
 
@@ -214,6 +266,7 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
         endpoint,
         transport_endpoint,
         password_available,
+        username_available,
         size,
         scale_factor: _scale_factor,
         read_only,
@@ -250,6 +303,7 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
         initial_size: size,
         monitor_layout,
         password_available,
+        username_available,
     };
     let control = Arc::new(VncSessionControl::default());
     let (request_tx, request_rx) = std::sync::mpsc::sync_channel(128);
@@ -381,6 +435,7 @@ fn run_vnc_session(
             &config.endpoint,
             config.transport_endpoint.as_ref(),
             config.session_options.vnc.security_policy,
+            config.username_available,
             config.password_available,
             canceled.clone(),
         ) {
@@ -413,14 +468,15 @@ fn run_vnc_session(
                 certificate: certificate.clone(),
             },
         )?;
-        let password = match wait_for_vnc_authentication(
+        let authentication = match wait_for_vnc_authentication(
             &request_rx,
             &control,
             &certificate,
+            preflight.requires_username(),
             preflight.requires_password(),
             &mut deferred_requests,
         ) {
-            Ok(password) => password,
+            Ok(authentication) => authentication,
             Err(_error) if control.close_requested.load(Ordering::Acquire) => break,
             Err(error) if control.take_reconnect() => {
                 diagnostics.log(format!("authentication canceled for reconnect: {error}"));
@@ -443,7 +499,8 @@ fn run_vnc_session(
         let mut connection = match VncConnection::complete(
             &config,
             &mut preflight,
-            password.as_ref(),
+            authentication.username(),
+            authentication.password(),
             writer.clone(),
             diagnostics,
             canceled,
@@ -456,9 +513,9 @@ fn run_vnc_session(
                 break;
             }
         };
-        // The VNC handshake has consumed the credential by this point. Release
-        // the zeroizing owner before the long-lived framebuffer loop starts.
-        drop(password);
+        // The VNC handshake has consumed the credentials by this point. Release
+        // both transient owners before the long-lived framebuffer loop starts.
+        drop(authentication);
         control.clear_attempt();
         send_event(
             &writer,
@@ -541,9 +598,10 @@ fn wait_for_vnc_authentication(
     request_rx: &Receiver<RemoteDesktopHelperRequest>,
     control: &VncSessionControl,
     certificate: &RemoteDesktopServerCertificate,
+    username_required: bool,
     password_required: bool,
     deferred_requests: &mut VecDeque<RemoteDesktopHelperRequest>,
-) -> VncResult<Option<RemoteDesktopSecret>> {
+) -> VncResult<VncAuthentication> {
     loop {
         if control.close_requested.load(Ordering::Acquire) || control.reconnect_requested() {
             return Err(VncError::cancelled());
@@ -578,11 +636,16 @@ fn wait_for_vnc_authentication(
                     drop(password);
                     continue;
                 }
-                if let Some(username) = username.as_mut() {
-                    username.zeroize();
-                }
                 if let Some(domain) = domain.as_mut() {
                     domain.zeroize();
+                }
+                let username = username
+                    .map(Zeroizing::new)
+                    .filter(|username| !username.is_empty());
+                if username_required && username.is_none() {
+                    return Err(VncError::authentication(
+                        "VNC server requires username authentication.",
+                    ));
                 }
                 if password_required && password.as_ref().is_none_or(RemoteDesktopSecret::is_empty)
                 {
@@ -590,7 +653,10 @@ fn wait_for_vnc_authentication(
                         "VNC server requires password authentication.",
                     ));
                 }
-                return Ok(password_required.then_some(password).flatten());
+                return Ok(VncAuthentication {
+                    username: username_required.then_some(username).flatten(),
+                    password: password_required.then_some(password).flatten(),
+                });
             }
             RemoteDesktopHelperRequest::Close => return Err(VncError::cancelled()),
             RemoteDesktopHelperRequest::Reconnect => return Err(VncError::cancelled()),
@@ -780,6 +846,44 @@ fn handle_real_vnc_request(
         }
         RemoteDesktopHelperRequest::CancelClipboardTransfer { transfer_id } => {
             connection.cancel_clipboard_transfer(transfer_id)?;
+        }
+        RemoteDesktopHelperRequest::VncListRemoteFiles { request_id, path } => {
+            if connection
+                .request_remote_files(request_id.clone(), path)
+                .is_err()
+            {
+                send_event(
+                    event_writer,
+                    RemoteDesktopHelperEvent::VncRemoteFileListFailed { request_id },
+                )?;
+            }
+        }
+        RemoteDesktopHelperRequest::VncDownloadRemoteFiles {
+            transfer_id,
+            remote_paths,
+            destination,
+            conflict_policy,
+        } => {
+            if connection
+                .download_remote_files(
+                    transfer_id.clone(),
+                    remote_paths,
+                    destination,
+                    conflict_policy,
+                )
+                .is_err()
+            {
+                send_event(
+                    event_writer,
+                    RemoteDesktopHelperEvent::VncFileTransferFailed {
+                        transfer_id,
+                        kind: RemoteDesktopFileTransferFailureKind::Local,
+                    },
+                )?;
+            }
+        }
+        RemoteDesktopHelperRequest::CancelVncFileTransfer { transfer_id } => {
+            connection.cancel_file_transfer(transfer_id)?;
         }
         RemoteDesktopHelperRequest::SynchronizeLockKeys { keys } if !config.read_only => {
             connection.synchronize_lock_keys(keys)?;

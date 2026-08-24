@@ -330,6 +330,7 @@ impl WorkspaceApp {
         let session = session_entity.read(cx);
         let geometry = session.geometry.clone();
         let certificate_challenge = session.certificate_challenge.clone();
+        let vnc_file_browser = session.vnc_files.open.then(|| session.vnc_files.clone());
         let worker_generation = session.worker_generation;
         let resize_menu_open = self.remote_desktop_resize_menu_tab_id == Some(tab_id);
         let resize_session = session_entity.clone();
@@ -605,6 +606,9 @@ impl WorkspaceApp {
                     challenge,
                     cx,
                 ))
+            })
+            .when_some(vnc_file_browser, |surface, browser| {
+                surface.child(self.render_vnc_file_browser(tab_id, browser, cx))
             })
             .into_any_element()
     }

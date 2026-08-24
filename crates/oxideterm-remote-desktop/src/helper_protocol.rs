@@ -6,10 +6,11 @@ use std::{fmt, path::PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    NegotiatedCapabilities, RemoteDesktopCursorShape, RemoteDesktopEndpoint, RemoteDesktopFrame,
+    NegotiatedCapabilities, RemoteDesktopCursorShape, RemoteDesktopEndpoint,
+    RemoteDesktopFileConflictPolicy, RemoteDesktopFileTransferFailureKind, RemoteDesktopFrame,
     RemoteDesktopFrameUpdate, RemoteDesktopFrameUpdateBatch, RemoteDesktopMonitorLayout,
-    RemoteDesktopProtocol, RemoteDesktopSecret, RemoteDesktopSessionOptions,
-    RemoteDesktopSessionStatus, RemoteDesktopSize,
+    RemoteDesktopProtocol, RemoteDesktopRemoteFileEntry, RemoteDesktopSecret,
+    RemoteDesktopSessionOptions, RemoteDesktopSessionStatus, RemoteDesktopSize,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -153,6 +154,10 @@ pub enum RemoteDesktopHelperRequest {
         /// without sending any credential material during preflight.
         #[serde(default)]
         password_available: bool,
+        /// Indicates whether the UI can answer a later username challenge
+        /// without exposing the username during transport preflight.
+        #[serde(default)]
+        username_available: bool,
         size: RemoteDesktopSize,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scale_factor: Option<u32>,
@@ -213,6 +218,19 @@ pub enum RemoteDesktopHelperRequest {
         transfer_id: String,
         paths: Vec<PathBuf>,
     },
+    VncListRemoteFiles {
+        request_id: String,
+        path: String,
+    },
+    VncDownloadRemoteFiles {
+        transfer_id: String,
+        remote_paths: Vec<String>,
+        destination: PathBuf,
+        conflict_policy: RemoteDesktopFileConflictPolicy,
+    },
+    CancelVncFileTransfer {
+        transfer_id: String,
+    },
     CancelClipboardTransfer {
         transfer_id: String,
     },
@@ -236,6 +254,7 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
                 endpoint,
                 transport_endpoint,
                 password_available,
+                username_available,
                 size,
                 scale_factor,
                 read_only,
@@ -247,6 +266,7 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
                 .field("endpoint", endpoint)
                 .field("transport_endpoint", transport_endpoint)
                 .field("password_available", password_available)
+                .field("username_available", username_available)
                 .field("size", size)
                 .field("scale_factor", scale_factor)
                 .field("read_only", read_only)
@@ -348,6 +368,27 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
                 .field("transfer_id", transfer_id)
                 .field("path_count", &paths.len())
                 .finish(),
+            Self::VncListRemoteFiles { request_id, path } => formatter
+                .debug_struct("VncListRemoteFiles")
+                .field("request_id", request_id)
+                .field("path", &format_args!("<redacted:{}>", path.chars().count()))
+                .finish(),
+            Self::VncDownloadRemoteFiles {
+                transfer_id,
+                remote_paths,
+                destination: _,
+                conflict_policy,
+            } => formatter
+                .debug_struct("VncDownloadRemoteFiles")
+                .field("transfer_id", transfer_id)
+                .field("remote_path_count", &remote_paths.len())
+                .field("destination", &"<redacted path>")
+                .field("conflict_policy", conflict_policy)
+                .finish(),
+            Self::CancelVncFileTransfer { transfer_id } => formatter
+                .debug_struct("CancelVncFileTransfer")
+                .field("transfer_id", transfer_id)
+                .finish(),
             Self::CancelClipboardTransfer { transfer_id } => formatter
                 .debug_struct("CancelClipboardTransfer")
                 .field("transfer_id", transfer_id)
@@ -424,6 +465,31 @@ pub enum RemoteDesktopHelperEvent {
     ClipboardTransferFailed {
         transfer_id: String,
         message: String,
+    },
+    VncRemoteFilesListed {
+        request_id: String,
+        path: String,
+        entries: Vec<RemoteDesktopRemoteFileEntry>,
+    },
+    VncRemoteFileListFailed {
+        request_id: String,
+    },
+    VncFileTransferProgress {
+        transfer_id: String,
+        file_name: String,
+        transferred_bytes: u64,
+        total_bytes: u64,
+        completed_files: u32,
+        total_files: u32,
+    },
+    VncFileTransferCompleted {
+        transfer_id: String,
+        paths: Vec<PathBuf>,
+        skipped_files: u32,
+    },
+    VncFileTransferFailed {
+        transfer_id: String,
+        kind: RemoteDesktopFileTransferFailureKind,
     },
     ConnectionFailure {
         message: String,
@@ -538,6 +604,54 @@ impl fmt::Debug for RemoteDesktopHelperEvent {
                 .field("transfer_id", transfer_id)
                 .field("message", message)
                 .finish(),
+            Self::VncRemoteFilesListed {
+                request_id,
+                path,
+                entries,
+            } => formatter
+                .debug_struct("VncRemoteFilesListed")
+                .field("request_id", request_id)
+                .field("path", &format_args!("<redacted:{}>", path.chars().count()))
+                .field("entry_count", &entries.len())
+                .finish(),
+            Self::VncRemoteFileListFailed { request_id } => formatter
+                .debug_struct("VncRemoteFileListFailed")
+                .field("request_id", request_id)
+                .finish(),
+            Self::VncFileTransferProgress {
+                transfer_id,
+                file_name,
+                transferred_bytes,
+                total_bytes,
+                completed_files,
+                total_files,
+            } => formatter
+                .debug_struct("VncFileTransferProgress")
+                .field("transfer_id", transfer_id)
+                .field(
+                    "file_name",
+                    &format_args!("<redacted:{}>", file_name.chars().count()),
+                )
+                .field("transferred_bytes", transferred_bytes)
+                .field("total_bytes", total_bytes)
+                .field("completed_files", completed_files)
+                .field("total_files", total_files)
+                .finish(),
+            Self::VncFileTransferCompleted {
+                transfer_id,
+                paths,
+                skipped_files,
+            } => formatter
+                .debug_struct("VncFileTransferCompleted")
+                .field("transfer_id", transfer_id)
+                .field("path_count", &paths.len())
+                .field("skipped_files", skipped_files)
+                .finish(),
+            Self::VncFileTransferFailed { transfer_id, kind } => formatter
+                .debug_struct("VncFileTransferFailed")
+                .field("transfer_id", transfer_id)
+                .field("kind", kind)
+                .finish(),
             Self::ConnectionFailure { message, category } => formatter
                 .debug_struct("ConnectionFailure")
                 .field("message", message)
@@ -590,6 +704,7 @@ mod tests {
             endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
             transport_endpoint: None,
             password_available: true,
+            username_available: true,
             size: RemoteDesktopSize {
                 width: 1280,
                 height: 720,
@@ -602,7 +717,8 @@ mod tests {
 
         let encoded = serde_json::to_string(&request).unwrap();
 
-        assert!(!encoded.contains("username"));
+        assert!(encoded.contains("\"usernameAvailable\":true"));
+        assert!(!encoded.contains("\"username\":"));
         assert!(!encoded.contains("domain"));
         assert!(encoded.contains("\"passwordAvailable\":true"));
         assert!(!encoded.contains("super-secret"));

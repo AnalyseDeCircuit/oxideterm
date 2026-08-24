@@ -627,6 +627,11 @@ impl RemoteDesktopViewState {
             | RemoteDesktopHelperEvent::ClipboardData { .. }
             | RemoteDesktopHelperEvent::ClipboardFilesReady { .. }
             | RemoteDesktopHelperEvent::ClipboardTransferFailed { .. }
+            | RemoteDesktopHelperEvent::VncRemoteFilesListed { .. }
+            | RemoteDesktopHelperEvent::VncRemoteFileListFailed { .. }
+            | RemoteDesktopHelperEvent::VncFileTransferProgress { .. }
+            | RemoteDesktopHelperEvent::VncFileTransferCompleted { .. }
+            | RemoteDesktopHelperEvent::VncFileTransferFailed { .. }
             | RemoteDesktopHelperEvent::ServerCertificate { .. } => {
                 // Clipboard changes are handled by the app surface that owns
                 // focus, clipboard, certificate prompts, and pointer capture.

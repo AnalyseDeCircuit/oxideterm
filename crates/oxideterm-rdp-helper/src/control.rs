@@ -158,6 +158,9 @@ pub(super) fn forward_client_rdp_request(
         | RemoteDesktopHelperRequest::ClipboardText { .. }
         | RemoteDesktopHelperRequest::ClipboardData { .. }
         | RemoteDesktopHelperRequest::ClipboardFiles { .. }
+        | RemoteDesktopHelperRequest::VncListRemoteFiles { .. }
+        | RemoteDesktopHelperRequest::VncDownloadRemoteFiles { .. }
+        | RemoteDesktopHelperRequest::CancelVncFileTransfer { .. }
         | RemoteDesktopHelperRequest::SynchronizeLockKeys { .. }
         | RemoteDesktopHelperRequest::ReleaseAllInputs => {}
     }

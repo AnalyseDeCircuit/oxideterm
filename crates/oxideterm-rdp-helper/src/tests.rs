@@ -666,6 +666,42 @@ fn client_config_withholds_credentials_until_certificate_acceptance() {
     assert_eq!(bitmap.color_depth, 32);
     assert_eq!(rdp_bitmap_codec_labels(&bitmap.codecs), "remotefx");
 
+    for (profile, expected_connection_type, expected_flags) in [
+        (
+            RemoteDesktopRdpNetworkProfile::Automatic,
+            ConnectionType::Autodetect,
+            PerformanceFlags::default(),
+        ),
+        (
+            RemoteDesktopRdpNetworkProfile::Lan,
+            ConnectionType::Lan,
+            PerformanceFlags::ENABLE_FONT_SMOOTHING | PerformanceFlags::ENABLE_DESKTOP_COMPOSITION,
+        ),
+        (
+            RemoteDesktopRdpNetworkProfile::Broadband,
+            ConnectionType::BroadbandHigh,
+            PerformanceFlags::DISABLE_WALLPAPER
+                | PerformanceFlags::DISABLE_FULLWINDOWDRAG
+                | PerformanceFlags::DISABLE_MENUANIMATIONS
+                | PerformanceFlags::ENABLE_FONT_SMOOTHING,
+        ),
+        (
+            RemoteDesktopRdpNetworkProfile::LowBandwidth,
+            ConnectionType::BroadbandLow,
+            PerformanceFlags::DISABLE_WALLPAPER
+                | PerformanceFlags::DISABLE_FULLWINDOWDRAG
+                | PerformanceFlags::DISABLE_MENUANIMATIONS
+                | PerformanceFlags::DISABLE_THEMING
+                | PerformanceFlags::DISABLE_CURSOR_SHADOW
+                | PerformanceFlags::DISABLE_CURSORSETTINGS,
+        ),
+    ] {
+        assert_eq!(
+            rdp_network_profile_config(profile),
+            (expected_connection_type, expected_flags)
+        );
+    }
+
     config.session_options.rdp.disable_graphics_pipeline = true;
     let compatibility_config = build_client_rdp_config(&config).unwrap();
     assert!(!compatibility_config.connector.support_dyn_vc_gfx_protocol);

@@ -27,18 +27,22 @@ use oxideterm_gpui_ui::{
         DropdownMenuItemKind, dropdown_menu_content, dropdown_menu_item, dropdown_menu_label,
         dropdown_menu_separator,
     },
-    modal::overlay_content_boundary,
+    modal::{
+        dialog_overlay, modal_body, modal_container, modal_footer, modal_header,
+        overlay_content_boundary,
+    },
 };
 use oxideterm_remote_desktop::{
     NegotiatedCapabilities, NegotiatedCapabilityStatus, RemoteDesktopClipboardData,
     RemoteDesktopClipboardFormat, RemoteDesktopConnectionProfile, RemoteDesktopEndpoint,
-    RemoteDesktopErrorCategory, RemoteDesktopFrameDeliverySlot, RemoteDesktopHelperEvent,
+    RemoteDesktopErrorCategory, RemoteDesktopFileConflictPolicy,
+    RemoteDesktopFileTransferFailureKind, RemoteDesktopFrameDeliverySlot, RemoteDesktopHelperEvent,
     RemoteDesktopHelperRequest, RemoteDesktopKey, RemoteDesktopKeyState, RemoteDesktopLockKeys,
     RemoteDesktopMonitor, RemoteDesktopMonitorLayout, RemoteDesktopMonitorOrientation,
     RemoteDesktopMouseButton, RemoteDesktopMouseButtonState, RemoteDesktopProtocol,
-    RemoteDesktopProviderManifest, RemoteDesktopSecret, RemoteDesktopSessionStatus,
-    RemoteDesktopSize, RemoteDesktopWheelDelta, builtin_preview_provider_registry,
-    builtin_provider_registry,
+    RemoteDesktopProviderManifest, RemoteDesktopRemoteFileEntry, RemoteDesktopRemoteFileKind,
+    RemoteDesktopSecret, RemoteDesktopSessionStatus, RemoteDesktopSize, RemoteDesktopWheelDelta,
+    builtin_preview_provider_registry, builtin_provider_registry,
 };
 use oxideterm_workspace::{Tab, TabKind, TabTitleSource};
 use tokio::sync::Notify;
@@ -52,6 +56,7 @@ mod input;
 mod interaction;
 mod public_mcp;
 mod session;
+mod vendor_files;
 mod view;
 mod worker;
 
@@ -60,6 +65,7 @@ pub(in crate::workspace) use public_mcp::RemoteDesktopPublicClipboardSnapshot;
 use certificate::*;
 use clipboard::*;
 use input::*;
+use vendor_files::*;
 use worker::*;
 
 const REMOTE_DESKTOP_INITIAL_WIDTH: u32 = 1280;
@@ -164,6 +170,8 @@ pub(super) enum RemoteDesktopWorkerDelivery {
 
 pub(super) enum RemoteDesktopDeliveryIntent {
     ClipboardTransferFailed,
+    VncFileTransferCompleted,
+    VncFileTransferFailed(RemoteDesktopFileTransferFailureKind),
 }
 
 pub(super) struct RemoteDesktopDeliveryOutcome {
@@ -559,6 +567,7 @@ pub(in crate::workspace) struct RemoteDesktopSessionEntity {
     pressed_mouse_buttons: HashSet<RemoteDesktopMouseButton>,
     wheel_pixel_remainder: RemoteDesktopWheelDelta,
     render_diagnostics: RemoteDesktopRenderDiagnostics,
+    vnc_files: RemoteDesktopVncFileBrowserState,
 }
 
 impl RemoteDesktopSessionEntity {
@@ -640,6 +649,7 @@ impl RemoteDesktopSessionEntity {
             pressed_mouse_buttons: HashSet::new(),
             wheel_pixel_remainder: remote_desktop_empty_wheel_delta(),
             render_diagnostics: RemoteDesktopRenderDiagnostics::default(),
+            vnc_files: RemoteDesktopVncFileBrowserState::default(),
         }
     }
 
@@ -696,6 +706,8 @@ pub(in crate::workspace) enum RemoteDesktopSessionEvent {
     DeliveryReady { generation: u64 },
     FrameApplyReady { generation: u64 },
     ClipboardTransferFailed,
+    VncFileTransferCompleted,
+    VncFileTransferFailed(RemoteDesktopFileTransferFailureKind),
 }
 
 impl gpui::EventEmitter<RemoteDesktopSessionEvent> for RemoteDesktopSessionEntity {}

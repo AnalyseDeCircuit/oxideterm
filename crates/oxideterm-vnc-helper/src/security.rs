@@ -5,6 +5,15 @@ use std::net::ToSocketAddrs;
 
 use native_tls::{Protocol, TlsConnector};
 use oxideterm_remote_desktop::{RemoteDesktopVncSecurityPolicy, RemoteDesktopVncSessionMode};
+use rsasl::{
+    callback::{Context as SaslContext, Request as SaslRequest, SessionCallback, SessionData},
+    mechanisms::{
+        plain::PLAIN,
+        scram::{SCRAM_SHA1, SCRAM_SHA256, SCRAM_SHA512},
+    },
+    prelude::{Mechanism, Mechname, Registry, SASLClient, SASLConfig},
+    property::{AuthId, Password},
+};
 use sha2::{Digest, Sha256};
 
 use super::*;
@@ -18,9 +27,39 @@ const VNC_SECURITY_VENCRYPT: u8 = 19;
 const VNC_VENCRYPT_VERSION: [u8; 2] = [0, 2];
 const VNC_VENCRYPT_TLS_NONE: u32 = 257;
 const VNC_VENCRYPT_TLS_VNC: u32 = 258;
+const VNC_VENCRYPT_TLS_PLAIN: u32 = 259;
 const VNC_VENCRYPT_X509_NONE: u32 = 260;
 const VNC_VENCRYPT_X509_VNC: u32 = 261;
+const VNC_VENCRYPT_X509_PLAIN: u32 = 262;
+const VNC_VENCRYPT_X509_SASL: u32 = 263;
+const VNC_VENCRYPT_TLS_SASL: u32 = 264;
 const MAX_VNC_REASON_BYTES: usize = 64 * 1024;
+const MAX_VNC_SASL_MECHANISMS_BYTES: usize = 300;
+const MAX_VNC_SASL_DATA_BYTES: usize = 1024 * 1024;
+const MAX_VNC_SASL_STEPS: usize = 16;
+
+static VNC_SASL_MECHANISMS: &[Mechanism] = &[SCRAM_SHA512, SCRAM_SHA256, SCRAM_SHA1, PLAIN];
+
+struct VncSaslCredentials {
+    // The SASL callback owns the only handshake-local credential copy; both
+    // buffers are cleared when authentication returns or fails.
+    username: Zeroizing<String>,
+    password: Zeroizing<String>,
+}
+
+impl SessionCallback for VncSaslCredentials {
+    fn callback(
+        &self,
+        _session_data: &SessionData,
+        _context: &SaslContext,
+        request: &mut SaslRequest<'_>,
+    ) -> Result<(), rsasl::prelude::SessionError> {
+        request
+            .satisfy::<AuthId>(self.username.as_str())?
+            .satisfy::<Password>(self.password.as_bytes())?;
+        Ok(())
+    }
+}
 
 pub(super) struct VncSecurityPreflight {
     pub(super) protocol_version: VncProtocolVersion,
@@ -38,29 +77,36 @@ impl VncSecurityPreflight {
             self.security,
             VncSecuritySelection::TlsNone
                 | VncSecuritySelection::TlsVnc
+                | VncSecuritySelection::TlsPlain
+                | VncSecuritySelection::TlsSasl
                 | VncSecuritySelection::X509None
                 | VncSecuritySelection::X509Vnc
+                | VncSecuritySelection::X509Plain
+                | VncSecuritySelection::X509Sasl
         )
     }
 
     pub(super) fn peer_identity_verified(&self) -> bool {
         matches!(
             self.security,
-            VncSecuritySelection::X509None | VncSecuritySelection::X509Vnc
+            VncSecuritySelection::X509None
+                | VncSecuritySelection::X509Vnc
+                | VncSecuritySelection::X509Plain
+                | VncSecuritySelection::X509Sasl
         )
     }
 
     pub(super) fn requires_password(&self) -> bool {
-        matches!(
-            self.security,
-            VncSecuritySelection::VncAuth
-                | VncSecuritySelection::TlsVnc
-                | VncSecuritySelection::X509Vnc
-        )
+        self.security.requires_password()
+    }
+
+    pub(super) fn requires_username(&self) -> bool {
+        self.security.requires_username()
     }
 
     pub(super) fn finish_authentication(
         &mut self,
+        username: Option<&str>,
         password: Option<&RemoteDesktopSecret>,
         session_mode: RemoteDesktopVncSessionMode,
     ) -> VncResult<Box<dyn VncTransport>> {
@@ -80,6 +126,31 @@ impl VncSecurityPreflight {
                 .write_all(challenge.as_slice())
                 .map_err(|error| map_io_error("VNC password response write failed", error))?;
             read_security_result(&mut transport, self.protocol_version)?;
+        } else if self.security.uses_sasl() {
+            let username = username
+                .filter(|username| !username.is_empty())
+                .ok_or_else(|| {
+                    VncError::authentication("VNC server requires username authentication.")
+                })?;
+            let password = password
+                .filter(|secret| !secret.is_empty())
+                .ok_or_else(|| {
+                    VncError::authentication("VNC server requires password authentication.")
+                })?;
+            authenticate_vnc_sasl(&mut transport, username, password, self.protocol_version)?;
+        } else if self.security.requires_username() {
+            let username = username
+                .filter(|username| !username.is_empty())
+                .ok_or_else(|| {
+                    VncError::authentication("VNC server requires username authentication.")
+                })?;
+            let password = password
+                .filter(|secret| !secret.is_empty())
+                .ok_or_else(|| {
+                    VncError::authentication("VNC server requires password authentication.")
+                })?;
+            write_plain_credentials(&mut transport, username, password)?;
+            read_security_result(&mut transport, self.protocol_version)?;
         }
         write_client_init(&mut transport, session_mode)?;
         Ok(transport)
@@ -90,19 +161,27 @@ pub(super) fn connect_vnc_security_preflight(
     endpoint: &RemoteDesktopEndpoint,
     transport_endpoint: Option<&RemoteDesktopEndpoint>,
     security_policy: RemoteDesktopVncSecurityPolicy,
+    username_available: bool,
     password_available: bool,
     canceled: Arc<AtomicBool>,
 ) -> VncResult<VncSecurityPreflight> {
     let stream = connect_vnc_tcp(transport_endpoint.unwrap_or(endpoint), canceled.clone())?;
     let mut stream = CancellableTcpStream::new(stream, canceled);
     stream.set_phase_timeout(VNC_HANDSHAKE_TIMEOUT);
-    negotiate_vnc_security(&endpoint.host, stream, security_policy, password_available)
+    negotiate_vnc_security(
+        &endpoint.host,
+        stream,
+        security_policy,
+        username_available,
+        password_available,
+    )
 }
 
 pub(super) fn negotiate_vnc_security(
     host: &str,
     mut stream: CancellableTcpStream,
     security_policy: RemoteDesktopVncSecurityPolicy,
+    username_available: bool,
     password_available: bool,
 ) -> VncResult<VncSecurityPreflight> {
     let protocol_version = negotiate_protocol_version(&mut stream)?;
@@ -117,13 +196,17 @@ pub(super) fn negotiate_vnc_security(
                 stream,
                 protocol_version,
                 security_policy,
+                username_available,
                 password_available,
             )?
         };
 
     let peer_certificate_fingerprint = if matches!(
         security,
-        VncSecuritySelection::X509None | VncSecuritySelection::X509Vnc
+        VncSecuritySelection::X509None
+            | VncSecuritySelection::X509Vnc
+            | VncSecuritySelection::X509Plain
+            | VncSecuritySelection::X509Sasl
     ) {
         let der = transport.peer_certificate_der()?.ok_or_else(|| {
             VncError::certificate("VNC X509 server did not present a certificate.")
@@ -297,6 +380,7 @@ fn negotiate_rfb37_or_38_security(
     mut stream: CancellableTcpStream,
     protocol_version: VncProtocolVersion,
     security_policy: RemoteDesktopVncSecurityPolicy,
+    username_available: bool,
     password_available: bool,
 ) -> VncResult<(
     VncSecuritySelection,
@@ -328,6 +412,7 @@ fn negotiate_rfb37_or_38_security(
             stream,
             protocol_version,
             security_policy,
+            username_available,
             password_available,
             offered,
         )?;
@@ -472,6 +557,7 @@ fn negotiate_vencrypt(
     mut stream: CancellableTcpStream,
     protocol_version: VncProtocolVersion,
     security_policy: RemoteDesktopVncSecurityPolicy,
+    username_available: bool,
     password_available: bool,
     offered_security_methods: Vec<String>,
 ) -> VncResult<(
@@ -512,7 +598,12 @@ fn negotiate_vencrypt(
                 .map_err(|error| map_io_error("VeNCrypt subtype read failed", error))?,
         );
     }
-    let selected = select_vencrypt_subtype(&subtypes, security_policy, password_available);
+    let selected = select_vencrypt_subtype(
+        &subtypes,
+        security_policy,
+        username_available,
+        password_available,
+    );
     let Some((subtype, security)) = selected else {
         return Err(VncError::security(format!(
             "VNC server does not offer an allowed VeNCrypt subtype: {subtypes:?}."
@@ -530,8 +621,10 @@ fn negotiate_vencrypt(
     }
 
     let mut tls = upgrade_vencrypt_tls(host, stream)?;
-    let password_challenge = if security.requires_password() {
+    let password_challenge = if security.uses_vnc_password_challenge() {
         Some(read_password_challenge(&mut tls)?)
+    } else if security.requires_username() {
+        None
     } else {
         read_security_result(&mut tls, protocol_version)?;
         None
@@ -549,34 +642,27 @@ fn negotiate_vencrypt(
 fn select_vencrypt_subtype(
     subtypes: &[u32],
     security_policy: RemoteDesktopVncSecurityPolicy,
+    username_available: bool,
     password_available: bool,
 ) -> Option<(u32, VncSecuritySelection)> {
-    let verified_preference = if password_available {
-        [
-            (VNC_VENCRYPT_X509_VNC, VncSecuritySelection::X509Vnc),
-            (VNC_VENCRYPT_X509_NONE, VncSecuritySelection::X509None),
-        ]
-    } else {
-        [
-            (VNC_VENCRYPT_X509_NONE, VncSecuritySelection::X509None),
-            (VNC_VENCRYPT_X509_VNC, VncSecuritySelection::X509Vnc),
-        ]
-    };
-    let unverified_preference = if password_available {
-        [
-            (VNC_VENCRYPT_TLS_VNC, VncSecuritySelection::TlsVnc),
-            (VNC_VENCRYPT_TLS_NONE, VncSecuritySelection::TlsNone),
-        ]
-    } else {
-        [
-            (VNC_VENCRYPT_TLS_NONE, VncSecuritySelection::TlsNone),
-            (VNC_VENCRYPT_TLS_VNC, VncSecuritySelection::TlsVnc),
-        ]
-    };
+    let verified_preference = [
+        (VNC_VENCRYPT_X509_SASL, VncSecuritySelection::X509Sasl),
+        (VNC_VENCRYPT_X509_PLAIN, VncSecuritySelection::X509Plain),
+        (VNC_VENCRYPT_X509_VNC, VncSecuritySelection::X509Vnc),
+        (VNC_VENCRYPT_X509_NONE, VncSecuritySelection::X509None),
+    ];
+    let unverified_preference = [
+        (VNC_VENCRYPT_TLS_SASL, VncSecuritySelection::TlsSasl),
+        (VNC_VENCRYPT_TLS_PLAIN, VncSecuritySelection::TlsPlain),
+        (VNC_VENCRYPT_TLS_VNC, VncSecuritySelection::TlsVnc),
+        (VNC_VENCRYPT_TLS_NONE, VncSecuritySelection::TlsNone),
+    ];
     verified_preference
         .into_iter()
         .find(|(subtype, security)| {
-            subtypes.contains(subtype) && (!security.requires_password() || password_available)
+            subtypes.contains(subtype)
+                && (!security.requires_username() || username_available)
+                && (!security.requires_password() || password_available)
         })
         .or_else(|| {
             (security_policy != RemoteDesktopVncSecurityPolicy::RequireVerifiedEncryption)
@@ -585,11 +671,191 @@ fn select_vencrypt_subtype(
                         .into_iter()
                         .find(|(subtype, security)| {
                             subtypes.contains(subtype)
+                                && (!security.requires_username() || username_available)
                                 && (!security.requires_password() || password_available)
                         })
                 })
                 .flatten()
         })
+}
+
+fn write_plain_credentials(
+    transport: &mut impl Write,
+    username: &str,
+    password: &RemoteDesktopSecret,
+) -> VncResult<()> {
+    let username_length = u32::try_from(username.len())
+        .map_err(|_| VncError::authentication("VNC username is too long."))?;
+    let password_bytes = password.expose_secret().as_bytes();
+    let password_length = u32::try_from(password_bytes.len())
+        .map_err(|_| VncError::authentication("VNC password is too long."))?;
+
+    // VeNCrypt Plain frames both UTF-8 byte strings explicitly, so no
+    // temporary combined credential buffer needs to retain their contents.
+    transport
+        .write_all(&username_length.to_be_bytes())
+        .and_then(|_| transport.write_all(&password_length.to_be_bytes()))
+        .and_then(|_| transport.write_all(username.as_bytes()))
+        .and_then(|_| transport.write_all(password_bytes))
+        .map_err(|error| map_io_error("VNC Plain credentials write failed", error))
+}
+
+fn authenticate_vnc_sasl(
+    transport: &mut Box<dyn VncTransport>,
+    username: &str,
+    password: &RemoteDesktopSecret,
+    protocol_version: VncProtocolVersion,
+) -> VncResult<()> {
+    let mechanism_length = read_be_u32(transport)
+        .map_err(|error| map_io_error("VNC SASL mechanism list length read failed", error))?
+        as usize;
+    if mechanism_length == 0 || mechanism_length > MAX_VNC_SASL_MECHANISMS_BYTES {
+        return Err(VncError::security(
+            "VNC server offered an invalid SASL mechanism list.",
+        ));
+    }
+    let mechanism_bytes = read_exact_vec(transport, mechanism_length)
+        .map_err(|error| map_io_error("VNC SASL mechanism list read failed", error))?;
+    let mechanism_text = std::str::from_utf8(&mechanism_bytes)
+        .map_err(|_| VncError::protocol("VNC SASL mechanism list is not valid ASCII."))?;
+    let offered = mechanism_text
+        .split(|character: char| character.is_ascii_whitespace() || character == ',')
+        .filter(|mechanism| !mechanism.is_empty())
+        .map(|mechanism| {
+            Mechname::parse(mechanism.as_bytes())
+                .map_err(|_| VncError::protocol("VNC server offered an invalid SASL mechanism."))
+        })
+        .collect::<VncResult<Vec<_>>>()?;
+    if offered.is_empty() {
+        return Err(VncError::security(
+            "VNC server offered no usable SASL mechanisms.",
+        ));
+    }
+
+    let config = SASLConfig::builder()
+        .with_registry(Registry::with_mechanisms(VNC_SASL_MECHANISMS))
+        .with_callback(VncSaslCredentials {
+            username: Zeroizing::new(username.to_string()),
+            password: Zeroizing::new(password.expose_secret().to_string()),
+        })
+        .map_err(|_| VncError::authentication("VNC SASL credential setup failed."))?;
+    let mut session = SASLClient::new(config)
+        .start_suggested_iter(offered.iter().copied())
+        .map_err(|_| {
+            VncError::security("VNC server offered no supported SASL mechanism over TLS.")
+        })?;
+    let selected = session.get_mechname().as_bytes();
+    write_be_sasl_bytes(transport, Some(selected), "VNC SASL mechanism selection")?;
+
+    let mut output = Vec::new();
+    let mut state = session
+        .step(None, &mut output)
+        .map_err(|_| VncError::authentication("VNC SASL initial authentication step failed."))?;
+    write_sasl_step(
+        transport,
+        state.has_sent_message().then_some(output.as_slice()),
+    )?;
+
+    for _ in 0..MAX_VNC_SASL_STEPS {
+        let server_data =
+            read_limited_sasl_bytes(transport, MAX_VNC_SASL_DATA_BYTES, "VNC SASL server step")?;
+        let complete = read_u8(transport)
+            .map_err(|error| map_io_error("VNC SASL completion flag read failed", error))?;
+        if complete > 1 {
+            return Err(VncError::protocol(
+                "VNC server sent an invalid SASL completion flag.",
+            ));
+        }
+        if state.is_finished() {
+            if complete == 1 {
+                read_security_result(transport, protocol_version)?;
+                return Ok(());
+            }
+            return Err(VncError::protocol(
+                "VNC SASL server requested another step after client completion.",
+            ));
+        }
+
+        output.clear();
+        state = session
+            .step(server_data.as_deref(), &mut output)
+            .map_err(|_| VncError::authentication("VNC SASL authentication step failed."))?;
+        if complete == 1 && state.is_finished() {
+            if state.has_sent_message() {
+                return Err(VncError::protocol(
+                    "VNC SASL server completed before receiving the final client step.",
+                ));
+            }
+            read_security_result(transport, protocol_version)?;
+            return Ok(());
+        }
+        write_sasl_step(
+            transport,
+            state.has_sent_message().then_some(output.as_slice()),
+        )?;
+    }
+    Err(VncError::protocol(
+        "VNC SASL authentication exceeded the step limit.",
+    ))
+}
+
+fn read_limited_sasl_bytes(
+    transport: &mut impl Read,
+    limit: usize,
+    label: &str,
+) -> VncResult<Option<Vec<u8>>> {
+    let wire_length = read_be_u32(transport)
+        .map_err(|error| map_io_error(&format!("{label} length read failed"), error))?;
+    let wire_length = usize::try_from(wire_length)
+        .map_err(|_| VncError::protocol(format!("{label} length is invalid.")))?;
+    if wire_length == 0 {
+        return Ok(None);
+    }
+    if wire_length > limit.saturating_add(1) {
+        return Err(VncError::protocol(format!("{label} exceeds the limit.")));
+    }
+    let mut wire = read_exact_vec(transport, wire_length)
+        .map_err(|error| map_io_error(&format!("{label} read failed"), error))?;
+    if wire.pop() != Some(0) {
+        return Err(VncError::protocol(format!(
+            "{label} is missing its terminator."
+        )));
+    }
+    Ok(Some(wire))
+}
+
+fn write_be_sasl_bytes(
+    transport: &mut impl Write,
+    value: Option<&[u8]>,
+    label: &str,
+) -> VncResult<()> {
+    let Some(value) = value else {
+        return transport
+            .write_all(&0u32.to_be_bytes())
+            .map_err(|error| map_io_error(&format!("{label} write failed"), error));
+    };
+    let length = u32::try_from(value.len())
+        .map_err(|_| VncError::protocol(format!("{label} exceeds the protocol limit.")))?;
+    transport
+        .write_all(&length.to_be_bytes())
+        .and_then(|_| transport.write_all(value))
+        .map_err(|error| map_io_error(&format!("{label} write failed"), error))
+}
+
+fn write_sasl_step(transport: &mut impl Write, value: Option<&[u8]>) -> VncResult<()> {
+    let Some(value) = value else {
+        return write_be_sasl_bytes(transport, None, "VNC SASL client step");
+    };
+    let wire_length = value
+        .len()
+        .checked_add(1)
+        .and_then(|length| u32::try_from(length).ok())
+        .ok_or_else(|| VncError::protocol("VNC SASL client step is too long."))?;
+    transport
+        .write_all(&wire_length.to_be_bytes())
+        .and_then(|_| transport.write_all(value))
+        .and_then(|_| transport.write_all(&[0]))
+        .map_err(|error| map_io_error("VNC SASL client step write failed", error))
 }
 
 fn upgrade_vencrypt_tls(
@@ -701,6 +967,7 @@ fn security_method_label(security_type: u32) -> &'static str {
         2 => "vnc-auth",
         16 => "tight",
         19 => "vencrypt",
+        20 => "sasl",
         _ => "unknown",
     }
 }
@@ -709,8 +976,12 @@ fn vencrypt_subtype_label(subtype: u32) -> &'static str {
     match subtype {
         VNC_VENCRYPT_TLS_NONE => "tls-none",
         VNC_VENCRYPT_TLS_VNC => "tls-vnc",
+        VNC_VENCRYPT_TLS_PLAIN => "tls-plain",
         VNC_VENCRYPT_X509_NONE => "x509-none",
         VNC_VENCRYPT_X509_VNC => "x509-vnc",
+        VNC_VENCRYPT_X509_PLAIN => "x509-plain",
+        VNC_VENCRYPT_X509_SASL => "x509-sasl",
+        VNC_VENCRYPT_TLS_SASL => "tls-sasl",
         _ => "unknown-vencrypt",
     }
 }
@@ -767,17 +1038,20 @@ mod tests {
     }
 
     #[test]
-    fn password_availability_only_changes_vencrypt_subtype_preference() {
+    fn credential_availability_selects_the_strongest_usable_vencrypt_subtype() {
         let offered = [
             VNC_VENCRYPT_X509_NONE,
             VNC_VENCRYPT_X509_VNC,
+            VNC_VENCRYPT_X509_PLAIN,
             VNC_VENCRYPT_TLS_NONE,
             VNC_VENCRYPT_TLS_VNC,
+            VNC_VENCRYPT_TLS_PLAIN,
         ];
         assert_eq!(
             select_vencrypt_subtype(
                 &offered,
                 RemoteDesktopVncSecurityPolicy::RequireVerifiedEncryption,
+                false,
                 false,
             ),
             Some((VNC_VENCRYPT_X509_NONE, VncSecuritySelection::X509None))
@@ -786,10 +1060,88 @@ mod tests {
             select_vencrypt_subtype(
                 &offered,
                 RemoteDesktopVncSecurityPolicy::RequireVerifiedEncryption,
+                false,
                 true,
             ),
             Some((VNC_VENCRYPT_X509_VNC, VncSecuritySelection::X509Vnc))
         );
+        assert_eq!(
+            select_vencrypt_subtype(
+                &offered,
+                RemoteDesktopVncSecurityPolicy::RequireVerifiedEncryption,
+                true,
+                true,
+            ),
+            Some((VNC_VENCRYPT_X509_PLAIN, VncSecuritySelection::X509Plain))
+        );
+        assert_eq!(
+            select_vencrypt_subtype(
+                &[VNC_VENCRYPT_TLS_PLAIN],
+                RemoteDesktopVncSecurityPolicy::AllowUnverifiedEncryption,
+                true,
+                true,
+            ),
+            Some((VNC_VENCRYPT_TLS_PLAIN, VncSecuritySelection::TlsPlain))
+        );
+        assert_eq!(
+            select_vencrypt_subtype(
+                &[VNC_VENCRYPT_X509_PLAIN, VNC_VENCRYPT_X509_SASL],
+                RemoteDesktopVncSecurityPolicy::RequireVerifiedEncryption,
+                true,
+                true,
+            ),
+            Some((VNC_VENCRYPT_X509_SASL, VncSecuritySelection::X509Sasl))
+        );
+    }
+
+    #[test]
+    fn plain_credentials_use_vencrypt_length_prefixed_framing() {
+        let password = RemoteDesktopSecret::from("correct horse");
+        let mut wire = Vec::new();
+
+        write_plain_credentials(&mut wire, "alice", &password).unwrap();
+
+        assert_eq!(
+            wire,
+            [
+                5_u32.to_be_bytes().as_slice(),
+                13_u32.to_be_bytes().as_slice(),
+                b"alice",
+                b"correct horse",
+            ]
+            .concat()
+        );
+    }
+
+    #[test]
+    fn sasl_plain_uses_rfb_framing_and_waits_for_security_result() {
+        let (client, mut server) = loopback_pair();
+        let server_thread = thread::spawn(move || {
+            server.write_all(&5u32.to_be_bytes()).unwrap();
+            server.write_all(b"PLAIN").unwrap();
+
+            let mechanism_length = read_be_u32(&mut server).unwrap() as usize;
+            let mechanism = read_exact_vec(&mut server, mechanism_length).unwrap();
+            assert_eq!(mechanism, b"PLAIN");
+            let step_length = read_be_u32(&mut server).unwrap() as usize;
+            let step = read_exact_vec(&mut server, step_length).unwrap();
+            assert_eq!(step, b"\0alice\0correct horse\0");
+
+            server.write_all(&0u32.to_be_bytes()).unwrap();
+            server.write_all(&[1]).unwrap();
+            server.write_all(&0u32.to_be_bytes()).unwrap();
+        });
+        let mut transport: Box<dyn VncTransport> = Box::new(client);
+        let password = RemoteDesktopSecret::from("correct horse");
+
+        authenticate_vnc_sasl(
+            &mut transport,
+            "alice",
+            &password,
+            VncProtocolVersion::Rfb003008,
+        )
+        .unwrap();
+        server_thread.join().unwrap();
     }
 
     #[test]
@@ -821,6 +1173,7 @@ mod tests {
                 "localhost",
                 client,
                 RemoteDesktopVncSecurityPolicy::AllowLegacy,
+                false,
                 false,
             )
             .unwrap();
@@ -855,6 +1208,7 @@ mod tests {
             "localhost",
             client,
             RemoteDesktopVncSecurityPolicy::AllowLegacy,
+            false,
             true,
         )
         .unwrap();
@@ -895,6 +1249,7 @@ mod tests {
             client,
             RemoteDesktopVncSecurityPolicy::AllowLegacy,
             false,
+            false,
         )
         .unwrap();
 
@@ -917,6 +1272,7 @@ mod tests {
                 &endpoint,
                 Some(&transport_endpoint),
                 RemoteDesktopVncSecurityPolicy::RequireVerifiedEncryption,
+                false,
                 false,
                 client_canceled,
             )

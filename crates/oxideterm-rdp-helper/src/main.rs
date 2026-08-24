@@ -68,8 +68,8 @@ use oxideterm_remote_desktop::{
     RemoteDesktopErrorCategory, RemoteDesktopFakeBackend, RemoteDesktopFrameFormat,
     RemoteDesktopHelperEvent, RemoteDesktopHelperRequest, RemoteDesktopLockKeys,
     RemoteDesktopMonitorLayout, RemoteDesktopMouseButtonState, RemoteDesktopProtocol,
-    RemoteDesktopSecret, RemoteDesktopSessionOptions, RemoteDesktopSessionStatus,
-    RemoteDesktopSize, read_request_line, run_fake_backend_stdio,
+    RemoteDesktopRdpNetworkProfile, RemoteDesktopSecret, RemoteDesktopSessionOptions,
+    RemoteDesktopSessionStatus, RemoteDesktopSize, read_request_line, run_fake_backend_stdio,
 };
 use sha2::{Digest as _, Sha256};
 use smallvec::SmallVec;
@@ -190,6 +190,7 @@ fn run_real_rdp_stdio(reader: &mut impl BufRead) -> Result<(), String> {
         endpoint,
         transport_endpoint,
         password_available: _,
+        username_available: _,
         size,
         scale_factor,
         read_only,

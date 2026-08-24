@@ -13,17 +13,18 @@ use oxideterm_connections::{
 use oxideterm_public_mcp::{
     ClientRef, ConnectionRef, DomainRequest, PublicConnectionAuth, PublicCredentialSlot,
     PublicMoshIpFamily, PublicMoshPredictionMode, PublicMoshUdpPortSelection,
-    PublicRemoteDesktopOptions, PublicSavedConnectionProfile, PublicSerialFlowControl,
-    PublicSerialParity, PublicTerminalBackspaceSequence, PublicTerminalDeleteSequence,
-    PublicTerminalEncoding, PublicTerminalOptions, PublicTerminalSessionLogPolicy, PublicToolCall,
-    PublicUpstreamProxy, PublicUpstreamProxyProtocol, PublicVncCompression, PublicVncImageQuality,
+    PublicRdpNetworkProfile, PublicRemoteDesktopOptions, PublicSavedConnectionProfile,
+    PublicSerialFlowControl, PublicSerialParity, PublicTerminalBackspaceSequence,
+    PublicTerminalDeleteSequence, PublicTerminalEncoding, PublicTerminalOptions,
+    PublicTerminalSessionLogPolicy, PublicToolCall, PublicUpstreamProxy,
+    PublicUpstreamProxyProtocol, PublicVncCompression, PublicVncImageQuality,
     PublicVncSecurityPolicy, PublicVncSessionMode, PublicX11ForwardingMode, ToolEnvelope,
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopAudioOptions, RemoteDesktopClipboardOptions, RemoteDesktopDisplayOptions,
-    RemoteDesktopProtocol, RemoteDesktopRdpOptions, RemoteDesktopSessionOptions,
-    RemoteDesktopVncCompression, RemoteDesktopVncImageQuality, RemoteDesktopVncOptions,
-    RemoteDesktopVncSecurityPolicy, RemoteDesktopVncSessionMode,
+    RemoteDesktopProtocol, RemoteDesktopRdpNetworkProfile, RemoteDesktopRdpOptions,
+    RemoteDesktopSessionOptions, RemoteDesktopVncCompression, RemoteDesktopVncImageQuality,
+    RemoteDesktopVncOptions, RemoteDesktopVncSecurityPolicy, RemoteDesktopVncSessionMode,
 };
 use serde_json::{Value, json};
 
@@ -759,6 +760,14 @@ fn remote_desktop_options(options: &PublicRemoteDesktopOptions) -> RemoteDesktop
             use_all_monitors: options.use_all_monitors,
         },
         rdp: RemoteDesktopRdpOptions {
+            network_profile: match options.rdp_network_profile {
+                PublicRdpNetworkProfile::Automatic => RemoteDesktopRdpNetworkProfile::Automatic,
+                PublicRdpNetworkProfile::Lan => RemoteDesktopRdpNetworkProfile::Lan,
+                PublicRdpNetworkProfile::Broadband => RemoteDesktopRdpNetworkProfile::Broadband,
+                PublicRdpNetworkProfile::LowBandwidth => {
+                    RemoteDesktopRdpNetworkProfile::LowBandwidth
+                }
+            },
             disable_graphics_pipeline: options.disable_rdp_graphics_pipeline,
         },
         vnc: RemoteDesktopVncOptions {
@@ -1146,6 +1155,12 @@ pub(super) fn remote_desktop_options_projection(options: &RemoteDesktopSessionOp
         "audio_playback": options.audio.playback,
         "audio_capture": options.audio.capture,
         "use_all_monitors": options.display.use_all_monitors,
+        "rdp_network_profile": match options.rdp.network_profile {
+            RemoteDesktopRdpNetworkProfile::Automatic => "automatic",
+            RemoteDesktopRdpNetworkProfile::Lan => "lan",
+            RemoteDesktopRdpNetworkProfile::Broadband => "broadband",
+            RemoteDesktopRdpNetworkProfile::LowBandwidth => "low_bandwidth",
+        },
         "disable_rdp_graphics_pipeline": options.rdp.disable_graphics_pipeline,
         "vnc_security_policy": match options.vnc.security_policy {
             RemoteDesktopVncSecurityPolicy::RequireVerifiedEncryption => "require_verified_encryption",

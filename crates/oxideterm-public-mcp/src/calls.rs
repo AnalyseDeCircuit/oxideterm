@@ -428,6 +428,16 @@ pub enum PublicVncCompression {
     High,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicRdpNetworkProfile {
+    #[default]
+    Automatic,
+    Lan,
+    Broadband,
+    LowBandwidth,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PublicRemoteDesktopOptions {
@@ -446,6 +456,8 @@ pub struct PublicRemoteDesktopOptions {
     /// Disables the RDP Graphics Pipeline for hosts affected by EGFX rendering corruption.
     #[serde(default)]
     pub disable_rdp_graphics_pipeline: bool,
+    #[serde(default)]
+    pub rdp_network_profile: PublicRdpNetworkProfile,
     #[serde(default)]
     pub vnc_security_policy: PublicVncSecurityPolicy,
     #[serde(default)]
@@ -466,6 +478,7 @@ impl Default for PublicRemoteDesktopOptions {
             audio_capture: false,
             use_all_monitors: false,
             disable_rdp_graphics_pipeline: false,
+            rdp_network_profile: PublicRdpNetworkProfile::default(),
             vnc_security_policy: PublicVncSecurityPolicy::default(),
             vnc_session_mode: PublicVncSessionMode::default(),
             vnc_image_quality: PublicVncImageQuality::default(),

@@ -248,6 +248,10 @@ pub fn initial_connect_request(
         endpoint: profile.endpoint.clone(),
         transport_endpoint: profile.transport_endpoint.clone(),
         password_available,
+        username_available: profile
+            .username
+            .as_deref()
+            .is_some_and(|username| !username.trim().is_empty()),
         size: RemoteDesktopSize::clamped(initial_size.width, initial_size.height),
         scale_factor,
         read_only: profile.read_only,
@@ -472,9 +476,10 @@ mod tests {
     }
 
     #[test]
-    fn staged_vnc_preflight_sends_only_password_availability() {
+    fn staged_vnc_preflight_sends_only_credential_availability() {
         let mut vnc_profile = profile();
         vnc_profile.protocol = RemoteDesktopProtocol::Vnc;
+        vnc_profile.username = Some("operator".to_string());
         vnc_profile.endpoint =
             RemoteDesktopEndpoint::for_protocol("preview.local", RemoteDesktopProtocol::Vnc);
         let request = initial_connect_request(
@@ -491,6 +496,7 @@ mod tests {
 
         let encoded = serde_json::to_string(&request).unwrap();
         assert!(encoded.contains("\"passwordAvailable\":true"));
+        assert!(encoded.contains("\"usernameAvailable\":true"));
         assert!(!encoded.contains("wire-secret"));
         assert!(!encoded.contains("\"password\":"));
         assert!(!encoded.contains("\"username\":"));
@@ -527,6 +533,7 @@ mod tests {
                 use_all_monitors: true,
             },
             rdp: crate::RemoteDesktopRdpOptions {
+                network_profile: crate::RemoteDesktopRdpNetworkProfile::LowBandwidth,
                 disable_graphics_pipeline: true,
             },
             vnc: crate::RemoteDesktopVncOptions::default(),
@@ -540,6 +547,10 @@ mod tests {
         assert!(effective.audio.playback);
         assert!(!effective.audio.capture);
         assert!(effective.display.use_all_monitors);
+        assert_eq!(
+            effective.rdp.network_profile,
+            crate::RemoteDesktopRdpNetworkProfile::LowBandwidth
+        );
         assert!(effective.rdp.disable_graphics_pipeline);
     }
 

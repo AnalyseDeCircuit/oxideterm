@@ -55,6 +55,7 @@ impl RemoteDesktopFakeBackend {
                 session_options: _,
                 monitor_layout: _,
                 password_available: _,
+                username_available: _,
             } => self.connect(protocol, endpoint, size, read_only),
             RemoteDesktopHelperRequest::Connect {
                 protocol,
@@ -120,6 +121,9 @@ impl RemoteDesktopFakeBackend {
             | RemoteDesktopHelperRequest::ClipboardText { .. }
             | RemoteDesktopHelperRequest::ClipboardData { .. }
             | RemoteDesktopHelperRequest::ClipboardFiles { .. }
+            | RemoteDesktopHelperRequest::VncListRemoteFiles { .. }
+            | RemoteDesktopHelperRequest::VncDownloadRemoteFiles { .. }
+            | RemoteDesktopHelperRequest::CancelVncFileTransfer { .. }
             | RemoteDesktopHelperRequest::CancelClipboardTransfer { .. }
             | RemoteDesktopHelperRequest::UpdateDisplayLayout { .. }
             | RemoteDesktopHelperRequest::Authenticate { .. }

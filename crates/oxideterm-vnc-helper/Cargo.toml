@@ -11,11 +11,11 @@ image = { version = "0.25.10", default-features = false, features = ["bmp", "gif
 ironrdp-cliprdr-format = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5" }
 native-tls = { version = "0.2", features = ["vendored"] }
 openh264 = { version = "0.9", default-features = false, features = ["libloading"] }
+oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-pcm-audio = { path = "../oxideterm-pcm-audio" }
 oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
+rsasl = { version = "2.3.1", default-features = false, features = ["config_builder", "plain", "provider", "scram-sha-1", "scram-sha-2", "std"] }
 sha2.workspace = true
+tempfile = "3"
 uuid.workspace = true
 zeroize.workspace = true
-
-[dev-dependencies]
-tempfile = "3"
