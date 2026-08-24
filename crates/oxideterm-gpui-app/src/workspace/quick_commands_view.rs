@@ -19,6 +19,7 @@ use oxideterm_gpui_ui::{
 };
 use oxideterm_quick_commands::{
     QuickCommandRisk, classify_command_risk, quick_command_category_draft_can_save,
+    validate_quick_command_template,
 };
 use zeroize::Zeroizing;
 
@@ -31,9 +32,9 @@ use super::super::{
 use super::{
     QuickCommand, QuickCommandCategory, QuickCommandCategoryDraft, QuickCommandConfirmationPolicy,
     QuickCommandEditorDraft, QuickCommandExecutionDraft, QuickCommandIcon, QuickCommandInput,
-    QuickCommandParameterEditorDraft, QuickCommandParameterKind, QuickCommandTargetProtocol,
-    TerminalQuickCommandsState, default_quick_command_categories, now_ms,
-    quick_command_icon_source_id,
+    QuickCommandParameter, QuickCommandParameterEditorDraft, QuickCommandParameterKind,
+    QuickCommandTargetProtocol, TerminalQuickCommandsState, default_quick_command_categories,
+    now_ms, quick_command_icon_source_id,
 };
 use crate::assets::LucideIcon;
 
@@ -97,26 +98,47 @@ fn select_quick_command_category_state(
 }
 
 fn quick_command_editor_can_save(draft: &QuickCommandEditorDraft) -> bool {
+    if draft.name.trim().is_empty() || draft.command.trim().is_empty() {
+        return false;
+    }
     let mut names = std::collections::HashSet::new();
-    !draft.name.trim().is_empty()
-        && !draft.command.trim().is_empty()
-        && draft.parameters.iter().all(|parameter| {
-            let name = parameter.name.trim();
-            let mut characters = name.chars();
-            let valid_name = characters
-                .next()
-                .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
-                && characters
-                    .all(|character| character.is_ascii_alphanumeric() || character == '_');
-            let has_choice = parameter
-                .choices
-                .split([',', '\n'])
-                .any(|choice| !choice.trim().is_empty());
-            valid_name
-                && names.insert(name.to_string())
-                && !parameter.label.trim().is_empty()
-                && (parameter.kind != QuickCommandParameterKind::Choice || has_choice)
-        })
+    let mut parameters = Vec::with_capacity(draft.parameters.len());
+    for parameter in &draft.parameters {
+        let name = parameter.name.trim();
+        let mut characters = name.chars();
+        let valid_name = characters
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+            && characters.all(|character| character.is_ascii_alphanumeric() || character == '_');
+        let choices = parameter
+            .choices
+            .split([',', '\n'])
+            .map(str::trim)
+            .filter(|choice| !choice.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let default_value = parameter.default_value.trim();
+        if !valid_name
+            || !names.insert(name.to_string())
+            || parameter.label.trim().is_empty()
+            || (parameter.kind == QuickCommandParameterKind::Choice && choices.is_empty())
+            || (parameter.kind == QuickCommandParameterKind::Choice
+                && !default_value.is_empty()
+                && !choices.iter().any(|choice| choice == default_value))
+        {
+            return false;
+        }
+        parameters.push(QuickCommandParameter {
+            name: name.to_string(),
+            label: parameter.label.trim().to_string(),
+            kind: parameter.kind,
+            default_value: (!default_value.is_empty()).then(|| default_value.to_string()),
+            choices,
+            required: parameter.required,
+        });
+    }
+    // A command cannot enter persisted state with misspelled or malformed template tokens.
+    validate_quick_command_template(&draft.command, &parameters).is_ok()
 }
 
 fn quick_command_space_inserts_literal(platform: bool, control: bool, alt: bool) -> bool {
@@ -2533,6 +2555,12 @@ impl WorkspaceApp {
                         cx,
                     ))
                     .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n.t("terminal.quick_commands.template_hint")),
+                    )
+                    .child(
                         self.render_quick_command_text_input(
                             QuickCommandInput::CommandDescription,
                             draft.description.clone(),
@@ -2902,7 +2930,9 @@ impl WorkspaceApp {
 #[cfg(test)]
 mod terminal_command_bar_quick_command_tests {
     use super::{
-        QuickCommandCategoryDraft, QuickCommandIcon, quick_command_category_draft_can_save,
+        QuickCommandCategoryDraft, QuickCommandConfirmationPolicy, QuickCommandEditorDraft,
+        QuickCommandIcon, QuickCommandParameterEditorDraft, QuickCommandParameterKind,
+        quick_command_category_draft_can_save, quick_command_editor_can_save,
         quick_command_space_inserts_literal,
     };
 
@@ -2930,5 +2960,33 @@ mod terminal_command_bar_quick_command_tests {
                 icon: QuickCommandIcon::Zap,
             }
         ));
+    }
+
+    #[test]
+    fn quick_command_editor_rejects_unknown_template_parameter() {
+        let mut draft = QuickCommandEditorDraft {
+            id: None,
+            name: "Deploy".to_string(),
+            command: "deploy {{param.sevrice}}".to_string(),
+            category: "custom".to_string(),
+            description: String::new(),
+            host_patterns: String::new(),
+            parameters: vec![QuickCommandParameterEditorDraft {
+                name: "service".to_string(),
+                label: "Service".to_string(),
+                kind: QuickCommandParameterKind::Text,
+                default_value: String::new(),
+                choices: String::new(),
+                required: true,
+            }],
+            protocols: Vec::new(),
+            confirmation: QuickCommandConfirmationPolicy::Inherit,
+            created_at: 1,
+            sort_order: 0,
+        };
+
+        assert!(!quick_command_editor_can_save(&draft));
+        draft.command = "deploy {{param.service|sh}}".to_string();
+        assert!(quick_command_editor_can_save(&draft));
     }
 }

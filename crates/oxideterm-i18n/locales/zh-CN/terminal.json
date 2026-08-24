@@ -286,6 +286,7 @@
       "empty_category": "此分类暂无快捷命令",
       "name_placeholder": "名称",
       "command_placeholder": "命令",
+      "template_hint": "使用 {{param.name}} 或 {{ctx.host}}；添加 |sh 可按 POSIX Shell 规则引用。",
       "description_placeholder": "描述",
       "host_pattern_placeholder": "主机匹配，如 *.prod",
       "confirm_title": "执行快捷命令？",

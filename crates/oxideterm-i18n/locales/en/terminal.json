@@ -286,6 +286,7 @@
       "empty_category": "No quick commands in this category",
       "name_placeholder": "Name",
       "command_placeholder": "Command",
+      "template_hint": "Use {{param.name}} or {{ctx.host}}; add |sh for POSIX shell quoting.",
       "description_placeholder": "Description",
       "host_pattern_placeholder": "Host pattern, e.g. *.prod",
       "confirm_title": "Run quick command?",

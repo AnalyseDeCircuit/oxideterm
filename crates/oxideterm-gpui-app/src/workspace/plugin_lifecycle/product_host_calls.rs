@@ -4,8 +4,12 @@
 //! Workspace-owned side effects for stable product plugin APIs.
 
 use gpui::{Context, Window};
-use oxideterm_quick_commands::QuickCommandDraft;
+use oxideterm_quick_commands::{
+    QuickCommandConfirmationPolicy, QuickCommandDraft, QuickCommandParameter,
+    QuickCommandTargetProtocol,
+};
 use oxideterm_ssh::NodeId;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 use zeroize::Zeroizing;
 
@@ -155,6 +159,29 @@ impl WorkspaceApp {
                 let Some(command) = string_arg(args, "command") else {
                     return;
                 };
+                // Structured fields are decoded before the queued effect mutates product state.
+                let Ok(parameters) =
+                    optional_json_arg::<Vec<QuickCommandParameter>>(args, "parameters")
+                else {
+                    return;
+                };
+                let Ok(protocols) =
+                    optional_json_arg::<Vec<QuickCommandTargetProtocol>>(args, "protocols")
+                else {
+                    return;
+                };
+                let Ok(confirmation) =
+                    optional_json_arg::<QuickCommandConfirmationPolicy>(args, "confirmation")
+                else {
+                    return;
+                };
+                let host_patterns = match optional_json_arg::<Vec<String>>(args, "hostPatterns") {
+                    Ok(Some(patterns)) => Some(patterns),
+                    Ok(None) => {
+                        string_arg(args, "hostPattern").map(|pattern| vec![pattern.to_string()])
+                    }
+                    Err(()) => return,
+                };
                 self.terminal.update(cx, |terminal, _cx| {
                     terminal
                         .quick_commands
@@ -163,13 +190,15 @@ impl WorkspaceApp {
                             id: string_arg(args, "id").map(str::to_string),
                             name: name.to_string(),
                             command: command.to_string(),
-                            category: string_arg(args, "category").unwrap_or("custom").to_string(),
-                            description: string_arg(args, "description")
-                                .unwrap_or_default()
-                                .to_string(),
-                            host_pattern: string_arg(args, "hostPattern")
-                                .unwrap_or_default()
-                                .to_string(),
+                            category: string_arg(args, "category").map(str::to_string),
+                            description: args
+                                .get("description")
+                                .and_then(Value::as_str)
+                                .map(str::to_string),
+                            parameters,
+                            protocols,
+                            host_patterns,
+                            confirmation,
                         });
                 });
             }
@@ -324,4 +353,10 @@ fn string_arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+fn optional_json_arg<T: DeserializeOwned>(args: &Value, key: &str) -> Result<Option<T>, ()> {
+    args.get(key)
+        .map(|value| serde_json::from_value(value.clone()).map_err(|_| ()))
+        .transpose()
 }

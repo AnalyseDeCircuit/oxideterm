@@ -1534,7 +1534,7 @@ interface HostCall {
 | `quickCommands.getMetadata` | 默认 | `{}` | 不含命令正文的发现元数据 |
 | `quickCommands.getAll` | `quick_commands.read` | `{}` | 完整分类和命令定义 |
 | `quickCommands.execute` | `quick_commands.execute` | `{ id: string }` | `{ queued: true }`；仍执行常规命令风险确认 |
-| `quickCommands.upsert` | `quick_commands.manage` | `{ id?, name, command, category?, description?, hostPattern? }` | `{ queued: true }` |
+| `quickCommands.upsert` | `quick_commands.manage` | `{ id?, name, command, category?, description?, hostPattern?, hostPatterns?, parameters?, protocols?, confirmation? }` | `{ queued: true }` |
 | `quickCommands.remove` | `quick_commands.manage` | `{ id: string }` | `{ queued: true }` |
 | `theme.getTokens` | 默认 | `{}` | 完整有效终端、界面、指标、圆角、间距和动效 token |
 | `theme.getAvailable` | 默认 | `{}` | 当前、内置和自定义主题标识 |
@@ -1543,6 +1543,7 @@ interface HostCall {
 | `hostTools.getExtensions` | 默认 | `{}` | 当前插件声明的监控元数据，不含命令字符串 |
 | `hostTools.capture` | `host_tools.read` | `{ nodeId, osType, resource, preset?, limit? }` | `docker`、`services`、`logs`、`tmux`、`ports`、`filesystems`、`packages` 或 `scheduledTasks` 的类型化快照 |
 | `hostTools.execute` | `host_tools.write` | `{ nodeId, osType, resource, action, target, ...actionArgs }` | `{ success, exitCode, truncated }` |
+
 | `hostTools.terminate` | `host_tools.destructive` | `{ nodeId, osType, resource: 'process' | 'tmux', action, target }` | `{ success, exitCode, truncated }` |
 | `hostTools.runExtension` | `host_tools.custom.execute` | `{ nodeId, osType, monitorId }` | `{ monitorId, success, data, rowCount, exitCode, truncated }` |
 | `cloudSync.getSummary` | 默认 | `{}` | 安全状态、进度、脏状态和冲突元数据 |
@@ -1552,6 +1553,8 @@ interface HostCall {
 | `cloudSync.pullPreview` | `cloud_sync.control` | `{}` | `{ queued: true }`；不会应用数据或保存未提交的面板草稿 |
 | `cloudSync.applyPreview` | `cloud_sync.apply` | `{}` | `{ queued: true }`；只应用当前已审阅预览 |
 | `cloudSync.setAutoUpload` | `cloud_sync.control` | `{ enabled: boolean, intervalMinutes?: number }` | `{ queued: true }`；间隔最小为五分钟 |
+
+快捷命令参数使用 `{ name, label, kind?, defaultValue?, choices?, required? }`；`kind` 可取 `text` 或 `choice`。`protocols` 支持 `local`、`ssh`、`mosh`、`telnet`、`serial` 和 `tmux`，`confirmation` 可取 `inherit` 或 `always`。模板中的 `{{param.name}}` 会原样插入；需要把值作为一个 POSIX Shell 参数引用时，请使用 `{{param.name|sh}}`。
 
 Host Tools 不会创建第二条 SSH 连接。它通过 `NodeRouter` 解析当前 `nodeId`，复用现有连接，以产品命令构建器验证每个参数，并省略原始标准错误；采集错误会在序列化前脱敏。
 

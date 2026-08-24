@@ -49,6 +49,7 @@ pub struct PreparedQuickCommand {
 pub enum QuickCommandTemplateError {
     UnterminatedToken,
     UnknownToken(String),
+    UnknownModifier(String),
     UnknownParameter(String),
     MissingParameter(String),
     InvalidChoice { parameter: String },
@@ -60,6 +61,9 @@ impl std::fmt::Display for QuickCommandTemplateError {
         match self {
             Self::UnterminatedToken => formatter.write_str("unterminated template token"),
             Self::UnknownToken(_) => formatter.write_str("unknown template token"),
+            Self::UnknownModifier(modifier) => {
+                write!(formatter, "unknown template modifier {modifier}")
+            }
             Self::UnknownParameter(parameter) => {
                 write!(formatter, "unknown parameter {parameter}")
             }
@@ -131,11 +135,44 @@ pub fn prepare_quick_command(
     })
 }
 
+pub fn validate_quick_command_template(
+    template: &str,
+    command_parameters: &[QuickCommandParameter],
+) -> Result<(), Vec<QuickCommandTemplateError>> {
+    let parameters = command_parameters
+        .iter()
+        .map(|parameter| (parameter.name.as_str(), parameter))
+        .collect::<HashMap<_, _>>();
+    let target = QuickCommandTargetContext {
+        target_id: "validation".to_string(),
+        label: "validation".to_string(),
+        protocol: QuickCommandTargetProtocol::Local,
+        // Known context fields use empty values so validation checks token shape, not runtime data.
+        values: QuickCommandContextValues {
+            host: Some(Zeroizing::new(String::new())),
+            username: Some(Zeroizing::new(String::new())),
+            port: Some(0),
+            cwd: Some(Zeroizing::new(String::new())),
+            connection: Some(Zeroizing::new(String::new())),
+            group: Some(Zeroizing::new(String::new())),
+            selection: Some(Zeroizing::new(String::new())),
+        },
+    };
+    resolve_template(template, &parameters, &BTreeMap::new(), &target).map(|_| ())
+}
+
 fn validate_parameter_values(
     parameters: &HashMap<&str, &QuickCommandParameter>,
     parameter_values: &BTreeMap<String, Zeroizing<String>>,
     errors: &mut Vec<QuickCommandTemplateError>,
 ) {
+    for parameter_name in parameter_values.keys() {
+        if !parameters.contains_key(parameter_name.as_str()) {
+            errors.push(QuickCommandTemplateError::UnknownParameter(
+                parameter_name.clone(),
+            ));
+        }
+    }
     for parameter in parameters.values() {
         let value = parameter_values
             .get(&parameter.name)
@@ -204,28 +241,54 @@ fn resolve_token(
     parameter_values: &BTreeMap<String, Zeroizing<String>>,
     target: &QuickCommandTargetContext,
 ) -> Result<Zeroizing<String>, QuickCommandTemplateError> {
-    if let Some(name) = token.strip_prefix("param.") {
+    let (token, modifier) = token
+        .split_once('|')
+        .map_or((token, None), |(token, modifier)| {
+            (token.trim(), Some(modifier.trim()))
+        });
+    let value = if let Some(name) = token.strip_prefix("param.") {
         let Some(parameter) = parameters.get(name) else {
             return Err(QuickCommandTemplateError::UnknownParameter(
                 name.to_string(),
             ));
         };
-        return Ok(parameter_values
+        parameter_values
             .get(name)
             .filter(|value| !value.is_empty())
             .cloned()
             .or_else(|| parameter.default_value.clone().map(Zeroizing::new))
-            .unwrap_or_else(|| Zeroizing::new(String::new())));
-    }
-    if let Some(field) = token.strip_prefix("ctx.") {
-        return context_value(&target.values, field).ok_or_else(|| {
+            .unwrap_or_else(|| Zeroizing::new(String::new()))
+    } else if let Some(field) = token.strip_prefix("ctx.") {
+        context_value(&target.values, field).ok_or_else(|| {
             QuickCommandTemplateError::MissingContext {
                 target: target.label.clone(),
                 field: field.to_string(),
             }
-        });
+        })?
+    } else {
+        return Err(QuickCommandTemplateError::UnknownToken(token.to_string()));
+    };
+    match modifier {
+        None => Ok(value),
+        Some("sh") => Ok(quote_posix_shell_word(&value)),
+        Some(modifier) => Err(QuickCommandTemplateError::UnknownModifier(
+            modifier.to_string(),
+        )),
     }
-    Err(QuickCommandTemplateError::UnknownToken(token.to_string()))
+}
+
+fn quote_posix_shell_word(value: &str) -> Zeroizing<String> {
+    let mut quoted = Zeroizing::new(String::with_capacity(value.len().saturating_add(2)));
+    quoted.push('\'');
+    for character in value.chars() {
+        if character == '\'' {
+            quoted.push_str("'\"'\"'");
+        } else {
+            quoted.push(character);
+        }
+    }
+    quoted.push('\'');
+    quoted
 }
 
 fn context_value(context: &QuickCommandContextValues, field: &str) -> Option<Zeroizing<String>> {
@@ -287,5 +350,160 @@ mod tests {
             prepared.targets[1].command.as_str(),
             "deploy api --host b.example.com"
         );
+    }
+
+    #[test]
+    fn template_validation_rejects_unknown_parameters_before_execution() {
+        let parameters = vec![QuickCommandParameter {
+            name: "service".to_string(),
+            label: "Service".to_string(),
+            ..QuickCommandParameter::default()
+        }];
+
+        let errors = validate_quick_command_template(
+            "deploy {{param.sevrice}} --host {{ctx.host}}",
+            &parameters,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            errors.as_slice(),
+            [QuickCommandTemplateError::UnknownParameter(parameter)] if parameter == "sevrice"
+        ));
+    }
+
+    #[test]
+    fn sh_modifier_quotes_one_posix_shell_word() {
+        let command = QuickCommand {
+            id: "show".to_string(),
+            name: "Show".to_string(),
+            command: "printf '%s\\n' {{param.value|sh}}".to_string(),
+            category: "custom".to_string(),
+            description: None,
+            parameters: vec![QuickCommandParameter {
+                name: "value".to_string(),
+                label: "Value".to_string(),
+                required: true,
+                ..QuickCommandParameter::default()
+            }],
+            availability: QuickCommandAvailability::default(),
+            confirmation: QuickCommandConfirmationPolicy::Inherit,
+            sort_order: 0,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let values = BTreeMap::from([(
+            "value".to_string(),
+            Zeroizing::new("a b'$(touch nope)".to_string()),
+        )]);
+        let target = QuickCommandTargetContext {
+            target_id: "local".to_string(),
+            label: "Local".to_string(),
+            protocol: QuickCommandTargetProtocol::Local,
+            values: QuickCommandContextValues::default(),
+        };
+
+        let prepared = prepare_quick_command(&command, &[target], &values).unwrap();
+
+        assert_eq!(
+            prepared.targets[0].command.as_str(),
+            "printf '%s\\n' 'a b'\"'\"'$(touch nope)'"
+        );
+    }
+
+    #[test]
+    fn preparation_rejects_unknown_values_and_confirms_expanded_risk() {
+        let command = QuickCommand {
+            id: "action".to_string(),
+            name: "Action".to_string(),
+            command: "{{param.action}}".to_string(),
+            category: "custom".to_string(),
+            description: None,
+            parameters: vec![QuickCommandParameter {
+                name: "action".to_string(),
+                label: "Action".to_string(),
+                required: true,
+                ..QuickCommandParameter::default()
+            }],
+            availability: QuickCommandAvailability::default(),
+            confirmation: QuickCommandConfirmationPolicy::Inherit,
+            sort_order: 0,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let target = QuickCommandTargetContext {
+            target_id: "ssh".to_string(),
+            label: "SSH".to_string(),
+            protocol: QuickCommandTargetProtocol::Ssh,
+            values: QuickCommandContextValues::default(),
+        };
+        let unknown_values = BTreeMap::from([
+            ("action".to_string(), Zeroizing::new("uptime".to_string())),
+            ("typo".to_string(), Zeroizing::new("ignored".to_string())),
+        ]);
+
+        let Err(errors) =
+            prepare_quick_command(&command, std::slice::from_ref(&target), &unknown_values)
+        else {
+            panic!("unknown parameter values must be rejected");
+        };
+        assert!(matches!(
+            errors.as_slice(),
+            [QuickCommandTemplateError::UnknownParameter(parameter)] if parameter == "typo"
+        ));
+
+        let risky_values = BTreeMap::from([(
+            "action".to_string(),
+            Zeroizing::new("rm -rf /tmp/example".to_string()),
+        )]);
+        let prepared = prepare_quick_command(&command, &[target], &risky_values).unwrap();
+        assert!(prepared.confirmation_required);
+        assert_eq!(prepared.targets[0].risk, Some(QuickCommandRisk::High));
+    }
+
+    #[test]
+    fn preparation_separates_available_and_unavailable_targets() {
+        let command = QuickCommand {
+            id: "ssh-only".to_string(),
+            name: "SSH only".to_string(),
+            command: "echo {{ctx.host}}".to_string(),
+            category: "custom".to_string(),
+            description: None,
+            parameters: Vec::new(),
+            availability: QuickCommandAvailability {
+                protocols: vec![QuickCommandTargetProtocol::Ssh],
+                host_patterns: Vec::new(),
+            },
+            confirmation: QuickCommandConfirmationPolicy::Inherit,
+            sort_order: 0,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let targets = [
+            QuickCommandTargetContext {
+                target_id: "local".to_string(),
+                label: "Local".to_string(),
+                protocol: QuickCommandTargetProtocol::Local,
+                values: QuickCommandContextValues::default(),
+            },
+            QuickCommandTargetContext {
+                target_id: "ssh".to_string(),
+                label: "Remote".to_string(),
+                protocol: QuickCommandTargetProtocol::Ssh,
+                values: QuickCommandContextValues {
+                    host: Some(Zeroizing::new("server.example.com".to_string())),
+                    ..QuickCommandContextValues::default()
+                },
+            },
+        ];
+
+        let prepared = prepare_quick_command(&command, &targets, &BTreeMap::new()).unwrap();
+
+        assert_eq!(prepared.targets.len(), 1);
+        assert_eq!(
+            prepared.targets[0].command.as_str(),
+            "echo server.example.com"
+        );
+        assert_eq!(prepared.unavailable_targets, ["Local"]);
     }
 }

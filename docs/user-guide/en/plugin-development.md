@@ -1539,7 +1539,7 @@ Workspace mutations return `{ queued: true }` after schema and permission prefli
 | `quickCommands.getMetadata` | baseline | `{}` | Discovery metadata without command bodies |
 | `quickCommands.getAll` | `quick_commands.read` | `{}` | Complete categories and command definitions |
 | `quickCommands.execute` | `quick_commands.execute` | `{ id: string }` | `{ queued: true }`; normal command-risk confirmation still applies |
-| `quickCommands.upsert` | `quick_commands.manage` | `{ id?, name, command, category?, description?, hostPattern? }` | `{ queued: true }` |
+| `quickCommands.upsert` | `quick_commands.manage` | `{ id?, name, command, category?, description?, hostPattern?, hostPatterns?, parameters?, protocols?, confirmation? }` | `{ queued: true }` |
 | `quickCommands.remove` | `quick_commands.manage` | `{ id: string }` | `{ queued: true }` |
 | `theme.getTokens` | baseline | `{}` | Complete effective terminal/UI/metric/radius/spacing/motion tokens |
 | `theme.getAvailable` | baseline | `{}` | Active, built-in, and custom theme identifiers |
@@ -1548,6 +1548,7 @@ Workspace mutations return `{ queued: true }` after schema and permission prefli
 | `hostTools.getExtensions` | baseline | `{}` | This plugin's monitor metadata, with command strings omitted |
 | `hostTools.capture` | `host_tools.read` | `{ nodeId, osType, resource, preset?, limit? }` | Typed snapshot for `docker`, `services`, `logs`, `tmux`, `ports`, `filesystems`, `packages`, or `scheduledTasks` |
 | `hostTools.execute` | `host_tools.write` | `{ nodeId, osType, resource, action, target, ...actionArgs }` | `{ success, exitCode, truncated }` |
+
 | `hostTools.terminate` | `host_tools.destructive` | `{ nodeId, osType, resource: 'process' | 'tmux', action, target }` | `{ success, exitCode, truncated }` |
 | `hostTools.runExtension` | `host_tools.custom.execute` | `{ nodeId, osType, monitorId }` | `{ monitorId, success, data, rowCount, exitCode, truncated }` |
 | `cloudSync.getSummary` | baseline | `{}` | Safe status/progress/dirty/conflict metadata |
@@ -1557,6 +1558,8 @@ Workspace mutations return `{ queued: true }` after schema and permission prefli
 | `cloudSync.pullPreview` | `cloud_sync.control` | `{}` | `{ queued: true }`; does not apply data or persist unsaved panel drafts |
 | `cloudSync.applyPreview` | `cloud_sync.apply` | `{}` | `{ queued: true }`; applies only the currently reviewed preview |
 | `cloudSync.setAutoUpload` | `cloud_sync.control` | `{ enabled: boolean, intervalMinutes?: number }` | `{ queued: true }`; interval is clamped to at least five minutes |
+
+Quick Command parameters use `{ name, label, kind?, defaultValue?, choices?, required? }`; `kind` is `text` or `choice`. `protocols` accepts `local`, `ssh`, `mosh`, `telnet`, `serial`, and `tmux`, while `confirmation` is `inherit` or `always`. Templates insert `{{param.name}}` verbatim; use `{{param.name|sh}}` when the value must be quoted as one POSIX shell word.
 
 Host Tools never creates a second SSH transport. It resolves the current `nodeId` through `NodeRouter`, uses the existing connection, validates every command argument with product command builders, and omits raw standard error. Capture errors are redacted before serialization.
 

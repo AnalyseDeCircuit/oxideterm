@@ -1205,6 +1205,64 @@ pub struct QuickCommandsDescribeArgs {
     pub quickcommand_ref: QuickCommandRef,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicQuickCommandParameterKind {
+    #[default]
+    Text,
+    Choice,
+}
+
+#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+pub struct PublicQuickCommandParameter {
+    pub name: String,
+    pub label: String,
+    #[serde(default)]
+    pub kind: PublicQuickCommandParameterKind,
+    #[serde(default)]
+    pub default_value: Option<String>,
+    #[serde(default)]
+    pub choices: Vec<String>,
+    #[serde(default)]
+    pub required: bool,
+}
+
+impl fmt::Debug for PublicQuickCommandParameter {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PublicQuickCommandParameter")
+            .field("name", &self.name)
+            .field("label", &self.label)
+            .field("kind", &self.kind)
+            // Defaults may contain credentials or other sensitive shell input.
+            .field(
+                "default_value",
+                &self.default_value.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("choice_count", &self.choices.len())
+            .field("required", &self.required)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicQuickCommandTargetProtocol {
+    Local,
+    Ssh,
+    Mosh,
+    Telnet,
+    Serial,
+    Tmux,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicQuickCommandConfirmationPolicy {
+    Inherit,
+    Always,
+}
+
 pub struct QuickCommandsSaveArgs {
     pub quickcommand_ref: Option<QuickCommandRef>,
     pub name: String,
@@ -1212,6 +1270,10 @@ pub struct QuickCommandsSaveArgs {
     pub category: String,
     pub description: Option<String>,
     pub host_pattern: Option<String>,
+    pub host_patterns: Option<Vec<String>>,
+    pub parameters: Option<Vec<PublicQuickCommandParameter>>,
+    pub protocols: Option<Vec<PublicQuickCommandTargetProtocol>>,
+    pub confirmation: Option<PublicQuickCommandConfirmationPolicy>,
     pub expected_revision: u64,
 }
 
@@ -1225,6 +1287,11 @@ impl fmt::Debug for QuickCommandsSaveArgs {
             .field("category", &self.category)
             .field("description", &self.description)
             .field("host_pattern", &self.host_pattern)
+            .field("host_patterns", &self.host_patterns)
+            // Parameter defaults may contain sensitive shell input.
+            .field("parameter_count", &self.parameters.as_ref().map(Vec::len))
+            .field("protocols", &self.protocols)
+            .field("confirmation", &self.confirmation)
             .field("expected_revision", &self.expected_revision)
             .finish()
     }

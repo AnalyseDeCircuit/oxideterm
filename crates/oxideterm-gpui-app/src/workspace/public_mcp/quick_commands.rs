@@ -2,13 +2,16 @@ use std::collections::HashSet;
 
 use gpui::Context;
 use oxideterm_public_mcp::{
-    ClientRef, DomainRequest, PublicToolCall, QuickCommandRef, ToolEnvelope, ToolGroup,
+    ClientRef, DomainRequest, PublicQuickCommandConfirmationPolicy, PublicQuickCommandParameter,
+    PublicQuickCommandParameterKind, PublicQuickCommandTargetProtocol, PublicToolCall,
+    QuickCommandRef, ToolEnvelope, ToolGroup,
 };
 use oxideterm_quick_commands::{
-    QuickCommand, QuickCommandContextValues, QuickCommandDraft, QuickCommandRisk,
-    QuickCommandTargetContext, QuickCommandTargetProtocol, QuickCommandsSnapshot,
-    classify_command_risk, delete_quick_command, load_snapshot, new_quick_command_id, now_ms,
-    prepare_quick_command, save_snapshot, upsert_quick_command,
+    QuickCommand, QuickCommandConfirmationPolicy, QuickCommandContextValues, QuickCommandDraft,
+    QuickCommandParameter, QuickCommandParameterKind, QuickCommandRisk, QuickCommandTargetContext,
+    QuickCommandTargetProtocol, QuickCommandsSnapshot, classify_command_risk, delete_quick_command,
+    load_snapshot, new_quick_command_id, now_ms, prepare_quick_command, save_snapshot,
+    upsert_quick_command,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -23,6 +26,10 @@ struct QuickCommandSummary {
     category: String,
     description: Option<String>,
     host_pattern: Option<String>,
+    host_patterns: Vec<String>,
+    protocols: Vec<QuickCommandTargetProtocol>,
+    parameter_count: usize,
+    confirmation: QuickCommandConfirmationPolicy,
     risk: Option<&'static str>,
     updated_at: u64,
 }
@@ -102,6 +109,10 @@ impl WorkspaceApp {
                 "category": command.category,
                 "description": command.description,
                 "host_pattern": command.availability.host_patterns.first(),
+                "host_patterns": command.availability.host_patterns,
+                "protocols": command.availability.protocols,
+                "parameters": command.parameters.into_iter().map(public_quick_command_parameter).collect::<Vec<_>>(),
+                "confirmation": command.confirmation,
                 "revision": snapshot.updated_at,
             }),
         );
@@ -153,9 +164,48 @@ impl WorkspaceApp {
                 id: Some(command_id.clone()),
                 name: args.name.clone(),
                 command: args.command.to_string(),
-                category: args.category.clone(),
-                description: args.description.clone().unwrap_or_default(),
-                host_pattern: args.host_pattern.clone().unwrap_or_default(),
+                category: Some(args.category.clone()),
+                description: args.description.clone(),
+                parameters: args.parameters.as_ref().map(|parameters| {
+                    parameters
+                        .iter()
+                        .map(|parameter| QuickCommandParameter {
+                            name: parameter.name.clone(),
+                            label: parameter.label.clone(),
+                            kind: match parameter.kind {
+                                PublicQuickCommandParameterKind::Text => {
+                                    QuickCommandParameterKind::Text
+                                }
+                                PublicQuickCommandParameterKind::Choice => {
+                                    QuickCommandParameterKind::Choice
+                                }
+                            },
+                            default_value: parameter.default_value.clone(),
+                            choices: parameter.choices.clone(),
+                            required: parameter.required,
+                        })
+                        .collect()
+                }),
+                protocols: args.protocols.as_ref().map(|protocols| {
+                    protocols
+                        .iter()
+                        .copied()
+                        .map(core_quick_command_protocol)
+                        .collect()
+                }),
+                host_patterns: args.host_patterns.clone().or_else(|| {
+                    args.host_pattern
+                        .clone()
+                        .map(|host_pattern| vec![host_pattern])
+                }),
+                confirmation: args.confirmation.map(|confirmation| match confirmation {
+                    PublicQuickCommandConfirmationPolicy::Inherit => {
+                        QuickCommandConfirmationPolicy::Inherit
+                    }
+                    PublicQuickCommandConfirmationPolicy::Always => {
+                        QuickCommandConfirmationPolicy::Always
+                    }
+                }),
             },
             new_revision,
         );
@@ -417,6 +467,10 @@ impl super::PublicMcpWorkspaceBridge {
             category: command.category,
             description: command.description,
             host_pattern: command.availability.host_patterns.first().cloned(),
+            host_patterns: command.availability.host_patterns,
+            protocols: command.availability.protocols,
+            parameter_count: command.parameters.len(),
+            confirmation: command.confirmation,
             risk: classify_command_risk(&command.command).map(quick_command_risk_name),
             updated_at: command.updated_at,
         }
@@ -437,6 +491,33 @@ impl super::PublicMcpWorkspaceBridge {
         let command_id = command_id.clone();
         self.quick_command_ids.remove(quickcommand_ref);
         self.quick_command_refs.remove(&(owner, command_id));
+    }
+}
+
+fn core_quick_command_protocol(
+    protocol: PublicQuickCommandTargetProtocol,
+) -> QuickCommandTargetProtocol {
+    match protocol {
+        PublicQuickCommandTargetProtocol::Local => QuickCommandTargetProtocol::Local,
+        PublicQuickCommandTargetProtocol::Ssh => QuickCommandTargetProtocol::Ssh,
+        PublicQuickCommandTargetProtocol::Mosh => QuickCommandTargetProtocol::Mosh,
+        PublicQuickCommandTargetProtocol::Telnet => QuickCommandTargetProtocol::Telnet,
+        PublicQuickCommandTargetProtocol::Serial => QuickCommandTargetProtocol::Serial,
+        PublicQuickCommandTargetProtocol::Tmux => QuickCommandTargetProtocol::Tmux,
+    }
+}
+
+fn public_quick_command_parameter(parameter: QuickCommandParameter) -> PublicQuickCommandParameter {
+    PublicQuickCommandParameter {
+        name: parameter.name,
+        label: parameter.label,
+        kind: match parameter.kind {
+            QuickCommandParameterKind::Text => PublicQuickCommandParameterKind::Text,
+            QuickCommandParameterKind::Choice => PublicQuickCommandParameterKind::Choice,
+        },
+        default_value: parameter.default_value,
+        choices: parameter.choices,
+        required: parameter.required,
     }
 }
 

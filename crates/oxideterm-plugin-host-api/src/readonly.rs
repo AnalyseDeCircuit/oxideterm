@@ -3,7 +3,10 @@
 
 //! Read-only plugin host API snapshots and returnable call routing.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use chrono::{SecondsFormat, Utc};
 use oxideterm_i18n::I18n;
@@ -683,14 +686,14 @@ pub fn native_plugin_returnable_host_api_response(
         ("quickCommands", "upsert") => {
             let has_name = call.args.get("name").and_then(Value::as_str).is_some();
             let has_command = call.args.get("command").and_then(Value::as_str).is_some();
-            if has_name && has_command {
+            if has_name && has_command && quick_command_upsert_args_are_valid(&call.args) {
                 Some(native_plugin_queued_response(call.request_id))
             } else {
                 Some(plugin_runtime::PluginResponse::error(
                     call.request_id,
                     plugin_runtime::PluginError::protocol(
                         "invalid_quick_command",
-                        "quickCommands.upsert requires string args.name and args.command",
+                        "quickCommands.upsert requires a valid Quick Command definition",
                     ),
                 ))
             }
@@ -702,6 +705,91 @@ pub fn native_plugin_returnable_host_api_response(
         )),
         _ => None,
     }
+}
+
+fn quick_command_upsert_args_are_valid(args: &Value) -> bool {
+    let optional_string = |key| args.get(key).is_none_or(Value::is_string);
+    let string_array = |key| {
+        args.get(key).is_none_or(|value| {
+            value
+                .as_array()
+                .is_some_and(|values| values.iter().all(Value::is_string))
+        })
+    };
+    let confirmation_is_valid = args
+        .get("confirmation")
+        .is_none_or(|value| matches!(value.as_str(), Some("inherit" | "always")));
+    let protocols_are_valid = args.get("protocols").is_none_or(|value| {
+        value.as_array().is_some_and(|protocols| {
+            protocols.iter().all(|protocol| {
+                matches!(
+                    protocol.as_str(),
+                    Some("local" | "ssh" | "mosh" | "telnet" | "serial" | "tmux")
+                )
+            })
+        })
+    });
+    optional_string("id")
+        && optional_string("category")
+        && optional_string("description")
+        && optional_string("hostPattern")
+        && confirmation_is_valid
+        && string_array("hostPatterns")
+        && protocols_are_valid
+        && args
+            .get("parameters")
+            .is_none_or(quick_command_parameters_are_valid)
+        && !(args.get("hostPattern").is_some() && args.get("hostPatterns").is_some())
+}
+
+fn quick_command_parameters_are_valid(value: &Value) -> bool {
+    let Some(parameters) = value.as_array() else {
+        return false;
+    };
+    let mut names = HashSet::new();
+    parameters.iter().all(|parameter| {
+        let Some(name) = parameter.get("name").and_then(Value::as_str) else {
+            return false;
+        };
+        let Some(label) = parameter.get("label").and_then(Value::as_str) else {
+            return false;
+        };
+        let mut characters = name.chars();
+        let valid_name = characters
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+            && characters.all(|character| character.is_ascii_alphanumeric() || character == '_');
+        let kind = parameter
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or("text");
+        let choices = match parameter.get("choices") {
+            None => Vec::new(),
+            Some(value) => {
+                let Some(values) = value.as_array() else {
+                    return false;
+                };
+                let choices = values.iter().filter_map(Value::as_str).collect::<Vec<_>>();
+                if choices.len() != values.len() {
+                    return false;
+                }
+                choices
+            }
+        };
+        let default_value = match parameter.get("defaultValue") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(value)) => Some(value.as_str()),
+            Some(_) => return false,
+        };
+        valid_name
+            && names.insert(name)
+            && !label.trim().is_empty()
+            && matches!(kind, "text" | "choice")
+            && parameter.get("required").is_none_or(Value::is_boolean)
+            && (kind != "choice" || !choices.is_empty())
+            && (kind != "choice"
+                || default_value.is_none_or(|default_value| choices.contains(&default_value)))
+    })
 }
 
 fn native_plugin_queued_response(request_id: String) -> plugin_runtime::PluginResponse {
@@ -1268,5 +1356,28 @@ mod tests {
         assert_eq!(value["progress"]["percent"], 50.0);
         assert!(value.get("endpoint").is_none());
         assert!(value.get("lastError").is_none());
+    }
+
+    #[test]
+    fn quick_command_upsert_validates_structured_fields() {
+        assert!(quick_command_upsert_args_are_valid(&json!({
+            "name": "Deploy",
+            "command": "deploy {{param.service}}",
+            "hostPatterns": ["*.prod", "bastion.*"],
+            "protocols": ["ssh", "mosh"],
+            "confirmation": "always",
+            "parameters": [{
+                "name": "service",
+                "label": "Service",
+                "kind": "choice",
+                "choices": ["api", "worker"],
+                "required": true
+            }]
+        })));
+        assert!(!quick_command_upsert_args_are_valid(&json!({
+            "name": "Deploy",
+            "command": "uptime",
+            "protocols": ["unsupported"]
+        })));
     }
 }

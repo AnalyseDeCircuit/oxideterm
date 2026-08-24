@@ -39,4 +39,5 @@ pub use store::{
 pub use template::{
     PreparedQuickCommand, PreparedQuickCommandTarget, QuickCommandContextValues,
     QuickCommandTargetContext, QuickCommandTemplateError, prepare_quick_command,
+    validate_quick_command_template,
 };

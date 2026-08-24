@@ -14,9 +14,12 @@ pub struct QuickCommandDraft {
     pub id: Option<String>,
     pub name: String,
     pub command: String,
-    pub category: String,
-    pub description: String,
-    pub host_pattern: String,
+    pub category: Option<String>,
+    pub description: Option<String>,
+    pub parameters: Option<Vec<crate::QuickCommandParameter>>,
+    pub protocols: Option<Vec<QuickCommandTargetProtocol>>,
+    pub host_patterns: Option<Vec<String>>,
+    pub confirmation: Option<QuickCommandConfirmationPolicy>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -92,15 +95,22 @@ pub fn upsert_quick_command(
         .as_ref()
         .and_then(|id| commands.iter().find(|command| &command.id == id));
     let existing_created_at = existing.map(|command| command.created_at);
+    let existing_category = existing
+        .map(|command| command.category.clone())
+        .unwrap_or_else(|| "custom".to_string());
+    let existing_description = existing.and_then(|command| command.description.clone());
     let existing_parameters = existing
         .map(|command| command.parameters.clone())
         .unwrap_or_default();
     let existing_protocols = existing
         .map(|command| command.availability.protocols.clone())
         .unwrap_or_default();
+    let existing_host_patterns = existing
+        .map(|command| command.availability.host_patterns.clone())
+        .unwrap_or_default();
     let existing_confirmation = existing
         .map(|command| command.confirmation)
-        .unwrap_or(QuickCommandConfirmationPolicy::Inherit);
+        .unwrap_or_default();
     let existing_sort_order = existing
         .map(|command| command.sort_order)
         .unwrap_or_else(|| next_command_sort_order(commands));
@@ -108,23 +118,38 @@ pub fn upsert_quick_command(
         id: draft.id.unwrap_or_else(new_quick_command_id),
         name: draft.name.trim().to_string(),
         command: draft.command.trim().to_string(),
-        category: if categories.iter().any(|item| item.id == draft.category) {
-            draft.category
-        } else {
-            "custom".to_string()
-        },
-        description: trim_optional(&draft.description),
-        parameters: existing_parameters,
+        category: draft.category.map_or(existing_category, |category| {
+            if categories.iter().any(|item| item.id == category) {
+                category
+            } else {
+                "custom".to_string()
+            }
+        }),
+        description: draft
+            .description
+            .map(|description| trim_optional(&description))
+            .unwrap_or(existing_description),
+        parameters: draft.parameters.unwrap_or(existing_parameters),
         availability: QuickCommandAvailability {
-            protocols: existing_protocols,
-            host_patterns: trim_optional(&draft.host_pattern).into_iter().collect(),
+            protocols: draft.protocols.unwrap_or(existing_protocols),
+            host_patterns: draft
+                .host_patterns
+                .map_or(existing_host_patterns, |patterns| {
+                    patterns
+                        .into_iter()
+                        .filter_map(|pattern| trim_optional(&pattern))
+                        .collect()
+                }),
         },
-        confirmation: existing_confirmation,
+        confirmation: draft.confirmation.unwrap_or(existing_confirmation),
         sort_order: existing_sort_order,
         created_at: existing_created_at.unwrap_or(now),
         updated_at: now,
     };
     if command.name.is_empty() || command.command.is_empty() {
+        return false;
+    }
+    if crate::validate_quick_command_template(&command.command, &command.parameters).is_err() {
         return false;
     }
 
@@ -309,9 +334,12 @@ mod tests {
                 id: Some("existing".to_string()),
                 name: " Updated ".to_string(),
                 command: " echo ready ".to_string(),
-                category: "missing".to_string(),
-                description: "  ".to_string(),
-                host_pattern: " *.example.com ".to_string(),
+                category: Some("missing".to_string()),
+                description: Some("  ".to_string()),
+                parameters: None,
+                protocols: None,
+                host_patterns: Some(vec![" *.example.com ".to_string()]),
+                confirmation: None,
             },
             11,
         ));
@@ -320,6 +348,62 @@ mod tests {
         assert_eq!(commands[0].created_at, 7);
         assert_eq!(commands[0].updated_at, 11);
         assert_eq!(commands[0].availability.host_patterns, ["*.example.com"]);
+    }
+
+    #[test]
+    fn command_upsert_preserves_advanced_fields_when_patch_omits_them() {
+        let categories = default_quick_command_categories();
+        let mut commands = vec![QuickCommand {
+            id: "existing".to_string(),
+            name: "Old".to_string(),
+            command: "old".to_string(),
+            category: "files".to_string(),
+            description: Some("kept".to_string()),
+            parameters: vec![crate::QuickCommandParameter {
+                name: "path".to_string(),
+                label: "Path".to_string(),
+                required: true,
+                ..crate::QuickCommandParameter::default()
+            }],
+            availability: QuickCommandAvailability {
+                protocols: vec![QuickCommandTargetProtocol::Ssh],
+                host_patterns: vec!["one.example.com".to_string(), "two.example.com".to_string()],
+            },
+            confirmation: QuickCommandConfirmationPolicy::Always,
+            sort_order: 0,
+            created_at: 7,
+            updated_at: 7,
+        }];
+
+        assert!(upsert_quick_command(
+            &mut commands,
+            &categories,
+            QuickCommandDraft {
+                id: Some("existing".to_string()),
+                name: "New".to_string(),
+                command: "new".to_string(),
+                category: None,
+                description: None,
+                parameters: None,
+                protocols: None,
+                host_patterns: None,
+                confirmation: None,
+            },
+            11,
+        ));
+
+        assert_eq!(commands[0].category, "files");
+        assert_eq!(commands[0].description.as_deref(), Some("kept"));
+        assert_eq!(commands[0].parameters[0].name, "path");
+        assert_eq!(
+            commands[0].availability.protocols,
+            [QuickCommandTargetProtocol::Ssh]
+        );
+        assert_eq!(commands[0].availability.host_patterns.len(), 2);
+        assert_eq!(
+            commands[0].confirmation,
+            QuickCommandConfirmationPolicy::Always
+        );
     }
 
     #[test]

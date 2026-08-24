@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 
 use super::{JsonArgs, WriteArgs};
 
@@ -54,8 +54,19 @@ pub struct QuickCommandCreateArgs {
     pub category: String,
     #[arg(long, help = "Optional description")]
     pub description: Option<String>,
-    #[arg(long, help = "Optional host pattern")]
-    pub host_pattern: Option<String>,
+    #[arg(long, action = clap::ArgAction::Append, help = "Allowed host pattern; repeat for multiple patterns")]
+    pub host_pattern: Vec<String>,
+    #[arg(long, value_enum, action = clap::ArgAction::Append, help = "Allowed target protocol; repeat for multiple protocols")]
+    pub protocol: Vec<QuickCommandProtocolArg>,
+    #[arg(long, help = "JSON array of Quick Command parameter definitions")]
+    pub parameters_json: Option<String>,
+    #[arg(
+        long,
+        value_enum,
+        default_value = "inherit",
+        help = "Execution confirmation policy"
+    )]
+    pub confirmation: QuickCommandConfirmationArg,
     #[command(flatten)]
     pub write: WriteArgs,
 }
@@ -70,10 +81,32 @@ pub struct QuickCommandEditArgs {
     pub command: Option<String>,
     #[arg(long, help = "Category id")]
     pub category: Option<String>,
-    #[arg(long, help = "Optional description")]
+    #[arg(
+        long,
+        conflicts_with = "clear_description",
+        help = "Optional description"
+    )]
     pub description: Option<String>,
-    #[arg(long, help = "Optional host pattern")]
-    pub host_pattern: Option<String>,
+    #[arg(long, help = "Remove the description")]
+    pub clear_description: bool,
+    #[arg(long, action = clap::ArgAction::Append, conflicts_with = "clear_host_patterns", help = "Replace allowed host patterns; repeat for multiple patterns")]
+    pub host_pattern: Vec<String>,
+    #[arg(long, help = "Remove all host restrictions")]
+    pub clear_host_patterns: bool,
+    #[arg(long, value_enum, action = clap::ArgAction::Append, conflicts_with = "clear_protocols", help = "Replace allowed target protocols; repeat for multiple protocols")]
+    pub protocol: Vec<QuickCommandProtocolArg>,
+    #[arg(long, help = "Allow every target protocol")]
+    pub clear_protocols: bool,
+    #[arg(
+        long,
+        conflicts_with = "clear_parameters",
+        help = "JSON array replacing parameter definitions"
+    )]
+    pub parameters_json: Option<String>,
+    #[arg(long, help = "Remove all parameter definitions")]
+    pub clear_parameters: bool,
+    #[arg(long, value_enum, help = "Execution confirmation policy")]
+    pub confirmation: Option<QuickCommandConfirmationArg>,
     #[command(flatten)]
     pub write: WriteArgs,
 }
@@ -92,4 +125,20 @@ pub struct QuickCommandImportArgs {
     pub path: String,
     #[command(flatten)]
     pub write: WriteArgs,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum QuickCommandProtocolArg {
+    Local,
+    Ssh,
+    Mosh,
+    Telnet,
+    Serial,
+    Tmux,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum QuickCommandConfirmationArg {
+    Inherit,
+    Always,
 }

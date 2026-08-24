@@ -313,10 +313,18 @@ struct QuickCommandsSaveSchema {
     description: Option<String>,
     #[serde(default)]
     host_pattern: Option<String>,
+    #[serde(default)]
+    host_patterns: Option<Vec<String>>,
+    #[serde(default)]
+    parameters: Option<Vec<crate::PublicQuickCommandParameter>>,
+    #[serde(default)]
+    protocols: Option<Vec<crate::PublicQuickCommandTargetProtocol>>,
+    #[serde(default)]
+    confirmation: Option<crate::PublicQuickCommandConfirmationPolicy>,
     expected_revision: u64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct QuickCommandsSaveMetadata {
     #[serde(default)]
@@ -327,6 +335,14 @@ struct QuickCommandsSaveMetadata {
     description: Option<String>,
     #[serde(default)]
     host_pattern: Option<String>,
+    #[serde(default)]
+    host_patterns: Option<Vec<String>>,
+    #[serde(default)]
+    parameters: Option<Vec<crate::PublicQuickCommandParameter>>,
+    #[serde(default)]
+    protocols: Option<Vec<crate::PublicQuickCommandTargetProtocol>>,
+    #[serde(default)]
+    confirmation: Option<crate::PublicQuickCommandConfirmationPolicy>,
     expected_revision: u64,
 }
 
@@ -1895,7 +1911,7 @@ fn tool_definitions() -> Vec<ToolDefinition> {
         ),
         define_tool::<QuickCommandsRunSchema>(
             "quickcommands_run",
-            "Execute one unchanged saved Quick Command on an acquired SSH node.",
+            "Expand and execute one saved Quick Command on an acquired SSH node.",
             ToolGroup::QuickCommandExecute,
             false,
             true,
@@ -2387,6 +2403,12 @@ fn parse_quick_commands_save(
             "The Quick Command name must be non-empty and at most 160 bytes",
         )));
     }
+    if metadata.host_pattern.is_some() && metadata.host_patterns.is_some() {
+        return Err(Box::new(tool_error(
+            "invalid_arguments",
+            "Provide host_pattern or host_patterns, not both",
+        )));
+    }
     Ok(QuickCommandsSaveArgs {
         quickcommand_ref: metadata.quickcommand_ref,
         name: metadata.name,
@@ -2394,6 +2416,10 @@ fn parse_quick_commands_save(
         category: metadata.category,
         description: metadata.description,
         host_pattern: metadata.host_pattern,
+        host_patterns: metadata.host_patterns,
+        parameters: metadata.parameters,
+        protocols: metadata.protocols,
+        confirmation: metadata.confirmation,
         expected_revision: metadata.expected_revision,
     })
 }
@@ -2653,5 +2679,37 @@ mod tests {
 
         assert_eq!(parsed.arguments["token"].as_str(), secret_value);
         assert!(!format!("{parsed:?}").contains(secret_value));
+    }
+
+    #[test]
+    fn quick_command_save_roundtrips_advanced_fields_without_debugging_defaults() {
+        let secret_default = "sensitive-default";
+        let arguments = json!({
+            "name": "Deploy",
+            "command": "deploy {{param.service}}",
+            "category": "custom",
+            "expected_revision": 7,
+            "host_patterns": ["*.prod", "bastion.*"],
+            "protocols": ["ssh", "mosh"],
+            "confirmation": "always",
+            "parameters": [{
+                "name": "service",
+                "label": "Service",
+                "kind": "choice",
+                "default_value": secret_default,
+                "choices": [secret_default, "worker"],
+                "required": true
+            }]
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
+
+        let parsed = parse_quick_commands_save(arguments).unwrap();
+
+        assert_eq!(parsed.host_patterns.as_ref().map(Vec::len), Some(2));
+        assert_eq!(parsed.protocols.as_ref().map(Vec::len), Some(2));
+        assert_eq!(parsed.parameters.as_ref().map(Vec::len), Some(1));
+        assert!(!format!("{parsed:?}").contains(secret_default));
     }
 }

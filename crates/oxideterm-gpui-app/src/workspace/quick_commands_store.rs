@@ -57,8 +57,24 @@ impl QuickCommandsState {
     }
 
     pub(in crate::workspace) fn upsert_command(&mut self, draft: QuickCommandDraft) {
-        if upsert_quick_command(&mut self.commands, &self.categories, draft, now_ms()) {
-            self.persist();
+        let updated_at = now_ms();
+        let mut commands = self.commands.clone();
+        if !upsert_quick_command(&mut commands, &self.categories, draft, updated_at) {
+            return;
+        }
+        // Plugin-originated candidates become visible only after full snapshot validation succeeds.
+        let snapshot = QuickCommandsSnapshot {
+            version: QUICK_COMMANDS_SCHEMA_VERSION,
+            categories: self.categories.clone(),
+            commands: commands.clone(),
+            updated_at,
+        };
+        match oxideterm_quick_commands::save_snapshot(&self.settings_path, &snapshot) {
+            Ok(()) => {
+                self.commands = commands;
+                self.last_persist_error = None;
+            }
+            Err(error) => self.last_persist_error = Some(error),
         }
     }
 
@@ -264,9 +280,12 @@ mod quick_command_tests {
             id: None,
             name: "List root".to_string(),
             command: "ls /".to_string(),
-            category: "files".to_string(),
-            description: "root listing".to_string(),
-            host_pattern: String::new(),
+            category: Some("files".to_string()),
+            description: Some("root listing".to_string()),
+            parameters: None,
+            protocols: None,
+            host_patterns: None,
+            confirmation: None,
         });
 
         let reloaded = QuickCommandsState::load(&settings_path);
