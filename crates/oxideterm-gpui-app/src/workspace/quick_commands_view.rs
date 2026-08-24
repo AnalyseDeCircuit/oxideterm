@@ -1489,12 +1489,11 @@ impl WorkspaceApp {
         );
         cx.spawn(async move |weak, cx| {
             let result = match receiver.await {
-                Ok(Ok(Some(path))) => oxideterm_atomic_file::durable_write(
-                    &path,
-                    snapshot_json.as_bytes(),
-                )
-                    .map(|()| Some(path))
-                    .map_err(|_| ()),
+                Ok(Ok(Some(path))) => {
+                    oxideterm_atomic_file::durable_write(&path, snapshot_json.as_bytes())
+                        .map(|()| Some(path))
+                        .map_err(|_| ())
+                }
                 Ok(Ok(None)) => Ok(None),
                 Ok(Err(_)) | Err(_) => Err(()),
             };
