@@ -253,6 +253,11 @@ fn approval_review(call: &PublicToolCall) -> ApprovalReview {
             command: Some(Zeroizing::new(args.command.to_string())),
             working_directory: None,
         },
+        PublicToolCall::PreparedQuickCommandRun(args) => ApprovalReview {
+            // The approved payload is already target-expanded and remains frozen in this entry.
+            command: Some(Zeroizing::new(args.command.to_string())),
+            working_directory: None,
+        },
         _ => ApprovalReview::default(),
     }
 }
@@ -282,7 +287,10 @@ mod tests {
     use zeroize::Zeroizing;
 
     use super::*;
-    use crate::{NodeRef, calls::StartCommandArgs};
+    use crate::{
+        NodeRef, QuickCommandRef,
+        calls::{PreparedQuickCommandRunArgs, StartCommandArgs},
+    };
 
     #[test]
     fn approved_action_is_client_scoped_frozen_and_one_shot() {
@@ -322,5 +330,39 @@ mod tests {
             approvals.take_approved(&owner, &projection.approval_ref),
             Err(ApprovalError::Consumed)
         ));
+    }
+
+    #[test]
+    fn prepared_quick_command_approval_shows_and_freezes_expanded_command() {
+        let approvals = ApprovalStore::default();
+        let owner = ClientRef::new();
+        let command = "rm -rf /tmp/example";
+        let projection = approvals
+            .stage(
+                owner.clone(),
+                PublicToolCall::PreparedQuickCommandRun(PreparedQuickCommandRunArgs {
+                    quickcommand_ref: QuickCommandRef::new(),
+                    node_ref: NodeRef::new(),
+                    command: Zeroizing::new(command.to_string()),
+                }),
+            )
+            .expect("stage prepared Quick Command");
+
+        assert_eq!(projection.review.command(), Some(command));
+        assert!(
+            !serde_json::to_string(&projection)
+                .unwrap()
+                .contains(command)
+        );
+        approvals
+            .set_status(&projection.approval_ref, ApprovalStatus::Approved)
+            .expect("approve prepared Quick Command");
+        let approved = approvals
+            .take_approved(&owner, &projection.approval_ref)
+            .expect("take prepared Quick Command");
+        let PublicToolCall::PreparedQuickCommandRun(args) = approved else {
+            panic!("approval returned a different tool call");
+        };
+        assert_eq!(args.command.as_str(), command);
     }
 }

@@ -6,7 +6,6 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
-    audit::AuditAuthorization,
     auth::{ClientApprovalMode, ClientRegistry, ToolGroup},
     calls::{PublicToolCall, ToolEnvelope},
     handles::ClientRef,
@@ -44,7 +43,7 @@ pub enum DomainMessage {
 pub struct DomainRequest {
     pub client_ref: ClientRef,
     pub call: PublicToolCall,
-    authorization: AuditAuthorization,
+    approval_mode: ClientApprovalMode,
     response: oneshot::Sender<ToolEnvelope>,
     cancellation: CancellationToken,
 }
@@ -73,8 +72,8 @@ impl DomainRequest {
         self.cancellation.clone()
     }
 
-    pub fn was_app_approved(&self) -> bool {
-        matches!(self.authorization, AuditAuthorization::AppApproval)
+    pub fn requires_standard_approval(&self) -> bool {
+        self.approval_mode == ClientApprovalMode::Standard
     }
 
     /// Retargets a protocol-level alias while preserving the original response and cancellation.
@@ -128,7 +127,6 @@ impl DomainBroker {
         expected_approval_mode: ClientApprovalMode,
         client_ref: ClientRef,
         call: PublicToolCall,
-        authorization: AuditAuthorization,
     ) -> Result<ToolEnvelope, BrokerError> {
         let required_groups = std::iter::once(call.required_group())
             .chain(call.additional_required_groups().iter().copied())
@@ -167,7 +165,7 @@ impl DomainBroker {
             .send(DomainMessage::Request(Box::new(DomainRequest {
                 client_ref,
                 call,
-                authorization,
+                approval_mode: expected_approval_mode,
                 response,
                 cancellation,
             })))

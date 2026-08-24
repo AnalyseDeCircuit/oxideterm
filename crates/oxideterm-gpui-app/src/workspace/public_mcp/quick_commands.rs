@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use gpui::Context;
 use oxideterm_public_mcp::{
-    ClientRef, DomainRequest, PublicQuickCommandConfirmationPolicy, PublicQuickCommandParameter,
-    PublicQuickCommandParameterKind, PublicQuickCommandTargetProtocol, PublicToolCall,
-    QuickCommandRef, ToolEnvelope, ToolGroup,
+    ClientRef, DomainRequest, PreparedQuickCommandRunArgs, PublicQuickCommandConfirmationPolicy,
+    PublicQuickCommandParameter, PublicQuickCommandParameterKind, PublicQuickCommandTargetProtocol,
+    PublicToolCall, QuickCommandRef, ToolEnvelope, ToolGroup,
 };
 use oxideterm_quick_commands::{
     QuickCommand, QuickCommandConfirmationPolicy, QuickCommandContextValues, QuickCommandDraft,
@@ -389,16 +389,53 @@ impl WorkspaceApp {
             ));
             return;
         };
-        if confirmation_required && !request.was_app_approved() {
-            request.finish(ToolEnvelope::failed(
-                "This Quick Command requires in-app approval before execution",
-            ));
+        if request.requires_standard_approval() || confirmation_required {
+            let prepared_call =
+                PublicToolCall::PreparedQuickCommandRun(PreparedQuickCommandRunArgs {
+                    quickcommand_ref: args.quickcommand_ref.clone(),
+                    node_ref: node_ref.clone(),
+                    command: prepared_target.command,
+                });
+            let approval = match self
+                .public_mcp
+                .state
+                .approvals
+                .stage(request.client_ref.clone(), prepared_call)
+            {
+                Ok(approval) => approval,
+                Err(error) => {
+                    request.finish(ToolEnvelope::failed(error.to_string()));
+                    return;
+                }
+            };
+            self.public_mcp.state.broker.notify_state_changed();
+            let response = ToolEnvelope::accepted(json!({
+                "outcome": "approval_required",
+                "approval": approval,
+            }))
+            .unwrap_or_else(|error| ToolEnvelope::failed(error.to_string()));
+            request.finish(response);
             return;
         }
         self.start_public_mcp_node_command(
             request,
             node_ref,
             prepared_target.command,
+            ToolGroup::QuickCommandExecute,
+        );
+    }
+
+    pub(super) fn handle_public_mcp_prepared_quick_command_run(&self, request: DomainRequest) {
+        let PublicToolCall::PreparedQuickCommandRun(args) = &request.call else {
+            return;
+        };
+        let node_ref = args.node_ref.clone();
+        // The approval store owns the frozen source; this bounded copy transfers it to the task.
+        let command = Zeroizing::new(args.command.to_string());
+        self.start_public_mcp_node_command(
+            request,
+            node_ref,
+            command,
             ToolGroup::QuickCommandExecute,
         );
     }

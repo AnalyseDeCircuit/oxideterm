@@ -10,6 +10,11 @@ use crate::{
     quick_command_available_for_target,
 };
 
+pub const MAX_QUICK_COMMAND_ARGUMENTS: usize = 32;
+pub const MAX_QUICK_COMMAND_ARGUMENT_NAME_BYTES: usize = 64;
+pub const MAX_QUICK_COMMAND_ARGUMENT_VALUE_BYTES: usize = 8 * 1024;
+pub const MAX_QUICK_COMMAND_EXPANDED_BYTES: usize = 64 * 1024;
+
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct QuickCommandContextValues {
     pub host: Option<Zeroizing<String>>,
@@ -51,6 +56,9 @@ pub enum QuickCommandTemplateError {
     UnknownToken(String),
     UnknownModifier(String),
     UnknownParameter(String),
+    TooManyParameterValues,
+    ParameterValueTooLong(String),
+    ExpandedCommandTooLong { target: String },
     MissingParameter(String),
     InvalidChoice { parameter: String },
     MissingContext { target: String, field: String },
@@ -66,6 +74,16 @@ impl std::fmt::Display for QuickCommandTemplateError {
             }
             Self::UnknownParameter(parameter) => {
                 write!(formatter, "unknown parameter {parameter}")
+            }
+            Self::TooManyParameterValues => formatter.write_str("too many parameter values"),
+            Self::ParameterValueTooLong(parameter) => {
+                write!(formatter, "value for parameter {parameter} is too long")
+            }
+            Self::ExpandedCommandTooLong { target } => {
+                write!(
+                    formatter,
+                    "expanded command for target {target} is too long"
+                )
             }
             Self::MissingParameter(parameter) => {
                 write!(formatter, "missing required parameter {parameter}")
@@ -173,6 +191,18 @@ fn validate_parameter_values(
             ));
         }
     }
+    if parameter_values.len() > MAX_QUICK_COMMAND_ARGUMENTS {
+        errors.push(QuickCommandTemplateError::TooManyParameterValues);
+    }
+    for (parameter_name, value) in parameter_values {
+        if parameter_name.len() > MAX_QUICK_COMMAND_ARGUMENT_NAME_BYTES
+            || value.len() > MAX_QUICK_COMMAND_ARGUMENT_VALUE_BYTES
+        {
+            errors.push(QuickCommandTemplateError::ParameterValueTooLong(
+                parameter_name.clone(),
+            ));
+        }
+    }
     for parameter in parameters.values() {
         let value = parameter_values
             .get(&parameter.name)
@@ -207,15 +237,15 @@ fn resolve_template(
     while cursor < template.len() {
         let remainder = &template[cursor..];
         if remainder.starts_with("\\{{") {
-            resolved.push_str("{{");
+            push_expanded(&mut resolved, "{{", target)?;
             cursor += 3;
             continue;
         }
         let Some(token_offset) = remainder.find("{{") else {
-            resolved.push_str(remainder);
+            push_expanded(&mut resolved, remainder, target)?;
             break;
         };
-        resolved.push_str(&remainder[..token_offset]);
+        push_expanded(&mut resolved, &remainder[..token_offset], target)?;
         cursor += token_offset + 2;
         let Some(token_end) = template[cursor..].find("}}") else {
             errors.push(QuickCommandTemplateError::UnterminatedToken);
@@ -224,7 +254,7 @@ fn resolve_template(
         let token = template[cursor..cursor + token_end].trim();
         cursor += token_end + 2;
         match resolve_token(token, parameters, parameter_values, target) {
-            Ok(value) => resolved.push_str(&value),
+            Ok(value) => push_expanded(&mut resolved, &value, target)?,
             Err(error) => errors.push(error),
         }
     }
@@ -233,6 +263,20 @@ fn resolve_template(
     } else {
         Err(errors)
     }
+}
+
+fn push_expanded(
+    resolved: &mut Zeroizing<String>,
+    value: &str,
+    target: &QuickCommandTargetContext,
+) -> Result<(), Vec<QuickCommandTemplateError>> {
+    if resolved.len().saturating_add(value.len()) > MAX_QUICK_COMMAND_EXPANDED_BYTES {
+        return Err(vec![QuickCommandTemplateError::ExpandedCommandTooLong {
+            target: target.label.clone(),
+        }]);
+    }
+    resolved.push_str(value);
+    Ok(())
 }
 
 fn resolve_token(
@@ -456,9 +500,39 @@ mod tests {
             "action".to_string(),
             Zeroizing::new("rm -rf /tmp/example".to_string()),
         )]);
-        let prepared = prepare_quick_command(&command, &[target], &risky_values).unwrap();
+        let prepared =
+            prepare_quick_command(&command, std::slice::from_ref(&target), &risky_values).unwrap();
         assert!(prepared.confirmation_required);
         assert_eq!(prepared.targets[0].risk, Some(QuickCommandRisk::High));
+
+        let oversized_values = BTreeMap::from([(
+            "action".to_string(),
+            Zeroizing::new("x".repeat(MAX_QUICK_COMMAND_ARGUMENT_VALUE_BYTES + 1)),
+        )]);
+        let Err(errors) =
+            prepare_quick_command(&command, std::slice::from_ref(&target), &oversized_values)
+        else {
+            panic!("oversized parameter values must be rejected");
+        };
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            QuickCommandTemplateError::ParameterValueTooLong(parameter) if parameter == "action"
+        )));
+
+        let mut amplified_command = command.clone();
+        amplified_command.command = "{{param.action}}".repeat(9);
+        let maximum_value = BTreeMap::from([(
+            "action".to_string(),
+            Zeroizing::new("x".repeat(MAX_QUICK_COMMAND_ARGUMENT_VALUE_BYTES)),
+        )]);
+        let Err(errors) = prepare_quick_command(&amplified_command, &[target], &maximum_value)
+        else {
+            panic!("expanded commands above the output limit must be rejected");
+        };
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            QuickCommandTemplateError::ExpandedCommandTooLong { .. }
+        )));
     }
 
     #[test]

@@ -1324,6 +1324,23 @@ impl fmt::Debug for QuickCommandsRunArgs {
     }
 }
 
+pub struct PreparedQuickCommandRunArgs {
+    pub quickcommand_ref: QuickCommandRef,
+    pub node_ref: NodeRef,
+    pub command: Zeroizing<String>,
+}
+
+impl fmt::Debug for PreparedQuickCommandRunArgs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PreparedQuickCommandRunArgs")
+            .field("quickcommand_ref", &self.quickcommand_ref)
+            .field("node_ref", &self.node_ref)
+            .field("command", &"[REDACTED]")
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct AddonsListArgs {
     #[serde(default)]
@@ -1691,6 +1708,8 @@ pub enum PublicToolCall {
     QuickCommandsSave(Box<QuickCommandsSaveArgs>),
     QuickCommandsRemove(QuickCommandsRemoveArgs),
     QuickCommandsRun(QuickCommandsRunArgs),
+    /// Internal frozen payload created only after workspace-side expansion.
+    PreparedQuickCommandRun(PreparedQuickCommandRunArgs),
     AddonsList(AddonsListArgs),
     AddonsInstall(AddonsInstallArgs),
     AddonsSetEnabled(AddonsSetEnabledArgs),
@@ -1783,6 +1802,7 @@ impl PublicToolCall {
             Self::QuickCommandsSave(_) => "quickcommands_save",
             Self::QuickCommandsRemove(_) => "quickcommands_remove",
             Self::QuickCommandsRun(_) => "quickcommands_run",
+            Self::PreparedQuickCommandRun(_) => "quickcommands_run",
             Self::AddonsList(_) => "addons_list",
             Self::AddonsInstall(_) => "addons_install",
             Self::AddonsSetEnabled(_) => "addons_set_enabled",
@@ -1866,7 +1886,9 @@ impl PublicToolCall {
             Self::QuickCommandsSave(_) | Self::QuickCommandsRemove(_) => {
                 ToolGroup::QuickCommandManage
             }
-            Self::QuickCommandsRun(_) => ToolGroup::QuickCommandExecute,
+            Self::QuickCommandsRun(_) | Self::PreparedQuickCommandRun(_) => {
+                ToolGroup::QuickCommandExecute
+            }
             Self::AddonsList(_) => ToolGroup::AddonRead,
             Self::AddonsInstall(_) | Self::AddonsSetEnabled(_) | Self::AddonsRemove(_) => {
                 ToolGroup::AddonManage
@@ -1970,6 +1992,10 @@ impl PublicToolCall {
 
     pub fn requires_explicit_app_approval(&self) -> bool {
         matches!(self, Self::RequestAccess(_))
+    }
+
+    pub fn requires_domain_preparation(&self) -> bool {
+        matches!(self, Self::QuickCommandsRun(_))
     }
 
     pub fn target_summary(&self) -> String {
@@ -2105,6 +2131,9 @@ impl PublicToolCall {
                 .map_or_else(|| "new quick command".to_owned(), ToString::to_string),
             Self::QuickCommandsRemove(args) => args.quickcommand_ref.to_string(),
             Self::QuickCommandsRun(args) => {
+                format!("{} on {}", args.quickcommand_ref, args.node_ref)
+            }
+            Self::PreparedQuickCommandRun(args) => {
                 format!("{} on {}", args.quickcommand_ref, args.node_ref)
             }
             Self::AddonsList(_) => "addon catalog".to_owned(),
@@ -2311,5 +2340,13 @@ impl ToolEnvelope {
             data: None,
             error: Some(error.into()),
         }
+    }
+
+    pub fn accepted(data: impl Serialize) -> Result<Self, serde_json::Error> {
+        Ok(Self {
+            outcome: ToolOutcome::Accepted,
+            data: Some(serde_json::to_value(data)?),
+            error: None,
+        })
     }
 }

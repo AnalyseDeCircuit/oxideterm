@@ -37,7 +37,8 @@ pub use store::{
     quick_commands_path, restore_checkpoint, save_snapshot,
 };
 pub use template::{
-    PreparedQuickCommand, PreparedQuickCommandTarget, QuickCommandContextValues,
-    QuickCommandTargetContext, QuickCommandTemplateError, prepare_quick_command,
-    validate_quick_command_template,
+    MAX_QUICK_COMMAND_ARGUMENT_NAME_BYTES, MAX_QUICK_COMMAND_ARGUMENT_VALUE_BYTES,
+    MAX_QUICK_COMMAND_ARGUMENTS, MAX_QUICK_COMMAND_EXPANDED_BYTES, PreparedQuickCommand,
+    PreparedQuickCommandTarget, QuickCommandContextValues, QuickCommandTargetContext,
+    QuickCommandTemplateError, prepare_quick_command, validate_quick_command_template,
 };

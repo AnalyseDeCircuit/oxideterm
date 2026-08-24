@@ -721,8 +721,8 @@ impl PublicMcpWorkspaceBridge {
                 .into_iter()
                 .find(|command| &command.id == command_id)
         {
-            // The full saved command is shown only in the local approval UI.
-            return format!("{} — {}", command.name, command.command);
+            // The frozen expanded command, when present, is rendered by ApprovalReview.
+            return command.name;
         }
         let connection_target = target.split_whitespace().next().unwrap_or(target);
         if let Ok(connection_ref) = connection_target.parse::<ConnectionRef>()
@@ -1339,6 +1339,9 @@ impl WorkspaceApp {
             }
             PublicToolCall::QuickCommandsRun(_) => {
                 self.handle_public_mcp_quick_commands_run(request)
+            }
+            PublicToolCall::PreparedQuickCommandRun(_) => {
+                self.handle_public_mcp_prepared_quick_command_run(request)
             }
             PublicToolCall::AddonsList(_) => self.handle_public_mcp_addons_list(request, cx),
             PublicToolCall::AddonsInstall(_) => self.handle_public_mcp_addons_install(request, cx),

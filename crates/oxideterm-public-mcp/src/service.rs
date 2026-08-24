@@ -58,6 +58,15 @@ const WORKING_DIRECTORY_LIMIT_BYTES: usize = 16 * 1024;
 const ARTIFACT_STAGE_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 const QUICK_COMMAND_NAME_LIMIT_BYTES: usize = 160;
 const QUICK_COMMAND_BODY_LIMIT_BYTES: usize = 4 * 1024;
+const QUICK_COMMAND_DESCRIPTION_LIMIT_BYTES: usize = 1024;
+const QUICK_COMMAND_ARGUMENT_LIMIT: usize = 32;
+const QUICK_COMMAND_ARGUMENT_NAME_LIMIT_BYTES: usize = 64;
+const QUICK_COMMAND_ARGUMENT_VALUE_LIMIT_BYTES: usize = 8 * 1024;
+const QUICK_COMMAND_ARGUMENT_TOTAL_LIMIT_BYTES: usize = 64 * 1024;
+const QUICK_COMMAND_PARAMETER_DEFAULT_LIMIT_BYTES: usize = 1024;
+const QUICK_COMMAND_PARAMETER_CHOICE_LIMIT: usize = 64;
+const QUICK_COMMAND_HOST_PATTERN_LIMIT: usize = 32;
+const QUICK_COMMAND_HOST_PATTERN_LIMIT_BYTES: usize = 256;
 const ADDON_ID_LIMIT_BYTES: usize = 255;
 const FORWARD_ENDPOINT_LIMIT_BYTES: usize = 255;
 const FORWARD_DESCRIPTION_LIMIT_BYTES: usize = 512;
@@ -421,8 +430,9 @@ impl PublicMcpService {
             );
         }
 
-        // Access expansion always crosses the local approval boundary, including unattended mode.
+        // Domain-prepared tools stage their frozen payload after workspace-side validation.
         if call.requires_approval()
+            && !call.requires_domain_preparation()
             && (client.approval_mode == ClientApprovalMode::Standard
                 || call.requires_explicit_app_approval())
         {
@@ -446,11 +456,12 @@ impl PublicMcpService {
             }));
         }
 
-        let authorization = if call.requires_approval() {
-            AuditAuthorization::Unattended
-        } else {
-            AuditAuthorization::NotRequired
-        };
+        let authorization =
+            if call.requires_approval() && client.approval_mode == ClientApprovalMode::Unattended {
+                AuditAuthorization::Unattended
+            } else {
+                AuditAuthorization::NotRequired
+            };
         self.execute_approved_call(
             client.client_ref.clone(),
             client.approval_mode,
@@ -477,7 +488,6 @@ impl PublicMcpService {
                 expected_approval_mode,
                 client_ref.clone(),
                 call,
-                authorization,
             )
             .await;
         match response {
@@ -2409,6 +2419,12 @@ fn parse_quick_commands_save(
             "Provide host_pattern or host_patterns, not both",
         )));
     }
+    if !quick_commands_save_metadata_is_bounded(&metadata) {
+        return Err(Box::new(tool_error(
+            "invalid_arguments",
+            "The Quick Command definition exceeds its supported limits",
+        )));
+    }
     Ok(QuickCommandsSaveArgs {
         quickcommand_ref: metadata.quickcommand_ref,
         name: metadata.name,
@@ -2429,16 +2445,37 @@ fn parse_quick_commands_run(
 ) -> Result<QuickCommandsRunArgs, Box<CallToolResult>> {
     let parameter_values = match arguments.remove("arguments") {
         None | Some(Value::Null) => BTreeMap::new(),
-        Some(Value::Object(values)) => values
-            .into_iter()
-            .map(|(name, value)| match value {
-                Value::String(value) => Ok((name, Zeroizing::new(value))),
-                _ => Err(Box::new(tool_error(
+        Some(Value::Object(values)) => {
+            if values.len() > QUICK_COMMAND_ARGUMENT_LIMIT {
+                return Err(Box::new(tool_error(
                     "invalid_arguments",
-                    "Quick Command argument values must be strings",
-                ))),
-            })
-            .collect::<Result<_, _>>()?,
+                    "Too many Quick Command arguments were provided",
+                )));
+            }
+            let mut total_bytes = 0usize;
+            values
+                .into_iter()
+                .map(|(name, value)| match value {
+                    Value::String(value)
+                        if name.len() <= QUICK_COMMAND_ARGUMENT_NAME_LIMIT_BYTES
+                            && value.len() <= QUICK_COMMAND_ARGUMENT_VALUE_LIMIT_BYTES
+                            && total_bytes.saturating_add(value.len())
+                                <= QUICK_COMMAND_ARGUMENT_TOTAL_LIMIT_BYTES =>
+                    {
+                        total_bytes = total_bytes.saturating_add(value.len());
+                        Ok((name, Zeroizing::new(value)))
+                    }
+                    Value::String(_) => Err(Box::new(tool_error(
+                        "invalid_arguments",
+                        "Quick Command arguments exceed their supported limits",
+                    ))),
+                    _ => Err(Box::new(tool_error(
+                        "invalid_arguments",
+                        "Quick Command argument values must be strings",
+                    ))),
+                })
+                .collect::<Result<_, _>>()?
+        }
         Some(_) => {
             return Err(Box::new(tool_error(
                 "invalid_arguments",
@@ -2453,6 +2490,63 @@ fn parse_quick_commands_run(
         expected_revision: metadata.expected_revision,
         arguments: parameter_values,
     })
+}
+
+fn quick_commands_save_metadata_is_bounded(metadata: &QuickCommandsSaveMetadata) -> bool {
+    if metadata.category.trim().is_empty()
+        || metadata.category.len() > 128
+        || metadata
+            .description
+            .as_ref()
+            .is_some_and(|value| value.len() > QUICK_COMMAND_DESCRIPTION_LIMIT_BYTES)
+        || metadata
+            .protocols
+            .as_ref()
+            .is_some_and(|protocols| protocols.len() > 6)
+    {
+        return false;
+    }
+    let host_patterns = metadata.host_patterns.as_deref().unwrap_or_default();
+    if host_patterns.len() > QUICK_COMMAND_HOST_PATTERN_LIMIT
+        || host_patterns
+            .iter()
+            .any(|pattern| pattern.len() > QUICK_COMMAND_HOST_PATTERN_LIMIT_BYTES)
+        || metadata
+            .host_pattern
+            .as_ref()
+            .is_some_and(|pattern| pattern.len() > QUICK_COMMAND_HOST_PATTERN_LIMIT_BYTES)
+    {
+        return false;
+    }
+    let parameters = metadata.parameters.as_deref().unwrap_or_default();
+    if parameters.len() > QUICK_COMMAND_ARGUMENT_LIMIT {
+        return false;
+    }
+    let mut total_bytes = metadata.description.as_ref().map_or(0, String::len)
+        + metadata.host_pattern.as_ref().map_or(0, String::len)
+        + host_patterns.iter().map(String::len).sum::<usize>();
+    for parameter in parameters {
+        if parameter.name.len() > QUICK_COMMAND_ARGUMENT_NAME_LIMIT_BYTES
+            || parameter.label.len() > QUICK_COMMAND_NAME_LIMIT_BYTES
+            || parameter
+                .default_value
+                .as_ref()
+                .is_some_and(|value| value.len() > QUICK_COMMAND_PARAMETER_DEFAULT_LIMIT_BYTES)
+            || parameter.choices.len() > QUICK_COMMAND_PARAMETER_CHOICE_LIMIT
+            || parameter
+                .choices
+                .iter()
+                .any(|choice| choice.len() > QUICK_COMMAND_PARAMETER_DEFAULT_LIMIT_BYTES)
+        {
+            return false;
+        }
+        total_bytes = total_bytes
+            .saturating_add(parameter.name.len())
+            .saturating_add(parameter.label.len())
+            .saturating_add(parameter.default_value.as_ref().map_or(0, String::len))
+            .saturating_add(parameter.choices.iter().map(String::len).sum::<usize>());
+    }
+    total_bytes <= QUICK_COMMAND_ARGUMENT_TOTAL_LIMIT_BYTES
 }
 
 fn managed_addon_install_args_are_valid(args: &AddonsInstallArgs) -> bool {
@@ -2608,7 +2702,12 @@ fn envelope_result(envelope: ToolEnvelope) -> CallToolResult {
             "outcome": envelope.outcome,
             "error": envelope.error,
         })),
-        _ => CallToolResult::structured(json!({
+        ToolOutcome::Accepted => CallToolResult::structured(
+            envelope
+                .data
+                .unwrap_or_else(|| json!({ "outcome": "accepted" })),
+        ),
+        ToolOutcome::Completed => CallToolResult::structured(json!({
             "outcome": envelope.outcome,
             "data": envelope.data,
         })),
@@ -2629,6 +2728,7 @@ fn unauthorized_error() -> McpError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DomainMessage;
 
     #[test]
     fn public_tool_input_schemas_have_object_roots() {
@@ -2682,6 +2782,23 @@ mod tests {
     }
 
     #[test]
+    fn quick_command_run_rejects_oversized_parameter_values_before_approval() {
+        let arguments = json!({
+            "quickcommand_ref": crate::QuickCommandRef::new(),
+            "node_ref": NodeRef::new(),
+            "expected_revision": 7,
+            "arguments": {
+                "value": "x".repeat(QUICK_COMMAND_ARGUMENT_VALUE_LIMIT_BYTES + 1)
+            }
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
+
+        assert!(parse_quick_commands_run(arguments).is_err());
+    }
+
+    #[test]
     fn quick_command_save_roundtrips_advanced_fields_without_debugging_defaults() {
         let secret_default = "sensitive-default";
         let arguments = json!({
@@ -2711,5 +2828,47 @@ mod tests {
         assert_eq!(parsed.protocols.as_ref().map(Vec::len), Some(2));
         assert_eq!(parsed.parameters.as_ref().map(Vec::len), Some(1));
         assert!(!format!("{parsed:?}").contains(secret_default));
+    }
+
+    #[tokio::test]
+    async fn standard_quick_command_run_reaches_domain_preparation_before_approval() {
+        let clients = Arc::new(ClientRegistry::default());
+        let mut tool_groups = ToolGroup::selectable()
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        tool_groups.insert(ToolGroup::Basic);
+        let registered = clients
+            .register(
+                "test client".to_string(),
+                ClientApprovalMode::Standard,
+                tool_groups,
+            )
+            .unwrap();
+        let client = clients.get(&registered.projection.client_ref).unwrap();
+        let (broker, mut receiver) = DomainBroker::channel(1);
+        let state = Arc::new(PublicMcpState {
+            clients,
+            approvals: Arc::default(),
+            audit: Arc::new(AuditStore::new(16)),
+            artifacts: Arc::default(),
+            broker,
+        });
+        let service = PublicMcpService::new(state.clone());
+        let call = PublicToolCall::QuickCommandsRun(QuickCommandsRunArgs {
+            quickcommand_ref: crate::QuickCommandRef::new(),
+            node_ref: NodeRef::new(),
+            expected_revision: 1,
+            arguments: BTreeMap::new(),
+        });
+
+        let execution = tokio::spawn(async move { service.execute_call(&client, call).await });
+        let Some(DomainMessage::Request(request)) = receiver.recv().await else {
+            panic!("Quick Command run must reach workspace preparation");
+        };
+        assert!(matches!(&request.call, PublicToolCall::QuickCommandsRun(_)));
+        assert!(state.approvals.list().is_empty());
+        request.finish(ToolEnvelope::accepted(json!({ "outcome": "approval_required" })).unwrap());
+        let _ = execution.await.unwrap();
     }
 }
