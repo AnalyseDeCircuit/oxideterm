@@ -35,6 +35,7 @@
       "cancel": "Cancel",
       "run": "Run",
       "launch_failed": "The trigger could not start the local program.",
+      "quick_command_data_missing": "The trigger's Quick Command needs parameter or terminal context data that is not available.",
       "risk_high": "high",
       "risk_medium": "medium",
       "risk_configured": "configured"

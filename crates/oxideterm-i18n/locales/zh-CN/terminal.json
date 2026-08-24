@@ -35,6 +35,7 @@
       "cancel": "取消",
       "run": "执行",
       "launch_failed": "触发器无法启动本机程序。",
+      "quick_command_data_missing": "触发器的快捷命令缺少可用的参数或终端上下文。",
       "risk_high": "高",
       "risk_medium": "中",
       "risk_configured": "按设置需确认"

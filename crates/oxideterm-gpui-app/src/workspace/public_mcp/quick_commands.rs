@@ -339,20 +339,6 @@ impl WorkspaceApp {
             return;
         };
         let command = snapshot.commands.swap_remove(index);
-        let target_fields = [
-            metadata.host.clone(),
-            metadata.username.clone(),
-            format!("{}@{}", metadata.username, metadata.host),
-        ];
-        if !oxideterm_quick_commands::match_quick_command_host_patterns(
-            &command.availability.host_patterns,
-            &target_fields,
-        ) {
-            request.finish(ToolEnvelope::failed(
-                "The Quick Command host pattern does not allow this node",
-            ));
-            return;
-        }
         let saved_connection = metadata
             .connection_id
             .as_deref()

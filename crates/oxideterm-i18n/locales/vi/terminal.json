@@ -35,6 +35,7 @@
       "cancel": "Hủy",
       "run": "Chạy",
       "launch_failed": "Trình kích hoạt không thể khởi chạy chương trình cục bộ.",
+      "quick_command_data_missing": "Lệnh nhanh của trình kích hoạt thiếu tham số hoặc ngữ cảnh thiết bị đầu cuối.",
       "risk_high": "cao",
       "risk_medium": "trung bình",
       "risk_configured": "đã cấu hình"

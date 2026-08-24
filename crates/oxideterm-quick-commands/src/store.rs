@@ -17,7 +17,7 @@ use crate::model::{
     QuickCommandImportStrategy, QuickCommandParameter, QuickCommandParameterKind,
     QuickCommandsSnapshot,
 };
-use crate::{decode_snapshot_json, encode_snapshot_json};
+use crate::{decode_snapshot_json, encode_snapshot_json, validate_quick_command_template};
 
 const QUICK_COMMANDS_FILENAME: &str = "quick-commands.json";
 const MAX_QUICK_COMMANDS_FILE_BYTES: u64 = 512 * 1024;
@@ -119,7 +119,9 @@ pub fn apply_snapshot_json(
     snapshot_json: &str,
     strategy: QuickCommandImportStrategy,
 ) -> QuickCommandImportResult {
-    let incoming = decode_snapshot_json(snapshot_json).and_then(sanitize_snapshot);
+    let incoming = decode_snapshot_json(snapshot_json)
+        .and_then(sanitize_snapshot)
+        .and_then(validate_imported_templates);
     let Ok(incoming) = incoming else {
         return QuickCommandImportResult {
             imported: 0,
@@ -149,6 +151,20 @@ pub fn apply_snapshot_json(
         skipped: merge.skipped,
         errors: Vec::new(),
     }
+}
+
+fn validate_imported_templates(
+    snapshot: QuickCommandsSnapshot,
+) -> Result<QuickCommandsSnapshot, String> {
+    for command in &snapshot.commands {
+        if validate_quick_command_template(&command.command, &command.parameters).is_err() {
+            return Err(format!(
+                "Quick Command {} contains an invalid template",
+                command.id
+            ));
+        }
+    }
+    Ok(snapshot)
 }
 
 fn default_snapshot() -> QuickCommandsSnapshot {
@@ -885,6 +901,24 @@ mod tests {
 
         assert!(result.imported > 0);
         assert!(exported.contains("Ops Uptime"));
+    }
+
+    #[test]
+    fn invalid_imported_template_is_rejected_without_replacing_current_state() {
+        let settings_path = temp_settings_path("invalid-import-template");
+        save_snapshot(&settings_path, &default_snapshot()).unwrap();
+        let path = quick_commands_path(&settings_path);
+        let previous = fs::read(&path).unwrap();
+        let mut incoming = default_snapshot();
+        incoming.commands[0].command = "echo {{param.missing}}".to_string();
+        let json = serde_json::to_string(&incoming).unwrap();
+
+        let result =
+            apply_snapshot_json(&settings_path, &json, QuickCommandImportStrategy::Replace);
+
+        assert_eq!(result.imported, 0);
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(fs::read(&path).unwrap(), previous);
     }
 
     #[test]

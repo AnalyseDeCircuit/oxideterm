@@ -35,6 +35,7 @@
       "cancel": "Annuler",
       "run": "Exécuter",
       "launch_failed": "Le déclencheur n’a pas pu démarrer le programme local.",
+      "quick_command_data_missing": "La commande rapide du déclencheur nécessite des paramètres ou un contexte de terminal indisponibles.",
       "risk_high": "élevé",
       "risk_medium": "moyen",
       "risk_configured": "configuré"

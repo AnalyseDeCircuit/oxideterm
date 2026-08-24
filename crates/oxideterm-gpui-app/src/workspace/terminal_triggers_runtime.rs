@@ -418,6 +418,18 @@ impl WorkspaceApp {
         };
         let Ok(prepared) = prepare_quick_command(&quick_command, &[context], &parameter_values)
         else {
+            self.push_workspace_notice(
+                TerminalNotice {
+                    title: self
+                        .i18n
+                        .t("terminal.triggers.quick_command_data_missing"),
+                    description: None,
+                    status_text: None,
+                    progress: None,
+                    variant: TerminalNoticeVariant::Error,
+                },
+                cx,
+            );
             return;
         };
         let template_requires_confirmation = prepared.confirmation_required;

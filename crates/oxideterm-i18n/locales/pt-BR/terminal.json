@@ -35,6 +35,7 @@
       "cancel": "Cancelar",
       "run": "Executar",
       "launch_failed": "O gatilho não conseguiu iniciar o programa local.",
+      "quick_command_data_missing": "O comando rápido do gatilho precisa de parâmetros ou contexto de terminal indisponíveis.",
       "risk_high": "alto",
       "risk_medium": "médio",
       "risk_configured": "configurado"

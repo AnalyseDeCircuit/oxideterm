@@ -752,7 +752,17 @@ impl WorkspaceApp {
                     width,
                     self.tokens.metrics.settings_theme_select_popup_max_height,
                 );
-                for command in &self.terminal.read(cx).quick_commands.store.commands {
+                for command in self
+                    .terminal
+                    .read(cx)
+                    .quick_commands
+                    .store
+                    .commands
+                    .iter()
+                    .filter(|command| {
+                        oxideterm_quick_commands::quick_command_can_run_non_interactively(command)
+                    })
+                {
                     let id = command.id.clone();
                     popup = popup.child(select_option_action(
                         select_option(&self.tokens, command.name.clone(), id == current),

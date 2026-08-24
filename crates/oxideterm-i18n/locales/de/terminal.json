@@ -35,6 +35,7 @@
       "cancel": "Abbrechen",
       "run": "Ausführen",
       "launch_failed": "Der Trigger konnte das lokale Programm nicht starten.",
+      "quick_command_data_missing": "Dem Schnellbefehl des Auslösers fehlen Parameter- oder Terminalkontextdaten.",
       "risk_high": "hoch",
       "risk_medium": "mittel",
       "risk_configured": "konfiguriert"

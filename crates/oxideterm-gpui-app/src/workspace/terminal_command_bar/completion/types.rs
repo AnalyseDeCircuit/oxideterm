@@ -70,9 +70,6 @@ impl TerminalCommandContext {
         if let Some(cwd_host) = &self.cwd_host {
             fields.push(cwd_host.clone());
         }
-        if let Some(node_id) = &self.node_id {
-            fields.push(node_id.0.clone());
-        }
         fields.retain(|field| !field.trim().is_empty());
         fields.dedup();
         fields

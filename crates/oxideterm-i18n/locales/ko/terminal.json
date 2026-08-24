@@ -35,6 +35,7 @@
       "cancel": "취소",
       "run": "실행",
       "launch_failed": "트리거가 로컬 프로그램을 시작하지 못했습니다.",
+      "quick_command_data_missing": "트리거의 빠른 명령에 필요한 매개변수 또는 터미널 컨텍스트가 없습니다.",
       "risk_high": "높음",
       "risk_medium": "중간",
       "risk_configured": "구성됨"

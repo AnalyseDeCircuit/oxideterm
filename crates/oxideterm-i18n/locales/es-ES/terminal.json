@@ -35,6 +35,7 @@
       "cancel": "Cancelar",
       "run": "Ejecutar",
       "launch_failed": "El desencadenador no pudo iniciar el programa local.",
+      "quick_command_data_missing": "Al comando rápido del desencadenador le faltan parámetros o datos de contexto del terminal.",
       "risk_high": "alto",
       "risk_medium": "medio",
       "risk_configured": "configurado"

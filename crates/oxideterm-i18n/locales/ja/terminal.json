@@ -35,6 +35,7 @@
       "cancel": "キャンセル",
       "run": "実行",
       "launch_failed": "トリガーがローカルプログラムを起動できませんでした。",
+      "quick_command_data_missing": "トリガーのクイックコマンドに必要なパラメーターまたはターミナルコンテキストがありません。",
       "risk_high": "高",
       "risk_medium": "中",
       "risk_configured": "設定済み"

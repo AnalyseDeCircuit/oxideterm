@@ -40,5 +40,6 @@ pub use template::{
     MAX_QUICK_COMMAND_ARGUMENT_NAME_BYTES, MAX_QUICK_COMMAND_ARGUMENT_VALUE_BYTES,
     MAX_QUICK_COMMAND_ARGUMENTS, MAX_QUICK_COMMAND_EXPANDED_BYTES, PreparedQuickCommand,
     PreparedQuickCommandTarget, QuickCommandContextValues, QuickCommandTargetContext,
-    QuickCommandTemplateError, prepare_quick_command, validate_quick_command_template,
+    QuickCommandTemplateError, prepare_quick_command, quick_command_can_run_non_interactively,
+    quick_command_target_match_fields, validate_quick_command_template,
 };

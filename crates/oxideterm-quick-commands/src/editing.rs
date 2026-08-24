@@ -249,17 +249,12 @@ pub fn match_quick_command_host_patterns(patterns: &[String], target_fields: &[S
 pub fn quick_command_available_for_target(
     command: &QuickCommand,
     protocol: QuickCommandTargetProtocol,
-    host: Option<&str>,
+    target_fields: &[String],
 ) -> bool {
     let protocol_matches = command.availability.protocols.is_empty()
         || command.availability.protocols.contains(&protocol);
-    let host_matches = command.availability.host_patterns.is_empty()
-        || host.is_some_and(|host| {
-            match_quick_command_host_patterns(
-                &command.availability.host_patterns,
-                &[host.to_string()],
-            )
-        });
+    let host_matches =
+        match_quick_command_host_patterns(&command.availability.host_patterns, target_fields);
     protocol_matches && host_matches
 }
 

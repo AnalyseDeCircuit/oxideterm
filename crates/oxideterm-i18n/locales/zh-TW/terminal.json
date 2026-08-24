@@ -35,6 +35,7 @@
       "cancel": "取消",
       "run": "執行",
       "launch_failed": "觸發器無法啟動本機程式。",
+      "quick_command_data_missing": "觸發器的快速命令缺少可用的參數或終端上下文。",
       "risk_high": "高",
       "risk_medium": "中",
       "risk_configured": "依設定需確認"

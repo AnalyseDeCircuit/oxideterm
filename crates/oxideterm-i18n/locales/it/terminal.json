@@ -35,6 +35,7 @@
       "cancel": "Annulla",
       "run": "Esegui",
       "launch_failed": "Il trigger non ha potuto avviare il programma locale.",
+      "quick_command_data_missing": "Al comando rapido del trigger mancano parametri o dati di contesto del terminale.",
       "risk_high": "alto",
       "risk_medium": "medio",
       "risk_configured": "configurato"

@@ -122,11 +122,8 @@ pub fn prepare_quick_command(
     let mut prepared_targets = Vec::new();
     let mut unavailable_targets = Vec::new();
     for target in targets {
-        if !quick_command_available_for_target(
-            command,
-            target.protocol,
-            target.values.host.as_deref().map(String::as_str),
-        ) {
+        let target_fields = quick_command_target_match_fields(target);
+        if !quick_command_available_for_target(command, target.protocol, &target_fields) {
             unavailable_targets.push(target.label.clone());
             continue;
         }
@@ -151,6 +148,38 @@ pub fn prepare_quick_command(
         unavailable_targets,
         confirmation_required,
     })
+}
+
+pub fn quick_command_target_match_fields(target: &QuickCommandTargetContext) -> Vec<String> {
+    // Availability and execution must derive identity from the same target context.
+    let mut fields = vec![target.label.clone()];
+    if let Some(host) = target.values.host.as_deref() {
+        fields.push(host.to_string());
+    }
+    if let Some(username) = target.values.username.as_deref() {
+        fields.push(username.to_string());
+        if let Some(host) = target.values.host.as_deref() {
+            fields.push(format!("{username}@{host}"));
+        }
+    }
+    if let Some(connection) = target.values.connection.as_deref() {
+        fields.push(connection.to_string());
+    }
+    fields.retain(|field| !field.trim().is_empty());
+    fields.dedup();
+    fields
+}
+
+pub fn quick_command_can_run_non_interactively(command: &QuickCommand) -> bool {
+    // Trigger actions cannot prompt for missing values, so required parameters need defaults.
+    validate_quick_command_template(&command.command, &command.parameters).is_ok()
+        && command.parameters.iter().all(|parameter| {
+            !parameter.required
+                || parameter
+                    .default_value
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty())
+        })
 }
 
 pub fn validate_quick_command_template(
@@ -579,5 +608,66 @@ mod tests {
             "echo server.example.com"
         );
         assert_eq!(prepared.unavailable_targets, ["Local"]);
+    }
+
+    #[test]
+    fn preparation_matches_the_same_target_identity_fields_it_executes() {
+        let command = QuickCommand {
+            id: "alice-only".to_string(),
+            name: "Alice only".to_string(),
+            command: "whoami".to_string(),
+            category: "custom".to_string(),
+            description: None,
+            parameters: Vec::new(),
+            availability: QuickCommandAvailability {
+                protocols: vec![QuickCommandTargetProtocol::Ssh],
+                host_patterns: vec!["alice@*.example.com".to_string()],
+            },
+            confirmation: QuickCommandConfirmationPolicy::Inherit,
+            sort_order: 0,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let target = QuickCommandTargetContext {
+            target_id: "ssh".to_string(),
+            label: "Production".to_string(),
+            protocol: QuickCommandTargetProtocol::Ssh,
+            values: QuickCommandContextValues {
+                host: Some(Zeroizing::new("api.example.com".to_string())),
+                username: Some(Zeroizing::new("alice".to_string())),
+                ..QuickCommandContextValues::default()
+            },
+        };
+
+        let prepared = prepare_quick_command(&command, &[target], &BTreeMap::new()).unwrap();
+
+        assert_eq!(prepared.targets.len(), 1);
+        assert!(prepared.unavailable_targets.is_empty());
+    }
+
+    #[test]
+    fn noninteractive_commands_require_defaults_for_required_parameters() {
+        let mut command = QuickCommand {
+            id: "service".to_string(),
+            name: "Service".to_string(),
+            command: "systemctl status {{param.service|sh}}".to_string(),
+            category: "custom".to_string(),
+            description: None,
+            parameters: vec![QuickCommandParameter {
+                name: "service".to_string(),
+                label: "Service".to_string(),
+                required: true,
+                ..QuickCommandParameter::default()
+            }],
+            availability: QuickCommandAvailability::default(),
+            confirmation: QuickCommandConfirmationPolicy::Inherit,
+            sort_order: 0,
+            created_at: 1,
+            updated_at: 1,
+        };
+
+        assert!(!quick_command_can_run_non_interactively(&command));
+        command.parameters[0].default_value = Some("sshd".to_string());
+        assert!(quick_command_can_run_non_interactively(&command));
     }
 }
