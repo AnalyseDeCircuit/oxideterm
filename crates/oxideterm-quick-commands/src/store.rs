@@ -20,7 +20,7 @@ use crate::model::{
 use crate::{decode_snapshot_json, encode_snapshot_json, validate_quick_command_template};
 
 const QUICK_COMMANDS_FILENAME: &str = "quick-commands.json";
-const MAX_QUICK_COMMANDS_FILE_BYTES: u64 = 512 * 1024;
+pub const MAX_QUICK_COMMANDS_FILE_BYTES: u64 = 512 * 1024;
 pub const MAX_CATEGORIES: usize = 100;
 const MAX_COMMANDS: usize = 1000;
 const MAX_ID_LEN: usize = 128;
@@ -119,6 +119,13 @@ pub fn apply_snapshot_json(
     snapshot_json: &str,
     strategy: QuickCommandImportStrategy,
 ) -> QuickCommandImportResult {
+    if snapshot_json.len() as u64 > MAX_QUICK_COMMANDS_FILE_BYTES {
+        return QuickCommandImportResult {
+            imported: 0,
+            skipped: 0,
+            errors: vec!["Quick Commands snapshot exceeds size limit".to_string()],
+        };
+    }
     let incoming = decode_snapshot_json(snapshot_json)
         .and_then(sanitize_snapshot)
         .and_then(validate_imported_templates);
@@ -926,6 +933,22 @@ mod tests {
         assert_eq!(result.imported, 0);
         assert_eq!(result.errors.len(), 1);
         assert_eq!(fs::read(&path).unwrap(), previous);
+    }
+
+    #[test]
+    fn oversized_import_is_rejected_before_parsing() {
+        let settings_path = temp_settings_path("oversized-import");
+        let oversized = " ".repeat(MAX_QUICK_COMMANDS_FILE_BYTES as usize + 1);
+
+        let result = apply_snapshot_json(
+            &settings_path,
+            &oversized,
+            QuickCommandImportStrategy::Rename,
+        );
+
+        assert_eq!(result.imported, 0);
+        assert_eq!(result.errors.len(), 1);
+        assert!(!quick_commands_path(&settings_path).exists());
     }
 
     #[test]

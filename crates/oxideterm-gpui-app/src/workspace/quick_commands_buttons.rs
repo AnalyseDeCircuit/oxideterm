@@ -1,4 +1,7 @@
-use gpui::{App, Context, MouseDownEvent, Window, rgb, rgba};
+use gpui::{
+    App, Context, InteractiveElement, MouseDownEvent, MouseMoveEvent, StatefulInteractiveElement,
+    Window, rgb, rgba,
+};
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions, ToolbarButtonOptions,
 };
@@ -26,6 +29,35 @@ impl WorkspaceApp {
             listener,
             cx,
         )
+    }
+
+    pub(super) fn quick_command_tooltip_icon_button(
+        &self,
+        icon: LucideIcon,
+        tooltip_id: &'static str,
+        tooltip_title: String,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<gpui::Div> {
+        // Manager actions use the same compact button geometry with an accessible hover label.
+        self.quick_command_icon_button(icon, listener, cx)
+            .id(tooltip_id)
+            .on_mouse_move(
+                cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
+                    this.queue_workspace_tooltip(
+                        tooltip_id,
+                        tooltip_title.clone(),
+                        f32::from(event.position.x) + 12.0,
+                        f32::from(event.position.y) + 16.0,
+                        cx,
+                    );
+                }),
+            )
+            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                if !*hovered {
+                    this.clear_workspace_tooltip(tooltip_id, cx);
+                }
+            }))
     }
 
     pub(super) fn quick_command_mini_button(

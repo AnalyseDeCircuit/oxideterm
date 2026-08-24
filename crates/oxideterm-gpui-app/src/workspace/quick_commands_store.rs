@@ -163,6 +163,72 @@ impl QuickCommandsState {
         }
     }
 
+    pub(in crate::workspace) fn move_command(&mut self, id: &str, offset: isize) -> bool {
+        if offset == 0 {
+            return false;
+        }
+        let Some(category) = self
+            .commands
+            .iter()
+            .find(|command| command.id == id)
+            .map(|command| command.category.clone())
+        else {
+            return false;
+        };
+        let mut category_indices = self
+            .commands
+            .iter()
+            .enumerate()
+            .filter(|(_, command)| command.category == category)
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        category_indices.sort_by_key(|index| self.commands[*index].sort_order);
+        let Some(current_position) = category_indices
+            .iter()
+            .position(|index| self.commands[*index].id == id)
+        else {
+            return false;
+        };
+        let target_position = current_position.saturating_add_signed(offset);
+        if target_position >= category_indices.len() || target_position == current_position {
+            return false;
+        }
+        category_indices.swap(current_position, target_position);
+
+        let updated_at = now_ms();
+        let mut commands = self.commands.clone();
+        // Normalize only this category so duplicate imported sort keys cannot block a move.
+        for (sort_order, index) in category_indices.into_iter().enumerate() {
+            commands[index].sort_order = sort_order as i64;
+            commands[index].updated_at = updated_at;
+        }
+        commands.sort_by_key(|command| command.sort_order);
+        let snapshot = QuickCommandsSnapshot {
+            version: QUICK_COMMANDS_SCHEMA_VERSION,
+            categories: self.categories.clone(),
+            commands: commands.clone(),
+            updated_at,
+        };
+        match oxideterm_quick_commands::save_snapshot(&self.settings_path, &snapshot) {
+            Ok(()) => {
+                self.commands = commands;
+                if let Some(editor) = self.command_editor.as_mut()
+                    && let Some(editor_id) = editor.id.as_deref()
+                    && let Some(command) =
+                        self.commands.iter().find(|command| command.id == editor_id)
+                {
+                    editor.sort_order = command.sort_order;
+                }
+                self.last_persist_error = None;
+                true
+            }
+            Err(error) => {
+                self.last_persist_error = Some(error);
+                false
+            }
+        }
+    }
+
     pub(super) fn upsert_category(&mut self, draft: QuickCommandCategoryDraft) -> String {
         self.active_category =
             upsert_quick_command_category(&mut self.categories, draft, &self.active_category);
@@ -179,12 +245,10 @@ impl QuickCommandsState {
         true
     }
 
-    #[allow(dead_code)]
     pub(in crate::workspace) fn export_snapshot_json(&self) -> Result<String, String> {
         oxideterm_quick_commands::export_snapshot_json(&self.settings_path)
     }
 
-    #[allow(dead_code)]
     pub(in crate::workspace) fn apply_snapshot_json(
         &mut self,
         snapshot_json: &str,
@@ -300,6 +364,33 @@ mod quick_command_tests {
                 && command.command == "ls /"
                 && command.description.as_deref() == Some("root listing")
         }));
+        let _ = fs::remove_dir_all(settings_path.parent().unwrap());
+    }
+
+    #[test]
+    fn moving_command_updates_visible_and_persisted_category_order() {
+        let settings_path = temp_settings_path("move-command");
+        let mut state = QuickCommandsState::load(&settings_path);
+        let category = state.commands[0].category.clone();
+        let category_commands = state
+            .commands
+            .iter()
+            .filter(|command| command.category == category)
+            .map(|command| command.id.clone())
+            .collect::<Vec<_>>();
+        assert!(category_commands.len() >= 2);
+        let moved_id = category_commands[1].clone();
+
+        assert!(state.move_command(&moved_id, -1));
+        let reloaded = QuickCommandsState::load(&settings_path);
+        let reloaded_order = reloaded
+            .commands
+            .iter()
+            .filter(|command| command.category == category)
+            .map(|command| command.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(reloaded_order.first().copied(), Some(moved_id.as_str()));
         let _ = fs::remove_dir_all(settings_path.parent().unwrap());
     }
 

@@ -76,7 +76,6 @@ fn terminal_command_suggestion_kind_key(kind: TerminalCommandSuggestionKind) -> 
         TerminalCommandSuggestionKind::Option => "option",
         TerminalCommandSuggestionKind::File => "file",
         TerminalCommandSuggestionKind::Directory => "directory",
-        TerminalCommandSuggestionKind::QuickCommand => "quick_command",
     }
 }
 

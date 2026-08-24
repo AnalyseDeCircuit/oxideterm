@@ -1,10 +1,9 @@
 // The legacy input owner is retired. Keep its data providers available for the
-// custom-spec settings surface and a sender-editor completion adapter without
-// retaining the old draft, focus, IME, or rendering state.
+// custom-spec settings surface without retaining the old draft, focus, IME,
+// or rendering state.
 #![allow(dead_code, unused_imports)]
 
 use super::actions::classify_command_risk;
-use super::quick_commands::match_quick_command_host_pattern;
 use super::*;
 use oxideterm_ai::infer_ai_cwd;
 use oxideterm_sftp::{FileType as RemotePathFileType, ListFilter, SortOrder};

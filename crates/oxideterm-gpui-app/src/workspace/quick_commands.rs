@@ -161,5 +161,4 @@ mod store;
 #[path = "quick_commands_view.rs"]
 mod view;
 
-pub(in crate::workspace) use oxideterm_quick_commands::match_quick_command_host_pattern;
 pub(in crate::workspace) use view::quick_command_input_uses_monospace;

@@ -1023,7 +1023,6 @@ enum TerminalCommandSuggestionKind {
     Option,
     File,
     Directory,
-    QuickCommand,
 }
 
 #[derive(Clone)]

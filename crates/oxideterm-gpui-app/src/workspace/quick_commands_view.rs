@@ -1,12 +1,14 @@
 use std::{
     collections::{HashMap, hash_map::DefaultHasher},
+    fs,
     hash::{Hash, Hasher},
+    path::PathBuf,
     sync::Arc,
 };
 
 use gpui::{
-    AnyElement, App, Context, CursorStyle, KeyDownEvent, MouseButton, div, prelude::*, px, rgb,
-    rgba,
+    AnyElement, App, Context, CursorStyle, KeyDownEvent, MouseButton, PathPromptOptions,
+    SharedString, div, prelude::*, px, rgb, rgba,
 };
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_gpui_ui::{
@@ -28,15 +30,17 @@ use zeroize::Zeroizing;
 use super::super::ime::WorkspaceImeTarget;
 use super::super::{
     QUICK_COMMAND_LIST_ESTIMATED_HEIGHT, QUICK_COMMAND_LIST_OVERSCAN, SelectableTextRole,
-    TauriVirtualListSpec, WorkspaceApp, settings_mono_font_family, settings_ui_font_family,
+    TauriVirtualListSpec, TerminalNotice, TerminalNoticeVariant, WorkspaceApp,
+    settings_mono_font_family, settings_ui_font_family,
     sync_tauri_variable_list_state_by_signatures, tauri_virtual_list,
 };
 use super::{
     QuickCommand, QuickCommandCategory, QuickCommandCategoryDraft, QuickCommandConfirmationPolicy,
-    QuickCommandEditorDraft, QuickCommandExecutionDraft, QuickCommandIcon, QuickCommandInput,
-    QuickCommandParameter, QuickCommandParameterEditorDraft, QuickCommandParameterKind,
-    QuickCommandTargetProtocol, TerminalQuickCommandsState, default_quick_command_categories,
-    now_ms, quick_command_icon_source_id,
+    QuickCommandEditorDraft, QuickCommandExecutionDraft, QuickCommandIcon,
+    QuickCommandImportStrategy, QuickCommandInput, QuickCommandParameter,
+    QuickCommandParameterEditorDraft, QuickCommandParameterKind, QuickCommandTargetProtocol,
+    TerminalQuickCommandsState, default_quick_command_categories, now_ms,
+    quick_command_icon_source_id,
 };
 use crate::assets::LucideIcon;
 
@@ -82,6 +86,10 @@ fn quick_command_list_height(row_count: usize) -> f32 {
 fn quick_commands_content_height(row_count: usize) -> f32 {
     (QUICK_COMMANDS_BODY_HEADER_HEIGHT + quick_command_list_height(row_count))
         .max(QUICK_COMMANDS_CONTENT_MIN_HEIGHT)
+}
+
+fn quick_commands_export_directory() -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
 fn select_quick_command_category_state(
@@ -1393,14 +1401,40 @@ impl WorkspaceApp {
                                     .child(self.i18n.t("terminal.quick_commands.title")),
                             ),
                     )
-                    .child(self.quick_command_icon_button(
-                        LucideIcon::X,
-                        |this, _event, _window, cx| {
-                            this.close_quick_commands_manager(cx);
-                            cx.stop_propagation();
-                        },
-                        cx,
-                    )),
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .child(self.quick_command_tooltip_icon_button(
+                                LucideIcon::Upload,
+                                "quick-commands-import",
+                                self.i18n.t("terminal.quick_commands.import"),
+                                |this, _event, _window, cx| {
+                                    this.import_quick_commands(cx);
+                                    cx.stop_propagation();
+                                },
+                                cx,
+                            ))
+                            .child(self.quick_command_tooltip_icon_button(
+                                LucideIcon::Download,
+                                "quick-commands-export",
+                                self.i18n.t("terminal.quick_commands.export"),
+                                |this, _event, _window, cx| {
+                                    this.export_quick_commands(cx);
+                                    cx.stop_propagation();
+                                },
+                                cx,
+                            ))
+                            .child(self.quick_command_icon_button(
+                                LucideIcon::X,
+                                |this, _event, _window, cx| {
+                                    this.close_quick_commands_manager(cx);
+                                    cx.stop_propagation();
+                                },
+                                cx,
+                            )),
+                    ),
             )
             .child(
                 div()
@@ -1425,6 +1459,168 @@ impl WorkspaceApp {
             )
             .child(overlay_content_boundary(manager))
             .into_any_element()
+    }
+
+    fn export_quick_commands(&mut self, cx: &mut Context<Self>) {
+        let export = self
+            .terminal
+            .read(cx)
+            .quick_commands
+            .store
+            .export_snapshot_json();
+        let Ok(snapshot_json) = export else {
+            self.push_workspace_notice(
+                TerminalNotice {
+                    title: self.i18n.t("terminal.quick_commands.export_failed"),
+                    description: None,
+                    status_text: None,
+                    progress: None,
+                    variant: TerminalNoticeVariant::Error,
+                },
+                cx,
+            );
+            return;
+        };
+        // Command bodies may contain user-entered sensitive literals during explicit export.
+        let snapshot_json = Zeroizing::new(snapshot_json);
+        let receiver = cx.prompt_for_new_path(
+            &quick_commands_export_directory(),
+            Some("oxideterm-quick-commands.json"),
+        );
+        cx.spawn(async move |weak, cx| {
+            let result = match receiver.await {
+                Ok(Ok(Some(path))) => oxideterm_atomic_file::durable_write(
+                    &path,
+                    snapshot_json.as_bytes(),
+                )
+                    .map(|()| Some(path))
+                    .map_err(|_| ()),
+                Ok(Ok(None)) => Ok(None),
+                Ok(Err(_)) | Err(_) => Err(()),
+            };
+            let _ = weak.update(cx, |this, cx| match result {
+                Ok(Some(path)) => this.push_workspace_notice(
+                    TerminalNotice {
+                        title: this.i18n.t("terminal.quick_commands.export_success"),
+                        description: Some(path.to_string_lossy().to_string()),
+                        status_text: None,
+                        progress: None,
+                        variant: TerminalNoticeVariant::Success,
+                    },
+                    cx,
+                ),
+                Ok(None) => {}
+                Err(()) => this.push_workspace_notice(
+                    TerminalNotice {
+                        title: this.i18n.t("terminal.quick_commands.export_failed"),
+                        description: None,
+                        status_text: None,
+                        progress: None,
+                        variant: TerminalNoticeVariant::Error,
+                    },
+                    cx,
+                ),
+            });
+        })
+        .detach();
+    }
+
+    fn import_quick_commands(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(SharedString::from(
+                self.i18n.t("terminal.quick_commands.import"),
+            )),
+        });
+        cx.spawn(async move |weak, cx| {
+            let selected_path = match receiver.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                Ok(Ok(None)) => None,
+                Ok(Err(_)) | Err(_) => {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.push_workspace_notice(
+                            TerminalNotice {
+                                title: this.i18n.t("terminal.quick_commands.import_failed"),
+                                description: None,
+                                status_text: None,
+                                progress: None,
+                                variant: TerminalNoticeVariant::Error,
+                            },
+                            cx,
+                        );
+                    });
+                    return;
+                }
+            };
+            let Some(path) = selected_path else {
+                return;
+            };
+            let snapshot_json = fs::metadata(&path)
+                .map_err(|_| ())
+                .and_then(|metadata| {
+                    (metadata.len() <= oxideterm_quick_commands::MAX_QUICK_COMMANDS_FILE_BYTES)
+                        .then_some(())
+                        .ok_or(())
+                })
+                .and_then(|()| {
+                    fs::read_to_string(&path)
+                        .map(Zeroizing::new)
+                        .map_err(|_| ())
+                });
+            let _ = weak.update(cx, |this, cx| {
+                let Ok(snapshot_json) = snapshot_json else {
+                    this.push_workspace_notice(
+                        TerminalNotice {
+                            title: this.i18n.t("terminal.quick_commands.import_failed"),
+                            description: None,
+                            status_text: None,
+                            progress: None,
+                            variant: TerminalNoticeVariant::Error,
+                        },
+                        cx,
+                    );
+                    return;
+                };
+                let result = this.terminal.update(cx, |terminal, _cx| {
+                    // Desktop import keeps every existing record and renames conflicts.
+                    terminal
+                        .quick_commands
+                        .store
+                        .apply_snapshot_json(&snapshot_json, QuickCommandImportStrategy::Rename)
+                });
+                if result.errors.is_empty() {
+                    let title = this
+                        .i18n
+                        .t("terminal.quick_commands.import_success")
+                        .replace("{{count}}", &result.imported.to_string());
+                    this.push_workspace_notice(
+                        TerminalNotice {
+                            title,
+                            description: None,
+                            status_text: None,
+                            progress: None,
+                            variant: TerminalNoticeVariant::Success,
+                        },
+                        cx,
+                    );
+                    cx.notify();
+                } else {
+                    this.push_workspace_notice(
+                        TerminalNotice {
+                            title: this.i18n.t("terminal.quick_commands.import_failed"),
+                            description: None,
+                            status_text: None,
+                            progress: None,
+                            variant: TerminalNoticeVariant::Error,
+                        },
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
     }
 
     fn render_quick_command_manager_list(
@@ -2196,7 +2392,9 @@ impl WorkspaceApp {
         let command_for_insert = command.command.clone();
         let command_for_run = command.clone();
         let command_for_primary_action = command.clone();
-        let command_id = command.id.clone();
+        let command_id_for_move_up = command.id.clone();
+        let command_id_for_move_down = command.id.clone();
+        let command_id_for_delete = command.id.clone();
         let command_id_for_hover = command.id.clone();
         let keep_open_for_insert = pinned;
         let highlighted = highlighted_command == Some(command.id.as_str());
@@ -2364,10 +2562,38 @@ impl WorkspaceApp {
             ))
             .when(managing, |row| {
                 row.child(self.quick_command_action_button(
+                    LucideIcon::ArrowUp,
+                    move |this, _event, _window, cx| {
+                        this.terminal.update(cx, |terminal, _cx| {
+                            terminal
+                                .quick_commands
+                                .store
+                                .move_command(&command_id_for_move_up, -1)
+                        });
+                        cx.stop_propagation();
+                        cx.notify();
+                    },
+                    cx,
+                ))
+                .child(self.quick_command_action_button(
+                    LucideIcon::ArrowDown,
+                    move |this, _event, _window, cx| {
+                        this.terminal.update(cx, |terminal, _cx| {
+                            terminal
+                                .quick_commands
+                                .store
+                                .move_command(&command_id_for_move_down, 1)
+                        });
+                        cx.stop_propagation();
+                        cx.notify();
+                    },
+                    cx,
+                ))
+                .child(self.quick_command_action_button(
                     LucideIcon::Trash2,
                     move |this, _event, _window, cx| {
                         this.terminal.update(cx, |terminal, _cx| {
-                            terminal.quick_commands.delete_command(&command_id)
+                            terminal.quick_commands.delete_command(&command_id_for_delete)
                         });
                         cx.stop_propagation();
                         cx.notify();
