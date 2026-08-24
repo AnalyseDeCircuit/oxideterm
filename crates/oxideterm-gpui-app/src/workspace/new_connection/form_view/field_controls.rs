@@ -1,6 +1,7 @@
 use super::*;
 use gpui::{Animation, AnimationExt, App, CursorStyle};
 use oxideterm_connections::ConnectionTerminalSessionLogPolicy;
+use oxideterm_remote_desktop::RemoteDesktopRdpNetworkProfile;
 use oxideterm_settings_model::parse_rgb24_hex;
 
 const NEW_CONNECTION_TRANSPORT_ROW_HEIGHT: f32 = 36.0;
@@ -159,6 +160,24 @@ const RDP_COMPATIBILITY_FEATURES: &[(RemoteDesktopSessionFeature, &str, &str)] =
     "modals.new_connection.remote_desktop_disable_graphics_pipeline",
     "modals.new_connection.remote_desktop_disable_graphics_pipeline_hint",
 )];
+const RDP_NETWORK_PROFILES: &[(RemoteDesktopRdpNetworkProfile, &str)] = &[
+    (
+        RemoteDesktopRdpNetworkProfile::Automatic,
+        "modals.new_connection.remote_desktop_rdp_network_auto",
+    ),
+    (
+        RemoteDesktopRdpNetworkProfile::Lan,
+        "modals.new_connection.remote_desktop_rdp_network_lan",
+    ),
+    (
+        RemoteDesktopRdpNetworkProfile::Broadband,
+        "modals.new_connection.remote_desktop_rdp_network_broadband",
+    ),
+    (
+        RemoteDesktopRdpNetworkProfile::LowBandwidth,
+        "modals.new_connection.remote_desktop_rdp_network_low_bandwidth",
+    ),
+];
 const VNC_SECURITY_PREFERENCES: &[(RemoteDesktopVncPreference, &str)] = &[
     (
         RemoteDesktopVncPreference::Security(
@@ -3061,23 +3080,24 @@ impl WorkspaceApp {
                 )
             })
             .into_any_element();
+        let username_placeholder =
+            if protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp {
+                "Administrator".to_string()
+            } else {
+                self.i18n.t("modals.new_connection.remote_desktop_username")
+            };
         let authentication = div()
             .flex()
             .flex_col()
             .gap(px(self.tokens.metrics.modal_section_gap))
-            .when(
-                protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp,
-                |section| {
-                    section.child(self.render_connection_field(
-                        self.i18n.t("modals.new_connection.remote_desktop_username"),
-                        &username,
-                        "Administrator".to_string(),
-                        NewConnectionField::Username,
-                        false,
-                        cx,
-                    ))
-                },
-            )
+            .child(self.render_connection_field(
+                self.i18n.t("modals.new_connection.remote_desktop_username"),
+                &username,
+                username_placeholder,
+                NewConnectionField::Username,
+                false,
+                cx,
+            ))
             .child(self.render_connection_secret_field(
                 self.i18n.t("ssh.form.password"),
                 if keeps_saved_password {
@@ -3263,13 +3283,69 @@ impl WorkspaceApp {
             .when(
                 protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp,
                 |features| {
-                    features.child(self.render_remote_desktop_feature_group(
-                        "modals.new_connection.remote_desktop_compatibility_group",
-                        RDP_COMPATIBILITY_FEATURES,
-                        capabilities,
-                        cx,
-                    ))
+                    features.child(self.render_rdp_network_profile(cx)).child(
+                        self.render_remote_desktop_feature_group(
+                            "modals.new_connection.remote_desktop_compatibility_group",
+                            RDP_COMPATIBILITY_FEATURES,
+                            capabilities,
+                            cx,
+                        ),
+                    )
                 },
+            )
+            .into_any_element()
+    }
+
+    fn render_rdp_network_profile(&self, cx: &mut Context<Self>) -> AnyElement {
+        let selected_profile = self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .map(|form| form.remote_desktop_session_options.rdp.network_profile)
+            .unwrap_or_default();
+        let options =
+            RDP_NETWORK_PROFILES
+                .iter()
+                .enumerate()
+                .map(|(index, (network_profile, label_key))| {
+                    let network_profile = *network_profile;
+                    segmented_tab(
+                        &self.tokens,
+                        self.i18n.t(label_key),
+                        selected_profile == network_profile,
+                    )
+                    .id(SharedString::from(format!("rdp-network-profile-{index}")))
+                    .whitespace_normal()
+                    .text_align(gpui::TextAlign::Center)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.update_connection_form_state(cx, |state| {
+                                if let Some(form) = state.form.as_mut() {
+                                    form.remote_desktop_session_options.rdp.network_profile =
+                                        network_profile;
+                                }
+                            });
+                            cx.notify();
+                        }),
+                    )
+                });
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.one))
+            .child(form_field(
+                &self.tokens,
+                self.i18n
+                    .t("modals.new_connection.remote_desktop_rdp_network_profile"),
+                segmented_tabs(&self.tokens).children(options),
+            ))
+            .child(
+                self.render_connection_hint(
+                    self.i18n
+                        .t("modals.new_connection.remote_desktop_rdp_network_profile_hint"),
+                ),
             )
             .into_any_element()
     }
