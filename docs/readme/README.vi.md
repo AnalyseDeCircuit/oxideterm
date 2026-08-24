@@ -3,7 +3,7 @@
 <p align="center">
   <strong>Không gian làm việc vận hành máy chủ từ xa có AI — ứng dụng gốc viết hoàn toàn bằng Rust</strong>
   <br>
-  Terminal SSH, Telnet, nối tiếp, RDP/VNC, SFTP, chuyển tiếp cổng và chỉnh sửa nhẹ trong một không gian làm việc gốc.
+  Terminal SSH, Mosh, Telnet, nối tiếp, RDP/VNC, SFTP, chuyển tiếp cổng và chỉnh sửa nhẹ trong một không gian làm việc gốc.
   <br>
   Kết xuất GPU. Miễn phí. Không cần tài khoản.
   <br>
@@ -39,7 +39,7 @@ OxideTerm là không gian làm việc mã nguồn mở cho SSH và vận hành t
 
 **Bạn có thể làm gì:**
 
-- Quản lý SSH, Telnet, serial, RDP/VNC, SFTP, chuyển tiếp cổng, shell cục bộ và chỉnh sửa nhẹ trong một không gian làm việc
+- Quản lý SSH, Mosh, Telnet, serial, RDP/VNC, SFTP, chuyển tiếp cổng, shell cục bộ và chỉnh sửa nhẹ trong một không gian làm việc
 - Duy trì công việc từ xa qua gián đoạn mạng ngắn bằng cơ chế kết nối lại Grace Period
 - Yêu cầu OxideSens kiểm tra phiên đang hoạt động và thực hiện các hành động đã được phê duyệt qua nhà cung cấp AI của bạn
 
@@ -97,7 +97,7 @@ OxideTerm giữ kết nối, tệp, chuyển tiếp, công cụ máy chủ, tự
 
 | Danh mục | Tính năng |
 |---|---|
-| **Terminal và kết nối** | Shell cục bộ, SSH, Telnet, serial, khung chia, chế độ nhập tự do, gửi lệnh nâng cao đến nhiều mục tiêu, multi-hop và kết nối lại ổn định |
+| **Terminal và kết nối** | Shell cục bộ, SSH, Mosh, Telnet, serial, khung chia, chế độ nhập tự do, nhật ký phiên có thể cấu hình, chế độ điều khiển tmux -CC gốc với bố cục khung và thanh phân cách có thể kéo, nhóm phát sóng có tên, gửi lệnh nâng cao đến nhiều mục tiêu, multi-hop và kết nối lại ổn định |
 | **Tệp và chỉnh sửa từ xa** | SFTP, hàng đợi truyền, dấu trang, ghi an toàn, cây dự án và chỉnh sửa theo tab |
 | **Chuyển tiếp và mạng** | Chuyển tiếp cục bộ, từ xa và SOCKS5 động, quy tắc đã lưu và gỡ lỗi socket |
 | **Vận hành máy chủ và màn hình từ xa** | Giám sát, tiến trình, dịch vụ, log, cổng, tác vụ, đĩa, gói, container, tmux, RDP và VNC |

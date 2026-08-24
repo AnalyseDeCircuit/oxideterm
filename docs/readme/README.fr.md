@@ -3,7 +3,7 @@
 <p align="center">
   <strong>Espace de travail d’exploitation natif avec IA pour serveurs distants — Application native 100% Rust</strong>
   <br>
-  Terminaux SSH, Telnet, série, RDP/VNC, SFTP, redirection de ports et édition légère dans un espace de travail natif.
+  Terminaux SSH, Mosh, Telnet, série, RDP/VNC, SFTP, redirection de ports et édition légère dans un espace de travail natif.
   <br>
   Rendu GPU. Gratuit. Aucun compte requis.
   <br>
@@ -39,7 +39,7 @@ OxideTerm est un espace de travail open source pour SSH et les opérations dista
 
 **Ce que vous pouvez faire :**
 
-- Gérer SSH, Telnet, série, RDP/VNC, SFTP, redirections de ports, shells locaux et édition légère dans un seul espace de travail
+- Gérer SSH, Mosh, Telnet, série, RDP/VNC, SFTP, redirections de ports, shells locaux et édition légère dans un seul espace de travail
 - Maintenir le travail distant pendant de brèves coupures réseau grâce à la reconnexion Grace Period
 - Demander à OxideSens d’examiner les sessions actives et d’exécuter des actions approuvées avec votre propre fournisseur d’IA
 
@@ -97,7 +97,7 @@ OxideTerm réunit connexions, fichiers, redirections, outils hôte, automatisati
 
 | Catégorie | Fonctions |
 |---|---|
-| **Terminal et connexions** | Shells locaux, SSH, Telnet, série, volets, mode de saisie libre, envoi avancé vers plusieurs cibles, routes multi-hop et reconnexion stable |
+| **Terminal et connexions** | Shells locaux, SSH, Mosh, Telnet, série, volets, mode de saisie libre, journaux de session configurables, mode de contrôle natif tmux -CC avec disposition des volets et séparateurs redimensionnables, groupes de diffusion nommés, envoi avancé vers plusieurs cibles, routes multi-hop et reconnexion stable |
 | **Fichiers et édition distante** | SFTP, files de transfert, favoris, écritures sûres, arbres de projet et édition par onglets |
 | **Redirection et réseau** | Redirections locale, distante et SOCKS5 dynamique, règles enregistrées et débogage de sockets |
 | **Opérations hôte et bureau distant** | Supervision, processus, services, journaux, ports, tâches, disques, paquets, conteneurs, tmux, RDP et VNC |

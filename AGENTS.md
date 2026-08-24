@@ -87,3 +87,5 @@
 ## void instruction-to-output leakage（IMPORTANT）
 
 Distinguish instructions from deliverable content. Embody the requirements; never restate them unless explicitly requested.
+
+## 不写不必要的测试

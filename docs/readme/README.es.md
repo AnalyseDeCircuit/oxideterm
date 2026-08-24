@@ -3,7 +3,7 @@
 <p align="center">
   <strong>Espacio de trabajo operativo nativo con IA para servidores remotos — aplicación nativa en Rust puro</strong>
   <br>
-  Terminales SSH, Telnet, serie, RDP/VNC, SFTP, reenvío de puertos y edición ligera en un espacio de trabajo nativo.
+  Terminales SSH, Mosh, Telnet, serie, RDP/VNC, SFTP, reenvío de puertos y edición ligera en un espacio de trabajo nativo.
   <br>
   Renderizado GPU. Gratis. Sin necesidad de cuenta.
   <br>
@@ -39,7 +39,7 @@ OxideTerm es un espacio de trabajo de código abierto para SSH y operaciones rem
 
 **Qué puedes hacer:**
 
-- Gestionar SSH, Telnet, serie, RDP/VNC, SFTP, reenvío de puertos, shells locales y edición ligera en un solo espacio de trabajo
+- Gestionar SSH, Mosh, Telnet, serie, RDP/VNC, SFTP, reenvío de puertos, shells locales y edición ligera en un solo espacio de trabajo
 - Mantener el trabajo remoto durante interrupciones breves de red mediante la reconexión Grace Period
 - Pedir a OxideSens que examine sesiones activas y ejecute acciones aprobadas mediante tu propio proveedor de IA
 
@@ -97,7 +97,7 @@ OxideTerm mantiene conexiones, archivos, reenvío, herramientas del host, automa
 
 | Categoría | Funciones |
 |---|---|
-| **Terminal y conexiones** | Shells locales, SSH, Telnet, serie, paneles divididos, modo de entrada libre, envío avanzado a varios destinos, rutas multi-hop y reconexión estable |
+| **Terminal y conexiones** | Shells locales, SSH, Mosh, Telnet, serie, paneles divididos, modo de entrada libre, registros de sesión configurables, modo de control nativo tmux -CC con distribución de paneles y separadores arrastrables, grupos de difusión con nombre, envío avanzado a varios destinos, rutas multi-hop y reconexión estable |
 | **Archivos y edición remota** | SFTP, colas de transferencia, marcadores, escritura segura, árboles de proyecto y edición en pestañas |
 | **Reenvío y redes** | Reenvío local, remoto y SOCKS5 dinámico, reglas guardadas y depuración de sockets |
 | **Operaciones del host y escritorio remoto** | Monitorización, procesos, servicios, logs, puertos, tareas, discos, paquetes, contenedores, tmux, RDP y VNC |

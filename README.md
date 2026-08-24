@@ -3,7 +3,7 @@
 <p align="center">
   <strong>AI-Powered SSH Client and Remote Operations Workspace</strong>
   <br>
-  SSH, Telnet, Serial, RDP/VNC, SFTP, port forwarding, and lightweight editing in one native workspace.
+  SSH, Mosh, Telnet, Serial, RDP/VNC, SFTP, port forwarding, and lightweight editing in one native workspace.
   <br>
   GPU-rendered. Free. No account needed.
   <br>
@@ -38,7 +38,7 @@ OxideTerm is an open-source, local-first workspace for connecting to servers and
 
 **What you can do:**
 
-- Manage SSH, Telnet, Serial, RDP/VNC, SFTP, port forwards, local shells, and lightweight editing in one native workspace
+- Manage SSH, Mosh, Telnet, Serial, RDP/VNC, SFTP, port forwards, local shells, and lightweight editing in one native workspace
 - Keep remote work alive through network hiccups with Grace Period reconnect
 - Ask OxideSens AI to inspect live sessions and perform approved workspace actions through your own AI provider
 - Load bounded Agent Skills and use the advanced terminal command sender for scheduled, repeatable, multi-target input
@@ -97,7 +97,7 @@ OxideTerm keeps terminal rendering, connection state, reconnect orchestration, f
 
 | Category | Features |
 |---|---|
-| **Terminal & Connections** | Local shells, SSH, Telnet, serial, split panes, Free Type Mode, shell integration, command marks, recording, trzsz transfers, terminal graphics, advanced multi-target command sending, multi-hop routes, host-key verification, Agent forwarding, 2FA, and Grace Period reconnect |
+| **Terminal & Connections** | Local shells, SSH, Mosh, Telnet, serial, split panes, Free Type Mode, shell integration, command marks, configurable session logs, recording, trzsz transfers, terminal graphics, native tmux -CC control mode with pane layouts and draggable dividers, named broadcast groups, advanced multi-target command sending, multi-hop routes, host-key verification, Agent forwarding, 2FA, and Grace Period reconnect |
 | **Files & Remote Editing** | SFTP browsing, transfer queues, speed limits, progress and ETA, bookmarks, safe writes, local file management, remote project trees, multi-tab editing, conflict handling, and workspace restore |
 | **Forwarding & Networking** | Local, remote, and dynamic SOCKS5 forwarding, saved rules, reconnect-aware restore, remote port detection, connection topology, and ad-hoc socket debugging |
 | **Host Operations & Remote Desktop** | Host monitoring, processes, services, logs, ports, tasks, disks, packages, containers, tmux, built-in RDP and VNC, clipboard, input, reconnect, and viewport-aware sizing |

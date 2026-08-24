@@ -3,7 +3,7 @@
 <p align="center">
   <strong>Espaço de trabalho operacional nativo com IA para servidores remotos — app nativo em Rust puro</strong>
   <br>
-  Terminais SSH, Telnet, seriais, RDP/VNC, SFTP, encaminhamento de portas e edição leve em um espaço de trabalho nativo.
+  Terminais SSH, Mosh, Telnet, seriais, RDP/VNC, SFTP, encaminhamento de portas e edição leve em um espaço de trabalho nativo.
   <br>
   Renderização GPU. Grátis. Sem necessidade de conta.
   <br>
@@ -39,7 +39,7 @@ OxideTerm é um espaço de trabalho de código aberto para SSH e operações rem
 
 **O que você pode fazer:**
 
-- Gerenciar SSH, Telnet, serial, RDP/VNC, SFTP, encaminhamento de portas, shells locais e edição leve em um único espaço de trabalho
+- Gerenciar SSH, Mosh, Telnet, serial, RDP/VNC, SFTP, encaminhamento de portas, shells locais e edição leve em um único espaço de trabalho
 - Manter o trabalho remoto durante breves interrupções de rede com a reconexão Grace Period
 - Pedir ao OxideSens que examine sessões ativas e execute ações aprovadas usando seu próprio provedor de IA
 
@@ -97,7 +97,7 @@ OxideTerm mantém conexões, arquivos, encaminhamentos, ferramentas do host, aut
 
 | Categoria | Recursos |
 |---|---|
-| **Terminal e conexões** | Shells locais, SSH, Telnet, serial, painéis, modo de entrada livre, envio avançado para vários destinos, rotas multi-hop e reconexão estável |
+| **Terminal e conexões** | Shells locais, SSH, Mosh, Telnet, serial, painéis, modo de entrada livre, logs de sessão configuráveis, modo de controle nativo tmux -CC com layout de painéis e divisores arrastáveis, grupos de transmissão nomeados, envio avançado para vários destinos, rotas multi-hop e reconexão estável |
 | **Arquivos e edição remota** | SFTP, filas de transferência, favoritos, gravação segura, árvores de projeto e edição em abas |
 | **Encaminhamento e rede** | Encaminhamento local, remoto e SOCKS5 dinâmico, regras salvas e depuração de sockets |
 | **Operações do host e desktop remoto** | Monitoramento, processos, serviços, logs, portas, tarefas, discos, pacotes, contêineres, tmux, RDP e VNC |

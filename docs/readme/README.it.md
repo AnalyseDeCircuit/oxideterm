@@ -3,7 +3,7 @@
 <p align="center">
   <strong>Spazio di lavoro operativo nativo con IA per server remoti — app nativa in Rust puro</strong>
   <br>
-  Terminali SSH, Telnet, seriali, RDP/VNC, SFTP, inoltro porte e modifica leggera in uno spazio di lavoro nativo.
+  Terminali SSH, Mosh, Telnet, seriali, RDP/VNC, SFTP, inoltro porte e modifica leggera in uno spazio di lavoro nativo.
   <br>
   Rendering su GPU. Gratis. Nessun account necessario.
   <br>
@@ -39,7 +39,7 @@ OxideTerm è uno spazio di lavoro open source per SSH e operazioni remote. Termi
 
 **Cosa puoi fare:**
 
-- Gestire SSH, Telnet, seriale, RDP/VNC, SFTP, port forwarding, shell locali e modifica leggera in un unico spazio di lavoro
+- Gestire SSH, Mosh, Telnet, seriale, RDP/VNC, SFTP, port forwarding, shell locali e modifica leggera in un unico spazio di lavoro
 - Mantenere attivo il lavoro remoto durante brevi interruzioni di rete con la riconnessione Grace Period
 - Chiedere a OxideSens di esaminare le sessioni attive ed eseguire azioni approvate tramite il tuo provider AI
 
@@ -97,7 +97,7 @@ OxideTerm mantiene connessioni, file, forwarding, strumenti host, automazione e 
 
 | Categoria | Funzioni |
 |---|---|
-| **Terminale e connessioni** | Shell locali, SSH, Telnet, seriale, pannelli, modalità di input libero, invio avanzato a più destinazioni, percorsi multi-hop e riconnessione stabile |
+| **Terminale e connessioni** | Shell locali, SSH, Mosh, Telnet, seriale, pannelli, modalità di input libero, registri di sessione configurabili, modalità di controllo nativa tmux -CC con layout dei pannelli e separatori trascinabili, gruppi di broadcast con nome, invio avanzato a più destinazioni, percorsi multi-hop e riconnessione stabile |
 | **File e modifica remota** | SFTP, code di trasferimento, preferiti, scritture sicure, alberi di progetto e modifica a schede |
 | **Forwarding e rete** | Forwarding locale, remoto e SOCKS5 dinamico, regole salvate e debug dei socket |
 | **Operazioni host e desktop remoto** | Monitoraggio, processi, servizi, log, porte, attività, dischi, pacchetti, container, tmux, RDP e VNC |

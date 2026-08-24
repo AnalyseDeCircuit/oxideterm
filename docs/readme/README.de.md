@@ -3,7 +3,7 @@
 <p align="center">
   <strong>KI-gestützter nativer Betriebsarbeitsbereich für Remote-Server — native App aus reinem Rust</strong>
   <br>
-  SSH, Telnet, serielle Terminals, RDP/VNC, SFTP, Portweiterleitung und leichtes Editieren in einem nativen Arbeitsbereich.
+  SSH, Mosh, Telnet, serielle Terminals, RDP/VNC, SFTP, Portweiterleitung und leichtes Editieren in einem nativen Arbeitsbereich.
   <br>
   GPU-gerendert. Kostenlos. Kein Konto nötig.
   <br>
@@ -39,7 +39,7 @@ OxideTerm ist ein Open-Source-Arbeitsbereich für SSH und Remote-Betrieb. Termin
 
 **Was Sie tun können:**
 
-- SSH, Telnet, serielle Verbindungen, RDP/VNC, SFTP, Portweiterleitungen, lokale Shells und leichtes Editieren in einem Arbeitsbereich verwalten
+- SSH, Mosh, Telnet, serielle Verbindungen, RDP/VNC, SFTP, Portweiterleitungen, lokale Shells und leichtes Editieren in einem Arbeitsbereich verwalten
 - Remote-Arbeit mit Grace-Period-Wiederverbindung über kurze Netzwerkausfälle hinweg aufrechterhalten
 - OxideSens aktive Sitzungen prüfen und freigegebene Arbeitsbereichsaktionen über Ihren eigenen KI-Anbieter ausführen lassen
 
@@ -97,7 +97,7 @@ OxideTerm hält Verbindungen, Dateien, Weiterleitungen, Host-Werkzeuge, Automati
 
 | Kategorie | Funktionen |
 |---|---|
-| **Terminal und Verbindungen** | Lokale Shells, SSH, Telnet, seriell, geteilte Bereiche, freier Eingabemodus, erweiterte Befehlsübertragung an mehrere Ziele, Multi-Hop-Routen und stabile Wiederverbindung |
+| **Terminal und Verbindungen** | Lokale Shells, SSH, Mosh, Telnet, seriell, geteilte Bereiche, freier Eingabemodus, konfigurierbare Sitzungsprotokolle, nativer tmux -CC-Steuerungsmodus mit Pane-Layout und ziehbaren Trennlinien, benannte Broadcast-Gruppen, erweiterte Befehlsübertragung an mehrere Ziele, Multi-Hop-Routen und stabile Wiederverbindung |
 | **Dateien und Remote-Bearbeitung** | SFTP, Übertragungswarteschlangen, Lesezeichen, sichere Schreibvorgänge, Projektbäume und Mehrfachbearbeitung |
 | **Weiterleitung und Netzwerk** | Lokale, entfernte und dynamische SOCKS5-Weiterleitung, gespeicherte Regeln und Socket-Debugging |
 | **Host-Betrieb und Remote-Desktop** | Überwachung, Prozesse, Dienste, Logs, Ports, Aufgaben, Datenträger, Pakete, Container, tmux, RDP und VNC |
