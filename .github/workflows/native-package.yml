@@ -1,4 +1,5 @@
 name: Native Package
+run-name: Native Package ${{ inputs.release_tag || inputs.version || github.sha }}
 
 on:
   workflow_dispatch:
@@ -7,29 +8,115 @@ on:
         description: 'Optional artifact version override, for example 0.1.0-preview.1'
         required: false
         type: string
+      release_tag:
+        description: 'Existing release tag to publish, for example v2.0.25'
+        required: false
+        type: string
       upload_release:
-        description: 'Upload artifacts to the current tag release'
+        description: 'Upload artifacts to release_tag'
         required: false
         default: false
         type: boolean
-  push:
-    tags:
-      - 'v*'
-      - 'native-v*'
-      - 'gpui-v*'
 
 permissions:
   contents: read
 
 concurrency:
-  group: native-package-${{ github.ref }}
+  group: native-package-${{ inputs.release_tag || github.sha }}
   cancel-in-progress: true
 
 jobs:
+  validate-release-request:
+    name: Validate release request
+    runs-on: ubuntu-latest
+    outputs:
+      raw_version: ${{ steps.release_request.outputs.raw_version }}
+      release_commit: ${{ steps.release_request.outputs.release_commit }}
+      release_tag: ${{ steps.release_request.outputs.release_tag }}
+      version: ${{ steps.release_request.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version, tag, and commit
+        id: release_request
+        shell: bash
+        env:
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_UPLOAD_RELEASE: ${{ inputs.upload_release }}
+        run: |
+          set -euo pipefail
+
+          workspace_version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
+          raw_version="${INPUT_VERSION:-${workspace_version}}"
+          release_commit="${GITHUB_SHA}"
+          release_tag=""
+
+          if [[ "${INPUT_UPLOAD_RELEASE}" == "true" ]]; then
+            if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+              echo "Release publishing must be dispatched from main, not ${GITHUB_REF}." >&2
+              exit 1
+            fi
+            if [[ -z "${INPUT_RELEASE_TAG}" ]]; then
+              echo 'Release publishing requires release_tag.' >&2
+              exit 1
+            fi
+            if [[ ! "${INPUT_RELEASE_TAG}" =~ ^(v|native-v|gpui-v)[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+              echo "Unsupported release tag: ${INPUT_RELEASE_TAG}" >&2
+              exit 1
+            fi
+
+            release_tag="${INPUT_RELEASE_TAG}"
+            raw_version="${release_tag}"
+            git fetch --no-tags origin "refs/tags/${release_tag}:refs/tags/${release_tag}"
+            tag_commit="$(git rev-list -n 1 "refs/tags/${release_tag}")"
+            if ! git merge-base --is-ancestor "${tag_commit}" "${GITHUB_SHA}"; then
+              echo "Release tag ${release_tag} points outside dispatched main history." >&2
+              exit 1
+            fi
+            release_commit="${tag_commit}"
+            workspace_version="$(git show "${release_commit}:Cargo.toml" | python3 -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["workspace"]["package"]["version"])')"
+          elif [[ -n "${INPUT_RELEASE_TAG}" ]]; then
+            echo 'release_tag is only valid when upload_release is enabled.' >&2
+            exit 1
+          fi
+
+          version="${raw_version#native-v}"
+          version="${version#gpui-v}"
+          version="${version#v}"
+          if [[ "${INPUT_UPLOAD_RELEASE}" == "true" && -n "${INPUT_VERSION}" ]]; then
+            input_version="${INPUT_VERSION#native-v}"
+            input_version="${input_version#gpui-v}"
+            input_version="${input_version#v}"
+            if [[ "${input_version}" != "${version}" ]]; then
+              echo "version input ${input_version} does not match release tag version ${version}." >&2
+              exit 1
+            fi
+          fi
+          if [[ "${INPUT_UPLOAD_RELEASE}" != "true" ]]; then
+            python3 scripts/release/bump_version.py "${version}" --dry-run
+          fi
+          if [[ "${version}" != "${workspace_version}" ]]; then
+            echo "Requested version ${version} does not match workspace version ${workspace_version}." >&2
+            exit 1
+          fi
+
+          echo "raw_version=${raw_version}" >> "${GITHUB_OUTPUT}"
+          echo "release_commit=${release_commit}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
   # ── Six-platform matrix (macOS / Linux / Windows, arm64 + x64) ─────────
   package:
     name: Package ${{ matrix.label }}
+    needs: validate-release-request
     runs-on: ${{ matrix.os }}
+    permissions:
+      actions: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -58,10 +145,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Validate manual release input
-        if: github.event_name == 'workflow_dispatch' && inputs.upload_release && inputs.version == ''
-        run: python3 -c "import sys; print('Manual release upload requires the version input.', file=sys.stderr); sys.exit(1)"
+        with:
+          ref: ${{ needs.validate-release-request.outputs.release_commit }}
 
       - name: Install Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -75,8 +160,11 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Rust cache
+        id: rust_cache
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
+          # Release dispatches stay on main while checkout selects the tagged commit, so this
+          # target-specific prefix can restore compatible dependency artifacts across versions.
           key: native-package-${{ matrix.target }}
           # Keep the compiled cache even when a build fails so a single-platform
           # retry resumes incrementally instead of rebuilding from scratch.
@@ -232,25 +320,9 @@ jobs:
 
           rm -f "${certificate_path}" "${identity_path}"
 
-      - name: Resolve effective package version
-        id: package_version
-        shell: bash
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            raw_version="${GITHUB_REF_NAME}"
-          elif [[ -n "${INPUT_VERSION:-}" ]]; then
-            raw_version="${INPUT_VERSION}"
-          else
-            raw_version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
-          fi
-          echo "raw=${raw_version}" >> "${GITHUB_OUTPUT}"
-
       - name: Package native app
         env:
-          OXIDETERM_VERSION: ${{ steps.package_version.outputs.raw }}
+          OXIDETERM_VERSION: ${{ needs.validate-release-request.outputs.raw_version }}
           APPIMAGE_EXTRACT_AND_RUN: ${{ runner.os == 'Linux' && '1' || '' }}
         run: python scripts/release/package_native.py ${{ matrix.target }}
 
@@ -267,7 +339,7 @@ jobs:
         run: >-
           python scripts/release/verify_native_package.py
           --target ${{ matrix.target }}
-          --version ${{ steps.package_version.outputs.raw }}
+          --version ${{ needs.validate-release-request.outputs.raw_version }}
           --dist dist
 
       - name: Upload workflow artifact
@@ -285,11 +357,45 @@ jobs:
             dist/*.rpm
           if-no-files-found: error
 
+      - name: Retire superseded package caches for this target
+        if: success() && github.ref == 'refs/heads/main' && steps.rust_cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          CACHE_KEY_FRAGMENT: native-package-${{ matrix.target }}
+        with:
+          script: |
+            // Delete the restored partial cache only after a successful package build. The
+            // rust-cache post step then saves the new main-scoped key without retaining one
+            // cache per release tag or version.
+            const caches = await github.paginate(
+              github.rest.actions.getActionsCacheList,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100,
+              },
+              (response) => response.data.actions_caches,
+            );
+            const matchingCaches = caches.filter((cache) =>
+              cache.key.includes(process.env.CACHE_KEY_FRAGMENT),
+            );
+            for (const cache of matchingCaches) {
+              core.info(`Deleting superseded cache ${cache.key} (${cache.id}).`);
+              await github.rest.actions.deleteActionsCacheById({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                cache_id: cache.id,
+              });
+            }
+
   release:
     name: Publish release assets
-    needs: package
+    needs:
+      - validate-release-request
+      - package
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.upload_release)
+    if: inputs.upload_release
     permissions:
       contents: write
     outputs:
@@ -299,6 +405,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.validate-release-request.outputs.release_commit }}
 
       - name: Download package artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -311,26 +419,18 @@ jobs:
         id: release_meta
         shell: bash
         env:
-          INPUT_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ needs.validate-release-request.outputs.release_tag }}
+          RELEASE_VERSION: ${{ needs.validate-release-request.outputs.version }}
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            tag="${GITHUB_REF_NAME}"
-          else
-            tag="native-v${INPUT_VERSION}"
-          fi
-
-          version="${tag#native-v}"
-          version="${version#gpui-v}"
-          version="${version#v}"
 
           prerelease=false
-          if [[ "${tag}" == native-v* || "${tag}" == gpui-v* || "${version}" == *-* ]]; then
+          if [[ "${RELEASE_TAG}" == native-v* || "${RELEASE_TAG}" == gpui-v* || "${RELEASE_VERSION}" == *-* ]]; then
             prerelease=true
           fi
 
-          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
-          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "version=${RELEASE_VERSION}" >> "${GITHUB_OUTPUT}"
           echo "prerelease=${prerelease}" >> "${GITHUB_OUTPUT}"
 
       - name: Resolve release notes
@@ -450,7 +550,7 @@ jobs:
             dist-release/*.sig
             dist-release/sha256sums.txt
           tag_name: ${{ steps.release_meta.outputs.tag }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ needs.validate-release-request.outputs.release_commit }}
           name: OxideTerm Native ${{ steps.release_meta.outputs.version }}
           prerelease: ${{ steps.release_meta.outputs.prerelease }}
           # Stable releases become Latest automatically; prereleases must never
@@ -467,7 +567,7 @@ jobs:
     name: Generate updater manifest
     needs: release
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.upload_release)
+    if: inputs.upload_release
     permissions:
       contents: write
     steps:
@@ -741,7 +841,7 @@ jobs:
       - release
       - publish-updater
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.upload_release)
+    if: inputs.upload_release
     permissions:
       contents: write
     steps:
@@ -774,7 +874,7 @@ jobs:
       - publish-updater
       - cleanup-sigs
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.upload_release)
+    if: inputs.upload_release
     permissions:
       contents: read
     steps:
