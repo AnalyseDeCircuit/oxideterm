@@ -25,7 +25,6 @@ oxideterm-theme = { path = "../oxideterm-theme" }
 oxideterm-trzsz = { path = "../oxideterm-trzsz" }
 parking_lot.workspace = true
 regex.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 tempfile = "3.23"
 unicode-segmentation.workspace = true

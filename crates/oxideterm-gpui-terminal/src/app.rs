@@ -134,8 +134,6 @@ pub enum TerminalPaneEvent {
     TriggerMatchesAvailable,
     // Search completion is asynchronous; Workspace reads the latest pane-owned status.
     SearchStatusChanged,
-    // Command contents stay in the shared protected history; Workspace receives only a save edge.
-    CommandHistoryChanged,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -3362,7 +3360,7 @@ impl TerminalPane {
     fn observe_autosuggest_input_bytes(
         &mut self,
         bytes: &[u8],
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> Option<String> {
         let previous_state = self.input_tracker.state();
         let command = self.input_tracker.apply_bytes(bytes);
@@ -3374,9 +3372,7 @@ impl TerminalPane {
         let command = command?;
         self.command_fact_ledger
             .record_runtime_autosuggest_command(&command);
-        if self.command_history.record(&command) {
-            cx.emit(TerminalPaneEvent::CommandHistoryChanged);
-        }
+        self.command_history.record(&command);
         Some(command)
     }
 

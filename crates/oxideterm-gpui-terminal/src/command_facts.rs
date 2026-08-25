@@ -10,8 +10,6 @@ use oxideterm_terminal::{
     TerminalCommandMarkDetectionSource,
 };
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
-use zeroize::Zeroizing;
 
 use crate::terminal_ui::MAX_HIGHLIGHT_PATTERN_LENGTH;
 
@@ -82,7 +80,6 @@ pub(crate) struct TerminalAutosuggestCandidate {
     pub(crate) last_used_at: u64,
 }
 
-const TERMINAL_COMMAND_HISTORY_DOCUMENT_VERSION: u8 = 1;
 const MAX_AUTOSUGGEST_RECORDS: usize = 10_000;
 
 #[derive(Clone, Default)]
@@ -93,89 +90,9 @@ pub struct SharedTerminalCommandHistory {
 #[derive(Default)]
 struct TerminalCommandHistoryState {
     records: Vec<TerminalAutosuggestCommandRecord>,
-    revision: u64,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PersistedTerminalCommandHistory {
-    version: u8,
-    records: Vec<PersistedTerminalCommandHistoryRecord>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PersistedTerminalCommandHistoryRecord {
-    command: String,
-    used_at: u64,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PersistedTerminalCommandHistoryRef<'a> {
-    version: u8,
-    records: Vec<PersistedTerminalCommandHistoryRecordRef<'a>>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PersistedTerminalCommandHistoryRecordRef<'a> {
-    command: &'a str,
-    used_at: u64,
 }
 
 impl SharedTerminalCommandHistory {
-    pub fn from_protected_json(document: &str) -> anyhow::Result<Self> {
-        let mut persisted: PersistedTerminalCommandHistory = serde_json::from_str(document)?;
-        anyhow::ensure!(
-            persisted.version == TERMINAL_COMMAND_HISTORY_DOCUMENT_VERSION,
-            "unsupported terminal command history version"
-        );
-        if persisted.records.len() > MAX_AUTOSUGGEST_RECORDS {
-            let overflow = persisted.records.len() - MAX_AUTOSUGGEST_RECORDS;
-            persisted.records.drain(0..overflow);
-        }
-        let records = persisted
-            .records
-            .into_iter()
-            .enumerate()
-            .filter(|(_, record)| !record.command.trim().is_empty())
-            .map(|(index, record)| TerminalAutosuggestCommandRecord {
-                command_id: format!("protected-history-{}-{index}", record.used_at),
-                command: record.command,
-                started_at: record.used_at,
-                finished_at: record.used_at,
-            })
-            .collect();
-        Ok(Self {
-            state: Arc::new(Mutex::new(TerminalCommandHistoryState {
-                records,
-                revision: 0,
-            })),
-        })
-    }
-
-    pub fn protected_json(&self) -> anyhow::Result<(u64, Zeroizing<String>)> {
-        let state = self.state.lock();
-        let document = PersistedTerminalCommandHistoryRef {
-            version: TERMINAL_COMMAND_HISTORY_DOCUMENT_VERSION,
-            records: state
-                .records
-                .iter()
-                .map(|record| PersistedTerminalCommandHistoryRecordRef {
-                    command: &record.command,
-                    used_at: record.finished_at,
-                })
-                .collect(),
-        };
-        let json = serde_json::to_string(&document)?;
-        Ok((state.revision, Zeroizing::new(json)))
-    }
-
-    pub fn revision(&self) -> u64 {
-        self.state.lock().revision
-    }
-
     #[cfg(test)]
     pub(crate) fn records(&self) -> Vec<TerminalAutosuggestCommandRecord> {
         self.state.lock().records.clone()
@@ -202,7 +119,6 @@ impl SharedTerminalCommandHistory {
             finished_at: now,
         });
         trim_autosuggest_records(&mut state.records);
-        state.revision = state.revision.wrapping_add(1);
         true
     }
 
@@ -213,7 +129,6 @@ impl SharedTerminalCommandHistory {
         if state.records.len() == previous_len {
             return false;
         }
-        state.revision = state.revision.wrapping_add(1);
         true
     }
 }
@@ -771,17 +686,14 @@ mod tests {
     }
 
     #[test]
-    fn protected_command_history_round_trips_commands_without_content_filtering() {
+    fn shared_command_history_keeps_commands_without_content_filtering() {
         let history = SharedTerminalCommandHistory::default();
         let command = "curl -H 'Authorization: Bearer example-token' https://example.test";
 
         assert!(history.record(command));
-        let (_, document) = history.protected_json().unwrap();
-        let restored = SharedTerminalCommandHistory::from_protected_json(&document).unwrap();
-
-        assert_eq!(restored.records().len(), 1);
-        assert_eq!(restored.records()[0].command, command);
-        assert!(!format!("{:?}", restored.records()[0]).contains(command));
+        assert_eq!(history.records().len(), 1);
+        assert_eq!(history.records()[0].command, command);
+        assert!(!format!("{:?}", history.records()[0]).contains(command));
     }
 
     #[test]
