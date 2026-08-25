@@ -93,7 +93,7 @@ OxideTerm 2.0.24 新增原生 tmux 控制模式、参数化快捷命令、可配
 - 将本地加密 `.oxide` 导入与导出移入 Cloud Hub，使本地备份与云同步集中在同一位置，同时在未配置云服务商时仍可使用。
 - 扩展同步的快捷命令与 SSH 元数据，并继续将设备本地敏感值排除在可移植快照之外，在兼容更新中保留这些值。
 
-![OxideTerm 2.0.23 and 2.0.24 terminal throughput comparison](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/v2.0.24/.github/release-notes/assets/terminal-performance-2.0.24-comparison.png)
+![OxideTerm terminal throughput before optimization, in 2.0.23, and in 2.0.24](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/v2.0.24/.github/release-notes/assets/terminal-performance-2.0.24-comparison.png)
 
 ## 2.0.23
 

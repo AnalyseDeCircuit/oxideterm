@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1100" height="600" viewBox="0 0 1100 600" role="img" aria-labelledby="title description">
-  <title id="title">OxideTerm terminal throughput in versions 2.0.23 and 2.0.24</title>
-  <desc id="description">Grouped bars compare median process-to-PTY throughput for plain, ANSI, Unicode, and long CSI workloads. Throughput increased from 69.031 to 86.032, 88.384 to 92.502, 68.711 to 75.884, and 96.685 to 100.336 MiB per second.</desc>
+  <title id="title">OxideTerm terminal throughput across two optimization rounds</title>
+  <desc id="description">Grouped bars compare median process-to-PTY throughput before optimization, in 2.0.23, and in 2.0.24 for plain, ANSI, Unicode, and long CSI workloads.</desc>
   <style>
     text { fill: #1e293b; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
     .title { font-size: 24px; font-weight: 700; }
@@ -11,19 +11,22 @@
     .gain-note { fill: #ffffff; font-size: 11px; text-anchor: middle; }
     .grid { stroke: #cbd5e1; stroke-width: 1; }
     .frame { fill: none; stroke: #94a3b8; stroke-width: 1; }
-    .previous { fill: #94a3b8; }
+    .baseline { fill: #cbd5e1; }
+    .previous { fill: #60a5fa; }
     .current { fill: #2563eb; }
   </style>
 
   <rect width="1100" height="600" fill="#f8fafc"/>
 
-  <text class="title" x="90" y="38">Further terminal throughput gains in OxideTerm 2.0.24</text>
+  <text class="title" x="90" y="38">Terminal throughput: baseline to 2.0.24</text>
   <text class="subtitle" x="90" y="66">16 MiB fixture · 1 warm-up · median of 3 measured runs · higher is better</text>
 
-  <rect class="previous" x="824" y="26" width="18" height="18" rx="2"/>
-  <text class="axis" x="850" y="40">2.0.23</text>
-  <rect class="current" x="930" y="26" width="18" height="18" rx="2"/>
-  <text class="axis" x="956" y="40">2.0.24</text>
+  <rect class="baseline" x="654" y="26" width="18" height="18" rx="2"/>
+  <text class="axis" x="680" y="40">Before optimization</text>
+  <rect class="previous" x="834" y="26" width="18" height="18" rx="2"/>
+  <text class="axis" x="860" y="40">2.0.23</text>
+  <rect class="current" x="940" y="26" width="18" height="18" rx="2"/>
+  <text class="axis" x="966" y="40">2.0.24</text>
 
   <line class="grid" x1="90" y1="480" x2="1070" y2="480"/>
   <line class="grid" x1="90" y1="416.7" x2="1070" y2="416.7"/>
@@ -43,38 +46,46 @@
   <text class="axis" x="76" y="104" text-anchor="end">120</text>
   <text class="axis" transform="translate(24 290) rotate(-90)" text-anchor="middle">Median throughput (MiB/s)</text>
 
-  <rect class="previous" x="118" y="261.4" width="68" height="218.6" rx="2"/>
-  <rect class="current" x="192" y="207.6" width="68" height="272.4" rx="2"/>
-  <text class="value" x="152" y="251">69.031</text>
-  <text class="value" x="226" y="197">86.032</text>
-  <text class="gain" x="226" y="240">+24.6%</text>
-  <text class="gain-note" x="226" y="257">throughput</text>
+  <rect class="baseline" x="110" y="470.0" width="50" height="10.0" rx="2"/>
+  <rect class="previous" x="166" y="261.4" width="50" height="218.6" rx="2"/>
+  <rect class="current" x="222" y="207.6" width="50" height="272.4" rx="2"/>
+  <text class="value" x="135" y="460">3.144</text>
+  <text class="value" x="191" y="251">69.031</text>
+  <text class="value" x="247" y="197">86.032</text>
+  <text class="gain" x="247" y="240">+24.6%</text>
+  <text class="gain-note" x="247" y="257">vs 2.0.23</text>
   <text class="axis" x="189" y="514" text-anchor="middle">plain</text>
 
-  <rect class="previous" x="368" y="200.8" width="68" height="279.2" rx="2"/>
-  <rect class="current" x="442" y="187.1" width="68" height="292.9" rx="2"/>
-  <text class="value" x="402" y="190">88.384</text>
-  <text class="value" x="476" y="177">92.502</text>
-  <text class="gain" x="476" y="220">+4.7%</text>
-  <text class="gain-note" x="476" y="237">throughput</text>
+  <rect class="baseline" x="360" y="456.8" width="50" height="23.2" rx="2"/>
+  <rect class="previous" x="416" y="200.8" width="50" height="279.2" rx="2"/>
+  <rect class="current" x="472" y="187.1" width="50" height="292.9" rx="2"/>
+  <text class="value" x="385" y="447">7.330</text>
+  <text class="value" x="441" y="190">88.384</text>
+  <text class="value" x="497" y="177">92.502</text>
+  <text class="gain" x="497" y="220">+4.7%</text>
+  <text class="gain-note" x="497" y="237">vs 2.0.23</text>
   <text class="axis" x="439" y="514" text-anchor="middle">ANSI</text>
 
-  <rect class="previous" x="618" y="262.4" width="68" height="217.6" rx="2"/>
-  <rect class="current" x="692" y="239.7" width="68" height="240.3" rx="2"/>
-  <text class="value" x="652" y="252">68.711</text>
-  <text class="value" x="726" y="229">75.884</text>
-  <text class="gain" x="726" y="272">+10.4%</text>
-  <text class="gain-note" x="726" y="289">throughput</text>
+  <rect class="baseline" x="610" y="466.1" width="50" height="13.9" rx="2"/>
+  <rect class="previous" x="666" y="262.4" width="50" height="217.6" rx="2"/>
+  <rect class="current" x="722" y="239.7" width="50" height="240.3" rx="2"/>
+  <text class="value" x="635" y="456">4.393</text>
+  <text class="value" x="691" y="252">68.711</text>
+  <text class="value" x="747" y="229">75.884</text>
+  <text class="gain" x="747" y="272">+10.4%</text>
+  <text class="gain-note" x="747" y="289">vs 2.0.23</text>
   <text class="axis" x="689" y="514" text-anchor="middle">Unicode</text>
 
-  <rect class="previous" x="868" y="173.8" width="68" height="306.2" rx="2"/>
-  <rect class="current" x="942" y="162.3" width="68" height="317.7" rx="2"/>
-  <text class="value" x="902" y="163">96.685</text>
-  <text class="value" x="976" y="152">100.336</text>
-  <text class="gain" x="976" y="195">+3.8%</text>
-  <text class="gain-note" x="976" y="212">throughput</text>
+  <rect class="baseline" x="860" y="447.7" width="50" height="32.3" rx="2"/>
+  <rect class="previous" x="916" y="173.8" width="50" height="306.2" rx="2"/>
+  <rect class="current" x="972" y="162.3" width="50" height="317.7" rx="2"/>
+  <text class="value" x="885" y="438">10.191</text>
+  <text class="value" x="941" y="163">96.685</text>
+  <text class="value" x="997" y="152">100.336</text>
+  <text class="gain" x="997" y="195">+3.8%</text>
+  <text class="gain-note" x="997" y="212">vs 2.0.23</text>
   <text class="axis" x="939" y="514" text-anchor="middle">long CSI</text>
 
   <text class="note" x="90" y="560">Measures process-to-PTY throughput; it does not measure completed rendering or input latency.</text>
-  <text class="note" x="90" y="582">2.0.23: 20260820T131720Z-72791 · 2.0.24: 20260822T184834Z-52719</text>
+  <text class="note" x="90" y="582">Before: 20260819T202020Z-23504 · 2.0.23: 20260820T131720Z-72791 · 2.0.24: 20260822T184834Z-52719</text>
 </svg>
