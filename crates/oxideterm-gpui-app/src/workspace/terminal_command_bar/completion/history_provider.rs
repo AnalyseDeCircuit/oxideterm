@@ -19,33 +19,19 @@ impl WorkspaceApp {
             .pane_id
             .and_then(|pane_id| tab_host.panes().get(&pane_id))
         {
-            for record in pane.read(cx).autosuggest_command_records() {
+            for (sequence, record) in pane
+                .read(cx)
+                .history_command_records()
+                .into_iter()
+                .enumerate()
+            {
                 put_terminal_history_entry(
                     &mut entries,
                     record.command,
                     TerminalHistorySource::Runtime,
                     record.finished_at as i64,
-                    false,
-                    record.started_at as usize,
-                );
-            }
-        }
-        if self
-            .settings_store
-            .settings()
-            .terminal
-            .autosuggest
-            .local_shell_history
-            && context.is_local_terminal()
-        {
-            for (index, command) in load_local_shell_history_commands().into_iter().enumerate() {
-                put_terminal_history_entry(
-                    &mut entries,
-                    command,
-                    TerminalHistorySource::LocalHistory,
-                    terminal_command_bar_now_ms().saturating_sub(index as i64),
-                    false,
-                    index,
+                    true,
+                    sequence,
                 );
             }
         }
@@ -69,8 +55,7 @@ impl WorkspaceApp {
                 } else {
                     fuzzy + recency + entry.uses as f64 * 5.0
                 } + entry.sequence as f64 / 1_000_000.0
-                    + 1000.0
-                    - terminal_command_risk_score_penalty(risk);
+                    + 1000.0;
                 Some(TerminalCommandSuggestion {
                     kind: TerminalCommandSuggestionKind::History,
                     label: entry.command.clone(),

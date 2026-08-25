@@ -1,6 +1,38 @@
 use super::*;
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn terminal_command_sender_history_suggestions(
+        &self,
+        input: &str,
+        allow_empty_history: bool,
+        cx: &mut Context<Self>,
+    ) -> Vec<TerminalCommandSuggestion> {
+        if !self
+            .settings_store
+            .settings()
+            .terminal
+            .command_bar
+            .smart_completion
+        {
+            return Vec::new();
+        }
+        let context = self.terminal_command_context(cx);
+        self.terminal_command_history_suggestions(input, allow_empty_history, &context, cx)
+    }
+
+    pub(in crate::workspace) fn terminal_command_sender_visible_history_suggestions(
+        &self,
+        input: &str,
+        cx: &mut Context<Self>,
+    ) -> Vec<TerminalCommandSuggestion> {
+        let suggestions = self.terminal_command_sender_history_suggestions(input, false, cx);
+        if suggestions.is_empty() {
+            self.terminal_command_sender_history_suggestions(input, true, cx)
+        } else {
+            suggestions
+        }
+    }
+
     pub(in crate::workspace) fn terminal_command_active_target_label(
         &self,
         cx: &mut Context<Self>,

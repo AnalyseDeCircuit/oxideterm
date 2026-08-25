@@ -541,6 +541,14 @@ impl WorkspaceApp {
             return true;
         }
 
+        if self
+            .terminal_command_sender
+            .update(cx, |sender, _cx| sender.dismiss_compact_suggestions())
+        {
+            cx.notify();
+            return true;
+        }
+
         false
     }
 

@@ -182,6 +182,8 @@ struct TerminalCommandSenderRunTarget {
 pub(super) struct TerminalCommandSenderEntity {
     layout: TerminalCommandSenderLayout,
     compact_focused: bool,
+    compact_suggestions_open: bool,
+    compact_suggestion_highlighted: Option<usize>,
     panel_height: f32,
     resize_drag: Option<TerminalCommandSenderResizeDrag>,
     documents: Vec<TerminalCommandSenderDocument>,
@@ -215,6 +217,8 @@ impl TerminalCommandSenderEntity {
         Self {
             layout: TerminalCommandSenderLayout::Compact,
             compact_focused: false,
+            compact_suggestions_open: false,
+            compact_suggestion_highlighted: None,
             panel_height: TERMINAL_SENDER_DEFAULT_HEIGHT,
             resize_drag: None,
             documents: vec![first],
@@ -289,6 +293,7 @@ impl TerminalCommandSenderEntity {
         self.sync_text_for_layout_change(next_layout, cx);
         self.layout = next_layout;
         self.compact_focused = false;
+        self.dismiss_compact_suggestions();
         // Hiding changes presentation only; documents and running jobs stay owned here.
         self.resize_drag = None;
         self.sync_editor_presentation(cx);
@@ -304,6 +309,7 @@ impl TerminalCommandSenderEntity {
         self.sync_text_for_layout_change(next_layout, cx);
         self.layout = next_layout;
         self.compact_focused = false;
+        self.dismiss_compact_suggestions();
         self.resize_drag = None;
         self.sync_editor_presentation(cx);
         cx.notify();
@@ -337,8 +343,54 @@ impl TerminalCommandSenderEntity {
         let focused = focused && self.layout == TerminalCommandSenderLayout::Compact;
         if self.compact_focused != focused {
             self.compact_focused = focused;
+            if !focused {
+                self.dismiss_compact_suggestions();
+            }
             cx.notify();
         }
+    }
+
+    pub(super) fn compact_suggestions_open(&self) -> bool {
+        self.compact_suggestions_open
+    }
+
+    pub(super) fn compact_suggestion_highlighted(&self) -> Option<usize> {
+        self.compact_suggestion_highlighted
+    }
+
+    pub(super) fn move_compact_suggestion_selection(
+        &mut self,
+        suggestions_len: usize,
+        move_down: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<usize> {
+        if suggestions_len == 0 {
+            if self.dismiss_compact_suggestions() {
+                cx.notify();
+            }
+            return None;
+        }
+        let last = suggestions_len.saturating_sub(1);
+        let next = if move_down {
+            self.compact_suggestion_highlighted
+                .map(|index| index.saturating_add(1).min(last))
+                .unwrap_or(0)
+        } else {
+            self.compact_suggestion_highlighted
+                .map(|index| index.saturating_sub(1))
+                .unwrap_or(last)
+        };
+        self.compact_suggestions_open = true;
+        self.compact_suggestion_highlighted = Some(next);
+        cx.notify();
+        Some(next)
+    }
+
+    pub(super) fn dismiss_compact_suggestions(&mut self) -> bool {
+        let had_highlight = self.compact_suggestion_highlighted.take().is_some();
+        let changed = self.compact_suggestions_open || had_highlight;
+        self.compact_suggestions_open = false;
+        changed
     }
 
     pub(super) fn active_compact_draft(&self) -> Option<&str> {
@@ -365,6 +417,7 @@ impl TerminalCommandSenderEntity {
             document.compact_draft = Zeroizing::new(text);
             document.failure = None;
         }
+        self.dismiss_compact_suggestions();
         cx.notify();
         sender_id
     }
@@ -377,6 +430,7 @@ impl TerminalCommandSenderEntity {
         if let Some(document) = self.document_mut(sender_id) {
             document.compact_draft = Zeroizing::new(String::new());
             document.compact_viewport = TextInputViewport::default();
+            self.dismiss_compact_suggestions();
             cx.notify();
         }
     }
@@ -417,6 +471,7 @@ impl TerminalCommandSenderEntity {
                 }
                 document.compact_draft.push_str(suffix);
                 document.failure = None;
+                self.dismiss_compact_suggestions();
                 cx.notify();
             }
             return sender_id;
@@ -455,6 +510,7 @@ impl TerminalCommandSenderEntity {
             return;
         }
         self.active_document_id = sender_id;
+        self.dismiss_compact_suggestions();
         cx.notify();
     }
 
@@ -520,6 +576,7 @@ impl TerminalCommandSenderEntity {
         {
             document.input_mode = mode;
             document.failure = None;
+            self.dismiss_compact_suggestions();
             cx.notify();
         }
     }
@@ -622,6 +679,7 @@ impl TerminalCommandSenderEntity {
         {
             document.target_scope = scope;
             document.failure = None;
+            self.dismiss_compact_suggestions();
             cx.notify();
         }
     }
@@ -1236,6 +1294,39 @@ mod tests {
         sender.update(cx, |sender, cx| sender.set_expanded(false, cx));
         sender.read_with(cx, |sender, _cx| {
             assert_eq!(sender.active_compact_draft(), Some("echo expanded"));
+        });
+    }
+
+    #[gpui::test]
+    fn compact_suggestion_selection_starts_at_the_directional_edge(cx: &mut TestAppContext) {
+        let sender = cx.new(|cx| {
+            TerminalCommandSenderEntity::new(
+                default_tokens(),
+                "Command".to_string(),
+                "Commands".to_string(),
+                test_context_menu_labels(),
+                cx,
+            )
+        });
+
+        sender.update(cx, |sender, cx| {
+            assert_eq!(
+                sender.move_compact_suggestion_selection(3, true, cx),
+                Some(0)
+            );
+            assert_eq!(
+                sender.move_compact_suggestion_selection(3, true, cx),
+                Some(1)
+            );
+            assert_eq!(
+                sender.move_compact_suggestion_selection(3, false, cx),
+                Some(0)
+            );
+            assert!(sender.dismiss_compact_suggestions());
+            assert_eq!(
+                sender.move_compact_suggestion_selection(3, false, cx),
+                Some(2)
+            );
         });
     }
 }

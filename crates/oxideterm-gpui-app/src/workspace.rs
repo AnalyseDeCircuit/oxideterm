@@ -1001,9 +1001,9 @@ impl WorkspaceApp {
     }
 }
 
-// Completion providers remain data-only while the sender editor owns input.
+// Suggestion values can contain credentials embedded in commands, so diagnostics must not format them.
 #[allow(dead_code)]
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct TerminalCommandSuggestion {
     kind: TerminalCommandSuggestionKind,
     label: String,
