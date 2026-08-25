@@ -66,6 +66,54 @@ fn saved_node_route_matches_config(
     })
 }
 
+fn saved_node_owner_matches_connection(
+    node_router: &NodeRouter,
+    node_id: &NodeId,
+    saved_connection_id: &str,
+) -> bool {
+    node_router
+        .node_metadata(node_id)
+        .is_some_and(|snapshot| snapshot.origin.saved_connection_id() == Some(saved_connection_id))
+}
+
+fn indexed_saved_node_matches_connection(
+    node_router: &NodeRouter,
+    node_id: &NodeId,
+    node: &WorkspaceSshNode,
+    requested_config: &SshConfig,
+    saved_connection_id: &str,
+) -> bool {
+    saved_node_route_matches_config(node_router, node_id, requested_config)
+        && saved_node_owner_matches_connection(node_router, node_id, saved_connection_id)
+        && node.saved_connection_id.as_deref() == Some(saved_connection_id)
+        && node.endpoint.host == requested_config.host
+        && node.endpoint.port == requested_config.port
+        && node.endpoint.username == requested_config.username
+}
+
+fn reusable_direct_root_node_for_saved_config(
+    node_router: &NodeRouter,
+    config: &SshConfig,
+    saved_connection_id: &str,
+) -> Option<NodeId> {
+    // Physical pooling stays registry-owned; one saved profile must not borrow another profile's
+    // logical node and terminal consumers merely because their transport endpoints are equal.
+    node_router.flatten_tree().into_iter().find_map(|node| {
+        let node_id = NodeId::new(node.id);
+        let endpoint_matches = node.depth == 0
+            && node.host == config.host
+            && node.port == config.port
+            && node.username == config.username;
+        let owner_matches = node_router.node_metadata(&node_id).is_some_and(|snapshot| {
+            snapshot
+                .origin
+                .saved_connection_id()
+                .is_none_or(|owner| owner == saved_connection_id)
+        });
+        (endpoint_matches && owner_matches).then_some(node_id)
+    })
+}
+
 impl WorkspaceApp {
     pub(crate) fn open_native_connection_launch(
         &mut self,
@@ -432,12 +480,15 @@ impl WorkspaceApp {
             .unwrap_or_default();
         let indexed_node_id = self.saved_ssh_nodes.get(&saved_connection_id).cloned();
         if let Some(node_id) = indexed_node_id.clone().filter(|node_id| {
-            saved_node_route_matches_config(&self.node_router, node_id, &config)
-                && self.ssh_nodes.get(node_id).is_some_and(|node| {
-                    node.endpoint.host == config.host
-                        && node.endpoint.port == config.port
-                        && node.endpoint.username == config.username
-                })
+            self.ssh_nodes.get(node_id).is_some_and(|node| {
+                indexed_saved_node_matches_connection(
+                    &self.node_router,
+                    node_id,
+                    node,
+                    &config,
+                    &saved_connection_id,
+                )
+            })
         }) {
             self.associate_existing_node_with_saved_connection(&node_id, &saved_connection_id);
             if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
@@ -523,8 +574,11 @@ impl WorkspaceApp {
             )?;
             return Ok(());
         } else {
-            if let Some(existing_node_id) = self.existing_direct_root_node_for_saved_config(&config)
-            {
+            if let Some(existing_node_id) = reusable_direct_root_node_for_saved_config(
+                &self.node_router,
+                &config,
+                &saved_connection_id,
+            ) {
                 self.ensure_workspace_ssh_node_from_runtime(&existing_node_id);
                 self.associate_existing_node_with_saved_connection(
                     &existing_node_id,
@@ -729,19 +783,6 @@ impl WorkspaceApp {
         }
         let _ = self.connection_store.mark_used(saved_connection_id);
         true
-    }
-
-    fn existing_direct_root_node_for_saved_config(&self, config: &SshConfig) -> Option<NodeId> {
-        self.node_router
-            .flatten_tree()
-            .into_iter()
-            .find(|node| {
-                node.depth == 0
-                    && node.host == config.host
-                    && node.port == config.port
-                    && node.username == config.username
-            })
-            .map(|node| NodeId::new(node.id))
     }
 
     pub(in crate::workspace) fn materialize_ssh_root_node(
@@ -1680,5 +1721,89 @@ mod create_tests {
             &expansion.target_node_id,
             &requested,
         ));
+    }
+
+    #[test]
+    fn indexed_saved_node_requires_the_requested_saved_owner() {
+        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
+        let node_id = NodeId::new("saved-node");
+        let requested = SshConfig::password("shared.example.com", 22, "ops", "pw");
+        router.upsert_node_with_origin(
+            node_id.clone(),
+            SshConfig::password("shared.example.com", 22, "ops", "pw"),
+            NodeOrigin::Restored {
+                saved_connection_id: "saved-a".to_string(),
+            },
+        );
+        let mut node = WorkspaceSshNode::new(
+            Some("saved-a".to_string()),
+            &requested,
+            "Saved A".to_string(),
+            Vec::new(),
+            NodeReadiness::Ready,
+        );
+
+        assert!(indexed_saved_node_matches_connection(
+            &router, &node_id, &node, &requested, "saved-a"
+        ));
+        assert!(!indexed_saved_node_matches_connection(
+            &router, &node_id, &node, &requested, "saved-b"
+        ));
+
+        router
+            .update_node_origin(
+                &node_id,
+                NodeOrigin::Restored {
+                    saved_connection_id: "saved-b".to_string(),
+                },
+            )
+            .unwrap();
+        assert!(!indexed_saved_node_matches_connection(
+            &router, &node_id, &node, &requested, "saved-b"
+        ));
+        node.saved_connection_id = Some("saved-b".to_string());
+        assert!(indexed_saved_node_matches_connection(
+            &router, &node_id, &node, &requested, "saved-b"
+        ));
+    }
+
+    #[test]
+    fn direct_root_reuse_rejects_another_saved_profiles_logical_node() {
+        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
+        let node_id = NodeId::new("saved-node");
+        let requested = SshConfig::password("shared.example.com", 22, "ops", "pw");
+        router.upsert_node_with_origin(
+            node_id.clone(),
+            SshConfig::password("shared.example.com", 22, "ops", "pw"),
+            NodeOrigin::Restored {
+                saved_connection_id: "saved-a".to_string(),
+            },
+        );
+
+        assert_eq!(
+            reusable_direct_root_node_for_saved_config(&router, &requested, "saved-a"),
+            Some(node_id)
+        );
+        assert_eq!(
+            reusable_direct_root_node_for_saved_config(&router, &requested, "saved-b"),
+            None
+        );
+    }
+
+    #[test]
+    fn direct_root_reuse_can_attach_an_unowned_logical_node() {
+        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
+        let node_id = NodeId::new("direct-node");
+        let requested = SshConfig::password("shared.example.com", 22, "ops", "pw");
+        router.upsert_node_with_origin(
+            node_id.clone(),
+            SshConfig::password("shared.example.com", 22, "ops", "pw"),
+            NodeOrigin::Direct,
+        );
+
+        assert_eq!(
+            reusable_direct_root_node_for_saved_config(&router, &requested, "saved-a"),
+            Some(node_id)
+        );
     }
 }
