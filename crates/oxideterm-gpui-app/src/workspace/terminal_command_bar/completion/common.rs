@@ -9,10 +9,7 @@ pub(super) fn put_terminal_history_entry(
     sequence: usize,
 ) {
     let normalized = normalize_terminal_autosuggest_command(&command);
-    if normalized.is_empty()
-        || normalized.len() > 2000
-        || is_likely_secret_terminal_command(&normalized)
-    {
+    if normalized.is_empty() || normalized.len() > 2000 {
         return;
     }
     entries
@@ -38,9 +35,6 @@ pub(super) fn normalize_terminal_command_suggestions(
 ) -> Vec<TerminalCommandSuggestion> {
     let mut by_key: HashMap<String, TerminalCommandSuggestion> = HashMap::new();
     for suggestion in suggestions {
-        if is_likely_secret_terminal_command(&suggestion.insert_text) {
-            continue;
-        }
         let key = format!(
             "{}:{}:{}:{}:{}",
             suggestion.source_label_key,

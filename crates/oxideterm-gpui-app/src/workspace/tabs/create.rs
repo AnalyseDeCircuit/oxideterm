@@ -1053,6 +1053,12 @@ impl WorkspaceApp {
         let preference_overrides = self.terminal_preference_overrides_for_ssh_node(node_id);
         let mut preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::SshTerminal, cx);
+        // Node-scoped history survives terminal pane replacement but never crosses SSH nodes.
+        preferences.command_history = self
+            .ssh_terminal_command_histories
+            .entry(node_id.clone())
+            .or_default()
+            .clone();
         preference_overrides.apply_to(&mut preferences);
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
         let session_config = if dedicated_new_terminal_connection {

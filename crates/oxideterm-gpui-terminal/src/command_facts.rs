@@ -93,6 +93,31 @@ struct TerminalCommandHistoryState {
 }
 
 impl SharedTerminalCommandHistory {
+    pub fn from_commands(commands: Vec<String>) -> Self {
+        let now = now_millis();
+        let command_count = commands.len();
+        let records = commands
+            .into_iter()
+            .enumerate()
+            .filter(|(_, command)| !command.trim().is_empty())
+            .map(|(index, command)| {
+                // Shell history is oldest-first, so retain that ordering when timestamps are absent.
+                let used_at = now.saturating_sub(command_count.saturating_sub(index) as u64);
+                TerminalAutosuggestCommandRecord {
+                    command_id: format!("shell-history-{used_at}-{index}"),
+                    command,
+                    started_at: used_at,
+                    finished_at: used_at,
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut state = TerminalCommandHistoryState { records };
+        trim_autosuggest_records(&mut state.records);
+        Self {
+            state: Arc::new(Mutex::new(state)),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn records(&self) -> Vec<TerminalAutosuggestCommandRecord> {
         self.state.lock().records.clone()
@@ -694,6 +719,30 @@ mod tests {
         assert_eq!(history.records().len(), 1);
         assert_eq!(history.records()[0].command, command);
         assert!(!format!("{:?}", history.records()[0]).contains(command));
+    }
+
+    #[test]
+    fn shell_history_seed_preserves_recency_order() {
+        let history = SharedTerminalCommandHistory::from_commands(vec![
+            "docker ps".to_string(),
+            "docker images".to_string(),
+        ]);
+        let candidates = history.candidates(
+            &TerminalAutosuggestInputState {
+                value: "docker ".to_string(),
+                cursor_index: 7,
+                is_cursor_at_end: true,
+            },
+            2,
+        );
+
+        assert_eq!(
+            candidates
+                .into_iter()
+                .map(|candidate| candidate.command)
+                .collect::<Vec<_>>(),
+            ["docker images", "docker ps"]
+        );
     }
 
     #[test]

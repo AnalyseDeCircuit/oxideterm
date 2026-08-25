@@ -15,7 +15,10 @@ impl WorkspaceApp {
 
         let mut entries: HashMap<String, TerminalHistoryEntry> = HashMap::new();
         let tab_host = self.tab_host.read(cx);
-        for pane in tab_host.panes().values() {
+        if let Some(pane) = context
+            .pane_id
+            .and_then(|pane_id| tab_host.panes().get(&pane_id))
+        {
             for record in pane.read(cx).autosuggest_command_records() {
                 put_terminal_history_entry(
                     &mut entries,
@@ -26,16 +29,6 @@ impl WorkspaceApp {
                     record.started_at as usize,
                 );
             }
-        }
-        for (sequence, record) in self.ai_runtime_command_records(cx).into_iter().enumerate() {
-            put_terminal_history_entry(
-                &mut entries,
-                record.command,
-                TerminalHistorySource::AiLedger,
-                record.finished_at.unwrap_or(record.started_at),
-                false,
-                sequence,
-            );
         }
         if self
             .settings_store

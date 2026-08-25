@@ -460,6 +460,8 @@ pub struct TerminalPane {
     command_mark_id_aliases: HashMap<String, String>,
     input_tracker: TerminalInputTracker,
     command_history: SharedTerminalCommandHistory,
+    // Shell integration opens this boundary at a prompt and command submission closes it.
+    autosuggest_prompt_active: bool,
     autosuggest_selected_index: Option<usize>,
     autosuggest_dismissed_query: Option<String>,
     privilege_prompt_tracker: PrivilegePromptTracker,
@@ -1089,6 +1091,7 @@ impl TerminalPane {
             command_mark_id_aliases: HashMap::new(),
             input_tracker: TerminalInputTracker::default(),
             command_history: preferences.command_history.clone(),
+            autosuggest_prompt_active: false,
             autosuggest_selected_index: None,
             autosuggest_dismissed_query: None,
             privilege_prompt_tracker: PrivilegePromptTracker::default(),
@@ -1394,7 +1397,7 @@ impl TerminalPane {
             .lines
             .get(self.snapshot.cursor_row)
             .is_some_and(|row| row.active_input);
-        if !self.focused
+        if !self.autosuggest_prompt_active
             || !self.terminal_accepts_input()
             || mode.contains(TermMode::ALT_SCREEN)
             || self.marked_text.is_some()
@@ -3051,6 +3054,11 @@ impl TerminalPane {
                 TerminalEventEffect::default()
             }
             TerminalEvent::ShellIntegration(event) => {
+                self.autosuggest_prompt_active = matches!(
+                    event.kind,
+                    oxideterm_terminal::ShellIntegrationEventKind::PromptStart
+                        | oxideterm_terminal::ShellIntegrationEventKind::CommandStart
+                );
                 self.shell_integration_status = ShellIntegrationStatus {
                     detected: true,
                     state: match event.kind {
@@ -3162,6 +3170,9 @@ impl TerminalPane {
             TerminalEvent::CwdChanged { cwd, host } => {
                 self.cwd = Some(cwd);
                 self.cwd_source = Some(TerminalWorkingDirectorySource::ShellIntegration);
+                // Managed OSC 7 hooks emit at the shell prompt, which establishes the minimum
+                // reliable boundary for terminal-side history suggestions.
+                self.autosuggest_prompt_active = true;
                 // A prepared startup profile becomes active only after the
                 // terminal parser receives a valid directory report.
                 self.cwd_shell_integration_status = TerminalCwdShellIntegrationStatus::Active;
@@ -3370,6 +3381,7 @@ impl TerminalPane {
             self.autosuggest_dismissed_query = None;
         }
         let command = command?;
+        self.autosuggest_prompt_active = false;
         self.command_fact_ledger
             .record_runtime_autosuggest_command(&command);
         self.command_history.record(&command);
@@ -3980,6 +3992,49 @@ mod tests {
             recorder.read_with(cx, |recorder, _cx| recorder.delivered.len()),
             3
         );
+    }
+
+    #[gpui::test]
+    fn history_suggestions_follow_prompt_capability_without_requiring_direct_focus(
+        cx: &mut TestAppContext,
+    ) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            let mut preferences = TerminalUiPreferences::default();
+            preferences.command_history =
+                SharedTerminalCommandHistory::from_commands(vec!["docker ps".to_string()]);
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    preferences,
+                    window,
+                    cx,
+                )
+                .expect("test terminal pane")
+            })
+        });
+
+        pane.update(cx, |pane, cx| {
+            pane.test_accepts_input = true;
+            pane.focused = false;
+            pane.snapshot.lines[pane.snapshot.cursor_row].active_input = true;
+            pane.observe_autosuggest_input_bytes(b"dock", cx);
+
+            assert!(pane.terminal_autosuggest_candidates().is_empty());
+            pane.autosuggest_prompt_active = true;
+            assert_eq!(
+                pane.terminal_autosuggest_candidates()
+                    .into_iter()
+                    .map(|candidate| candidate.command)
+                    .collect::<Vec<_>>(),
+                ["docker ps"]
+            );
+
+            pane.observe_autosuggest_input_bytes(b"\r", cx);
+            assert!(!pane.autosuggest_prompt_active);
+            assert!(pane.terminal_autosuggest_candidates().is_empty());
+        });
     }
 
     #[test]

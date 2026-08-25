@@ -202,53 +202,6 @@ pub fn terminal_autosuggest_fuzzy_score(command: &str, query: &str) -> f64 {
     }
 }
 
-pub fn is_likely_secret_terminal_command(command: &str) -> bool {
-    let normalized = command.trim();
-    if normalized.is_empty() {
-        return false;
-    }
-    let lower = normalized.to_lowercase();
-    lower.contains("authorization")
-        || lower.contains("bearer")
-        || lower.contains("password")
-        || lower.contains("passwd")
-        || lower.contains("passphrase")
-        || lower.contains("private_key")
-        || lower.contains("private-key")
-        || lower.contains("api_key")
-        || lower.contains("api-key")
-        || lower.contains("access_key")
-        || lower.contains("access-key")
-        || lower.contains("github_token")
-        || lower.contains("openai_api_key")
-        || lower.contains("anthropic_api_key")
-        || lower.contains("aws_secret_access_key")
-        || has_secret_assignment(normalized)
-        || has_password_flag(normalized)
-}
-
-fn has_secret_assignment(command: &str) -> bool {
-    command.split_whitespace().any(|token| {
-        let lower = token.to_lowercase();
-        token.contains('=')
-            && (lower.contains("token")
-                || lower.contains("secret")
-                || lower.contains("password")
-                || lower.contains("api_key")
-                || lower.contains("api-key"))
-    })
-}
-
-fn has_password_flag(command: &str) -> bool {
-    let mut tokens = command.split_whitespace();
-    while let Some(token) = tokens.next() {
-        if matches!(token, "-p" | "--password" | "--passphrase") && tokens.next().is_some() {
-            return true;
-        }
-    }
-    false
-}
-
 pub fn load_local_shell_history_commands() -> Vec<String> {
     let Some(home) = std::env::var_os("HOME") else {
         return Vec::new();
@@ -295,8 +248,6 @@ fn load_local_shell_history_commands_from_home(home: &Path) -> Vec<String> {
     if commands.len() > MAX_COMMANDS {
         commands = commands.split_off(commands.len() - MAX_COMMANDS);
     }
-    // Secret-like history remains excluded before the cache owns command text.
-    commands.retain(|command| !is_likely_secret_terminal_command(command));
     if let Ok(mut guard) = cache.lock() {
         *guard = Some(LocalShellHistoryCache {
             home,
@@ -380,11 +331,17 @@ mod tests {
     }
 
     #[test]
-    fn rejects_secret_like_history_before_caching() {
-        assert!(is_likely_secret_terminal_command(
-            "curl -H 'Authorization: Bearer abc'"
-        ));
-        assert!(is_likely_secret_terminal_command("TOKEN=value deploy"));
-        assert!(!is_likely_secret_terminal_command("cargo test --workspace"));
+    fn preserves_shell_owned_history_without_content_filtering() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::write(
+            home.path().join(".bash_history"),
+            "TOKEN=value deploy\ncargo test --workspace\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            load_local_shell_history_commands_from_home(home.path()),
+            ["TOKEN=value deploy", "cargo test --workspace"]
+        );
     }
 }

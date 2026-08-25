@@ -27,9 +27,9 @@ pub(self) use fig_specs::{
 };
 pub(self) use oxideterm_terminal::{TerminalShellParseResult, TerminalShellToken};
 pub(self) use oxideterm_terminal::{
-    escape_terminal_path_for_shell, is_likely_secret_terminal_command,
-    load_local_shell_history_commands, normalize_terminal_autosuggest_command,
-    terminal_autosuggest_fuzzy_score, tokenize_terminal_command_line,
+    escape_terminal_path_for_shell, load_local_shell_history_commands,
+    normalize_terminal_autosuggest_command, terminal_autosuggest_fuzzy_score,
+    tokenize_terminal_command_line,
 };
 pub(self) use quick_command_provider::{
     infer_terminal_ssh_identity_from_buffer, terminal_cwd_looks_remote,

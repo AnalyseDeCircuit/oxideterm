@@ -97,9 +97,8 @@ pub use session::{
 };
 pub use shell_completion::{
     TerminalShellParseResult, TerminalShellToken, escape_terminal_path_for_shell,
-    is_likely_secret_terminal_command, load_local_shell_history_commands,
-    normalize_terminal_autosuggest_command, terminal_autosuggest_fuzzy_score,
-    tokenize_terminal_command_line,
+    load_local_shell_history_commands, normalize_terminal_autosuggest_command,
+    terminal_autosuggest_fuzzy_score, tokenize_terminal_command_line,
 };
 pub use shell_integration::{
     ShellIntegrationEvent, ShellIntegrationEventKind, ShellIntegrationLifecycleState,

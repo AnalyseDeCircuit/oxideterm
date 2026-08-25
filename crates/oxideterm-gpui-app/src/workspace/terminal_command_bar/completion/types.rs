@@ -13,7 +13,6 @@ pub(super) struct TerminalHistoryEntry {
 pub(super) enum TerminalHistorySource {
     Runtime,
     LocalHistory,
-    AiLedger,
 }
 
 impl TerminalHistorySource {
@@ -23,7 +22,7 @@ impl TerminalHistorySource {
             // Tauri's command-bar history provider preserves these underlying
             // autosuggest sources internally, but renders completion rows with
             // the generic history source badge.
-            Self::LocalHistory | Self::AiLedger => "terminal.command_bar.source_history",
+            Self::LocalHistory => "terminal.command_bar.source_history",
         }
     }
 }
