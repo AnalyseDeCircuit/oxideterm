@@ -32,15 +32,17 @@ fn should_use_dedicated_terminal_connection(
     allow_dedicated_connection && saved_policy.unwrap_or(manual_node_policy)
 }
 
-fn saved_node_route_matches_config(
+type SshRouteEndpoint<'a> = (&'a str, u16, &'a str);
+
+fn saved_node_route_matches_endpoints(
     node_router: &NodeRouter,
     node_id: &NodeId,
-    requested_config: &SshConfig,
+    proxy_hops: &[SshRouteEndpoint<'_>],
+    target: SshRouteEndpoint<'_>,
 ) -> bool {
     let Ok(path) = node_router.path_to_node(node_id) else {
         return false;
     };
-    let proxy_hops = requested_config.proxy_chain.as_deref().unwrap_or_default();
     if path.len() != proxy_hops.len() + 1 {
         return false;
     }
@@ -48,22 +50,69 @@ fn saved_node_route_matches_config(
     // A saved-connection index is reusable only while every routed endpoint
     // still matches the current saved profile. Authentication and host-key
     // overrides may change without changing which remote node the path owns.
-    path.iter().enumerate().all(|(index, node_id)| {
-        let Some(actual) = node_router.node_metadata(node_id) else {
-            return false;
-        };
-        let (expected_host, expected_port, expected_username) = proxy_hops
-            .get(index)
-            .map(|hop| (hop.host.as_str(), hop.port, hop.username.as_str()))
-            .unwrap_or((
-                requested_config.host.as_str(),
-                requested_config.port,
-                requested_config.username.as_str(),
-            ));
-        actual.host == expected_host
-            && actual.port == expected_port
-            && actual.username == expected_username
-    })
+    path.iter()
+        .zip(proxy_hops.iter().copied().chain(std::iter::once(target)))
+        .all(
+            |(node_id, (expected_host, expected_port, expected_username))| {
+                let Some(actual) = node_router.node_metadata(node_id) else {
+                    return false;
+                };
+                actual.host == expected_host
+                    && actual.port == expected_port
+                    && actual.username == expected_username
+            },
+        )
+}
+
+fn saved_node_route_matches_config(
+    node_router: &NodeRouter,
+    node_id: &NodeId,
+    requested_config: &SshConfig,
+) -> bool {
+    let proxy_hops = requested_config
+        .proxy_chain
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|hop| (hop.host.as_str(), hop.port, hop.username.as_str()))
+        .collect::<Vec<_>>();
+    saved_node_route_matches_endpoints(
+        node_router,
+        node_id,
+        &proxy_hops,
+        (
+            requested_config.host.as_str(),
+            requested_config.port,
+            requested_config.username.as_str(),
+        ),
+    )
+}
+
+fn saved_connection_proxy_route<'a>(
+    store: &'a oxideterm_connections::ConnectionStore,
+    connection: &'a oxideterm_connections::SavedConnection,
+) -> Option<Vec<SshRouteEndpoint<'a>>> {
+    if !connection.proxy_chain.is_empty() {
+        return Some(
+            connection
+                .proxy_chain
+                .iter()
+                .map(|hop| (hop.host.as_str(), hop.port, hop.username.as_str()))
+                .collect(),
+        );
+    }
+    let Some(jump_id) = connection.options.jump_host.as_deref() else {
+        return Some(Vec::new());
+    };
+    if jump_id == connection.id {
+        return None;
+    }
+    let jump = store.get(jump_id)?;
+    Some(vec![(
+        jump.host.as_str(),
+        jump.port,
+        jump.username.as_str(),
+    )])
 }
 
 fn saved_node_owner_matches_connection(
@@ -89,6 +138,55 @@ fn indexed_saved_node_matches_connection(
         && node.endpoint.host == requested_config.host
         && node.endpoint.port == requested_config.port
         && node.endpoint.username == requested_config.username
+}
+
+fn reusable_indexed_saved_node_for_config(
+    saved_ssh_nodes: &HashMap<String, NodeId>,
+    ssh_nodes: &HashMap<NodeId, WorkspaceSshNode>,
+    node_router: &NodeRouter,
+    saved_connection_id: &str,
+    requested_config: &SshConfig,
+) -> Option<NodeId> {
+    let node_id = saved_ssh_nodes.get(saved_connection_id)?;
+    let node = ssh_nodes.get(node_id)?;
+    indexed_saved_node_matches_connection(
+        node_router,
+        node_id,
+        node,
+        requested_config,
+        saved_connection_id,
+    )
+    .then(|| node_id.clone())
+}
+
+fn indexed_saved_node_matches_saved_connection(
+    node_router: &NodeRouter,
+    store: &oxideterm_connections::ConnectionStore,
+    node_id: &NodeId,
+    node: &WorkspaceSshNode,
+    connection: &oxideterm_connections::SavedConnection,
+    saved_connection_id: &str,
+) -> bool {
+    if connection.id != saved_connection_id {
+        return false;
+    }
+    let Some(proxy_hops) = saved_connection_proxy_route(store, connection) else {
+        return false;
+    };
+    saved_node_route_matches_endpoints(
+        node_router,
+        node_id,
+        &proxy_hops,
+        (
+            connection.host.as_str(),
+            connection.port,
+            connection.username.as_str(),
+        ),
+    ) && saved_node_owner_matches_connection(node_router, node_id, saved_connection_id)
+        && node.saved_connection_id.as_deref() == Some(saved_connection_id)
+        && node.endpoint.host == connection.host
+        && node.endpoint.port == connection.port
+        && node.endpoint.username == connection.username
 }
 
 fn reusable_direct_root_node_for_saved_config(
@@ -479,17 +577,13 @@ impl WorkspaceApp {
             })
             .unwrap_or_default();
         let indexed_node_id = self.saved_ssh_nodes.get(&saved_connection_id).cloned();
-        if let Some(node_id) = indexed_node_id.clone().filter(|node_id| {
-            self.ssh_nodes.get(node_id).is_some_and(|node| {
-                indexed_saved_node_matches_connection(
-                    &self.node_router,
-                    node_id,
-                    node,
-                    &config,
-                    &saved_connection_id,
-                )
-            })
-        }) {
+        if let Some(node_id) = reusable_indexed_saved_node_for_config(
+            &self.saved_ssh_nodes,
+            &self.ssh_nodes,
+            &self.node_router,
+            &saved_connection_id,
+            &config,
+        ) {
             self.associate_existing_node_with_saved_connection(&node_id, &saved_connection_id);
             if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
                 node.terminal_options = saved_terminal_options.clone();
@@ -745,19 +839,17 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(session_id) = self.ssh_nodes.iter().find_map(|(node_id, _node)| {
-            // Match Tauri connectToSaved: a saved connection with missing
-            // credentials may still focus an already-active root node with the
-            // same endpoint, but it must not create a new terminal.
-            let matching_root = self
-                .node_router
-                .node_metadata(node_id)
-                .is_some_and(|snapshot| {
-                    snapshot.depth == 0
-                        && snapshot.host == connection.host
-                        && snapshot.port == connection.port
-                        && snapshot.username == connection.username
-                });
+        let Some(session_id) = self.ssh_nodes.iter().find_map(|(node_id, node)| {
+            // Missing credentials may focus only the terminal already owned by
+            // this exact saved route; endpoint equality cannot establish ownership.
+            let matching_saved_node = indexed_saved_node_matches_saved_connection(
+                &self.node_router,
+                &self.connection_store,
+                node_id,
+                node,
+                connection,
+                saved_connection_id,
+            );
             // `then_some` evaluates its argument eagerly. Use `first()` so a
             // ready node without attached terminals can be skipped instead of
             // indexing an empty terminal list during startup/event handling.
@@ -771,7 +863,7 @@ impl WorkspaceApp {
                 .ssh_terminal_session_ids_for_node(node_id)
                 .first()
                 .copied();
-            (matching_root && runtime_ready)
+            (matching_saved_node && runtime_ready)
                 .then_some(session_id)
                 .flatten()
         }) else {
@@ -785,34 +877,52 @@ impl WorkspaceApp {
         true
     }
 
+    pub(in crate::workspace) fn indexed_saved_ssh_node_for_connection(
+        &self,
+        saved_connection_id: &str,
+        connection: &oxideterm_connections::SavedConnection,
+    ) -> Option<NodeId> {
+        let node_id = self.saved_ssh_nodes.get(saved_connection_id)?;
+        let node = self.ssh_nodes.get(node_id)?;
+        indexed_saved_node_matches_saved_connection(
+            &self.node_router,
+            &self.connection_store,
+            node_id,
+            node,
+            connection,
+            saved_connection_id,
+        )
+        .then(|| node_id.clone())
+    }
+
     pub(in crate::workspace) fn materialize_ssh_root_node(
         &mut self,
         config: SshConfig,
         title: String,
         saved_connection_id: Option<String>,
     ) -> NodeId {
+        let indexed_node_id = saved_connection_id
+            .as_ref()
+            .and_then(|saved_connection_id| self.saved_ssh_nodes.get(saved_connection_id))
+            .cloned();
         if let Some(saved_connection_id) = saved_connection_id.as_ref()
-            && let Some(node_id) = self.saved_ssh_nodes.get(saved_connection_id).cloned()
-        {
-            let ui_node = WorkspaceSshNode::new(
-                Some(saved_connection_id.clone()),
+            && let Some(node_id) = reusable_indexed_saved_node_for_config(
+                &self.saved_ssh_nodes,
+                &self.ssh_nodes,
+                &self.node_router,
+                saved_connection_id,
                 &config,
-                title.clone(),
-                Vec::new(),
-                NodeReadiness::Disconnected,
-            );
-            if !self.node_router.contains_node(&node_id) {
-                self.node_router.upsert_node_with_origin(
-                    node_id.clone(),
-                    config,
-                    NodeOrigin::Restored {
-                        saved_connection_id: saved_connection_id.clone(),
-                    },
-                );
-            }
-            self.ssh_nodes.entry(node_id.clone()).or_insert(ui_node);
+            )
+        {
             self.associate_existing_node_with_saved_connection(&node_id, saved_connection_id);
             return node_id;
+        }
+        if indexed_node_id.is_some()
+            && let Some(saved_connection_id) = saved_connection_id.as_ref()
+        {
+            // Every direct caller, including gateway and public API paths, must
+            // invalidate stale routing before materializing a replacement node.
+            self.saved_ssh_nodes.remove(saved_connection_id);
         }
 
         let node_id = NodeId::new(format!("ssh-{}", self.next_ssh_node_id));
@@ -1558,6 +1668,21 @@ fn ssh_config_from_proxy_hop(hop: ProxyHopConfig, connect_timeout_seconds: u64) 
 mod create_tests {
     use super::*;
 
+    fn saved_connection_metadata(id: &str) -> oxideterm_connections::SavedConnection {
+        // This fixture deliberately has no runtime credential so reuse can be
+        // verified against persisted route identity alone.
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "name": "Saved connection",
+            "host": "shared.example.com",
+            "port": 22,
+            "username": "ops",
+            "auth": { "type": "password" },
+            "created_at": "2026-01-01T00:00:00Z"
+        }))
+        .expect("valid saved connection fixture")
+    }
+
     #[test]
     fn proxy_hop_conversion_moves_auth_and_preserves_transport_options() {
         let connect_timeout_seconds = 180;
@@ -1764,6 +1889,132 @@ mod create_tests {
         node.saved_connection_id = Some("saved-b".to_string());
         assert!(indexed_saved_node_matches_connection(
             &router, &node_id, &node, &requested, "saved-b"
+        ));
+    }
+
+    #[test]
+    fn indexed_saved_lookup_rejects_a_foreign_or_stale_mapping() {
+        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
+        let node_id = NodeId::new("saved-node");
+        let requested = SshConfig::password("shared.example.com", 22, "ops", "runtime-secret");
+        router.upsert_node_with_origin(
+            node_id.clone(),
+            SshConfig::password("shared.example.com", 22, "ops", "runtime-secret"),
+            NodeOrigin::Restored {
+                saved_connection_id: "saved-a".to_string(),
+            },
+        );
+        let node = WorkspaceSshNode::new(
+            Some("saved-a".to_string()),
+            &requested,
+            "Saved A".to_string(),
+            Vec::new(),
+            NodeReadiness::Ready,
+        );
+        let ssh_nodes = HashMap::from([(node_id.clone(), node)]);
+        let saved_ssh_nodes = HashMap::from([
+            ("saved-a".to_string(), node_id.clone()),
+            ("saved-b".to_string(), node_id.clone()),
+        ]);
+
+        assert_eq!(
+            reusable_indexed_saved_node_for_config(
+                &saved_ssh_nodes,
+                &ssh_nodes,
+                &router,
+                "saved-a",
+                &requested,
+            ),
+            Some(node_id)
+        );
+        assert_eq!(
+            reusable_indexed_saved_node_for_config(
+                &saved_ssh_nodes,
+                &ssh_nodes,
+                &router,
+                "saved-b",
+                &requested,
+            ),
+            None
+        );
+
+        let stale_config = SshConfig::password("changed.example.com", 22, "ops", "new-secret");
+        assert_eq!(
+            reusable_indexed_saved_node_for_config(
+                &saved_ssh_nodes,
+                &ssh_nodes,
+                &router,
+                "saved-a",
+                &stale_config,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn metadata_only_saved_reuse_requires_owner_and_current_route() {
+        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
+        let node_id = NodeId::new("saved-node");
+        router.upsert_node_with_origin(
+            node_id.clone(),
+            SshConfig::password("shared.example.com", 22, "ops", "runtime-secret"),
+            NodeOrigin::Restored {
+                saved_connection_id: "saved-a".to_string(),
+            },
+        );
+        let requested = SshConfig::password("shared.example.com", 22, "ops", "runtime-secret");
+        let node = WorkspaceSshNode::new(
+            Some("saved-a".to_string()),
+            &requested,
+            "Saved A".to_string(),
+            Vec::new(),
+            NodeReadiness::Ready,
+        );
+        let store_path = std::env::temp_dir().join(format!(
+            "oxideterm-saved-reuse-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let store = oxideterm_connections::ConnectionStore::load_read_only(store_path)
+            .expect("empty read-only connection store");
+        let mut connection = saved_connection_metadata("saved-a");
+
+        assert!(indexed_saved_node_matches_saved_connection(
+            &router,
+            &store,
+            &node_id,
+            &node,
+            &connection,
+            "saved-a",
+        ));
+        assert!(!indexed_saved_node_matches_saved_connection(
+            &router,
+            &store,
+            &node_id,
+            &node,
+            &connection,
+            "saved-b",
+        ));
+
+        connection
+            .proxy_chain
+            .push(oxideterm_connections::SavedProxyHop {
+                host: "jump.example.com".to_string(),
+                port: 22,
+                username: "ops".to_string(),
+                auth: oxideterm_connections::SavedAuth::Agent,
+                agent_forwarding: false,
+                identity_agent: None,
+                agent_forwarding_socket: None,
+                legacy_ssh_compatibility: false,
+                ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
+            });
+        assert!(!indexed_saved_node_matches_saved_connection(
+            &router,
+            &store,
+            &node_id,
+            &node,
+            &connection,
+            "saved-a",
         ));
     }
 

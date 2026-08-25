@@ -25,9 +25,14 @@ impl WorkspaceApp {
                     oxideterm_ai::RuntimeValidationFailure::CapabilityUnavailable,
                 )
             })?;
-        self.saved_ssh_nodes
-            .get(resource_id)
-            .cloned()
+        let connection = self.connection_store.get(resource_id).ok_or_else(|| {
+            oxideterm_ai::RuntimeValidationError::new(
+                oxideterm_ai::RuntimeValidationFailure::OwnerClosed,
+            )
+        })?;
+        // Stable saved-connection authority must resolve through the same route
+        // and owner checks as terminal opens, never through a stale index alone.
+        self.indexed_saved_ssh_node_for_connection(resource_id, connection)
             .ok_or_else(|| {
                 oxideterm_ai::RuntimeValidationError::new(
                     oxideterm_ai::RuntimeValidationFailure::OwnerClosed,
