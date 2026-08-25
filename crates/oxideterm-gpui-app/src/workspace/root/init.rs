@@ -30,6 +30,16 @@ impl WorkspaceApp {
         let connection_store = ConnectionStore::load(default_connections_path())?;
         let settings = settings_store.settings().clone();
         let i18n = I18n::new(locale_from_settings(settings.general.language));
+        let (terminal_command_history, terminal_command_history_persistence_available) =
+            match terminal_command_history::load_terminal_command_history() {
+                Ok(history) => (history, true),
+                Err(error) => {
+                    // An unavailable credential manager leaves history memory-only and must not
+                    // let a later partial snapshot replace protected data that could not be read.
+                    eprintln!("failed to load protected terminal command history: {error}");
+                    (SharedTerminalCommandHistory::default(), false)
+                }
+            };
         let session_log_directory = settings_store
             .path()
             .parent()
@@ -642,6 +652,9 @@ impl WorkspaceApp {
             terminal_command_context_highlight_section_expanded: true,
             terminal_command_sender,
             _terminal_command_sender_observation: terminal_command_sender_observation,
+            terminal_command_history,
+            terminal_command_history_save_scheduled: false,
+            terminal_command_history_persistence_available,
             detached_local_terminals: HashMap::new(),
             detached_local_terminal_order: Vec::new(),
             serial_terminal_configs: HashMap::new(),
@@ -1150,6 +1163,7 @@ impl WorkspaceApp {
             command_marks_user_input_observed: terminal.command_marks.user_input_observed,
             command_marks_heuristic_detection: terminal.command_marks.heuristic_detection,
             command_marks_show_hover_actions: terminal.command_marks.show_hover_actions,
+            command_history: self.terminal_command_history.clone(),
             terminal_encoding: session_terminal_encoding(terminal.terminal_encoding),
             show_performance_overlay: terminal.show_fps_overlay,
             render_policy: self.render_policy,
@@ -1161,6 +1175,9 @@ impl WorkspaceApp {
                 confirm: self.i18n.t("terminal.paste.confirm"),
                 cancel: self.i18n.t("terminal.paste.cancel"),
                 paste: self.i18n.t("terminal.paste.paste"),
+            },
+            autosuggest_labels: TerminalAutosuggestLabels {
+                history_source: self.i18n.t("terminal.command_bar.source_history"),
             },
             command_selection_labels: TerminalCommandSelectionLabels {
                 actions: self.i18n.t("terminal.command_selection.actions"),

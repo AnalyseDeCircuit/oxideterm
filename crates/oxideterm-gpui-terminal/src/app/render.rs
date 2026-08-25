@@ -494,6 +494,14 @@ impl TerminalPane {
         let selected_index = self
             .autosuggest_selected_index
             .filter(|index| *index < candidates.len());
+        let history_source_short = self
+            .preferences
+            .autosuggest_labels
+            .history_source
+            .chars()
+            .next()
+            .map(|character| character.to_string())
+            .unwrap_or_default();
 
         let mut list = div()
             .w(px(popup_width))
@@ -543,7 +551,7 @@ impl TerminalPane {
                             .text_size(px(tokens.metrics.ui_text_xs))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(rgb(tokens.ui.accent_text))
-                            .child("h"),
+                            .child(history_source_short.clone()),
                     )
                     .on_mouse_down(
                         MouseButton::Left,

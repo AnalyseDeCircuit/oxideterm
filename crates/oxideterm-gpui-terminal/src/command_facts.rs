@@ -9,6 +9,9 @@ use oxideterm_terminal::{
     TerminalCommandMark, TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence,
     TerminalCommandMarkDetectionSource,
 };
+use parking_lot::Mutex;
+use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 use crate::terminal_ui::MAX_HIGHLIGHT_PATTERN_LENGTH;
 
@@ -79,6 +82,142 @@ pub(crate) struct TerminalAutosuggestCandidate {
     pub(crate) last_used_at: u64,
 }
 
+const TERMINAL_COMMAND_HISTORY_DOCUMENT_VERSION: u8 = 1;
+const MAX_AUTOSUGGEST_RECORDS: usize = 10_000;
+
+#[derive(Clone, Default)]
+pub struct SharedTerminalCommandHistory {
+    state: Arc<Mutex<TerminalCommandHistoryState>>,
+}
+
+#[derive(Default)]
+struct TerminalCommandHistoryState {
+    records: Vec<TerminalAutosuggestCommandRecord>,
+    revision: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedTerminalCommandHistory {
+    version: u8,
+    records: Vec<PersistedTerminalCommandHistoryRecord>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedTerminalCommandHistoryRecord {
+    command: String,
+    used_at: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedTerminalCommandHistoryRef<'a> {
+    version: u8,
+    records: Vec<PersistedTerminalCommandHistoryRecordRef<'a>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedTerminalCommandHistoryRecordRef<'a> {
+    command: &'a str,
+    used_at: u64,
+}
+
+impl SharedTerminalCommandHistory {
+    pub fn from_protected_json(document: &str) -> anyhow::Result<Self> {
+        let mut persisted: PersistedTerminalCommandHistory = serde_json::from_str(document)?;
+        anyhow::ensure!(
+            persisted.version == TERMINAL_COMMAND_HISTORY_DOCUMENT_VERSION,
+            "unsupported terminal command history version"
+        );
+        if persisted.records.len() > MAX_AUTOSUGGEST_RECORDS {
+            let overflow = persisted.records.len() - MAX_AUTOSUGGEST_RECORDS;
+            persisted.records.drain(0..overflow);
+        }
+        let records = persisted
+            .records
+            .into_iter()
+            .enumerate()
+            .filter(|(_, record)| !record.command.trim().is_empty())
+            .map(|(index, record)| TerminalAutosuggestCommandRecord {
+                command_id: format!("protected-history-{}-{index}", record.used_at),
+                command: record.command,
+                started_at: record.used_at,
+                finished_at: record.used_at,
+            })
+            .collect();
+        Ok(Self {
+            state: Arc::new(Mutex::new(TerminalCommandHistoryState {
+                records,
+                revision: 0,
+            })),
+        })
+    }
+
+    pub fn protected_json(&self) -> anyhow::Result<(u64, Zeroizing<String>)> {
+        let state = self.state.lock();
+        let document = PersistedTerminalCommandHistoryRef {
+            version: TERMINAL_COMMAND_HISTORY_DOCUMENT_VERSION,
+            records: state
+                .records
+                .iter()
+                .map(|record| PersistedTerminalCommandHistoryRecordRef {
+                    command: &record.command,
+                    used_at: record.finished_at,
+                })
+                .collect(),
+        };
+        let json = serde_json::to_string(&document)?;
+        Ok((state.revision, Zeroizing::new(json)))
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.state.lock().revision
+    }
+
+    #[cfg(test)]
+    pub(crate) fn records(&self) -> Vec<TerminalAutosuggestCommandRecord> {
+        self.state.lock().records.clone()
+    }
+
+    pub(crate) fn candidates(
+        &self,
+        state: &TerminalAutosuggestInputState,
+        limit: usize,
+    ) -> Vec<TerminalAutosuggestCandidate> {
+        autosuggest_candidates_for_records(&self.state.lock().records, state, limit)
+    }
+
+    pub(crate) fn record(&self, command: &str) -> bool {
+        if command.trim().is_empty() {
+            return false;
+        }
+        let now = now_millis();
+        let mut state = self.state.lock();
+        state.records.push(TerminalAutosuggestCommandRecord {
+            command_id: format!("runtime-autosuggest-{now}"),
+            command: command.to_string(),
+            started_at: now,
+            finished_at: now,
+        });
+        trim_autosuggest_records(&mut state.records);
+        state.revision = state.revision.wrapping_add(1);
+        true
+    }
+
+    pub(crate) fn remove(&self, command: &str) -> bool {
+        let mut state = self.state.lock();
+        let previous_len = state.records.len();
+        state.records.retain(|record| record.command != command);
+        if state.records.len() == previous_len {
+            return false;
+        }
+        state.revision = state.revision.wrapping_add(1);
+        true
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalAutosuggestInputState {
     pub value: String,
@@ -144,42 +283,13 @@ impl CommandFactLedger {
             .filter(|suffix| !suffix.is_empty())
     }
 
+    #[cfg(test)]
     pub(crate) fn autosuggest_candidates(
         &self,
         state: &TerminalAutosuggestInputState,
         limit: usize,
     ) -> Vec<TerminalAutosuggestCandidate> {
-        let query = state.value.as_str();
-        if query.trim().is_empty() || !state.is_cursor_at_end || limit == 0 {
-            return Vec::new();
-        }
-
-        let mut candidates_by_command = HashMap::<&str, TerminalAutosuggestCandidate>::new();
-        for record in &self.autosuggest_records {
-            if !record.command.starts_with(query) || record.command == query {
-                continue;
-            }
-            let candidate = candidates_by_command
-                .entry(&record.command)
-                .or_insert_with(|| TerminalAutosuggestCandidate {
-                    command: record.command.clone(),
-                    use_count: 0,
-                    last_used_at: record.finished_at,
-                });
-            candidate.use_count = candidate.use_count.saturating_add(1);
-            candidate.last_used_at = candidate.last_used_at.max(record.finished_at);
-        }
-
-        let mut candidates = candidates_by_command.into_values().collect::<Vec<_>>();
-        candidates.sort_by(|left, right| {
-            right
-                .use_count
-                .cmp(&left.use_count)
-                .then_with(|| right.last_used_at.cmp(&left.last_used_at))
-                .then_with(|| left.command.cmp(&right.command))
-        });
-        candidates.truncate(limit);
-        candidates
+        autosuggest_candidates_for_records(&self.autosuggest_records, state, limit)
     }
 
     pub(crate) fn remove_autosuggest_command(&mut self, command: &str) -> bool {
@@ -193,13 +303,6 @@ impl CommandFactLedger {
         if command.trim().is_empty() {
             return;
         }
-        if self
-            .autosuggest_records
-            .last()
-            .is_some_and(|record| record.command == command)
-        {
-            return;
-        }
         let now = now_millis();
         self.autosuggest_records
             .push(TerminalAutosuggestCommandRecord {
@@ -208,11 +311,7 @@ impl CommandFactLedger {
                 started_at: now,
                 finished_at: now,
             });
-        const MAX_AUTOSUGGEST_RECORDS: usize = 10_000;
-        if self.autosuggest_records.len() > MAX_AUTOSUGGEST_RECORDS {
-            let overflow = self.autosuggest_records.len() - MAX_AUTOSUGGEST_RECORDS;
-            self.autosuggest_records.drain(0..overflow);
-        }
+        trim_autosuggest_records(&mut self.autosuggest_records);
     }
 
     pub(crate) fn create_from_mark(&mut self, mark: &TerminalCommandMark) {
@@ -404,6 +503,51 @@ fn transient_literal_query(command: &str) -> Option<TransientLiteralQuery> {
     None
 }
 
+fn autosuggest_candidates_for_records(
+    records: &[TerminalAutosuggestCommandRecord],
+    state: &TerminalAutosuggestInputState,
+    limit: usize,
+) -> Vec<TerminalAutosuggestCandidate> {
+    let query = state.value.as_str();
+    if query.trim().is_empty() || !state.is_cursor_at_end || limit == 0 {
+        return Vec::new();
+    }
+
+    let mut candidates_by_command = HashMap::<&str, TerminalAutosuggestCandidate>::new();
+    for record in records {
+        if !record.command.starts_with(query) || record.command == query {
+            continue;
+        }
+        let candidate = candidates_by_command
+            .entry(&record.command)
+            .or_insert_with(|| TerminalAutosuggestCandidate {
+                command: record.command.clone(),
+                use_count: 0,
+                last_used_at: record.finished_at,
+            });
+        candidate.use_count = candidate.use_count.saturating_add(1);
+        candidate.last_used_at = candidate.last_used_at.max(record.finished_at);
+    }
+
+    let mut candidates = candidates_by_command.into_values().collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        right
+            .use_count
+            .cmp(&left.use_count)
+            .then_with(|| right.last_used_at.cmp(&left.last_used_at))
+            .then_with(|| left.command.cmp(&right.command))
+    });
+    candidates.truncate(limit);
+    candidates
+}
+
+fn trim_autosuggest_records(records: &mut Vec<TerminalAutosuggestCommandRecord>) {
+    if records.len() > MAX_AUTOSUGGEST_RECORDS {
+        let overflow = records.len() - MAX_AUTOSUGGEST_RECORDS;
+        records.drain(0..overflow);
+    }
+}
+
 fn literal_query_after_command(tokens: &[&str]) -> Option<TransientLiteralQuery> {
     let mut case_sensitive = true;
     let mut fixed_strings = false;
@@ -562,9 +706,10 @@ mod tests {
         ledger.record_runtime_autosuggest_command(" ");
 
         let records = ledger.autosuggest_records();
-        assert_eq!(records.len(), 2);
+        assert_eq!(records.len(), 3);
         assert_eq!(records[0].command, "  git   status  ");
-        assert_eq!(records[1].command, "git status");
+        assert_eq!(records[1].command, "  git   status  ");
+        assert_eq!(records[2].command, "git status");
 
         let mut ledger = CommandFactLedger::default();
         ledger.record_runtime_autosuggest_command("git status");
@@ -623,6 +768,20 @@ mod tests {
                 .iter()
                 .all(|record| record.command != "docker ps")
         );
+    }
+
+    #[test]
+    fn protected_command_history_round_trips_commands_without_content_filtering() {
+        let history = SharedTerminalCommandHistory::default();
+        let command = "curl -H 'Authorization: Bearer example-token' https://example.test";
+
+        assert!(history.record(command));
+        let (_, document) = history.protected_json().unwrap();
+        let restored = SharedTerminalCommandHistory::from_protected_json(&document).unwrap();
+
+        assert_eq!(restored.records().len(), 1);
+        assert_eq!(restored.records()[0].command, command);
+        assert!(!format!("{:?}", restored.records()[0]).contains(command));
     }
 
     #[test]

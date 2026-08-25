@@ -277,11 +277,12 @@ impl TerminalPane {
                     self.autosuggest_selected_index = None;
                     return false;
                 };
-                if self
-                    .command_fact_ledger
-                    .remove_autosuggest_command(&candidate.command)
-                {
+                let removed_from_shared_history = self.command_history.remove(&candidate.command);
+                self.command_fact_ledger
+                    .remove_autosuggest_command(&candidate.command);
+                if removed_from_shared_history {
                     self.autosuggest_selected_index = None;
+                    cx.emit(TerminalPaneEvent::CommandHistoryChanged);
                     cx.notify();
                 }
                 true

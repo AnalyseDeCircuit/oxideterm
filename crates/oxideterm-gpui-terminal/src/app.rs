@@ -39,8 +39,9 @@ use zeroize::Zeroizing;
 
 use crate::background_cache::BackgroundImageRenderCache;
 use crate::command_facts::{
-    CommandFactLedger, TerminalAiCommandRecord, TerminalAutosuggestCandidate,
-    TerminalAutosuggestCommandRecord, TerminalAutosuggestInputState, TerminalCommandFact,
+    CommandFactLedger, SharedTerminalCommandHistory, TerminalAiCommandRecord,
+    TerminalAutosuggestCandidate, TerminalAutosuggestCommandRecord, TerminalAutosuggestInputState,
+    TerminalCommandFact,
 };
 use crate::privilege_prompt::{
     PrivilegeInputObservation, PrivilegePromptMatch, PrivilegePromptSnapshot,
@@ -133,6 +134,8 @@ pub enum TerminalPaneEvent {
     TriggerMatchesAvailable,
     // Search completion is asynchronous; Workspace reads the latest pane-owned status.
     SearchStatusChanged,
+    // Command contents stay in the shared protected history; Workspace receives only a save edge.
+    CommandHistoryChanged,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -458,6 +461,7 @@ pub struct TerminalPane {
     selected_command_mark_id: Option<String>,
     command_mark_id_aliases: HashMap<String, String>,
     input_tracker: TerminalInputTracker,
+    command_history: SharedTerminalCommandHistory,
     autosuggest_selected_index: Option<usize>,
     autosuggest_dismissed_query: Option<String>,
     privilege_prompt_tracker: PrivilegePromptTracker,
@@ -1086,6 +1090,7 @@ impl TerminalPane {
             selected_command_mark_id: None,
             command_mark_id_aliases: HashMap::new(),
             input_tracker: TerminalInputTracker::default(),
+            command_history: preferences.command_history.clone(),
             autosuggest_selected_index: None,
             autosuggest_dismissed_query: None,
             privilege_prompt_tracker: PrivilegePromptTracker::default(),
@@ -1405,8 +1410,8 @@ impl TerminalPane {
         {
             return Vec::new();
         }
-        self.command_fact_ledger
-            .autosuggest_candidates(&state, TERMINAL_AUTOSUGGEST_MAX_CANDIDATES)
+        self.command_history
+            .candidates(&state, TERMINAL_AUTOSUGGEST_MAX_CANDIDATES)
     }
 
     fn dismiss_terminal_autosuggest(&mut self, cx: &mut Context<Self>) {
@@ -1583,6 +1588,7 @@ impl TerminalPane {
         }
         self.settings = next_settings;
         self.theme = preferences.theme.clone();
+        self.command_history = preferences.command_history.clone();
         self.image_cache
             .set_byte_limit(preferences.render_policy.image_cache_bytes);
         self.background_image_cache
@@ -2193,10 +2199,12 @@ impl TerminalPane {
         let mode = self.terminal.lock().mode();
         self.delete_free_type_selection_if_active(mode, cx);
         let now = Instant::now();
-        // Pasted terminal input can include the sudo command while the later
-        // prompt is a bare `Password:`. Feed it through the privilege tracker
-        // without recording the paste as command history or exposing content.
-        self.observe_privilege_input("paste", &bytes, now, cx);
+        // Privilege input classification runs before command tracking so a password answer never
+        // becomes a command merely because it arrived through the clipboard path.
+        let privilege_observation = self.observe_privilege_input("paste", &bytes, now, cx);
+        let trackable_single_line_paste = std::str::from_utf8(&bytes)
+            .ok()
+            .filter(|text| !text.contains(['\r', '\n']));
         // Preserve bracketed paste encoding when hook output is still text;
         // binary hook output falls back to raw protocol bytes.
         let result = match std::str::from_utf8(&bytes) {
@@ -2205,7 +2213,14 @@ impl TerminalPane {
         };
         if result.is_ok() {
             self.restore_live_output_after_user_input();
-            self.input_tracker.reset();
+            if privilege_observation == PrivilegeInputObservation::SecretEntry {
+                self.input_tracker.reset();
+            } else if let Some(text) = trackable_single_line_paste {
+                self.observe_autosuggest_input_bytes(text.as_bytes(), cx);
+            } else {
+                // Multi-line and binary pastes do not have one reliable shell submission boundary.
+                self.input_tracker.reset();
+            }
             self.last_terminal_input = Instant::now();
             self.reset_cursor_blink();
             cx.notify();
@@ -3347,7 +3362,7 @@ impl TerminalPane {
     fn observe_autosuggest_input_bytes(
         &mut self,
         bytes: &[u8],
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Option<String> {
         let previous_state = self.input_tracker.state();
         let command = self.input_tracker.apply_bytes(bytes);
@@ -3359,6 +3374,9 @@ impl TerminalPane {
         let command = command?;
         self.command_fact_ledger
             .record_runtime_autosuggest_command(&command);
+        if self.command_history.record(&command) {
+            cx.emit(TerminalPaneEvent::CommandHistoryChanged);
+        }
         Some(command)
     }
 

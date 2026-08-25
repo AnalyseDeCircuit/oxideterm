@@ -61,6 +61,7 @@ oxideterm-public-mcp = { path = "../oxideterm-public-mcp" }
 oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
 oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
+oxideterm-secret-store = { path = "../oxideterm-secret-store" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-settings-model = { path = "../oxideterm-settings-model" }
 oxideterm-skills = { path = "../oxideterm-skills" }

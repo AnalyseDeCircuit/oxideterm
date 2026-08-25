@@ -161,6 +161,9 @@ impl WorkspaceApp {
                     cx.notify();
                 }
             }
+            TerminalPaneEvent::CommandHistoryChanged => {
+                self.schedule_terminal_command_history_save(cx);
+            }
             TerminalPaneEvent::PrivilegePromptStateChanged => {
                 if self.active_pane_id(cx) == Some(pane_id)
                     && self.sync_active_privilege_prompt_inline_hint(cx)

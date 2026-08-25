@@ -57,6 +57,7 @@ mod sidebar;
 mod tabs;
 mod terminal_cast;
 mod terminal_command_bar;
+mod terminal_command_history;
 mod terminal_command_sender;
 mod terminal_context_actions;
 mod terminal_cwd;
@@ -165,7 +166,8 @@ use oxideterm_gpui_platform::{
     window_opacity::{apply_window_opacity, normalized_window_opacity},
 };
 use oxideterm_gpui_terminal::{
-    BackgroundImageRenderCache, PrivilegePromptMatch, SemanticShellDialect, SharedTerminalSession,
+    BackgroundImageRenderCache, PrivilegePromptMatch, SemanticShellDialect,
+    SharedTerminalCommandHistory, SharedTerminalSession, TerminalAutosuggestLabels,
     TerminalBackgroundFit, TerminalBackgroundPreferences, TerminalBroadcastInputKind,
     TerminalCommandSelectionLabels, TerminalContextAction, TerminalHighlightMatchScope,
     TerminalHighlightRenderMode, TerminalHighlightRule as UiHighlightRule,
@@ -759,6 +761,9 @@ pub(crate) struct WorkspaceApp {
     terminal_command_context_highlight_section_expanded: bool,
     terminal_command_sender: Entity<terminal_command_sender::TerminalCommandSenderEntity>,
     _terminal_command_sender_observation: Subscription,
+    terminal_command_history: SharedTerminalCommandHistory,
+    terminal_command_history_save_scheduled: bool,
+    terminal_command_history_persistence_available: bool,
     detached_local_terminals: HashMap<TerminalSessionId, DetachedLocalTerminalSession>,
     detached_local_terminal_order: Vec<TerminalSessionId>,
     serial_terminal_configs: HashMap<TerminalSessionId, SerialSessionConfig>,

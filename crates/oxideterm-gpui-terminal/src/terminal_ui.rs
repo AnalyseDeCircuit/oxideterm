@@ -17,7 +17,10 @@ use oxideterm_terminal_semantic::{
 };
 use oxideterm_theme::{ThemeTokens, default_tokens};
 
-use crate::session_log::{TerminalSessionLogContext, TerminalSessionLogOptions};
+use crate::{
+    command_facts::SharedTerminalCommandHistory,
+    session_log::{TerminalSessionLogContext, TerminalSessionLogOptions},
+};
 
 pub const MAX_HIGHLIGHT_RULES: usize = 32;
 pub const MAX_HIGHLIGHT_PATTERN_LENGTH: usize = 512;
@@ -96,6 +99,7 @@ pub struct TerminalUiPreferences {
     pub command_marks_user_input_observed: bool,
     pub command_marks_heuristic_detection: bool,
     pub command_marks_show_hover_actions: bool,
+    pub command_history: SharedTerminalCommandHistory,
     pub terminal_encoding: TerminalEncoding,
     pub show_performance_overlay: bool,
     pub theme: TerminalUiTheme,
@@ -103,6 +107,7 @@ pub struct TerminalUiPreferences {
     pub background: Option<TerminalBackgroundPreferences>,
     pub transparent_background: bool,
     pub paste_labels: TerminalPasteLabels,
+    pub autosuggest_labels: TerminalAutosuggestLabels,
     pub command_selection_labels: TerminalCommandSelectionLabels,
     pub modem_labels: TerminalModemLabels,
     pub trzsz_labels: TerminalTrzszLabels,
@@ -208,6 +213,7 @@ impl Default for TerminalUiPreferences {
             command_marks_user_input_observed: false,
             command_marks_heuristic_detection: false,
             command_marks_show_hover_actions: TERMINAL_COMMAND_MARKS_SHOW_HOVER_ACTIONS,
+            command_history: SharedTerminalCommandHistory::default(),
             terminal_encoding: TerminalEncoding::Utf8,
             show_performance_overlay: false,
             theme: TerminalUiTheme::default(),
@@ -215,6 +221,7 @@ impl Default for TerminalUiPreferences {
             background: None,
             transparent_background: false,
             paste_labels: TerminalPasteLabels::default(),
+            autosuggest_labels: TerminalAutosuggestLabels::default(),
             command_selection_labels: TerminalCommandSelectionLabels::default(),
             modem_labels: TerminalModemLabels::default(),
             trzsz_labels: TerminalTrzszLabels::default(),
@@ -344,6 +351,19 @@ pub struct TerminalNotice {
     pub status_text: Option<String>,
     pub progress: Option<f32>,
     pub variant: TerminalNoticeVariant,
+}
+
+#[derive(Clone, Debug)]
+pub struct TerminalAutosuggestLabels {
+    pub history_source: String,
+}
+
+impl Default for TerminalAutosuggestLabels {
+    fn default() -> Self {
+        Self {
+            history_source: "history".to_string(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
