@@ -47,7 +47,7 @@ impl WorkspaceApp {
                 self.close_terminal_command_overlays(cx);
                 let sender_id = self.replace_terminal_command_sender_text(command, cx);
                 self.ime_marked_text = None;
-                self.focus_terminal_command_sender_editor(sender_id, window, cx);
+                self.focus_terminal_command_sender_input(sender_id, window, cx);
                 cx.notify();
                 true
             }

@@ -189,13 +189,11 @@ impl WorkspaceApp {
                                         .terminal_command_sender
                                         .update(cx, |sender, cx| sender.toggle_visible(cx));
                                     if visible {
-                                        let sender_id = this
-                                            .terminal_command_sender
-                                            .read(cx)
-                                            .active_document_id();
-                                        this.focus_terminal_command_sender_editor(
-                                            sender_id, window, cx,
-                                        );
+                                        this.terminal_command_sender.update(cx, |sender, cx| {
+                                            sender.set_compact_focused(true, cx);
+                                        });
+                                        this.clear_ime_selection();
+                                        window.focus(&this.focus_handle, cx);
                                     } else {
                                         this.focus_active_pane(window, cx);
                                     }
@@ -349,9 +347,17 @@ impl WorkspaceApp {
                                     });
                                     let sender_id =
                                         this.terminal_command_sender.read(cx).active_document_id();
-                                    this.focus_terminal_command_sender_editor(
-                                        sender_id, window, cx,
-                                    );
+                                    if expanding {
+                                        this.focus_terminal_command_sender_editor(
+                                            sender_id, window, cx,
+                                        );
+                                    } else {
+                                        this.terminal_command_sender.update(cx, |sender, cx| {
+                                            sender.set_compact_focused(true, cx);
+                                        });
+                                        this.clear_ime_selection();
+                                        window.focus(&this.focus_handle, cx);
+                                    }
                                     cx.stop_propagation();
                                 },
                                 cx,

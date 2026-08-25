@@ -351,6 +351,9 @@ impl WorkspaceApp {
                 } else if this.handle_terminal_git_branch_picker_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_compact_terminal_command_sender_key(event, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this.handle_active_text_input_navigation(&event.keystroke, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -438,9 +441,6 @@ impl WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_privilege_prompt_helper_key(event, window, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_compact_terminal_command_sender_key(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.terminal_command_sender_editor_focused(window, cx) {

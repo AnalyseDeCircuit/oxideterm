@@ -18,7 +18,9 @@ use oxideterm_gpui_ui::button::{ButtonRadius, IconButtonOptions};
 use oxideterm_gpui_ui::context_menu::{
     ContextMenuActionableStyle, context_menu_event_boundary, context_menu_pointer_event_boundary,
 };
-use oxideterm_gpui_ui::text_input::{TextInputView, text_input, text_input_anchor_probe};
+use oxideterm_gpui_ui::text_input::{
+    TextInputView, text_input, text_input_anchor_probe, text_input_with_viewport_and_ghost_text,
+};
 use oxideterm_gpui_ui::{
     ActionChipOptions, ActionChipTextTone, CommandPanelOptions, ContextChipOptions,
     EntityListRowOptions, MonospaceDatumOptions, MonospaceDatumTone, StatusPillOptions, StatusTone,

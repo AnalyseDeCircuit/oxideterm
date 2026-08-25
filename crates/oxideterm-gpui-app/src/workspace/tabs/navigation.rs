@@ -281,6 +281,9 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn focus_active_pane(&mut self, window: &mut Window, cx: &mut App) {
         self.clear_ai_sidebar_keyboard_focus(cx);
+        self.terminal_command_sender.update(cx, |sender, cx| {
+            sender.set_compact_focused(false, cx);
+        });
         if let Some(pane) = self.active_pane(cx) {
             // A hidden terminal can retain paint operations that reference atlas slots later
             // reused by another surface. Force one fresh frame when the pane becomes active so

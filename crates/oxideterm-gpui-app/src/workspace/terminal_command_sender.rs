@@ -9,6 +9,7 @@ use oxideterm_gpui_editor::{
     EditorContextMenuLabels, EditorPresentation, EditorSettings, TextEditorView,
 };
 use oxideterm_gpui_terminal::TerminalPane;
+use oxideterm_gpui_ui::text_input::TextInputViewport;
 use oxideterm_terminal::{
     TerminalSenderFrame, TerminalSenderInputMode, TerminalSenderPacing, TerminalSenderPlanError,
     build_terminal_sender_plan,
@@ -131,6 +132,8 @@ pub(super) struct TerminalCommandSenderDocumentSnapshot {
 struct TerminalCommandSenderDocument {
     id: TerminalCommandSenderId,
     editor: Entity<TextEditorView>,
+    compact_draft: Zeroizing<String>,
+    compact_viewport: TextInputViewport,
     input_mode: TerminalSenderInputMode,
     pacing: TerminalSenderPacing,
     interval_ms: u64,
@@ -178,6 +181,7 @@ struct TerminalCommandSenderRunTarget {
 /// Owns sender documents, target snapshots, timers, cancellation, and progress.
 pub(super) struct TerminalCommandSenderEntity {
     layout: TerminalCommandSenderLayout,
+    compact_focused: bool,
     panel_height: f32,
     resize_drag: Option<TerminalCommandSenderResizeDrag>,
     documents: Vec<TerminalCommandSenderDocument>,
@@ -210,6 +214,7 @@ impl TerminalCommandSenderEntity {
         );
         Self {
             layout: TerminalCommandSenderLayout::Compact,
+            compact_focused: false,
             panel_height: TERMINAL_SENDER_DEFAULT_HEIGHT,
             resize_drag: None,
             documents: vec![first],
@@ -251,6 +256,8 @@ impl TerminalCommandSenderEntity {
         TerminalCommandSenderDocument {
             id,
             editor,
+            compact_draft: Zeroizing::new(String::new()),
+            compact_viewport: TextInputViewport::default(),
             input_mode: TerminalSenderInputMode::Text,
             pacing: TerminalSenderPacing::Line,
             interval_ms: 1_000,
@@ -278,7 +285,10 @@ impl TerminalCommandSenderEntity {
     }
 
     pub(super) fn toggle_visible(&mut self, cx: &mut Context<Self>) -> bool {
-        self.layout = self.layout.toggled_visibility();
+        let next_layout = self.layout.toggled_visibility();
+        self.sync_text_for_layout_change(next_layout, cx);
+        self.layout = next_layout;
+        self.compact_focused = false;
         // Hiding changes presentation only; documents and running jobs stay owned here.
         self.resize_drag = None;
         self.sync_editor_presentation(cx);
@@ -291,8 +301,9 @@ impl TerminalCommandSenderEntity {
         if self.layout == next_layout {
             return;
         }
-        // Compact and expanded layouts share the same documents and jobs.
+        self.sync_text_for_layout_change(next_layout, cx);
         self.layout = next_layout;
+        self.compact_focused = false;
         self.resize_drag = None;
         self.sync_editor_presentation(cx);
         cx.notify();
@@ -318,11 +329,66 @@ impl TerminalCommandSenderEntity {
         self.active_document_id
     }
 
+    pub(super) fn compact_focused(&self) -> bool {
+        self.compact_focused
+    }
+
+    pub(super) fn set_compact_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
+        let focused = focused && self.layout == TerminalCommandSenderLayout::Compact;
+        if self.compact_focused != focused {
+            self.compact_focused = focused;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn active_compact_draft(&self) -> Option<&str> {
+        self.document(self.active_document_id)
+            .map(|document| document.compact_draft.as_str())
+    }
+
+    pub(super) fn active_compact_viewport(&self) -> Option<TextInputViewport> {
+        self.document(self.active_document_id)
+            .map(|document| document.compact_viewport.clone())
+    }
+
+    pub(super) fn compact_placeholder(&self) -> &str {
+        &self.compact_editor_placeholder
+    }
+
+    pub(super) fn replace_active_compact_text(
+        &mut self,
+        text: String,
+        cx: &mut Context<Self>,
+    ) -> TerminalCommandSenderId {
+        let sender_id = self.editable_active_document_id(cx);
+        if let Some(document) = self.document_mut(sender_id) {
+            document.compact_draft = Zeroizing::new(text);
+            document.failure = None;
+        }
+        cx.notify();
+        sender_id
+    }
+
+    pub(super) fn clear_compact_text(
+        &mut self,
+        sender_id: TerminalCommandSenderId,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(document) = self.document_mut(sender_id) {
+            document.compact_draft = Zeroizing::new(String::new());
+            document.compact_viewport = TextInputViewport::default();
+            cx.notify();
+        }
+    }
+
     pub(super) fn replace_active_text(
         &mut self,
         text: String,
         cx: &mut Context<Self>,
     ) -> TerminalCommandSenderId {
+        if !self.is_expanded() {
+            return self.replace_active_compact_text(text, cx);
+        }
         let (sender_id, editor) = self.editable_active_editor(cx);
         editor.update(cx, |editor, cx| {
             editor.replace_text_external(text, cx);
@@ -337,6 +403,24 @@ impl TerminalCommandSenderEntity {
         separate_with_space: bool,
         cx: &mut Context<Self>,
     ) -> TerminalCommandSenderId {
+        if !self.is_expanded() {
+            let sender_id = self.editable_active_document_id(cx);
+            if let Some(document) = self.document_mut(sender_id) {
+                if separate_with_space
+                    && document
+                        .compact_draft
+                        .chars()
+                        .next_back()
+                        .is_some_and(|last| !last.is_whitespace())
+                {
+                    document.compact_draft.push(' ');
+                }
+                document.compact_draft.push_str(suffix);
+                document.failure = None;
+                cx.notify();
+            }
+            return sender_id;
+        }
         let (sender_id, editor) = self.editable_active_editor(cx);
         let mut text = Zeroizing::new(editor.read(cx).buffer().text());
         if separate_with_space
@@ -620,7 +704,11 @@ impl TerminalCommandSenderEntity {
         if document.status == TerminalCommandSenderStatus::Running {
             return false;
         }
-        let input = Zeroizing::new(document.editor.read(cx).buffer().text());
+        let input = if self.is_expanded() {
+            Zeroizing::new(document.editor.read(cx).buffer().text())
+        } else {
+            Zeroizing::new(document.compact_draft.to_string())
+        };
         let mode = document.input_mode;
         let pacing = document.pacing;
         let repeat_count = document.repeat_count;
@@ -866,20 +954,24 @@ impl TerminalCommandSenderEntity {
         &mut self,
         cx: &mut Context<Self>,
     ) -> (TerminalCommandSenderId, Entity<TextEditorView>) {
-        let sender_id = if self
-            .document(self.active_document_id)
-            .is_some_and(|document| document.status == TerminalCommandSenderStatus::Running)
-        {
-            self.add_document(cx)
-        } else {
-            self.active_document_id
-        };
+        let sender_id = self.editable_active_document_id(cx);
         let editor = self
             .document(sender_id)
             .expect("active sender document disappeared")
             .editor
             .clone();
         (sender_id, editor)
+    }
+
+    fn editable_active_document_id(&mut self, cx: &mut Context<Self>) -> TerminalCommandSenderId {
+        if self
+            .document(self.active_document_id)
+            .is_some_and(|document| document.status == TerminalCommandSenderStatus::Running)
+        {
+            self.add_document(cx)
+        } else {
+            self.active_document_id
+        }
     }
 
     fn document(
@@ -1004,6 +1096,32 @@ impl TerminalCommandSenderEntity {
             });
         }
     }
+
+    fn sync_text_for_layout_change(
+        &mut self,
+        next_layout: TerminalCommandSenderLayout,
+        cx: &mut Context<Self>,
+    ) {
+        // The rendered surface is the sole live editor; layout boundaries transfer its draft.
+        if self.layout == TerminalCommandSenderLayout::Expanded
+            && next_layout != TerminalCommandSenderLayout::Expanded
+        {
+            for document in &mut self.documents {
+                document.compact_draft = Zeroizing::new(document.editor.read(cx).buffer().text());
+                document.compact_viewport = TextInputViewport::default();
+            }
+        } else if self.layout != TerminalCommandSenderLayout::Expanded
+            && next_layout == TerminalCommandSenderLayout::Expanded
+        {
+            for document in &self.documents {
+                let text = document.compact_draft.to_string();
+                document.editor.update(cx, |editor, cx| {
+                    editor.replace_text_external(text, cx);
+                    editor.move_cursor_to_document_end(cx);
+                });
+            }
+        }
+    }
 }
 
 fn resolve_run_targets(
@@ -1059,7 +1177,19 @@ fn adjusted_sender_panel_height(start_height: f32, delta_y: f32, viewport_height
 
 #[cfg(test)]
 mod tests {
+    use gpui::TestAppContext;
+    use oxideterm_theme::default_tokens;
+
     use super::*;
+
+    fn test_context_menu_labels() -> EditorContextMenuLabels {
+        EditorContextMenuLabels {
+            copy: "Copy".to_string(),
+            cut: "Cut".to_string(),
+            paste: "Paste".to_string(),
+            select_all: "Select all".to_string(),
+        }
+    }
 
     #[test]
     fn plan_errors_map_without_retaining_input_details() {
@@ -1071,5 +1201,41 @@ mod tests {
             plan_failure(TerminalSenderPlanError::EmptyInput),
             TerminalCommandSenderFailure::EmptyInput
         );
+    }
+
+    #[gpui::test]
+    fn compact_and_expanded_inputs_sync_only_when_layout_changes(cx: &mut TestAppContext) {
+        let sender = cx.new(|cx| {
+            TerminalCommandSenderEntity::new(
+                default_tokens(),
+                "Command".to_string(),
+                "Commands".to_string(),
+                test_context_menu_labels(),
+                cx,
+            )
+        });
+        sender.update(cx, |sender, cx| {
+            sender.replace_active_compact_text("echo compact".to_string(), cx);
+            sender.set_expanded(true, cx);
+        });
+        let editor = sender
+            .read_with(cx, |sender, _cx| {
+                sender
+                    .active_document_snapshot()
+                    .map(|snapshot| snapshot.editor)
+            })
+            .expect("active sender editor");
+        assert_eq!(
+            editor.read_with(cx, |editor, _cx| editor.buffer().text()),
+            "echo compact"
+        );
+
+        editor.update(cx, |editor, cx| {
+            editor.replace_text_external("echo expanded".to_string(), cx);
+        });
+        sender.update(cx, |sender, cx| sender.set_expanded(false, cx));
+        sender.read_with(cx, |sender, _cx| {
+            assert_eq!(sender.active_compact_draft(), Some("echo expanded"));
+        });
     }
 }
