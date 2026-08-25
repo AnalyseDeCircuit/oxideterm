@@ -823,7 +823,7 @@ impl WaylandClient {
             .unwrap();
 
         let compositor_gpu = detect_compositor_gpu();
-        let gpu_context = Rc::new(RefCell::new(None));
+        let gpu_context = GpuContext::new();
 
         let (frame_ping, frame_ping_source) =
             calloop::ping::make_ping().expect("Failed to create the frame ping");

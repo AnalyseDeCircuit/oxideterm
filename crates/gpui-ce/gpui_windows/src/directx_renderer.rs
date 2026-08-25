@@ -1369,7 +1369,8 @@ impl DirectXRenderPipelines {
             device,
             RawShaderBytes::new(ShaderModule::BlurComposite, ShaderTarget::Fragment)?.as_bytes(),
         )?;
-        let blur_params_buffer = create_constant_buffer(device, std::mem::size_of::<BlurParams>())?;
+        let blur_params_buffer =
+            create_sized_constant_buffer(device, std::mem::size_of::<BlurParams>())?;
         let blur_blend_replace = create_blend_state_no_blend(device)?;
         // Premultiplied (One / InvSrcAlpha) — the composite outputs a premultiplied blurred sample;
         // straight-alpha blending would darken the faded edges.
@@ -2047,7 +2048,7 @@ fn create_blend_state_for_path_sprite(device: &ID3D11Device) -> Result<ID3D11Ble
 
 /// Create a CPU-writable dynamic constant buffer of the given byte size (rounded up to 16).
 #[inline]
-fn create_constant_buffer(device: &ID3D11Device, byte_size: usize) -> Result<ID3D11Buffer> {
+fn create_sized_constant_buffer(device: &ID3D11Device, byte_size: usize) -> Result<ID3D11Buffer> {
     let desc = D3D11_BUFFER_DESC {
         ByteWidth: byte_size.next_multiple_of(16) as u32,
         Usage: D3D11_USAGE_DYNAMIC,

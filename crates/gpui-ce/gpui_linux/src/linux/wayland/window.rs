@@ -42,7 +42,7 @@ use gpui::{
     popup::PopupOptions,
     px, size,
 };
-use gpui_wgpu::{CompositorGpuHint, WgpuRenderer, WgpuSurfaceConfig, wgpu};
+use gpui_wgpu::{CompositorGpuHint, WgpuRecoveryStatus, WgpuRenderer, WgpuSurfaceConfig, wgpu};
 
 #[derive(Default)]
 pub(crate) struct Callbacks {
@@ -1928,14 +1928,18 @@ impl PlatformWindow for WaylandWindow {
                     .display_ptr()
                     .cast::<std::ffi::c_void>(),
             };
-            match state.renderer.recover(&raw_window) {
-                Ok(()) => {}
+            state.redraw_requested = match state.renderer.recover(&raw_window) {
+                Ok(WgpuRecoveryStatus::Recovered | WgpuRecoveryStatus::Deferred) => true,
+                Ok(WgpuRecoveryStatus::Failed) => {
+                    // A terminal recovery result must not keep the compositor frame loop busy.
+                    log::error!("GPU recovery exhausted; restart OxideTerm to restore rendering");
+                    false
+                }
                 Err(err) => {
                     log::warn!("GPU recovery failed, will retry on next frame: {err}");
+                    true
                 }
-            }
-
-            state.redraw_requested = true;
+            };
             return;
         }
 

@@ -33,7 +33,7 @@ use crate::*;
 use gpui::*;
 
 #[cfg(feature = "wgpu")]
-use gpui_wgpu::{WgpuRenderer, WgpuSurfaceConfig, wgpu};
+use gpui_wgpu::{GpuContext, WgpuRecoveryStatus, WgpuRenderer, WgpuSurfaceConfig, wgpu};
 
 pub(crate) struct WindowsWindow(pub Rc<WindowsWindowInner>);
 
@@ -77,6 +77,9 @@ pub struct WindowsWindowState {
     /// and when a forced render was requested while another draw was in
     /// progress and had to be deferred.
     pub force_render_pending: Cell<bool>,
+    /// Coalesces demand-driven frame messages so keyboard input cannot flood
+    /// the Win32 queue or leave presentation dependent on low-priority WM_PAINT.
+    pub frame_request_pending: Cell<bool>,
 
     pub click_state: ClickState,
     pub current_cursor: Cell<Option<HCURSOR>>,
@@ -147,7 +150,7 @@ impl WindowsWindowState {
         let restore_from_minimized = None;
         #[cfg(feature = "wgpu")]
         let renderer = WgpuRenderer::new(
-            Rc::new(RefCell::new(None)),
+            GpuContext::new(),
             &RawWindow { hwnd },
             WgpuSurfaceConfig {
                 size: physical_size,
@@ -194,6 +197,7 @@ impl WindowsWindowState {
             hovered: Cell::new(hovered),
             renderer: RefCell::new(renderer),
             force_render_pending: Cell::new(false),
+            frame_request_pending: Cell::new(false),
             click_state,
             current_cursor: Cell::new(current_cursor),
             cursor_visible,
@@ -271,6 +275,24 @@ impl WindowsWindowState {
 }
 
 impl WindowsWindowInner {
+    pub(crate) fn request_frame(&self) {
+        if self.state.frame_request_pending.replace(true) {
+            return;
+        }
+
+        if let Err(error) = unsafe {
+            PostMessageW(
+                Some(self.hwnd),
+                WM_GPUI_REQUEST_FRAME,
+                WPARAM::default(),
+                LPARAM::default(),
+            )
+        } {
+            self.state.frame_request_pending.set(false);
+            log::warn!("failed to schedule Windows frame: {error}");
+        }
+    }
+
     fn new(context: &mut WindowCreateContext, hwnd: HWND, cs: &CREATESTRUCTW) -> Result<Rc<Self>> {
         let state = WindowsWindowState::new(
             hwnd,
@@ -1043,6 +1065,19 @@ impl PlatformWindow for WindowsWindow {
         self.state.callbacks.request_frame.set(Some(callback));
     }
 
+    fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
+        let window = Rc::downgrade(&self.0);
+        Some(Rc::new(move || {
+            if let Some(window) = window.upgrade() {
+                window.request_frame();
+            }
+        }))
+    }
+
+    fn schedule_frame(&self) {
+        self.0.request_frame();
+    }
+
     fn on_input(&self, callback: Box<dyn FnMut(PlatformInput) -> DispatchEventResult>) {
         self.state.callbacks.input.set(Some(callback));
     }
@@ -1109,16 +1144,21 @@ impl PlatformWindow for WindowsWindow {
         {
             let mut renderer = self.state.renderer.borrow_mut();
             if renderer.device_lost() {
-                match renderer.recover(&RawWindow {
-                    hwnd: self.platform_window_handle,
-                }) {
-                    Ok(()) => {}
-                    Err(err) => {
-                        log::warn!("GPU recovery failed, will retry on next frame: {err}");
-                    }
-                }
-
-                self.state.force_render_pending.set(true);
+                self.state.force_render_pending.set(
+                    match renderer.recover(&RawWindow {
+                        hwnd: self.platform_window_handle,
+                    }) {
+                        Ok(WgpuRecoveryStatus::Recovered | WgpuRecoveryStatus::Deferred) => true,
+                        Ok(WgpuRecoveryStatus::Failed) => {
+                            log::error!("GPU recovery is exhausted; restart is required");
+                            false
+                        }
+                        Err(err) => {
+                            log::warn!("GPU recovery failed, will retry on next frame: {err}");
+                            true
+                        }
+                    },
+                );
                 return;
             }
             if !renderer.draw(scene) {

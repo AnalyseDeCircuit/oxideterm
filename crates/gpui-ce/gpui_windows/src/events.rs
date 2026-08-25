@@ -31,6 +31,7 @@ pub(crate) const WM_GPUI_KEYBOARD_LAYOUT_CHANGED: u32 = WM_USER + 6;
 pub(crate) const WM_GPUI_GPU_DEVICE_LOST: u32 = WM_USER + 7;
 pub(crate) const WM_GPUI_KEYDOWN: u32 = WM_USER + 8;
 pub(crate) const WM_GPUI_END_SESSION: u32 = WM_USER + 9;
+pub(crate) const WM_GPUI_REQUEST_FRAME: u32 = WM_USER + 10;
 
 const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
 
@@ -163,6 +164,10 @@ impl WindowsWindowInner {
             WM_SHOWWINDOW => self.handle_window_visibility_changed(handle, wparam),
             WM_GPUI_CURSOR_STYLE_CHANGED => self.handle_cursor_changed(lparam),
             WM_GPUI_FORCE_UPDATE_WINDOW => self.draw_window(handle, true),
+            WM_GPUI_REQUEST_FRAME => {
+                self.state.frame_request_pending.set(false);
+                self.draw_window(handle, false)
+            }
             WM_GPUI_GPU_DEVICE_LOST => self.handle_device_lost(lparam),
             DM_POINTERHITTEST => self.handle_dm_pointer_hit_test(wparam),
             WM_GETOBJECT => self.handle_wm_getobject(wparam, lparam),
@@ -1339,6 +1344,9 @@ impl WindowsWindowInner {
             // `begin_vsync_thread`), so the deferred frame still gets drawn,
             // at most one vsync late.
             unsafe { ValidateRect(Some(handle), None).ok().log_err() };
+            // WM_PAINT is lower priority than keyboard input. Re-post an ordinary
+            // frame request so sustained input cannot starve the deferred draw.
+            self.request_frame();
             return Some(0);
         };
         let mut request_frame = self.state.callbacks.request_frame.take()?;

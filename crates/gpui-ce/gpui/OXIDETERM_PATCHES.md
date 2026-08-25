@@ -167,8 +167,11 @@ Windows platform layers:
   `crates/gpui-ce/gpui_windows/src/platform.rs`, and
   `crates/gpui-ce/gpui_windows/src/window.rs` share one platform-owned draw coordinator across all
   windows. A nested Windows paint validates the update region to prevent a `WM_PAINT` busy loop;
-  the existing vsync thread invalidates all windows again on the next tick. Forced device-recovery
-  renders remain pending until a draw acquires the coordinator.
+  the existing vsync thread invalidates all windows again on the next tick. Demand-driven redraws
+  also use one coalesced posted window message per window, because sustained keyboard input can
+  starve low-priority `WM_PAINT`; a request deferred by draw re-entry posts itself again after the
+  active draw unwinds. Forced device-recovery renders remain pending until a draw acquires the
+  coordinator.
 - Synchronous draw helpers in `crates/gpui-ce/gpui/src/app.rs`,
   `crates/gpui-ce/gpui/src/app/test_app.rs`,
   `crates/gpui-ce/gpui/src/app/test_context.rs`, and
@@ -367,11 +370,17 @@ The GPUI-CE WGPU path carries OxideTerm-specific VM and recovery behavior:
   - clears recoverable frame resources without terminating the application;
   - recreates resources transactionally and notifies the atlas only after a
     replacement context succeeds;
+- `crates/gpui-ce/gpui_wgpu/src/gpui_wgpu.rs`
+  - exports the recovery status contract consumed by platform render loops;
 - `crates/gpui-ce/gpui_linux/src/linux/wayland/client.rs`,
   `crates/gpui-ce/gpui_linux/src/linux/x11/client.rs`, and
   `crates/gpui-ce/gpui_windows/src/window.rs`
   - initialize the shared WGPU context and recovery state through the
     OxideTerm recovery-aware context wrapper;
+- `crates/gpui-ce/gpui_linux/src/linux/wayland/window.rs` and
+  `crates/gpui-ce/gpui_linux/src/linux/x11/window.rs`
+  - request another frame after recovered or deferred attempts and stop the
+    automatic frame loop after terminal recovery exhaustion;
 - `crates/gpui-ce/gpui_wgpu/src/wgpu_atlas.rs`
   - drops stale uploads and advances the renderer resource generation when the
     WGPU resources are cleared or replaced.
@@ -416,6 +425,8 @@ Remote desktop must be able to hide the local system pointer while painting a
 remote cursor. Preserve `CursorStyle::None` across the full platform split:
 
 - `crates/gpui-ce/gpui/src/platform.rs` defines the public variant;
+- `crates/gpui-ce/gpui/src/window.rs` exposes the resolved cursor under the
+  test-support feature so product interaction tests observe the painted result;
 - `crates/gpui-ce/gpui_linux/src/linux/wayland.rs` and
   `crates/gpui-ce/gpui_linux/src/linux/wayland/client.rs` preserve explicit hiding
   across Wayland pointer events;

@@ -310,10 +310,12 @@ js-sys = "0.3"
 wasmtime = { version = "46.0.1", default-features = false, features = ["cranelift", "runtime", "std"] }
 wasmtime-wasi = { version = "46.0.1", default-features = false, features = ["p1"] }
 windows = { version = "0.61", features = [
+  "Data_Xml_Dom",
   "Foundation_Numerics",
   "Globalization_DateTimeFormatting",
   "Storage_Search",
   "Storage_Streams",
+  "UI_Notifications",
   "UI_ViewManagement",
   "Wdk_System_SystemServices",
   "Win32_Foundation",
@@ -337,6 +339,7 @@ windows = { version = "0.61", features = [
   "Win32_Security_Credentials",
   "Win32_Security_Cryptography",
   "Win32_Storage_FileSystem",
+  "Win32_Storage_Packaging_Appx",
   "Win32_System_Com",
   "Win32_System_Com_StructuredStorage",
   "Win32_System_Console",

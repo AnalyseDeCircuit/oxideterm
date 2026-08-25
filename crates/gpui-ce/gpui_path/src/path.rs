@@ -615,19 +615,19 @@ mod tests {
                 PathStyle::Unix,
                 "/a/b/c",
                 "/a/b",
-                Some(rel_path("c").into_arc()),
+                Some(rel_path("c").to_arc()),
             ),
             (
                 PathStyle::Unix,
                 "/a/b/c",
                 "/a/b/",
-                Some(rel_path("c").into_arc()),
+                Some(rel_path("c").to_arc()),
             ),
             (
                 PathStyle::Unix,
                 "/a/b/c",
                 "/",
-                Some(rel_path("a/b/c").into_arc()),
+                Some(rel_path("a/b/c").to_arc()),
             ),
             (PathStyle::Unix, "/a/b/c", "", None),
             (PathStyle::Unix, "/a/b//c", "/a/b/", None),
@@ -636,25 +636,25 @@ mod tests {
                 PathStyle::Unix,
                 "/a/b/c",
                 "/a/b/c",
-                Some(rel_path("").into_arc()),
+                Some(rel_path("").to_arc()),
             ),
             (
                 PathStyle::Windows,
                 "C:\\a\\b\\c",
                 "C:\\a\\b",
-                Some(rel_path("c").into_arc()),
+                Some(rel_path("c").to_arc()),
             ),
             (
                 PathStyle::Windows,
                 "C:\\a\\b\\c",
                 "C:\\a\\b\\",
-                Some(rel_path("c").into_arc()),
+                Some(rel_path("c").to_arc()),
             ),
             (
                 PathStyle::Windows,
                 "C:\\a\\b\\c",
                 "C:\\",
-                Some(rel_path("a/b/c").into_arc()),
+                Some(rel_path("a/b/c").to_arc()),
             ),
             (PathStyle::Windows, "C:\\a\\b\\c", "", None),
             (PathStyle::Windows, "C:\\a\\b\\\\c", "C:\\a\\b\\", None),
@@ -663,19 +663,19 @@ mod tests {
                 PathStyle::Windows,
                 "C:\\a\\b/c",
                 "C:\\a\\b",
-                Some(rel_path("c").into_arc()),
+                Some(rel_path("c").to_arc()),
             ),
             (
                 PathStyle::Windows,
                 "C:\\a\\b/c",
                 "C:\\a\\b\\",
-                Some(rel_path("c").into_arc()),
+                Some(rel_path("c").to_arc()),
             ),
             (
                 PathStyle::Windows,
                 "C:\\a\\b/c",
                 "C:\\a\\b/",
-                Some(rel_path("c").into_arc()),
+                Some(rel_path("c").to_arc()),
             ),
         ];
         let actual = expected.clone().map(|(style, child, parent, _)| {
@@ -685,7 +685,7 @@ mod tests {
                 parent,
                 style
                     .strip_prefix(child.as_ref(), parent.as_ref())
-                    .map(|rel_path| rel_path.into_arc()),
+                    .map(|rel_path| rel_path.to_arc()),
             )
         });
         pretty_assertions::assert_eq!(actual, expected);

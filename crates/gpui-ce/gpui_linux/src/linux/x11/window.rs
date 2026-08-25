@@ -9,7 +9,7 @@ use gpui::{
     Tiling, WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowControlArea,
     WindowDecorations, WindowKind, WindowParams, popup::PopupNotSupportedError, px,
 };
-use gpui_wgpu::{CompositorGpuHint, WgpuRenderer, WgpuSurfaceConfig};
+use gpui_wgpu::{CompositorGpuHint, WgpuRecoveryStatus, WgpuRenderer, WgpuSurfaceConfig};
 
 use collections::FxHashSet;
 use gpui_util::{ResultExt, maybe};
@@ -1738,14 +1738,18 @@ impl PlatformWindow for X11Window {
                 window_id: self.0.x_window,
                 visual_id: inner.visual_id,
             };
-            match inner.renderer.recover(&raw_window) {
-                Ok(()) => {}
+            inner.force_render_after_recovery = match inner.renderer.recover(&raw_window) {
+                Ok(WgpuRecoveryStatus::Recovered | WgpuRecoveryStatus::Deferred) => true,
+                Ok(WgpuRecoveryStatus::Failed) => {
+                    // A terminal recovery result must not keep the X11 frame loop busy.
+                    log::error!("GPU recovery exhausted; restart OxideTerm to restore rendering");
+                    false
+                }
                 Err(err) => {
                     log::warn!("GPU recovery failed, will retry on next frame: {err}");
+                    true
                 }
-            }
-
-            inner.force_render_after_recovery = true;
+            };
             return;
         }
 
