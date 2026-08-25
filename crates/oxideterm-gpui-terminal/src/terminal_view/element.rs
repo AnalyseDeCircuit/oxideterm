@@ -8,8 +8,8 @@ use std::{
 
 use gpui::{
     App, Bounds, ContentMask, CursorStyle, Element, ElementId, Entity, FocusHandle,
-    GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, Pixels, ShapedLine,
-    SharedString, Style, TextRun, Window, fill, point, px, relative, rgb, rgba, size,
+    GlobalElementId, Hsla, InspectorElementId, IntoColor, IntoElement, LayoutId, LineLayout,
+    Pixels, SharedString, Style, TextRun, Window, fill, point, px, relative, rgb, rgba, size,
 };
 use oxideterm_terminal::{
     TerminalColor, TerminalCommandMark, TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
@@ -128,7 +128,7 @@ pub(crate) struct BatchedTextRun {
     pub(crate) text: SharedString,
     pub(crate) cells: usize,
     pub(crate) style: TextRun,
-    shaped: Option<Arc<OnceLock<ShapedLine>>>,
+    layout: Option<Arc<OnceLock<Arc<LineLayout>>>>,
 }
 
 #[derive(Clone)]
@@ -183,7 +183,7 @@ struct TerminalRowTextRun {
     text: SharedString,
     cells: usize,
     style: TextRun,
-    shaped: Arc<OnceLock<ShapedLine>>,
+    layout: Arc<OnceLock<Arc<LineLayout>>>,
 }
 
 struct PendingTerminalRowTextRun {
@@ -200,7 +200,7 @@ impl From<PendingTerminalRowTextRun> for TerminalRowTextRun {
             text: SharedString::from(run.text),
             cells: run.cells,
             style: run.style,
-            shaped: Arc::new(OnceLock::new()),
+            layout: Arc::new(OnceLock::new()),
         }
     }
 }
@@ -845,7 +845,7 @@ impl TerminalElement {
                     text: SharedString::from(text.clone()),
                     cells: text.encode_utf16().count().max(1),
                     style: marked_text_run(text, &self.metrics),
-                    shaped: None,
+                    layout: None,
                 })
             }),
             ghost_text: self.ghost_text_run(cursor_row_visible),
@@ -863,7 +863,7 @@ impl TerminalElement {
             cells: TERMINAL_TIMESTAMP_LABEL_CELLS,
             style: timestamp_text_run(&label, &self.theme, &self.metrics),
             text: SharedString::from(label),
-            shaped: None,
+            layout: None,
         })
     }
 
@@ -923,7 +923,7 @@ impl TerminalElement {
             (
                 highlight,
                 rgba((self.theme.tokens.ui.warning << 8) | TRANSIENT_COMMAND_HIGHLIGHT_ALPHA)
-                    .into(),
+                    .into_color(),
             )
         });
         let mut layout = terminal_highlights_for_rows(
@@ -1338,7 +1338,7 @@ impl TerminalElement {
             cells: visible_cells,
             style: ghost_text_run(&visible_text, &self.theme, &self.metrics),
             text: SharedString::from(visible_text),
-            shaped: None,
+            layout: None,
         })
     }
 }
@@ -1402,7 +1402,7 @@ fn append_cached_row_layout(
         text: run.text.clone(),
         cells: run.cells,
         style: run.style.clone(),
-        shaped: Some(run.shaped.clone()),
+        layout: Some(run.layout.clone()),
     }));
     if let Some(row_cursor) = row_layout.cursor {
         *cursor = Some(TerminalCursor {

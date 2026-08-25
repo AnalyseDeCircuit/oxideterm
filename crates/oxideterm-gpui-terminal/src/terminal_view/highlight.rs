@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 
-use gpui::{Hsla, rgba};
+use gpui::{Hsla, IntoColor, rgba};
 use regex::RegexBuilder;
 
 use crate::command_facts::TransientCommandHighlight;
@@ -431,7 +431,7 @@ fn apply_matches(
             .as_deref()
             .and_then(parse_hex_color)
             .or(foreground)
-            .unwrap_or_else(|| rgba(0xf59e0bff).into());
+            .unwrap_or_else(|| rgba(0xf59e0bff).into_color());
         let paint_cells = &line.map[matched.start..end];
         for cell in paint_cells {
             if let Some(foreground) = foreground {

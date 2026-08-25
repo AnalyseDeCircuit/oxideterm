@@ -1,8 +1,8 @@
 use std::time::{Duration, Instant};
 
 use gpui::{
-    App, Bounds, Corners, PathBuilder, Pixels, Point, RenderImage, Rgba, SharedString, TextAlign,
-    Window, fill, point, px, rgb, rgba, size,
+    App, Bounds, Corners, DecorationRun, PathBuilder, Pixels, Point, RenderImage, Rgba,
+    SharedString, TextAlign, Window, fill, point, px, rgb, rgba, size,
 };
 use oxideterm_terminal::{TerminalCursorShape, TerminalImageData};
 use unicode_width::UnicodeWidthChar;
@@ -238,6 +238,7 @@ pub(crate) fn paint_terminal_image(
     }
     let _ = window.paint_image(
         bounds,
+        bounds,
         Corners::all(px(0.0)),
         render_image.clone(),
         frame_index,
@@ -385,18 +386,33 @@ pub(crate) fn paint_text_run(
             px(run.col as f32 * metrics.cell_width_f32()),
             px(run.row as f32 * metrics.line_height_f32()),
         );
-    if let Some(shaped) = &run.shaped {
-        // Stable terminal rows retain their shaped glyph layout with the row-layout cache.
-        // Transient runs keep using GPUI's frame cache through the fallback below.
-        let shaped = shaped.get_or_init(|| {
-            window.text_system().shape_line(
-                run.text.clone(),
+    if let Some(layout) = &run.layout {
+        // Stable terminal rows retain only glyph layout; one explicit decoration avoids the
+        // large inline decoration capacity carried by `ShapedLine` for every cached run.
+        let layout = layout.get_or_init(|| {
+            window.text_system().layout_line(
+                &run.text,
                 metrics.font_size,
                 std::slice::from_ref(&run.style),
                 Some(metrics.cell_width),
             )
         });
-        let _ = shaped.paint_cached(position, metrics.line_height, window, cx);
+        let decoration = DecorationRun {
+            len: run.style.len as u32,
+            color: run.style.color,
+            background_color: run.style.background_color,
+            underline: run.style.underline,
+            strikethrough: run.style.strikethrough,
+        };
+        let _ = layout.paint(
+            position,
+            metrics.line_height,
+            TextAlign::Left,
+            None,
+            std::slice::from_ref(&decoration),
+            window,
+            cx,
+        );
         return;
     }
 

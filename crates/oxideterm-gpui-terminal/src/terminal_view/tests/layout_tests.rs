@@ -530,7 +530,7 @@ fn terminal_highlight_can_preserve_existing_background() {
         layout
             .text_runs
             .iter()
-            .any(|run| run.text == "ERROR" && run.style.color == rgb(0xff0000).into())
+            .any(|run| run.text == "ERROR" && run.style.color == rgb(0xff0000).into_color())
     );
 }
 

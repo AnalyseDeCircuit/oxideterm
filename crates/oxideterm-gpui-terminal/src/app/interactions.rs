@@ -541,6 +541,11 @@ impl TerminalPane {
                 })
             }
             TouchPhase::Ended => None,
+            TouchPhase::Cancelled => Some(TerminalWheelScrollDelta {
+                rows: 0,
+                repaint: self.clear_smooth_scroll_remainder(),
+                animate_rows: false,
+            }),
         }
     }
 
