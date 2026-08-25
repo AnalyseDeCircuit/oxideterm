@@ -2687,10 +2687,28 @@ impl AiWorkspaceEntity {
             .insert(provider_id.clone(), generation);
         self.selector_probe_pending = self.selector_probe_pending.saturating_add(1);
         let worker_tx = self.selector_probe_tx.clone();
+        let key_store = self.key_store.clone();
         self.task_runtime.spawn(async move {
-            let online =
+            let online = if provider.provider_type == "openai_compatible" {
+                let provider_id_for_key = provider_id.clone();
+                // OpenAI-compatible endpoints may be keyless or authenticated. Keep the optional
+                // secret in a zeroizing owner for this probe and never copy it into status state.
+                let api_key = tokio::task::spawn_blocking(move || {
+                    key_store.get_provider_key(&provider_id_for_key)
+                })
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .flatten();
+                oxideterm_ai::check_openai_compatible_model_selector_provider_online(
+                    &provider.base_url,
+                    api_key,
+                )
+                .await
+            } else {
                 oxideterm_ai::check_model_selector_provider_online(&provider.base_url, endpoint)
-                    .await;
+                    .await
+            };
             let _ = worker_tx.send(AiModelSelectorProbeDelivery {
                 provider_id,
                 generation,

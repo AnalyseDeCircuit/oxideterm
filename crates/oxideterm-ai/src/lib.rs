@@ -90,8 +90,9 @@ pub use provider_embeddings::{
 };
 pub use providers::{
     AI_PROVIDER_TEMPLATES, active_model_selection, active_provider_view,
-    check_model_selector_provider_online, fetch_provider_models, generated_provider_id,
-    is_local_provider_url, model_selector_display_name, model_selector_truncated_label,
+    check_model_selector_provider_online, check_openai_compatible_model_selector_provider_online,
+    fetch_provider_models, generated_provider_id, is_local_provider_url,
+    model_selector_display_name, model_selector_truncated_label,
     model_selector_visible_provider_groups, new_provider_from_template, provider_id,
     provider_string, provider_template_by_type, provider_view, provider_views,
     resolve_model_selector_provider_probe, update_provider,

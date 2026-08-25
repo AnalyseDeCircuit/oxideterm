@@ -1,5 +1,8 @@
 use std::time::Duration;
 
+use zeroize::Zeroizing;
+
+use super::discovery_http::fetch_openai_compatible_json;
 use crate::{AiProviderView, ModelSelectorProviderGroup, ModelSelectorProviderProbe};
 
 const MODEL_SELECTOR_ONLINE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -118,4 +121,93 @@ pub async fn check_model_selector_provider_online(base_url: &str, endpoint: &str
         .await
         .map(|response| response.status().is_success())
         .unwrap_or(false)
+}
+
+pub async fn check_openai_compatible_model_selector_provider_online(
+    base_url: &str,
+    api_key: Option<Zeroizing<String>>,
+) -> bool {
+    let Ok(builder) = oxideterm_network_proxy::application_http_client_builder() else {
+        return false;
+    };
+    let Ok(client) = builder.timeout(MODEL_SELECTOR_ONLINE_TIMEOUT).build() else {
+        return false;
+    };
+    // Keep selector readiness aligned with model discovery: both use the same optional
+    // authorization header, version fallback, and JSON response validation.
+    fetch_openai_compatible_json(
+        &client,
+        base_url,
+        "/models",
+        api_key.as_ref(),
+        "OpenAI-compatible model selector probe",
+    )
+    .await
+    .is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+    use zeroize::Zeroizing;
+
+    #[tokio::test]
+    async fn openai_compatible_probe_uses_optional_key_and_version_fallback() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let request_lines = Arc::new(Mutex::new(Vec::new()));
+        let server_request_lines = request_lines.clone();
+        let server = tokio::spawn(async move {
+            for _ in 0..4 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = vec![0_u8; 4096];
+                let length = socket.read(&mut request).await.unwrap();
+                let request = String::from_utf8_lossy(&request[..length]);
+                let request_line = request.lines().next().unwrap_or_default().to_string();
+                server_request_lines
+                    .lock()
+                    .unwrap()
+                    .push(request_line.clone());
+                let authorized = request
+                    .to_ascii_lowercase()
+                    .contains("authorization: bearer selector-test-key");
+                let (status, body) = if request_line.contains(" /models ") {
+                    ("404 Not Found", "{}")
+                } else if request_line.contains(" /v1/models ") && authorized {
+                    ("200 OK", r#"{"data":[{"id":"model-a"}]}"#)
+                } else {
+                    ("401 Unauthorized", "{}")
+                };
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+
+        assert!(
+            check_openai_compatible_model_selector_provider_online(
+                &base_url,
+                Some(Zeroizing::new("selector-test-key".to_string())),
+            )
+            .await
+        );
+        assert!(!check_openai_compatible_model_selector_provider_online(&base_url, None).await);
+        server.await.unwrap();
+        assert_eq!(
+            request_lines.lock().unwrap().as_slice(),
+            [
+                "GET /models HTTP/1.1",
+                "GET /v1/models HTTP/1.1",
+                "GET /models HTTP/1.1",
+                "GET /v1/models HTTP/1.1",
+            ]
+        );
+    }
 }

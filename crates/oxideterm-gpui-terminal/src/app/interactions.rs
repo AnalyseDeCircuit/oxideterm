@@ -500,12 +500,12 @@ impl TerminalPane {
         scroll_multiplier: f32,
     ) -> Option<TerminalWheelScrollDelta> {
         match event.touch_phase {
-            TouchPhase::Started => Some(TerminalWheelScrollDelta {
+            TouchPhase::Started if !event.delta.precise() => Some(TerminalWheelScrollDelta {
                 rows: 0,
                 repaint: self.clear_smooth_scroll_remainder(),
                 animate_rows: false,
             }),
-            TouchPhase::Moved => {
+            TouchPhase::Started | TouchPhase::Moved => {
                 let precise = event.delta.precise();
                 if precise && self.smooth_scroll_animation.is_some() {
                     let _ = self.advance_smooth_scroll_animation(Instant::now());
@@ -516,6 +516,8 @@ impl TerminalPane {
                 }
                 let line_height = self.metrics.line_height;
                 let previous_visual_offset = self.smooth_scroll_offset_px;
+                // Precise begin events may carry the first touchpad delta. Preserve the existing
+                // fractional position so a new gesture continues without a one-frame snap.
                 self.scroll_input_remainder_px +=
                     event.delta.pixel_delta(line_height).y * scroll_multiplier;
                 let rows = (self.scroll_input_remainder_px / line_height) as i32;
@@ -2845,6 +2847,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
+    use gpui::{AppContext, IntoElement, Render, ScrollDelta, TestAppContext, Window, div, point};
     #[cfg(unix)]
     use oxideterm_terminal::{
         GraphicsOptions, LocalPtyConfig, ShellInfo, TerminalEncoding, TerminalEvent,
@@ -2855,6 +2858,56 @@ mod tests {
         TerminalEditorApplication, TerminalEditorCapabilities, TerminalEditorClipboardOperation,
         TerminalEditorIntegrationEvent, TerminalEditorMode, TerminalEditorSelection,
     };
+
+    struct TerminalScrollTestRoot;
+
+    impl Render for TerminalScrollTestRoot {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    #[gpui::test]
+    fn touchpad_scroll_start_preserves_fractional_visual_position(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalScrollTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .expect("test terminal pane")
+            })
+        });
+
+        pane.update(cx, |pane, _cx| {
+            let previous_offset = px(pane.metrics.line_height_f32() * 0.25);
+            let event_offset = px(pane.metrics.line_height_f32() * 0.125);
+            pane.scroll_input_remainder_px = previous_offset;
+            pane.smooth_scroll_offset_px = previous_offset;
+
+            let scroll_delta = pane
+                .determine_scroll_delta(
+                    &ScrollWheelEvent {
+                        delta: ScrollDelta::Pixels(point(px(0.0), event_offset)),
+                        touch_phase: TouchPhase::Started,
+                        ..Default::default()
+                    },
+                    1.0,
+                )
+                .expect("touchpad start should consume its first pixel delta");
+
+            assert_eq!(scroll_delta.rows, 0);
+            assert_eq!(
+                pane.scroll_input_remainder_px,
+                previous_offset + event_offset
+            );
+            assert_eq!(pane.smooth_scroll_offset_px, previous_offset + event_offset);
+        });
+    }
 
     fn test_cell(ch: char) -> TerminalCell {
         TerminalCell {

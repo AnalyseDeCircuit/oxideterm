@@ -5,8 +5,6 @@ section as the detailed changelog attached to the corresponding GitHub Release.
 
 ## 2.0.24
 
-![OxideTerm 2.0.24 release highlights: native tmux, parameterized Quick Commands, session logging, Kerberos SSH, and a faster terminal](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/v2.0.24/.github/release-notes/assets/oxideterm-2.0.24-release-highlights.png)
-
 ### English
 
 OxideTerm 2.0.24 adds native tmux control-mode sessions, parameterized Quick Commands, configurable session logging, named broadcast groups, cross-platform Kerberos authentication, richer remote-desktop workflows, and scoped terminal history while further improving terminal throughput and saved-connection routing correctness.
@@ -15,7 +13,9 @@ OxideTerm 2.0.24 adds native tmux control-mode sessions, parameterized Quick Com
 
 - Reduced repeated work across PTY draining, snapshot conversion, text layout, link preparation, and rendering; compacted snapshot-cell storage and reused unchanged terminal data more aggressively; and batched common ASCII parsing and grid writes in the vendored terminal stack.
 - In OxideTerm's reproducible 16 MiB release-build benchmark, median process-to-PTY throughput increased from 69.031 to 86.032 MiB/s for plain text, from 88.384 to 92.502 MiB/s for ANSI output, from 68.711 to 75.884 MiB/s for Unicode output, and from 96.685 to 100.336 MiB/s for long CSI sequences. These are further gains of 24.6%, 4.7%, 10.4%, and 3.8% over 2.0.23 respectively.
+- Across both optimization rounds, 2.0.24 reaches 27.36×, 12.62×, 17.27×, and 9.85× the original baseline throughput for plain text, ANSI output, Unicode output, and long CSI sequences respectively.
 - The comparison used the same fixture size, one warm-up, and the median of three measured runs. It measures process-to-PTY throughput rather than completed rendering or input latency.
+- Corrected precise touchpad smooth scrolling so a new gesture preserves its fractional visual position and consumes the first pixel delta instead of briefly snapping in the opposite direction.
 
 #### ✨ Native tmux, Session Logs, Broadcast Groups, and History
 
@@ -30,6 +30,10 @@ OxideTerm 2.0.24 adds native tmux control-mode sessions, parameterized Quick Com
 - Added protocol and host-pattern availability, per-target previews, unavailable-target reporting, bounded expansion, and per-command confirmation policies. Commands approved by the user are frozen before dispatch so later target or input changes cannot alter the authorized payload.
 - Secret parameter values use short-lived protected buffers, stay out of stored Quick Command definitions and diagnostic output, and hide expanded previews that would expose them. Risk classification and confirmation are applied to the final expanded command.
 - Expanded Quick Command management across the desktop UI, CLI, plugins, Public MCP, terminal triggers, Cloud Sync, and `.oxide` transfer. Categories and commands now support explicit ordering, and desktop exports use atomic snapshot replacement.
+
+#### 🤖 AI Provider Compatibility
+
+- Aligned OpenAI-compatible model discovery, selector readiness, and chat execution. Local and private endpoints now reuse optional stored credentials and the same `/v1` fallback during readiness checks, while compatible keyless gateways remain selectable.
 
 #### 🔐 SSH, Kerberos, and Connection Identity
 
@@ -59,7 +63,9 @@ OxideTerm 2.0.24 新增原生 tmux 控制模式、参数化快捷命令、可配
 
 - 减少 PTY 排空、快照转换、文本布局、链接准备及绘制中的重复工作；压缩终端快照单元存储并更积极地复用未变化数据；同时在内置终端栈中批量处理常见 ASCII 解析与网格写入。
 - 在 OxideTerm 可复现的 16 MiB 发布构建基准中，纯文本的进程到 PTY 吞吐量中位数由 69.031 MiB/s 提升至 86.032 MiB/s，ANSI 输出由 88.384 MiB/s 提升至 92.502 MiB/s，Unicode 输出由 68.711 MiB/s 提升至 75.884 MiB/s，长 CSI 序列由 96.685 MiB/s 提升至 100.336 MiB/s；相较 2.0.23 分别进一步提升 24.6%、4.7%、10.4% 和 3.8%。
+- 综合两轮优化后，2.0.24 的纯文本、ANSI 输出、Unicode 输出及长 CSI 序列吞吐量分别达到最初基线的 27.36 倍、12.62 倍、17.27 倍和 9.85 倍。
 - 对比采用相同的测试数据规模、一次预热及三次测量的中位数。该结果衡量进程到 PTY 的吞吐量，不代表绘制完成耗时或输入延迟。
+- 修正精确触控板的平滑滚动：新手势会保留原有的小数行视觉位置并消费首段像素增量，不再先向相反方向短暂回跳。
 
 #### ✨ 原生 tmux、会话日志、广播组与历史记录
 
@@ -74,6 +80,10 @@ OxideTerm 2.0.24 新增原生 tmux 控制模式、参数化快捷命令、可配
 - 新增协议与主机模式可用范围、逐目标预览、不可用目标提示、有界展开及单命令确认策略。用户批准后的命令会在分发前冻结，后续目标或输入变化无法修改已经授权的内容。
 - 敏感参数值使用短生命周期受保护缓冲区，不进入持久化快捷命令定义或诊断输出；可能暴露敏感值的展开预览会被隐藏。风险分级与确认针对最终展开后的命令执行。
 - 扩展桌面界面、CLI、插件、Public MCP、终端触发器、Cloud Sync 及 `.oxide` 传输中的快捷命令管理。分类和命令现可明确排序，桌面导出采用原子快照替换。
+
+#### 🤖 AI 服务兼容性
+
+- 统一 OpenAI-compatible 模型发现、模型选择器就绪状态与聊天执行。对本地及私网服务的就绪探测现会复用可选的系统凭据和相同的 `/v1` 回退规则，同时继续允许选择兼容的无密钥网关。
 
 #### 🔐 SSH、Kerberos 与连接身份
 
@@ -94,6 +104,8 @@ OxideTerm 2.0.24 新增原生 tmux 控制模式、参数化快捷命令、可配
 
 - 将本地加密 `.oxide` 导入与导出移入 Cloud Hub，使本地备份与云同步集中在同一位置，同时在未配置云服务商时仍可使用。
 - 扩展同步的快捷命令与 SSH 元数据，并继续将设备本地敏感值排除在可移植快照之外，在兼容更新中保留这些值。
+
+![OxideTerm 2.0.24 release highlights: native tmux, parameterized Quick Commands, session logging, Kerberos SSH, and a faster terminal](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/v2.0.24/.github/release-notes/assets/oxideterm-2.0.24-release-highlights.png)
 
 ![OxideTerm terminal throughput before optimization, in 2.0.23, and in 2.0.24](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/v2.0.24/.github/release-notes/assets/terminal-performance-2.0.24-comparison.png)
 

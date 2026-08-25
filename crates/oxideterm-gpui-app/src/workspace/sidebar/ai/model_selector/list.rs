@@ -146,6 +146,18 @@ impl WorkspaceApp {
                 },
             )
             .into_any_element(),
+            _ if !ai_provider_chat_requires_key(&provider.provider_type) => {
+                ai_model_selector_local_status(
+                    &self.tokens,
+                    online,
+                    if online {
+                        self.i18n.t("ai.model_selector.ok")
+                    } else {
+                        self.i18n.t("ai.model_selector.offline")
+                    },
+                )
+                .into_any_element()
+            }
             _ => ai_model_selector_key_status(
                 &self.tokens,
                 has_key,

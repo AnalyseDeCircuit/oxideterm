@@ -439,7 +439,10 @@ impl WorkspaceApp {
         match resolve_model_selector_provider_probe(provider) {
             ModelSelectorProviderProbe::Disabled => false,
             ModelSelectorProviderProbe::ImplicitKey { .. } => true,
-            ModelSelectorProviderProbe::StoredKey => self.ai_provider_has_key(&provider.id, cx),
+            ModelSelectorProviderProbe::StoredKey => {
+                !ai_provider_chat_requires_key(&provider.provider_type)
+                    || self.ai_provider_has_key(&provider.id, cx)
+            }
         }
     }
 

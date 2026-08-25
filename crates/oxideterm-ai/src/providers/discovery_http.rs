@@ -94,7 +94,7 @@ pub(crate) fn parse_provider_json(body: &str, context: &str) -> Result<Value> {
     })
 }
 
-async fn fetch_openai_compatible_json(
+pub(crate) async fn fetch_openai_compatible_json(
     client: &reqwest::Client,
     base_url: &str,
     path: &str,
