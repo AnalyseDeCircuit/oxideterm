@@ -845,19 +845,28 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) -> Result<Self> {
         let reconnect_config = config.clone();
-        let terminal = Arc::new(Mutex::new(
+        let terminal = Self::open_serial_session_with_preferences(config, &preferences)?;
+        let mut pane = Self::from_session(terminal, preferences, window, cx)?;
+        pane.serial_reconnect_config = Some(reconnect_config);
+        Ok(pane)
+    }
+
+    pub fn open_serial_session_with_preferences(
+        config: SerialSessionConfig,
+        preferences: &TerminalUiPreferences,
+    ) -> Result<SharedTerminalSession> {
+        // Opening the device is fallible and must happen before GPUI allocates
+        // the pane entity so callers can surface missing or busy ports.
+        Ok(Arc::new(Mutex::new(
             TerminalSession::serial_with_graphics_and_encoding(
                 config,
                 DEFAULT_COLS,
                 DEFAULT_ROWS,
-                graphics_options_from_preferences(&preferences),
+                graphics_options_from_preferences(preferences),
                 preferences.terminal_encoding,
                 preferences.scrollback_lines,
             )?,
-        ));
-        let mut pane = Self::from_session(terminal, preferences, window, cx)?;
-        pane.serial_reconnect_config = Some(reconnect_config);
-        Ok(pane)
+        )))
     }
 
     pub fn from_shared_session(
@@ -1626,6 +1635,13 @@ impl TerminalPane {
         // Callers apply these overrides before constructing the backend. The
         // pane retains them only to preserve host behavior on later refreshes.
         self.preference_overrides = preference_overrides;
+        self
+    }
+
+    pub fn with_serial_reconnect_config(mut self, config: SerialSessionConfig) -> Self {
+        // A pane built from a pre-opened session still owns the configuration
+        // required by explicit reconnect and serial status controls.
+        self.serial_reconnect_config = Some(config);
         self
     }
 
@@ -3869,6 +3885,39 @@ mod tests {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
             div()
         }
+    }
+
+    #[test]
+    fn missing_serial_port_is_reported_before_pane_construction() {
+        const MISSING_SERIAL_PORT_PATH: &str = "oxideterm-test-missing-serial-port";
+        let config = SerialSessionConfig {
+            port_path: MISSING_SERIAL_PORT_PATH.to_string(),
+            baud_rate: 115_200,
+            data_bits: 8,
+            stop_bits: 1,
+            parity: oxideterm_terminal::SerialParity::None,
+            flow_control: oxideterm_terminal::SerialFlowControl::None,
+        };
+
+        let result = TerminalPane::open_serial_session_with_preferences(
+            config,
+            &TerminalUiPreferences::default(),
+        );
+        let error = match result {
+            Ok(_) => panic!("missing serial port must not open"),
+            Err(error) => error,
+        };
+        let serial_error = error
+            .downcast_ref::<oxideterm_terminal::SerialError>()
+            .expect("serial backend error");
+        assert_eq!(
+            serial_error.code,
+            oxideterm_terminal::SerialErrorCode::PortNotFound
+        );
+        assert_eq!(
+            serial_error.port_path.as_deref(),
+            Some(MISSING_SERIAL_PORT_PATH)
+        );
     }
 
     #[test]

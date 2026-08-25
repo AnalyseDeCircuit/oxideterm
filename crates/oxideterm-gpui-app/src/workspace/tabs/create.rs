@@ -470,9 +470,12 @@ impl WorkspaceApp {
         });
         preference_overrides.apply_to(&mut preferences);
         let pane_config = config.clone();
+        let serial_session =
+            TerminalPane::open_serial_session_with_preferences(config.clone(), &preferences)?;
         let pane = cx.new(|cx| {
-            TerminalPane::new_serial_with_preferences(pane_config, preferences, window, cx)
-                .expect("failed to initialize Serial terminal pane")
+            TerminalPane::from_shared_session(serial_session, preferences, window, cx)
+                .expect("failed to initialize pre-opened Serial terminal pane")
+                .with_serial_reconnect_config(pane_config)
                 .with_preference_overrides(preference_overrides)
         });
 
