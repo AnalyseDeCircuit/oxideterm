@@ -5,6 +5,8 @@ section as the detailed changelog attached to the corresponding GitHub Release.
 
 ## 2.0.24
 
+![OxideTerm 2.0.24 release highlights: native tmux, parameterized Quick Commands, session logging, Kerberos SSH, and a faster terminal](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/v2.0.24/.github/release-notes/assets/oxideterm-2.0.24-release-highlights.png)
+
 ### English
 
 OxideTerm 2.0.24 adds native tmux control-mode sessions, parameterized Quick Commands, configurable session logging, named broadcast groups, cross-platform Kerberos authentication, richer remote-desktop workflows, and scoped terminal history while further improving terminal throughput and saved-connection routing correctness.
