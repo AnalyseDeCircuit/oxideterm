@@ -537,7 +537,7 @@ impl WorkspaceApp {
             Ok(saved) => {
                 self.terminal_trigger_shell_confirmation_pending = false;
                 self.terminal_triggers.error_key = None;
-                self.apply_loaded_settings_to_runtime(&saved.settings, cx);
+                self.apply_loaded_settings_to_runtime(&previous_settings, &saved.settings, cx);
                 self.settings_workspace.update(cx, |settings, _cx| {
                     settings.acknowledge_external_store_state()
                 });

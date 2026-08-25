@@ -403,3 +403,14 @@ opt-level = 0
 debug = 1
 incremental = true
 split-debuginfo = "unpacked"
+
+# The refreshed GPUI traverses larger interaction and layout trees. Keep the default development
+# build debuggable while avoiding multi-hundred-millisecond frames in the native GUI.
+[profile.dev.package.oxideterm-gpui-app]
+opt-level = 1
+
+[profile.dev.package.gpui]
+opt-level = 1
+
+[profile.dev.package.taffy]
+opt-level = 1

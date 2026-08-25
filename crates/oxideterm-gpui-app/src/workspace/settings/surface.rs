@@ -1107,7 +1107,7 @@ impl WorkspaceApp {
         let previous_settings = self.settings_store.settings().clone();
         edit(self.settings_store.settings_mut());
         let settings = self.settings_store.settings().clone();
-        self.apply_loaded_settings_to_runtime(&settings, cx);
+        self.apply_loaded_settings_to_runtime(&previous_settings, &settings, cx);
         let _ = self.settings_store.save();
         self.settings_workspace.update(cx, |settings, _cx| {
             settings.acknowledge_external_store_state()
@@ -1139,7 +1139,7 @@ impl WorkspaceApp {
         // External sync mutates persisted stores outside the GPUI controls.
         // Re-apply the same runtime side effects used by edit_settings instead
         // of relying on stale in-memory settings or browser-style stores.
-        self.apply_loaded_settings_to_runtime(&settings, cx);
+        self.apply_loaded_settings_to_runtime(&previous_settings, &settings, cx);
         self.refresh_ai_skill_registry();
         self.emit_native_plugin_settings_events(&previous_settings, &settings, cx);
         self.queue_cloud_sync_dirty_refresh(cx);
@@ -1155,11 +1155,16 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn apply_loaded_settings_to_runtime(
         &mut self,
+        previous_settings: &PersistedSettings,
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) {
         install_application_proxy_policy_from_settings(settings, &self.connection_store);
-        crate::app_icon::install_runtime_app_icon(settings.appearance.app_icon);
+        if previous_settings.appearance.app_icon != settings.appearance.app_icon {
+            // Replacing the macOS application icon decodes the bundled image on the main thread,
+            // so unrelated form edits must not repeat that work.
+            crate::app_icon::install_runtime_app_icon(settings.appearance.app_icon);
+        }
         if let Err(error) =
             bundled_fonts::load_terminal_font_open_critical(settings, &cx.text_system())
         {
