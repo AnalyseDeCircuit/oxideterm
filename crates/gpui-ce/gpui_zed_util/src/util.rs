@@ -1,20 +1,25 @@
-// OxideTerm modification: use product-scoped root-execution controls and diagnostics.
-
+#[cfg(not(target_family = "wasm"))]
 pub mod archive;
+#[cfg(not(target_family = "wasm"))]
 pub mod command;
-pub mod disambiguate;
+#[cfg(not(target_family = "wasm"))]
 pub mod fs;
+#[cfg(not(target_family = "wasm"))]
+pub mod process;
+#[cfg(not(target_family = "wasm"))]
+pub mod shell;
+#[cfg(not(target_family = "wasm"))]
+pub mod shell_builder;
+#[cfg(not(target_family = "wasm"))]
+pub mod shell_env;
+
+pub mod disambiguate;
 pub mod markdown;
 pub mod path_list;
 pub mod paths;
-pub mod process;
 pub mod redact;
-pub mod rel_path;
 pub mod schemars;
 pub mod serde;
-pub mod shell;
-pub mod shell_builder;
-pub mod shell_env;
 pub mod size;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test;
@@ -23,7 +28,7 @@ pub mod time;
 use anyhow::Result;
 use itertools::Either;
 use regex::Regex;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::LazyLock;
 use std::{
     borrow::Cow,
@@ -33,9 +38,13 @@ use std::{
 use unicase::UniCase;
 
 pub use gpui_util::*;
+pub use path::PathExt;
+pub use path::normalize_path;
+pub use path::rel_path;
 
 pub use take_until::*;
 
+#[cfg(not(target_family = "wasm"))]
 pub use self::shell::{
     get_default_system_shell, get_default_system_shell_preferring_bash, get_system_shell,
 };
@@ -51,6 +60,29 @@ pub fn truncate(s: &str, max_chars: usize) -> &str {
         None => s,
         Some((idx, _)) => &s[..idx],
     }
+}
+
+/// Parses the contents of an `os-release` file (as found at `/etc/os-release`
+/// and described by the systemd spec) into a human-readable string such as
+/// `"ubuntu 24.04"`, combining the `ID` and `VERSION_ID` fields.
+///
+/// Returns `None` if no `ID` field is present. When `VERSION_ID` is absent
+/// (e.g. on rolling releases), only the `ID` is returned.
+pub fn parse_os_release(content: &str) -> Option<String> {
+    let mut id = None;
+    let mut version_id = None;
+    for line in content.lines() {
+        match line.split_once('=') {
+            Some(("ID", value)) => id = Some(value.trim_matches('"')),
+            Some(("VERSION_ID", value)) => version_id = Some(value.trim_matches('"')),
+            _ => {}
+        }
+    }
+    let id = id?;
+    Some(match version_id {
+        Some(version) => format!("{id} {version}"),
+        None => id.to_string(),
+    })
 }
 
 /// Removes characters from the end of the string if its length is greater than `max_chars` and
@@ -185,45 +217,23 @@ where
     }
 }
 
-pub fn truncate_to_bottom_n_sorted_by<T, F>(items: &mut Vec<T>, limit: usize, compare: &F)
-where
-    F: Fn(&T, &T) -> Ordering,
-{
-    if limit == 0 {
-        items.clear();
-    }
-    if items.len() <= limit {
-        items.sort_by(compare);
-        return;
-    }
-    // When limit is near to items.len() it may be more efficient to sort the whole list and
-    // truncate, rather than always doing selection first as is done below. It's hard to analyze
-    // where the threshold for this should be since the quickselect style algorithm used by
-    // `select_nth_unstable_by` makes the prefix partially sorted, and so its work is not wasted -
-    // the expected number of comparisons needed by `sort_by` is less than it is for some arbitrary
-    // unsorted input.
-    items.select_nth_unstable_by(limit, compare);
-    items.truncate(limit);
-    items.sort_by(compare);
-}
-
 /// Prevents execution of the application with root privileges on Unix systems.
 ///
 /// This function checks if the current process is running with root privileges
 /// and terminates the program with an error message unless explicitly allowed via the
-/// `OXIDETERM_ALLOW_ROOT` environment variable.
+/// `ZED_ALLOW_ROOT` environment variable.
 #[cfg(unix)]
 pub fn prevent_root_execution() {
     let is_root = nix::unistd::geteuid().is_root();
-    let allow_root = std::env::var("OXIDETERM_ALLOW_ROOT").is_ok_and(|val| val == "true");
+    let allow_root = std::env::var("ZED_ALLOW_ROOT").is_ok_and(|val| val == "true");
 
     if is_root && !allow_root {
         eprintln!(
             "\
-Error: Running OxideTerm as root or via sudo is unsupported.
-       Doing so (even once) may subtly break things for all subsequent non-root usage of OxideTerm.
+Error: Running Zed as root or via sudo is unsupported.
+       Doing so (even once) may subtly break things for all subsequent non-root usage of Zed.
        It is untested and not recommended, don't complain when things break.
-       If you wish to proceed anyways, set `OXIDETERM_ALLOW_ROOT=true` in your environment."
+       If you wish to proceed anyways, set `ZED_ALLOW_ROOT=true` in your environment."
         );
         std::process::exit(1);
     }
@@ -285,6 +295,7 @@ fn load_shell_from_passwd() -> Result<()> {
 }
 
 /// Returns a shell escaped path for the current zed executable
+#[cfg(not(target_family = "wasm"))]
 pub fn get_shell_safe_zed_path(shell_kind: shell::ShellKind) -> anyhow::Result<String> {
     use anyhow::Context as _;
     use paths::PathExt;
@@ -427,6 +438,9 @@ pub fn merge_json_lenient_value_into(
     }
 }
 
+/// Merges `source` into `target`: objects are merged recursively, key by key;
+/// any other colliding value in `target` — including arrays — is replaced by
+/// `source`'s value wholesale.
 pub fn merge_json_value_into(source: serde_json::Value, target: &mut serde_json::Value) {
     use serde_json::Value;
 
@@ -440,13 +454,6 @@ pub fn merge_json_value_into(source: serde_json::Value, target: &mut serde_json:
                 }
             }
         }
-
-        (Value::Array(source), Value::Array(target)) => {
-            for value in source {
-                target.push(value);
-            }
-        }
-
         (source, target) => *target = source,
     }
 }
@@ -758,39 +765,26 @@ impl<O> From<anyhow::Result<O>> for ConnectionResult<O> {
     }
 }
 
-/// Normalizes a path by resolving `.` and `..` components without
-/// requiring the path to exist on disk (unlike `canonicalize`).
-pub fn normalize_path(path: &Path) -> PathBuf {
-    use std::path::Component;
-    let mut components = path.components().peekable();
-    let mut ret = if let Some(c @ Component::Prefix(..)) = components.peek().cloned() {
-        components.next();
-        PathBuf::from(c.as_os_str())
-    } else {
-        PathBuf::new()
-    };
-
-    for component in components {
-        match component {
-            Component::Prefix(..) => unreachable!(),
-            Component::RootDir => {
-                ret.push(component.as_os_str());
-            }
-            Component::CurDir => {}
-            Component::ParentDir => {
-                ret.pop();
-            }
-            Component::Normal(c) => {
-                ret.push(c);
-            }
-        }
-    }
-    ret
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_os_release() {
+        let os_release =
+            "NAME=\"Ubuntu\"\nID=ubuntu\nVERSION_ID=\"24.04\"\nPRETTY_NAME=\"Ubuntu 24.04 LTS\"\n";
+        assert_eq!(
+            parse_os_release(os_release),
+            Some("ubuntu 24.04".to_string())
+        );
+
+        // VERSION_ID may be absent (e.g. rolling releases like Arch).
+        assert_eq!(parse_os_release("ID=arch\n"), Some("arch".to_string()));
+
+        // Without an ID there is nothing usable to report.
+        assert_eq!(parse_os_release("VERSION_ID=1\n"), None);
+        assert_eq!(parse_os_release(""), None);
+    }
 
     #[test]
     fn test_extend_sorted() {
@@ -1072,5 +1066,61 @@ Line 3"#
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], (0..6, "héllo")); // 'é' is 2 bytes
         assert_eq!(result[1], (10..15, "world")); // '🦀' is 4 bytes
+    }
+
+    #[test]
+    fn test_merge_json_values() {
+        use serde_json::json;
+
+        let mut target = json!({
+            "unchanged": 1,
+            "replaced_scalar": "old",
+            "replaced_array": ["default-1", "default-2"],
+            "nulled": true,
+            "array_becomes_object": [1, 2],
+            "object_becomes_scalar": { "x": 1 },
+            "nested": {
+                "kept": true,
+                "overridden": 2,
+                "args": ["--default"],
+                "deeper": { "list": [1, 2], "other": "kept" },
+            },
+        });
+        let source = json!({
+            "replaced_scalar": "new",
+            "replaced_array": ["default-2", "user"],
+            "nulled": null,
+            "array_becomes_object": { "y": 2 },
+            "object_becomes_scalar": 3,
+            "inserted": ["brand-new"],
+            "nested": {
+                "overridden": 20,
+                "args": ["--user"],
+                "deeper": { "list": [3] },
+                "inserted": { "z": true },
+            },
+        });
+
+        merge_json_value_into(source, &mut target);
+
+        assert_eq!(
+            target,
+            json!({
+                "unchanged": 1,
+                "replaced_scalar": "new",
+                "replaced_array": ["default-2", "user"],
+                "nulled": null,
+                "array_becomes_object": { "y": 2 },
+                "object_becomes_scalar": 3,
+                "inserted": ["brand-new"],
+                "nested": {
+                    "kept": true,
+                    "overridden": 20,
+                    "args": ["--user"],
+                    "deeper": { "list": [3], "other": "kept" },
+                    "inserted": { "z": true },
+                },
+            })
+        );
     }
 }

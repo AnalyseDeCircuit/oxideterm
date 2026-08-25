@@ -1,5 +1,3 @@
-// OxideTerm modification: releases previous-frame cache locks before shaping or cache promotion.
-
 use crate::{FontId, GlyphId, Pixels, PlatformTextSystem, Point, SharedString, Size, point, px};
 use collections::FxHashMap;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
@@ -10,7 +8,6 @@ use std::{
     ops::Range,
     sync::Arc,
 };
-use unicode_segmentation::UnicodeSegmentation;
 
 use super::LineWrapper;
 
@@ -126,6 +123,68 @@ impl LineLayout {
             }
         }
         None
+    }
+
+    /// Split this layout at a byte index, returning `(prefix, suffix)`.
+    ///
+    /// - `prefix` contains glyphs for bytes `[0, byte_index)` with original positions.
+    ///   Its width equals the x-advance up to the split point.
+    /// - `suffix` contains glyphs for bytes `[byte_index, len)` with positions
+    ///   shifted left so the first glyph starts at x=0, and byte indices rebased to 0.
+    /// - `font_size`, `ascent`, and `descent` are copied to both halves.
+    pub fn split_at(&self, byte_index: usize) -> (LineLayout, LineLayout) {
+        let x_offset = self.x_for_index(byte_index);
+
+        // Partition glyph runs. A single run may contribute glyphs to both halves.
+        let mut left_runs = Vec::new();
+        let mut right_runs = Vec::new();
+
+        for run in &self.runs {
+            let split_pos = run.glyphs.partition_point(|g| g.index < byte_index);
+
+            if split_pos > 0 {
+                left_runs.push(ShapedRun {
+                    font_id: run.font_id,
+                    glyphs: run.glyphs[..split_pos].to_vec(),
+                });
+            }
+
+            if split_pos < run.glyphs.len() {
+                let right_glyphs = run.glyphs[split_pos..]
+                    .iter()
+                    .map(|g| ShapedGlyph {
+                        id: g.id,
+                        position: point(g.position.x - x_offset, g.position.y),
+                        index: g.index - byte_index,
+                        is_emoji: g.is_emoji,
+                    })
+                    .collect();
+                right_runs.push(ShapedRun {
+                    font_id: run.font_id,
+                    glyphs: right_glyphs,
+                });
+            }
+        }
+
+        let left = LineLayout {
+            font_size: self.font_size,
+            width: x_offset,
+            ascent: self.ascent,
+            descent: self.descent,
+            runs: left_runs,
+            len: byte_index,
+        };
+
+        let right = LineLayout {
+            font_size: self.font_size,
+            width: self.width - x_offset,
+            ascent: self.ascent,
+            descent: self.descent,
+            runs: right_runs,
+            len: self.len - byte_index,
+        };
+
+        (left, right)
     }
 
     fn compute_wrap_boundaries(
@@ -602,9 +661,7 @@ impl LineLayoutCache {
         }
 
         let mut current_frame = RwLockUpgradableReadGuard::upgrade(current_frame);
-        // Avoid holding both frame caches while promoting a layout or shaping a replacement.
-        let previous_layout = self.previous_frame.lock().lines.remove_entry(key);
-        if let Some((key, layout)) = previous_layout {
+        if let Some((key, layout)) = self.previous_frame.lock().lines.remove_entry(key) {
             current_frame.lines.insert(key.clone(), layout.clone());
             current_frame.used_lines.push(key);
             layout
@@ -615,7 +672,7 @@ impl LineLayoutCache {
                 .layout_line(&text, font_size, runs);
 
             if let Some(force_width) = force_width {
-                apply_force_width_to_layout(&mut layout, &text, force_width);
+                apply_force_width_to_layout(&mut layout, force_width);
             }
 
             let key = Arc::new(CacheKey {
@@ -764,7 +821,7 @@ impl LineLayoutCache {
             .layout_line(&text, font_size, runs);
 
         if let Some(force_width) = force_width {
-            apply_force_width_to_layout(&mut layout, &text, force_width);
+            apply_force_width_to_layout(&mut layout, force_width);
         }
 
         let key = Arc::new(HashedCacheKey {
@@ -784,55 +841,60 @@ impl LineLayoutCache {
     }
 }
 
-fn apply_force_width_to_layout(layout: &mut LineLayout, text: &str, force_width: Pixels) {
-    let grapheme_starts = text
-        .grapheme_indices(true)
-        .map(|(byte_index, _)| byte_index)
-        .collect::<Vec<_>>();
-    let mut visual_cell = 0usize;
-    let mut last_grapheme_ordinal = None;
-    let mut last_base_shaped_x = px(0.);
+// Combining marks (e.g. Thai vowel signs, Arabic diacritics) are shaped by
+// HarfBuzz at the same x position as their base character. The force-width
+// loop must not advance the cell counter for these zero-advance glyphs,
+// otherwise they get displaced into the next cell. We detect them by checking
+// whether shaped x has advanced by at least half a cell beyond the last base.
+fn apply_force_width_to_layout(layout: &mut LineLayout, force_width: Pixels) {
+    let mut glyph_pos: usize = 0;
+    // NEG_INFINITY ensures the first glyph is always classified as a base.
+    let mut last_base_shaped_x = px(f32::NEG_INFINITY);
     let mut last_base_actual_x = px(0.);
 
     for run in layout.runs.iter_mut() {
         for glyph in run.glyphs.iter_mut() {
             let shaped_x = glyph.position.x;
-            let grapheme_ordinal = grapheme_ordinal_for_byte_index(&grapheme_starts, glyph.index);
 
-            if last_grapheme_ordinal != Some(grapheme_ordinal) {
-                if let Some(previous_ordinal) = last_grapheme_ordinal {
-                    // Absolute distance handles visual-order glyphs from right-to-left shaping,
-                    // while larger jumps preserve the cells consumed by a ligature cluster.
-                    visual_cell += grapheme_ordinal.abs_diff(previous_ordinal).max(1);
-                }
-                let forced_x = visual_cell * force_width;
+            if shaped_x > last_base_shaped_x + force_width * 0.5 {
+                let forced_x = glyph_pos * force_width;
                 if (shaped_x - forced_x).abs() > px(1.) {
                     glyph.position.x = forced_x;
                 }
                 last_base_shaped_x = shaped_x;
                 last_base_actual_x = glyph.position.x;
-                last_grapheme_ordinal = Some(grapheme_ordinal);
+                glyph_pos += 1;
             } else {
-                // Multiple glyphs in one grapheme retain their shaped offset from the base glyph.
                 glyph.position.x = last_base_actual_x + (shaped_x - last_base_shaped_x);
             }
         }
     }
 }
 
-fn grapheme_ordinal_for_byte_index(grapheme_starts: &[usize], byte_index: usize) -> usize {
-    match grapheme_starts.binary_search(&byte_index) {
-        Ok(ordinal) => ordinal,
-        Err(next_ordinal) => next_ordinal.saturating_sub(1),
-    }
-}
-
 /// A run of text with a single font.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[expect(missing_docs)]
 pub struct FontRun {
     pub len: usize,
     pub font_id: FontId,
+    pub letter_spacing: Option<Pixels>,
+}
+
+impl Hash for FontRun {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.len.hash(state);
+        self.font_id.hash(state);
+        self.letter_spacing
+            .map(Pixels::as_f32)
+            .map(|value| {
+                if value == 0.0 {
+                    0.0f32.to_bits()
+                } else {
+                    value.to_bits()
+                }
+            })
+            .hash(state);
+    }
 }
 
 trait AsCacheKeyRef {
@@ -1016,19 +1078,7 @@ mod tests {
         let cell_width = px(8.);
         let mut layout = make_layout(vec![glyph_at(0., 0), glyph_at(8., 1), glyph_at(16., 2)]);
 
-        apply_force_width_to_layout(&mut layout, "abc", cell_width);
-
-        let positions = glyph_x_positions(&layout);
-        assert_eq!(positions, vec![0., 8., 16.]);
-    }
-
-    #[test]
-    fn test_force_width_proportional_narrow_latin_uses_distinct_cells() {
-        let cell_width = px(8.);
-        // A proportional fallback advances narrow Latin glyphs by less than half a terminal cell.
-        let mut layout = make_layout(vec![glyph_at(0., 0), glyph_at(3., 1), glyph_at(6., 2)]);
-
-        apply_force_width_to_layout(&mut layout, "iii", cell_width);
+        apply_force_width_to_layout(&mut layout, cell_width);
 
         let positions = glyph_x_positions(&layout);
         assert_eq!(positions, vec![0., 8., 16.]);
@@ -1043,7 +1093,7 @@ mod tests {
             glyph_at(0., 3), // ี (combining mark, same x)
         ]);
 
-        apply_force_width_to_layout(&mut layout, "กี", cell_width);
+        apply_force_width_to_layout(&mut layout, cell_width);
 
         let positions = glyph_x_positions(&layout);
         assert_eq!(positions, vec![0., 0.]);
@@ -1054,7 +1104,7 @@ mod tests {
         let cell_width = px(8.);
         let mut layout = make_layout(vec![glyph_at(0., 0), glyph_at(0., 3), glyph_at(8., 6)]);
 
-        apply_force_width_to_layout(&mut layout, "กีข", cell_width);
+        apply_force_width_to_layout(&mut layout, cell_width);
 
         let positions = glyph_x_positions(&layout);
         assert_eq!(positions, vec![0., 0., 8.]);
@@ -1063,7 +1113,7 @@ mod tests {
     #[test]
     fn test_force_width_multiple_combining_marks() {
         let cell_width = px(8.);
-        // Simulates "กี้ข" — base + vowel + tone mark followed by another base.
+        // Simulates "ก้" — base + vowel + tone mark (two combining marks stacked)
         let mut layout = make_layout(vec![
             glyph_at(0., 0), // ก (base)
             glyph_at(0., 3), // vowel (combining)
@@ -1071,7 +1121,7 @@ mod tests {
             glyph_at(8., 9), // next base
         ]);
 
-        apply_force_width_to_layout(&mut layout, "กี้ข", cell_width);
+        apply_force_width_to_layout(&mut layout, cell_width);
 
         let positions = glyph_x_positions(&layout);
         assert_eq!(positions, vec![0., 0., 0., 8.]);
@@ -1087,7 +1137,7 @@ mod tests {
             glyph_at(19.8, 2), // >1px off from 16.0, corrected
         ]);
 
-        apply_force_width_to_layout(&mut layout, "abc", cell_width);
+        apply_force_width_to_layout(&mut layout, cell_width);
 
         let positions = glyph_x_positions(&layout);
         assert_eq!(positions, vec![0.5, 8., 16.]);
@@ -1100,42 +1150,9 @@ mod tests {
         // The combining mark must align to the base's actual position, not the grid slot.
         let mut layout = make_layout(vec![glyph_at(0.5, 0), glyph_at(0.5, 3)]);
 
-        apply_force_width_to_layout(&mut layout, "กี", cell_width);
+        apply_force_width_to_layout(&mut layout, cell_width);
 
         let positions = glyph_x_positions(&layout);
         assert_eq!(positions, vec![0.5, 0.5]);
-    }
-
-    #[test]
-    fn test_force_width_keeps_multiple_glyphs_in_one_cluster_together() {
-        let cell_width = px(8.);
-        let mut layout = make_layout(vec![glyph_at(0., 0), glyph_at(1.5, 0)]);
-
-        apply_force_width_to_layout(&mut layout, "กี", cell_width);
-
-        let positions = glyph_x_positions(&layout);
-        assert_eq!(positions, vec![0., 1.5]);
-    }
-
-    #[test]
-    fn test_force_width_preserves_cells_consumed_by_ligature() {
-        let cell_width = px(8.);
-        let mut layout = make_layout(vec![glyph_at(0., 0), glyph_at(18., 3)]);
-
-        apply_force_width_to_layout(&mut layout, "ffix", cell_width);
-
-        let positions = glyph_x_positions(&layout);
-        assert_eq!(positions, vec![0., 24.]);
-    }
-
-    #[test]
-    fn test_force_width_handles_right_to_left_visual_order() {
-        let cell_width = px(8.);
-        let mut layout = make_layout(vec![glyph_at(0., 4), glyph_at(8., 2), glyph_at(16., 0)]);
-
-        apply_force_width_to_layout(&mut layout, "אבג", cell_width);
-
-        let positions = glyph_x_positions(&layout);
-        assert_eq!(positions, vec![0., 8., 16.]);
     }
 }

@@ -1,4 +1,5 @@
 use gpui::{App, Bounds, Context, Window, WindowBounds, WindowOptions, div, prelude::*, px, size};
+use palette::WithAlpha;
 
 struct Scrollable {}
 
@@ -16,7 +17,7 @@ impl Render for Scrollable {
                     .h(px(5000.))
                     .border_1()
                     .border_color(gpui::blue())
-                    .bg(gpui::blue().opacity(0.05))
+                    .bg(gpui::blue().with_alpha(0.05))
                     .p_4()
                     .child(
                         div()
@@ -28,8 +29,8 @@ impl Render for Scrollable {
                                 div()
                                     .w(px(2000.))
                                     .h(px(150.))
-                                    .bg(gpui::green().opacity(0.1))
-                                    .hover(|this| this.bg(gpui::green().opacity(0.2)))
+                                    .bg(gpui::green().with_alpha(0.1))
+                                    .hover(|this| this.bg(gpui::green().with_alpha(0.2)))
                                     .border_1()
                                     .border_color(gpui::green())
                                     .p_4()

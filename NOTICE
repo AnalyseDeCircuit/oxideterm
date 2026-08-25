@@ -41,14 +41,20 @@ Copyright (c) 2020, Lucide Contributors.
 Licensed under the ISC License.
 Used for the native workspace sidebar and toolbar SVG icons.
 
-GPUI-CE / GPUI
+GPUI / GPUI-CE
 Copyright 2022-2025 Zed Industries, Inc.
 Additional GPUI-CE contributions are included under the same license.
 Licensed under the Apache License, Version 2.0.
-Vendored from https://github.com/gpui-ce/gpui-ce at commit
-6c799b8e994266233014cea66d7769675ec1967c for the native UI framework and
-Metal, DirectX, Vulkan, and OpenGL rendering backends. OxideTerm modifications
-are recorded in crates/gpui-ce/gpui/OXIDETERM_PATCHES.md.
+Vendored from https://github.com/zed-industries/zed at commit
+0969b0dba3f3411592fce801d00f8d81b8dcf902 with the GPUI-CE portability layer
+from https://github.com/gpui-ce/gpui-ce at commit
+9949f8b2d27bb1d6dbc1efe90be039634cf1fb6b. OxideTerm modifications are
+recorded in crates/gpui-ce/gpui/OXIDETERM_PATCHES.md.
+
+IBM Plex Sans and Lilex
+The GPUI regression suite includes IBM Plex Sans and Lilex test fonts.
+Both are licensed under the SIL Open Font License, Version 1.1; their license
+texts are stored beside the font files under assets/fonts.
 
 Microsoft Terminal
 Copyright (c) Microsoft Corporation.

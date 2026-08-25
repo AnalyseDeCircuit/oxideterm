@@ -1,4 +1,3 @@
-//! OxideTerm vendor modification: retain bounded row overscan for fast terminal-adjacent lists.
 //! A scrollable list of elements with uniform height, optimized for large lists.
 //! Rather than use the full taffy layout system, uniform_list simply measures
 //! the first element and then lays out all remaining elements in a line based on that
@@ -12,7 +11,7 @@ use crate::{
     StyleRefinement, Styled, Window, point, px, size,
 };
 use smallvec::SmallVec;
-use std::{cell::RefCell, cmp, ops::Range, rc::Rc, usize};
+use std::{cell::RefCell, cmp, ops::Range, rc::Rc};
 
 use super::ListHorizontalSizingBehavior;
 
@@ -489,7 +488,6 @@ impl Element for UniformList {
                         / item_height)
                         .ceil() as usize;
 
-                    // A bounded overscan avoids exposing empty edges during fast scrolling.
                     let visible_range = overscanned_visible_range(
                         first_visible_element_ix,
                         last_visible_element_ix,
@@ -695,7 +693,7 @@ impl UniformList {
             return Size::default();
         };
         let available_space = size(
-            list_width.map_or(AvailableSpace::MinContent, |width| {
+            list_width.map_or(AvailableSpace::MaxContent, |width| {
                 AvailableSpace::Definite(width)
             }),
             AvailableSpace::MinContent,
@@ -744,15 +742,6 @@ impl InteractiveElement for UniformList {
 #[cfg(test)]
 mod test {
     use crate::TestAppContext;
-
-    use super::overscanned_visible_range;
-
-    #[test]
-    fn overscan_expands_and_clamps_the_visible_range() {
-        assert_eq!(overscanned_visible_range(20, 30, 100, 5), 15..35);
-        assert_eq!(overscanned_visible_range(2, 8, 100, 5), 0..13);
-        assert_eq!(overscanned_visible_range(95, 100, 100, 5), 90..100);
-    }
 
     #[gpui::test]
     fn test_scroll_strategy_nearest(cx: &mut TestAppContext) {

@@ -2,7 +2,7 @@ use crate::{
     ActiveTooltip, AnyView, App, Bounds, DispatchPhase, Element, ElementId, GlobalElementId,
     HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, Size, TextOverflow,
-    TextRun, TextStyle, TooltipId, TruncateFrom, WhiteSpace, Window, WrappedLine,
+    TextRun, TextStyle, TextTransform, TooltipId, TruncateFrom, WhiteSpace, Window, WrappedLine,
     WrappedLineLayout, register_tooltip_mouse_handlers, set_tooltip_on_window,
 };
 use anyhow::Context as _;
@@ -17,6 +17,7 @@ use std::{
     rc::Rc,
     sync::Arc,
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 /// An [`Element`] that renders text.
 ///
@@ -618,8 +619,137 @@ struct TextLayoutInner {
     lines: SmallVec<[WrappedLine; 1]>,
     line_height: Pixels,
     wrap_width: Option<Pixels>,
+    truncate_width: Option<Pixels>,
     size: Option<Size<Pixels>>,
     bounds: Option<Bounds<Pixels>>,
+}
+
+fn apply_text_transform_preserving_byte_len(
+    text: SharedString,
+    transform: Option<TextTransform>,
+) -> SharedString {
+    let Some(transform) = transform else {
+        return text;
+    };
+    if matches!(transform, TextTransform::None) {
+        return text;
+    }
+
+    let mut output = String::with_capacity(text.len());
+    match transform {
+        TextTransform::Uppercase => {
+            for character in text.as_ref().chars() {
+                push_case_mapped_character(&mut output, character, CaseMapKind::Upper);
+            }
+        }
+        TextTransform::Lowercase => {
+            for character in text.as_ref().chars() {
+                push_case_mapped_character(&mut output, character, CaseMapKind::Lower);
+            }
+        }
+        TextTransform::Capitalize => {
+            for piece in text.as_ref().split_word_bounds() {
+                let mut seen_first_letter = false;
+                for character in piece.chars() {
+                    if !seen_first_letter && character.is_alphabetic() {
+                        push_case_mapped_character(&mut output, character, CaseMapKind::Upper);
+                        seen_first_letter = true;
+                    } else {
+                        output.push(character);
+                    }
+                }
+            }
+        }
+        TextTransform::None => return text,
+    }
+
+    SharedString::from(output)
+}
+
+#[derive(Copy, Clone)]
+enum CaseMapKind {
+    Upper,
+    Lower,
+}
+
+fn push_case_mapped_character(output: &mut String, character: char, kind: CaseMapKind) {
+    let mapped = match kind {
+        CaseMapKind::Upper => character.to_uppercase().collect::<String>(),
+        CaseMapKind::Lower => character.to_lowercase().collect::<String>(),
+    };
+
+    if mapped.len() == character.len_utf8() && mapped.chars().count() == 1 {
+        output.push_str(&mapped);
+    } else {
+        output.push(character);
+    }
+}
+
+#[cfg(test)]
+mod text_transform_tests {
+    use super::apply_text_transform_preserving_byte_len;
+    use crate::{SharedString, TextTransform};
+
+    #[test]
+    fn text_transforms_preserve_bytes_and_spacing() {
+        let input = SharedString::from("hello   WORLD\tfoo-bar 123baz déjà vu");
+        let uppercase =
+            apply_text_transform_preserving_byte_len(input.clone(), Some(TextTransform::Uppercase));
+        let lowercase =
+            apply_text_transform_preserving_byte_len(input.clone(), Some(TextTransform::Lowercase));
+        let capitalize = apply_text_transform_preserving_byte_len(
+            input.clone(),
+            Some(TextTransform::Capitalize),
+        );
+
+        assert_eq!(uppercase.as_ref(), "HELLO   WORLD\tFOO-BAR 123BAZ DÉJÀ VU");
+        assert_eq!(lowercase.as_ref(), "hello   world\tfoo-bar 123baz déjà vu");
+        assert_eq!(capitalize.as_ref(), "Hello   WORLD\tFoo-Bar 123Baz Déjà Vu");
+        assert_eq!(input.len(), uppercase.len());
+        assert_eq!(input.len(), lowercase.len());
+        assert_eq!(input.len(), capitalize.len());
+    }
+
+    #[test]
+    fn text_transforms_skip_expanding_unicode_mappings() {
+        let input = SharedString::from("straße İSTANBUL");
+        let uppercase =
+            apply_text_transform_preserving_byte_len(input.clone(), Some(TextTransform::Uppercase));
+        let lowercase =
+            apply_text_transform_preserving_byte_len(input.clone(), Some(TextTransform::Lowercase));
+
+        assert_eq!(uppercase.as_ref(), "STRAßE İSTANBUL");
+        assert_eq!(lowercase.as_ref(), "straße İstanbul");
+        assert_eq!(input.len(), uppercase.len());
+        assert_eq!(input.len(), lowercase.len());
+    }
+
+    #[test]
+    fn capitalize_preserves_letters_after_digit_prefix() {
+        let input = SharedString::from("123BAZ");
+        let output = apply_text_transform_preserving_byte_len(
+            input.clone(),
+            Some(TextTransform::Capitalize),
+        );
+        assert_eq!(output.as_ref(), "123BAZ");
+        assert_eq!(input.len(), output.len());
+    }
+
+    #[test]
+    fn capitalize_does_not_fold_remaining_letters() {
+        let input = SharedString::from("foo2BAR");
+        let output =
+            apply_text_transform_preserving_byte_len(input, Some(TextTransform::Capitalize));
+        assert_eq!(output.as_ref(), "Foo2BAR");
+    }
+
+    #[test]
+    fn capitalize_handles_apostrophe_contractions() {
+        let input = SharedString::from("don't panic");
+        let output =
+            apply_text_transform_preserving_byte_len(input, Some(TextTransform::Capitalize));
+        assert_eq!(output.as_ref(), "Don't Panic");
+    }
 }
 
 /// Metadata about how text should be truncated. Generated during text layout via `TextLayout::evaluate_overflow`.
@@ -645,6 +775,11 @@ impl TextLayoutTruncation {
                 width,
                 affix: s,
                 source: TruncateFrom::Start,
+            },
+            TextOverflow::TruncateMiddle(s) => TextLayoutTruncation {
+                width,
+                affix: s,
+                source: TruncateFrom::Middle,
             },
         }
     }
@@ -705,13 +840,16 @@ impl TextLayout {
         text: SharedString,
         text_style: &TextStyle,
         font_size: Pixels,
+        line_height: Pixels,
         wrap_width: Option<Pixels>,
         truncation: &TextLayoutTruncation,
         runs: &'runs [TextRun],
+        window: &mut Window,
         cx: &mut App,
     ) -> (SharedString, Cow<'runs, [TextRun]>) {
         let mut line_wrapper = cx.text_system().line_wrapper(text_style.font(), font_size);
-        if truncation.width.is_some() {
+        line_wrapper.set_letter_spacing(text_style.letter_spacing);
+        if let Some(truncate_width) = truncation.width {
             if let Some(max_lines) = text_style.line_clamp
                 && let Some(wrap_width) = wrap_width
             {
@@ -723,10 +861,25 @@ impl TextLayout {
                     &runs,
                     truncation.source,
                 )
+            } else if let Some(unclipped) = window
+                .text_system()
+                .shape_text(text.clone(), font_size, &runs, None, None)
+                .log_err()
+                && unclipped
+                    .iter()
+                    .all(|line| line.size(line_height).width <= truncate_width)
+            {
+                // The truncation decision below sums per-character advances,
+                // which overestimates the shaped width (no kerning), truncating
+                // text that fits exactly in its measured width. Skip truncation
+                // whenever the honestly-shaped text fits; the shaping result
+                // comes from the line layout cache when the same text was
+                // already measured untruncated this frame.
+                (text, std::borrow::Cow::Borrowed(runs))
             } else {
                 line_wrapper.truncate_line(
                     text,
-                    truncation.width.unwrap_or(Pixels::MAX),
+                    truncate_width,
                     &truncation.affix,
                     &runs,
                     truncation.source,
@@ -745,6 +898,7 @@ impl TextLayout {
         _: &mut App,
     ) -> LayoutId {
         let text_style = window.text_style();
+        let text = apply_text_transform_preserving_byte_len(text, text_style.text_transform);
         let font_size = text_style.font_size.to_pixels(window.rem_size());
         let line_height = window.pixel_snap(
             text_style
@@ -769,16 +923,21 @@ impl TextLayout {
 
                 let truncation =
                     Self::evaluate_overflow(&text_style, known_dimensions, available_space);
+                let truncate_width = truncation.width;
 
                 // Only use cached layout if:
                 // 1. We have a cached size
                 // 2. wrap_width matches (or both are None)
                 // 3. truncate_width is None (if truncate_width is Some, we need to re-layout
                 //    because the previous layout may have been computed without truncation)
+                // 4. the cached layout was not truncated (a truncated layout answers an
+                //    unconstrained probe with the truncated size, which poisons intrinsic
+                //    sizing with whatever width some earlier measure pass happened to use)
                 if let Some(text_layout) = element_state.0.borrow().as_ref()
                     && let Some(size) = text_layout.size
                     && (wrap_width.is_none() || wrap_width == text_layout.wrap_width)
-                    && truncation.width.is_none()
+                    && truncate_width.is_none()
+                    && text_layout.truncate_width.is_none()
                 {
                     return size;
                 }
@@ -787,9 +946,11 @@ impl TextLayout {
                     text.clone(),
                     &text_style,
                     font_size,
+                    line_height,
                     wrap_width,
                     &truncation,
                     &runs,
+                    window,
                     cx,
                 );
                 let len = text.len();
@@ -810,6 +971,7 @@ impl TextLayout {
                         len: 0,
                         line_height,
                         wrap_width,
+                        truncate_width,
                         size: Some(Size::default()),
                         bounds: None,
                     });
@@ -828,6 +990,7 @@ impl TextLayout {
                     len,
                     line_height,
                     wrap_width,
+                    truncate_width,
                     size: Some(size),
                     bounds: None,
                 });
@@ -954,12 +1117,6 @@ impl TextLayout {
         let element_state = element_state
             .as_ref()
             .expect("measurement has not been performed");
-        let bounds = element_state
-            .bounds
-            .expect("prepaint has not been performed");
-        let line_height = element_state.line_height;
-
-        let mut line_origin = bounds.origin;
         let mut line_start_ix = 0;
 
         for line in &element_state.lines {
@@ -967,7 +1124,6 @@ impl TextLayout {
             if index < line_start_ix {
                 break;
             } else if index > line_end_ix {
-                line_origin.y += line.size(line_height).height;
                 line_start_ix = line_end_ix + 1;
                 continue;
             } else {
@@ -976,6 +1132,18 @@ impl TextLayout {
         }
 
         None
+    }
+
+    /// Retrieve all line layouts in source order.
+    pub fn line_layouts(&self) -> SmallVec<[Arc<WrappedLineLayout>; 1]> {
+        self.0
+            .borrow()
+            .as_ref()
+            .expect("measurement has not been performed")
+            .lines
+            .iter()
+            .map(|line| line.layout.clone())
+            .collect()
     }
 
     /// The bounds of this layout.
@@ -1307,6 +1475,7 @@ impl Element for InteractiveText {
                         build_tooltip,
                         check_is_hovered,
                         check_is_hovered_during_prepaint,
+                        None,
                         window,
                     );
                 }

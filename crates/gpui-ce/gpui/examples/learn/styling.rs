@@ -8,9 +8,10 @@
 
 use gpui::colors::Colors;
 use gpui::{
-    App, Bounds, Context, FocusHandle, Hsla, KeyBinding, Menu, MenuItem, Render, Rgba, Window,
-    WindowBounds, WindowOptions, actions, div, prelude::*, px, rgb, size,
+    App, Bounds, ColorExt, Context, FocusHandle, Hsla, KeyBinding, Menu, MenuItem, Render, Rgba,
+    Window, WindowBounds, WindowOptions, actions, div, prelude::*, px, rgb, size,
 };
+use palette::{IntoColor, WithAlpha};
 
 actions!(styling_example, [Quit, Tab, TabPrev]);
 
@@ -147,7 +148,7 @@ fn list_item(
                 .text_color(text_muted)
         })
         .when(!is_disabled && is_selected, move |el| {
-            let accent_bg: Hsla = accent.into();
+            let accent_bg: Hsla = accent.into_color();
             el.bg(accent_bg.opacity(0.2))
                 .border_color(accent)
                 .text_color(text)
@@ -438,8 +439,8 @@ impl Render for StylingExample {
 }
 
 fn section(colors: &Colors, title: &'static str, content: impl IntoElement) -> impl IntoElement {
-    let surface: Hsla = colors.container.into();
-    let border: Hsla = colors.border.into();
+    let surface: Hsla = colors.container.into_color();
+    let border: Hsla = colors.border.into_color();
 
     div()
         .flex()
@@ -474,7 +475,7 @@ fn color_swatch(colors: &Colors, name: &'static str, color: Rgba) -> impl IntoEl
                 .rounded_md()
                 .bg(color)
                 .border_1()
-                .border_color(gpui::white().opacity(0.2)),
+                .border_color(gpui::white().with_alpha(0.2)),
         )
         .child(div().text_xs().text_color(text_muted).child(name))
 }

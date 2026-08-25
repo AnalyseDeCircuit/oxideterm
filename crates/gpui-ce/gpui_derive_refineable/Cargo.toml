@@ -1,10 +1,9 @@
-# Modified by OxideTerm to prevent publishing the vendored workspace crate.
 [package]
 name = "gpui_derive_refineable"
 version = "0.2.2"
 edition = "2024"
 license = "Apache-2.0"
-publish = false
+publish = true
 description = "Derive macro for gpui-ce's Refineable (vendored from Zed)."
 
 [lib]

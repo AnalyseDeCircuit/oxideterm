@@ -10,7 +10,7 @@ use cocoa::{
     base::{id, nil},
     foundation::{NSArray, NSData, NSFastEnumeration, NSString},
 };
-use objc::{msg_send, runtime::Object, sel, sel_impl};
+use objc::{msg_send, rc::StrongPtr, runtime::Object, sel, sel_impl};
 use smallvec::SmallVec;
 use strum::IntoEnumIterator as _;
 
@@ -20,9 +20,9 @@ use gpui::{
 };
 
 pub struct Pasteboard {
-    inner: id,
-    text_hash_type: id,
-    metadata_type: id,
+    inner: StrongPtr,
+    text_hash_type: StrongPtr,
+    metadata_type: StrongPtr,
 }
 
 impl Pasteboard {
@@ -40,17 +40,19 @@ impl Pasteboard {
     }
 
     unsafe fn new(inner: id) -> Self {
+        // These constructors return autoreleased objects, but a Pasteboard can
+        // outlive the autorelease pool in which it was created.
         Self {
-            inner,
-            text_hash_type: unsafe { ns_string("zed-text-hash") },
-            metadata_type: unsafe { ns_string("zed-metadata") },
+            inner: unsafe { StrongPtr::retain(inner) },
+            text_hash_type: unsafe { StrongPtr::retain(ns_string("zed-text-hash")) },
+            metadata_type: unsafe { StrongPtr::retain(ns_string("zed-metadata")) },
         }
     }
 
     pub fn read(&self) -> Option<ClipboardItem> {
         unsafe {
             // Check for file paths first
-            let filenames = NSPasteboard::propertyListForType(self.inner, NSFilenamesPboardType);
+            let filenames = NSPasteboard::propertyListForType(*self.inner, NSFilenamesPboardType);
             if filenames != nil && NSArray::count(filenames) > 0 {
                 let mut paths = SmallVec::new();
                 for file in filenames.iter() {
@@ -118,27 +120,18 @@ impl Pasteboard {
                 return None;
             }
 
-            let data = self.inner.dataForType(string_type);
-            let text_bytes: &[u8] = if data == nil {
-                return None;
-            } else if data.bytes().is_null() {
-                // https://developer.apple.com/documentation/foundation/nsdata/1410616-bytes?language=objc
-                // "If the length of the NSData object is 0, this property returns nil."
-                &[]
-            } else {
-                slice::from_raw_parts(data.bytes() as *mut u8, data.length() as usize)
-            };
+            let text_bytes = self.data_for_type(string_type)?;
 
-            let text = String::from_utf8_lossy(text_bytes).to_string();
+            let text = String::from_utf8_lossy(&text_bytes).to_string();
             let metadata = self
-                .data_for_type(self.text_hash_type)
+                .data_for_type(*self.text_hash_type)
                 .and_then(|hash_bytes| {
-                    let hash_bytes = hash_bytes.try_into().ok()?;
+                    let hash_bytes = hash_bytes.as_slice().try_into().ok()?;
                     let hash = u64::from_be_bytes(hash_bytes);
-                    let metadata = self.data_for_type(self.metadata_type)?;
+                    let metadata = self.data_for_type(*self.metadata_type)?;
 
                     if hash == ClipboardString::text_hash(&text) {
-                        String::from_utf8(metadata.to_vec()).ok()
+                        String::from_utf8(metadata).ok()
                     } else {
                         None
                     }
@@ -148,16 +141,17 @@ impl Pasteboard {
         }
     }
 
-    unsafe fn data_for_type(&self, kind: id) -> Option<&[u8]> {
+    unsafe fn data_for_type(&self, kind: id) -> Option<Vec<u8>> {
         unsafe {
             let data = self.inner.dataForType(kind);
             if data == nil {
                 None
+            } else if data.bytes().is_null() {
+                Some(Vec::new())
             } else {
-                Some(slice::from_raw_parts(
-                    data.bytes() as *mut u8,
-                    data.length() as usize,
-                ))
+                Some(
+                    slice::from_raw_parts(data.bytes() as *mut u8, data.length() as usize).to_vec(),
+                )
             }
         }
     }
@@ -175,9 +169,7 @@ impl Pasteboard {
                 [ClipboardEntry::Image(image)] => {
                     self.write_image(image);
                 }
-                [ClipboardEntry::ExternalPaths(paths)] => {
-                    self.write_external_paths(paths);
-                }
+                [ClipboardEntry::ExternalPaths(_)] => {}
                 _ => {
                     // Agus NB: We're currently only writing string entries to the clipboard when we have more than one.
                     //
@@ -228,7 +220,7 @@ impl Pasteboard {
                     hash_bytes.as_ptr() as *const c_void,
                     hash_bytes.len() as u64,
                 );
-                self.inner.setData_forType(hash_bytes, self.text_hash_type);
+                self.inner.setData_forType(hash_bytes, *self.text_hash_type);
 
                 let metadata_bytes = NSData::dataWithBytes_length_(
                     nil,
@@ -236,7 +228,7 @@ impl Pasteboard {
                     metadata.len() as u64,
                 );
                 self.inner
-                    .setData_forType(metadata_bytes, self.metadata_type);
+                    .setData_forType(metadata_bytes, *self.metadata_type);
             }
         }
     }
@@ -253,36 +245,6 @@ impl Pasteboard {
 
             self.inner
                 .setData_forType(bytes, Into::<UTType>::into(image.format).inner_mut());
-        }
-    }
-
-    fn write_external_paths(&self, paths: &ExternalPaths) {
-        unsafe {
-            let path_strings = paths
-                .paths()
-                .iter()
-                .map(|path| path.to_string_lossy().into_owned())
-                .collect::<Vec<_>>();
-            let ns_paths = path_strings
-                .iter()
-                .map(|path| ns_string(path))
-                .collect::<Vec<id>>();
-            let ns_path_array = NSArray::arrayWithObjects(nil, &ns_paths);
-            let types =
-                NSArray::arrayWithObjects(nil, &[NSFilenamesPboardType, NSPasteboardTypeString]);
-
-            self.inner.declareTypes_owner(types, nil);
-            self.inner
-                .setPropertyList_forType(ns_path_array, NSFilenamesPboardType);
-
-            // A plain-text representation keeps pasting useful in text-only applications.
-            let joined_paths = path_strings.join("\n");
-            let bytes = NSData::dataWithBytes_length_(
-                nil,
-                joined_paths.as_ptr() as *const c_void,
-                joined_paths.len() as u64,
-            );
-            self.inner.setData_forType(bytes, NSPasteboardTypeString);
         }
     }
 }
@@ -374,24 +336,12 @@ mod tests {
         base::{id, nil},
         foundation::{NSArray, NSData},
     };
-    use std::{
-        ffi::c_void,
-        sync::{Mutex, MutexGuard},
-    };
+    use std::ffi::c_void;
 
     use gpui::{ClipboardEntry, ClipboardItem, ClipboardString, ImageFormat};
+    use objc::rc::autoreleasepool;
 
     use super::*;
-
-    static PASTEBOARD_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    fn lock_pasteboard_tests() -> MutexGuard<'static, ()> {
-        // AppKit pasteboard calls are process-global and are not safe to drive
-        // concurrently from Rust's parallel test threads.
-        PASTEBOARD_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-    }
 
     unsafe fn simulate_external_file_copy(pasteboard: &Pasteboard, paths: &[&str]) {
         unsafe {
@@ -422,7 +372,6 @@ mod tests {
 
     #[test]
     fn test_string() {
-        let _guard = lock_pasteboard_tests();
         let pasteboard = Pasteboard::unique();
         assert_eq!(pasteboard.read(), None);
 
@@ -456,8 +405,19 @@ mod tests {
     }
 
     #[test]
+    fn test_custom_types_survive_creation_autorelease_pool() {
+        let pasteboard = autoreleasepool(|| unsafe { Pasteboard::new(nil) });
+
+        unsafe {
+            let text_hash_type = CStr::from_ptr(NSString::UTF8String(*pasteboard.text_hash_type));
+            let metadata_type = CStr::from_ptr(NSString::UTF8String(*pasteboard.metadata_type));
+            assert_eq!(text_hash_type.to_bytes(), b"zed-text-hash");
+            assert_eq!(metadata_type.to_bytes(), b"zed-metadata");
+        }
+    }
+
+    #[test]
     fn test_read_external_path() {
-        let _guard = lock_pasteboard_tests();
         let pasteboard = Pasteboard::unique();
 
         unsafe {
@@ -488,7 +448,6 @@ mod tests {
 
     #[test]
     fn test_read_external_paths_with_spaces() {
-        let _guard = lock_pasteboard_tests();
         let pasteboard = Pasteboard::unique();
         let paths = ["/some file with spaces.txt"];
 
@@ -508,7 +467,6 @@ mod tests {
 
     #[test]
     fn test_read_multiple_external_paths() {
-        let _guard = lock_pasteboard_tests();
         let pasteboard = Pasteboard::unique();
         let paths = ["/file.txt", "/image.png"];
 
@@ -540,33 +498,7 @@ mod tests {
     }
 
     #[test]
-    fn test_write_external_paths() {
-        let _guard = lock_pasteboard_tests();
-        let pasteboard = Pasteboard::unique();
-        let item = ClipboardItem {
-            entries: vec![ClipboardEntry::ExternalPaths(ExternalPaths(
-                [PathBuf::from("/file.txt"), PathBuf::from("/image.png")]
-                    .into_iter()
-                    .collect(),
-            ))],
-        };
-
-        pasteboard.write(item);
-        let copied_item = pasteboard.read().expect("should read copied paths");
-
-        assert_eq!(
-            copied_item.entries[0],
-            ClipboardEntry::ExternalPaths(ExternalPaths(
-                [PathBuf::from("/file.txt"), PathBuf::from("/image.png")]
-                    .into_iter()
-                    .collect(),
-            ))
-        );
-    }
-
-    #[test]
     fn test_read_image() {
-        let _guard = lock_pasteboard_tests();
         let pasteboard = Pasteboard::unique();
 
         // Smallest valid PNG: 1x1 transparent pixel

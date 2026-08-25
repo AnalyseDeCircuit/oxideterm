@@ -4,10 +4,9 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::window::PreparedGlyphBatch;
 use crate::{
-    AtlasTextureId, AtlasTile, Background, Bounds, ContentMask, Corners, Edges, Hsla, Pixels,
-    Point, Radians, ScaledFilter, ScaledPixels, Size, bounds_tree::BoundsTree, point,
+    AtlasTextureId, AtlasTile, Background, Bounds, ContentMask, Corners, Edges, Pixels, Point,
+    Radians, ScaledFilter, ScaledPixels, Size, bounds_tree::BoundsTree, point,
 };
 use smallvec::SmallVec;
 use std::{
@@ -15,7 +14,6 @@ use std::{
     iter::Peekable,
     ops::{Add, Range, Sub},
     slice,
-    sync::Arc,
 };
 
 #[allow(non_camel_case_types, unused)]
@@ -24,6 +22,26 @@ pub type PathVertex_ScaledPixels = PathVertex<ScaledPixels>;
 
 #[expect(missing_docs)]
 pub type DrawOrder = u32;
+
+/// A boolean stored as a `u32` so that GPU-facing structs contain no
+/// compiler-inserted padding bytes, which would be undefined behavior to
+/// reinterpret as `&[u8]` when writing instance buffers. Guaranteed to be
+/// `0` or `1` by construction; shaders read it as a `u32`/`uint`.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct PaddedBool32(u32);
+
+impl From<bool> for PaddedBool32 {
+    fn from(value: bool) -> Self {
+        PaddedBool32(value as u32)
+    }
+}
+
+impl From<PaddedBool32> for u32 {
+    fn from(value: PaddedBool32) -> Self {
+        value.0
+    }
+}
 
 #[derive(Default)]
 #[expect(missing_docs)]
@@ -176,94 +194,10 @@ impl Scene {
             .push(PaintOperation::Primitive(primitive));
     }
 
-    /// Expand a cached glyph batch into render sprites and retain one replay operation.
-    pub(crate) fn insert_prepared_glyph_batch(
-        &mut self,
-        batch: Arc<PreparedGlyphBatch>,
-        origin: Point<ScaledPixels>,
-        content_mask: ContentMask<ScaledPixels>,
-        opacity: f32,
-    ) {
-        let layer_order = self.layer_stack.last().copied();
-        for glyph in &batch.monochrome {
-            let mut sprite = MonochromeSprite {
-                order: 0,
-                pad: 0,
-                bounds: glyph.bounds + origin,
-                content_mask,
-                color: glyph.color.opacity(opacity),
-                tile: glyph.tile,
-                transformation: TransformationMatrix::unit(),
-            };
-            let clipped_bounds = sprite.bounds.intersect(&sprite.content_mask.bounds);
-            if clipped_bounds.is_empty() {
-                continue;
-            }
-            sprite.order =
-                layer_order.unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
-            self.monochrome_sprites.push(sprite);
-        }
-        for glyph in &batch.subpixel {
-            let mut sprite = SubpixelSprite {
-                order: 0,
-                pad: 0,
-                bounds: glyph.bounds + origin,
-                content_mask,
-                color: glyph.color.opacity(opacity),
-                tile: glyph.tile,
-                transformation: TransformationMatrix::unit(),
-            };
-            let clipped_bounds = sprite.bounds.intersect(&sprite.content_mask.bounds);
-            if clipped_bounds.is_empty() {
-                continue;
-            }
-            sprite.order =
-                layer_order.unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
-            self.subpixel_sprites.push(sprite);
-        }
-        for glyph in &batch.polychrome {
-            let mut sprite = PolychromeSprite {
-                order: 0,
-                pad: 0,
-                grayscale: false,
-                opacity,
-                bounds: glyph.bounds + origin,
-                content_mask,
-                corner_radii: Default::default(),
-                tile: glyph.tile,
-            };
-            let clipped_bounds = sprite.bounds.intersect(&sprite.content_mask.bounds);
-            if clipped_bounds.is_empty() {
-                continue;
-            }
-            sprite.order =
-                layer_order.unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
-            self.polychrome_sprites.push(sprite);
-        }
-        self.paint_operations
-            .push(PaintOperation::PreparedGlyphBatch {
-                batch,
-                origin,
-                content_mask,
-                opacity,
-            });
-    }
-
     pub fn replay(&mut self, range: Range<usize>, prev_scene: &Scene) {
         for operation in &prev_scene.paint_operations[range] {
             match operation {
                 PaintOperation::Primitive(primitive) => self.insert_primitive(primitive.clone()),
-                PaintOperation::PreparedGlyphBatch {
-                    batch,
-                    origin,
-                    content_mask,
-                    opacity,
-                } => self.insert_prepared_glyph_batch(
-                    batch.clone(),
-                    *origin,
-                    *content_mask,
-                    *opacity,
-                ),
                 PaintOperation::StartLayer(bounds) => self.push_layer(*bounds),
                 PaintOperation::EndLayer => self.pop_layer(),
             }
@@ -324,6 +258,35 @@ impl Scene {
     }
 }
 
+/// Internal representation of [`palette::Hsla`] which is layout sensitive, as its provided to the renderer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[repr(C)]
+pub struct SceneHsla {
+    /// Hue, in a range from 0 to 1
+    pub(crate) h: f32,
+    /// Saturation, in a range from 0 to 1
+    pub(crate) s: f32,
+    /// Lightness, in a range from 0 to 1
+    pub(crate) l: f32,
+    /// Alpha, in a range from 0 to 1
+    pub(crate) a: f32,
+}
+impl Into<palette::Hsla> for SceneHsla {
+    fn into(self) -> palette::Hsla {
+        palette::Hsla::new(self.h * 360.0, self.s, self.l, self.a)
+    }
+}
+impl From<palette::Hsla> for SceneHsla {
+    fn from(hsla: palette::Hsla) -> Self {
+        Self {
+            h: hsla.hue.into_positive_degrees() / 360.0,
+            s: hsla.saturation,
+            l: hsla.lightness,
+            a: hsla.alpha,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Default)]
 #[cfg_attr(
     all(
@@ -353,12 +316,6 @@ pub(crate) enum PrimitiveKind {
 
 pub(crate) enum PaintOperation {
     Primitive(Primitive),
-    PreparedGlyphBatch {
-        batch: Arc<PreparedGlyphBatch>,
-        origin: Point<ScaledPixels>,
-        content_mask: ContentMask<ScaledPixels>,
-        opacity: f32,
-    },
     StartLayer(Bounds<ScaledPixels>),
     EndLayer,
 }
@@ -694,6 +651,42 @@ pub enum PrimitiveBatch {
     FilterBoundary(usize),
 }
 
+impl PrimitiveBatch {
+    #[expect(missing_docs)]
+    pub fn label(&self) -> String {
+        match self {
+            Self::Shadows(range) => format!("shadows ({})", range.len()),
+            Self::Quads(range) => format!("quads ({})", range.len()),
+            Self::Paths(range) => format!("paths ({})", range.len()),
+            Self::Underlines(range) => format!("underlines ({})", range.len()),
+            Self::MonochromeSprites { texture_id, range } => {
+                format!(
+                    "monochrome sprites ({}) on atlas {}",
+                    range.len(),
+                    texture_id.index
+                )
+            }
+            Self::SubpixelSprites { texture_id, range } => {
+                format!(
+                    "subpixel sprites ({}) on atlas {}",
+                    range.len(),
+                    texture_id.index
+                )
+            }
+            Self::PolychromeSprites { texture_id, range } => {
+                format!(
+                    "polychrome sprites ({}) on atlas {}",
+                    range.len(),
+                    texture_id.index
+                )
+            }
+            Self::Surfaces(range) => format!("surfaces ({})", range.len()),
+            Self::BackdropFilters(range) => format!("backdrop filters ({})", range.len()),
+            Self::FilterBoundary(ix) => format!("filter boundary ({ix})"),
+        }
+    }
+}
+
 #[derive(Default, Debug, Copy, Clone)]
 #[repr(C)]
 #[expect(missing_docs)]
@@ -703,7 +696,7 @@ pub struct Quad {
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
     pub background: Background,
-    pub border_color: Hsla,
+    pub border_color: SceneHsla,
     pub corner_radii: Corners<ScaledPixels>,
     pub border_widths: Edges<ScaledPixels>,
 }
@@ -722,9 +715,9 @@ pub struct Underline {
     pub pad: u32, // align to 8 bytes
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
-    pub color: Hsla,
+    pub color: SceneHsla,
     pub thickness: ScaledPixels,
-    pub wavy: u32,
+    pub wavy: PaddedBool32,
 }
 
 impl From<Underline> for Primitive {
@@ -742,7 +735,7 @@ pub struct Shadow {
     pub bounds: Bounds<ScaledPixels>,
     pub corner_radii: Corners<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
-    pub color: Hsla,
+    pub color: SceneHsla,
     pub element_bounds: Bounds<ScaledPixels>,
     pub element_corner_radii: Corners<ScaledPixels>,
     /// 0 = drop shadow (rendered outside the element), 1 = inset shadow (rendered inside).
@@ -931,7 +924,7 @@ pub struct MonochromeSprite {
     pub pad: u32,
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
-    pub color: Hsla,
+    pub color: SceneHsla,
     pub tile: AtlasTile,
     pub transformation: TransformationMatrix,
 }
@@ -950,7 +943,7 @@ pub struct SubpixelSprite {
     pub pad: u32, // align to 8 bytes
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
-    pub color: Hsla,
+    pub color: SceneHsla,
     pub tile: AtlasTile,
     pub transformation: TransformationMatrix,
 }
@@ -967,7 +960,7 @@ impl From<SubpixelSprite> for Primitive {
 pub struct PolychromeSprite {
     pub order: DrawOrder,
     pub pad: u32,
-    pub grayscale: bool,
+    pub grayscale: PaddedBool32,
     pub opacity: f32,
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
@@ -1173,8 +1166,7 @@ impl PathVertex<Pixels> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::window::PreparedMonochromeGlyph;
-    use crate::{AtlasTextureKind, DevicePixels, Point, Size, TileId};
+    use crate::{Point, Size};
 
     fn sp(value: f32) -> ScaledPixels {
         ScaledPixels(value)
@@ -1249,28 +1241,6 @@ mod tests {
             filters: smallvec::smallvec![ScaledFilter::Blur(sp(20.0))],
             opacity: 1.0,
             ..Default::default()
-        }
-    }
-
-    fn prepared_monochrome_glyph(bounds: Bounds<ScaledPixels>) -> PreparedMonochromeGlyph {
-        PreparedMonochromeGlyph {
-            bounds,
-            color: Hsla::default(),
-            tile: AtlasTile {
-                texture_id: AtlasTextureId {
-                    index: 0,
-                    kind: AtlasTextureKind::Monochrome,
-                },
-                tile_id: TileId(1),
-                padding: 0,
-                bounds: Bounds {
-                    origin: Point::default(),
-                    size: Size {
-                        width: DevicePixels(8),
-                        height: DevicePixels(16),
-                    },
-                },
-            },
         }
     }
 
@@ -1358,32 +1328,5 @@ mod tests {
         scene.insert_primitive(quad());
 
         assert_eq!(batch_kinds(&mut scene), vec!["quad", "backdrop", "quad"]);
-    }
-
-    #[test]
-    fn sprite_batch_preserves_layer_order_and_replay() {
-        let mut scene = Scene::default();
-        scene.push_layer(full_bounds());
-        let batch = Arc::new(PreparedGlyphBatch {
-            monochrome: vec![
-                prepared_monochrome_glyph(full_bounds()),
-                prepared_monochrome_glyph(full_bounds()),
-                prepared_monochrome_glyph(detached_quad().bounds),
-            ],
-            ..Default::default()
-        });
-        scene.insert_prepared_glyph_batch(batch, Point::default(), mask(), 1.0);
-        scene.pop_layer();
-
-        assert_eq!(scene.monochrome_sprites.len(), 2);
-        assert_eq!(scene.len(), 3);
-        let paint_range = 0..scene.len();
-        let mut replayed = Scene::default();
-        replayed.replay(paint_range, &scene);
-        assert_eq!(replayed.monochrome_sprites.len(), 2);
-        assert_eq!(
-            replayed.monochrome_sprites[0].order,
-            scene.monochrome_sprites[0].order
-        );
     }
 }

@@ -14,9 +14,10 @@ mod example_prelude;
 
 use example_prelude::init_example;
 use gpui::{
-    App, Bounds, Context, FontStyle, FontWeight, Hsla, Render, StyledText, TextOverflow, Window,
-    WindowBounds, WindowOptions, colors::Colors, div, prelude::*, px, relative, rgb, size,
+    App, Bounds, ColorExt, Context, FontStyle, FontWeight, Hsla, Render, StyledText, TextOverflow,
+    Window, WindowBounds, WindowOptions, colors::Colors, div, prelude::*, px, relative, rgb, size,
 };
+use palette::IntoColor;
 
 // Text Styling Examples
 
@@ -546,7 +547,7 @@ impl Render for TextExample {
 }
 
 fn section(colors: &Colors, title: &'static str, content: impl IntoElement) -> impl IntoElement {
-    let surface: Hsla = colors.container.into();
+    let surface: Hsla = colors.container.into_color();
 
     div()
         .flex()

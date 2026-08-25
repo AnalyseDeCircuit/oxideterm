@@ -1,5 +1,5 @@
 use crate::{
-    AnyView, AnyWindowHandle, AppContext, AsyncApp, DispatchPhase, Effect, EntityId, EventEmitter,
+    AnyView, AnyWindowHandle, AppContext, AsyncApp, DispatchPhase, EntityId, EventEmitter,
     FocusHandle, FocusOutEvent, Focusable, Global, KeystrokeObserver, Priority, Reservation,
     SubscriberSet, Subscription, Task, WeakEntity, WeakFocusHandle, Window, WindowHandle,
 };
@@ -767,15 +767,7 @@ impl<T> Context<'_, T> {
         T: EventEmitter<Evt>,
         Evt: 'static,
     {
-        let event = self
-            .event_arena
-            .alloc(|| event)
-            .map(|it| it as &mut dyn Any);
-        self.app.pending_effects.push_back(Effect::Emit {
-            emitter: self.entity_state.entity_id,
-            event_type: TypeId::of::<Evt>(),
-            event,
-        });
+        self.app.emit(&self.entity(), event);
     }
 }
 

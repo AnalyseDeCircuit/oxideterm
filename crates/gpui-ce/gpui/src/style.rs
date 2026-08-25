@@ -1,20 +1,16 @@
-use std::{
-    hash::{Hash, Hasher},
-    iter, mem,
-    ops::Range,
-};
-
 use crate::{
-    AbsoluteLength, App, Background, BackgroundTag, BorderStyle, Bounds, ContentMask, Corners,
-    CornersRefinement, CursorStyle, DefiniteLength, DevicePixels, Edges, EdgesRefinement, Font,
-    FontFallbacks, FontFeatures, FontStyle, FontWeight, GridLocation, Hsla, Length, Pixels, Point,
-    PointRefinement, Rgba, ScaledPixels, SharedString, Size, SizeRefinement, Styled, TextRun,
-    Window, black, phi, point, quad, rems, size,
+    AbsoluteLength, App, Background, BackgroundTag, BorderStyle, Bounds, ColorExt, ContentMask,
+    Corners, CornersRefinement, CursorStyle, DefiniteLength, DevicePixels, Edges, EdgesRefinement,
+    Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, GridLocation, Length, Pixels, Point,
+    PointRefinement, ScaledPixels, SharedString, Size, SizeRefinement, Styled, TextRun, Window,
+    black, phi, point, px, quad, rems, size,
 };
 use collections::HashSet;
+use palette::{Hsla, IntoColor, rgb::Rgba};
 use refineable::Refineable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::{iter, mem, ops::Range};
 
 /// Use this struct for interfacing with the 'debug_below' styling from your own elements.
 /// If a parent element has this style set on it, then this struct will be set as a global in
@@ -142,13 +138,13 @@ impl ObjectFit {
 #[derive(
     Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default, JsonSchema, Serialize, Deserialize,
 )]
-pub enum TemplateColumnMinSize {
-    /// The column size may be 0
+pub enum GridTemplateMinSize {
+    /// The column or row size may be 0
     #[default]
     Zero,
-    /// The column size can be determined by the min content
+    /// The column or row size can be determined by the min content
     MinContent,
-    /// The column size can be determined by the max content
+    /// The column or row size can be determined by the max content
     MaxContent,
 }
 
@@ -171,12 +167,12 @@ pub struct GridTemplate {
     /// How this template directive should be repeated
     pub repeat: u16,
     /// The minimum size in the repeat(<>, minmax(_, 1fr)) equation
-    pub min_size: TemplateColumnMinSize,
+    pub min_size: GridTemplateMinSize,
 }
 
 /// The CSS styling that can be applied to an element via the `Styled` trait
 #[derive(Clone, Refineable, Debug)]
-#[refineable(Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[refineable(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Style {
     /// What layout strategy should be used?
     pub display: Display,
@@ -192,11 +188,15 @@ pub struct Style {
     pub scrollbar_width: AbsoluteLength,
     /// Whether both x and y axis should be scrollable at the same time.
     pub allow_concurrent_scroll: bool,
-    /// Whether scrolling should be restricted to the axis indicated by the mouse wheel.
+    /// Whether scrolling should be restricted to the input gesture's axis.
     ///
-    /// This means that:
-    /// - The mouse wheel alone will only ever scroll the Y axis.
-    /// - Holding `Shift` and using the mouse wheel will scroll the X axis.
+    /// Pixel-based scroll gestures are locked to their initially dominant axis. The lock may be
+    /// released when the gesture changes direction strongly. Touch phases delimit gestures when
+    /// available, with a timeout fallback for platforms that only emit moved events.
+    ///
+    /// This also prevents input from being remapped to another axis. For example, horizontal input
+    /// will not scroll a container that only has vertical overflow enabled. Mouse wheel platforms
+    /// typically report ordinary wheel input on the Y axis and Shift-modified input on the X axis.
     ///
     /// ## Motivation
     ///
@@ -347,7 +347,7 @@ pub enum Visibility {
 }
 
 /// The possible values of the box-shadow property
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BoxShadow {
     /// What color should the shadow have?
     pub color: Hsla,
@@ -359,6 +359,39 @@ pub struct BoxShadow {
     pub spread_radius: Pixels,
     /// Whether this is an inset shadow (drawn inside the element's bounds).
     pub inset: bool,
+}
+
+impl BoxShadow {
+    /// Creates a new [`BoxShadow`] with the given offset and color, matching the order
+    /// of the CSS `box-shadow` property. Use the builder methods to set blur radius,
+    /// spread radius, and inset.
+    pub fn new(offset_x: Pixels, offset_y: Pixels, color: Hsla) -> Self {
+        Self {
+            color,
+            offset: point(offset_x, offset_y),
+            blur_radius: px(0.),
+            spread_radius: px(0.),
+            inset: false,
+        }
+    }
+
+    /// Sets the shadow blur radius.
+    pub fn blur_radius(mut self, blur_radius: Pixels) -> Self {
+        self.blur_radius = blur_radius;
+        self
+    }
+
+    /// Sets the shadow spread radius.
+    pub fn spread_radius(mut self, spread_radius: Pixels) -> Self {
+        self.spread_radius = spread_radius;
+        self
+    }
+
+    /// Marks the shadow as inset (drawn inside the element's bounds).
+    pub fn inset(mut self) -> Self {
+        self.inset = true;
+        self
+    }
 }
 
 /// A graphical filter that can be applied either to an element's own content
@@ -425,6 +458,10 @@ pub enum TextOverflow {
     /// displaying the provided string at the beginning (e.g., "…ong text here").
     /// Typically more adequate for file paths where the end is more important than the beginning.
     TruncateStart(SharedString),
+    /// Truncate the text in the middle when it doesn't fit, preserving both the start and end
+    /// of the string (e.g., "long fi…name.rs"). Useful for filenames where both the prefix
+    /// and the extension are important context.
+    TruncateMiddle(SharedString),
 }
 
 /// How to align text within the element
@@ -441,9 +478,36 @@ pub enum TextAlign {
     Right,
 }
 
+/// Case mapping applied at layout time while keeping **UTF-8 byte lengths** unchanged.
+///
+/// [`TextTransform::Uppercase`] and [`TextTransform::Lowercase`] use Unicode full case folding via
+/// [`char::to_uppercase`] / [`char::to_lowercase`]. If mapping a code point would change its UTF-8
+/// length, or would replace one scalar value with more than one character, the **original**
+/// character is kept. That keeps indices into the underlying buffer aligned with hit-testing and
+/// editor-style caret positions that use raw byte offsets.
+///
+/// [`TextTransform::Capitalize`] matches CSS / Tailwind [`capitalize`][tw-cap] using Unicode word
+/// boundaries: only the first alphabetic code point in each word is uppercased; other characters
+/// are unchanged.
+///
+/// [tw-cap]: https://tailwindcss.com/docs/text-transform
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum TextTransform {
+    /// Do not transform text.
+    #[default]
+    None,
+    /// Uppercase text (Unicode, byte-length preserving — see [`TextTransform`]).
+    Uppercase,
+    /// Lowercase text (Unicode, byte-length preserving — see [`TextTransform`]).
+    Lowercase,
+    /// `text-transform: capitalize` semantics (Tailwind class `capitalize`): per Unicode word, only
+    /// the first alphabetic character is mapped to uppercase; the rest of the string is unchanged.
+    Capitalize,
+}
+
 /// The properties that can be used to style text in GPUI
 #[derive(Refineable, Clone, Debug, PartialEq)]
-#[refineable(Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[refineable(Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextStyle {
     /// The color of the text
     pub color: Hsla,
@@ -489,6 +553,14 @@ pub struct TextStyle {
 
     /// The number of lines to display before truncating the text
     pub line_clamp: Option<usize>,
+
+    /// Letter spacing added between characters, in pixels (positive widens, negative tightens).
+    ///
+    /// The platform text stack may clamp values outside the range it supports.
+    pub letter_spacing: Option<Pixels>,
+
+    /// Case transformation applied at layout time.
+    pub text_transform: Option<TextTransform>,
 }
 
 impl Default for TextStyle {
@@ -510,6 +582,8 @@ impl Default for TextStyle {
             text_overflow: None,
             text_align: TextAlign::default(),
             line_clamp: None,
+            letter_spacing: None,
+            text_transform: None,
         }
     }
 }
@@ -526,7 +600,7 @@ impl TextStyle {
         }
 
         if let Some(color) = style.color {
-            self.color = self.color.blend(color);
+            self.color = self.color.blend(&color);
         }
 
         if let Some(factor) = style.fade_out {
@@ -579,12 +653,18 @@ impl TextStyle {
             background_color: self.background_color,
             underline: self.underline,
             strikethrough: self.strikethrough,
+            letter_spacing: self.letter_spacing,
         }
     }
 }
 
 /// A highlight style to apply, similar to a `TextStyle` except
 /// for a single font, uniformly sized and spaced text.
+///
+/// Layout extras on the base [`TextStyle`] — such as [`TextStyle::letter_spacing`] and
+/// [`TextStyle::text_transform`] — are not stored here; highlighted segments inherit them
+/// from the surrounding style (see [`TextStyle::highlight`] and
+/// [`crate::StyledText::with_default_highlights`]).
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct HighlightStyle {
     /// The color of the text
@@ -607,22 +687,6 @@ pub struct HighlightStyle {
 
     /// Similar to the CSS `opacity` property, this will cause the text to be less vibrant.
     pub fade_out: Option<f32>,
-}
-
-impl Eq for HighlightStyle {}
-
-impl Hash for HighlightStyle {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.color.hash(state);
-        self.font_weight.hash(state);
-        self.font_style.hash(state);
-        self.background_color.hash(state);
-        self.underline.hash(state);
-        self.strikethrough.hash(state);
-        state.write_u32(u32::from_be_bytes(
-            self.fade_out.map(|f| f.to_be_bytes()).unwrap_or_default(),
-        ));
-    }
 }
 
 impl Style {
@@ -658,10 +722,7 @@ impl Style {
                 let mut min = bounds.origin;
                 let mut max = bounds.bottom_right();
 
-                if self
-                    .border_color
-                    .is_some_and(|color| !color.is_transparent())
-                {
+                if self.border_color.is_some_and(|color| color.alpha > 0.) {
                     min.x += self.border_widths.left.to_pixels(rem_size);
                     max.x -= self.border_widths.right.to_pixels(rem_size);
                     min.y += self.border_widths.top.to_pixels(rem_size);
@@ -735,17 +796,17 @@ impl Style {
                     Some(color) => match color.tag {
                         BackgroundTag::Solid
                         | BackgroundTag::PatternSlash
-                        | BackgroundTag::Checkerboard => color.solid,
+                        | BackgroundTag::Checkerboard => color.solid.into(),
 
                         BackgroundTag::LinearGradient => color
                             .colors
                             .first()
-                            .map(|stop| stop.color)
+                            .map(|stop| stop.color.into())
                             .unwrap_or_default(),
                     },
                     None => Hsla::default(),
                 };
-                border_color.a = 0.;
+                border_color.alpha = 0.;
                 window.paint_quad(quad(
                     bounds,
                     corner_radii,
@@ -763,7 +824,7 @@ impl Style {
             if self.is_border_visible() {
                 let border_widths = self.border_widths.to_pixels(rem_size);
                 let mut background = self.border_color.unwrap_or_default();
-                background.a = 0.;
+                background.alpha = 0.;
                 window.paint_quad(quad(
                     bounds,
                     corner_radii,
@@ -790,8 +851,7 @@ impl Style {
     }
 
     fn is_border_visible(&self) -> bool {
-        self.border_color
-            .is_some_and(|color| !color.is_transparent())
+        self.border_color.is_some_and(|color| color.alpha > 0.)
             && self.border_widths.any(|length| !length.is_zero())
     }
 }
@@ -852,9 +912,7 @@ impl Default for Style {
 }
 
 /// The properties that can be applied to an underline.
-#[derive(
-    Refineable, Copy, Clone, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
-)]
+#[derive(Refineable, Copy, Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UnderlineStyle {
     /// The thickness of the underline.
     pub thickness: Pixels,
@@ -867,9 +925,7 @@ pub struct UnderlineStyle {
 }
 
 /// The properties that can be applied to a strikethrough.
-#[derive(
-    Refineable, Copy, Clone, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
-)]
+#[derive(Refineable, Copy, Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StrikethroughStyle {
     /// The thickness of the strikethrough.
     pub thickness: Pixels,
@@ -902,21 +958,9 @@ impl Default for Fill {
     }
 }
 
-impl From<Hsla> for Fill {
-    fn from(color: Hsla) -> Self {
+impl<T: Into<Background>> From<T> for Fill {
+    fn from(color: T) -> Self {
         Self::Color(color.into())
-    }
-}
-
-impl From<Rgba> for Fill {
-    fn from(color: Rgba) -> Self {
-        Self::Color(color.into())
-    }
-}
-
-impl From<Background> for Fill {
-    fn from(background: Background) -> Self {
-        Self::Color(background)
     }
 }
 
@@ -957,7 +1001,7 @@ impl HighlightStyle {
                 .color
                 .map(|other_color| {
                     if let Some(color) = self.color {
-                        color.blend(other_color)
+                        color.blend(&other_color)
                     } else {
                         other_color
                     }
@@ -1010,7 +1054,7 @@ impl From<FontStyle> for HighlightStyle {
 impl From<Rgba> for HighlightStyle {
     fn from(color: Rgba) -> Self {
         Self {
-            color: Some(color.into()),
+            color: Some(color.into_color()),
             ..Default::default()
         }
     }
@@ -1279,13 +1323,13 @@ pub enum Position {
 impl From<AlignItems> for taffy::style::AlignItems {
     fn from(value: AlignItems) -> Self {
         match value {
-            AlignItems::Start => Self::Start,
-            AlignItems::End => Self::End,
-            AlignItems::FlexStart => Self::FlexStart,
-            AlignItems::FlexEnd => Self::FlexEnd,
-            AlignItems::Center => Self::Center,
-            AlignItems::Baseline => Self::Baseline,
-            AlignItems::Stretch => Self::Stretch,
+            AlignItems::Start => Self::START,
+            AlignItems::End => Self::END,
+            AlignItems::FlexStart => Self::FLEX_START,
+            AlignItems::FlexEnd => Self::FLEX_END,
+            AlignItems::Center => Self::CENTER,
+            AlignItems::Baseline => Self::BASELINE,
+            AlignItems::Stretch => Self::STRETCH,
         }
     }
 }
@@ -1293,15 +1337,15 @@ impl From<AlignItems> for taffy::style::AlignItems {
 impl From<AlignContent> for taffy::style::AlignContent {
     fn from(value: AlignContent) -> Self {
         match value {
-            AlignContent::Start => Self::Start,
-            AlignContent::End => Self::End,
-            AlignContent::FlexStart => Self::FlexStart,
-            AlignContent::FlexEnd => Self::FlexEnd,
-            AlignContent::Center => Self::Center,
-            AlignContent::Stretch => Self::Stretch,
-            AlignContent::SpaceBetween => Self::SpaceBetween,
-            AlignContent::SpaceEvenly => Self::SpaceEvenly,
-            AlignContent::SpaceAround => Self::SpaceAround,
+            AlignContent::Start => Self::START,
+            AlignContent::End => Self::END,
+            AlignContent::FlexStart => Self::FLEX_START,
+            AlignContent::FlexEnd => Self::FLEX_END,
+            AlignContent::Center => Self::CENTER,
+            AlignContent::Stretch => Self::STRETCH,
+            AlignContent::SpaceBetween => Self::SPACE_BETWEEN,
+            AlignContent::SpaceEvenly => Self::SPACE_EVENLY,
+            AlignContent::SpaceAround => Self::SPACE_AROUND,
         }
     }
 }
@@ -1361,6 +1405,7 @@ impl From<Position> for taffy::style::Position {
 #[cfg(test)]
 mod tests {
     use crate::{blue, green, px, red, yellow};
+    use palette::WithAlpha;
 
     use super::*;
 
@@ -1408,7 +1453,7 @@ mod tests {
         let mut style_c = expected_style;
 
         let style_d = HighlightStyle {
-            color: Some(blue().alpha(0.7)),
+            color: Some(blue().with_alpha(0.7)),
             strikethrough: Some(StrikethroughStyle {
                 thickness: px(4.),
                 color: Some(crate::red()),
@@ -1425,7 +1470,7 @@ mod tests {
         };
 
         let expected_style = HighlightStyle {
-            color: Some(red().blend(blue().alpha(0.7))),
+            color: Some(red().blend(&blue().with_alpha(0.7))),
             strikethrough: Some(StrikethroughStyle {
                 thickness: px(4.),
                 color: Some(red()),

@@ -1,3 +1,26 @@
+use crate::{
+    Bounds, DevicePixels, Pixels, PlatformTextSystem, Point, Result, SharedString, Size,
+    StrikethroughStyle, TextRenderingMode, UnderlineStyle, px,
+};
+use anyhow::{Context as _, anyhow};
+use collections::FxHashMap;
+use core::fmt;
+use derive_more::{Add, Deref, FromStr, Sub};
+use itertools::Itertools;
+use palette::Hsla;
+use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use smallvec::{SmallVec, smallvec};
+use std::{
+    borrow::Cow,
+    cmp,
+    fmt::{Debug, Display, Formatter},
+    hash::{Hash, Hasher},
+    ops::{Deref, DerefMut, Range},
+    sync::Arc,
+};
+
 mod font_fallbacks;
 mod font_features;
 mod line;
@@ -9,28 +32,6 @@ pub use font_features::*;
 pub use line::*;
 pub use line_layout::*;
 pub use line_wrapper::*;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
-use crate::{
-    Bounds, DevicePixels, Hsla, Pixels, PlatformTextSystem, Point, Result, SharedString, Size,
-    StrikethroughStyle, TextRenderingMode, UnderlineStyle, px,
-};
-use anyhow::{Context as _, anyhow};
-use collections::FxHashMap;
-use core::fmt;
-use derive_more::{Add, Deref, FromStr, Sub};
-use itertools::Itertools;
-use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
-use smallvec::{SmallVec, smallvec};
-use std::{
-    borrow::Cow,
-    cmp,
-    fmt::{Debug, Display, Formatter},
-    hash::{Hash, Hasher},
-    ops::{Deref, DerefMut, Range},
-    sync::Arc,
-};
 
 /// An opaque identifier for a specific font.
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
@@ -93,18 +94,14 @@ impl TextSystem {
                 .map(|font| font.family.to_string()),
         );
         names.push(".SystemUIFont".to_string());
-        names.sort();
+        names.sort_unstable();
         names.dedup();
         names
     }
 
     /// Add a font's data to the text system.
     pub fn add_fonts(&self, fonts: Vec<Cow<'static, [u8]>>) -> Result<()> {
-        let mut cached_font_ids = self.font_ids_by_font.write();
-        self.platform_text_system.add_fonts(fonts)?;
-        // Dynamic registration can satisfy lookups that were previously cached as failures.
-        cached_font_ids.clear();
-        Ok(())
+        self.platform_text_system.add_fonts(fonts)
     }
 
     /// Get the FontId for the configure font family and style.
@@ -116,15 +113,20 @@ impl TextSystem {
             }
         }
 
-        let cached_font_ids = self.font_ids_by_font.upgradable_read();
-        if let Some(font_id) = cached_font_ids.get(font).map(clone_font_id_result) {
-            return font_id;
+        let font_id = self
+            .font_ids_by_font
+            .read()
+            .get(font)
+            .map(clone_font_id_result);
+        if let Some(font_id) = font_id {
+            font_id
+        } else {
+            let font_id = self.platform_text_system.font_id(font);
+            self.font_ids_by_font
+                .write()
+                .insert(font.clone(), clone_font_id_result(&font_id));
+            font_id
         }
-
-        let mut cached_font_ids = RwLockUpgradableReadGuard::upgrade(cached_font_ids);
-        let font_id = self.platform_text_system.font_id(font);
-        cached_font_ids.insert(font.clone(), clone_font_id_result(&font_id));
-        font_id
     }
 
     /// Get the Font for the Font Id.
@@ -148,26 +150,6 @@ impl TextSystem {
         if let Ok(font_id) = self.font_id(font) {
             return font_id;
         }
-        if let Some(fallbacks) = &font.fallbacks {
-            for (fallback_index, family) in fallbacks.fallback_list().iter().enumerate() {
-                if family == font.family.as_ref() {
-                    continue;
-                }
-                let remaining_fallbacks = &fallbacks.fallback_list()[fallback_index + 1..];
-                // Preserve style and the remaining chain when promoting a fallback to primary.
-                let fallback = Font {
-                    family: SharedString::from(family.as_str()),
-                    features: font.features.clone(),
-                    fallbacks: (!remaining_fallbacks.is_empty())
-                        .then(|| FontFallbacks::from_fonts(remaining_fallbacks.to_vec())),
-                    weight: font.weight,
-                    style: font.style,
-                };
-                if let Ok(font_id) = self.font_id(&fallback) {
-                    return font_id;
-                }
-            }
-        }
         for fallback in &self.fallback_font_stack {
             if let Ok(font_id) = self.font_id(fallback) {
                 return font_id;
@@ -182,6 +164,22 @@ impl TextSystem {
                 .map(|fallback| &fallback.family)
                 .join(", ")
         );
+    }
+
+    /// Prewarm any system font caches needed to shape text.
+    ///
+    /// This may be expensive, so callers should generally invoke it on a
+    /// background executor. Missing entries are still populated on demand by
+    /// the normal shaping path.
+    pub fn prewarm_fonts(&self, fonts: &[Font]) {
+        let mut font_ids = SmallVec::<[FontId; 8]>::new();
+        for font in fonts {
+            let font_id = self.resolve_font(font);
+            if !font_ids.contains(&font_id) {
+                font_ids.push(font_id);
+            }
+        }
+        self.platform_text_system.prewarm_fonts(&font_ids);
     }
 
     /// Get the bounding box for the given font and font size.
@@ -234,6 +232,7 @@ impl TextSystem {
                 &[FontRun {
                     len: buffer.len(),
                     font_id,
+                    letter_spacing: None,
                 }],
             )
             .width
@@ -378,6 +377,14 @@ impl TextSystem {
     }
 }
 
+#[cfg(test)]
+impl TextSystem {
+    /// Reach the platform shaper from crate tests (e.g. `line_wrapper`) without a [`WindowTextSystem`].
+    pub(crate) fn platform_text_system_for_tests(&self) -> Arc<dyn PlatformTextSystem> {
+        self.platform_text_system.clone()
+    }
+}
+
 /// The GPUI text layout subsystem.
 #[derive(Deref)]
 pub struct WindowTextSystem {
@@ -451,7 +458,6 @@ impl WindowTextSystem {
             layout,
             text,
             decoration_runs,
-            prepared_paint: Default::default(),
         }
     }
 
@@ -520,7 +526,6 @@ impl WindowTextSystem {
             layout,
             text,
             decoration_runs,
-            prepared_paint: Default::default(),
         }
     }
 
@@ -584,8 +589,10 @@ impl WindowTextSystem {
                 };
 
                 let font_id = self.resolve_font(&run.font);
+                let letter_spacing = run.letter_spacing;
                 if let Some(font_run) = font_runs.last_mut()
                     && font_id == font_run.font_id
+                    && font_run.letter_spacing == letter_spacing
                     && !decoration_changed
                 {
                     font_run.len += run_len_within_line;
@@ -593,6 +600,7 @@ impl WindowTextSystem {
                     font_runs.push(FontRun {
                         len: run_len_within_line,
                         font_id,
+                        letter_spacing,
                     });
                 }
 
@@ -698,8 +706,10 @@ impl WindowTextSystem {
             };
 
             let font_id = self.resolve_font(&run.font);
+            let letter_spacing = run.letter_spacing;
             if let Some(font_run) = font_runs.last_mut()
                 && font_id == font_run.font_id
+                && font_run.letter_spacing == letter_spacing
                 && !decoration_changed
             {
                 font_run.len += run.len;
@@ -707,6 +717,7 @@ impl WindowTextSystem {
                 font_runs.push(FontRun {
                     len: run.len,
                     font_id,
+                    letter_spacing,
                 });
             }
         }
@@ -734,6 +745,7 @@ impl WindowTextSystem {
                 &[FontRun {
                     len: buffer.len(),
                     font_id,
+                    letter_spacing: None,
                 }],
                 None,
             )
@@ -780,8 +792,10 @@ impl WindowTextSystem {
             };
 
             let font_id = self.resolve_font(&run.font);
+            let letter_spacing = run.letter_spacing;
             if let Some(font_run) = font_runs.last_mut()
                 && font_id == font_run.font_id
+                && font_run.letter_spacing == letter_spacing
                 && !decoration_changed
             {
                 font_run.len += run.len;
@@ -789,6 +803,7 @@ impl WindowTextSystem {
                 font_runs.push(FontRun {
                     len: run.len,
                     font_id,
+                    letter_spacing,
                 });
             }
         }
@@ -842,8 +857,10 @@ impl WindowTextSystem {
             };
 
             let font_id = self.resolve_font(&run.font);
+            let letter_spacing = run.letter_spacing;
             if let Some(font_run) = font_runs.last_mut()
                 && font_id == font_run.font_id
+                && font_run.letter_spacing == letter_spacing
                 && !decoration_changed
             {
                 font_run.len += run.len;
@@ -851,6 +868,7 @@ impl WindowTextSystem {
                 font_runs.push(FontRun {
                     len: run.len,
                     font_id,
+                    letter_spacing,
                 });
             }
         }
@@ -885,7 +903,8 @@ pub struct LineWrapperHandle {
 impl Drop for LineWrapperHandle {
     fn drop(&mut self) {
         let mut state = self.text_system.wrapper_pool.lock();
-        let wrapper = self.wrapper.take().unwrap();
+        let mut wrapper = self.wrapper.take().unwrap();
+        wrapper.set_letter_spacing(None);
         state
             .get_mut(&FontIdWithSize {
                 font_id: wrapper.font_id,
@@ -1013,7 +1032,7 @@ impl Display for FontStyle {
 }
 
 /// A styled run of text, for use in [`crate::TextLayout`].
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct TextRun {
     /// A number of utf8 bytes
     pub len: usize,
@@ -1027,6 +1046,8 @@ pub struct TextRun {
     pub underline: Option<UnderlineStyle>,
     /// The strikethrough style (if any)
     pub strikethrough: Option<StrikethroughStyle>,
+    /// Letter spacing applied between glyphs, in pixels.
+    pub letter_spacing: Option<Pixels>,
 }
 
 #[cfg(all(target_os = "macos", test))]
@@ -1201,133 +1222,6 @@ impl FontMetrics {
     /// Returns the outer limits of the area that the font covers in pixels.
     pub fn bounding_box(&self, font_size: Pixels) -> Bounds<Pixels> {
         (self.bounding_box / self.units_per_em as f32 * font_size.0).map(px)
-    }
-}
-
-#[cfg(test)]
-mod cache_tests {
-    use super::*;
-    use crate::{GlyphId, LineLayout, RenderGlyphParams, size};
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    const LATE_FONT_FAMILY: &str = "Late Loaded Test Font";
-    const DECLARED_FALLBACK_FAMILY: &str = "Declared Test Monospace";
-    const SECONDARY_FALLBACK_FAMILY: &str = "Secondary Test Font";
-
-    #[derive(Default)]
-    struct LateLoadingPlatformTextSystem {
-        late_font_loaded: AtomicBool,
-    }
-
-    impl PlatformTextSystem for LateLoadingPlatformTextSystem {
-        fn add_fonts(&self, _fonts: Vec<Cow<'static, [u8]>>) -> Result<()> {
-            self.late_font_loaded.store(true, Ordering::Release);
-            Ok(())
-        }
-
-        fn all_font_names(&self) -> Vec<String> {
-            Vec::new()
-        }
-
-        fn font_id(&self, descriptor: &Font) -> Result<FontId> {
-            match descriptor.family.as_ref() {
-                LATE_FONT_FAMILY if self.late_font_loaded.load(Ordering::Acquire) => Ok(FontId(42)),
-                LATE_FONT_FAMILY => Err(anyhow!("test font has not been loaded")),
-                DECLARED_FALLBACK_FAMILY
-                    if descriptor.fallbacks.as_ref().is_some_and(|fallbacks| {
-                        fallbacks.fallback_list() == [SECONDARY_FALLBACK_FAMILY]
-                    }) =>
-                {
-                    Ok(FontId(43))
-                }
-                ".ZedMono" => Ok(FontId(1)),
-                family => Err(anyhow!("unsupported test font family: {family}")),
-            }
-        }
-
-        fn font_metrics(&self, _font_id: FontId) -> FontMetrics {
-            FontMetrics {
-                units_per_em: 1,
-                ascent: 1.0,
-                descent: 0.0,
-                line_gap: 0.0,
-                underline_position: 0.0,
-                underline_thickness: 0.0,
-                cap_height: 1.0,
-                x_height: 1.0,
-                bounding_box: Bounds::default(),
-            }
-        }
-
-        fn typographic_bounds(&self, _font_id: FontId, _glyph_id: GlyphId) -> Result<Bounds<f32>> {
-            Ok(Bounds::default())
-        }
-
-        fn advance(&self, _font_id: FontId, _glyph_id: GlyphId) -> Result<Size<f32>> {
-            Ok(size(1.0, 0.0))
-        }
-
-        fn glyph_for_char(&self, _font_id: FontId, _ch: char) -> Option<GlyphId> {
-            Some(GlyphId(1))
-        }
-
-        fn glyph_raster_bounds(&self, _params: &RenderGlyphParams) -> Result<Bounds<DevicePixels>> {
-            Ok(Bounds::default())
-        }
-
-        fn rasterize_glyph(
-            &self,
-            _params: &RenderGlyphParams,
-            raster_bounds: Bounds<DevicePixels>,
-        ) -> Result<(Size<DevicePixels>, Vec<u8>)> {
-            Ok((raster_bounds.size, Vec::new()))
-        }
-
-        fn layout_line(&self, text: &str, font_size: Pixels, _runs: &[FontRun]) -> LineLayout {
-            LineLayout {
-                font_size,
-                len: text.len(),
-                ..LineLayout::default()
-            }
-        }
-
-        fn recommended_rendering_mode(
-            &self,
-            _font_id: FontId,
-            _font_size: Pixels,
-        ) -> TextRenderingMode {
-            TextRenderingMode::Grayscale
-        }
-    }
-
-    #[test]
-    fn add_fonts_invalidates_a_cached_font_lookup_failure() {
-        let text_system = TextSystem::new(Arc::new(LateLoadingPlatformTextSystem::default()));
-        let late_font = font(LATE_FONT_FAMILY);
-
-        assert!(text_system.font_id(&late_font).is_err());
-        text_system
-            .add_fonts(vec![Cow::Borrowed(b"test font bytes")])
-            .unwrap();
-
-        assert_eq!(text_system.font_id(&late_font).unwrap(), FontId(42));
-    }
-
-    #[test]
-    fn resolve_font_uses_declared_fallback_before_global_stack() {
-        let text_system = TextSystem::new(Arc::new(LateLoadingPlatformTextSystem::default()));
-        let requested_font = Font {
-            family: SharedString::from("Missing Test Font"),
-            features: FontFeatures::default(),
-            fallbacks: Some(FontFallbacks::from_fonts(vec![
-                DECLARED_FALLBACK_FAMILY.to_string(),
-                SECONDARY_FALLBACK_FAMILY.to_string(),
-            ])),
-            weight: FontWeight::NORMAL,
-            style: FontStyle::Normal,
-        };
-
-        assert_eq!(text_system.resolve_font(&requested_font), FontId(43));
     }
 }
 

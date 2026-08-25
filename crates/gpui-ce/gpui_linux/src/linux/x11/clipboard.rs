@@ -47,9 +47,8 @@ use x11rb::{
     wrapper::ConnectionExt as _,
 };
 
-use gpui::{ClipboardEntry, ClipboardItem, ExternalPaths, Image, ImageFormat, hash};
+use gpui::{ClipboardItem, Image, ImageFormat, hash};
 use strum::IntoEnumIterator;
-use url::Url;
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -79,7 +78,7 @@ x11rb::atom_manager! {
         TEXT_MIME_UNKNOWN: b"text/plain",
 
         // HTML: b"text/html",
-        URI_LIST: b"text/uri-list",
+        // URI_LIST: b"text/uri-list",
 
         PNG__MIME: ImageFormat::mime_type(ImageFormat::Png ).as_bytes(),
         JPEG_MIME: ImageFormat::mime_type(ImageFormat::Jpeg).as_bytes(),
@@ -845,7 +844,7 @@ fn serve_requests(context: Arc<Inner>) -> Result<(), Box<dyn std::error::Error>>
 
     log::trace!("Started serve requests thread.");
 
-    let _guard = util::defer(|| {
+    let _guard = gpui_util::defer(|| {
         context.serve_stopped.store(true, Ordering::Relaxed);
     });
 
@@ -991,32 +990,6 @@ impl Clipboard {
         self.inner.write(data, selection, wait)
     }
 
-    pub(crate) fn set_item(
-        &self,
-        item: &ClipboardItem,
-        selection: ClipboardKind,
-        wait: WaitConfig,
-    ) -> Result<()> {
-        let mut data = Vec::new();
-        for entry in item.entries() {
-            match entry {
-                ClipboardEntry::String(string) => data.push(ClipboardData {
-                    bytes: string.text().as_bytes().to_vec(),
-                    format: self.inner.atoms.UTF8_STRING,
-                }),
-                ClipboardEntry::Image(image) => data.push(ClipboardData {
-                    bytes: image.bytes.clone(),
-                    format: self.image_format_atom(image.format),
-                }),
-                ClipboardEntry::ExternalPaths(paths) => data.push(ClipboardData {
-                    bytes: encode_uri_list(paths),
-                    format: self.inner.atoms.URI_LIST,
-                }),
-            }
-        }
-        self.inner.write(data, selection, wait)
-    }
-
     fn image_format_atom(&self, format: ImageFormat) -> Atom {
         match format {
             ImageFormat::Png => self.inner.atoms.PNG__MIME,
@@ -1063,7 +1036,6 @@ impl Clipboard {
         // image formats first, as they are more specific, and read will return the first
         // format that the contents can be converted to
         let mut format_atoms = Vec::with_capacity(image_entries.len() + text_format_atoms.len());
-        format_atoms.push(self.inner.atoms.URI_LIST);
         format_atoms.extend(image_entries.iter().map(|(atom, _)| *atom));
         format_atoms.extend_from_slice(text_format_atoms);
 
@@ -1073,23 +1045,6 @@ impl Clipboard {
             "read clipboard as format {:?}",
             self.inner.atom_name(result.format)
         );
-
-        if result.format == self.inner.atoms.URI_LIST {
-            let uri_list = String::from_utf8(result.bytes).map_err(|_| Error::ConversionFailure)?;
-            let paths = uri_list
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty() && !line.starts_with('#'))
-                .filter_map(|line| Url::parse(line).ok())
-                .filter_map(|uri| uri.to_file_path().ok())
-                .collect::<Vec<_>>();
-            if paths.is_empty() {
-                return Err(Error::ConversionFailure);
-            }
-            return Ok(ClipboardItem {
-                entries: vec![ClipboardEntry::ExternalPaths(ExternalPaths(paths.into()))],
-            });
-        }
 
         for (format_atom, image_format) in image_entries {
             if result.format == format_atom {
@@ -1116,17 +1071,6 @@ impl Clipboard {
     pub fn is_owner(&self, selection: ClipboardKind) -> bool {
         self.inner.is_owner(selection).unwrap_or(false)
     }
-}
-
-fn encode_uri_list(paths: &ExternalPaths) -> Vec<u8> {
-    let mut uri_list = String::new();
-    for path in paths.paths() {
-        if let Ok(uri) = Url::from_file_path(path) {
-            uri_list.push_str(uri.as_str());
-            uri_list.push_str("\r\n");
-        }
-    }
-    uri_list.into_bytes()
 }
 
 impl Drop for Clipboard {

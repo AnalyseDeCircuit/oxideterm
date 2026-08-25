@@ -1,16 +1,13 @@
-// OxideTerm modification: dispatches background work through the native Win32 thread pool.
-
 use std::{
     ffi::c_void,
-    mem::size_of,
     ptr::NonNull,
     sync::atomic::{AtomicBool, Ordering},
     thread::{ThreadId, current},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use anyhow::Context;
-use util::ResultExt;
+use gpui_util::ResultExt;
 use windows::Win32::{
     Foundation::{FILETIME, LPARAM, WPARAM},
     Media::{timeBeginPeriod, timeEndPeriod},
@@ -25,8 +22,7 @@ use windows::Win32::{
 
 use crate::{HWND, SafeHwnd, WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD};
 use gpui::{
-    GLOBAL_THREAD_TIMINGS, PlatformDispatcher, Priority, PriorityQueueSender, RunnableVariant,
-    TaskTiming, ThreadTaskTimings, TimerResolutionGuard,
+    PlatformDispatcher, Priority, PriorityQueueSender, RunnableVariant, TimerResolutionGuard,
 };
 
 pub(crate) struct WindowsDispatcher {
@@ -56,81 +52,53 @@ impl WindowsDispatcher {
     }
 
     fn dispatch_on_threadpool(&self, priority: TP_CALLBACK_PRIORITY, runnable: RunnableVariant) {
-        let callback_environment = TP_CALLBACK_ENVIRON_V3 {
+        let environ = TP_CALLBACK_ENVIRON_V3 {
             Version: 3,
-            Size: size_of::<TP_CALLBACK_ENVIRON_V3>() as u32,
             CallbackPriority: priority,
+            Size: size_of::<TP_CALLBACK_ENVIRON_V3>() as u32,
             ..Default::default()
         };
-        let runnable_pointer = runnable.into_raw();
-        let result = unsafe {
-            TrySubmitThreadpoolCallback(
-                Some(run_work_callback),
-                Some(runnable_pointer.as_ptr().cast::<c_void>()),
-                Some(&callback_environment),
-            )
-        };
-        if let Err(error) = result {
-            // SAFETY: Submission failed, so the callback cannot consume this unique raw pointer.
-            drop(unsafe { RunnableVariant::from_raw(runnable_pointer) });
-            log::error!("failed to submit Win32 thread-pool work: {error}");
+
+        // If the thread pool never runs our callback, the matching `from_raw` is never called, which leaks the runnable.
+        // Dropping the scheduled runnable would cancel its task and make the next poll of any awaiter panic. Since we expect
+        // the scenario to usually happen during shutdown, this leak is acceptable.
+        let context = runnable.into_raw().as_ptr() as *mut c_void;
+
+        unsafe {
+            TrySubmitThreadpoolCallback(Some(run_work_callback), Some(context), Some(&environ))
+                .log_err();
         }
     }
 
     fn dispatch_on_threadpool_after(&self, runnable: RunnableVariant, duration: Duration) {
-        let runnable_pointer = runnable.into_raw();
-        let timer = match unsafe {
-            CreateThreadpoolTimer(
-                Some(run_timer_callback),
-                Some(runnable_pointer.as_ptr().cast::<c_void>()),
-                None,
-            )
-        } {
-            Ok(timer) => timer,
-            Err(error) => {
-                // SAFETY: Timer creation failed, so no callback owns this unique raw pointer.
-                drop(unsafe { RunnableVariant::from_raw(runnable_pointer) });
-                log::error!("failed to create Win32 thread-pool timer: {error}");
-                return;
-            }
-        };
-        let due_time = relative_threadpool_due_time(duration);
+        let context = runnable.into_raw().as_ptr() as *mut c_void;
+
         unsafe {
-            SetThreadpoolTimer(timer, Some(&due_time), 0, None);
+            if let Ok(timer) = CreateThreadpoolTimer(Some(run_timer_callback), Some(context), None)
+            {
+                // Negative FILETIME expresses a relative delay in 100ns ticks
+                let ticks = (duration.as_nanos() / 100).min(i64::MAX as u128) as i64;
+                let due = (-ticks) as u64;
+                let due_time = FILETIME {
+                    dwLowDateTime: due as u32,
+                    dwHighDateTime: (due >> 32) as u32,
+                };
+                SetThreadpoolTimer(timer, Some(&due_time), 0, None);
+            }
         }
     }
 
     #[inline(always)]
     pub(crate) fn execute_runnable(runnable: RunnableVariant) {
-        let start = Instant::now();
-
         let location = runnable.metadata().location;
-        let mut timing = TaskTiming {
-            location,
-            start,
-            end: None,
-        };
-        gpui::profiler::add_task_timing(timing);
-
+        let spawned = runnable.metadata().spawned;
+        gpui::profiler::update_running_task(spawned, location);
         runnable.run();
-
-        let end = Instant::now();
-        timing.end = Some(end);
-
-        gpui::profiler::add_task_timing(timing);
+        gpui::profiler::save_task_timing();
     }
 }
 
 impl PlatformDispatcher for WindowsDispatcher {
-    fn get_all_timings(&self) -> Vec<ThreadTaskTimings> {
-        let global_thread_timings = GLOBAL_THREAD_TIMINGS.lock();
-        ThreadTaskTimings::convert(&global_thread_timings)
-    }
-
-    fn get_current_thread_timings(&self) -> gpui::ThreadTaskTimings {
-        gpui::profiler::get_current_thread_task_timings()
-    }
-
     fn is_main_thread(&self) -> bool {
         current().id() == self.main_thread_id
     }
@@ -198,23 +166,9 @@ impl PlatformDispatcher for WindowsDispatcher {
         unsafe {
             timeBeginPeriod(1);
         }
-        util::defer(Box::new(|| unsafe {
+        gpui_util::defer(Box::new(|| unsafe {
             timeEndPeriod(1);
         }))
-    }
-}
-
-/// Converts a Rust duration to the negative 100-nanosecond interval used by Win32 timers.
-fn relative_threadpool_due_time(duration: Duration) -> FILETIME {
-    let tick_count = duration
-        .as_nanos()
-        .saturating_add(99)
-        .div_euclid(100)
-        .min(i64::MAX as u128) as i64;
-    let encoded_interval = tick_count.saturating_neg() as u64;
-    FILETIME {
-        dwLowDateTime: encoded_interval as u32,
-        dwHighDateTime: (encoded_interval >> 32) as u32,
     }
 }
 
@@ -222,10 +176,7 @@ unsafe extern "system" fn run_work_callback(
     _instance: PTP_CALLBACK_INSTANCE,
     context: *mut c_void,
 ) {
-    let runnable_pointer =
-        NonNull::new(context.cast::<()>()).expect("Win32 work callback received null context");
-    // SAFETY: Each successful submission transfers exactly one raw runnable to one callback.
-    let runnable = unsafe { RunnableVariant::from_raw(runnable_pointer) };
+    let runnable = unsafe { RunnableVariant::from_raw(NonNull::new_unchecked(context as *mut ())) };
     WindowsDispatcher::execute_runnable(runnable);
 }
 
@@ -234,26 +185,7 @@ unsafe extern "system" fn run_timer_callback(
     context: *mut c_void,
     timer: PTP_TIMER,
 ) {
-    let runnable_pointer =
-        NonNull::new(context.cast::<()>()).expect("Win32 timer callback received null context");
-    // SAFETY: Each timer transfers exactly one raw runnable to its one-shot callback.
-    let runnable = unsafe { RunnableVariant::from_raw(runnable_pointer) };
+    let runnable = unsafe { RunnableVariant::from_raw(NonNull::new_unchecked(context as *mut ())) };
     WindowsDispatcher::execute_runnable(runnable);
-    unsafe {
-        CloseThreadpoolTimer(timer);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn relative_due_time_uses_negative_hundred_nanosecond_ticks() {
-        let due_time = relative_threadpool_due_time(Duration::from_micros(25));
-        let encoded =
-            u64::from(due_time.dwLowDateTime) | (u64::from(due_time.dwHighDateTime) << 32);
-
-        assert_eq!(encoded as i64, -250);
-    }
+    unsafe { CloseThreadpoolTimer(timer) };
 }

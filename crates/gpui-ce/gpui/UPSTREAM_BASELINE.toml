@@ -1,111 +1,144 @@
-schema_version = 2
-upstream_repository = "https://github.com/gpui-ce/gpui-ce.git"
-upstream_commit = "6c799b8e994266233014cea66d7769675ec1967c"
+schema_version = 3
+primary_upstream = "zed"
+zed_repository = "https://github.com/zed-industries/zed.git"
+zed_commit = "0969b0dba3f3411592fce801d00f8d81b8dcf902"
+gpui_ce_repository = "https://github.com/gpui-ce/gpui-ce.git"
+gpui_ce_commit = "9949f8b2d27bb1d6dbc1efe90be039634cf1fb6b"
 upstream_license = "Apache-2.0"
 upstream_root_license = "crates/gpui-ce/gpui/GPUI_CE_ROOT_LICENSE.md"
 packaged_license = "licenses/third-party/GPUI-CE-LICENSE-APACHE"
-imported_on = "2026-07-17"
-oxideterm_baseline_commit = "7c2c5046c93ae4d54a132d40c33d0c622274354a"
-oxideterm_cargo_lock_sha256 = "1ef7aae94815e974fe39d4ac7d5ea5025b7588fa2002e7992a9f50af634eb6fa"
+imported_on = "2026-08-25"
+oxideterm_import_parent_commit = "f462f86a7bcbc5d2803b55b118f6763a3b7c89b6"
+oxideterm_cargo_lock_sha256 = "d25bd8b9b5eb01e402d80d188703ac2723df8edee54a59cdfe80b4ef0798548f"
 oxideterm_rust_toolchain = "1.94.1"
 oxideterm_cargo_resolver = "2"
 local_patch_ledger = "crates/gpui-ce/gpui/OXIDETERM_PATCHES.md"
 
 [[crates]]
 name = "gpui"
-upstream_path = "crates/gpui"
 local_path = "crates/gpui-ce/gpui"
-upstream_tree = "1afc44f32dc650bb7d013894b52ae1dbe49d3eed"
+zed_path = "crates/gpui"
+zed_tree = "ce8ebf9e1b34889aa07a39ab5f0679c378a39a0d"
+gpui_ce_path = "crates/gpui"
+gpui_ce_tree = "14d78aa877ef35266c7a7d70d06927235b79e1f8"
+
+[[crates]]
+name = "gpui_apple"
+local_path = "crates/gpui-ce/gpui_apple"
+zed_path = "crates/gpui_apple"
+zed_tree = "6382ce9f939bd0baddf8cc0729e6eef860e813c8"
 
 [[crates]]
 name = "gpui_ce_util"
-upstream_path = "crates/gpui_ce_util"
 local_path = "crates/gpui-ce/gpui_ce_util"
-upstream_tree = "3675425365546cfbd0b089a93fe2de7267e85c77"
+zed_path = "crates/gpui_util"
+zed_tree = "fc89b3a85d4e17ea376963c6cc53e1ab2c0faf29"
+gpui_ce_path = "crates/gpui_ce_util"
+gpui_ce_tree = "9611a9ec652cd7b28f899ffc8ee0e4008e5f8ba9"
 
 [[crates]]
 name = "gpui_collections"
-upstream_path = "crates/gpui_collections"
 local_path = "crates/gpui-ce/gpui_collections"
-upstream_tree = "ef8637ab096b5955715ca3b0a45d2a1db3501fbe"
+gpui_ce_path = "crates/gpui_collections"
+gpui_ce_tree = "0119941cdba066283da1d86ebe8ccfca58455e48"
 
 [[crates]]
 name = "gpui_derive_refineable"
-upstream_path = "crates/gpui_derive_refineable"
 local_path = "crates/gpui-ce/gpui_derive_refineable"
-upstream_tree = "5c82e7afb96ed53f6806aef26957547096f4f290"
+gpui_ce_path = "crates/gpui_derive_refineable"
+gpui_ce_tree = "5c82e7afb96ed53f6806aef26957547096f4f290"
 
 [[crates]]
 name = "gpui_linux"
-upstream_path = "crates/gpui_linux"
 local_path = "crates/gpui-ce/gpui_linux"
-upstream_tree = "c380dc0b71aeb80cfe1593aaf01ff8de26b752b0"
+zed_path = "crates/gpui_linux"
+zed_tree = "7719d35998c4ba0a60f0ec85ab8d5303a92f64e7"
+gpui_ce_path = "crates/gpui_linux"
+gpui_ce_tree = "eb3d3c651f471de2ea99715a9f4b9e434dd16bdb"
 
 [[crates]]
 name = "gpui_macos"
-upstream_path = "crates/gpui_macos"
 local_path = "crates/gpui-ce/gpui_macos"
-upstream_tree = "e1870c5d8b8fd2fc98997a337a01e94fd45ae885"
+zed_path = "crates/gpui_macos"
+zed_tree = "f930365b6bf79e6ec60bf4e76ebd5cadabe0b9ee"
+gpui_ce_path = "crates/gpui_macos"
+gpui_ce_tree = "7496a2146663280c1fe532b2d6188efa57613f48"
 
 [[crates]]
 name = "gpui_macros"
-upstream_path = "crates/gpui_macros"
 local_path = "crates/gpui-ce/gpui_macros"
-upstream_tree = "0e1cfd79ef7a4d9c7adc53564d4ef985f1836df3"
+zed_path = "crates/gpui_macros"
+zed_tree = "01e041ace626b62112d866982bb24e5863888245"
+gpui_ce_path = "crates/gpui_macros"
+gpui_ce_tree = "120e6e50bf0f6e9d97e107bd0ee6aa53356c5620"
 
 [[crates]]
 name = "gpui_media"
-upstream_path = "crates/gpui_media"
 local_path = "crates/gpui-ce/gpui_media"
-upstream_tree = "5507916c525ab624e3377bf0df729743cd755a81"
+gpui_ce_path = "crates/gpui_media"
+gpui_ce_tree = "5507916c525ab624e3377bf0df729743cd755a81"
+
+[[crates]]
+name = "gpui_path"
+local_path = "crates/gpui-ce/gpui_path"
+gpui_ce_path = "crates/gpui_path"
+gpui_ce_tree = "b3749f6a20cf783121268af19e60e5a1b42129f7"
 
 [[crates]]
 name = "gpui_platform"
-upstream_path = "crates/gpui_platform"
 local_path = "crates/gpui-ce/gpui_platform"
-upstream_tree = "169597cd560a13f9548d5799e5eb4f4df998571c"
+zed_path = "crates/gpui_platform"
+zed_tree = "72f6014568b653ed96a486f782e2ed1fbd863740"
+gpui_ce_path = "crates/gpui_platform"
+gpui_ce_tree = "f7e3f6c481a7629ffd5c09d7c4fa1fec165c0d72"
 
 [[crates]]
 name = "gpui_refineable"
-upstream_path = "crates/gpui_refineable"
 local_path = "crates/gpui-ce/gpui_refineable"
-upstream_tree = "0f208d2ca4c89c184e0ddab416575d9c1b5d0409"
+gpui_ce_path = "crates/gpui_refineable"
+gpui_ce_tree = "0f208d2ca4c89c184e0ddab416575d9c1b5d0409"
 
 [[crates]]
 name = "gpui_scheduler"
-upstream_path = "crates/gpui_scheduler"
 local_path = "crates/gpui-ce/gpui_scheduler"
-upstream_tree = "7082f4dfcf398b9ab6566c68308a78e34b8172d6"
+gpui_ce_path = "crates/gpui_scheduler"
+gpui_ce_tree = "aea8140993812c4a5080366391850e8d42e07e2f"
 
 [[crates]]
 name = "gpui_shared_string"
-upstream_path = "crates/gpui_shared_string"
 local_path = "crates/gpui-ce/gpui_shared_string"
-upstream_tree = "1d7d7f6ff518cb00d8d2313563aaf312f96860b5"
+zed_path = "crates/gpui_shared_string"
+zed_tree = "8fa2ca629bf5fd1d9354874c5529de018c4c24c2"
+gpui_ce_path = "crates/gpui_shared_string"
+gpui_ce_tree = "1d7d7f6ff518cb00d8d2313563aaf312f96860b5"
 
 [[crates]]
 name = "gpui_sum_tree"
-upstream_path = "crates/gpui_sum_tree"
 local_path = "crates/gpui-ce/gpui_sum_tree"
-upstream_tree = "013dea39b60df5a6dce0a85d58d18468f1e49b2b"
+gpui_ce_path = "crates/gpui_sum_tree"
+gpui_ce_tree = "013dea39b60df5a6dce0a85d58d18468f1e49b2b"
 
 [[crates]]
 name = "gpui_wgpu"
-upstream_path = "crates/gpui_wgpu"
 local_path = "crates/gpui-ce/gpui_wgpu"
-upstream_tree = "2a9625d5baaebc7b2423ea346634221689dc8035"
+zed_path = "crates/gpui_wgpu"
+zed_tree = "f8117735035ad9b5ca314ce1f7def5ad4cb0eaae"
+gpui_ce_path = "crates/gpui_wgpu"
+gpui_ce_tree = "350441ba439448d9680d4f8abe7e2b2452cec348"
 
 [[crates]]
 name = "gpui_windows"
-upstream_path = "crates/gpui_windows"
 local_path = "crates/gpui-ce/gpui_windows"
-upstream_tree = "4a45c2e350600759d3897cf3458448d84e7dfb68"
+zed_path = "crates/gpui_windows"
+zed_tree = "09aedd114984d814e85c7a3184cfcc6abfa55572"
+gpui_ce_path = "crates/gpui_windows"
+gpui_ce_tree = "a74fecd1b847f8b87a5a9b84ff39caaa52f3803b"
 
 [[crates]]
 name = "gpui_zed_util"
-upstream_path = "crates/gpui_zed_util"
 local_path = "crates/gpui-ce/gpui_zed_util"
-upstream_tree = "f62661a0b62cc99fae522de27c4570883c721645"
+gpui_ce_path = "crates/gpui_zed_util"
+gpui_ce_tree = "da30511f359b3d44d0752699ec4bfe52c5037cfa"
 
 [excluded]
 paths = [

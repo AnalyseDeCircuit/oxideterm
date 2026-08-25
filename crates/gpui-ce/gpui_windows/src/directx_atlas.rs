@@ -1,5 +1,3 @@
-// Modified by OxideTerm contributors to support dedicated mutable textures and partial uploads.
-
 use collections::FxHashMap;
 use etagere::BucketedAtlasAllocator;
 use parking_lot::Mutex;
@@ -21,28 +19,11 @@ pub(crate) struct DirectXAtlas(Mutex<DirectXAtlasState>);
 struct DirectXAtlasState {
     device: ID3D11Device,
     device_context: ID3D11DeviceContext,
-    resource_generation: ResourceGeneration,
+    resource_generation: u64,
     monochrome_textures: AtlasTextureList<DirectXAtlasTexture>,
     polychrome_textures: AtlasTextureList<DirectXAtlasTexture>,
     subpixel_textures: AtlasTextureList<DirectXAtlasTexture>,
     tiles_by_key: FxHashMap<AtlasKey, AtlasTile>,
-}
-
-/// Monotonic version of the GPU resources currently stored in the atlas.
-#[derive(Default)]
-struct ResourceGeneration(u64);
-
-impl ResourceGeneration {
-    fn current(&self) -> u64 {
-        self.0
-    }
-
-    fn advance(&mut self) {
-        self.0 = self
-            .0
-            .checked_add(1)
-            .expect("DirectX atlas resource generation exhausted");
-    }
 }
 
 struct DirectXAtlasTexture {
@@ -59,7 +40,7 @@ impl DirectXAtlas {
         DirectXAtlas(Mutex::new(DirectXAtlasState {
             device: device.clone(),
             device_context: device_context.clone(),
-            resource_generation: Default::default(),
+            resource_generation: 0,
             monochrome_textures: Default::default(),
             polychrome_textures: Default::default(),
             subpixel_textures: Default::default(),
@@ -103,8 +84,6 @@ impl PlatformAtlas for DirectXAtlas {
             let Some((size, bytes)) = build()? else {
                 return Ok(None);
             };
-            // Mutable framebuffers use dedicated textures so partial uploads do
-            // not contend with glyphs and immutable images in shared atlases.
             let tile = if matches!(key, AtlasKey::DynamicTexture(_)) {
                 lock.allocate_dedicated(size, key.texture_kind())
             } else {
@@ -125,30 +104,29 @@ impl PlatformAtlas for DirectXAtlas {
         bytes: &[u8],
     ) -> anyhow::Result<()> {
         let lock = self.0.lock();
-        let Some(tile) = lock.tiles_by_key.get(key) else {
+        let Some(tile) = lock.tiles_by_key.get(key).copied() else {
             return Ok(());
         };
-        // Dirty bounds are relative to the logical tile, while D3D expects
-        // coordinates in the backing texture.
         let upload_bounds = Bounds {
             origin: tile.bounds.origin + bounds.origin,
             size: bounds.size,
         };
-        let texture = lock.texture(tile.texture_id);
-        texture.upload(&lock.device_context, upload_bounds, bytes);
+        lock.texture(tile.texture_id)
+            .upload(&lock.device_context, upload_bounds, bytes);
         Ok(())
     }
 
     fn resource_generation(&self) -> u64 {
-        self.0.lock().resource_generation.current()
+        self.0.lock().resource_generation
     }
 
     fn remove(&self, key: &AtlasKey) {
         let mut lock = self.0.lock();
 
-        let Some(id) = lock.tiles_by_key.remove(key).map(|tile| tile.texture_id) else {
+        let Some(tile) = lock.tiles_by_key.remove(key) else {
             return;
         };
+        let id = tile.texture_id;
 
         let textures = match id.kind {
             AtlasTextureKind::Monochrome => &mut lock.monochrome_textures,
@@ -161,6 +139,7 @@ impl PlatformAtlas for DirectXAtlas {
         };
 
         if let Some(mut texture) = texture_slot.take() {
+            texture.allocator.deallocate(tile.tile_id.into());
             texture.decrement_ref_count();
             if texture.is_unreferenced() {
                 textures.free_list.push(texture.id.index as usize);
@@ -177,9 +156,7 @@ impl DirectXAtlasState {
         self.polychrome_textures = AtlasTextureList::default();
         self.subpixel_textures = AtlasTextureList::default();
         self.tiles_by_key.clear();
-        // One generation change represents one atomic invalidation of all
-        // atlas textures, including dedicated dynamic textures.
-        self.resource_generation.advance();
+        self.resource_generation = self.resource_generation.wrapping_add(1);
     }
 
     fn allocate_dedicated(
@@ -191,12 +168,15 @@ impl DirectXAtlasState {
             width: DevicePixels(16384),
             height: DevicePixels(16384),
         };
-        if size.width > MAX_ATLAS_SIZE.width || size.height > MAX_ATLAS_SIZE.height {
+        if size.width.0 <= 0
+            || size.height.0 <= 0
+            || size.width > MAX_ATLAS_SIZE.width
+            || size.height > MAX_ATLAS_SIZE.height
+        {
             return None;
         }
-
-        let texture = self.push_texture_with_size(size, texture_kind)?;
-        texture.allocate(size)
+        self.push_texture_with_size(size, texture_kind)?
+            .allocate(size)
     }
 
     fn allocate(
@@ -363,6 +343,24 @@ impl DirectXAtlasTexture {
         bounds: Bounds<DevicePixels>,
         bytes: &[u8],
     ) {
+        // `UpdateSubresource` reads `row_pitch * height` bytes from `bytes` based on the
+        // `D3D11_BOX` below. If the caller hands us a slice shorter than that, the driver would
+        // over-read past the end of the source buffer (potentially by multiple megabytes), so bail
+        // out instead. This is a first-insert path rather than a per-frame one, so the check is
+        // effectively free.
+        let row_bytes = bounds.size.width.to_bytes(self.bytes_per_pixel as u8) as usize;
+        let expected = row_bytes * bounds.size.height.0.max(0) as usize;
+        if bytes.len() < expected {
+            log::error!(
+                "DirectXAtlasTexture::upload: source slice is {} bytes but the {}x{} region \
+                 requires {} bytes; skipping upload to avoid a driver over-read",
+                bytes.len(),
+                bounds.size.width.0,
+                bounds.size.height.0,
+                expected,
+            );
+            return;
+        }
         unsafe {
             device_context.UpdateSubresource(
                 &self.texture,
@@ -404,16 +402,80 @@ fn etagere_point_to_device(value: etagere::Point) -> Point<DevicePixels> {
 
 #[cfg(test)]
 mod tests {
-    use super::ResourceGeneration;
+    use super::*;
+    use gpui::{ImageId, RenderImageParams};
+    use std::borrow::Cow;
+    use windows::Win32::{
+        Foundation::HMODULE,
+        Graphics::{
+            Direct3D::D3D_DRIVER_TYPE_WARP,
+            Direct3D11::{D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice},
+        },
+    };
+
+    fn create_atlas() -> Option<DirectXAtlas> {
+        let mut device: Option<ID3D11Device> = None;
+        let mut device_context: Option<ID3D11DeviceContext> = None;
+        unsafe {
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_WARP,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                Some(&mut device_context),
+            )
+        }
+        .ok()?;
+        Some(DirectXAtlas::new(&device?, &device_context?))
+    }
+
+    fn make_image_key(image_id: usize) -> AtlasKey {
+        AtlasKey::Image(RenderImageParams {
+            image_id: ImageId(image_id),
+            frame_index: 0,
+        })
+    }
+
+    fn insert_tile(atlas: &DirectXAtlas, key: &AtlasKey, size: Size<DevicePixels>) -> AtlasTile {
+        atlas
+            .get_or_insert_with(key, &mut || {
+                let byte_count = (size.width.0 as usize) * (size.height.0 as usize) * 4;
+                Ok(Some((size, Cow::Owned(vec![0u8; byte_count]))))
+            })
+            .expect("allocation should succeed")
+            .expect("callback returns Some")
+    }
 
     #[test]
-    fn resource_generation_advances_once_per_invalidation() {
-        let mut generation = ResourceGeneration::default();
+    fn test_remove_deallocates_tile_space_for_reuse() {
+        let Some(atlas) = create_atlas() else {
+            return;
+        };
 
-        assert_eq!(generation.current(), 0);
-        generation.advance();
-        assert_eq!(generation.current(), 1);
-        generation.advance();
-        assert_eq!(generation.current(), 2);
+        let small = Size {
+            width: DevicePixels(64),
+            height: DevicePixels(64),
+        };
+        let big = Size {
+            width: DevicePixels(700),
+            height: DevicePixels(700),
+        };
+
+        let keeper_key = make_image_key(1);
+        let big_key_a = make_image_key(2);
+        let big_key_b = make_image_key(3);
+
+        let keeper_tile = insert_tile(&atlas, &keeper_key, small);
+        let tile_a = insert_tile(&atlas, &big_key_a, big);
+        assert_eq!(keeper_tile.texture_id, tile_a.texture_id);
+
+        atlas.remove(&big_key_a);
+
+        let tile_b = insert_tile(&atlas, &big_key_b, big);
+        assert_eq!(tile_b.texture_id, keeper_tile.texture_id);
     }
 }

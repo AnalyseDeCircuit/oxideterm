@@ -6,6 +6,7 @@ use gpui::{
     Resource, SharedString, Window, WindowBounds, WindowOptions, black, div, img, prelude::*,
     pulsating_between, px, red, size,
 };
+use palette::WithAlpha;
 
 struct Assets {}
 
@@ -28,7 +29,10 @@ impl AssetSource for Assets {
     }
 }
 
-const IMAGE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/image/app-icon.png");
+const IMAGE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/examples/legacy/image/app-icon.png"
+);
 
 #[derive(Copy, Clone, Hash)]
 struct LoadImageParameters {
@@ -74,13 +78,13 @@ impl ImageLoadingExample {
                 Animation::new(Duration::from_secs(3))
                     .repeat()
                     .with_easing(pulsating_between(0.04, 0.24)),
-                move |this, delta| this.bg(black().opacity(delta)),
+                move |this, delta| this.bg(black().with_alpha(delta)),
             ),
         )
     }
 
     fn fallback_element() -> impl IntoElement {
-        let fallback_color: Hsla = black().opacity(0.5);
+        let fallback_color: Hsla = black().with_alpha(0.5);
 
         div().size_full().flex_none().p_0p5().child(
             div()
