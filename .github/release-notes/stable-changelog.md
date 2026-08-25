@@ -12,8 +12,8 @@ OxideTerm 2.0.24 adds native tmux control-mode sessions, parameterized Quick Com
 #### ⚡ Further Terminal Performance
 
 - Reduced repeated work across PTY draining, snapshot conversion, text layout, link preparation, and rendering; compacted snapshot-cell storage and reused unchanged terminal data more aggressively; and batched common ASCII parsing and grid writes in the vendored terminal stack.
-- In OxideTerm's reproducible 16 MiB release-build benchmark, median process-to-PTY throughput increased from 69.031 to 86.032 MiB/s for plain text, from 88.384 to 92.502 MiB/s for ANSI output, from 68.711 to 75.884 MiB/s for Unicode output, and from 96.685 to 100.336 MiB/s for long CSI sequences. These are further gains of 24.6%, 4.7%, 10.4%, and 3.8% over 2.0.23 respectively.
-- Across both optimization rounds, 2.0.24 reaches 27.36×, 12.62×, 17.27×, and 9.85× the original baseline throughput for plain text, ANSI output, Unicode output, and long CSI sequences respectively.
+- In OxideTerm's reproducible 16 MiB release-build benchmark, median process-to-PTY throughput increased from 69.031 to 82.864 MiB/s for plain text, from 88.384 to 91.609 MiB/s for ANSI output, from 68.711 to 69.988 MiB/s for Unicode output, and from 96.685 to 99.644 MiB/s for long CSI sequences. These are further gains of 20.0%, 3.6%, 1.9%, and 3.1% over 2.0.23 respectively.
+- Across both optimization rounds, 2.0.24 reaches 26.36×, 12.50×, 15.93×, and 9.78× the original baseline throughput for plain text, ANSI output, Unicode output, and long CSI sequences respectively.
 - The comparison used the same fixture size, one warm-up, and the median of three measured runs. It measures process-to-PTY throughput rather than completed rendering or input latency.
 - Corrected precise touchpad smooth scrolling so a new gesture preserves its fractional visual position and consumes the first pixel delta instead of briefly snapping in the opposite direction.
 
@@ -62,8 +62,8 @@ OxideTerm 2.0.24 新增原生 tmux 控制模式、参数化快捷命令、可配
 #### ⚡ 终端性能进一步强化
 
 - 减少 PTY 排空、快照转换、文本布局、链接准备及绘制中的重复工作；压缩终端快照单元存储并更积极地复用未变化数据；同时在内置终端栈中批量处理常见 ASCII 解析与网格写入。
-- 在 OxideTerm 可复现的 16 MiB 发布构建基准中，纯文本的进程到 PTY 吞吐量中位数由 69.031 MiB/s 提升至 86.032 MiB/s，ANSI 输出由 88.384 MiB/s 提升至 92.502 MiB/s，Unicode 输出由 68.711 MiB/s 提升至 75.884 MiB/s，长 CSI 序列由 96.685 MiB/s 提升至 100.336 MiB/s；相较 2.0.23 分别进一步提升 24.6%、4.7%、10.4% 和 3.8%。
-- 综合两轮优化后，2.0.24 的纯文本、ANSI 输出、Unicode 输出及长 CSI 序列吞吐量分别达到最初基线的 27.36 倍、12.62 倍、17.27 倍和 9.85 倍。
+- 在 OxideTerm 可复现的 16 MiB 发布构建基准中，纯文本的进程到 PTY 吞吐量中位数由 69.031 MiB/s 提升至 82.864 MiB/s，ANSI 输出由 88.384 MiB/s 提升至 91.609 MiB/s，Unicode 输出由 68.711 MiB/s 提升至 69.988 MiB/s，长 CSI 序列由 96.685 MiB/s 提升至 99.644 MiB/s；相较 2.0.23 分别进一步提升 20.0%、3.6%、1.9% 和 3.1%。
+- 综合两轮优化后，2.0.24 的纯文本、ANSI 输出、Unicode 输出及长 CSI 序列吞吐量分别达到最初基线的 26.36 倍、12.50 倍、15.93 倍和 9.78 倍。
 - 对比采用相同的测试数据规模、一次预热及三次测量的中位数。该结果衡量进程到 PTY 的吞吐量，不代表绘制完成耗时或输入延迟。
 - 修正精确触控板的平滑滚动：新手势会保留原有的小数行视觉位置并消费首段像素增量，不再先向相反方向短暂回跳。
 
@@ -107,7 +107,7 @@ OxideTerm 2.0.24 新增原生 tmux 控制模式、参数化快捷命令、可配
 
 ![OxideTerm 2.0.24 release highlights: native tmux, parameterized Quick Commands, session logging, Kerberos SSH, and a faster terminal](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/v2.0.24/.github/release-notes/assets/oxideterm-2.0.24-release-highlights.png)
 
-![OxideTerm terminal throughput before optimization, in 2.0.23, and in 2.0.24](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/v2.0.24/.github/release-notes/assets/terminal-performance-2.0.24-comparison.png)
+![OxideTerm terminal throughput before optimization, in 2.0.23, and in 2.0.24](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/main/.github/release-notes/assets/terminal-performance-2.0.24-comparison.png)
 
 ## 2.0.23
 
