@@ -1398,6 +1398,10 @@ impl TerminalPane {
             })
     }
 
+    pub fn history_command_records(&self) -> Vec<TerminalAutosuggestCommandRecord> {
+        self.command_history.records()
+    }
+
     fn terminal_autosuggest_candidates(&self) -> Vec<TerminalAutosuggestCandidate> {
         let mode = self.terminal.lock().mode();
         let state = self.input_tracker.state();

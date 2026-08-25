@@ -118,7 +118,6 @@ impl SharedTerminalCommandHistory {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn records(&self) -> Vec<TerminalAutosuggestCommandRecord> {
         self.state.lock().records.clone()
     }
