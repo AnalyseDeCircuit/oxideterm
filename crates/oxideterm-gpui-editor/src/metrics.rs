@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use gpui::{
-    Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, SharedString, TextRun, Window, px,
-    rgb,
+    Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, IntoColor, SharedString, TextRun,
+    Window, px, rgb,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -143,10 +143,11 @@ fn fallback_code_cell_width(
     let run = TextRun {
         len: sample.len(),
         font: font.clone(),
-        color: rgb(0xe6e8eb).into(),
+        color: rgb(0xe6e8eb).into_color(),
         background_color: None,
         underline: None,
         strikethrough: None,
+        letter_spacing: None,
     };
     window
         .text_system()

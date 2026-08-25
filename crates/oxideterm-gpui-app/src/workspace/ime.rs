@@ -2,8 +2,8 @@ use std::{cell::RefCell, collections::HashMap, fmt, ops::Range, rc::Rc, time::In
 
 use gpui::{
     App, Bounds, ClipboardItem, Context, Element, ElementId, Entity, FocusHandle, GlobalElementId,
-    InputHandler, InspectorElementId, Keystroke, LayoutId, Pixels, Point, SharedString, Style,
-    TextRun, Timer, UTF16Selection, Window, font, point, px, rgb,
+    InputHandler, InspectorElementId, IntoColor, Keystroke, LayoutId, Pixels, Point, SharedString,
+    Style, TextRun, Timer, UTF16Selection, Window, font, point, px, rgb,
 };
 use oxideterm_editor_core::utf16::{
     byte_index_for_utf16, control_k_delete_end, floor_char_boundary, line_end_for_utf16_offset,
@@ -1794,10 +1794,11 @@ impl WorkspaceApp {
         let run = TextRun {
             len: shared.len(),
             font,
-            color: rgb(self.tokens.ui.text).into(),
+            color: rgb(self.tokens.ui.text).into_color(),
             background_color: None,
             underline: None,
             strikethrough: None,
+            letter_spacing: None,
         };
         window
             .text_system()

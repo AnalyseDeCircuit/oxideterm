@@ -3,7 +3,7 @@
 
 //! Style helpers that map OxideTerm theme tokens to GPUI text / element styling.
 
-use gpui::{AbsoluteLength, Font, FontStyle, FontWeight, Hsla, Rgba, SharedString};
+use gpui::{AbsoluteLength, Font, FontStyle, FontWeight, Hsla, IntoColor, Rgba, SharedString};
 use oxideterm_theme::ThemeTokens;
 
 use crate::options::MarkdownOptions;
@@ -17,7 +17,7 @@ pub fn hex_to_hsla(hex: u32) -> Hsla {
     let r = ((hex >> 16) & 0xff) as f32 / 255.0;
     let g = ((hex >> 8) & 0xff) as f32 / 255.0;
     let b = (hex & 0xff) as f32 / 255.0;
-    Rgba { r, g, b, a: 1.0 }.into()
+    Rgba::new(r, g, b, 1.0).into_color()
 }
 
 // ── token-derived style values ──────────────────────────────────────────
@@ -48,7 +48,7 @@ pub fn code_block_bg_color(tokens: &ThemeTokens, opts: &MarkdownOptions) -> Hsla
 
 pub fn code_block_border_color(tokens: &ThemeTokens) -> Hsla {
     let mut c = hex_to_hsla(tokens.ui.border);
-    c.a = 0.2;
+    c.alpha = 0.2;
     c
 }
 
@@ -59,20 +59,20 @@ pub fn code_block_header_bg_color(tokens: &ThemeTokens, opts: &MarkdownOptions) 
 fn background_surface_color(color: u32, opts: &MarkdownOptions) -> Hsla {
     let mut color = hex_to_hsla(color);
     if opts.background_surface_active {
-        color.a = BACKGROUND_SURFACE_CODE_ALPHA;
+        color.alpha = BACKGROUND_SURFACE_CODE_ALPHA;
     }
     color
 }
 
 pub fn code_block_header_border_color(tokens: &ThemeTokens) -> Hsla {
     let mut c = hex_to_hsla(tokens.ui.border);
-    c.a = 0.05;
+    c.alpha = 0.05;
     c
 }
 
 pub fn code_action_color(tokens: &ThemeTokens) -> Hsla {
     let mut c = hex_to_hsla(tokens.ui.text_muted);
-    c.a = 0.5;
+    c.alpha = 0.5;
     c
 }
 
@@ -87,7 +87,7 @@ pub fn bg_color(tokens: &ThemeTokens) -> Hsla {
 /// Left-border colour for blockquotes — muted text at reduced opacity.
 pub fn blockquote_border_color(tokens: &ThemeTokens) -> Hsla {
     let mut c = hex_to_hsla(tokens.ui.text_muted);
-    c.a = 0.5;
+    c.alpha = 0.5;
     c
 }
 
@@ -109,7 +109,7 @@ pub fn inline_code_bg_color(tokens: &ThemeTokens, opts: &MarkdownOptions) -> Hsl
 /// Theme-aware background used by safe HTML `<mark>` content.
 pub fn highlight_bg_color(tokens: &ThemeTokens) -> Hsla {
     let mut color = accent_color(tokens);
-    color.a = 0.22;
+    color.alpha = 0.22;
     color
 }
 

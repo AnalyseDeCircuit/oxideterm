@@ -3,7 +3,8 @@ use std::{cell::Cell, panic::Location, rc::Rc};
 use gpui::{
     AnyElement, App, AppContext, CursorStyle, Div, Element, ElementId, EmptyView,
     InteractiveElement, IntoElement, ParentElement, Point, RenderOnce, ScrollHandle, Stateful,
-    StatefulInteractiveElement, StyleRefinement, Styled, Window, div, prelude::FluentBuilder, px,
+    StatefulInteractiveElement, StyleRefinement, Styled, Window, WithAlpha, div,
+    prelude::FluentBuilder, px,
 };
 
 const SCROLLBAR_LAYER_WIDTH: f32 = 10.0;
@@ -306,7 +307,7 @@ fn render_vertical_scrollbar(
     let Some(geometry) = scrollbar_geometry(viewport_height, max_offset_y, scroll_position) else {
         return div().id(id).into_any_element();
     };
-    let thumb_color = window.text_style().color.alpha(SCROLLBAR_THUMB_ALPHA);
+    let thumb_color = window.text_style().color.with_alpha(SCROLLBAR_THUMB_ALPHA);
     let drag_state = ScrollbarDragState {
         scroll_handle: scroll_handle.clone(),
         axis: ScrollbarAxis::Vertical,
@@ -356,7 +357,7 @@ fn render_horizontal_scrollbar(
     let Some(geometry) = scrollbar_geometry(viewport_width, max_offset_x, scroll_position) else {
         return div().id(id).into_any_element();
     };
-    let thumb_color = window.text_style().color.alpha(SCROLLBAR_THUMB_ALPHA);
+    let thumb_color = window.text_style().color.with_alpha(SCROLLBAR_THUMB_ALPHA);
     let drag_state = ScrollbarDragState {
         scroll_handle: scroll_handle.clone(),
         axis: ScrollbarAxis::Horizontal,

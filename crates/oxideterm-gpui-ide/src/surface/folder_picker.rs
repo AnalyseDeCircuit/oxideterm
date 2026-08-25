@@ -340,10 +340,11 @@ impl IdeSurface {
             font: font(SharedString::from(
                 self.tokens.metrics.markdown_code_font_family,
             )),
-            color: rgb(self.tokens.ui.text).into(),
+            color: rgb(self.tokens.ui.text).into_color(),
             background_color: None,
             underline: None,
             strikethrough: None,
+            letter_spacing: None,
         };
         let shaped = window.text_system().shape_line(
             display,
@@ -374,10 +375,11 @@ impl IdeSurface {
             font: font(SharedString::from(
                 self.tokens.metrics.markdown_code_font_family,
             )),
-            color: rgb(self.tokens.ui.text).into(),
+            color: rgb(self.tokens.ui.text).into_color(),
             background_color: None,
             underline: None,
             strikethrough: None,
+            letter_spacing: None,
         };
         let prefix_width = window
             .text_system()

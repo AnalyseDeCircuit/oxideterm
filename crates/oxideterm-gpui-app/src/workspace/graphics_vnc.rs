@@ -122,7 +122,14 @@ pub(super) fn graphics_vnc_canvas(
         move |bounds, image_bounds, window: &mut Window, _cx: &mut App| {
             window.paint_quad(fill(bounds, rgb(background)));
             if let (Some(image), Some(image_bounds)) = (image, image_bounds) {
-                let _ = window.paint_image(image_bounds, Corners::all(px(0.0)), image, 0, false);
+                let _ = window.paint_image(
+                    image_bounds,
+                    image_bounds,
+                    Corners::all(px(0.0)),
+                    image,
+                    0,
+                    false,
+                );
             }
         },
     )
