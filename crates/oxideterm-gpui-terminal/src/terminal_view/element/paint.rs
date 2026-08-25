@@ -386,10 +386,10 @@ pub(crate) fn paint_text_run(
             px(run.col as f32 * metrics.cell_width_f32()),
             px(run.row as f32 * metrics.line_height_f32()),
         );
-    if let Some(layout) = &run.layout {
+    if let Some(cache) = &run.cache {
         // Stable terminal rows retain only glyph layout; one explicit decoration avoids the
         // large inline decoration capacity carried by `ShapedLine` for every cached run.
-        let layout = layout.get_or_init(|| {
+        let layout = cache.layout.get_or_init(|| {
             window.text_system().layout_line(
                 &run.text,
                 metrics.font_size,
@@ -404,12 +404,11 @@ pub(crate) fn paint_text_run(
             underline: run.style.underline,
             strikethrough: run.style.strikethrough,
         };
-        let _ = layout.paint(
+        let _ = layout.paint_cached(
             position,
             metrics.line_height,
-            TextAlign::Left,
-            None,
             std::slice::from_ref(&decoration),
+            &cache.paint,
             window,
             cx,
         );

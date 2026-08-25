@@ -1,10 +1,12 @@
+use crate::window::PreparedGlyphBatch;
 use crate::{
     App, Bounds, DevicePixels, Half, LineLayout, Pixels, Point, RenderGlyphParams, Result,
-    SharedString, StrikethroughStyle, TextAlign, UnderlineStyle, Window, WrapBoundary,
-    WrappedLineLayout, black, fill, point, px, size,
+    ScaledPixels, SceneHsla, SharedString, StrikethroughStyle, TextAlign, UnderlineStyle, Window,
+    WrapBoundary, WrappedLineLayout, black, fill, point, px, size,
 };
 use derive_more::{Deref, DerefMut};
 use palette::Hsla;
+use parking_lot::Mutex;
 use smallvec::SmallVec;
 use std::sync::Arc;
 
@@ -18,6 +20,124 @@ pub struct GlyphRasterData {
     pub bounds: Vec<Bounds<DevicePixels>>,
     /// The render params for each glyph (needed for sprite atlas lookup).
     pub params: Vec<RenderGlyphParams>,
+}
+
+/// Cached renderer resources for repeatedly painting one stable line layout and style.
+#[derive(Debug, Default)]
+pub struct LinePaintCache {
+    prepared: Mutex<Option<Box<PreparedLinePaint>>>,
+}
+
+#[derive(Debug)]
+struct PreparedLinePaint {
+    key: PreparedLinePaintKey,
+    glyphs: Arc<PreparedGlyphBatch>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct PreparedDecorationKey {
+    len: u32,
+    color: SceneHsla,
+}
+
+#[derive(Debug, PartialEq)]
+struct PreparedLinePaintKey {
+    layout_identity: usize,
+    renderer_resource_identity: usize,
+    renderer_resource_generation: u64,
+    scale_factor_bits: u32,
+    line_height_bits: u32,
+    origin_phase_x_bits: u32,
+    origin_phase_y_bits: u32,
+    decorations: SmallVec<[PreparedDecorationKey; 1]>,
+    subpixel_rendering: SmallVec<[bool; 16]>,
+}
+
+#[inline]
+fn device_pixel_phase(value: f32) -> f32 {
+    value.rem_euclid(1.0)
+}
+
+fn prepared_decoration_keys(
+    decoration_runs: &[DecorationRun],
+) -> SmallVec<[PreparedDecorationKey; 1]> {
+    decoration_runs
+        .iter()
+        .map(|run| PreparedDecorationKey {
+            len: run.len,
+            color: run.color.into(),
+        })
+        .collect()
+}
+
+fn prepare_line_glyphs(
+    layout: &LineLayout,
+    decoration_runs: &[DecorationRun],
+    origin: Point<Pixels>,
+    line_height: Pixels,
+    device_origin: Point<ScaledPixels>,
+    subpixel_rendering: &[bool],
+    window: &mut Window,
+) -> Result<PreparedGlyphBatch> {
+    let baseline_y = (line_height - layout.ascent - layout.descent) / 2.0 + layout.ascent;
+    let mut decoration_runs = decoration_runs.iter();
+    let mut run_end = 0;
+    let mut color = black();
+    let mut dilation = window.glyph_dilation_for_color(color);
+    let mut glyphs = PreparedGlyphBatch::default();
+
+    for (run_index, run) in layout.runs.iter().enumerate() {
+        let use_subpixel_rendering = subpixel_rendering.get(run_index).copied().unwrap_or(false);
+        for glyph in &run.glyphs {
+            if glyph.index >= run_end {
+                let mut style_run = decoration_runs.next();
+                while let Some(run) = style_run {
+                    if glyph.index < run_end + run.len as usize {
+                        break;
+                    }
+                    run_end += run.len as usize;
+                    style_run = decoration_runs.next();
+                }
+
+                if let Some(style_run) = style_run {
+                    run_end += style_run.len as usize;
+                    color = style_run.color;
+                    dilation = window.glyph_dilation_for_color(color);
+                } else {
+                    run_end = layout.len;
+                }
+            }
+
+            let glyph_origin = point(
+                origin.x + glyph.position.x,
+                origin.y + baseline_y + glyph.position.y,
+            );
+            if glyph.is_emoji {
+                window.prepare_emoji_for_batch(
+                    glyph_origin,
+                    run.font_id,
+                    glyph.id,
+                    layout.font_size,
+                    device_origin,
+                    &mut glyphs,
+                )?;
+            } else {
+                window.prepare_glyph_for_batch(
+                    glyph_origin,
+                    run.font_id,
+                    glyph.id,
+                    layout.font_size,
+                    color,
+                    use_subpixel_rendering,
+                    dilation,
+                    device_origin,
+                    &mut glyphs,
+                )?;
+            }
+        }
+    }
+
+    Ok(glyphs)
 }
 
 /// Set the text decoration for a run of text.
@@ -232,6 +352,87 @@ impl LineLayout {
             window,
             cx,
         )
+    }
+
+    /// Paints a stable, left-aligned line while retaining atlas tiles and relative glyph bounds.
+    pub fn paint_cached(
+        &self,
+        origin: Point<Pixels>,
+        line_height: Pixels,
+        decoration_runs: &[DecorationRun],
+        cache: &LinePaintCache,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<()> {
+        if decoration_runs
+            .iter()
+            .any(|run| run.underline.is_some() || run.strikethrough.is_some())
+        {
+            return self.paint(
+                origin,
+                line_height,
+                TextAlign::Left,
+                None,
+                decoration_runs,
+                window,
+                cx,
+            );
+        }
+
+        let line_bounds = Bounds::new(origin, size(self.width, line_height));
+        if !line_bounds.intersects(&window.content_mask().bounds) {
+            return Ok(());
+        }
+
+        window.paint_layer(line_bounds, |window| {
+            let scale_factor = window.scale_factor();
+            let device_origin = point(
+                ScaledPixels(origin.x.0 * scale_factor),
+                ScaledPixels(origin.y.0 * scale_factor),
+            );
+            let subpixel_rendering = self
+                .runs
+                .iter()
+                .map(|run| window.should_use_subpixel_rendering(run.font_id, self.font_size))
+                .collect::<SmallVec<[bool; 16]>>();
+            let key = PreparedLinePaintKey {
+                layout_identity: self as *const Self as usize,
+                renderer_resource_identity: window.renderer_resource_identity(),
+                renderer_resource_generation: window.renderer_resource_generation(),
+                scale_factor_bits: scale_factor.to_bits(),
+                line_height_bits: line_height.0.to_bits(),
+                origin_phase_x_bits: device_pixel_phase(device_origin.x.0).to_bits(),
+                origin_phase_y_bits: device_pixel_phase(device_origin.y.0).to_bits(),
+                decorations: prepared_decoration_keys(decoration_runs),
+                subpixel_rendering,
+            };
+
+            let glyphs = {
+                let mut prepared = cache.prepared.lock();
+                if prepared.as_ref().is_none_or(|prepared| prepared.key != key) {
+                    let glyphs = prepare_line_glyphs(
+                        self,
+                        decoration_runs,
+                        origin,
+                        line_height,
+                        device_origin,
+                        &key.subpixel_rendering,
+                        window,
+                    )?;
+                    *prepared = Some(Box::new(PreparedLinePaint {
+                        key,
+                        glyphs: Arc::new(glyphs),
+                    }));
+                }
+                prepared
+                    .as_ref()
+                    .expect("prepared line paint is initialized above")
+                    .glyphs
+                    .clone()
+            };
+            window.paint_prepared_glyph_batch(device_origin, glyphs);
+            Ok(())
+        })
     }
 
     /// Paint the background of this layout to the window, using the given
@@ -798,6 +999,13 @@ mod tests {
             text: SharedString::new(text),
             decoration_runs: SmallVec::from(decorations.to_vec()),
         }
+    }
+
+    #[test]
+    fn line_paint_cache_keeps_prepared_state_out_of_line_storage() {
+        // Cached terminal runs retain this object for hundreds of rows, so the
+        // generation key and glyph vectors must stay behind the optional box.
+        assert!(std::mem::size_of::<LinePaintCache>() <= std::mem::size_of::<usize>() * 2);
     }
 
     #[test]

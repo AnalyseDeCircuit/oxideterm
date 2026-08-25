@@ -9,7 +9,8 @@ use std::{
 use gpui::{
     App, Bounds, ContentMask, CursorStyle, Element, ElementId, Entity, FocusHandle,
     GlobalElementId, Hsla, InspectorElementId, IntoColor, IntoElement, LayoutId, LineLayout,
-    Pixels, SharedString, Style, TextRun, Window, fill, point, px, relative, rgb, rgba, size,
+    LinePaintCache, Pixels, SharedString, Style, TextRun, Window, fill, point, px, relative, rgb,
+    rgba, size,
 };
 use oxideterm_terminal::{
     TerminalColor, TerminalCommandMark, TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
@@ -128,7 +129,13 @@ pub(crate) struct BatchedTextRun {
     pub(crate) text: SharedString,
     pub(crate) cells: usize,
     pub(crate) style: TextRun,
-    layout: Option<Arc<OnceLock<Arc<LineLayout>>>>,
+    cache: Option<Arc<TerminalTextRunCache>>,
+}
+
+#[derive(Default)]
+struct TerminalTextRunCache {
+    layout: OnceLock<Arc<LineLayout>>,
+    paint: LinePaintCache,
 }
 
 #[derive(Clone)]
@@ -183,7 +190,7 @@ struct TerminalRowTextRun {
     text: SharedString,
     cells: usize,
     style: TextRun,
-    layout: Arc<OnceLock<Arc<LineLayout>>>,
+    cache: Arc<TerminalTextRunCache>,
 }
 
 struct PendingTerminalRowTextRun {
@@ -200,7 +207,7 @@ impl From<PendingTerminalRowTextRun> for TerminalRowTextRun {
             text: SharedString::from(run.text),
             cells: run.cells,
             style: run.style,
-            layout: Arc::new(OnceLock::new()),
+            cache: Arc::new(TerminalTextRunCache::default()),
         }
     }
 }
@@ -845,7 +852,7 @@ impl TerminalElement {
                     text: SharedString::from(text.clone()),
                     cells: text.encode_utf16().count().max(1),
                     style: marked_text_run(text, &self.metrics),
-                    layout: None,
+                    cache: None,
                 })
             }),
             ghost_text: self.ghost_text_run(cursor_row_visible),
@@ -863,7 +870,7 @@ impl TerminalElement {
             cells: TERMINAL_TIMESTAMP_LABEL_CELLS,
             style: timestamp_text_run(&label, &self.theme, &self.metrics),
             text: SharedString::from(label),
-            layout: None,
+            cache: None,
         })
     }
 
@@ -1338,7 +1345,7 @@ impl TerminalElement {
             cells: visible_cells,
             style: ghost_text_run(&visible_text, &self.theme, &self.metrics),
             text: SharedString::from(visible_text),
-            layout: None,
+            cache: None,
         })
     }
 }
@@ -1402,7 +1409,7 @@ fn append_cached_row_layout(
         text: run.text.clone(),
         cells: run.cells,
         style: run.style.clone(),
-        layout: Some(run.layout.clone()),
+        cache: Some(run.cache.clone()),
     }));
     if let Some(row_cursor) = row_layout.cursor {
         *cursor = Some(TerminalCursor {
@@ -2294,6 +2301,30 @@ mod cache_tests {
             moved.logical_highlight_cache_key_with_logical_line(moved_line, None)
         );
         assert_eq!(original.row_link_cache_key(0), moved.row_link_cache_key(0));
+    }
+
+    #[test]
+    fn stable_row_reuses_text_cache_but_style_changes_replace_it() {
+        let row = row_with_text_and_cursor(0, "cached", 5);
+        let stable = element(snapshot(0, vec![row.clone()]));
+        let mut cache = TerminalLayoutCache::default();
+        let first = stable.layout_for_rows(0..1, Some(&mut cache));
+        let second = stable.layout_for_rows(0..1, Some(&mut cache));
+        let first_cache = first.text_runs[0].cache.as_ref().expect("cached text run");
+        let second_cache = second.text_runs[0].cache.as_ref().expect("cached text run");
+        assert!(Arc::ptr_eq(first_cache, second_cache));
+
+        let mut changed_row = row;
+        let cells = Arc::make_mut(&mut changed_row.cells);
+        cells[0].fg = TerminalColor::rgb(0xff, 0x00, 0x00);
+        changed_row.refresh_signature();
+        let changed = element(snapshot(0, vec![changed_row]));
+        let changed_layout = changed.layout_for_rows(0..1, Some(&mut cache));
+        let changed_cache = changed_layout.text_runs[0]
+            .cache
+            .as_ref()
+            .expect("changed cached text run");
+        assert!(!Arc::ptr_eq(first_cache, changed_cache));
     }
 
     #[test]

@@ -988,6 +988,26 @@ pub(crate) struct Frame {
     pub(crate) tab_stops: TabStopMap,
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct PreparedGlyphBatch {
+    pub(crate) monochrome: Vec<PreparedMonochromeGlyph>,
+    pub(crate) subpixel: Vec<PreparedMonochromeGlyph>,
+    pub(crate) polychrome: Vec<PreparedPolychromeGlyph>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PreparedMonochromeGlyph {
+    pub(crate) bounds: Bounds<ScaledPixels>,
+    pub(crate) color: Hsla,
+    pub(crate) tile: AtlasTile,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PreparedPolychromeGlyph {
+    pub(crate) bounds: Bounds<ScaledPixels>,
+    pub(crate) tile: AtlasTile,
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct PrepaintStateIndex {
     hitboxes_index: usize,
@@ -4487,6 +4507,142 @@ impl Window {
         });
     }
 
+    #[inline]
+    pub(crate) fn glyph_dilation_for_color(&self, color: Hsla) -> u8 {
+        self.text_system().glyph_dilation_for_color(color)
+    }
+
+    /// Resolves a monochrome glyph to an atlas tile and stores bounds relative to a batch origin.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prepare_glyph_for_batch(
+        &mut self,
+        origin: Point<Pixels>,
+        font_id: FontId,
+        glyph_id: GlyphId,
+        font_size: Pixels,
+        color: Hsla,
+        subpixel_rendering: bool,
+        dilation: u8,
+        batch_origin: Point<ScaledPixels>,
+        batch: &mut PreparedGlyphBatch,
+    ) -> Result<()> {
+        self.invalidator.debug_assert_paint();
+
+        let scale_factor = self.scale_factor();
+        let glyph_origin = origin.scale(scale_factor);
+        let quantized_origin = Point::new(
+            round_half_toward_zero(glyph_origin.x.0 * SUBPIXEL_VARIANTS_X as f32)
+                / SUBPIXEL_VARIANTS_X as f32,
+            round_half_toward_zero(glyph_origin.y.0 * SUBPIXEL_VARIANTS_Y as f32)
+                / SUBPIXEL_VARIANTS_Y as f32,
+        );
+        let subpixel_variant = Point::new(
+            (quantized_origin.x.fract() * SUBPIXEL_VARIANTS_X as f32) as u8,
+            (quantized_origin.y.fract() * SUBPIXEL_VARIANTS_Y as f32) as u8,
+        );
+        let integer_origin = quantized_origin.map(|coordinate| ScaledPixels(coordinate.trunc()));
+        let params = RenderGlyphParams {
+            font_id,
+            glyph_id,
+            font_size,
+            subpixel_variant,
+            scale_factor,
+            is_emoji: false,
+            subpixel_rendering,
+            dilation,
+        };
+
+        let raster_bounds = self.text_system().raster_bounds(&params)?;
+        if raster_bounds.is_zero() {
+            return Ok(());
+        }
+        let tile = self
+            .sprite_atlas
+            .get_or_insert_with(&params.clone().into(), &mut || {
+                let (size, bytes) = self.text_system().rasterize_glyph(&params)?;
+                Ok(Some((size, Cow::Owned(bytes))))
+            })?
+            .expect("glyph rasterization returns an atlas tile");
+        let bounds = Bounds {
+            origin: integer_origin + raster_bounds.origin.map(Into::into),
+            size: tile.bounds.size.map(Into::into),
+        } - batch_origin;
+        let glyph = PreparedMonochromeGlyph {
+            bounds,
+            color,
+            tile,
+        };
+        if subpixel_rendering {
+            batch.subpixel.push(glyph);
+        } else {
+            batch.monochrome.push(glyph);
+        }
+        Ok(())
+    }
+
+    /// Resolves an emoji glyph to an atlas tile and stores bounds relative to a batch origin.
+    pub(crate) fn prepare_emoji_for_batch(
+        &mut self,
+        origin: Point<Pixels>,
+        font_id: FontId,
+        glyph_id: GlyphId,
+        font_size: Pixels,
+        batch_origin: Point<ScaledPixels>,
+        batch: &mut PreparedGlyphBatch,
+    ) -> Result<()> {
+        self.invalidator.debug_assert_paint();
+
+        let scale_factor = self.scale_factor();
+        let glyph_origin = origin.scale(scale_factor);
+        let integer_origin =
+            glyph_origin.map(|coordinate| ScaledPixels(round_half_toward_zero(coordinate.0)));
+        let params = RenderGlyphParams {
+            font_id,
+            glyph_id,
+            font_size,
+            subpixel_variant: Default::default(),
+            scale_factor,
+            is_emoji: true,
+            subpixel_rendering: false,
+            dilation: 0,
+        };
+
+        let raster_bounds = self.text_system().raster_bounds(&params)?;
+        if raster_bounds.is_zero() {
+            return Ok(());
+        }
+        let tile = self
+            .sprite_atlas
+            .get_or_insert_with(&params.clone().into(), &mut || {
+                let (size, bytes) = self.text_system().rasterize_glyph(&params)?;
+                Ok(Some((size, Cow::Owned(bytes))))
+            })?
+            .expect("emoji rasterization returns an atlas tile");
+        let bounds = Bounds {
+            origin: integer_origin + raster_bounds.origin.map(Into::into),
+            size: tile.bounds.size.map(Into::into),
+        } - batch_origin;
+        batch
+            .polychrome
+            .push(PreparedPolychromeGlyph { bounds, tile });
+        Ok(())
+    }
+
+    /// Appends a prepared glyph batch without repeating atlas lookups.
+    pub(crate) fn paint_prepared_glyph_batch(
+        &mut self,
+        origin: Point<ScaledPixels>,
+        batch: Arc<PreparedGlyphBatch>,
+    ) {
+        self.invalidator.debug_assert_paint();
+
+        let content_mask = self.snapped_content_mask();
+        let opacity = self.element_opacity();
+        self.next_frame
+            .scene
+            .insert_prepared_glyph_batch(batch, origin, content_mask, opacity);
+    }
+
     /// Paints a monochrome (non-emoji) glyph into the scene for the next frame at the current z-index.
     ///
     /// The y component of the origin is the baseline of the glyph.
@@ -4573,7 +4729,7 @@ impl Window {
         Ok(())
     }
 
-    fn should_use_subpixel_rendering(&self, font_id: FontId, font_size: Pixels) -> bool {
+    pub(crate) fn should_use_subpixel_rendering(&self, font_id: FontId, font_size: Pixels) -> bool {
         if self.platform_window.background_appearance() != WindowBackgroundAppearance::Opaque {
             return false;
         }
@@ -4966,6 +5122,12 @@ impl Window {
     /// Returns the generation of renderer resources backing dynamic textures.
     pub fn renderer_resource_generation(&self) -> u64 {
         self.sprite_atlas.resource_generation()
+    }
+
+    pub(crate) fn renderer_resource_identity(&self) -> usize {
+        // Generation counters are atlas-local, so the allocation identity prevents
+        // reusing tiles after a pane moves to a window backed by another atlas.
+        Arc::as_ptr(&self.sprite_atlas) as *const () as usize
     }
 
     /// Returns whether every frame of an image is present in the sprite atlas.

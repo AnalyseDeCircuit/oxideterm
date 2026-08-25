@@ -219,6 +219,22 @@ merely to simplify resize handling.
 `NoopTextSystem` on macOS: layout surfaces and SVG assets remain visible, but
 all glyph-backed text and icons disappear.
 
+### Compact terminal line paint cache
+
+Terminal row caches retain `Arc<LineLayout>` rather than `ShapedLine`, whose
+32-entry inline decoration storage is too large for hundreds of cached rows.
+`crates/gpui-ce/gpui/src/text_system/line.rs`, `scene.rs`, and `window.rs`
+provide a separate `LinePaintCache` that retains prepared atlas tiles and
+relative glyph bounds without putting decorations back into the layout cache.
+
+The prepared batch key includes the atlas allocation identity, resource
+generation, scale factor, line height, device-pixel phase, foreground
+decorations, and subpixel mode. Preserve every component: omitting atlas
+identity can reuse tiles after moving a pane between windows, while omitting
+generation can replay tiles invalidated by device recovery. Prepared batches
+must also remain one replay operation so GPUI view caching does not expand them
+into persistent per-glyph paint operations.
+
 ### Scheduler-owned animation clock
 
 `crates/gpui-ce/gpui/src/elements/animation.rs` advances ordinary and spring
