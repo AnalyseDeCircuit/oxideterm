@@ -1,4 +1,6 @@
 use std::{
+    collections::HashMap,
+    fmt,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -49,12 +51,32 @@ pub struct TerminalAiCommandRecord {
     pub end_line: Option<usize>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct TerminalAutosuggestCommandRecord {
     pub command_id: String,
     pub command: String,
     pub started_at: u64,
     pub finished_at: u64,
+}
+
+impl fmt::Debug for TerminalAutosuggestCommandRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TerminalAutosuggestCommandRecord")
+            .field("command_id", &self.command_id)
+            // Command lines can contain credentials and must not enter diagnostic output.
+            .field("command", &"<redacted>")
+            .field("started_at", &self.started_at)
+            .field("finished_at", &self.finished_at)
+            .finish()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub(crate) struct TerminalAutosuggestCandidate {
+    pub(crate) command: String,
+    pub(crate) use_count: usize,
+    pub(crate) last_used_at: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -122,17 +144,59 @@ impl CommandFactLedger {
             .filter(|suffix| !suffix.is_empty())
     }
 
+    pub(crate) fn autosuggest_candidates(
+        &self,
+        state: &TerminalAutosuggestInputState,
+        limit: usize,
+    ) -> Vec<TerminalAutosuggestCandidate> {
+        let query = state.value.as_str();
+        if query.trim().is_empty() || !state.is_cursor_at_end || limit == 0 {
+            return Vec::new();
+        }
+
+        let mut candidates_by_command = HashMap::<&str, TerminalAutosuggestCandidate>::new();
+        for record in &self.autosuggest_records {
+            if !record.command.starts_with(query) || record.command == query {
+                continue;
+            }
+            let candidate = candidates_by_command
+                .entry(&record.command)
+                .or_insert_with(|| TerminalAutosuggestCandidate {
+                    command: record.command.clone(),
+                    use_count: 0,
+                    last_used_at: record.finished_at,
+                });
+            candidate.use_count = candidate.use_count.saturating_add(1);
+            candidate.last_used_at = candidate.last_used_at.max(record.finished_at);
+        }
+
+        let mut candidates = candidates_by_command.into_values().collect::<Vec<_>>();
+        candidates.sort_by(|left, right| {
+            right
+                .use_count
+                .cmp(&left.use_count)
+                .then_with(|| right.last_used_at.cmp(&left.last_used_at))
+                .then_with(|| left.command.cmp(&right.command))
+        });
+        candidates.truncate(limit);
+        candidates
+    }
+
+    pub(crate) fn remove_autosuggest_command(&mut self, command: &str) -> bool {
+        let previous_len = self.autosuggest_records.len();
+        self.autosuggest_records
+            .retain(|record| record.command != command);
+        self.autosuggest_records.len() != previous_len
+    }
+
     pub(crate) fn record_runtime_autosuggest_command(&mut self, command: &str) {
-        let command = command.trim();
-        if command.is_empty() {
+        if command.trim().is_empty() {
             return;
         }
-        let normalized = command.split_whitespace().collect::<Vec<_>>().join(" ");
-        if normalized.is_empty()
-            || self
-                .autosuggest_records
-                .last()
-                .is_some_and(|record| record.command == normalized)
+        if self
+            .autosuggest_records
+            .last()
+            .is_some_and(|record| record.command == command)
         {
             return;
         }
@@ -140,11 +204,11 @@ impl CommandFactLedger {
         self.autosuggest_records
             .push(TerminalAutosuggestCommandRecord {
                 command_id: format!("runtime-autosuggest-{now}"),
-                command: normalized,
+                command: command.to_string(),
                 started_at: now,
                 finished_at: now,
             });
-        const MAX_AUTOSUGGEST_RECORDS: usize = 1000;
+        const MAX_AUTOSUGGEST_RECORDS: usize = 10_000;
         if self.autosuggest_records.len() > MAX_AUTOSUGGEST_RECORDS {
             let overflow = self.autosuggest_records.len() - MAX_AUTOSUGGEST_RECORDS;
             self.autosuggest_records.drain(0..overflow);
@@ -493,12 +557,14 @@ mod tests {
         let mut ledger = CommandFactLedger::default();
 
         ledger.record_runtime_autosuggest_command("  git   status  ");
+        ledger.record_runtime_autosuggest_command("  git   status  ");
         ledger.record_runtime_autosuggest_command("git status");
         ledger.record_runtime_autosuggest_command(" ");
 
         let records = ledger.autosuggest_records();
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].command, "git status");
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].command, "  git   status  ");
+        assert_eq!(records[1].command, "git status");
 
         let mut ledger = CommandFactLedger::default();
         ledger.record_runtime_autosuggest_command("git status");
@@ -527,6 +593,35 @@ mod tests {
                 is_cursor_at_end: false,
             }),
             None
+        );
+    }
+
+    #[test]
+    fn runtime_autosuggest_candidates_rank_activity_without_changing_history() {
+        let mut ledger = CommandFactLedger::default();
+        ledger.record_runtime_autosuggest_command("docker ps");
+        ledger.record_runtime_autosuggest_command("docker images");
+        ledger.record_runtime_autosuggest_command("docker ps");
+        ledger.record_runtime_autosuggest_command("docker compose up");
+
+        let state = TerminalAutosuggestInputState {
+            value: "dock".to_string(),
+            cursor_index: 4,
+            is_cursor_at_end: true,
+        };
+        let candidates = ledger.autosuggest_candidates(&state, 3);
+
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(candidates[0].command, "docker ps");
+        assert_eq!(candidates[0].use_count, 2);
+        assert_eq!(ledger.autosuggest_records().len(), 4);
+
+        assert!(ledger.remove_autosuggest_command("docker ps"));
+        assert!(
+            ledger
+                .autosuggest_records()
+                .iter()
+                .all(|record| record.command != "docker ps")
         );
     }
 

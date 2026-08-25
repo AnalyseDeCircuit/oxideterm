@@ -573,9 +573,8 @@ impl TerminalInputTracker {
             let ch = chars[index];
             match ch {
                 '\r' | '\n' => {
-                    let command = self.value.trim().to_string();
-                    if !command.is_empty() {
-                        completed_command = Some(command);
+                    if !self.value.trim().is_empty() {
+                        completed_command = Some(self.value.clone());
                     }
                     self.reset();
                     index += 1;
@@ -943,6 +942,12 @@ fn input_tracker_handles_submission_editing_state_and_reset_sequences() {
         assert_eq!(tracker.apply_bytes(b"pwd"), None);
         assert_eq!(tracker.apply_bytes(b"\r"), Some("pwd".to_string()));
         assert_eq!(tracker.apply_bytes(b"\r"), None);
+
+        assert_eq!(tracker.apply_bytes(b"  printf 'a  b'  "), None);
+        assert_eq!(
+            tracker.apply_bytes(b"\r"),
+            Some("  printf 'a  b'  ".to_string())
+        );
 
         let mut tracker = TerminalInputTracker::default();
 

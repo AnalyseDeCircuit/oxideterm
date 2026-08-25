@@ -39,8 +39,8 @@ use zeroize::Zeroizing;
 
 use crate::background_cache::BackgroundImageRenderCache;
 use crate::command_facts::{
-    CommandFactLedger, TerminalAiCommandRecord, TerminalAutosuggestCommandRecord,
-    TerminalAutosuggestInputState, TerminalCommandFact,
+    CommandFactLedger, TerminalAiCommandRecord, TerminalAutosuggestCandidate,
+    TerminalAutosuggestCommandRecord, TerminalAutosuggestInputState, TerminalCommandFact,
 };
 use crate::privilege_prompt::{
     PrivilegeInputObservation, PrivilegePromptMatch, PrivilegePromptSnapshot,
@@ -110,6 +110,7 @@ const EDITOR_INTEGRATION_HEARTBEAT_TIMEOUT: Duration = Duration::from_millis(250
 const EDITOR_CLIPBOARD_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 const TERMINAL_SEARCH_DEBOUNCE: Duration = Duration::from_millis(24);
 const BACKGROUND_IMAGE_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(32);
+const TERMINAL_AUTOSUGGEST_MAX_CANDIDATES: usize = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalPaneEvent {
@@ -457,6 +458,8 @@ pub struct TerminalPane {
     selected_command_mark_id: Option<String>,
     command_mark_id_aliases: HashMap<String, String>,
     input_tracker: TerminalInputTracker,
+    autosuggest_selected_index: Option<usize>,
+    autosuggest_dismissed_query: Option<String>,
     privilege_prompt_tracker: PrivilegePromptTracker,
     privilege_prompt_expiry_generation: u64,
     privilege_prompt_expiry_task: Option<gpui::Task<()>>,
@@ -1083,6 +1086,8 @@ impl TerminalPane {
             selected_command_mark_id: None,
             command_mark_id_aliases: HashMap::new(),
             input_tracker: TerminalInputTracker::default(),
+            autosuggest_selected_index: None,
+            autosuggest_dismissed_query: None,
             privilege_prompt_tracker: PrivilegePromptTracker::default(),
             privilege_prompt_expiry_generation: 0,
             privilege_prompt_expiry_task: None,
@@ -1378,8 +1383,62 @@ impl TerminalPane {
             .autosuggest_ghost_text(&self.input_tracker.state())
     }
 
+    fn terminal_autosuggest_candidates(&self) -> Vec<TerminalAutosuggestCandidate> {
+        let mode = self.terminal.lock().mode();
+        let state = self.input_tracker.state();
+        let cursor_row_is_active_input = self
+            .snapshot
+            .lines
+            .get(self.snapshot.cursor_row)
+            .is_some_and(|row| row.active_input);
+        if !self.focused
+            || !self.terminal_accepts_input()
+            || mode.contains(TermMode::ALT_SCREEN)
+            || self.marked_text.is_some()
+            || self.tmux_prompt.is_some()
+            || self.pending_paste.is_some()
+            || self.context_menu.is_some()
+            || self.privilege_prompt_inline_hint.is_some()
+            || !cursor_row_is_active_input
+            || self.snapshot.display_offset != 0
+            || self.autosuggest_dismissed_query.as_deref() == Some(state.value.as_str())
+        {
+            return Vec::new();
+        }
+        self.command_fact_ledger
+            .autosuggest_candidates(&state, TERMINAL_AUTOSUGGEST_MAX_CANDIDATES)
+    }
+
+    fn dismiss_terminal_autosuggest(&mut self, cx: &mut Context<Self>) {
+        self.autosuggest_dismissed_query = Some(self.input_tracker.state().value);
+        self.autosuggest_selected_index = None;
+        cx.notify();
+    }
+
+    fn fill_terminal_autosuggest_command(
+        &mut self,
+        command: &str,
+        append_enter: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let state = self.input_tracker.state();
+        let Some(suffix) = command.strip_prefix(&state.value) else {
+            return false;
+        };
+        let mut bytes =
+            Zeroizing::new(Vec::with_capacity(suffix.len() + usize::from(append_enter)));
+        bytes.extend_from_slice(suffix.as_bytes());
+        if append_enter {
+            bytes.push(b'\r');
+        }
+        self.autosuggest_selected_index = None;
+        self.autosuggest_dismissed_query = Some(command.to_string());
+        self.send_user_protocol_bytes(&bytes, cx);
+        true
+    }
+
     fn terminal_ghost_text(&self) -> Option<String> {
-        // Keep the terminal grid shell-owned; OxideTerm suggestions belong to the command bar.
+        // Keep ordinary terminal suggestions in the pane-owned list instead of painting ghost text.
         self.privilege_prompt_inline_hint.clone()
     }
 
@@ -3290,7 +3349,14 @@ impl TerminalPane {
         bytes: &[u8],
         _cx: &mut Context<Self>,
     ) -> Option<String> {
-        let command = self.input_tracker.apply_bytes(bytes)?;
+        let previous_state = self.input_tracker.state();
+        let command = self.input_tracker.apply_bytes(bytes);
+        let next_state = self.input_tracker.state();
+        if next_state != previous_state {
+            self.autosuggest_selected_index = None;
+            self.autosuggest_dismissed_query = None;
+        }
+        let command = command?;
         self.command_fact_ledger
             .record_runtime_autosuggest_command(&command);
         Some(command)

@@ -14,6 +14,7 @@ use oxideterm_terminal::{
 use oxideterm_terminal_unicode::visual_line_for_row;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
+use zeroize::Zeroizing;
 
 use super::{
     FreeTypeDragAction, FreeTypeDragState, PendingTerminalEditorClipboard, ScrollbarDrag,
@@ -125,6 +126,10 @@ impl TerminalPane {
             return true;
         }
 
+        if self.handle_terminal_autosuggest_key(key, modifiers, cx) {
+            return true;
+        }
+
         if modifiers.platform && modifiers.shift && key.eq_ignore_ascii_case("k") {
             let result = if modifiers.alt {
                 self.terminal.lock().kill_active_task()
@@ -224,6 +229,77 @@ impl TerminalPane {
         }
 
         false
+    }
+
+    fn handle_terminal_autosuggest_key(
+        &mut self,
+        key: &str,
+        modifiers: Modifiers,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if modifiers.platform || modifiers.control || modifiers.alt {
+            return false;
+        }
+        let candidates = self.terminal_autosuggest_candidates();
+        if candidates.is_empty() {
+            self.autosuggest_selected_index = None;
+            return false;
+        }
+
+        match key {
+            "escape" => {
+                self.dismiss_terminal_autosuggest(cx);
+                true
+            }
+            "down" if !modifiers.shift => {
+                self.autosuggest_selected_index = Some(
+                    self.autosuggest_selected_index
+                        .map(|index| (index + 1) % candidates.len())
+                        .unwrap_or(0),
+                );
+                cx.notify();
+                true
+            }
+            "up" if !modifiers.shift => {
+                self.autosuggest_selected_index = Some(
+                    self.autosuggest_selected_index
+                        .map(|index| index.checked_sub(1).unwrap_or(candidates.len() - 1))
+                        .unwrap_or(candidates.len() - 1),
+                );
+                cx.notify();
+                true
+            }
+            "delete" if modifiers.shift => {
+                let Some(index) = self.autosuggest_selected_index else {
+                    return false;
+                };
+                let Some(candidate) = candidates.get(index) else {
+                    self.autosuggest_selected_index = None;
+                    return false;
+                };
+                if self
+                    .command_fact_ledger
+                    .remove_autosuggest_command(&candidate.command)
+                {
+                    self.autosuggest_selected_index = None;
+                    cx.notify();
+                }
+                true
+            }
+            "enter" if !modifiers.shift => {
+                let Some(index) = self.autosuggest_selected_index else {
+                    // WindTerm leaves the list unselected so Enter keeps the shell's normal meaning.
+                    return false;
+                };
+                let Some(candidate) = candidates.get(index) else {
+                    self.autosuggest_selected_index = None;
+                    return false;
+                };
+                let command = Zeroizing::new(candidate.command.clone());
+                self.fill_terminal_autosuggest_command(&command, true, cx)
+            }
+            _ => false,
+        }
     }
 
     pub fn handle_unfocused_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {

@@ -21,6 +21,7 @@ use oxideterm_terminal::{
     TermMode, TerminalCommandMark, TerminalCursorShape, TerminalLifecycle, TerminalSessionKind,
     TerminalSnapshot, TmuxAction, TmuxUiState,
 };
+use unicode_width::UnicodeWidthStr;
 
 use super::{
     BACKGROUND_IMAGE_COMPLETION_POLL_INTERVAL, ImageRenderCache, ModemProgressState,
@@ -47,6 +48,7 @@ const TMUX_CONTROL_BAR_HEIGHT: f32 = 34.0;
 const SERIAL_CONTROL_BUTTON_RADIUS: f32 = 999.0;
 // Keep diagnostic chrome away from the prompt and command text at the left edge.
 const TERMINAL_PERFORMANCE_OVERLAY_INSET: f32 = 8.0;
+const TERMINAL_AUTOSUGGEST_MAX_WIDTH: f32 = 520.0;
 
 fn clamp_terminal_context_menu_position(
     pointer_x: f32,
@@ -171,6 +173,13 @@ impl Render for TerminalPane {
                 })
                 .flatten()
         });
+        let terminal_top = if tmux_state.is_some() {
+            TMUX_CONTROL_BAR_HEIGHT
+        } else if self.is_serial_transport() {
+            SERIAL_CONTROL_BAR_HEIGHT
+        } else {
+            0.0
+        };
         let decode_images = self
             .preferences
             .render_policy
@@ -254,6 +263,11 @@ impl Render for TerminalPane {
         } else {
             None
         };
+        let autosuggest_overlay = {
+            let candidates = self.terminal_autosuggest_candidates();
+            (!candidates.is_empty())
+                .then(|| self.render_terminal_autosuggest_overlay(candidates, terminal_top, cx))
+        };
         let terminal_element = TerminalElement::new_with_images_and_bidi(
             snapshot,
             rendered_images,
@@ -309,14 +323,6 @@ impl Render for TerminalPane {
             0.0
         })
         .layout_cache(self.layout_cache.clone());
-        let terminal_top = if tmux_state.is_some() {
-            TMUX_CONTROL_BAR_HEIGHT
-        } else if self.is_serial_transport() {
-            SERIAL_CONTROL_BAR_HEIGHT
-        } else {
-            0.0
-        };
-
         div()
             .id("terminal-pane")
             .size_full()
@@ -427,6 +433,7 @@ impl Render for TerminalPane {
             .when_some(self.context_menu.clone(), |pane, menu| {
                 pane.child(self.render_terminal_context_menu(menu, window, cx))
             })
+            .when_some(autosuggest_overlay, |pane, overlay| pane.child(overlay))
             .when(self.preferences.show_performance_overlay, |pane| {
                 pane.child(self.render_terminal_performance_overlay())
             })
@@ -442,6 +449,120 @@ impl Render for TerminalPane {
 }
 
 impl TerminalPane {
+    fn render_terminal_autosuggest_overlay(
+        &self,
+        candidates: Vec<crate::command_facts::TerminalAutosuggestCandidate>,
+        terminal_top: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(anchor) = self.cursor_anchor() else {
+            return div().into_any_element();
+        };
+        let tokens = &self.theme.tokens;
+        let popup_margin = tokens.spacing.two;
+        let popup_gap = tokens.spacing.one;
+        let row_height = tokens.metrics.ui_button_sm_height;
+        let popup_padding = tokens.metrics.ui_menu_padding;
+        let badge_width = row_height;
+        let widest_command_cells = candidates
+            .iter()
+            .map(|candidate| UnicodeWidthStr::width(candidate.command.as_str()))
+            .max()
+            .unwrap_or_default();
+        let available_width = (anchor.container_width - popup_margin * 2.0).max(0.0);
+        let desired_width = widest_command_cells as f32 * anchor.char_width
+            + badge_width
+            + tokens.metrics.ui_menu_item_padding_x * 2.0
+            + popup_padding * 2.0;
+        let popup_width = desired_width
+            .max(tokens.metrics.ui_menu_min_width.min(available_width))
+            .min(TERMINAL_AUTOSUGGEST_MAX_WIDTH.min(available_width));
+        let query_width = UnicodeWidthStr::width(self.input_tracker.state().value.as_str()) as f32
+            * anchor.char_width;
+        let preferred_left = anchor.x - query_width;
+        let max_left = (anchor.container_width - popup_width - popup_margin).max(popup_margin);
+        let popup_left = preferred_left.max(popup_margin).min(max_left);
+        let popup_height = row_height * candidates.len() as f32 + popup_padding * 2.0;
+        let cursor_top = terminal_top + anchor.y;
+        let container_height = terminal_top + anchor.container_height;
+        let max_top = (container_height - popup_height - popup_margin).max(popup_margin);
+        let popup_top = if cursor_top - popup_height - popup_gap >= popup_margin {
+            cursor_top - popup_height - popup_gap
+        } else {
+            (cursor_top + anchor.line_height + popup_gap).min(max_top)
+        };
+        let selected_index = self
+            .autosuggest_selected_index
+            .filter(|index| *index < candidates.len());
+
+        let mut list = div()
+            .w(px(popup_width))
+            .rounded(px(tokens.radii.md))
+            .border_1()
+            .border_color(rgb(tokens.ui.border_strong))
+            .bg(rgb(tokens.ui.bg_elevated))
+            .p(px(popup_padding))
+            .shadow_lg()
+            .overflow_hidden()
+            .on_scroll_wheel(|_event, _window, cx| cx.stop_propagation());
+        for (index, candidate) in candidates.into_iter().enumerate() {
+            let command = candidate.command;
+            let command_for_click = command.clone();
+            list = list.child(
+                div()
+                    .id(("terminal-autosuggest-row", index))
+                    .h(px(row_height))
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .rounded(px(tokens.radii.sm))
+                    .cursor_pointer()
+                    .when(selected_index == Some(index), |row| {
+                        row.bg(rgb(tokens.ui.bg_active))
+                    })
+                    .hover(|row| row.bg(rgb(tokens.ui.bg_hover)))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .px(px(tokens.metrics.ui_menu_item_padding_x))
+                            .truncate()
+                            .text_size(px(tokens.metrics.ui_text_sm))
+                            .text_color(rgb(tokens.ui.text))
+                            .child(command),
+                    )
+                    .child(
+                        div()
+                            .w(px(badge_width))
+                            .h_full()
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .bg(rgb(tokens.ui.accent))
+                            .text_size(px(tokens.metrics.ui_text_xs))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(tokens.ui.accent_text))
+                            .child("h"),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.fill_terminal_autosuggest_command(&command_for_click, false, cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+            );
+        }
+
+        div()
+            .absolute()
+            .left(px(popup_left))
+            .top(px(popup_top))
+            .child(overlay_content_boundary(list))
+            .into_any_element()
+    }
+
     fn drop_retired_images(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         for image in self.image_cache.take_retired_images() {
             // GPUI keeps painted RenderImage values in the window sprite atlas
