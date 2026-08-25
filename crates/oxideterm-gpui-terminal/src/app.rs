@@ -1389,6 +1389,15 @@ impl TerminalPane {
             .autosuggest_ghost_text(&self.input_tracker.state())
     }
 
+    pub fn history_ghost_text_for_input(&self, input: &str) -> Option<String> {
+        self.command_history
+            .ghost_text(&TerminalAutosuggestInputState {
+                value: input.to_string(),
+                cursor_index: input.len(),
+                is_cursor_at_end: true,
+            })
+    }
+
     fn terminal_autosuggest_candidates(&self) -> Vec<TerminalAutosuggestCandidate> {
         let mode = self.terminal.lock().mode();
         let state = self.input_tracker.state();

@@ -131,6 +131,15 @@ impl SharedTerminalCommandHistory {
         autosuggest_candidates_for_records(&self.state.lock().records, state, limit)
     }
 
+    pub(crate) fn ghost_text(&self, state: &TerminalAutosuggestInputState) -> Option<String> {
+        let query = state.value.as_str();
+        self.candidates(state, 1)
+            .into_iter()
+            .next()
+            .and_then(|candidate| candidate.command.strip_prefix(query).map(str::to_string))
+            .filter(|suffix| !suffix.is_empty())
+    }
+
     pub(crate) fn record(&self, command: &str) -> bool {
         if command.trim().is_empty() {
             return false;
@@ -742,6 +751,20 @@ mod tests {
                 .map(|candidate| candidate.command)
                 .collect::<Vec<_>>(),
             ["docker images", "docker ps"]
+        );
+    }
+
+    #[test]
+    fn shared_command_history_projects_the_top_match_as_a_suffix() {
+        let history = SharedTerminalCommandHistory::from_commands(vec!["ls -la".to_string()]);
+
+        assert_eq!(
+            history.ghost_text(&TerminalAutosuggestInputState {
+                value: "ls".to_string(),
+                cursor_index: 2,
+                is_cursor_at_end: true,
+            }),
+            Some(" -la".to_string())
         );
     }
 
