@@ -1,5 +1,5 @@
 use gpui::{
-    AnyElement, BoxShadow, CursorStyle, Div, Hsla, ParentElement, Rgba, Styled, div, point,
+    AnyElement, BoxShadow, CursorStyle, Div, IntoColor, ParentElement, Rgba, Styled, div, point,
     prelude::*, px, rgb, rgba,
 };
 use oxideterm_theme::ThemeTokens;
@@ -20,7 +20,7 @@ pub fn tauri_focus_visible_ring(tokens: &ThemeTokens) -> Vec<BoxShadow> {
     // select triggers, and dialog footer actions. GPUI callers pass the owner
     // state explicitly, but the visual ring must stay centralized.
     vec![BoxShadow {
-        color: Hsla::from(rgba((tokens.ui.accent << 8) | BUTTON_FOCUS_RING_ALPHA)),
+        color: rgba((tokens.ui.accent << 8) | BUTTON_FOCUS_RING_ALPHA).into_color(),
         offset: point(px(0.0), px(0.0)),
         blur_radius: px(0.0),
         spread_radius: px(BUTTON_FOCUS_RING_WIDTH),

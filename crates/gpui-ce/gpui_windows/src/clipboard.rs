@@ -1,4 +1,4 @@
-use std::{os::windows::ffi::OsStrExt as _, sync::LazyLock};
+use std::sync::LazyLock;
 
 use anyhow::Result;
 use collections::FxHashMap;
@@ -14,7 +14,7 @@ use windows::Win32::{
         Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock},
         Ole::{CF_DIB, CF_HDROP, CF_UNICODETEXT},
     },
-    UI::Shell::{DROPFILES, DragQueryFileW, HDROP},
+    UI::Shell::{DragQueryFileW, HDROP},
 };
 use windows::core::{Owned, PCWSTR};
 
@@ -78,7 +78,7 @@ pub(crate) fn write_to_clipboard(item: ClipboardItem) {
             match entry {
                 ClipboardEntry::String(string) => write_string(string)?,
                 ClipboardEntry::Image(image) => write_image(image)?,
-                ClipboardEntry::ExternalPaths(paths) => write_files(paths)?,
+                ClipboardEntry::ExternalPaths(_) => {}
             }
         }
         Ok(())
@@ -211,37 +211,6 @@ fn write_image(item: &Image) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn write_files(paths: &ExternalPaths) -> Result<()> {
-    let header = DROPFILES {
-        pFiles: std::mem::size_of::<DROPFILES>() as u32,
-        fWide: true.into(),
-        ..Default::default()
-    };
-    let header_bytes = unsafe {
-        // DROPFILES is a packed wire header whose bytes precede the UTF-16 path list.
-        std::slice::from_raw_parts(
-            std::ptr::addr_of!(header).cast::<u8>(),
-            std::mem::size_of::<DROPFILES>(),
-        )
-    };
-    let mut payload = Vec::with_capacity(header_bytes.len() + paths.paths().len() * 64);
-    payload.extend_from_slice(header_bytes);
-
-    for path in paths.paths() {
-        let path_words = path.as_os_str().encode_wide().collect::<Vec<_>>();
-        anyhow::ensure!(
-            !path_words.contains(&0),
-            "clipboard file path contains a null character"
-        );
-        for word in path_words.into_iter().chain(Some(0)) {
-            payload.extend_from_slice(&word.to_le_bytes());
-        }
-    }
-    // CF_HDROP requires one additional null word after the final path.
-    payload.extend_from_slice(&0u16.to_le_bytes());
-    set_clipboard_bytes(&payload, CF_HDROP.0 as u32)
 }
 
 fn convert_to_png(bytes: &[u8], format: ImageFormat) -> Option<Vec<u8>> {

@@ -10,9 +10,11 @@ use strum::IntoEnumIterator;
 use wayland_client::{Connection, protocol::wl_data_offer::WlDataOffer};
 use wayland_protocols::wp::primary_selection::zv1::client::zwp_primary_selection_offer_v1::ZwpPrimarySelectionOfferV1;
 
-use crate::linux::{WaylandClientStatePtr, platform::read_fd};
-use gpui::{ClipboardEntry, ClipboardItem, ExternalPaths, Image, ImageFormat, hash};
-use url::Url;
+use crate::linux::{
+    WaylandClientStatePtr,
+    platform::{PIPE_READ_TIMEOUT, read_fd_with_timeout},
+};
+use gpui::{ClipboardEntry, ClipboardItem, Image, ImageFormat, hash};
 
 /// Text mime types that we'll offer to other programs.
 pub(crate) const TEXT_MIME_TYPES: [&str; 3] =
@@ -87,7 +89,7 @@ impl<T: ReceiveData> DataOffer<T> {
 
         connection.flush().unwrap();
 
-        match unsafe { read_fd(fd) } {
+        match read_fd_with_timeout(fd, PIPE_READ_TIMEOUT) {
             Ok(bytes) => Some(bytes),
             Err(err) => {
                 log::error!("error reading clipboard pipe: {err:?}");
@@ -134,24 +136,6 @@ impl<T: ReceiveData> DataOffer<T> {
         }
         None
     }
-
-    fn read_files(&self, connection: &Connection) -> Option<ClipboardItem> {
-        if !self.has_mime_type(FILE_LIST_MIME_TYPE) {
-            return None;
-        }
-        let bytes = self.read_bytes(connection, FILE_LIST_MIME_TYPE)?;
-        let uri_list = String::from_utf8(bytes).ok()?;
-        let paths = uri_list
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty() && !line.starts_with('#'))
-            .filter_map(|line| Url::parse(line).ok())
-            .filter_map(|uri| uri.to_file_path().ok())
-            .collect::<Vec<_>>();
-        (!paths.is_empty()).then(|| ClipboardItem {
-            entries: vec![ClipboardEntry::ExternalPaths(ExternalPaths(paths.into()))],
-        })
-    }
 }
 
 impl Clipboard {
@@ -196,15 +180,9 @@ impl Clipboard {
         self.self_mime.clone()
     }
 
-    pub fn send(&self, mime_type: String, fd: OwnedFd) {
-        if mime_type == FILE_LIST_MIME_TYPE
-            && let Some(paths) = self.contents.as_ref().and_then(external_paths)
-        {
-            self.send_internal(fd, encode_uri_list(paths));
-            return;
-        }
+    pub fn send(&self, _mime_type: String, fd: OwnedFd) {
         if let Some(text) = self.contents.as_ref().and_then(|contents| contents.text()) {
-            self.send_internal(fd, text.as_bytes().to_owned());
+            self.send_bytes(fd, text.as_bytes().to_owned());
         }
     }
 
@@ -214,7 +192,7 @@ impl Clipboard {
             .as_ref()
             .and_then(|contents| contents.text())
         {
-            self.send_internal(fd, text.as_bytes().to_owned());
+            self.send_bytes(fd, text.as_bytes().to_owned());
         }
     }
 
@@ -229,8 +207,7 @@ impl Clipboard {
         }
 
         let item = offer
-            .read_files(&self.connection)
-            .or_else(|| offer.read_text(&self.connection))
+            .read_text(&self.connection)
             .or_else(|| offer.read_image(&self.connection))?;
 
         self.cached_read = Some(item.clone());
@@ -255,7 +232,7 @@ impl Clipboard {
         Some(item)
     }
 
-    fn send_internal(&self, fd: OwnedFd, bytes: Vec<u8>) {
+    pub fn send_bytes(&self, fd: OwnedFd, bytes: Vec<u8>) {
         let mut written = 0;
         self.loop_handle
             .insert_source(
@@ -283,26 +260,4 @@ impl Clipboard {
             )
             .unwrap();
     }
-
-    pub fn has_files(&self) -> bool {
-        self.contents.as_ref().and_then(external_paths).is_some()
-    }
-}
-
-fn external_paths(item: &ClipboardItem) -> Option<&ExternalPaths> {
-    item.entries().iter().find_map(|entry| match entry {
-        ClipboardEntry::ExternalPaths(paths) => Some(paths),
-        _ => None,
-    })
-}
-
-fn encode_uri_list(paths: &ExternalPaths) -> Vec<u8> {
-    let mut uri_list = String::new();
-    for path in paths.paths() {
-        if let Ok(uri) = Url::from_file_path(path) {
-            uri_list.push_str(uri.as_str());
-            uri_list.push_str("\r\n");
-        }
-    }
-    uri_list.into_bytes()
 }

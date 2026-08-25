@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the pinned GPUI-CE vendor baseline and its required license files."""
+"""Verify the pinned Zed/GPUI-CE vendor baseline and required license files."""
 
 from __future__ import annotations
 
@@ -28,9 +28,14 @@ MICROSOFT_TERMINAL_LICENSE_SHA256 = (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--upstream-checkout",
+        "--zed-checkout",
         type=Path,
-        help="Optional GPUI-CE Git checkout used to verify recorded tree hashes.",
+        help="Optional Zed Git checkout used to verify recorded tree hashes.",
+    )
+    parser.add_argument(
+        "--gpui-ce-checkout",
+        type=Path,
+        help="Optional GPUI-CE Git checkout used to verify recorded overlay tree hashes.",
     )
     return parser.parse_args()
 
@@ -84,12 +89,20 @@ def upstream_file_bytes(checkout: Path, revision: str, source_path: str) -> byte
     )
 
 
+def normalized_markdown_lines(content: bytes) -> list[bytes]:
+    """Ignore Markdown-only trailing spaces while preserving the license text."""
+    return [line.rstrip(b" \t") for line in content.splitlines()]
+
+
 def main() -> None:
     args = parse_args()
     baseline = load_toml(BASELINE_PATH)
     crates = baseline.get("crates") or []
     local_crate_paths = {entry["local_path"] for entry in crates}
-    upstream_crate_paths = {entry["upstream_path"] for entry in crates}
+    zed_crate_paths = {entry["zed_path"] for entry in crates if "zed_path" in entry}
+    gpui_ce_crate_paths = {
+        entry["gpui_ce_path"] for entry in crates if "gpui_ce_path" in entry
+    }
 
     # The migration baseline is reviewed against one exact dependency graph.
     cargo_lock_digest = hashlib.sha256(CARGO_LOCK_PATH.read_bytes()).hexdigest()
@@ -100,8 +113,10 @@ def main() -> None:
 
     if len(local_crate_paths) != len(crates):
         raise RuntimeError("vendor baseline contains duplicate local crate paths")
-    if len(upstream_crate_paths) != len(crates):
-        raise RuntimeError("vendor baseline contains duplicate upstream crate paths")
+    if len(zed_crate_paths) != sum("zed_path" in entry for entry in crates):
+        raise RuntimeError("vendor baseline contains duplicate Zed crate paths")
+    if len(gpui_ce_crate_paths) != sum("gpui_ce_path" in entry for entry in crates):
+        raise RuntimeError("vendor baseline contains duplicate GPUI-CE crate paths")
     if not CANONICAL_LICENSE.is_file():
         raise RuntimeError(f"missing canonical GPUI-CE license: {CANONICAL_LICENSE}")
     if not ROOT_UPSTREAM_LICENSE.is_file():
@@ -125,30 +140,44 @@ def main() -> None:
             raise RuntimeError(f"missing vendored GPUI crate manifest: {crate_path}")
         verify_license(crate_path)
 
-    if args.upstream_checkout is not None:
-        revision = baseline["upstream_commit"]
+    if args.zed_checkout is not None:
+        revision = baseline["zed_commit"]
         if CANONICAL_LICENSE.read_bytes() != upstream_file_bytes(
-            args.upstream_checkout,
-            revision,
-            "crates/gpui/LICENSE-APACHE",
+            args.zed_checkout, revision, "LICENSE-APACHE"
         ):
-            raise RuntimeError("canonical GPUI-CE license differs from pinned upstream")
-        if ROOT_UPSTREAM_LICENSE.read_bytes() != upstream_file_bytes(
-            args.upstream_checkout,
-            revision,
-            "LICENSE.md",
+            raise RuntimeError("canonical GPUI license differs from pinned Zed upstream")
+        for entry in crates:
+            if "zed_path" in entry:
+                verify_recorded_tree(
+                    args.zed_checkout,
+                    revision,
+                    entry["zed_path"],
+                    entry["zed_tree"],
+                )
+
+    if args.gpui_ce_checkout is not None:
+        revision = baseline["gpui_ce_commit"]
+        if CANONICAL_LICENSE.read_bytes() != upstream_file_bytes(
+            args.gpui_ce_checkout, revision, "crates/gpui/LICENSE-APACHE"
+        ):
+            raise RuntimeError("canonical GPUI license differs from pinned GPUI-CE upstream")
+        if normalized_markdown_lines(
+            ROOT_UPSTREAM_LICENSE.read_bytes()
+        ) != normalized_markdown_lines(
+            upstream_file_bytes(args.gpui_ce_checkout, revision, "LICENSE.md")
         ):
             raise RuntimeError("GPUI-CE root license differs from pinned upstream")
         for entry in crates:
-            verify_recorded_tree(
-                args.upstream_checkout,
-                revision,
-                entry["upstream_path"],
-                entry["upstream_tree"],
-            )
+            if "gpui_ce_path" in entry:
+                verify_recorded_tree(
+                    args.gpui_ce_checkout,
+                    revision,
+                    entry["gpui_ce_path"],
+                    entry["gpui_ce_tree"],
+                )
     print(
-        f"verified {len(crates)} GPUI vendor crates at "
-        f"{baseline['upstream_commit']}"
+        f"verified {len(crates)} GPUI vendor crates at Zed {baseline['zed_commit']} "
+        f"with GPUI-CE overlay {baseline['gpui_ce_commit']}"
     )
 
 

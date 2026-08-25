@@ -592,7 +592,7 @@ impl LauncherWorkspaceEntity {
                     .justify_center()
                     .shadow(vec![gpui::BoxShadow {
                         inset: false,
-                        color: rgba((0x000000 << 8) | 0x33).into(),
+                        color: rgba((0x000000 << 8) | 0x33).into_color(),
                         offset: gpui::point(px(0.0), px(2.0)),
                         blur_radius: px(4.0),
                         spread_radius: px(0.0),

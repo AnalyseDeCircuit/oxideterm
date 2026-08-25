@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, Context, CursorStyle, ElementId, Entity, Hsla, InteractiveElement,
+    AnyElement, App, Context, CursorStyle, ElementId, Entity, Hsla, InteractiveElement, IntoColor,
     IntoElement, MouseButton, ParentElement, Pixels, Point, ScrollHandle, SharedString,
     StatefulInteractiveElement, Styled, StyledText, TextLayout, TextRun, Timer, Window, div, font,
     prelude::FluentBuilder, px, rgb,
@@ -605,8 +605,8 @@ impl WorkspaceApp {
         font_family: Option<SharedString>,
         alpha: f32,
     ) -> TextRun {
-        let mut color: Hsla = rgb(color).into();
-        color.a = alpha.clamp(0.0, 1.0);
+        let mut color: Hsla = rgb(color).into_color();
+        color.alpha = alpha.clamp(0.0, 1.0);
         TextRun {
             len: value.len(),
             font: font(font_family.unwrap_or_else(|| {
@@ -616,6 +616,7 @@ impl WorkspaceApp {
             background_color: None,
             underline: None,
             strikethrough: None,
+            letter_spacing: None,
         }
     }
 
@@ -970,10 +971,11 @@ impl SelectableTextRenderState {
         let run = TextRun {
             len: text.len(),
             font: font(self.ui_font_family.clone()),
-            color: rgb(color).into(),
+            color: rgb(color).into_color(),
             background_color: None,
             underline: None,
             strikethrough: None,
+            letter_spacing: None,
         };
         match role {
             SelectableTextRole::PlainDocument | SelectableTextRole::RowSafe => self
@@ -1143,8 +1145,8 @@ impl SelectableTextRenderState {
 }
 
 fn selection_bg(accent: u32) -> Hsla {
-    let mut color: Hsla = rgb(accent).into();
-    color.a = 0.25;
+    let mut color: Hsla = rgb(accent).into_color();
+    color.alpha = 0.25;
     color
 }
 

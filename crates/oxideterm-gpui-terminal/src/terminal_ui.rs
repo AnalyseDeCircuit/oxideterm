@@ -1,8 +1,8 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use gpui::{
-    Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, Pixels, SharedString, TextRun,
-    Window, px, rgb,
+    Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, IntoColor, Pixels, SharedString,
+    TextRun, Window, px, rgb,
 };
 use oxideterm_render_policy::EffectiveRenderPolicy;
 use oxideterm_settings::{
@@ -913,10 +913,11 @@ pub(crate) fn fallback_cell_width(window: &mut Window, font: &Font, font_size: P
     let run = TextRun {
         len: sample.len(),
         font: font.clone(),
-        color: rgb(0xe6e8eb).into(),
+        color: rgb(0xe6e8eb).into_color(),
         background_color: None,
         underline: None,
         strikethrough: None,
+        letter_spacing: None,
     };
 
     window

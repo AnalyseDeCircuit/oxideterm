@@ -1,10 +1,8 @@
-// OxideTerm modification: maps the hidden cursor style to a null Win32 cursor handle.
-
 use std::sync::OnceLock;
 
-use ::util::ResultExt;
 #[cfg(not(feature = "wgpu"))]
 use anyhow::Context;
+use gpui_util::ResultExt;
 use windows::{
     UI::{
         Color,

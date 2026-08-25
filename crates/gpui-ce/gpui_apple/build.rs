@@ -41,7 +41,7 @@ mod macos_build {
             "Size".into(),
             "Pixels".into(),
             "PointF".into(),
-            "Hsla".into(),
+            "SceneHsla".into(),
             "ContentMask".into(),
             "Uniforms".into(),
             "AtlasTile".into(),
@@ -65,6 +65,10 @@ mod macos_build {
         ]);
         config.no_includes = true;
         config.enumeration.prefix_with_name = true;
+        config
+            .export
+            .rename
+            .insert("SceneHsla".into(), "Hsla".into());
 
         let mut builder = cbindgen::Builder::new();
 
@@ -117,7 +121,7 @@ mod macos_build {
         let shader_source_path = "./src/shaders.metal";
         let shader_path = PathBuf::from(shader_source_path);
         stitch_header(header_path, &shader_path).unwrap();
-        println!("cargo:rerun-if-changed={}", &shader_source_path);
+        println!("cargo:rerun-if-changed={shader_source_path}");
     }
 
     #[cfg(not(feature = "runtime_shaders"))]

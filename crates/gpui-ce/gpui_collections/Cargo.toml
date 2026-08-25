@@ -1,10 +1,9 @@
-# Modified by OxideTerm to prevent publishing the vendored workspace crate.
 [package]
 name = "gpui_collections"
 version = "0.2.2"
 edition = "2024"
 license = "Apache-2.0"
-publish = false
+publish = true
 description = "Blessed hash collections used by gpui-ce (vendored from Zed)."
 repository = "https://github.com/gpui-ce/gpui-ce"
 
@@ -19,3 +18,4 @@ test-support = []
 [dependencies]
 indexmap = { version = "2", features = ["serde"] }
 rustc-hash = "2"
+gpui_util = { package = "gpui_ce_util", version = "0.2.2", path = "../gpui_ce_util" }

@@ -308,6 +308,8 @@ fn terminal_element_does_not_recolor_path_like_prompt_segments() {
             .text_runs
             .iter()
             .filter(|run| run.text.contains("Documents") || run.text.contains("OxideTerm"))
-            .all(|run| run.style.underline.is_none() && run.style.color == rgb(0xffffff).into())
+            .all(|run| {
+                run.style.underline.is_none() && run.style.color == rgb(0xffffff).into_color()
+            })
     );
 }

@@ -5,9 +5,9 @@ use crate::{CompositorGpuHint, WgpuAtlas, WgpuContext, WgpuDeviceRequirements};
 use bytemuck::{Pod, Zeroable};
 use gpui::{
     AtlasTextureId, AtlasTextureKind, AtlasTile, BackdropFilter, Background, BorderStyle, Bounds,
-    Corners, DevicePixels, Edges, FilterBoundary, GpuSpecs, Hsla, LinearColorStop,
-    MonochromeSprite, PaintSurface, Path, PolychromeSprite, PrimitiveBatch, Quad, ScaledFilter,
-    ScaledPixels, Scene, Shadow, Size, SubpixelSprite, TransformationMatrix, Underline,
+    Corners, DevicePixels, Edges, FilterBoundary, GpuSpecs, LinearColorStop, MonochromeSprite,
+    PaintSurface, Path, PolychromeSprite, PrimitiveBatch, Quad, ScaledFilter, ScaledPixels, Scene,
+    SceneHsla, Shadow, Size, SubpixelSprite, TransformationMatrix, Underline,
     get_gamma_correction_ratios,
 };
 use log::warn;
@@ -156,13 +156,14 @@ struct GpuHsla {
     a: f32,
 }
 
-impl From<Hsla> for GpuHsla {
-    fn from(color: Hsla) -> Self {
+impl From<SceneHsla> for GpuHsla {
+    fn from(color: SceneHsla) -> Self {
+        let color: gpui::Hsla = color.into();
         Self {
-            h: color.h,
-            s: color.s,
-            l: color.l,
-            a: color.a,
+            h: color.hue.into_positive_degrees() / 360.0,
+            s: color.saturation,
+            l: color.lightness,
+            a: color.alpha,
         }
     }
 }
@@ -355,7 +356,7 @@ impl From<&Underline> for GpuUnderline {
             content_mask: underline.content_mask.bounds.into(),
             color: underline.color.into(),
             thickness: underline.thickness.0,
-            wavy: underline.wavy,
+            wavy: underline.wavy.into(),
         }
     }
 }
@@ -3624,7 +3625,7 @@ mod tests {
         let mut sprite = PolychromeSprite {
             order: 7,
             pad: u32::MAX,
-            grayscale: true,
+            grayscale: true.into(),
             opacity: 0.5,
             bounds: Bounds::default(),
             content_mask: gpui::ContentMask::default(),
@@ -3645,21 +3646,22 @@ mod tests {
         assert_eq!(encoded.pad, 0);
         assert_eq!(encoded.tile.texture_id.kind, 1);
 
-        sprite.grayscale = false;
+        sprite.grayscale = false.into();
         assert_eq!(GpuPolychromeSprite::from(&sprite).grayscale, 0);
     }
 
     #[test]
     fn scene_enum_encodings_match_wgsl_discriminants() {
-        let solid = gpui::solid_background(Hsla::default());
+        let default_color = gpui::hsla(0.0, 0.0, 0.0, 0.0);
+        let solid = gpui::solid_background(default_color);
         let linear = gpui::linear_gradient(
             90.0,
-            gpui::linear_color_stop(Hsla::default(), 0.0),
-            gpui::linear_color_stop(Hsla::default(), 1.0),
+            gpui::linear_color_stop(default_color, 0.0),
+            gpui::linear_color_stop(default_color, 1.0),
         )
         .color_space(gpui::ColorSpace::Oklab);
-        let pattern = gpui::pattern_slash(Hsla::default(), 1.0, 1.0);
-        let checkerboard = gpui::checkerboard(Hsla::default(), 2.0);
+        let pattern = gpui::pattern_slash(default_color, 1.0, 1.0);
+        let checkerboard = gpui::checkerboard(default_color, 2.0);
         assert_eq!(GpuBackground::from(&solid).tag, 0);
         assert_eq!(GpuBackground::from(&linear).tag, 1);
         assert_eq!(GpuBackground::from(&linear).color_space, 1);

@@ -5,7 +5,7 @@ use std::{cell::RefCell, collections::HashMap, ops::Range, sync::Arc, time::Dura
 
 use gpui::{
     AnyElement, App, Bounds, Context, Div, Element, ElementId, ElementInputHandler, Entity,
-    FocusHandle, Focusable, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
+    FocusHandle, Focusable, GlobalElementId, InspectorElementId, IntoColor, IntoElement, LayoutId,
     ParentElement, Pixels, Point, ScrollWheelEvent, SharedString, Task, TextRun, Timer, Window,
     div, point, prelude::*, px, rgb,
 };
@@ -1213,10 +1213,11 @@ impl TextEditorView {
         let run = TextRun {
             len: text.len(),
             font: editor_code_font(&self.appearance.font_family),
-            color: rgb(self.appearance.text_hex).into(),
+            color: rgb(self.appearance.text_hex).into_color(),
             background_color: None,
             underline: None,
             strikethrough: None,
+            letter_spacing: None,
         };
         window
             .text_system()

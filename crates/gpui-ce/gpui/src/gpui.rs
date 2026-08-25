@@ -19,12 +19,15 @@ mod bounds_tree;
 mod color;
 /// The default colors used by GPUI.
 pub mod colors;
+#[cfg(feature = "profiler")]
+mod debug_overlay;
 mod element;
 mod elements;
 mod executor;
 mod platform_scheduler;
 pub(crate) use platform_scheduler::PlatformScheduler;
 mod geometry;
+mod gestures;
 mod global;
 mod input;
 mod inspector;
@@ -35,13 +38,20 @@ mod lerp;
 mod path_builder;
 mod platform;
 pub mod prelude;
-/// Profiling utilities for task timing and thread performance tracking.
+/// Profiling utilities for task, frame, and thread performance tracking.
 pub mod profiler;
-#[cfg(any(target_os = "windows", target_os = "linux", target_family = "wasm"))]
+#[cfg(any(
+    test,
+    target_os = "windows",
+    target_os = "linux",
+    target_family = "wasm",
+    feature = "test-support"
+))]
 #[expect(missing_docs)]
 pub mod queue;
 mod scene;
 mod shared_uri;
+mod spring;
 mod style;
 mod styled;
 mod subscription;
@@ -91,16 +101,44 @@ pub use asset_cache::*;
 pub use assets::*;
 pub use color::*;
 pub use ctor::ctor;
+#[cfg(feature = "profiler")]
+pub use debug_overlay::*;
 pub use element::*;
 pub use elements::*;
 pub use executor::*;
 /// OxideTerm compatibility alias for the pre-vendor anchored-element API.
 pub use geometry::Anchor as Corner;
 pub use geometry::*;
+pub use gestures::*;
 pub use global::*;
 pub use gpui_macros::{
-    AppContext, IntoElement, Render, VisualContext, property_test, register_action, test,
+    AppContext, IntoElement, Render, VisualContext, bench, property_test, register_action, test,
 };
+pub use spring::*;
+
+/// Defines a Criterion benchmark group for benchmarks annotated with [`gpui::bench`].
+///
+/// This mirrors `criterion::criterion_group!` so GPUI benchmark files can keep the
+/// same shape as ordinary Criterion benchmarks.
+///
+/// [`gpui::bench`]: crate::bench
+#[macro_export]
+macro_rules! bench_group {
+    ($($tokens:tt)*) => {
+        criterion::criterion_group!($($tokens)*);
+    };
+}
+
+/// Defines the entry point for GPUI Criterion benchmark groups.
+///
+/// This mirrors `criterion::criterion_main!` so GPUI benchmark files can keep the
+/// same shape as ordinary Criterion benchmarks.
+#[macro_export]
+macro_rules! bench_main {
+    ($($tokens:tt)*) => {
+        criterion::criterion_main!($($tokens)*);
+    };
+}
 pub use gpui_shared_string::*;
 pub use gpui_util::arc_cow::ArcCow;
 /// HTTP client abstraction for making requests.
@@ -318,10 +356,10 @@ pub struct GpuSpecs {
     /// Whether the renderer identifies the adapter as a virtual GPU.
     #[serde(default)]
     pub is_virtual_gpu: bool,
-    /// The name of the device, as reported by the active graphics backend.
+    /// The name of the device, as reported by Vulkan.
     pub device_name: String,
-    /// The name of the driver, as reported by the active graphics backend.
+    /// The name of the driver, as reported by Vulkan.
     pub driver_name: String,
-    /// Further information about the driver, as reported by the active graphics backend.
+    /// Further information about the driver, as reported by Vulkan.
     pub driver_info: String,
 }

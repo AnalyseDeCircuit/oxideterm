@@ -1,6 +1,6 @@
 use gpui::{
-    AnyElement, App, BoxShadow, Hsla, MouseButton, MouseDownEvent, ParentElement, Styled, Window,
-    div, point, prelude::*, px, rgb, rgba, svg,
+    AnyElement, App, BoxShadow, IntoColor, MouseButton, MouseDownEvent, ParentElement, Styled,
+    Window, div, point, prelude::*, px, rgb, rgba, svg,
 };
 use oxideterm_theme::ThemeTokens;
 use std::rc::Rc;
@@ -114,7 +114,7 @@ pub fn confirm_dialog_with_focus_motion(
                 .border_color(rgba((theme.border << 8) | CONFIRM_BORDER_ALPHA))
                 .bg(rgb(theme.bg_elevated))
                 .shadow(vec![BoxShadow {
-                    color: Hsla::from(rgba((TW_BLACK << 8) | CONFIRM_SHADOW_ALPHA)),
+                    color: rgba((TW_BLACK << 8) | CONFIRM_SHADOW_ALPHA).into_color(),
                     offset: point(px(0.0), px(16.0)),
                     blur_radius: px(32.0),
                     spread_radius: px(0.0),

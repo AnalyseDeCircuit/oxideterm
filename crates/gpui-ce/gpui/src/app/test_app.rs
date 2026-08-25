@@ -1,5 +1,3 @@
-// OxideTerm modification: clears draw-scoped element arenas through their owning App.
-
 //! A clean testing API for GPUI applications.
 //!
 //! `TestApp` provides a simpler alternative to `TestAppContext` with:

@@ -1,44 +1,48 @@
-# OxideTerm GPUI-CE Vendor Ledger
+# OxideTerm GPUI Vendor Ledger
 
-OxideTerm vendors a pinned GPUI-CE source snapshot. This is not an OxideTerm
-fork with an independent upstream history, and it is not the previous
-monolithic `gpui` crate copied from crates.io.
+OxideTerm vendors a reviewed hybrid of Zed's current GPUI implementation and
+GPUI-CE's community-maintained portability layer. This is not an independent
+upstream fork and it is not the previous monolithic `gpui` crate from crates.io.
 
 The authoritative provenance record is [`UPSTREAM_BASELINE.toml`](./UPSTREAM_BASELINE.toml).
 It pins:
 
-- upstream repository: `https://github.com/gpui-ce/gpui-ce.git`;
-- upstream commit: `6c799b8e994266233014cea66d7769675ec1967c`;
-- OxideTerm import base: `7c2c5046c93ae4d54a132d40c33d0c622274354a`;
+- primary repository: `https://github.com/zed-industries/zed.git`;
+- primary commit: `0969b0dba3f3411592fce801d00f8d81b8dcf902`;
+- GPUI-CE overlay repository: `https://github.com/gpui-ce/gpui-ce.git`;
+- GPUI-CE overlay commit: `9949f8b2d27bb1d6dbc1efe90be039634cf1fb6b`;
+- OxideTerm import parent: `f462f86a7bcbc5d2803b55b118f6763a3b7c89b6`;
 - the SHA-256 digest of the reviewed workspace `Cargo.lock`;
-- the pristine upstream tree object for every imported crate;
+- the pristine Zed and/or GPUI-CE tree objects used for every imported crate;
 - the imported and deliberately excluded paths;
 - the license and packaged-license locations.
 
-The tree object IDs in `UPSTREAM_BASELINE.toml` describe the pristine upstream
-snapshot before the local deltas in this document are applied. Do not replace
-them with hashes of the modified OxideTerm trees.
+The tree object IDs describe both pristine inputs before the local deltas in
+this document are applied. Do not replace them with hashes of the modified
+OxideTerm trees.
 
 ## Imported Closure
 
-The approved vendor closure contains these 16 crates:
+The approved vendor closure contains these 18 crates:
 
 1. `crates/gpui-ce/gpui`
-2. `crates/gpui-ce/gpui_ce_util`
-3. `crates/gpui-ce/gpui_collections`
-4. `crates/gpui-ce/gpui_derive_refineable`
-5. `crates/gpui-ce/gpui_linux`
-6. `crates/gpui-ce/gpui_macos`
-7. `crates/gpui-ce/gpui_macros`
-8. `crates/gpui-ce/gpui_media`
-9. `crates/gpui-ce/gpui_platform`
-10. `crates/gpui-ce/gpui_refineable`
-11. `crates/gpui-ce/gpui_scheduler`
-12. `crates/gpui-ce/gpui_shared_string`
-13. `crates/gpui-ce/gpui_sum_tree`
-14. `crates/gpui-ce/gpui_wgpu`
-15. `crates/gpui-ce/gpui_windows`
-16. `crates/gpui-ce/gpui_zed_util`
+2. `crates/gpui-ce/gpui_apple`
+3. `crates/gpui-ce/gpui_ce_util`
+4. `crates/gpui-ce/gpui_collections`
+5. `crates/gpui-ce/gpui_derive_refineable`
+6. `crates/gpui-ce/gpui_linux`
+7. `crates/gpui-ce/gpui_macos`
+8. `crates/gpui-ce/gpui_macros`
+9. `crates/gpui-ce/gpui_media`
+10. `crates/gpui-ce/gpui_path`
+11. `crates/gpui-ce/gpui_platform`
+12. `crates/gpui-ce/gpui_refineable`
+13. `crates/gpui-ce/gpui_scheduler`
+14. `crates/gpui-ce/gpui_shared_string`
+15. `crates/gpui-ce/gpui_sum_tree`
+16. `crates/gpui-ce/gpui_wgpu`
+17. `crates/gpui-ce/gpui_windows`
+18. `crates/gpui-ce/gpui_zed_util`
 
 WebAssembly is not a shipped or supported OxideTerm target. `crates/gpui_web`,
 `crates/gpui_elements`, `crates/gpui_tokio`, and `tooling/perf` are deliberately
@@ -62,7 +66,7 @@ the WGPU backend below.
 The renderer layout is now:
 
 - Linux and FreeBSD: `gpui_wgpu`, using WGPU with Vulkan and GL backends;
-- macOS: `gpui_macos`, using Metal;
+- macOS: `gpui_macos` with the extracted `gpui_apple` Metal renderer;
 - Windows: `gpui_windows`, using Direct3D 11;
 
 Backdrop filtering is already provided by the pinned GPUI-CE baseline. The
@@ -181,7 +185,7 @@ frame dispatch, presentation, IME updates, and multiple windows.
 
 ### Metal intermediate texture lifetime
 
-`crates/gpui-ce/gpui_macos/src/metal_renderer.rs` allocates its full-window intermediate
+`crates/gpui-ce/gpui_apple/src/metal_renderer.rs` allocates its full-window intermediate
 textures lazily. Preserve these lifecycle rules:
 
 - updating the drawable size records the valid size and invalidates intermediates created for a
@@ -211,6 +215,15 @@ merely to simplify resize handling.
 `gpui_platform/font-kit` feature. Without it, GPUI-CE constructs
 `NoopTextSystem` on macOS: layout surfaces and SVG assets remain visible, but
 all glyph-backed text and icons disappear.
+
+### Scheduler-owned animation clock
+
+`crates/gpui-ce/gpui/src/elements/animation.rs` advances ordinary and spring
+animations with the platform background executor's clock. Production platforms
+still use monotonic wall time, while `TestAppContext` can advance the same clock
+deterministically. Do not restore direct `Instant::now` or `Instant::elapsed`
+calls in these element paths: doing so disconnects animation state from GPUI's
+timer scheduler and makes retargeting, pause, and resume tests timing-dependent.
 
 ### Nested scroll ownership
 
@@ -485,7 +498,7 @@ Refresh the vendor only on an isolated migration branch or worktree.
 1. Check out the candidate GPUI-CE commit in a clean temporary directory and
    record its full commit ID.
 2. Recompute the dependency closure from the candidate manifests. Any addition
-   to or removal from the 16-crate closure requires an explicit review of why it
+   to or removal from the 18-crate closure requires an explicit review of why it
    is needed, its license, and whether it becomes a shipped target.
 3. Record the pristine Git tree ID for every imported crate
    in `UPSTREAM_BASELINE.toml` before applying local patches.
@@ -519,7 +532,8 @@ Verify provenance against the clean upstream checkout:
 
 ```sh
 python3 scripts/quality/verify_gpui_vendor.py \
-  --upstream-checkout /path/to/clean/gpui-ce
+  --zed-checkout /path/to/clean/zed \
+  --gpui-ce-checkout /path/to/clean/gpui-ce
 ```
 
 Verify formatting, the vendor crates, and product integration:

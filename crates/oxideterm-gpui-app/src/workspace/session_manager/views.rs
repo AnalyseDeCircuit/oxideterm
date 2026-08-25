@@ -933,7 +933,7 @@ impl WorkspaceApp {
         });
         self.session_manager_card_surface(self.tokens.radii.lg, has_background)
             .min_w(px(260.0))
-            .flex_grow()
+            .flex_grow_1()
             .flex_basis(px(320.0))
             .px(px(self.tokens.spacing.three))
             .py(px(self.tokens.spacing.three))

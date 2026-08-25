@@ -1,7 +1,7 @@
 use super::*;
 use std::{path::Path, sync::Arc};
 
-use gpui::{Bounds, Keystroke, Modifiers, MouseButton, Pixels, point, px, rgb, size};
+use gpui::{Bounds, IntoColor, Keystroke, Modifiers, MouseButton, Pixels, point, px, rgb, size};
 use oxideterm_terminal::{
     TermMode, TerminalCell, TerminalColor, TerminalCommandMark, TerminalCommandMarkClosedBy,
     TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource, TerminalCursorShape,

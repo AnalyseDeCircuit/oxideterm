@@ -1,15 +1,12 @@
-// Modified by OxideTerm contributors to preserve mutable DirectWrite callback provenance,
-// retain callback font identities, and release mapped glyph readback resources deterministically.
-
 use std::{
     borrow::Cow,
     ffi::{c_uint, c_void},
     mem::ManuallyDrop,
 };
 
-use ::util::{ResultExt, maybe};
 use anyhow::{Context, Result};
 use collections::HashMap;
+use gpui_util::{ResultExt, maybe};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use windows::{
     Win32::{
@@ -36,12 +33,6 @@ struct FontInfo {
     features: IDWriteTypography,
     fallbacks: Option<IDWriteFontFallback>,
     font_collection: IDWriteFontCollection1,
-}
-
-struct CachedFontFace {
-    font_id: FontId,
-    // Keep the callback face alive while its pointer address is used as a draw-local key.
-    _font_face: IDWriteFontFace3,
 }
 
 pub(crate) struct DirectWriteTextSystem {
@@ -84,6 +75,7 @@ struct DirectWriteState {
     custom_font_collection: IDWriteFontCollection1,
     fonts: Vec<FontInfo>,
     font_to_font_id: HashMap<Font, FontId>,
+    font_info_cache: HashMap<usize, FontId>,
     layout_line_scratch: Vec<u16>,
 }
 
@@ -220,6 +212,7 @@ impl DirectWriteTextSystem {
                 custom_font_collection,
                 fonts: Vec::new(),
                 font_to_font_id: HashMap::default(),
+                font_info_cache: HashMap::default(),
                 layout_line_scratch: Vec::new(),
             }),
         })
@@ -327,7 +320,9 @@ impl DirectWriteState {
                 })?;
 
             let font_id = FontId(this.fonts.len());
+            let font_face_key = info.font_face.cast::<IUnknown>().unwrap().as_raw().addr();
             this.fonts.push(info);
+            this.font_info_cache.insert(font_face_key, font_id);
             Some(font_id)
         };
 
@@ -556,12 +551,10 @@ impl DirectWriteState {
                     format.SetFontFallback(fallbacks)?;
                 }
 
-                let layout = components.factory.CreateTextLayout(
-                    text_wide,
-                    &format,
-                    f32::INFINITY,
-                    f32::INFINITY,
-                )?;
+                let layout: IDWriteTextLayout1 = components
+                    .factory
+                    .CreateTextLayout(text_wide, &format, f32::INFINITY, f32::INFINITY)?
+                    .cast()?;
                 let current_text = &text[utf8_offset..(utf8_offset + first_run.len)];
                 utf8_offset += first_run.len;
                 let current_text_utf16_length = current_text.encode_utf16().count() as u32;
@@ -570,6 +563,9 @@ impl DirectWriteState {
                     length: current_text_utf16_length,
                 };
                 layout.SetTypography(&font_info.features, text_range)?;
+                if let Some(spacing) = first_run.letter_spacing {
+                    layout.SetCharacterSpacing(0.0, spacing.as_f32(), 0.0, text_range)?;
+                }
                 utf16_offset += current_text_utf16_length;
 
                 layout
@@ -608,6 +604,9 @@ impl DirectWriteState {
                 text_layout.SetFontStyle(font_info.font_face.GetStyle(), text_range)?;
                 text_layout.SetFontWeight(font_info.font_face.GetWeight(), text_range)?;
                 text_layout.SetTypography(&font_info.features, text_range)?;
+                if let Some(spacing) = run.letter_spacing {
+                    text_layout.SetCharacterSpacing(0.0, spacing.as_f32(), 0.0, text_range)?;
+                }
 
                 break_ligatures = !break_ligatures;
             }
@@ -617,7 +616,6 @@ impl DirectWriteState {
                 text_system: self,
                 components,
                 index_converter: StringIndexConverter::new(text),
-                font_info_cache: HashMap::default(),
                 runs: &mut runs,
                 width: 0.0,
             };
@@ -887,8 +885,10 @@ impl DirectWriteState {
         params: &RenderGlyphParams,
         glyph_bounds: Bounds<DevicePixels>,
     ) -> Result<Vec<u8>> {
-        // This method drives the shared D3D11 immediate context, so glyph rasterization must
-        // remain on the main UI thread alongside the renderer and atlas operations.
+        // INVARIANT: the code below drives the *shared* D3D11 immediate context
+        // (`Map`/`Unmap`/`Draw`/`CopyResource`), which `DirectXRenderer` and `DirectXAtlas` also
+        // touch. An immediate `ID3D11DeviceContext` is not thread-safe, so this must only run on
+        // the main UI thread (which it always is; text rasterization never leaves that thread).
         let bitmap_size = glyph_bounds.size;
         let subpixel_shift = params
             .subpixel_variant
@@ -976,12 +976,7 @@ impl DirectWriteState {
 
                     let run_color = {
                         let run_color = color_run.Base.runColor;
-                        Rgba {
-                            r: run_color.r,
-                            g: run_color.g,
-                            b: run_color.b,
-                            a: run_color.a,
-                        }
+                        Rgba::new(run_color.r, run_color.g, run_color.b, run_color.a)
                     };
                     let bounds = bounds(point(color_bounds.left, color_bounds.top), color_size);
                     glyph_layers.push(GlyphLayerTexture::new(
@@ -1182,7 +1177,8 @@ impl DirectWriteState {
             };
         }
 
-        // Release the mapping before the staging texture is reused by later glyph uploads.
+        // Release the mapping now that the rows have been copied out; leaving `staging_texture`
+        // mapped would leak the mapping and keep the resource pinned for later reuse.
         unsafe { device_context.Unmap(&staging_texture, 0) };
 
         // Convert from premultiplied to straight alpha
@@ -1374,7 +1370,6 @@ struct RendererContext<'t, 'a, 'b> {
     text_system: &'t mut DirectWriteState,
     components: &'a DirectWriteComponents,
     index_converter: StringIndexConverter<'a>,
-    font_info_cache: HashMap<usize, CachedFontFace>,
     runs: &'b mut Vec<ShapedRun>,
     width: f32,
 }
@@ -1503,9 +1498,10 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
 
         let font_face_key = font_face.cast::<IUnknown>().unwrap().as_raw().addr();
         let font_id = context
+            .text_system
             .font_info_cache
             .get(&font_face_key)
-            .map(|cached| cached.font_id)
+            .copied()
             // in some circumstances, we might be getting served a FontFace that we did not create ourselves
             // so create a new font from it and cache it accordingly. The usual culprit here seems to be Segoe UI Symbol
             .map_or_else(
@@ -1519,13 +1515,10 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
                             .select_and_cache_font(context.components, &font)
                             .ok_or_else(|| Error::new(DWRITE_E_NOFONT, "Failed to create font"))?,
                     };
-                    context.font_info_cache.insert(
-                        font_face_key,
-                        CachedFontFace {
-                            font_id,
-                            _font_face: font_face.clone(),
-                        },
-                    );
+                    context
+                        .text_system
+                        .font_info_cache
+                        .insert(font_face_key, font_id);
                     windows::core::Result::Ok(font_id)
                 },
                 Ok,
@@ -1640,13 +1633,14 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
     }
 }
 
-/// Converts an optional DirectWrite array pointer into a slice without constructing a Rust slice
-/// from a null pointer. A nonzero length still requires a valid backing array.
+/// Interprets an optional DirectWrite array pointer as a slice, treating a
+/// null pointer with a zero length as an empty slice. A null pointer with a
+/// nonzero length fails with `null_error_message`.
 ///
 /// # Safety
 ///
-/// When `ptr` is non-null, it must reference at least `len` initialized elements that outlive the
-/// returned slice.
+/// When `ptr` is non-null, the caller must guarantee that it points to a valid
+/// array of at least `len` elements that outlives the returned slice.
 unsafe fn slice_from_nullable<'a, T>(
     ptr: *const T,
     len: usize,

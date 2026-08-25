@@ -11,11 +11,11 @@ use std::{
 
 use gpui::{
     Anchor, AnchoredPositionMode, AnyElement, App, AppContext, Bounds, ClipboardItem, Context,
-    Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement,
-    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
-    Point, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Task, TextRun,
-    UniformListScrollHandle, Window, anchored, deferred, div, font, prelude::*, px, rgb, rgba, svg,
-    uniform_list,
+    Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoColor,
+    IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement, Pixels, Point, Render, ScrollHandle, SharedString, StatefulInteractiveElement,
+    Styled, Task, TextRun, UniformListScrollHandle, Window, anchored, deferred, div, font,
+    prelude::*, px, rgb, rgba, svg, uniform_list,
 };
 use oxideterm_editor_syntax::LanguageId;
 use oxideterm_gpui_editor::{EditorContextMenuLabels, TextEditorView};

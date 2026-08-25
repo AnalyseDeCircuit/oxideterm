@@ -97,7 +97,7 @@ impl Render for ImageShowcase {
                             .items_center()
                             .gap_8()
                             .child(ImageContainer::new(
-                                "Image loaded from a local file",
+                                "Image loaded from a local file with EXIF orientation",
                                 self.local_resource.clone(),
                             ))
                             .child(ImageContainer::new(

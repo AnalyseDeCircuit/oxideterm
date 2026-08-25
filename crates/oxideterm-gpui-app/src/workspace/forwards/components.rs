@@ -642,11 +642,11 @@ impl WorkspaceApp {
 
     pub(super) fn forward_cell_element(&self, flex: f32, child: AnyElement) -> AnyElement {
         div()
-            .flex_grow()
+            .flex_grow_1()
             .flex_basis(px(0.0))
             .min_w(px(0.0))
             .px_4()
-            .when(flex > 1.0, |cell| cell.flex_grow())
+            .when(flex > 1.0, |cell| cell.flex_grow_1())
             .child(child)
             .into_any_element()
     }

@@ -197,6 +197,7 @@ fn remote_desktop_frame_canvas(
                 let cursor_image: Arc<RenderImage> = Arc::clone(cursor_image);
                 let _ = window.paint_image(
                     cursor_bounds,
+                    cursor_bounds,
                     Corners::all(px(0.0)),
                     cursor_image,
                     0,

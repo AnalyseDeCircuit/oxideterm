@@ -659,7 +659,7 @@ impl WorkspaceApp {
                         let accent = self.tokens.ui.accent;
                         let active_shadow = vec![gpui::BoxShadow {
                             inset: false,
-                            color: gpui::Hsla::from(rgba((accent << 8) | ACTIVE_PANE_SHADOW_ALPHA)),
+                            color: rgba((accent << 8) | ACTIVE_PANE_SHADOW_ALPHA).into_color(),
                             offset: gpui::point(px(0.0), px(0.0)),
                             blur_radius: px(ACTIVE_PANE_SHADOW_BLUR),
                             spread_radius: px(0.0),

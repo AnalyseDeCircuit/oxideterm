@@ -28,6 +28,8 @@ pub struct PlatformScheduler {
     dispatcher: Arc<dyn PlatformDispatcher>,
     clock: Arc<PlatformClock>,
     next_session_id: AtomicU16,
+    #[cfg(feature = "profiler")]
+    foreground_runnables: crate::profiler::journal::ForegroundRunnableCounter,
 }
 
 impl PlatformScheduler {
@@ -36,6 +38,8 @@ impl PlatformScheduler {
             dispatcher: dispatcher.clone(),
             clock: Arc::new(PlatformClock { dispatcher }),
             next_session_id: AtomicU16::new(0),
+            #[cfg(feature = "profiler")]
+            foreground_runnables: crate::profiler::journal::foreground_runnable_counter(),
         }
     }
 
@@ -51,6 +55,13 @@ impl PlatformScheduler {
 
     fn next_session_id(&self) -> SessionId {
         SessionId::new(self.next_session_id.fetch_add(1, Ordering::SeqCst))
+    }
+
+    #[cfg(feature = "profiler")]
+    pub(crate) fn foreground_runnable_counter(
+        &self,
+    ) -> crate::profiler::journal::ForegroundRunnableCounter {
+        self.foreground_runnables.clone()
     }
 }
 
@@ -105,6 +116,8 @@ impl Scheduler for PlatformScheduler {
     }
 
     fn schedule_local(&self, _session_id: SessionId, runnable: Runnable<RunnableMeta>) {
+        #[cfg(feature = "profiler")]
+        self.foreground_runnables.queued();
         self.dispatcher
             .dispatch_on_main_thread(runnable, Priority::default());
     }
@@ -129,7 +142,10 @@ impl Scheduler for PlatformScheduler {
         // Create a runnable that will send the completion signal
         let location = std::panic::Location::caller();
         let (runnable, _task) = async_task::Builder::new()
-            .metadata(RunnableMeta { location })
+            .metadata(RunnableMeta {
+                location,
+                spawned: scheduler::SpawnTime(Instant::now()),
+            })
             .spawn(
                 move |_| async move {
                     let _ = tx.send(());
@@ -185,7 +201,7 @@ impl Clock for PlatformClock {
 #[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use super::*;
-    use crate::{RunnableVariant, ThreadTaskTimings};
+    use crate::RunnableVariant;
     use scheduler::BackgroundExecutor;
     use std::time::Instant as StdInstant;
 
@@ -194,17 +210,6 @@ mod tests {
     struct SmokeDispatcher;
 
     impl PlatformDispatcher for SmokeDispatcher {
-        fn get_all_timings(&self) -> Vec<ThreadTaskTimings> {
-            Vec::new()
-        }
-        fn get_current_thread_timings(&self) -> ThreadTaskTimings {
-            ThreadTaskTimings {
-                thread_name: None,
-                thread_id: std::thread::current().id(),
-                timings: Vec::new(),
-                total_pushed: 0,
-            }
-        }
         fn is_main_thread(&self) -> bool {
             false
         }
@@ -220,6 +225,26 @@ mod tests {
         fn spawn_realtime(&self, _f: Box<dyn FnOnce() + Send>) {
             panic!("SmokeDispatcher does not implement realtime");
         }
+    }
+
+    #[test]
+    fn dedicated_executor_tasks_share_one_thread() {
+        let background =
+            BackgroundExecutor::new(Arc::new(PlatformScheduler::new(Arc::new(SmokeDispatcher))));
+        let dedicated = scheduler::DedicatedExecutor::new(&background);
+
+        let first = dedicated.spawn(async { std::thread::current().id() });
+        let second = dedicated.spawn(async { std::thread::current().id() });
+
+        let first = futures::executor::block_on(first);
+        let second = futures::executor::block_on(second);
+
+        assert_eq!(first, second, "tasks must share the dedicated thread");
+        assert_ne!(
+            first,
+            std::thread::current().id(),
+            "dedicated tasks must not run on the spawning thread"
+        );
     }
 
     #[test]

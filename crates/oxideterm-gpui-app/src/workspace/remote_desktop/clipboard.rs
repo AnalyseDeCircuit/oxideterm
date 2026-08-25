@@ -100,7 +100,7 @@ pub(super) fn remote_desktop_capability_chip(
 ) -> gpui::Div {
     div()
         .min_w(px(0.0))
-        .flex_shrink()
+        .flex_shrink_1()
         .h(px(20.0))
         .px(px(tokens.spacing.two))
         .flex()

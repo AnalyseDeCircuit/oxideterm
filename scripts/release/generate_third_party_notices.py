@@ -29,6 +29,7 @@ PERMISSIVE_LICENSES = {
 VENDORED_WORKSPACE_PACKAGES = {
     "alacritty_terminal",
     "gpui",
+    "gpui_apple",
     "gpui_ce_util",
     "gpui_collections",
     "gpui_derive_refineable",
@@ -36,6 +37,7 @@ VENDORED_WORKSPACE_PACKAGES = {
     "gpui_macos",
     "gpui_macros",
     "gpui_media",
+    "gpui_path",
     "gpui_platform",
     "gpui_refineable",
     "gpui_scheduler",

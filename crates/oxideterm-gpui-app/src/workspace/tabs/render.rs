@@ -1050,14 +1050,14 @@ impl WorkspaceApp {
         let brand_glow = vec![
             gpui::BoxShadow {
                 inset: false,
-                color: rgba((theme.accent << 8) | BRAND_GLOW_INNER_ALPHA).into(),
+                color: rgba((theme.accent << 8) | BRAND_GLOW_INNER_ALPHA).into_color(),
                 offset: gpui::point(px(0.0), px(0.0)),
                 blur_radius: px(40.0),
                 spread_radius: px(0.0),
             },
             gpui::BoxShadow {
                 inset: false,
-                color: rgba((theme.accent << 8) | BRAND_GLOW_OUTER_ALPHA).into(),
+                color: rgba((theme.accent << 8) | BRAND_GLOW_OUTER_ALPHA).into_color(),
                 offset: gpui::point(px(0.0), px(0.0)),
                 blur_radius: px(80.0),
                 spread_radius: px(0.0),
@@ -1065,7 +1065,7 @@ impl WorkspaceApp {
         ];
         let caret_glow = vec![gpui::BoxShadow {
             inset: false,
-            color: rgba((theme.accent << 8) | BRAND_CARET_GLOW_ALPHA).into(),
+            color: rgba((theme.accent << 8) | BRAND_CARET_GLOW_ALPHA).into_color(),
             offset: gpui::point(px(0.0), px(0.0)),
             blur_radius: px(14.0),
             spread_radius: px(0.0),

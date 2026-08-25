@@ -574,7 +574,7 @@ impl WorkspaceApp {
                 .child(
                     div()
                         .flex_grow_0()
-                        .flex_shrink()
+                        .flex_shrink_1()
                         .flex_basis(relative(session_fraction))
                         .min_h(px(0.0))
                         .flex()
@@ -612,7 +612,7 @@ impl WorkspaceApp {
                 .child(
                     div()
                         .flex_grow_0()
-                        .flex_shrink()
+                        .flex_shrink_1()
                         .flex_basis(relative(file_fraction))
                         .min_h(px(0.0))
                         .flex()

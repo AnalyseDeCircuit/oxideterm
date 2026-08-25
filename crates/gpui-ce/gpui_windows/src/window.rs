@@ -1,4 +1,3 @@
-// OxideTerm modification: coordinates Windows draws and polls non-blocking GPU recovery.
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use std::{
@@ -11,9 +10,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use ::util::ResultExt;
 use anyhow::{Context as _, Result};
 use futures::channel::oneshot::{self, Receiver};
+use gpui_util::ResultExt;
 use raw_window_handle as rwh;
 use smallvec::SmallVec;
 use windows::{
@@ -34,9 +33,7 @@ use crate::*;
 use gpui::*;
 
 #[cfg(feature = "wgpu")]
-use gpui_wgpu::{
-    RECOVERY_EXHAUSTED_MESSAGE, WgpuRecoveryStatus, WgpuRenderer, WgpuSurfaceConfig, wgpu,
-};
+use gpui_wgpu::{WgpuRenderer, WgpuSurfaceConfig, wgpu};
 
 pub(crate) struct WindowsWindow(pub Rc<WindowsWindowInner>);
 
@@ -72,11 +69,13 @@ pub struct WindowsWindowState {
     pub renderer: RefCell<WgpuRenderer>,
     #[cfg(not(feature = "wgpu"))]
     pub renderer: RefCell<DirectXRenderer>,
-    /// Set after a GPU device-lost recovery so the next `draw_window` call is
-    /// treated as a forced render. This guarantees the next frame both
-    /// re-enables drawing (via `mark_drawable`) and bypasses the GPUI view
-    /// cache, which would otherwise replay stale atlas tile references from
-    /// the previous frame and panic in `DirectXAtlasState::texture`.
+    /// Set when the next `draw_window` call must be treated as a forced
+    /// render. Used after a GPU device-lost recovery, where the next frame
+    /// must both re-enable drawing (via `mark_drawable`) and bypass the GPUI
+    /// view cache (which would otherwise replay stale atlas tile references
+    /// from the previous frame and panic in `DirectXAtlasState::texture`),
+    /// and when a forced render was requested while another draw was in
+    /// progress and had to be deferred.
     pub force_render_pending: Cell<bool>,
 
     pub click_state: ClickState,
@@ -84,14 +83,15 @@ pub struct WindowsWindowState {
     /// Shared with [`WindowsPlatformState::cursor_visible`].
     pub cursor_visible: Arc<AtomicBool>,
     pub nc_button_pressed: Cell<Option<u32>>,
+    pub dragging: Cell<bool>,
 
     pub display: Cell<WindowsDisplay>,
     /// Flag to instruct the `VSyncProvider` thread to invalidate the directx devices
     /// as resizing them has failed, causing us to have lost at least the render target.
     #[cfg(not(feature = "wgpu"))]
     pub invalidate_devices: Arc<AtomicBool>,
-    /// Shared across every window to prevent nested Win32 paint dispatch.
-    pub(crate) draw_coordinator: Rc<WindowDrawCoordinator>,
+    /// Shared with [`WindowsPlatformState::draw_coordinator`] and every other window.
+    pub(crate) draw_coordinator: Rc<DrawCoordinator>,
     fullscreen: Cell<Option<StyleAndBounds>>,
     initial_placement: Cell<Option<WindowOpenStatus>>,
     hwnd: HWND,
@@ -106,6 +106,8 @@ pub(crate) struct WindowsWindowInner {
     pub(crate) handle: AnyWindowHandle,
     pub(crate) hide_title_bar: bool,
     pub(crate) is_movable: bool,
+    pub(crate) is_resizable: bool,
+    pub(crate) is_minimizable: bool,
     pub(crate) executor: ForegroundExecutor,
     pub(crate) validation_number: usize,
     pub(crate) main_receiver: PriorityQueueReceiver<RunnableVariant>,
@@ -125,7 +127,7 @@ impl WindowsWindowState {
         appearance: WindowAppearance,
         #[cfg(not(feature = "wgpu"))] disable_direct_composition: bool,
         #[cfg(not(feature = "wgpu"))] invalidate_devices: Arc<AtomicBool>,
-        draw_coordinator: Rc<WindowDrawCoordinator>,
+        draw_coordinator: Rc<DrawCoordinator>,
     ) -> Result<Self> {
         let scale_factor = {
             let monitor_dpi = unsafe { GetDpiForWindow(hwnd) } as f32;
@@ -145,7 +147,7 @@ impl WindowsWindowState {
         let restore_from_minimized = None;
         #[cfg(feature = "wgpu")]
         let renderer = WgpuRenderer::new(
-            gpui_wgpu::GpuContext::new(),
+            Rc::new(RefCell::new(None)),
             &RawWindow { hwnd },
             WgpuSurfaceConfig {
                 size: physical_size,
@@ -196,6 +198,7 @@ impl WindowsWindowState {
             current_cursor: Cell::new(current_cursor),
             cursor_visible,
             nc_button_pressed: Cell::new(nc_button_pressed),
+            dragging: Cell::new(false),
             display: Cell::new(display),
             fullscreen: Cell::new(fullscreen),
             initial_placement: Cell::new(initial_placement),
@@ -293,6 +296,8 @@ impl WindowsWindowInner {
             handle: context.handle,
             hide_title_bar: context.hide_title_bar,
             is_movable: context.is_movable,
+            is_resizable: context.is_resizable,
+            is_minimizable: context.is_minimizable,
             executor: context.executor.clone(),
             validation_number: context.validation_number,
             main_receiver: context.main_receiver.clone(),
@@ -415,6 +420,8 @@ struct WindowCreateContext {
     hide_title_bar: bool,
     display: WindowsDisplay,
     is_movable: bool,
+    is_resizable: bool,
+    is_minimizable: bool,
     min_size: Option<Size<Pixels>>,
     executor: ForegroundExecutor,
     current_cursor: Option<HCURSOR>,
@@ -430,7 +437,7 @@ struct WindowCreateContext {
     directx_devices: DirectXDevices,
     #[cfg(not(feature = "wgpu"))]
     invalidate_devices: Arc<AtomicBool>,
-    draw_coordinator: Rc<WindowDrawCoordinator>,
+    draw_coordinator: Rc<DrawCoordinator>,
     parent_hwnd: Option<HWND>,
 }
 
@@ -440,6 +447,12 @@ impl WindowsWindow {
         params: WindowParams,
         creation_info: WindowCreationInfo,
     ) -> Result<Self> {
+        // Native popups are not implemented on Windows yet. Rejecting lets callers fall back to
+        // gpui's in-window popovers.
+        if let WindowKind::AnchoredPopup(_) = params.kind {
+            return Err(popup::PopupNotSupportedError.into());
+        }
+
         let WindowCreationInfo {
             icon,
             executor,
@@ -489,7 +502,7 @@ impl WindowsWindow {
         );
 
         let (mut dwexstyle, dwstyle) = if params.kind == WindowKind::PopUp {
-            (WS_EX_TOOLWINDOW, WINDOW_STYLE(0x0))
+            (WS_EX_TOOLWINDOW | WS_EX_TOPMOST, WINDOW_STYLE(0x0))
         } else {
             let mut dwstyle = WS_SYSMENU;
 
@@ -528,6 +541,8 @@ impl WindowsWindow {
             hide_title_bar,
             display,
             is_movable: params.is_movable,
+            is_resizable: params.is_resizable,
+            is_minimizable: params.is_minimizable,
             min_size: params.window_min_size,
             executor,
             current_cursor,
@@ -581,6 +596,10 @@ impl WindowsWindow {
             &this.state.border_offset,
         )?;
         if params.show {
+            let mut placement = placement;
+            if !params.focus {
+                placement.showCmd = SW_SHOWNOACTIVATE.0 as u32;
+            }
             unsafe { SetWindowPlacement(hwnd, &placement)? };
         } else {
             this.state.initial_placement.set(Some(WindowOpenStatus {
@@ -884,6 +903,27 @@ impl PlatformWindow for WindowsWindow {
             .detach();
     }
 
+    fn request_attention(&self) {
+        if self.is_active() {
+            return;
+        }
+
+        let hwnd = self.0.hwnd;
+        self.0
+            .executor
+            .spawn(async move {
+                let info = FLASHWINFO {
+                    cbSize: std::mem::size_of::<FLASHWINFO>() as u32,
+                    hwnd,
+                    dwFlags: FLASHW_ALL,
+                    uCount: 1,
+                    dwTimeout: 0,
+                };
+                unsafe { FlashWindowEx(&info).ok().log_err() };
+            })
+            .detach();
+    }
+
     fn is_active(&self) -> bool {
         self.0.hwnd == unsafe { GetActiveWindow() }
     }
@@ -972,6 +1012,33 @@ impl PlatformWindow for WindowsWindow {
         self.state.is_fullscreen()
     }
 
+    fn start_window_move(&self) {
+        // winit does this by tracking whether the user is mouse-dragging
+        //     https://github.com/rust-windowing/winit/blob/9674d8ceef6976326fe9583a81f2e684daac05d6/winit-win32/src/window.rs#L241-L269
+        //     https://github.com/rust-windowing/winit/blob/9674d8ceef6976326fe9583a81f2e684daac05d6/winit-win32/src/event_loop.rs#L1234-L1243
+        self.state.dragging.set(true);
+
+        let cursor_pos = {
+            let mut pos = unsafe { std::mem::zeroed() };
+            let _ = unsafe { GetCursorPos(&mut pos) };
+            pos
+        };
+        let points = POINTS {
+            x: cursor_pos.x as i16,
+            y: cursor_pos.y as i16,
+        };
+
+        let _ = unsafe { ReleaseCapture() };
+        let _ = unsafe {
+            PostMessageW(
+                Some(self.0.hwnd),
+                WM_NCLBUTTONDOWN,
+                WPARAM(HTCAPTION as usize),
+                LPARAM(&points as *const _ as isize),
+            )
+        };
+    }
+
     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>) {
         self.state.callbacks.request_frame.set(Some(callback));
     }
@@ -1045,20 +1112,13 @@ impl PlatformWindow for WindowsWindow {
                 match renderer.recover(&RawWindow {
                     hwnd: self.platform_window_handle,
                 }) {
-                    Ok(WgpuRecoveryStatus::Recovered) => {
-                        self.state.force_render_pending.set(true);
-                    }
-                    Ok(WgpuRecoveryStatus::Deferred) => {
-                        // VSync invalidation will poll recovery again after the cooldown.
-                    }
-                    Ok(WgpuRecoveryStatus::Failed) => {
-                        log::error!("{RECOVERY_EXHAUSTED_MESSAGE}");
-                    }
+                    Ok(()) => {}
                     Err(err) => {
                         log::warn!("GPU recovery failed, will retry on next frame: {err}");
                     }
                 }
 
+                self.state.force_render_pending.set(true);
                 return;
             }
             if !renderer.draw(scene) {
@@ -1658,8 +1718,12 @@ fn set_window_composition_attribute(hwnd: HWND, color: Option<Color>, state: u32
             .log_err()
         {
             let func_name = PCSTR::from_raw(c"SetWindowCompositionAttribute".as_ptr() as *const u8);
+            let Some(raw_set_window_composition_attribute) = GetProcAddress(user32, func_name)
+            else {
+                return;
+            };
             let set_window_composition_attribute: SetWindowCompositionAttributeType =
-                std::mem::transmute(GetProcAddress(user32, func_name));
+                std::mem::transmute(raw_set_window_composition_attribute);
             let mut color = color.unwrap_or_default();
             let is_acrylic = state == 4;
             if is_acrylic && color.3 == 0 {

@@ -1414,7 +1414,7 @@ fn render_table(
             let cell: &[Inline] = headers.get(ci).map(|v| v.as_slice()).unwrap_or(&[]);
             div()
                 .w(relative(column_widths[ci]))
-                .flex_shrink()
+                .flex_shrink_1()
                 .min_w(px(0.0))
                 .overflow_hidden()
                 .whitespace_normal()
@@ -1444,7 +1444,7 @@ fn render_table(
                 let cell: &[Inline] = row.get(ci).map(|v| v.as_slice()).unwrap_or(&[]);
                 div()
                     .w(relative(column_widths[ci]))
-                    .flex_shrink()
+                    .flex_shrink_1()
                     .min_w(px(0.0))
                     .overflow_hidden()
                     .whitespace_normal()
@@ -1501,7 +1501,7 @@ fn render_selectable_table(
             let cell: &[Inline] = headers.get(ci).map(|v| v.as_slice()).unwrap_or(&[]);
             div()
                 .w(relative(column_widths[ci]))
-                .flex_shrink()
+                .flex_shrink_1()
                 .min_w(px(0.0))
                 .overflow_hidden()
                 .whitespace_normal()
@@ -1538,7 +1538,7 @@ fn render_selectable_table(
                 let cell: &[Inline] = row.get(ci).map(|v| v.as_slice()).unwrap_or(&[]);
                 div()
                     .w(relative(column_widths[ci]))
-                    .flex_shrink()
+                    .flex_shrink_1()
                     .min_w(px(0.0))
                     .overflow_hidden()
                     .whitespace_normal()
@@ -2398,6 +2398,7 @@ fn text_run_for_flat(
         background_color,
         underline,
         strikethrough,
+        letter_spacing: None,
     }
 }
 
@@ -2409,6 +2410,7 @@ fn plain_code_run(code: &str, tokens: &ThemeTokens, opts: &MarkdownOptions) -> T
         background_color: None,
         underline: None,
         strikethrough: None,
+        letter_spacing: None,
     }
 }
 

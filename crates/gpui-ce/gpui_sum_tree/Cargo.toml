@@ -1,11 +1,10 @@
-# Modified by OxideTerm to prevent publishing the vendored workspace crate.
 [package]
 name = "gpui_sum_tree"
 version = "0.2.2"
 edition = "2024"
 license = "Apache-2.0"
 description = "Copy-on-write B+ tree with monoidal summaries for gpui-ce (vendored from Zed)."
-publish = false
+publish = true
 
 [lib]
 name = "sum_tree"
@@ -26,5 +25,5 @@ proptest = { version = "1.0", features = ["attr-macro"] }
 [features]
 test-support = ["proptest"]
 
-[package.metadata.cargo-machete]
+[package.metadata.cargo-shear]
 ignored = ["tracing"]
