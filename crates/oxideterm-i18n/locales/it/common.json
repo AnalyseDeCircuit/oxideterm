@@ -145,7 +145,8 @@
       "cancel": "Annulla",
       "confirm": "Conferma",
       "do_not_ask_again": "Non chiedere più",
-      "delete": "Elimina"
+      "delete": "Elimina",
+      "retry": "Riprova"
     },
     "cancel": "Annulla",
     "delete": "Elimina",
@@ -1078,8 +1079,6 @@
     "security_desc": "Portachiavi, crittografia ChaCha20-Poly1305, SSH in puro Rust.",
     "local_file_manager": "Gestore file locale",
     "local_file_manager_desc": "File browser desktop con anteprima rapida, segnalibri e trascinamento.",
-    "launchpad": "Launchpad macOS",
-    "launchpad_desc": "Launcher nativo — cerca e apri app da /Applications istantaneamente.",
     "wsl_graphics": "Grafica WSL",
     "wsl_graphics_desc": "Esegui app Linux grafiche su Windows tramite VNC integrato — modalità desktop o singola app.",
     "plugin_system": "Sistema di plugin",

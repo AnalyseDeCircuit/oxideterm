@@ -1363,7 +1363,6 @@ impl WorkspaceApp {
         }
         match (kind, root_pane) {
             (TabKind::FileManager, _) => self.render_file_manager_surface(window, cx),
-            (TabKind::Launcher, _) => self.render_launcher_surface(window, cx),
             (TabKind::Graphics, _) => self.render_graphics_surface(window, cx),
             (TabKind::Runtime, _) => self.render_connection_runtime_surface(cx),
             (TabKind::ConnectionPool, _) => {

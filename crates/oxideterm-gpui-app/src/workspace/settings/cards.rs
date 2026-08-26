@@ -929,13 +929,6 @@ impl WorkspaceApp {
             changed = true;
         }
         if self
-            .launcher
-            .update(cx, |launcher, cx| launcher.clear_input_focus(cx))
-        {
-            self.ime_marked_text = None;
-            changed = true;
-        }
-        if self
             .graphics
             .update(cx, |graphics, cx| graphics.clear_input_focus(cx))
         {

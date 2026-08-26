@@ -7,7 +7,6 @@ pub(in crate::workspace) fn tab_background_key(kind: &TabKind) -> &'static str {
         TabKind::SshTerminal => "terminal",
         TabKind::MoshTerminal => "terminal",
         TabKind::FileManager => "file_manager",
-        TabKind::Launcher => "launcher",
         TabKind::Graphics => "graphics",
         TabKind::Runtime => "runtime",
         TabKind::ConnectionPool => "runtime",

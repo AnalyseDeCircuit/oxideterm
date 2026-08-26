@@ -1862,7 +1862,7 @@ Staleness means "the app cannot prove this state is current." It does not automa
 | ACP agent sessions and host tools | `oxideterm-acp-adapter`, `oxideterm-acp-host-tools`, `workspace/acp_workspace.rs` |
 | Plugins | `oxideterm-plugin-manifest`, `oxideterm-plugin-registry`, `oxideterm-plugin-host-api`, `oxideterm-plugin-wasm-runtime`, app plugin entities |
 | Cloud sync and portable runtime | `oxideterm-cloud-sync`, `oxideterm-gpui-cloud-sync`, `oxideterm-portable-runtime` |
-| Notifications, launcher, update | `oxideterm-notification-center`, `oxideterm-launcher`, `oxideterm-update` |
+| Notifications and update | `oxideterm-notification-center`, `oxideterm-update` |
 | CLI companion | `oxideterm-cli` |
 
 ---

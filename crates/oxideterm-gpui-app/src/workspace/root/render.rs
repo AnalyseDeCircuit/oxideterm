@@ -161,7 +161,6 @@ impl WorkspaceApp {
                     TabKind::Settings
                         | TabKind::SessionManager
                         | TabKind::FileManager
-                        | TabKind::Launcher
                         | TabKind::Graphics
                         | TabKind::Runtime
                         | TabKind::ConnectionPool
@@ -188,7 +187,6 @@ impl WorkspaceApp {
             match (tab_kind, root_pane) {
                 (TabKind::Settings, _) => self.render_settings_surface(cx),
                 (TabKind::FileManager, _) => self.render_file_manager_surface(window, cx),
-                (TabKind::Launcher, _) => self.render_launcher_surface(window, cx),
                 (TabKind::Graphics, _) => self.render_graphics_surface(window, cx),
                 (TabKind::Runtime, _) => self.render_connection_runtime_surface(cx),
                 (TabKind::ConnectionPool, _) => {
@@ -470,14 +468,6 @@ impl WorkspaceApp {
                     && this.forwarding.read(cx).view().focused_input.is_some()
                 {
                     let _ = this.handle_forwards_key(event, cx);
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this
-                    .active_tab(cx)
-                    .is_some_and(|tab| tab.kind == TabKind::Launcher)
-                    && this.launcher.read(cx).focused_input().is_some()
-                {
-                    let _ = this.handle_launcher_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this
@@ -1272,13 +1262,7 @@ impl WorkspaceApp {
         self.stop_selectable_text_autoscroll();
         self.finish_tab_drag(event, window, cx);
         let cancelled_sftp_drag = self.cancel_sftp_drag_capture(cx);
-        let cleared_launcher_press = self
-            .launcher
-            .update(cx, |launcher, cx| launcher.clear_pressed_app(cx));
-        if cleared_launcher_press || cancelled_sftp_drag {
-            // A single mouse-up can clear both transient states; repaint once
-            // after composing those no-longer-visible captures instead of
-            // notifying per flag.
+        if cancelled_sftp_drag {
             cx.notify();
         }
         if capture_owner.is_some() || was_read_only_dragging || cancelled_sftp_drag {

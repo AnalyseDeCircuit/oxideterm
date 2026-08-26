@@ -1037,7 +1037,6 @@ impl WorkspaceApp {
                     TabKind::Sftp => self.i18n.t("sidebar.panels.sftp"),
                     TabKind::Ide => self.i18n.t("settings_view.tabs.ide"),
                     TabKind::FileManager => self.i18n.t("settings_view.help.category_file_manager"),
-                    TabKind::Launcher => self.i18n.t("app.shellLauncher"),
                     TabKind::Graphics => self.i18n.t("settings_view.tabs.graphics"),
                 };
                 PaletteItem {
@@ -2172,7 +2171,6 @@ fn tab_kind_icon(kind: &TabKind) -> LucideIcon {
             LucideIcon::Terminal
         }
         TabKind::FileManager => LucideIcon::FolderOpen,
-        TabKind::Launcher => LucideIcon::Terminal,
         TabKind::Graphics => LucideIcon::AppWindow,
         TabKind::Runtime => LucideIcon::Gauge,
         TabKind::ConnectionPool => LucideIcon::Gauge,

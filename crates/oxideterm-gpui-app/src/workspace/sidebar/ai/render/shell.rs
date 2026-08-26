@@ -545,7 +545,7 @@ impl WorkspaceApp {
                             SelectableTextRole::NonSelectable,
                             "ai-chat-load-failed",
                             "retry",
-                            self.i18n.t("launcher.retry"),
+                            self.i18n.t("common.actions.retry"),
                             self.tokens.ui.bg,
                             cx,
                         ))

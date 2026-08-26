@@ -210,7 +210,7 @@ OxideSens is BYOK-first, with context building performed in-process:
 The entire UI is written in Rust using GPUI (Zed's GPU-backed UI framework):
 
 - **No CSS, no DOM, no JavaScript** in the rendering pipeline
-- **Workspace tab types**: local terminal, SSH, Telnet, Serial, RDP, VNC, SFTP, IDE, port forwards, session manager, cloud sync, settings, plugins, topology, monitoring, file manager, launcher, graphics, and custom plugin tabs
+- **Workspace tab types**: local terminal, SSH, Telnet, Serial, RDP, VNC, SFTP, IDE, port forwards, session manager, cloud sync, settings, plugins, topology, monitoring, file manager, graphics, and custom plugin tabs
 - **Split pane system**: binary pane tree, draggable dividers, up to 4 panes per terminal tab
 - **Command palette**, global key bindings, sidebar panels — all GPUI primitives
 - **Immediate-mode rendering**: UI reflects Rust state changes without a serialization round-trip

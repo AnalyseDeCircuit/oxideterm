@@ -232,11 +232,6 @@ pub fn background_tab_options() -> &'static [(&'static str, &'static str, Settin
             SettingsBackgroundTabIcon::Folder,
         ),
         (
-            "launcher",
-            "settings_view.terminal.bg_tab_launcher",
-            SettingsBackgroundTabIcon::Rocket,
-        ),
-        (
             "graphics",
             "settings_view.terminal.bg_tab_graphics",
             SettingsBackgroundTabIcon::Monitor,

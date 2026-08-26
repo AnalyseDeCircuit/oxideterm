@@ -145,7 +145,8 @@
       "cancel": "Abbrechen",
       "confirm": "Bestätigen",
       "do_not_ask_again": "Nicht erneut fragen",
-      "delete": "Löschen"
+      "delete": "Löschen",
+      "retry": "Erneut versuchen"
     },
     "cancel": "Abbrechen",
     "delete": "Löschen",
@@ -1078,8 +1079,6 @@
     "security_desc": "Schlüsselbundspeicher, ChaCha20-Poly1305-Verschlüsselung, reines Rust-SSH.",
     "local_file_manager": "Lokaler Dateimanager",
     "local_file_manager_desc": "Desktop-Dateibrowser mit Schnellvorschau, Lesezeichen und Drag-and-Drop.",
-    "launchpad": "macOS Launchpad",
-    "launchpad_desc": "Nativer App-Launcher — Apps aus /Applications suchen und sofort öffnen.",
     "wsl_graphics": "WSL-Grafik",
     "wsl_graphics_desc": "Linux-GUI-Apps unter Windows über integrierten VNC ausführen — Desktop- oder Einzelapp-Modus.",
     "plugin_system": "Plugin-System",

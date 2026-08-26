@@ -145,7 +145,8 @@
       "cancel": "취소",
       "confirm": "확인",
       "do_not_ask_again": "다시 묻지 않기",
-      "delete": "삭제"
+      "delete": "삭제",
+      "retry": "재시도"
     },
     "cancel": "취소",
     "delete": "삭제",
@@ -1078,8 +1079,6 @@
     "security_desc": "키체인 저장, ChaCha20-Poly1305 암호화, 순수 Rust SSH.",
     "local_file_manager": "로컬 파일 관리자",
     "local_file_manager_desc": "Quick Look 미리보기, 북마크, 드래그 앤 드롭을 지원하는 데스크톱 파일 브라우저.",
-    "launchpad": "macOS Launchpad",
-    "launchpad_desc": "네이티브 앱 런처 — /Applications에서 앱을 검색하고 즉시 실행.",
     "wsl_graphics": "WSL 그래픽스",
     "wsl_graphics_desc": "내장 VNC로 Windows에서 Linux GUI 앱 실행 — 데스크톱 또는 단일 앱 모드.",
     "plugin_system": "플러그인 시스템",

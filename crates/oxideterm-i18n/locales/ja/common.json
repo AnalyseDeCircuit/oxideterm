@@ -145,7 +145,8 @@
       "cancel": "キャンセル",
       "confirm": "確認",
       "do_not_ask_again": "今後は確認しない",
-      "delete": "削除"
+      "delete": "削除",
+      "retry": "再試行"
     },
     "cancel": "キャンセル",
     "delete": "削除",
@@ -1078,8 +1079,6 @@
     "security_desc": "キーチェーン保存、ChaCha20-Poly1305 暗号化、純 Rust SSH。",
     "local_file_manager": "ローカルファイルマネージャー",
     "local_file_manager_desc": "Quick Look プレビュー、ブックマーク、ドラッグ＆ドロップ対応のデスクトップファイルブラウザ。",
-    "launchpad": "macOS Launchpad",
-    "launchpad_desc": "ネイティブアプリランチャー — /Applications からアプリを検索して即座に起動。",
     "wsl_graphics": "WSL グラフィックス",
     "wsl_graphics_desc": "内蔵 VNC で Windows 上から Linux GUI アプリを実行 — デスクトップまたは単一アプリモード。",
     "plugin_system": "プラグインシステム",

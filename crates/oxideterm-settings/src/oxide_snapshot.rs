@@ -155,7 +155,6 @@ const LOCAL_TERMINAL_KEYS: &[&str] = &[
 const NATIVE_PREFERENCES_KEYS: &[&str] = &[
     "keybindings",
     "customThemes",
-    "launcher",
     "experimental",
     "newConnection",
     "settingsNavigation",
@@ -458,7 +457,6 @@ mod tests {
         );
         assert!(parsed["settings"].get("keybindings").is_some());
         assert!(parsed["settings"].get("customThemes").is_some());
-        assert!(parsed["settings"].get("launcher").is_some());
         assert!(parsed["settings"].get("experimental").is_some());
         assert!(parsed["settings"].get("newConnection").is_some());
         assert!(parsed["settings"].get("hostTools").is_some());

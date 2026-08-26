@@ -295,12 +295,6 @@ pub struct KeybindingSettings {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LauncherSettings {
-    pub enabled: bool,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct NewConnectionSettings {
     pub save_connection: bool,
 }
@@ -447,8 +441,6 @@ pub struct PersistedSettings {
     #[serde(default)]
     pub custom_themes: Map<String, Value>,
     #[serde(default)]
-    pub launcher: LauncherSettings,
-    #[serde(default)]
     pub agent_roles: Option<Value>,
     #[serde(default)]
     pub new_connection: NewConnectionSettings,
@@ -488,7 +480,6 @@ impl Default for PersistedSettings {
             command_palette_mru: Vec::new(),
             keybindings: KeybindingSettings::default(),
             custom_themes: Map::new(),
-            launcher: LauncherSettings::default(),
             agent_roles: None,
             new_connection: NewConnectionSettings::default(),
             ssh_config: SshConfigSettings::default(),

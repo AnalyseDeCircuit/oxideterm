@@ -25,7 +25,7 @@ fn tab_kind_icon(
         TabKind::SshTerminal => LucideIcon::Terminal,
         TabKind::MoshTerminal => LucideIcon::Terminal,
         TabKind::FileManager => LucideIcon::FolderOpen,
-        TabKind::Launcher | TabKind::Graphics | TabKind::RemoteDesktop => LucideIcon::Monitor,
+        TabKind::Graphics | TabKind::RemoteDesktop => LucideIcon::Monitor,
         TabKind::Runtime | TabKind::ConnectionPool => LucideIcon::Gauge,
         TabKind::Topology => LucideIcon::Network,
         TabKind::NotificationCenter => LucideIcon::Bell,

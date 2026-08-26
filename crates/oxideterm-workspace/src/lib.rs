@@ -30,7 +30,6 @@ pub enum TabKind {
     SshTerminal,
     MoshTerminal,
     FileManager,
-    Launcher,
     Graphics,
     Runtime,
     ConnectionPool,

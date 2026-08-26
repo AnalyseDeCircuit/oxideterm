@@ -152,7 +152,8 @@
       "cancel": "取消",
       "confirm": "确定",
       "do_not_ask_again": "下次不再询问",
-      "delete": "删除"
+      "delete": "删除",
+      "retry": "重试"
     },
     "cancel": "取消",
     "delete": "删除",
@@ -1078,8 +1079,6 @@
     "security_desc": "密码存于系统钥匙串，ChaCha20-Poly1305 加密，纯 Rust SSH。",
     "local_file_manager": "本地文件管理器",
     "local_file_manager_desc": "桌面文件浏览器，支持快速预览、书签夹和拖放操作。",
-    "launchpad": "macOS 启动台",
-    "launchpad_desc": "原生应用启动器 — 从 /Applications 搜索并快速打开应用。",
     "wsl_graphics": "WSL 图形转发",
     "wsl_graphics_desc": "通过内置 VNC 在 Windows 上运行 Linux 图形应用 — 支持桌面和单应用模式。",
     "plugin_system": "插件系统",

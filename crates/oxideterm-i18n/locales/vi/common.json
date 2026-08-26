@@ -145,7 +145,8 @@
       "cancel": "Hủy",
       "confirm": "Xác nhận",
       "do_not_ask_again": "Không hỏi lại",
-      "delete": "Xóa"
+      "delete": "Xóa",
+      "retry": "Thử lại"
     },
     "cancel": "Hủy",
     "delete": "Xóa",
@@ -984,8 +985,6 @@
     "security_desc": "Lưu trữ chuỗi khóa, mã hóa ChaCha20-Poly1305, SSH thuần Rust.",
     "local_file_manager": "Trình quản lý tập tin cục bộ",
     "local_file_manager_desc": "Trình duyệt tập tin với xem trước nhanh, đánh dấu và kéo thả.",
-    "launchpad": "Launchpad macOS",
-    "launchpad_desc": "Trình khởi chạy ứng dụng gốc — tìm kiếm và mở ứng dụng từ /Applications.",
     "wsl_graphics": "Đồ họa WSL",
     "wsl_graphics_desc": "Chạy ứng dụng Linux đồ họa trên Windows qua VNC tích hợp — chế độ máy tính để bàn hoặc ứng dụng đơn.",
     "plugin_system": "Hệ thống plugin",

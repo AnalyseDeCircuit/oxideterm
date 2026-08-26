@@ -18,7 +18,6 @@ mod graphics;
 mod graphics_vnc;
 mod ide;
 mod ime;
-mod launcher;
 mod local_shell_launcher;
 mod local_terminal_background;
 mod new_connection;
@@ -274,7 +273,6 @@ use self::ime::{
     WorkspaceImeElement, WorkspaceImeSelection, WorkspaceImeTarget,
     active_ime_should_defer_input_key, workspace_ime_target_for_plain_host_tools_input,
 };
-use self::launcher::{LauncherWorkspaceEntity, LauncherWorkspaceEvent};
 use self::new_connection::{
     ConnectionFlowEntity, ConnectionFlowEvent, NativeSshPromptHandler, NewConnectionField,
     NewConnectionForm, SavedConnectionPromptAction, SshAuthTab, SshConnectionIntent,
@@ -893,9 +891,6 @@ pub(crate) struct WorkspaceApp {
     sftp_view: Entity<sftp::SftpWorkspaceEntity>,
     _sftp_observation: Subscription,
     _sftp_subscription: Subscription,
-    launcher: Entity<LauncherWorkspaceEntity>,
-    _launcher_observation: Subscription,
-    _launcher_subscription: Subscription,
     graphics: Entity<GraphicsWorkspaceEntity>,
     _graphics_observation: Subscription,
     _graphics_subscription: Subscription,

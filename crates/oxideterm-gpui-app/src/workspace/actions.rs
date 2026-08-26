@@ -826,15 +826,6 @@ impl WorkspaceApp {
 
         if self
             .active_tab(cx)
-            .is_some_and(|tab| tab.kind == TabKind::Launcher)
-            && self.launcher.read(cx).focused_input().is_some()
-        {
-            let _ = self.handle_launcher_key(event, cx);
-            return;
-        }
-
-        if self
-            .active_tab(cx)
             .is_some_and(|tab| tab.kind == TabKind::Graphics)
             && self.graphics.read(cx).focused_input().is_some()
         {

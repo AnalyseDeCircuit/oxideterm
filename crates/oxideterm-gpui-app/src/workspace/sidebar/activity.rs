@@ -217,9 +217,6 @@ impl WorkspaceApp {
             SidebarSection::Files => self
                 .active_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::FileManager),
-            SidebarSection::Monitor if cfg!(target_os = "macos") => self
-                .active_tab(cx)
-                .is_some_and(|tab| tab.kind == TabKind::Launcher),
             SidebarSection::Notifications => self
                 .active_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::NotificationCenter),
@@ -387,8 +384,6 @@ impl WorkspaceApp {
                         }
                     } else if section == SidebarSection::Files {
                         this.open_file_manager_tab(window, cx);
-                    } else if section == SidebarSection::Monitor && cfg!(target_os = "macos") {
-                        this.open_launcher_tab(window, cx);
                     } else if section == SidebarSection::Notifications {
                         this.open_notification_center_tab(window, cx);
                     } else if section == SidebarSection::Assistant {
@@ -424,9 +419,6 @@ impl WorkspaceApp {
             SidebarSection::Automation => self.i18n.t("sidebar.panels.activity"),
             SidebarSection::Workspace => self.i18n.t("sidebar.actions.new_local_terminal"),
             SidebarSection::Files => self.i18n.t("sidebar.panels.files"),
-            SidebarSection::Monitor if cfg!(target_os = "macos") => {
-                self.i18n.t("launcher.tabTitle")
-            }
             SidebarSection::Monitor => self.i18n.t("sidebar.panels.connection_monitor"),
             SidebarSection::Notifications => self.i18n.t("sidebar.panels.notifications"),
             SidebarSection::Settings => self.i18n.t("sidebar.tooltips.settings"),

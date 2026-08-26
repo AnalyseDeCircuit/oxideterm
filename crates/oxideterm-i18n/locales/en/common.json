@@ -152,7 +152,8 @@
       "cancel": "Cancel",
       "confirm": "Confirm",
       "do_not_ask_again": "Don't ask again",
-      "delete": "Delete"
+      "delete": "Delete",
+      "retry": "Retry"
     },
     "cancel": "Cancel",
     "delete": "Delete",
@@ -1078,8 +1079,6 @@
     "security_desc": "Keychain storage, ChaCha20-Poly1305 encryption, pure Rust SSH.",
     "local_file_manager": "Local File Manager",
     "local_file_manager_desc": "Desktop file browser with Quick Look previews, bookmarks, and drag-drop.",
-    "launchpad": "macOS Launchpad",
-    "launchpad_desc": "Native app launcher — search and open apps from /Applications instantly.",
     "wsl_graphics": "WSL Graphics",
     "wsl_graphics_desc": "Run Linux GUI apps on Windows via built-in VNC — desktop or single-app mode.",
     "plugin_system": "Plugin System",

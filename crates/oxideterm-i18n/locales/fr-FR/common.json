@@ -145,7 +145,8 @@
       "cancel": "Annuler",
       "confirm": "Confirmer",
       "do_not_ask_again": "Ne plus demander",
-      "delete": "Supprimer"
+      "delete": "Supprimer",
+      "retry": "Réessayer"
     },
     "cancel": "Annuler",
     "delete": "Supprimer",
@@ -1078,8 +1079,6 @@
     "security_desc": "Stockage trousseau, chiffrement ChaCha20-Poly1305, SSH pur Rust.",
     "local_file_manager": "Gestionnaire de fichiers local",
     "local_file_manager_desc": "Explorateur de fichiers avec aperçu rapide, signets et glisser-déposer.",
-    "launchpad": "Launchpad macOS",
-    "launchpad_desc": "Lanceur d'apps natif — recherchez et ouvrez des apps depuis /Applications.",
     "wsl_graphics": "Graphiques WSL",
     "wsl_graphics_desc": "Exécutez des apps Linux graphiques sur Windows via VNC intégré — mode bureau ou app unique.",
     "plugin_system": "Système de plugins",

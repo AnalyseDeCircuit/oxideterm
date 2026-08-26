@@ -52,7 +52,6 @@ members = [
   "crates/oxideterm-secret-store",
   "crates/oxideterm-update",
   "crates/oxideterm-i18n",
-  "crates/oxideterm-launcher",
   "crates/oxideterm-local-files",
   "crates/oxideterm-modem-transfer",
   "crates/oxideterm-wsl-graphics",

@@ -47,7 +47,6 @@ oxideterm-environment = { path = "../oxideterm-environment" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
 oxideterm-ide-core = { path = "../oxideterm-ide-core" }
 oxideterm-ide-fs = { path = "../oxideterm-ide-fs" }
-oxideterm-launcher = { path = "../oxideterm-launcher" }
 oxideterm-local-files = { path = "../oxideterm-local-files" }
 oxideterm-mosh = { path = "../oxideterm-mosh" }
 oxideterm-notification-center = { path = "../oxideterm-notification-center" }

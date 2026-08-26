@@ -7905,7 +7905,6 @@ dependencies = [
  "oxideterm-i18n",
  "oxideterm-ide-core",
  "oxideterm-ide-fs",
- "oxideterm-launcher",
  "oxideterm-local-files",
  "oxideterm-mosh",
  "oxideterm-network-proxy",
@@ -8144,14 +8143,6 @@ dependencies = [
  "tokio",
  "tracing",
  "zstd",
-]
-
-[[package]]
-name = "oxideterm-launcher"
-version = "2.0.24"
-dependencies = [
- "oxideterm-settings",
- "oxideterm-wsl-graphics",
 ]
 
 [[package]]
