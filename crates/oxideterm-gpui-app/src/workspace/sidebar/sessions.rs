@@ -101,6 +101,25 @@ fn session_status_can_remove_from_sidebar(status: ActiveSessionStatus) -> bool {
 }
 
 impl WorkspaceApp {
+    /// Keeps clickable session labels from competing with their control's pointer interaction.
+    fn render_session_control_label(
+        &self,
+        scope: &str,
+        key: impl Hash,
+        text: impl Into<String>,
+        color: u32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_display_text_with_role(
+            SelectableTextRole::NonSelectable,
+            scope,
+            key,
+            text,
+            color,
+            cx,
+        )
+    }
+
     fn queue_ssh_terminal_tab_for_sidebar_node(
         &mut self,
         node_id: NodeId,
@@ -563,8 +582,7 @@ impl WorkspaceApp {
                     rgb(root_color),
                 ))
                 .when(root_active, |button| {
-                    button.child(self.render_display_text_with_role(
-                        SelectableTextRole::PlainDocument,
+                    button.child(self.render_session_control_label(
                         "session-focus-breadcrumb-root",
                         "sessions.breadcrumb.all_servers",
                         self.i18n.t("sessions.breadcrumb.all_servers"),
@@ -592,7 +610,6 @@ impl WorkspaceApp {
             };
             let node_id = row.node_id.clone();
             let title = row.node_view.title.clone();
-            let key = format!("session-focus-breadcrumb-{}", node_id.0);
             breadcrumb = breadcrumb
                 .child(Self::render_lucide_icon(
                     LucideIcon::ChevronRight,
@@ -617,17 +634,11 @@ impl WorkspaceApp {
                         .text_color(rgb(text_color))
                         .cursor_pointer()
                         .hover(move |button| button.bg(rgb(theme.bg_hover)))
-                        .child(self.render_row_safe_selectable_display_text_in_group(
-                            crate::workspace::selectable_text::selectable_text_id(
-                                "session-focus-breadcrumb",
-                                &node_id,
-                            ),
-                            &key,
-                            "label",
-                            0,
+                        .child(self.render_session_control_label(
+                            "session-focus-breadcrumb",
+                            &node_id,
                             title,
                             text_color,
-                            None,
                             cx,
                         ))
                         .on_mouse_down(
@@ -817,10 +828,6 @@ impl WorkspaceApp {
         let terminal_count = row.node_view.terminal_ids.len();
         let has_children = row.has_children;
         let action_label = self.i18n.t("sessions.actions.connect");
-        let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
-            "session-focus-card",
-            &row.node_id,
-        );
         let border_color = if selected {
             rgba((theme.accent << 8) | SESSION_FOCUS_CARD_SELECTED_BORDER_ALPHA)
         } else {
@@ -897,14 +904,11 @@ impl WorkspaceApp {
                                     .text_size(px(SESSION_TREE_TEXT_SIZE))
                                     .font_weight(gpui::FontWeight::MEDIUM)
                                     .text_color(rgb(status.text_color))
-                                    .child(self.render_row_safe_selectable_display_text_in_group(
-                                        selection_group_id,
+                                    .child(self.render_session_control_label(
                                         "session-focus-card-cell",
                                         "title",
-                                        0,
                                         row.node_view.title.clone(),
                                         status.text_color,
-                                        None,
                                         cx,
                                     )),
                             )
@@ -914,14 +918,11 @@ impl WorkspaceApp {
                                     .truncate()
                                     .text_size(px(SESSION_TREE_META_TEXT_SIZE))
                                     .text_color(rgb(theme.text_muted))
-                                    .child(self.render_row_safe_selectable_display_text_in_group(
-                                        selection_group_id,
+                                    .child(self.render_session_control_label(
                                         "session-focus-card-cell",
                                         "subtitle",
-                                        1,
                                         subtitle,
                                         theme.text_muted,
-                                        None,
                                         cx,
                                     )),
                             ),
@@ -1089,17 +1090,11 @@ impl WorkspaceApp {
                     .flex_1()
                     .truncate()
                     .text_size(px(SESSION_TREE_META_TEXT_SIZE))
-                    .child(self.render_row_safe_selectable_display_text_in_group(
-                        crate::workspace::selectable_text::selectable_text_id(
-                            "session-focus-terminal",
-                            session_id,
-                        ),
+                    .child(self.render_session_control_label(
                         "session-focus-terminal-cell",
                         "label",
-                        0,
                         text,
                         text_color,
-                        None,
                         cx,
                     )),
             )
@@ -1654,9 +1649,6 @@ impl WorkspaceApp {
         let row_text = rgb(status.text_color);
         let port_text = format!(":{}", node.port);
         let terminal_count = node.terminal_ids.len();
-        let selection_group_id =
-            crate::workspace::selectable_text::selectable_text_id("session-sidebar-node", &node_id);
-
         div()
             .relative()
             .h(px(SESSION_TREE_NODE_HEIGHT))
@@ -1715,14 +1707,11 @@ impl WorkspaceApp {
                         gpui::FontWeight::NORMAL
                     })
                     .text_color(row_text)
-                    .child(self.render_row_safe_selectable_display_text_in_group(
-                        selection_group_id,
+                    .child(self.render_session_control_label(
                         "session-sidebar-node-cell",
                         "title",
-                        0,
                         node.title,
                         status.text_color,
-                        None,
                         cx,
                     )),
             )
@@ -1732,14 +1721,11 @@ impl WorkspaceApp {
                         .ml_2()
                         .text_size(px(SESSION_TREE_META_TEXT_SIZE))
                         .text_color(muted_text)
-                        .child(self.render_row_safe_selectable_display_text_in_group(
-                            selection_group_id,
+                        .child(self.render_session_control_label(
                             "session-sidebar-node-cell",
                             "port",
-                            1,
                             port_text,
                             theme.text_muted,
-                            None,
                             cx,
                         )),
                 )
@@ -1759,14 +1745,11 @@ impl WorkspaceApp {
                             12.0,
                             muted_text,
                         ))
-                        .child(self.render_row_safe_selectable_display_text_in_group(
-                            selection_group_id,
+                        .child(self.render_session_control_label(
                             "session-sidebar-node-cell",
                             "terminal-count",
-                            2,
                             terminal_count.to_string(),
                             theme.text_muted,
-                            None,
                             cx,
                         )),
                 )
@@ -1878,21 +1861,15 @@ impl WorkspaceApp {
                             gpui::FontWeight::NORMAL
                         })
                         .text_color(text_color)
-                        .child(self.render_row_safe_selectable_display_text_in_group(
-                            crate::workspace::selectable_text::selectable_text_id(
-                                "session-sidebar-terminal",
-                                session_id,
-                            ),
+                        .child(self.render_session_control_label(
                             "session-sidebar-terminal-cell",
                             "label",
-                            0,
                             text,
                             if active {
                                 theme.accent
                             } else {
                                 theme.text_muted
                             },
-                            None,
                             cx,
                         )),
                 )
@@ -1942,11 +1919,6 @@ impl WorkspaceApp {
                 (theme.error, mix_rgb(theme.bg_hover, theme.error, 0.10))
             }
         };
-        let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
-            "session-sidebar-action",
-            (depth, line_stops_here, label.as_str()),
-        );
-
         self.render_session_tree_child(
             depth,
             line_stops_here,
@@ -1968,18 +1940,13 @@ impl WorkspaceApp {
                     SESSION_TREE_CHILD_ICON_SIZE,
                     rgb(text_color),
                 ))
-                .child(div().truncate().child(
-                    self.render_row_safe_selectable_display_text_in_group(
-                        selection_group_id,
-                        "session-sidebar-action-cell",
-                        "label",
-                        0,
-                        label,
-                        text_color,
-                        None,
-                        cx,
-                    ),
-                ))
+                .child(div().truncate().child(self.render_session_control_label(
+                    "session-sidebar-action-cell",
+                    "label",
+                    label,
+                    text_color,
+                    cx,
+                )))
                 .on_mouse_down(MouseButton::Left, listener)
                 .into_any_element(),
         )
