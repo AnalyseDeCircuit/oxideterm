@@ -9,6 +9,8 @@ pub mod terminal_ui;
 mod terminal_view;
 mod trzsz_worker;
 
+#[cfg(feature = "bench")]
+pub use app::TerminalPlaybackUpdateTimings;
 pub use app::{
     SharedTerminalSession, TerminalBroadcastInputKind, TerminalContextAction, TerminalCursorAnchor,
     TerminalCwdShellIntegrationStatus, TerminalInputBroadcaster, TerminalInputInterceptor,

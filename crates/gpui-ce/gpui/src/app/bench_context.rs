@@ -1,5 +1,7 @@
+// OxideTerm modification: benchmark reports include platform presentation and scene-cost metrics.
 use std::{
     cell::{OnceCell, RefCell},
+    collections::BTreeMap,
     future::Future,
     rc::Rc,
     sync::Arc,
@@ -12,8 +14,8 @@ use hdrhistogram::Histogram;
 use crate::{
     AnyView, AnyWindowHandle, App, AppCell, AppContext, BackgroundExecutor, Bounds, Context, Empty,
     Entity, EntityId, Focusable, ForegroundExecutor, Global, Platform, PlatformHeadlessRenderer,
-    PlatformTextSystem, Render, Reservation, Task, TestPlatform, ThreadedDispatcher, VisualContext,
-    Window, WindowBounds, WindowHandle, WindowOptions,
+    PlatformTextSystem, Render, Reservation, Scene, Task, TestPlatform, ThreadedDispatcher,
+    VisualContext, Window, WindowBounds, WindowHandle, WindowOptions,
     app::GpuiBorrow,
     profiler::{
         self, FrameEvent, FrameTimingCollector,
@@ -146,6 +148,10 @@ impl BenchReport {
                     }
                 }
                 FrameEvent::Present(timing) => {
+                    snapshot
+                        .present
+                        .record(timing.present_duration().as_nanos() as u64)
+                        .ok();
                     if let Some(animation_interval) = timing.animation_interval {
                         snapshot
                             .present_interval
@@ -172,6 +178,47 @@ impl BenchReport {
                 _ => event.duration(),
             };
             snapshot.foreground_work.record(duration);
+        }
+    }
+
+    fn record_scene(&self, scene: &Scene) {
+        let primitive_count = scene.shadows.len()
+            + scene.quads.len()
+            + scene.paths.len()
+            + scene.underlines.len()
+            + scene.monochrome_sprites.len()
+            + scene.subpixel_sprites.len()
+            + scene.polychrome_sprites.len()
+            + scene.surfaces.len()
+            + scene.backdrop_filters.len()
+            + scene.filter_boundaries.len();
+        let mut snapshot = self.frame_snapshot.borrow_mut();
+        snapshot
+            .scene_primitives
+            .record(primitive_count as u64)
+            .ok();
+        snapshot
+            .scene_batches
+            .record(scene.batches().count() as u64)
+            .ok();
+        snapshot
+            .scene_paint_operations
+            .record(scene.len() as u64)
+            .ok();
+    }
+
+    fn record_stage_samples(
+        &self,
+        name: &'static str,
+        samples: impl IntoIterator<Item = Duration>,
+    ) {
+        let mut snapshot = self.frame_snapshot.borrow_mut();
+        let histogram = snapshot
+            .stages
+            .entry(name)
+            .or_insert_with(|| Histogram::new(3).expect("3 significant digits is valid"));
+        for duration in samples {
+            histogram.record(duration.as_nanos() as u64).ok();
         }
     }
 
@@ -241,6 +288,7 @@ impl BenchReport {
         eprintln!("  note: includes Criterion warmup/calibration");
         self.print_histogram("window dirty-to-draw", &frame_snapshot.dirty_to_draw);
         self.print_histogram("window draw", &frame_snapshot.draw);
+        self.print_histogram("window present", &frame_snapshot.present);
         self.print_histogram("window present interval", &frame_snapshot.present_interval);
         if !frame_snapshot.invalidations_per_frame.is_empty() {
             eprintln!(
@@ -248,6 +296,15 @@ impl BenchReport {
                 frame_snapshot.invalidations_per_frame.mean(),
                 frame_snapshot.invalidations_per_frame.max()
             );
+        }
+        self.print_count_histogram("scene primitives", &frame_snapshot.scene_primitives);
+        self.print_count_histogram("scene GPU batches", &frame_snapshot.scene_batches);
+        self.print_count_histogram(
+            "scene replay operations",
+            &frame_snapshot.scene_paint_operations,
+        );
+        for (name, histogram) in &frame_snapshot.stages {
+            self.print_histogram(name, histogram);
         }
         self.print_foreground_work(&frame_snapshot.foreground_work);
     }
@@ -273,6 +330,18 @@ impl BenchReport {
             format_duration(Duration::from_nanos(foreground_work.total_nanos))
         );
         self.print_histogram_body(&foreground_work.histogram);
+    }
+
+    fn print_count_histogram(&self, name: &str, histogram: &Histogram<u64>) {
+        if histogram.is_empty() {
+            return;
+        }
+        eprintln!(
+            "  {name}: mean {:.2}, p95 {}, max {}",
+            histogram.mean(),
+            histogram.value_at_quantile(0.95),
+            histogram.max()
+        );
     }
 
     fn print_histogram_body(&self, histogram: &Histogram<u64>) {
@@ -313,8 +382,13 @@ impl BenchReport {
 struct WindowFrameSnapshot {
     dirty_to_draw: Histogram<u64>,
     draw: Histogram<u64>,
+    present: Histogram<u64>,
     present_interval: Histogram<u64>,
     invalidations_per_frame: Histogram<u64>,
+    scene_primitives: Histogram<u64>,
+    scene_batches: Histogram<u64>,
+    scene_paint_operations: Histogram<u64>,
+    stages: BTreeMap<&'static str, Histogram<u64>>,
     foreground_work: DurationHistogram,
 }
 
@@ -323,8 +397,13 @@ impl WindowFrameSnapshot {
         Self {
             dirty_to_draw: Histogram::new(3).expect("3 significant digits is valid"),
             draw: Histogram::new(3).expect("3 significant digits is valid"),
+            present: Histogram::new(3).expect("3 significant digits is valid"),
             present_interval: Histogram::new(3).expect("3 significant digits is valid"),
             invalidations_per_frame: Histogram::new(3).expect("3 significant digits is valid"),
+            scene_primitives: Histogram::new(3).expect("3 significant digits is valid"),
+            scene_batches: Histogram::new(3).expect("3 significant digits is valid"),
+            scene_paint_operations: Histogram::new(3).expect("3 significant digits is valid"),
+            stages: BTreeMap::new(),
             foreground_work: DurationHistogram::new(),
         }
     }
@@ -332,6 +411,7 @@ impl WindowFrameSnapshot {
     fn is_empty(&self) -> bool {
         self.dirty_to_draw.is_empty()
             && self.draw.is_empty()
+            && self.present.is_empty()
             && self.present_interval.is_empty()
             && self.foreground_work.histogram.is_empty()
     }
@@ -639,6 +719,30 @@ impl<'a, 'measurement> BenchAppContext<'a, 'measurement> {
         self.replace_bencher(bencher);
     }
 
+    /// Asserts that the measurements recorded by this benchmark did not draw or present a frame.
+    ///
+    /// Call this after [`Self::bench_iter`] when measuring a steady idle state. Setup draws that
+    /// happen before the measured iterator are not included in the report.
+    pub fn assert_no_rendered_frames(&self) {
+        let snapshot = self.report.frame_snapshot.borrow();
+        assert!(
+            snapshot.draw.is_empty() && snapshot.present.is_empty(),
+            "idle benchmark unexpectedly observed {} draws and {} presentations",
+            snapshot.draw.len(),
+            snapshot.present.len(),
+        );
+    }
+
+    /// Adds named duration samples to the benchmark report without charging aggregation to the
+    /// measured iterator. Call this after the corresponding `bench_*` method returns.
+    pub fn record_stage_samples(
+        &self,
+        name: &'static str,
+        samples: impl IntoIterator<Item = Duration>,
+    ) {
+        self.report.record_stage_samples(name, samples);
+    }
+
     /// Measures a GPUI task to completion using Criterion's iteration loop.
     ///
     /// The closure is invoked once per Criterion iteration. The returned task
@@ -742,7 +846,6 @@ impl<'a, 'measurement> BenchAppContext<'a, 'measurement> {
 
         let dispatcher = self.background_executor.dispatcher().clone();
         let collector = TraceScope::start(self.foreground_journal_collector());
-
         let mut benchmark = || {
             // Work already queued at frame start delays the frame in
             // production too, so run it inside the measured interval.
@@ -763,6 +866,14 @@ impl<'a, 'measurement> BenchAppContext<'a, 'measurement> {
             .expect("cannot benchmark renderer for entity without a current window");
         };
         bencher.iter(&mut benchmark);
+
+        // Scene accounting walks the batch iterator, so sample the final frame after Criterion's
+        // timed loop instead of charging diagnostic work to every measured render.
+        let report = self.report.clone();
+        self.with_window(view.entity_id(), |window, _| {
+            report.record_scene(&window.rendered_frame.scene);
+        })
+        .expect("cannot inspect renderer scene for entity without a current window");
 
         let events = collector.finish();
         self.report
@@ -1125,6 +1236,24 @@ mod tests {
 
     use super::*;
     use crate::profiler::journal::install_test_foreground_journal;
+
+    #[test]
+    fn frame_report_records_platform_present_duration() {
+        let present_start = scheduler::Instant::now();
+        let expected_duration = Duration::from_millis(7);
+        let report = BenchReport::default();
+        report.record_frame_timings([&FrameEvent::Present(crate::profiler::PresentTiming {
+            window_id: crate::WindowId::from(1),
+            present_start,
+            present_end: present_start + expected_duration,
+            animation_interval: None,
+        })]);
+
+        let snapshot = report.frame_snapshot.borrow();
+        assert_eq!(snapshot.present.len(), 1);
+        assert!(snapshot.present.max() >= expected_duration.as_nanos() as u64);
+        assert!(snapshot.present_interval.is_empty());
+    }
 
     #[test]
     fn foreground_work_reports_long_task_without_window_draw() {

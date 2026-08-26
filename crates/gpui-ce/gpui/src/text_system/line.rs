@@ -1,3 +1,4 @@
+// OxideTerm modification: cached line paint can reuse a caller-owned bounded layer.
 use crate::window::PreparedGlyphBatch;
 use crate::{
     App, Bounds, DevicePixels, Half, LineLayout, Pixels, Point, RenderGlyphParams, Result,
@@ -385,54 +386,113 @@ impl LineLayout {
         }
 
         window.paint_layer(line_bounds, |window| {
-            let scale_factor = window.scale_factor();
-            let device_origin = point(
-                ScaledPixels(origin.x.0 * scale_factor),
-                ScaledPixels(origin.y.0 * scale_factor),
-            );
-            let subpixel_rendering = self
-                .runs
-                .iter()
-                .map(|run| window.should_use_subpixel_rendering(run.font_id, self.font_size))
-                .collect::<SmallVec<[bool; 16]>>();
-            let key = PreparedLinePaintKey {
-                layout_identity: self as *const Self as usize,
-                renderer_resource_identity: window.renderer_resource_identity(),
-                renderer_resource_generation: window.renderer_resource_generation(),
-                scale_factor_bits: scale_factor.to_bits(),
-                line_height_bits: line_height.0.to_bits(),
-                origin_phase_x_bits: device_pixel_phase(device_origin.x.0).to_bits(),
-                origin_phase_y_bits: device_pixel_phase(device_origin.y.0).to_bits(),
-                decorations: prepared_decoration_keys(decoration_runs),
-                subpixel_rendering,
-            };
-
-            let glyphs = {
-                let mut prepared = cache.prepared.lock();
-                if prepared.as_ref().is_none_or(|prepared| prepared.key != key) {
-                    let glyphs = prepare_line_glyphs(
-                        self,
-                        decoration_runs,
-                        origin,
-                        line_height,
-                        device_origin,
-                        &key.subpixel_rendering,
-                        window,
-                    )?;
-                    *prepared = Some(Box::new(PreparedLinePaint {
-                        key,
-                        glyphs: Arc::new(glyphs),
-                    }));
-                }
-                prepared
-                    .as_ref()
-                    .expect("prepared line paint is initialized above")
-                    .glyphs
-                    .clone()
-            };
-            window.paint_prepared_glyph_batch(device_origin, glyphs);
-            Ok(())
+            self.paint_cached_in_current_layer_impl(
+                origin,
+                line_height,
+                decoration_runs,
+                cache,
+                window,
+                cx,
+            )
         })
+    }
+
+    /// Paints cached glyphs inside a layer already established by the caller.
+    pub fn paint_cached_in_current_layer(
+        &self,
+        origin: Point<Pixels>,
+        line_height: Pixels,
+        decoration_runs: &[DecorationRun],
+        cache: &LinePaintCache,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<()> {
+        if decoration_runs
+            .iter()
+            .any(|run| run.underline.is_some() || run.strikethrough.is_some())
+        {
+            return self.paint(
+                origin,
+                line_height,
+                TextAlign::Left,
+                None,
+                decoration_runs,
+                window,
+                cx,
+            );
+        }
+
+        let line_bounds = Bounds::new(origin, size(self.width, line_height));
+        if !line_bounds.intersects(&window.content_mask().bounds) {
+            return Ok(());
+        }
+
+        self.paint_cached_in_current_layer_impl(
+            origin,
+            line_height,
+            decoration_runs,
+            cache,
+            window,
+            cx,
+        )
+    }
+
+    fn paint_cached_in_current_layer_impl(
+        &self,
+        origin: Point<Pixels>,
+        line_height: Pixels,
+        decoration_runs: &[DecorationRun],
+        cache: &LinePaintCache,
+        window: &mut Window,
+        _cx: &mut App,
+    ) -> Result<()> {
+        let scale_factor = window.scale_factor();
+        let device_origin = point(
+            ScaledPixels(origin.x.0 * scale_factor),
+            ScaledPixels(origin.y.0 * scale_factor),
+        );
+        let subpixel_rendering = self
+            .runs
+            .iter()
+            .map(|run| window.should_use_subpixel_rendering(run.font_id, self.font_size))
+            .collect::<SmallVec<[bool; 16]>>();
+        let key = PreparedLinePaintKey {
+            layout_identity: self as *const Self as usize,
+            renderer_resource_identity: window.renderer_resource_identity(),
+            renderer_resource_generation: window.renderer_resource_generation(),
+            scale_factor_bits: scale_factor.to_bits(),
+            line_height_bits: line_height.0.to_bits(),
+            origin_phase_x_bits: device_pixel_phase(device_origin.x.0).to_bits(),
+            origin_phase_y_bits: device_pixel_phase(device_origin.y.0).to_bits(),
+            decorations: prepared_decoration_keys(decoration_runs),
+            subpixel_rendering,
+        };
+
+        let glyphs = {
+            let mut prepared = cache.prepared.lock();
+            if prepared.as_ref().is_none_or(|prepared| prepared.key != key) {
+                let glyphs = prepare_line_glyphs(
+                    self,
+                    decoration_runs,
+                    origin,
+                    line_height,
+                    device_origin,
+                    &key.subpixel_rendering,
+                    window,
+                )?;
+                *prepared = Some(Box::new(PreparedLinePaint {
+                    key,
+                    glyphs: Arc::new(glyphs),
+                }));
+            }
+            prepared
+                .as_ref()
+                .expect("prepared line paint is initialized above")
+                .glyphs
+                .clone()
+        };
+        window.paint_prepared_glyph_batch(device_origin, glyphs);
+        Ok(())
     }
 
     /// Paint the background of this layout to the window, using the given

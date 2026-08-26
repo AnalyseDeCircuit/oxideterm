@@ -493,6 +493,12 @@ pub struct TerminalPane {
     process_info_refresh_in_flight: bool,
     last_process_info_refresh_requested: Instant,
     render_stats: TerminalRenderStats,
+    #[cfg(feature = "bench")]
+    benchmark_performance_metrics_enabled: bool,
+    #[cfg(feature = "bench")]
+    benchmark_backend_snapshot_micros: u64,
+    #[cfg(feature = "bench")]
+    benchmark_snapshot_state_micros: u64,
     render_stats_window_start: Instant,
     render_stats_window_writes: usize,
     drain_duration_samples_micros: VecDeque<u64>,
@@ -1134,6 +1140,12 @@ impl TerminalPane {
                 .checked_sub(ACTIVE_PROCESS_INFO_REFRESH_INTERVAL)
                 .unwrap_or_else(Instant::now),
             render_stats: TerminalRenderStats::default(),
+            #[cfg(feature = "bench")]
+            benchmark_performance_metrics_enabled: false,
+            #[cfg(feature = "bench")]
+            benchmark_backend_snapshot_micros: 0,
+            #[cfg(feature = "bench")]
+            benchmark_snapshot_state_micros: 0,
             render_stats_window_start: Instant::now(),
             render_stats_window_writes: 0,
             drain_duration_samples_micros: VecDeque::with_capacity(
@@ -1180,6 +1192,7 @@ impl TerminalPane {
     }
 
     fn stamp_snapshot(&mut self, mut snapshot: TerminalSnapshot) -> TerminalSnapshot {
+        let backend_reused_rows = snapshot.lines.iter().any(|row| row.line_id != 0);
         reconcile_snapshot_line_ids(
             &mut snapshot,
             &self.snapshot,
@@ -1187,7 +1200,11 @@ impl TerminalPane {
         );
         // Raw backend snapshots are stateless; the pane owns frame generation
         // so future render caches can invalidate without changing backends.
-        snapshot.reuse_unchanged_rows_from(&self.snapshot);
+        if !backend_reused_rows {
+            // Incremental backends already carry shared cell buffers and line identities. Full
+            // snapshots still receive the equality fallback used by reset and resize paths.
+            snapshot.reuse_unchanged_rows_from(&self.snapshot);
+        }
         self.record_snapshot_row_timestamps(&snapshot);
         self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
         if self.snapshot_generation == 0 {
@@ -1412,16 +1429,12 @@ impl TerminalPane {
     }
 
     fn terminal_autosuggest_candidates(&self) -> Vec<TerminalAutosuggestCandidate> {
-        let mode = self.terminal.lock().mode();
-        let state = self.input_tracker.state();
         let cursor_row_is_active_input = self
             .snapshot
             .lines
             .get(self.snapshot.cursor_row)
             .is_some_and(|row| row.active_input);
         if !self.autosuggest_prompt_active
-            || !self.terminal_accepts_input()
-            || mode.contains(TermMode::ALT_SCREEN)
             || self.marked_text.is_some()
             || self.tmux_prompt.is_some()
             || self.pending_paste.is_some()
@@ -1429,8 +1442,22 @@ impl TerminalPane {
             || self.privilege_prompt_inline_hint.is_some()
             || !cursor_row_is_active_input
             || self.snapshot.display_offset != 0
-            || self.autosuggest_dismissed_query.as_deref() == Some(state.value.as_str())
         {
+            return Vec::new();
+        }
+        // Most terminal frames have no active suggestion prompt. Defer both the terminal lock and
+        // input-state clone until the pane-local eligibility checks have passed.
+        let (mode, terminal_interactive) = {
+            let terminal = self.terminal.lock();
+            (terminal.mode(), terminal.is_interactive())
+        };
+        if mode.contains(TermMode::ALT_SCREEN)
+            || !self.terminal_accepts_input_with_interactive_state(terminal_interactive)
+        {
+            return Vec::new();
+        }
+        let state = self.input_tracker.state();
+        if self.autosuggest_dismissed_query.as_deref() == Some(state.value.as_str()) {
             return Vec::new();
         }
         self.command_history
@@ -3448,10 +3475,19 @@ impl TerminalPane {
     fn terminal_accepts_input(&self) -> bool {
         #[cfg(test)]
         if self.test_accepts_input {
+            return !self.input_locked;
+        }
+        let terminal_interactive = self.terminal.lock().is_interactive();
+        self.terminal_accepts_input_with_interactive_state(terminal_interactive)
+    }
+
+    fn terminal_accepts_input_with_interactive_state(&self, terminal_interactive: bool) -> bool {
+        #[cfg(test)]
+        if self.test_accepts_input {
             // Unit tests can exercise input routing without creating a live PTY.
             return !self.input_locked;
         }
-        !self.input_locked && !self.terminal_exited && self.terminal.lock().is_interactive()
+        !self.input_locked && !self.terminal_exited && terminal_interactive
     }
 
     fn commit_text(&mut self, text: &str, cx: &mut Context<Self>) {
@@ -3874,6 +3910,23 @@ mod tests {
 
     use gpui::{AppContext, IntoElement, Render, TestAppContext, div};
     use oxideterm_terminal::{TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape};
+
+    #[test]
+    fn idle_terminal_has_no_maintenance_deadline() {
+        assert_eq!(
+            terminal_maintenance_interval(
+                false,
+                false,
+                Duration::from_millis(8),
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            None
+        );
+    }
 
     struct TerminalTestRoot;
 

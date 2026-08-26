@@ -106,6 +106,19 @@ Every source file changed by OxideTerm should retain an English modification
 notice near the top. The sections below define the behavior to preserve; line
 numbers are intentionally omitted because upstream refreshes move code.
 
+### Benchmark frame-cost reporting
+
+`crates/gpui-ce/gpui/src/app/bench_context.rs` extends renderer benchmark reports with the
+platform presentation duration and final-frame scene primitive, GPU batch, and replay-operation
+counts. Scene accounting runs after Criterion's timed iteration loop because walking the batch
+iterator again is diagnostic work rather than product rendering. Preserve that separation so
+terminal render benchmarks expose CPU draw, GPU submission, presentation, and scene-complexity
+changes without measuring the reporter itself. `BenchAppContext::assert_no_rendered_frames`
+supports idle benchmarks whose contract is the absence of draw and presentation events after
+setup has settled. Named stage samples are merged only after a timed iterator returns, keeping
+histogram aggregation outside the measurement while allowing product benchmarks to split their
+own synchronous pipelines.
+
 ### Transparent border-only quad overdraw
 
 `crates/gpui-ce/gpui/src/window.rs` limits transparent, border-only quads to four clipped
@@ -233,7 +246,9 @@ decorations, and subpixel mode. Preserve every component: omitting atlas
 identity can reuse tiles after moving a pane between windows, while omitting
 generation can replay tiles invalidated by device recovery. Prepared batches
 must also remain one replay operation so GPUI view caching does not expand them
-into persistent per-glyph paint operations.
+into persistent per-glyph paint operations. `LineLayout::paint_cached_in_current_layer` lets the
+terminal group adjacent style runs under one row-scoped layer; callers must establish a bounded
+layer before using it so draw ordering does not collapse across unrelated rows.
 
 ### Scheduler-owned animation clock
 

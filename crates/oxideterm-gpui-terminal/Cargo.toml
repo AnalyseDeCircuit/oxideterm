@@ -4,6 +4,9 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[features]
+bench = []
+
 [dependencies]
 anyhow.workspace = true
 async-channel.workspace = true
@@ -33,4 +36,11 @@ vte.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
-gpui = { workspace = true, features = ["test-support"] }
+criterion.workspace = true
+gpui = { workspace = true, features = ["bench"] }
+gpui_platform = { workspace = true, features = ["font-kit", "test-support"] }
+
+[[bench]]
+name = "terminal_render"
+harness = false
+required-features = ["bench"]

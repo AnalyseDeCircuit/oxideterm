@@ -239,6 +239,20 @@ fn benchmark_terminal_pipeline(criterion: &mut Criterion) {
             black_box(incremental_scroll_snapshot.display_offset)
         });
     });
+    let mut full_output_terminal = populated_terminal(20_000);
+    criterion.bench_function("snapshot_output_scroll_full_120x40", |bencher| {
+        bencher.iter_custom(|iterations| {
+            let mut measured = Duration::ZERO;
+            for _ in 0..iterations {
+                full_output_terminal.feed_recording_output(black_box(b"next line\r\n"));
+                let started = Instant::now();
+                let snapshot = full_output_terminal.snapshot();
+                measured += started.elapsed();
+                black_box(snapshot.generation);
+            }
+            measured
+        });
+    });
     let mut output_scroll_terminal = populated_terminal(20_000);
     let mut output_scroll_snapshot = output_scroll_terminal.snapshot();
     criterion.bench_function("snapshot_output_scroll_incremental_120x40", |bencher| {
@@ -255,6 +269,46 @@ fn benchmark_terminal_pipeline(criterion: &mut Criterion) {
             measured
         });
     });
+    let current_line_updates = [b"\rprogress 0123456789", b"\rprogress 9876543210"];
+    let mut full_current_line_terminal = populated_terminal(20_000);
+    criterion.bench_function("snapshot_output_current_line_full_120x40", |bencher| {
+        bencher.iter_custom(|iterations| {
+            let mut measured = Duration::ZERO;
+            for iteration in 0..iterations {
+                full_current_line_terminal.feed_recording_output(black_box(
+                    current_line_updates[iteration as usize % current_line_updates.len()]
+                        .as_slice(),
+                ));
+                let started = Instant::now();
+                let snapshot = full_current_line_terminal.snapshot();
+                measured += started.elapsed();
+                black_box(snapshot.generation);
+            }
+            measured
+        });
+    });
+    let mut incremental_current_line_terminal = populated_terminal(20_000);
+    let mut incremental_current_line_snapshot = incremental_current_line_terminal.snapshot();
+    criterion.bench_function(
+        "snapshot_output_current_line_incremental_120x40",
+        |bencher| {
+            bencher.iter_custom(|iterations| {
+                let mut measured = Duration::ZERO;
+                for iteration in 0..iterations {
+                    incremental_current_line_terminal.feed_recording_output(black_box(
+                        current_line_updates[iteration as usize % current_line_updates.len()]
+                            .as_slice(),
+                    ));
+                    let started = Instant::now();
+                    incremental_current_line_snapshot = incremental_current_line_terminal
+                        .snapshot_incremental(black_box(&incremental_current_line_snapshot));
+                    measured += started.elapsed();
+                }
+                black_box(incremental_current_line_snapshot.generation);
+                measured
+            });
+        },
+    );
     let search_source = terminal
         .search_source()
         .expect("recording playback sessions expose a background search source");

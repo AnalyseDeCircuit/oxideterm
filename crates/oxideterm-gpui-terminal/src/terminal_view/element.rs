@@ -2114,9 +2114,14 @@ impl Element for TerminalElement {
                 for rect in &layout.selections {
                     paint_terminal_rect(rect, origin, &self.metrics, window);
                 }
-                for run in &layout.text_runs {
-                    paint_text_run(run, origin, &self.metrics, window, cx);
-                }
+                paint_text_runs_by_row(
+                    &layout.text_runs,
+                    origin,
+                    self.snapshot.cols,
+                    &self.metrics,
+                    window,
+                    cx,
+                );
                 if let Some(ghost_text) = &layout.ghost_text {
                     paint_ghost_text_run(ghost_text, origin, &self.metrics, window, cx);
                 }

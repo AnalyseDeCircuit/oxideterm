@@ -1,3 +1,13 @@
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TerminalPlaybackUpdateTimings {
+    pub terminal_lock: Duration,
+    pub parse_and_grid: Duration,
+    pub event_extraction: Duration,
+    pub gpui_state_update: Duration,
+}
+
 impl TerminalPane {
     pub fn recording_status(&self) -> TerminalRecordingStatus {
         self.recorder
@@ -76,15 +86,74 @@ impl TerminalPane {
     }
 
     pub fn feed_recording_output(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
-        let snapshot = {
+        {
             let mut terminal = self.terminal.lock();
             terminal.feed_recording_output(bytes);
             let _ = terminal.take_events();
-            terminal.snapshot()
-        };
-        self.snapshot = self.stamp_snapshot(snapshot);
+        }
+        // Match live PTY output: multiple updates may coalesce before the visible pane builds one
+        // latest incremental snapshot during render.
+        self.snapshot_dirty = true;
         self.mark_terminal_content_changed(cx);
         cx.notify();
+    }
+
+    #[cfg(feature = "bench")]
+    #[doc(hidden)]
+    pub fn enable_benchmark_performance_metrics(&mut self) {
+        // Benchmark collection is separate from the visible overlay so diagnostic chrome does
+        // not change the scene whose layout and paint cost is being measured.
+        self.benchmark_performance_metrics_enabled = true;
+    }
+
+    #[cfg(feature = "bench")]
+    #[doc(hidden)]
+    pub fn benchmark_render_stage_micros(&self) -> (u64, u64, u64, u64, u64) {
+        let performance = self.layout_cache.lock().performance();
+        (
+            self.render_stats.snapshot_micros,
+            self.benchmark_backend_snapshot_micros,
+            self.benchmark_snapshot_state_micros,
+            performance.layout_micros,
+            performance.paint_micros,
+        )
+    }
+
+    #[cfg(feature = "bench")]
+    #[doc(hidden)]
+    pub fn feed_recording_output_profiled(
+        &mut self,
+        bytes: &[u8],
+        cx: &mut Context<Self>,
+    ) -> TerminalPlaybackUpdateTimings {
+        // Stage clocks are opt-in benchmark work; the production feed path above remains free of
+        // timing calls and uses the same operation order.
+        let lock_started = Instant::now();
+        let mut terminal = self.terminal.lock();
+        let terminal_lock = lock_started.elapsed();
+
+        let parse_started = Instant::now();
+        terminal.feed_recording_output(bytes);
+        let parse_and_grid = parse_started.elapsed();
+
+        let events_started = Instant::now();
+        let _ = terminal.take_events();
+        let event_extraction = events_started.elapsed();
+
+        drop(terminal);
+
+        let state_started = Instant::now();
+        self.snapshot_dirty = true;
+        self.mark_terminal_content_changed(cx);
+        cx.notify();
+        let gpui_state_update = state_started.elapsed();
+
+        TerminalPlaybackUpdateTimings {
+            terminal_lock,
+            parse_and_grid,
+            event_extraction,
+            gpui_state_update,
+        }
     }
 
     pub fn resize_recording_playback(&mut self, cols: usize, rows: usize, cx: &mut Context<Self>) {

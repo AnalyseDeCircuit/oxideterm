@@ -377,6 +377,17 @@ pub(crate) fn paint_text_run(
     window: &mut Window,
     cx: &mut App,
 ) {
+    paint_text_run_with_layer(run, origin, metrics, true, window, cx);
+}
+
+fn paint_text_run_with_layer(
+    run: &BatchedTextRun,
+    origin: gpui::Point<Pixels>,
+    metrics: &TerminalMetrics,
+    establish_layer: bool,
+    window: &mut Window,
+    cx: &mut App,
+) {
     if paint_powerline_separators(run, origin, metrics, window) {
         return;
     }
@@ -404,14 +415,26 @@ pub(crate) fn paint_text_run(
             underline: run.style.underline,
             strikethrough: run.style.strikethrough,
         };
-        let _ = layout.paint_cached(
-            position,
-            metrics.line_height,
-            std::slice::from_ref(&decoration),
-            &cache.paint,
-            window,
-            cx,
-        );
+        let decorations = std::slice::from_ref(&decoration);
+        let _ = if establish_layer {
+            layout.paint_cached(
+                position,
+                metrics.line_height,
+                decorations,
+                &cache.paint,
+                window,
+                cx,
+            )
+        } else {
+            layout.paint_cached_in_current_layer(
+                position,
+                metrics.line_height,
+                decorations,
+                &cache.paint,
+                window,
+                cx,
+            )
+        };
         return;
     }
 
@@ -429,6 +452,33 @@ pub(crate) fn paint_text_run(
         window,
         cx,
     );
+}
+
+pub(crate) fn paint_text_runs_by_row(
+    runs: &[BatchedTextRun],
+    origin: gpui::Point<Pixels>,
+    terminal_cols: usize,
+    metrics: &TerminalMetrics,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    for row_runs in runs.chunk_by(|left, right| left.row == right.row) {
+        let row = row_runs[0].row;
+        let row_bounds = Bounds::new(
+            origin + point(px(0.0), px(row as f32 * metrics.line_height_f32())),
+            size(
+                px(terminal_cols as f32 * metrics.cell_width_f32()),
+                metrics.line_height,
+            ),
+        );
+        // The complete row bounds include glyph overhang that can extend beyond a run's cells.
+        // One row-scoped layer still avoids a layer pair for every adjacent style run.
+        window.paint_layer(row_bounds, |window| {
+            for run in row_runs {
+                paint_text_run_with_layer(run, origin, metrics, false, window, cx);
+            }
+        });
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
