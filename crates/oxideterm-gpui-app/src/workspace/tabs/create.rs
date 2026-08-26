@@ -8,6 +8,24 @@ use oxideterm_remote_desktop::{
 use oxideterm_session_adapter::managed_key_resolver_from_store;
 use oxideterm_ssh_launch::{RemoteDesktopLaunchProtocol, TemporaryRemoteDesktopLaunch};
 
+const SSH_ROOT_NODE_ID_PREFIX: &str = "ssh";
+
+fn next_available_ssh_root_node_id(
+    next_sequence: &mut u64,
+    mut node_exists: impl FnMut(&NodeId) -> bool,
+) -> NodeId {
+    loop {
+        let sequence = *next_sequence;
+        // Restored session trees can already own numeric ids while the workspace counter
+        // starts from one, so allocation must skip every live logical node owner.
+        *next_sequence = sequence.wrapping_add(1).max(1);
+        let node_id = NodeId::new(format!("{SSH_ROOT_NODE_ID_PREFIX}-{sequence}"));
+        if !node_exists(&node_id) {
+            return node_id;
+        }
+    }
+}
+
 fn attach_saved_owner_to_reused_ssh_node(
     node: &mut WorkspaceSshNode,
     saved_connection_id: &str,
@@ -928,8 +946,9 @@ impl WorkspaceApp {
             self.saved_ssh_nodes.remove(saved_connection_id);
         }
 
-        let node_id = NodeId::new(format!("ssh-{}", self.next_ssh_node_id));
-        self.next_ssh_node_id += 1;
+        let node_id = next_available_ssh_root_node_id(&mut self.next_ssh_node_id, |node_id| {
+            self.node_router.contains_node(node_id) || self.ssh_nodes.contains_key(node_id)
+        });
         let origin = saved_connection_id
             .as_ref()
             .map(|id| NodeOrigin::Restored {
@@ -1670,6 +1689,23 @@ fn ssh_config_from_proxy_hop(hop: ProxyHopConfig, connect_timeout_seconds: u64) 
 #[cfg(test)]
 mod create_tests {
     use super::*;
+
+    #[test]
+    fn ssh_root_node_allocator_skips_restored_node_ids() {
+        let occupied_node_ids = HashSet::from([
+            NodeId::new("ssh-1"),
+            NodeId::new("ssh-2"),
+            NodeId::new("direct-restored"),
+        ]);
+        let mut next_sequence = 1;
+
+        let node_id = next_available_ssh_root_node_id(&mut next_sequence, |node_id| {
+            occupied_node_ids.contains(node_id)
+        });
+
+        assert_eq!(node_id, NodeId::new("ssh-3"));
+        assert_eq!(next_sequence, 4);
+    }
 
     fn saved_connection_metadata(id: &str) -> oxideterm_connections::SavedConnection {
         // This fixture deliberately has no runtime credential so reuse can be
