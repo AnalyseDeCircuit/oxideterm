@@ -1201,7 +1201,7 @@ impl TmuxController {
         let active = self.display.pane() == Some(pane);
         let configured_size = self.size;
         let graphics_commands = {
-            let pane_state = self.ensure_pane(pane, configured_size.cols, configured_size.rows);
+            let pane_state = self.ensure_pane_preserving_layout(pane);
             let pane_size = {
                 let term = pane_state.term.lock();
                 TerminalSize {
@@ -1401,6 +1401,20 @@ impl TmuxController {
         pane_state
     }
 
+    fn ensure_pane_preserving_layout(&mut self, pane: PaneId) -> &mut TmuxPane {
+        // Layout notifications are authoritative for existing pane emulators. Only an
+        // output notification for an unknown pane may fall back to the client dimensions.
+        let (cols, rows) = self
+            .panes
+            .get(&pane)
+            .map(|pane_state| {
+                let term = pane_state.term.lock();
+                (term.columns(), term.screen_lines())
+            })
+            .unwrap_or((self.size.cols, self.size.rows));
+        self.ensure_pane(pane, cols, rows)
+    }
+
     fn apply_pane_record(&mut self, line: &[u8]) {
         let mut fields = line.split(|byte| *byte == b' ');
         let (
@@ -1491,8 +1505,7 @@ impl TmuxController {
         self.active_window = Some(window);
         self.active_pane = Some(pane);
         self.window_active_panes.insert(window, pane);
-        self.ensure_pane(pane, self.size.cols, self.size.rows)
-            .window = Some(window);
+        self.ensure_pane_preserving_layout(pane).window = Some(window);
         self.publish_metadata();
     }
 
@@ -1864,6 +1877,53 @@ fn parse_leading_decimal(bytes: &[u8]) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layout_sized_panes_survive_active_sync_and_output() {
+        let (listener, _) = crate::local_event_channel();
+        let display = Arc::new(TmuxDisplay::default());
+        let size = TerminalSize {
+            cols: 80,
+            rows: 24,
+            cell_width: 0,
+            cell_height: 0,
+        };
+        let mut controller = TmuxController::new(
+            display,
+            listener,
+            size,
+            TerminalEncoding::Utf8,
+            100,
+            GraphicsOptions::default(),
+        );
+        let upper_pane = PaneId(1);
+        let left_pane = PaneId(2);
+        controller.ensure_pane(upper_pane, 80, 11).window = Some(WindowId(1));
+        controller.ensure_pane(left_pane, 39, 24).window = Some(WindowId(2));
+
+        controller.apply_active_record(b"$1 @1 %1");
+        let mut outcome = TmuxAdvance::new();
+        controller.feed_pane(
+            upper_pane,
+            b"vertical output",
+            false,
+            &mut |_| {},
+            &mut outcome,
+        );
+        controller.feed_pane(
+            left_pane,
+            b"horizontal output",
+            false,
+            &mut |_| {},
+            &mut outcome,
+        );
+
+        let upper_term = controller.panes[&upper_pane].term.lock();
+        assert_eq!((upper_term.columns(), upper_term.screen_lines()), (80, 11));
+        drop(upper_term);
+        let left_term = controller.panes[&left_pane].term.lock();
+        assert_eq!((left_term.columns(), left_term.screen_lines()), (39, 24));
+    }
 
     #[test]
     fn control_mode_takes_over_the_existing_stream_and_restores_it_on_exit() {
