@@ -551,28 +551,6 @@ fn config_keychain_account() -> String {
 }
 
 #[cfg(test)]
-fn encode_encrypted_connection_store_data_for_tests(
-    data: &ConnectionStoreData,
-    key: &[u8; CONFIG_ENCRYPTION_KEY_LEN],
-) -> Vec<u8> {
-    let envelope = encrypt_connection_store_data(data, key).expect("test envelope encrypts");
-    serde_json::to_vec_pretty(&envelope).expect("test envelope serializes")
-}
-
-#[cfg(test)]
-fn decode_connection_store_data_for_tests(
-    bytes: &[u8],
-    key: &[u8; CONFIG_ENCRYPTION_KEY_LEN],
-) -> Result<LoadedConnectionStoreData> {
-    let document: serde_json::Value = serde_json::from_slice(bytes)?;
-    let envelope: EncryptedConfigEnvelope = serde_json::from_value(document)?;
-    Ok(LoadedConnectionStoreData {
-        data: decrypt_connection_store_data(envelope, key)?,
-        format: ConnectionStoreStorageFormat::Encrypted,
-    })
-}
-
-#[cfg(test)]
 struct ConfigEncryptionKeyGuardForTests;
 
 #[cfg(test)]

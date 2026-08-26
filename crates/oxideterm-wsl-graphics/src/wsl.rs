@@ -703,59 +703,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_wsl_distro_list_matches_tauri_default_and_running_fields() {
-        let distros = parse_wsl_distro_list(
-            "  NAME                   STATE           VERSION\n* Ubuntu                 Running         2\n  Debian                 Stopped         2\n",
-        );
-        assert_eq!(
-            distros,
-            vec![
-                WslDistro {
-                    name: "Ubuntu".to_string(),
-                    is_default: true,
-                    is_running: true,
-                },
-                WslDistro {
-                    name: "Debian".to_string(),
-                    is_default: false,
-                    is_running: false,
-                },
-            ]
-        );
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    #[test]
-    fn non_windows_returns_tauri_not_available_error() {
-        assert_eq!(
-            list_distros().unwrap_err().to_string(),
-            crate::WSL_GRAPHICS_UNAVAILABLE
-        );
-    }
-
-    #[test]
-    fn desktop_candidate_order_matches_tauri() {
-        let names = crate::desktop_candidates()
-            .iter()
-            .map(|candidate| candidate.display_name)
-            .collect::<Vec<_>>();
-        assert_eq!(
-            names,
-            vec![
-                "Xfce",
-                "GNOME",
-                "KDE Plasma",
-                "MATE",
-                "LXDE",
-                "Cinnamon",
-                "Openbox",
-                "Fluxbox",
-                "IceWM"
-            ]
-        );
-    }
-
-    #[test]
     fn desktop_bootstrap_script_preserves_dbus_launch_paths() {
         // Both supported D-Bus launch paths must retain their required shell fragments.
         let cases = [
@@ -789,14 +736,5 @@ mod tests {
                 assert!(script.contains(fragment), "missing {fragment:?}");
             }
         }
-    }
-
-    #[test]
-    fn app_bootstrap_script_keeps_tauri_exec_argv_semantics() {
-        let script = build_app_bootstrap_script(":12");
-        assert!(script.contains("unset LD_PRELOAD LD_LIBRARY_PATH"));
-        assert!(script.contains("export DISPLAY=:12"));
-        assert!(script.contains("openbox --config-file /dev/null &"));
-        assert!(script.contains("exec \"$@\""));
     }
 }

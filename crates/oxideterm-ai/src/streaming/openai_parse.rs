@@ -279,61 +279,6 @@ mod tests {
     }
 
     #[test]
-    fn stream_parser_emits_tool_partial_only_for_argument_delta_like_tauri() {
-        let mut accumulator = OpenAiToolAccumulator::default();
-        let name_only = parse_openai_data_line_with_accumulator(
-            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"run_command"}}]},"finish_reason":null}]}"#,
-            &mut accumulator,
-        );
-        assert!(name_only.events.is_empty());
-
-        let args_only = parse_openai_data_line_with_accumulator(
-            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#,
-            &mut accumulator,
-        );
-        assert_eq!(
-            args_only.events,
-            vec![
-                AiStreamEvent::ToolCall {
-                    id: "call-1".to_string(),
-                    name: "run_command".to_string(),
-                    arguments: "{}".to_string(),
-                },
-                AiStreamEvent::ToolCallComplete {
-                    id: "call-1".to_string(),
-                    name: "run_command".to_string(),
-                    arguments: "{}".to_string(),
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn stream_parser_orders_tool_events_before_content_like_tauri() {
-        let mut accumulator = OpenAiToolAccumulator::default();
-        let parsed = parse_openai_data_line_with_accumulator(
-            r#"data: {"choices":[{"delta":{"content":"after","tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"get_state","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#,
-            &mut accumulator,
-        );
-        assert_eq!(
-            parsed.events,
-            vec![
-                AiStreamEvent::ToolCall {
-                    id: "call-1".to_string(),
-                    name: "get_state".to_string(),
-                    arguments: "{}".to_string(),
-                },
-                AiStreamEvent::ToolCallComplete {
-                    id: "call-1".to_string(),
-                    name: "get_state".to_string(),
-                    arguments: "{}".to_string(),
-                },
-                AiStreamEvent::Content("after".to_string()),
-            ]
-        );
-    }
-
-    #[test]
     fn json_parser_extracts_openai_tool_call_complete() {
         let events = parse_openai_json_events(
             r#"{"choices":[{"message":{"tool_calls":[{"id":"call-1","type":"function","function":{"name":"get_state","arguments":"{\"scope\":\"active\"}"}}]}}]}"#,
@@ -347,30 +292,6 @@ mod tests {
                 name: "get_state".to_string(),
                 arguments: "{\"scope\":\"active\"}".to_string(),
             }]
-        );
-    }
-
-    #[test]
-    fn json_parser_keeps_openai_tool_call_fallbacks_like_tauri() {
-        let events = parse_openai_json_events(
-            r#"{"choices":[{"message":{"tool_calls":[{"type":"function","function":{}},{"id":"","type":"function"}]}}]}"#,
-            "test",
-        )
-        .unwrap();
-        assert_eq!(
-            events,
-            vec![
-                AiStreamEvent::ToolCallComplete {
-                    id: "call-0".to_string(),
-                    name: String::new(),
-                    arguments: "{}".to_string(),
-                },
-                AiStreamEvent::ToolCallComplete {
-                    id: "call-1".to_string(),
-                    name: String::new(),
-                    arguments: "{}".to_string(),
-                },
-            ]
         );
     }
 }

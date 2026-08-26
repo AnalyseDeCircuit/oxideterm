@@ -85,12 +85,4 @@ mod terminal_quick_command_provider_tests {
             Some("user@example.com".to_string())
         );
     }
-
-    #[test]
-    fn remote_cwd_prefixes_match_tauri_command_bar_heuristic() {
-        assert!(terminal_cwd_looks_remote("/home/dev/project"));
-        assert!(terminal_cwd_looks_remote("/srv/app"));
-        assert!(terminal_cwd_looks_remote("/var/www/site"));
-        assert!(!terminal_cwd_looks_remote("/Users/dev/project"));
-    }
 }

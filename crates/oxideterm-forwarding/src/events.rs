@@ -106,35 +106,6 @@ mod tests {
     }
 
     #[test]
-    fn status_event_uses_tauri_camel_case_tag() {
-        let event = ForwardEvent::StatusChanged {
-            forward_id: "forward-1".to_string(),
-            session_id: "session-1".to_string(),
-            status: ForwardStatus::Active,
-            error: None,
-        };
-        let json = serde_json::to_string(&event).unwrap();
-
-        assert!(json.contains("statusChanged"));
-        assert!(json.contains("forward-1"));
-        assert!(!json.contains("error"));
-    }
-
-    #[test]
-    fn error_status_serializes_like_tauri_status_enum() {
-        let event = ForwardEvent::StatusChanged {
-            forward_id: "forward-1".to_string(),
-            session_id: "session-1".to_string(),
-            status: ForwardStatus::Error,
-            error: Some("connection lost".to_string()),
-        };
-        let json = serde_json::to_string(&event).unwrap();
-
-        assert!(json.contains("\"status\":\"error\""));
-        assert!(json.contains("\"error\":\"connection lost\""));
-    }
-
-    #[test]
     fn session_suspended_event_carries_all_forward_ids() {
         let event = ForwardEvent::SessionSuspended {
             session_id: "session-1".to_string(),

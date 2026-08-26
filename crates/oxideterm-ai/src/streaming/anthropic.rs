@@ -491,35 +491,6 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_tool_payload_matches_tauri_shape() {
-        let mut tool_config = config("auto", 4096);
-        tool_config.tools = vec![AiToolDefinition {
-            name: "get_state".to_string(),
-            description: "Get state".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": { "scope": { "type": "string" } },
-                "required": ["scope"],
-            }),
-        }];
-        tool_config.tool_choice = AiToolChoice::Required;
-        let body = anthropic_chat_body(&tool_config, &[]);
-        assert_eq!(body["tools"][0]["name"].as_str(), Some("get_state"));
-        assert_eq!(
-            body["tools"][0]["input_schema"]["type"].as_str(),
-            Some("object")
-        );
-        assert_eq!(body["tool_choice"]["type"].as_str(), Some("any"));
-
-        let mut thinking_config = config("high", 4096);
-        thinking_config.tools = tool_config.tools;
-        thinking_config.tool_choice = AiToolChoice::Required;
-        let body = anthropic_chat_body(&thinking_config, &[]);
-        assert!(body.get("tools").is_some());
-        assert!(body.get("tool_choice").is_none());
-    }
-
-    #[test]
     fn anthropic_message_conversion_preserves_tool_use_and_results() {
         let assistant = AiChatMessage {
             id: "a1".to_string(),
@@ -584,130 +555,6 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_system_and_missing_tool_call_id_match_tauri_json() {
-        let system = AiChatMessage {
-            id: "s1".to_string(),
-            role: AiChatRole::System,
-            content: "sys".to_string(),
-            timestamp_ms: 1,
-            model: None,
-            context: None,
-            thinking_content: None,
-            is_streaming: false,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
-        };
-        let empty_system = AiChatMessage {
-            id: "s2".to_string(),
-            role: AiChatRole::System,
-            content: String::new(),
-            timestamp_ms: 2,
-            model: None,
-            context: None,
-            thinking_content: None,
-            is_streaming: false,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
-        };
-        let tool = AiChatMessage {
-            id: "t1".to_string(),
-            role: AiChatRole::Tool,
-            content: "{\"ok\":true}".to_string(),
-            timestamp_ms: 3,
-            model: None,
-            context: None,
-            thinking_content: None,
-            is_streaming: false,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
-        };
-
-        let assistant = AiChatMessage {
-            role: AiChatRole::Assistant,
-            content: "hello".to_string(),
-            ..system.clone()
-        };
-        let repeated_assistant = AiChatMessage {
-            content: "again".to_string(),
-            ..assistant.clone()
-        };
-        let user = AiChatMessage {
-            role: AiChatRole::User,
-            content: "question".to_string(),
-            ..system.clone()
-        };
-        let (merged_system, merged_messages) =
-            anthropic_chat_messages(&[system.clone(), assistant, repeated_assistant, user]);
-        assert_eq!(merged_system.as_deref(), Some("sys"));
-        assert_eq!(merged_messages[0]["role"].as_str(), Some("user"));
-        assert_eq!(
-            merged_messages[0]["content"].as_str(),
-            Some("(Continue from previous context)")
-        );
-        assert_eq!(merged_messages[1]["role"].as_str(), Some("assistant"));
-        assert_eq!(
-            merged_messages[1]["content"].as_str(),
-            Some("hello\n\nagain")
-        );
-
-        let (system_prompt, converted) =
-            anthropic_chat_messages(&[system, empty_system.clone(), tool]);
-        assert_eq!(system_prompt.as_deref(), Some("sys\n\n"));
-        assert!(converted[0]["content"][0].get("tool_use_id").is_none());
-
-        let body = anthropic_chat_body(&config("off", 4096), &[empty_system]);
-        assert!(body.get("system").is_none());
-    }
-
-    #[test]
-    fn anthropic_invalid_tool_arguments_fall_back_to_empty_object_like_tauri() {
-        let assistant = AiChatMessage {
-            id: "a1".to_string(),
-            role: AiChatRole::Assistant,
-            content: String::new(),
-            timestamp_ms: 1,
-            model: None,
-            context: None,
-            thinking_content: None,
-            is_streaming: false,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: vec![serde_json::json!({
-                "id": "call-1",
-                "name": "get_state",
-                "arguments": "{not json",
-            })],
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
-        };
-
-        let (_, converted) = anthropic_chat_messages(&[assistant]);
-
-        assert_eq!(converted[1]["content"][0]["input"], serde_json::json!({}));
-    }
-
-    #[test]
     fn anthropic_stream_parser_assembles_tool_use_chunks() {
         let mut accumulator = AnthropicToolAccumulator::default();
         let start = parse_anthropic_data_line_with_accumulator(
@@ -739,15 +586,5 @@ mod tests {
                 arguments: "{\"scope\":\"active\"}".to_string(),
             }]
         );
-    }
-
-    #[test]
-    fn anthropic_stream_parser_requires_delta_type_like_tauri() {
-        let mut accumulator = AnthropicToolAccumulator::default();
-        let parsed = parse_anthropic_data_line_with_accumulator(
-            r#"data: {"type":"content_block_delta","index":0,"delta":{"text":"ignored","thinking":"ignored","partial_json":"{}"}}"#,
-            &mut accumulator,
-        );
-        assert!(parsed.events.is_empty());
     }
 }

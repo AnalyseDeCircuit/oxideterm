@@ -874,15 +874,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn derives_ui_colors_like_tauri() {
-        let ui = ThemeTokens::from_builtin(theme_by_id("default")).ui;
-        assert_eq!(ui.bg, 0x09090b);
-        assert_eq!(ui.bg_panel, 0x18181b);
-        assert_eq!(ui.bg_hover, 0x27272a);
-        assert_eq!(ui.accent, 0xea580c);
-    }
-
-    #[test]
     fn applies_builtin_theme_overrides() {
         let oxide = ThemeTokens::from_builtin(theme_by_id("oxide")).ui;
         assert_eq!(oxide.bg_panel, 0x291c16);

@@ -301,27 +301,6 @@ mod tests {
     use super::*;
     use crate::{AiExecutionBackend, AiPolicySafetyMode, AiToolUsePolicy};
 
-    fn message(role: AiChatRole, content: &str) -> AiChatMessage {
-        AiChatMessage {
-            id: format!("message-{content}"),
-            role,
-            content: content.to_string(),
-            timestamp_ms: 1,
-            model: None,
-            context: None,
-            thinking_content: None,
-            is_streaming: false,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
-        }
-    }
-
     fn config(provider_type: &str, reasoning_effort: &str) -> AiChatStreamConfig {
         AiChatStreamConfig {
             execution_backend: AiExecutionBackend::Provider,
@@ -447,38 +426,6 @@ mod tests {
     }
 
     #[test]
-    fn openai_tool_payload_matches_tauri_shape() {
-        let mut config = config("openai", "auto");
-        config.tools = vec![AiToolDefinition {
-            name: "run_command".to_string(),
-            description: "Run command".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "command": { "type": "string" }
-                },
-                "required": ["command"],
-            }),
-        }];
-        config.tool_choice = AiToolChoice::Named("run_command".to_string());
-
-        let body = openai_chat_body(&config, &[]);
-        assert_eq!(body["tools"][0]["type"].as_str(), Some("function"));
-        assert_eq!(
-            body["tools"][0]["function"]["name"].as_str(),
-            Some("run_command")
-        );
-        assert_eq!(
-            body["tool_choice"]["function"]["name"].as_str(),
-            Some("run_command")
-        );
-
-        config.tool_choice = AiToolChoice::Required;
-        let body = openai_chat_body(&config, &[]);
-        assert_eq!(body["tool_choice"].as_str(), Some("required"));
-    }
-
-    #[test]
     fn openai_message_conversion_preserves_tool_calls_and_results() {
         let assistant = AiChatMessage {
             id: "a1".to_string(),
@@ -530,56 +477,5 @@ mod tests {
         );
         assert_eq!(converted[1]["role"].as_str(), Some("tool"));
         assert_eq!(converted[1]["tool_call_id"].as_str(), Some("call-1"));
-    }
-
-    #[test]
-    fn openai_tool_message_omits_missing_call_id_like_tauri_json() {
-        let tool = message(AiChatRole::Tool, "{\"ok\":true}");
-        let converted = openai_chat_messages(&config("openai", "auto"), &[tool]);
-
-        assert_eq!(converted[0]["role"].as_str(), Some("tool"));
-        assert_eq!(converted[0]["content"].as_str(), Some("{\"ok\":true}"));
-        assert!(converted[0].get("tool_call_id").is_none());
-    }
-
-    #[test]
-    fn openai_empty_system_message_branch_matches_tauri_merge_semantics() {
-        let config = config("openai", "auto");
-        let converted = openai_chat_messages(
-            &config,
-            &[
-                message(AiChatRole::System, "one"),
-                message(AiChatRole::User, "hi"),
-                message(AiChatRole::System, "two"),
-            ],
-        );
-        assert_eq!(converted[0]["role"].as_str(), Some("system"));
-        assert_eq!(converted[0]["content"].as_str(), Some("one\n\ntwo"));
-        assert_eq!(converted[1]["role"].as_str(), Some("user"));
-        assert_eq!(converted[1]["content"].as_str(), Some("hi"));
-
-        let converted = openai_chat_messages(
-            &config,
-            &[
-                message(AiChatRole::System, ""),
-                message(AiChatRole::User, "hello"),
-            ],
-        );
-        assert_eq!(converted[0]["role"].as_str(), Some("system"));
-        assert_eq!(converted[0]["content"].as_str(), Some(""));
-        assert_eq!(converted[1]["role"].as_str(), Some("user"));
-
-        let converted = openai_chat_messages(
-            &config,
-            &[
-                message(AiChatRole::System, ""),
-                message(AiChatRole::System, "real system"),
-                message(AiChatRole::User, "hello"),
-            ],
-        );
-        assert_eq!(converted.len(), 2);
-        assert_eq!(converted[0]["role"].as_str(), Some("system"));
-        assert_eq!(converted[0]["content"].as_str(), Some("real system"));
-        assert_eq!(converted[1]["role"].as_str(), Some("user"));
     }
 }

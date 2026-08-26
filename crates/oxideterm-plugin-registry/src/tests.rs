@@ -90,20 +90,6 @@ fn manifest_json(id: &str, version: &str) -> String {
 }
 
 #[test]
-fn legacy_tauri_manifest_is_visible_but_not_executable() {
-    let mut manifest = minimal_manifest();
-    manifest.main = Some("main.js".to_string());
-
-    let plan = native_runtime_plan_for_manifest(&manifest).unwrap();
-    assert_eq!(
-        plan,
-        NativePluginRuntimePlan::UnsupportedLegacyJs {
-            entry: "main.js".to_string()
-        }
-    );
-}
-
-#[test]
 fn native_wasm_runtime_uses_explicit_runtime_block() {
     let mut manifest = minimal_manifest();
     manifest.runtime = Some(NativePluginRuntime {

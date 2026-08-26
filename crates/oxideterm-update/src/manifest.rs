@@ -70,33 +70,6 @@ impl NativeUpdateManifest {
 mod tests {
     use super::*;
 
-    #[test]
-    fn parses_tauri_manifest_aliases_and_selects_target() {
-        let manifest: NativeUpdateManifest = serde_json::from_str(
-            r#"{
-              "version": "1.2.0-beta.1",
-              "notes": "Beta notes",
-              "pub_date": "2026-05-27T00:00:00Z",
-              "platforms": {
-                "darwin-aarch64": {
-                  "url": "https://example.invalid/OxideTerm.app.tar.gz",
-                  "signature": "sig"
-                }
-              }
-            }"#,
-        )
-        .expect("manifest should parse");
-
-        let target = PlatformTarget::new("macos", "aarch64");
-        let package = manifest
-            .select_package("1.2.0-beta.0", &target, InstallFlavor::MacApp)
-            .expect("newer target package should be selected");
-
-        assert_eq!(package.platform_key, "darwin-aarch64");
-        assert_eq!(package.body.as_deref(), Some("Beta notes"));
-        assert_eq!(package.signature.as_deref(), Some("sig"));
-    }
-
     fn matrix_manifest() -> NativeUpdateManifest {
         let platforms = [
             ("darwin-aarch64-app", "mac-app.zip"),

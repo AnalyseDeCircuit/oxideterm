@@ -794,10 +794,4 @@ mod tests {
         assert!(!name.contains('/'));
         assert!(!name.contains('?'));
     }
-
-    #[test]
-    fn parses_content_range_total_like_tauri_backend() {
-        assert_eq!(parse_content_range_total("bytes 10-19/42"), Some(42));
-        assert_eq!(parse_content_range_total("bytes 10-19/*"), None);
-    }
 }

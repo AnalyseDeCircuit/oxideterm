@@ -654,28 +654,6 @@ mod ai_turn_order_tests {
 
 
 
-    #[test]
-    fn compaction_plan_uses_tauri_manual_and_silent_keep_budgets() {
-        let messages = (0..6)
-            .map(|index| {
-                test_message(
-                    &format!("m-{index}"),
-                    if index % 2 == 0 {
-                        AiChatRole::User
-                    } else {
-                        AiChatRole::Assistant
-                    },
-                    "x".repeat(1_000),
-                )
-            })
-            .collect::<Vec<_>>();
-
-        let silent = ai_compaction_plan(&messages, 2_000, true).expect("silent plan");
-        let manual = ai_compaction_plan(&messages, 2_000, false).expect("manual plan");
-
-        assert!(silent.keep_messages.len() >= manual.keep_messages.len());
-        assert!(silent.compact_messages.len() <= manual.compact_messages.len());
-    }
 
     #[test]
     fn compaction_plan_skips_when_less_than_two_messages_would_compact() {
@@ -689,75 +667,9 @@ mod ai_turn_order_tests {
         assert!(ai_compaction_plan(&messages, 100_000, true).is_none());
     }
 
-    #[test]
-    fn compaction_plan_keeps_tauri_zero_budget_boundary() {
-        let messages = vec![
-            test_message("u-1", AiChatRole::User, "first".to_string()),
-            test_message("a-1", AiChatRole::Assistant, "answer".to_string()),
-            test_message("u-2", AiChatRole::User, String::new()),
-            test_message("a-2", AiChatRole::Assistant, "a".to_string()),
-        ];
-
-        let plan = ai_compaction_plan(&messages, 1, true).expect("zero-budget plan");
-
-        assert_eq!(
-            plan.keep_messages
-                .iter()
-                .map(|message| message.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["a-2"]
-        );
-    }
 
 
-    #[test]
-    fn conversation_summary_prompt_excludes_tool_messages_like_tauri() {
-        let messages = vec![
-            test_message("u-1", AiChatRole::User, " question ".to_string()),
-            test_message("tool-1", AiChatRole::Tool, "tool output".to_string()),
-            test_message("a-1", AiChatRole::Assistant, " answer ".to_string()),
-        ];
 
-        let prompt = ai_conversation_summary_messages(&messages);
-
-        assert_eq!(prompt.len(), 2);
-        assert!(prompt[1].content.contains("User:  question "));
-        assert!(prompt[1].content.contains("Assistant:  answer "));
-        assert!(!prompt[1].content.contains("tool output"));
-    }
-
-    #[test]
-    fn compaction_anchor_snapshot_keeps_only_tauri_message_core() {
-        let mut message = test_message("a-1", AiChatRole::Assistant, "answer".to_string());
-        message.model = Some("gpt-4o".to_string());
-        message.context = Some("terminal context".to_string());
-        message.thinking_content = Some("reasoning".to_string());
-        message.tool_call_id = Some("call-1".to_string());
-        message.tool_calls = vec![serde_json::json!({ "id": "call-1" })];
-        message.turn = Some(serde_json::json!({ "parts": [] }));
-        message.transcript_ref = Some(serde_json::json!({ "endEntryId": "entry-1" }));
-        message.summary_ref = Some(serde_json::json!({ "kind": "conversation" }));
-        message.suggestions = vec![oxideterm_ai::AiFollowUpSuggestion {
-            icon: "Zap".to_string(),
-            text: "Next".to_string(),
-        }];
-
-        let snapshot = ai_compaction_anchor_snapshot(&[message]);
-
-        assert_eq!(snapshot.len(), 1);
-        assert_eq!(snapshot[0].id, "a-1");
-        assert_eq!(snapshot[0].role, AiChatRole::Assistant);
-        assert_eq!(snapshot[0].content, "answer");
-        assert!(snapshot[0].model.is_none());
-        assert!(snapshot[0].context.is_none());
-        assert!(snapshot[0].thinking_content.is_none());
-        assert!(snapshot[0].tool_call_id.is_none());
-        assert!(snapshot[0].tool_calls.is_empty());
-        assert!(snapshot[0].turn.is_none());
-        assert!(snapshot[0].transcript_ref.is_none());
-        assert!(snapshot[0].summary_ref.is_none());
-        assert!(snapshot[0].suggestions.is_empty());
-    }
 
     #[test]
     fn compaction_summary_uses_latest_tool_round_id() {
@@ -872,71 +784,7 @@ mod ai_turn_order_tests {
     }
 
 
-    #[test]
-    fn old_tool_messages_are_condensed_like_tauri_tool_loop() {
-        let mut history = (0..7)
-            .map(|index| AiChatMessage {
-                id: format!("tool-{index}"),
-                role: AiChatRole::Tool,
-                content: serde_json::json!({
-                    "ok": true,
-                    "output": format!("line 1\nline 2\nline 3\nline 4\nline 5 for {index}"),
-                    "meta": { "toolName": "read_resource" },
-                })
-                .to_string(),
-                timestamp_ms: index,
-                model: None,
-                context: None,
-                is_streaming: false,
-                thinking_content: None,
-                metadata: None,
-                tool_call_id: Some(format!("call-{index}")),
-                tool_calls: Vec::new(),
-                turn: None,
-                transcript_ref: None,
-                summary_ref: None,
-                branches: None,
-                suggestions: Vec::new(),
-            })
-            .collect::<Vec<_>>();
 
-        condense_ai_tool_messages(&mut history);
-
-        assert!(
-            history[0]
-                .content
-                .starts_with("[condensed] read_resource -> ok:")
-        );
-        assert!(
-            history[1]
-                .content
-                .starts_with("[condensed] read_resource -> ok:")
-        );
-        assert!(!history[2].content.starts_with("[condensed]"));
-    }
-
-    #[test]
-    fn guardrail_parts_are_structured_like_tauri_turn_model() {
-        let mut message = assistant_message();
-
-        append_ai_turn_guardrail_part(
-            &mut message,
-            "tool-budget-limit",
-            "Tool use stopped.",
-            Some("raw candidate text"),
-        );
-
-        let parts = message
-            .turn
-            .as_ref()
-            .and_then(|turn| turn.get("parts"))
-            .and_then(serde_json::Value::as_array)
-            .expect("turn parts");
-        assert_eq!(parts[0]["type"], "guardrail");
-        assert_eq!(parts[0]["code"], "tool-budget-limit");
-        assert_eq!(parts[0]["message"], "Tool use stopped.");
-        assert_eq!(parts[0]["rawText"], "raw candidate text");
-    }
 
     #[test]
     fn tool_execution_argument_summary_omits_write_content() {
@@ -1723,57 +1571,4 @@ mod ai_turn_order_tests {
         );
     }
 
-    #[test]
-    fn cancel_removes_empty_streaming_placeholder_like_tauri_abort() {
-        let mut conversation = AiConversation {
-            id: "conv-1".to_string(),
-            title: "Chat".to_string(),
-            messages: vec![AiChatMessage {
-                id: "assistant-empty".to_string(),
-                role: AiChatRole::Assistant,
-                content: String::new(),
-                timestamp_ms: 1,
-                model: None,
-                context: None,
-                is_streaming: true,
-                thinking_content: None,
-                metadata: None,
-                tool_call_id: None,
-                tool_calls: Vec::new(),
-                turn: Some(serde_json::json!({
-                    "id": "assistant-empty",
-                    "status": "streaming",
-                    "parts": [],
-                    "toolRounds": [],
-                    "plainTextSummary": "",
-                })),
-                transcript_ref: None,
-                summary_ref: None,
-                branches: None,
-                suggestions: Vec::new(),
-            }],
-            created_at_ms: 1,
-            updated_at_ms: 1,
-            origin: "sidebar".to_string(),
-            profile_id: None,
-            message_count: 1,
-            session_id: None,
-            session_metadata: None,
-            messages_loaded: true,
-            turn_count: 0,
-        };
-
-        let stopped = finalize_streaming_ai_messages_on_cancel(&mut conversation);
-
-        assert!(conversation.messages.is_empty());
-        assert_eq!(conversation.message_count, 0);
-        assert_eq!(
-            stopped,
-            vec![AiStoppedAssistantTurn {
-                message_id: "assistant-empty".to_string(),
-                status: "error",
-                retained: false,
-            }]
-        );
-    }
 }

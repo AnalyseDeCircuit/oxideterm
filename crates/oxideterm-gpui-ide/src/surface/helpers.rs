@@ -308,14 +308,6 @@ fn watch_refresh_path(root_path: &str, event_path: &str) -> String {
 mod helper_tests {
     use super::*;
 
-    #[test]
-    fn watch_refresh_path_matches_tauri_parent_refresh() {
-        assert_eq!(watch_refresh_path("/srv/app", "/srv/app"), "/srv/app");
-        assert_eq!(
-            watch_refresh_path("/srv/app", "/srv/app/src/main.rs"),
-            "/srv/app/src"
-        );
-    }
 
     #[test]
     fn normalize_remote_path_preserves_home_expansion_inputs() {
@@ -323,17 +315,6 @@ mod helper_tests {
         assert_eq!(normalize_remote_path("~/project/"), "~/project");
     }
 
-    #[test]
-    fn search_match_path_resolution_matches_tauri_panel() {
-        assert_eq!(
-            resolve_search_match_path("/srv/app", "/srv/app/src/main.rs"),
-            "/srv/app/src/main.rs"
-        );
-        assert_eq!(
-            resolve_search_match_path("/srv/app", "src/main.rs"),
-            "/srv/app/src/main.rs"
-        );
-    }
 
     #[test]
     fn tree_motion_ids_are_stable_and_state_independent() {

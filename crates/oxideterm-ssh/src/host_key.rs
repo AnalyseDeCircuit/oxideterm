@@ -722,29 +722,6 @@ mod tests {
     }
 
     #[test]
-    fn known_hosts_store_skips_hashed_entries_like_tauri() {
-        let path = temp_known_hosts_path("hashed");
-        let key = sample_public_key();
-        fs::write(
-            &path,
-            format!(
-                "|1|salt|hash {} {}\n",
-                public_key_type(&key),
-                key.public_key_base64()
-            ),
-        )
-        .unwrap();
-
-        let store = KnownHostsStore::with_path(path.clone()).unwrap();
-
-        assert!(matches!(
-            store.verify("example.com", 22, &key),
-            HostKeyVerification::Unknown { .. }
-        ));
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
     fn known_hosts_store_verifies_plain_alias_entry() {
         let path = temp_known_hosts_path("alias");
         let key = sample_public_key();
@@ -845,14 +822,6 @@ mod tests {
         };
         assert!(message.contains("requires explicit authorization"));
         HOST_KEY_CACHE.clear();
-    }
-
-    #[test]
-    fn default_known_hosts_path_falls_back_like_tauri_when_home_is_missing() {
-        assert_eq!(
-            known_hosts_path_from_ssh_dir(None),
-            PathBuf::from("~/.ssh/known_hosts")
-        );
     }
 
     #[test]

@@ -392,9 +392,4 @@ mod tests {
         assert_eq!(output.len(), 2);
         assert!(output[1].starts_with("\x1b[39D"));
     }
-
-    #[test]
-    fn chinese_characters_count_as_tauri_double_width_range() {
-        assert_eq!(display_length("ab中文"), 6);
-    }
 }

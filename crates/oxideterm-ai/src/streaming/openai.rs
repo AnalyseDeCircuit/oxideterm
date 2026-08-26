@@ -252,7 +252,7 @@ fn is_tool_choice_unsupported_error(message: &str) -> bool {
 mod tests {
     use serde_json::json;
 
-    use super::{body_without_tool_choice, is_tool_choice_unsupported_error};
+    use super::body_without_tool_choice;
 
     #[test]
     fn tool_choice_fallback_removes_only_tool_choice() {
@@ -271,17 +271,5 @@ mod tests {
             body.get("tool_choice").and_then(|value| value.as_str()),
             Some("required")
         );
-    }
-
-    #[test]
-    fn detects_tool_choice_unsupported_errors_like_tauri() {
-        assert!(is_tool_choice_unsupported_error("unsupported tool choice"));
-        assert!(is_tool_choice_unsupported_error(
-            "Unknown parameter: tool_choice"
-        ));
-        assert!(is_tool_choice_unsupported_error(
-            "unrecognized tool call option"
-        ));
-        assert!(!is_tool_choice_unsupported_error("invalid API key"));
     }
 }

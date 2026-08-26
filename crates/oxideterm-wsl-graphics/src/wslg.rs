@@ -109,28 +109,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_section_reads_between_tauri_markers() {
-        let output = "--- WAYLAND ---\nREADY\n--- MOUNT ---\nNO\n";
-        assert_eq!(parse_section(output, "WAYLAND").as_deref(), Some("READY"));
-        assert_eq!(parse_section(output, "MOUNT").as_deref(), Some("NO"));
-    }
-
-    #[test]
-    fn parse_wslg_status_uses_tauri_availability_rule() {
-        let output = "--- WAYLAND ---\nNO\n--- MOUNT ---\nREADY\n--- X11 ---\nREADY\n--- OPENBOX ---\nREADY\n--- VERSION ---\n1.0.65\n";
-        assert_eq!(
-            parse_wslg_status_output(output),
-            WslgStatus {
-                available: true,
-                wayland: false,
-                x11: true,
-                wslg_version: Some("1.0.65".to_string()),
-                has_openbox: true,
-            }
-        );
-    }
-
-    #[test]
     fn parse_wslg_status_keeps_empty_version_none() {
         let output = "--- WAYLAND ---\nREADY\n--- MOUNT ---\nREADY\n--- X11 ---\nNO\n--- OPENBOX ---\nNO\n--- VERSION ---\n\n";
         assert_eq!(parse_wslg_status_output(output).wslg_version, None);

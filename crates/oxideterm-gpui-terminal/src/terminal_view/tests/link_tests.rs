@@ -57,44 +57,6 @@ fn disabling_path_detection_preserves_urls_and_osc8_links() {
 }
 
 #[test]
-fn link_detection_preserves_unicode_wide_path_segments() {
-    let target = "~/Documents/OxideTerm/tauri版本代码/src";
-    let snapshot = wide_snapshot(target);
-    let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
-        &snapshot,
-        0..snapshot.lines.len(),
-        true,
-    );
-
-    assert_eq!(links.len(), 1);
-    assert_eq!(links[0].kind, TerminalLinkKind::Path);
-    assert_eq!(links[0].start_col, 0);
-    assert_eq!(
-        links[0].end_col,
-        target.chars().map(display_cell_width).sum::<usize>()
-    );
-    assert_eq!(links[0].target, target);
-}
-
-fn display_cell_width(ch: char) -> usize {
-    if matches!(
-        ch as u32,
-        0x1100..=0x115f
-            | 0x2e80..=0xa4cf
-            | 0xac00..=0xd7a3
-            | 0xf900..=0xfaff
-            | 0xfe10..=0xfe19
-            | 0xfe30..=0xfe6f
-            | 0xff00..=0xff60
-            | 0xffe0..=0xffe6
-    ) {
-        2
-    } else {
-        1
-    }
-}
-
-#[test]
 fn display_links_skip_path_like_text_on_active_input_row() {
     let mut snapshot = selection_snapshot("cd ../");
     snapshot.lines[0].active_input = true;

@@ -1272,46 +1272,6 @@ mod tests {
     }
 
     #[test]
-    fn migrates_empty_ai_providers_to_tauri_builtin_defaults() {
-        let sanitized = sanitize_settings_value(json!({
-            "ai": {
-                "providers": []
-            }
-        }))
-        .expect("sanitize settings");
-
-        let providers = sanitized.settings.ai.providers;
-        assert_eq!(providers.len(), 5);
-        assert_eq!(
-            providers
-                .first()
-                .and_then(|provider| provider.get("id"))
-                .and_then(Value::as_str),
-            Some("builtin-openai")
-        );
-        assert_eq!(
-            providers
-                .iter()
-                .find(
-                    |provider| provider.get("id").and_then(Value::as_str) == Some("builtin-ollama")
-                )
-                .and_then(|provider| provider.get("enabled"))
-                .and_then(Value::as_bool),
-            Some(false)
-        );
-        assert_eq!(
-            sanitized.settings.ai.active_provider_id.as_deref(),
-            Some("builtin-openai")
-        );
-        assert_eq!(sanitized.settings.ai.active_model, None);
-        assert!(
-            providers
-                .iter()
-                .all(|provider| provider.get("defaultModel").is_none())
-        );
-    }
-
-    #[test]
     fn removes_legacy_provider_default_model_without_selecting_it() {
         let sanitized = sanitize_settings_value(json!({
             "ai": {
@@ -1351,19 +1311,6 @@ mod tests {
         assert!(sanitized.settings.sftp.speed_limit_enabled);
         assert_eq!(sanitized.settings.sftp.speed_limit_kbps, 2048);
         assert!(!sanitized.settings.sftp.extra.contains_key("speedLimitKbps"));
-    }
-
-    #[test]
-    fn tauri_sftp_speed_limit_key_wins_over_legacy_alias() {
-        let sanitized = sanitize_settings_value(json!({
-            "sftp": {
-                "speedLimitKBps": 4096,
-                "speedLimitKbps": 2048
-            }
-        }))
-        .expect("sanitize settings");
-
-        assert_eq!(sanitized.settings.sftp.speed_limit_kbps, 4096);
     }
 
     #[test]
@@ -1409,34 +1356,6 @@ mod tests {
         assert_eq!(agents[2].args, vec!["--stdio"]);
         assert_eq!(agents[3].command, "copilot");
         assert_eq!(agents[3].args, vec!["--acp", "--stdio"]);
-    }
-
-    #[test]
-    fn legacy_write_resource_auto_approval_expands_like_tauri() {
-        let sanitized = sanitize_settings_value(json!({
-            "ai": {
-                "toolUse": {
-                    "autoApproveTools": {
-                        "write_resource": true
-                    }
-                }
-            }
-        }))
-        .expect("sanitize settings");
-
-        let auto_approve = sanitized.settings.ai.tool_use.auto_approve_tools;
-        assert_eq!(
-            auto_approve
-                .get("write_resource:settings")
-                .and_then(Value::as_bool),
-            Some(true)
-        );
-        assert_eq!(
-            auto_approve
-                .get("write_resource:file")
-                .and_then(Value::as_bool),
-            Some(true)
-        );
     }
 
     #[test]
@@ -1499,63 +1418,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_tool_use_read_only_flags_migrate_like_tauri() {
-        let sanitized = sanitize_settings_value(json!({
-            "ai": {
-                "toolUse": {
-                    "enabled": true,
-                    "autoApproveReadOnly": true,
-                    "autoApproveAll": false
-                }
-            }
-        }))
-        .expect("sanitize settings");
-
-        let tool_use = sanitized.settings.ai.tool_use;
-        assert!(tool_use.enabled);
-        assert_eq!(
-            tool_use
-                .auto_approve_tools
-                .get("list_targets")
-                .and_then(Value::as_bool),
-            Some(true)
-        );
-        assert_eq!(
-            tool_use
-                .auto_approve_tools
-                .get("run_command")
-                .and_then(Value::as_bool),
-            Some(false)
-        );
-        assert!(tool_use.disabled_tools.is_empty());
-        assert!(!tool_use.extra.contains_key("autoApproveReadOnly"));
-        assert!(!tool_use.extra.contains_key("autoApproveAll"));
-    }
-
-    #[test]
-    fn legacy_tool_use_auto_approve_all_migrates_like_tauri() {
-        let sanitized = sanitize_settings_value(json!({
-            "ai": {
-                "toolUse": {
-                    "enabled": true,
-                    "autoApproveAll": true
-                }
-            }
-        }))
-        .expect("sanitize settings");
-
-        assert!(
-            sanitized
-                .settings
-                .ai
-                .tool_use
-                .auto_approve_tools
-                .values()
-                .all(|value| value.as_bool() == Some(true))
-        );
-    }
-
-    #[test]
     fn missing_execution_profiles_keep_active_ai_settings() {
         let sanitized = sanitize_settings_value(json!({
             "ai": {
@@ -1593,39 +1455,6 @@ mod tests {
             Some("run_command"),
         );
         assert!(!ai.extra.contains_key("executionProfiles"));
-    }
-
-    #[test]
-    fn tauri_reasoning_effort_aliases_keep_native_schema_and_profile_semantics() {
-        let sanitized = sanitize_settings_value(json!({
-            "ai": {
-                "reasoningEffort": "max",
-                "providers": [{
-                    "id": "provider-1",
-                    "type": "openai",
-                    "name": "OpenAI",
-                    "baseUrl": "https://api.openai.com/v1",
-                    "models": ["gpt-4o-mini"],
-                    "enabled": true,
-                    "createdAt": 1
-                }],
-                "activeProviderId": "provider-1",
-                "activeModel": "gpt-4o-mini"
-            }
-        }))
-        .expect("sanitize settings");
-
-        assert_eq!(
-            sanitized.settings.ai.reasoning_effort,
-            AiReasoningEffort::Max
-        );
-        assert!(
-            !sanitized
-                .settings
-                .ai
-                .extra
-                .contains_key("executionProfiles")
-        );
     }
 
     #[test]

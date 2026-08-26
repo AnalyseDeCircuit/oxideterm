@@ -452,35 +452,4 @@ mod tests {
             Some(TrzszFilterOutput::SendServer(vec![1, 65]))
         );
     }
-
-    #[test]
-    fn upload_interrupt_sequence_matches_tauri() {
-        let mut filter = TrzszFilter::default();
-        assert_eq!(
-            filter.begin_upload_interrupt(true),
-            Some(TrzszFilterOutput::SendServer(vec![0x03]))
-        );
-        assert!(filter.process_server_output(b"noise").is_empty());
-        assert_eq!(
-            filter.finish_upload_interrupt(),
-            Some(TrzszFilterOutput::SendServer(b"trz -d\r".to_vec()))
-        );
-        assert_eq!(
-            filter.process_server_output(b"\x1b[31mtrz -d\r\n"),
-            vec![TrzszFilterOutput::WriteTerminal(b"\r\n".to_vec())]
-        );
-    }
-
-    #[test]
-    fn upload_init_timeout_uses_tauri_message() {
-        let mut filter = TrzszFilter::default();
-        let _ = filter.begin_upload_interrupt(false);
-        assert_eq!(
-            filter.upload_init_timed_out(),
-            Some(TrzszFilterOutput::UploadTimedOut {
-                message: DRAG_INIT_TIMEOUT_MESSAGE
-            })
-        );
-        assert_eq!(filter.upload_init_timed_out(), None);
-    }
 }

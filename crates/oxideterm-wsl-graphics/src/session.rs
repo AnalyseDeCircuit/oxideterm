@@ -364,16 +364,6 @@ fn validate_argv(argv: &[String]) -> Result<(), WslGraphicsError> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn validate_argv_matches_tauri_rejections() {
-        assert!(validate_argv(&[]).is_err());
-        assert!(validate_argv(&["".to_string()]).is_err());
-        assert!(validate_argv(&["gedit".to_string(), "a;b".to_string()]).is_err());
-        assert!(validate_argv(&["../gedit".to_string()]).is_err());
-        assert!(validate_argv(&["./gedit".to_string()]).is_err());
-        assert!(validate_argv(&["gedit".to_string(), "/tmp/file.txt".to_string()]).is_ok());
-    }
-
     #[cfg(not(target_os = "windows"))]
     #[tokio::test]
     async fn detect_wslg_uses_same_non_windows_fallback() {

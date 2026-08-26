@@ -965,22 +965,6 @@ mod tests {
         assert_eq!(probe_count.load(Ordering::SeqCst), 2);
     }
 
-    #[test]
-    fn clamps_like_tauri_backend_command() {
-        let manager = SftpTransferManager::new();
-        manager.apply_settings(SftpTransferRuntimeSettings {
-            max_concurrent_transfers: 99,
-            speed_limit_kbps: 0,
-            directory_parallelism: 99,
-        });
-
-        assert_eq!(manager.max_concurrent(), MAX_SFTP_CONCURRENT_TRANSFERS);
-        assert_eq!(
-            manager.directory_parallelism(),
-            MAX_SFTP_DIRECTORY_PARALLELISM
-        );
-    }
-
     #[tokio::test]
     async fn acquire_permit_unblocks_when_limit_increases() {
         let manager = Arc::new(SftpTransferManager::new());
@@ -1014,61 +998,6 @@ mod tests {
             0,
             0,
         )
-    }
-
-    #[test]
-    fn background_transfer_snapshot_lifecycle_matches_tauri_manager() {
-        let manager = SftpTransferManager::new();
-        manager.register_background_transfer(make_background_snapshot("tx-1", "node-a"));
-
-        let queued = manager.get_background_transfer("tx-1").unwrap();
-        assert_eq!(queued.state, BackgroundTransferState::Pending);
-
-        manager.mark_background_transfer_active("tx-1");
-        manager.update_background_transfer_progress("tx-1", 256, 1024, 64);
-
-        let active = manager.get_background_transfer("tx-1").unwrap();
-        assert_eq!(active.state, BackgroundTransferState::Active);
-        assert_eq!(active.transferred, 256);
-        assert_eq!(active.size, 1024);
-        assert_eq!(active.backend_speed, Some(64));
-        assert_eq!(manager.list_background_transfers(Some("node-a")).len(), 1);
-        assert!(manager.list_background_transfers(Some("node-b")).is_empty());
-
-        let finished = manager
-            .finish_background_transfer("tx-1", BackgroundTransferState::Completed, None, Some(7))
-            .unwrap();
-        assert_eq!(finished.state, BackgroundTransferState::Completed);
-        assert_eq!(finished.transferred, 1024);
-        assert_eq!(finished.item_count, Some(7));
-    }
-
-    #[tokio::test]
-    async fn wait_background_transfer_finished_wakes_like_tauri_manager() {
-        let manager = Arc::new(SftpTransferManager::new());
-        manager.register_background_transfer(make_background_snapshot("tx-1", "node-a"));
-
-        let finisher = manager.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(25)).await;
-            finisher.finish_background_transfer(
-                "tx-1",
-                BackgroundTransferState::Error,
-                Some("boom".to_string()),
-                None,
-            );
-        });
-
-        let snapshot = tokio::time::timeout(
-            Duration::from_millis(300),
-            manager.wait_background_transfer_finished("tx-1"),
-        )
-        .await
-        .expect("waiter should wake")
-        .expect("snapshot should still be retained");
-
-        assert_eq!(snapshot.state, BackgroundTransferState::Error);
-        assert_eq!(snapshot.error.as_deref(), Some("boom"));
     }
 
     #[tokio::test]

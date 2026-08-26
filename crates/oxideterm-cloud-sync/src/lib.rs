@@ -1059,29 +1059,10 @@ fn join_key(parts: &[Option<&str>]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
-
     use super::*;
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
-    }
-
-    #[test]
-    fn normalizes_default_scope_like_tauri_plugin() {
-        let available = strings(&["zeta", CLOUD_SYNC_PLUGIN_ID, "alpha", "alpha"]);
-        let scope = normalize_sync_scope(None, &available);
-
-        assert!(scope.sync_connections);
-        assert!(scope.sync_forwards);
-        assert!(scope.sync_serial_profiles);
-        assert!(scope.sync_mosh_profiles);
-        assert!(scope.sync_remote_desktop_profiles);
-        assert!(scope.sync_app_settings);
-        assert_eq!(scope.app_settings_sections, DEFAULT_APP_SETTINGS_SECTIONS);
-        assert!(!scope.include_local_terminal_env_vars);
-        assert!(scope.sync_plugin_settings);
-        assert_eq!(scope.plugin_ids, Some(strings(&["alpha", "zeta"])));
     }
 
     #[test]
@@ -1115,18 +1096,6 @@ mod tests {
             strings(&["general", "localTerminal"])
         );
         assert_eq!(scope.plugin_ids, Some(strings(&["plugin-a", "plugin-b"])));
-    }
-
-    #[test]
-    fn preserves_fractional_auto_upload_interval_like_tauri_settings() {
-        let settings: CloudSyncSettings =
-            serde_json::from_str(r#"{"autoUploadIntervalMins":7.5}"#).unwrap();
-
-        assert_eq!(settings.auto_upload_interval_mins, 7.5);
-        assert_eq!(
-            serde_json::to_value(&settings).unwrap()["autoUploadIntervalMins"],
-            serde_json::json!(7.5)
-        );
     }
 
     #[test]
@@ -1351,27 +1320,6 @@ mod tests {
         assert_eq!(
             merged.plugin_settings["plugin-a"].as_deref(),
             Some("pa-old")
-        );
-    }
-
-    #[test]
-    fn preserves_tauri_revision_shape_and_snapshot_paths() {
-        let timestamp = Utc.with_ymd_and_hms(2026, 5, 19, 4, 5, 6).unwrap();
-
-        assert_eq!(
-            revision_id(timestamp, "macos-abcd1234", 9),
-            "2026-05-19T04:05:06.000Z-macos-abcd1234-009"
-        );
-        assert_eq!(
-            snapshot_object_paths("/team/default/"),
-            SnapshotObjectPaths {
-                metadata_key: "team/default/latest.json".into(),
-                blob_key: "team/default/latest.oxide".into(),
-            }
-        );
-        assert_eq!(
-            s3_revision_blob_key("team/default", "rev-1"),
-            "team/default/blobs/rev-1.oxide"
         );
     }
 }

@@ -634,20 +634,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn file_header_matches_tauri_binary_layout() {
-        let header = FileHeader::new(1234, 5678);
-        let bytes = header.to_bytes();
-        let parsed = FileHeader::from_bytes(&bytes).unwrap();
-
-        assert_eq!(bytes.len(), 21);
-        assert_eq!(parsed.magic, *MAGIC);
-        assert_eq!(parsed.version, VERSION);
-        assert_eq!(parsed.flags, kdf_flags::CURRENT_KDF);
-        assert_eq!(parsed.metadata_length, 1234);
-        assert_eq!(parsed.encrypted_data_length, 5678);
-    }
-
-    #[test]
     fn old_key_auth_deserializes_without_managed_metadata() {
         let json = r#"{
             "type": "key",

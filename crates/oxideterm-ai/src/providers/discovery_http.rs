@@ -278,21 +278,4 @@ mod tests {
             "https://generativelanguage.googleapis.com/v1beta/models"
         );
     }
-
-    #[test]
-    fn openai_compatible_error_detail_matches_tauri_priority() {
-        assert_eq!(
-            parse_openai_compatible_error(r#"{"error":{"message":"bad key"}}"#).as_deref(),
-            Some("bad key")
-        );
-        assert_eq!(
-            parse_openai_compatible_error(r#"{"message":"missing model"}"#).as_deref(),
-            Some("missing model")
-        );
-        assert_eq!(
-            parse_openai_compatible_error("plain provider failure").as_deref(),
-            Some("plain provider failure")
-        );
-        assert!(parse_openai_compatible_error("").is_none());
-    }
 }

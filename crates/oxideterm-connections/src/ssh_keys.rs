@@ -34,11 +34,6 @@ pub(crate) enum DefaultPrivateKeyStatus {
     RequiresPassphrase,
 }
 
-#[cfg(test)]
-pub(crate) fn default_private_key_paths_in_home(home: PathBuf) -> Vec<PathBuf> {
-    default_private_key_paths_in_ssh_dir(home.join(".ssh"))
-}
-
 pub(crate) fn default_private_key_paths_in_ssh_dir(ssh: PathBuf) -> Vec<PathBuf> {
     let preferred_names = ["id_ed25519", "id_ecdsa", "id_rsa"];
     let mut paths = preferred_names

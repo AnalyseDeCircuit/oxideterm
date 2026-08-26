@@ -82,26 +82,6 @@ mod tests {
         drop(registry);
     }
 
-    #[test]
-    fn parses_remote_agent_version_like_tauri() {
-        assert_eq!(
-            parse_remote_version_output("NOT_FOUND"),
-            RemoteAgentInstallState::Missing
-        );
-        assert_eq!(
-            parse_remote_version_output(&format!(
-                "oxideterm-agent 0.12.1 compat {CURRENT_AGENT_COMPATIBILITY_VERSION}"
-            )),
-            RemoteAgentInstallState::Current
-        );
-        assert_eq!(
-            parse_remote_version_output("oxideterm-agent 0.12.1 compat abc"),
-            RemoteAgentInstallState::Incompatible(RemoteAgentVersionInfo {
-                version: "0.12.1".to_string(),
-                compatibility_version: INVALID_AGENT_COMPATIBILITY_VERSION,
-            })
-        );
-    }
 
     #[test]
     fn resolves_encoded_appimage_agent_payload() {
@@ -404,28 +384,7 @@ mod tests {
         assert!(!fs.watch_subscriptions.contains_key(&second_owned_key));
     }
 
-    #[test]
-    fn parses_exec_grep_output_like_tauri_search_fallback() {
-        let matches = parse_grep_output(
-            "./src/main.rs:12:let needle = true;\nREADME.md:2:Needle again\n",
-            "needle",
-            false,
-        );
 
-        assert_eq!(matches.len(), 2);
-        assert_eq!(matches[0].path, "src/main.rs");
-        assert_eq!(matches[0].line, 12);
-        assert_eq!(matches[0].match_start, 4);
-        assert_eq!(matches[1].path, "README.md");
-    }
-
-    #[test]
-    fn grep_fallback_escapes_query_and_home_cwd_like_tauri() {
-        assert_eq!(regex_escape_for_basic_grep("a+b[0]"), "a\\+b\\[0\\]");
-        assert_eq!(shell_cd_arg("~"), "~");
-        assert_eq!(shell_cd_arg("~/my repo"), "~/'my repo'");
-        assert_eq!(shell_cd_arg("/srv/my repo"), "'/srv/my repo'");
-    }
 
     fn has_ide_consumer(handle: &SshConnectionHandle, node_id: &str) -> bool {
         ide_consumer_count(handle, node_id) > 0

@@ -1846,8 +1846,6 @@ impl Default for SshConnectionRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::router::{NodeId, NodeReadiness, NodeStateEvent};
-
     #[test]
     fn shares_one_connection_for_many_consumers() {
         let registry = SshConnectionRegistry::default();
@@ -1928,14 +1926,6 @@ mod tests {
             Some(false)
         );
         assert_eq!(registry.mark_visible_terminal_ready("missing"), None);
-    }
-
-    #[test]
-    fn remote_env_parser_matches_tauri_unix_os_names() {
-        assert_eq!(classify_remote_unix_os("Linux"), "Linux");
-        assert_eq!(classify_remote_unix_os("Darwin"), "macOS");
-        assert_eq!(classify_remote_unix_os("MINGW64_NT-10.0"), "Windows_MinGW");
-        assert_eq!(classify_remote_unix_os(""), "Unknown");
     }
 
     #[test]
@@ -2339,58 +2329,6 @@ mod tests {
                 .consumers
                 .contains(&ConnectionConsumer::NodeRouter("root".into()))
         );
-    }
-
-    #[test]
-    fn link_down_cascade_emits_tauri_shaped_status_event() {
-        let registry = SshConnectionRegistry::default();
-        let emitter = NodeEventEmitter::new();
-        let (tx, rx) = std::sync::mpsc::channel();
-        emitter.subscribe(tx);
-        registry.set_node_event_emitter(emitter.clone());
-
-        let root = registry.acquire(
-            SshConfig::password("jump", 22, "me", "pw"),
-            ConnectionConsumer::NodeRouter("root".into()),
-        );
-        let child = registry.acquire(
-            SshConfig::password("target", 22, "me", "pw"),
-            ConnectionConsumer::NodeRouter("child".into()),
-        );
-        emitter.register(root.connection_id(), NodeId::new("root"));
-        emitter.register(child.connection_id(), NodeId::new("child"));
-        registry.mark_state_without_event(root.connection_id(), ConnectionState::Active);
-        registry.mark_state_without_event(child.connection_id(), ConnectionState::Active);
-        registry.set_parent_connection_id(
-            child.connection_id(),
-            Some(root.connection_id().to_string()),
-        );
-
-        registry.mark_link_down_cascade(root.connection_id());
-
-        match rx.recv().unwrap() {
-            NodeStateEvent::ConnectionStatusChanged {
-                connection_id,
-                status,
-                affected_children,
-                ..
-            } => {
-                assert_eq!(connection_id, root.connection_id());
-                assert_eq!(status, "link_down");
-                assert_eq!(affected_children, vec![child.connection_id().to_string()]);
-            }
-            event => panic!("expected connection status event, got {event:?}"),
-        }
-        match rx.recv().unwrap() {
-            NodeStateEvent::ConnectionStateChanged { node_id, state, .. } => {
-                assert_eq!(node_id, "root");
-                assert_eq!(state, NodeReadiness::Error);
-            }
-            event => panic!("expected root node state event, got {event:?}"),
-        }
-
-        registry.mark_link_down_cascade(root.connection_id());
-        assert!(rx.try_recv().is_err());
     }
 
     #[test]

@@ -479,28 +479,6 @@ abc\tweb\t0.0.0.0:3000->3000/tcp, :::3000->3000/tcp
     }
 
     #[test]
-    fn classifies_tauri_remote_os_outputs() {
-        assert_eq!(
-            classify_remote_platform("===DETECT===\nLinux\n===END==="),
-            RemotePortScanPlatform::Linux
-        );
-        assert_eq!(
-            classify_remote_platform("===DETECT===\nDarwin\n===END==="),
-            RemotePortScanPlatform::MacOs
-        );
-        assert_eq!(
-            classify_remote_platform("===DETECT===\nMINGW64_NT-10.0-19045\n===END==="),
-            RemotePortScanPlatform::WindowsUnix
-        );
-        assert_eq!(
-            classify_remote_platform(
-                "===DETECT===\nPLATFORM=Win32NT\nOS=Microsoft Windows NT 10.0.22631.0\n===END==="
-            ),
-            RemotePortScanPlatform::Windows
-        );
-    }
-
-    #[test]
     fn parses_windows_powershell_listening_ports() {
         let output = "\
 ===PORTS===

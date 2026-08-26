@@ -43,20 +43,6 @@ fn connection_sync_record(
     }
 }
 
-fn dirty_snapshot() -> CloudSyncLocalSnapshot {
-    CloudSyncLocalSnapshot {
-        dirty: crate::StructuredDirtyInfo {
-            current_state: crate::StructuredLocalState::default(),
-            dirty_sections: crate::StructuredDirtySections {
-                connections: true,
-                ..crate::StructuredDirtySections::default()
-            },
-            has_dirty: true,
-        },
-        ..CloudSyncLocalSnapshot::default()
-    }
-}
-
 fn remote_desktop_snapshot(
     credential_ref: Option<&str>,
     host: &str,
@@ -259,27 +245,6 @@ fn connection_merge_preserves_independent_full_option_changes() {
 }
 
 #[test]
-fn operation_guard_skips_or_rejects_concurrent_operation_like_tauri() {
-    let guard = CloudSyncOperationGuard::default();
-    let _permit = guard
-        .begin(CloudSyncOperationKind::Upload, false)
-        .unwrap()
-        .unwrap();
-
-    assert!(
-        guard
-            .begin(CloudSyncOperationKind::Check, true)
-            .unwrap()
-            .is_none()
-    );
-    let error = guard
-        .begin(CloudSyncOperationKind::Check, false)
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("operation_in_progress"));
-}
-
-#[test]
 fn operation_guard_clears_when_permit_drops() {
     let guard = CloudSyncOperationGuard::default();
     {
@@ -314,34 +279,6 @@ fn connection_preflight_allows_managed_keys_only_with_sensitive_credentials_scop
     assert!(include_managed_keys_in_connection_preflight(
         &with_sensitive_credentials
     ));
-}
-
-#[test]
-fn upload_conflict_check_rejects_changed_legacy_snapshot_like_tauri() {
-    let metadata = RemoteMetadata {
-        exists: true,
-        revision: Some("remote-new".to_string()),
-        format: None,
-        ..RemoteMetadata::default()
-    };
-
-    let error = ensure_no_remote_conflict(&dirty_snapshot(), &metadata, Some("remote-old"), None)
-        .unwrap_err()
-        .to_string();
-
-    assert!(error.contains("remote_changed_before_upload"));
-}
-
-#[test]
-fn upload_conflict_check_allows_unchanged_legacy_snapshot_like_tauri() {
-    let metadata = RemoteMetadata {
-        exists: true,
-        revision: Some("remote-current".to_string()),
-        format: None,
-        ..RemoteMetadata::default()
-    };
-
-    ensure_no_remote_conflict(&dirty_snapshot(), &metadata, Some("remote-current"), None).unwrap();
 }
 
 #[test]

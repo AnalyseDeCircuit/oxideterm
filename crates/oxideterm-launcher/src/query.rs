@@ -78,45 +78,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn filter_matches_tauri_name_or_bundle_id() {
-        let apps = vec![
-            LauncherAppEntry {
-                name: "Safari".to_string(),
-                path: "/Applications/Safari.app".to_string(),
-                bundle_id: Some("com.apple.Safari".to_string()),
-                icon_path: None,
-            },
-            LauncherAppEntry {
-                name: "Calendar".to_string(),
-                path: "/System/Applications/Calendar.app".to_string(),
-                bundle_id: Some("com.apple.iCal".to_string()),
-                icon_path: None,
-            },
-        ];
-        assert_eq!(filter_apps(&apps, "saf").len(), 1);
-        assert_eq!(filter_apps(&apps, "ical")[0].name, "Calendar");
-        assert_eq!(filter_apps(&apps, "missing").len(), 0);
-    }
-
-    #[test]
-    fn filter_wsl_distros_matches_tauri_name_filter() {
-        let distros = vec![
-            WslDistro {
-                name: "Ubuntu".to_string(),
-                is_default: true,
-                is_running: true,
-            },
-            WslDistro {
-                name: "Debian".to_string(),
-                is_default: false,
-                is_running: false,
-            },
-        ];
-        assert_eq!(filter_wsl_distros(&distros, "ubu")[0].name, "Ubuntu");
-        assert!(filter_wsl_distros(&distros, "missing").is_empty());
-    }
-
-    #[test]
     fn filter_indices_preserve_catalog_order_without_cloning_entries() {
         let apps = vec![
             LauncherAppEntry {

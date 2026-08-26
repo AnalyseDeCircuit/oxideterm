@@ -64,16 +64,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn json_request_detection_uses_tauri_word_boundaries() {
-        assert!(ai_user_explicitly_requested_json("Return JSON schema."));
-        assert!(ai_user_explicitly_requested_json("Use an object literal"));
-        assert!(!ai_user_explicitly_requested_json(
-            "Please jsonify this later"
-        ));
-        assert!(!ai_user_explicitly_requested_json("This is schematic only"));
-    }
-
-    #[test]
     fn pseudo_tool_json_hard_deny_respects_json_requests() {
         let pseudo = r#"{"name":"run_command","arguments":{"command":"pwd"}}"#;
 

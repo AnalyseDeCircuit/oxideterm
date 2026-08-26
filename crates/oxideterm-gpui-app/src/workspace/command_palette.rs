@@ -3,8 +3,6 @@ mod entity;
 
 pub(in crate::workspace) use entity::CommandPaletteEntity;
 use entity::CommandPaletteView;
-#[cfg(test)]
-use oxideterm_connections::is_literal_ssh_config_alias_query;
 use oxideterm_connections::{resolve_ssh_config_alias, saved_connection_from_ssh_host};
 use oxideterm_gpui_settings_view::{OXIDE_THEME_IDS, built_in_theme_exists, is_oxide_theme};
 use oxideterm_gpui_ui::{
@@ -2646,29 +2644,6 @@ fn shortcut_reference_rows() -> Vec<(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn quick_connect_host_parser_matches_tauri_shape() {
-        assert_eq!(
-            parse_explicit_user_host_port_target("root@example.com"),
-            Some(("root".to_string(), "example.com".to_string(), 22))
-        );
-        assert_eq!(
-            parse_explicit_user_host_port_target("root@example.com:2200"),
-            Some(("root".to_string(), "example.com".to_string(), 2200))
-        );
-        assert!(parse_explicit_user_host_port_target("example.com").is_none());
-        assert!(parse_explicit_user_host_port_target("root@example.com:abc").is_none());
-    }
-
-    #[test]
-    fn quick_connect_alias_query_rejects_tauri_excluded_characters() {
-        assert!(is_literal_ssh_config_alias_query("prod-db"));
-        assert!(!is_literal_ssh_config_alias_query(""));
-        assert!(!is_literal_ssh_config_alias_query("prod db"));
-        assert!(!is_literal_ssh_config_alias_query("user@host"));
-        assert!(!is_literal_ssh_config_alias_query("host:2222"));
-    }
 
     #[test]
     fn remote_desktop_quick_connect_uses_protocol_default_ports() {

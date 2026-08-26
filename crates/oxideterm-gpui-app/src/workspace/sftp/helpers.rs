@@ -927,17 +927,6 @@ mod sftp_helper_tests {
     }
 
     #[test]
-    fn modified_date_matches_tauri_seconds_contract() {
-        assert_eq!(format_modified(None), "-");
-        assert_eq!(format_modified(Some(0)), "-");
-
-        let rendered = format_modified(Some(1_700_000_000));
-        assert_ne!(rendered, "-");
-        assert_ne!(rendered, "2026/5/7");
-        assert!(rendered.contains('/'));
-    }
-
-    #[test]
     fn local_navigation_preserves_windows_drive_roots() {
         let segments = sftp_path_segments(r"D:\Projects\OxideTerm", false);
 

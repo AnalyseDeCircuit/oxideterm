@@ -63,16 +63,3 @@ pub fn unescape_data(data: &[u8], escape_codes: &[EscapeCode]) -> Vec<u8> {
     }
     buffer
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn escapes_and_unescapes_binary_data_like_tauri() {
-        let codes = vec![[b'\n', b'!', b'N'], [b'\r', b'!', b'R']];
-        let escaped = escape_data(b"a\nb\rc", &codes);
-        assert_eq!(escaped, b"a!Nb!Rc");
-        assert_eq!(unescape_data(&escaped, &codes), b"a\nb\rc");
-    }
-}

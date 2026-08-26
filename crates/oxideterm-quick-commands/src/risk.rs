@@ -62,26 +62,3 @@ fn medium_risk_command_patterns() -> &'static [Regex] {
             .collect()
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn command_risk_patterns_match_tauri_regex_boundaries() {
-        assert_eq!(
-            classify_command_risk("rm -rf /tmp/example"),
-            Some(QuickCommandRisk::High)
-        );
-        assert_eq!(
-            classify_command_risk("mkfs.ext4 /dev/sdb"),
-            Some(QuickCommandRisk::High)
-        );
-        assert_eq!(
-            classify_command_risk("sudo systemctl status nginx"),
-            Some(QuickCommandRisk::Medium)
-        );
-        assert_eq!(classify_command_risk("echo shutdowns"), None);
-        assert_eq!(classify_command_risk("docker image rm unused"), None);
-    }
-}

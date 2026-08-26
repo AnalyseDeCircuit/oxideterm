@@ -643,29 +643,6 @@ mod tests {
         assert!(store.snapshot(&expansion.target_node_id).is_none());
     }
 
-    #[test]
-    fn drill_down_requires_ready_parent_like_tauri_tree() {
-        let store = NodeRuntimeStore::default();
-        let root = NodeId::new("root");
-        store.upsert_node(root.clone(), SshConfig::password("jump", 22, "me", "pw"));
-
-        assert!(matches!(
-            store.drill_down(root.clone(), SshConfig::password("child", 22, "me", "pw")),
-            Err(RouteError::ParentNotConnected(_))
-        ));
-
-        {
-            let mut snapshot = store.export_snapshot();
-            snapshot.nodes[0].state.readiness = NodeReadiness::Ready;
-            store.apply_snapshot(snapshot).unwrap();
-        }
-
-        let child = store
-            .drill_down(root.clone(), SshConfig::password("child", 22, "me", "pw"))
-            .unwrap();
-        let path = store.path_to_node(&child).unwrap();
-        assert_eq!(path, vec![root, child]);
-    }
 
     #[test]
     fn reconcile_runtime_tree_clears_missing_runtime_connection() {

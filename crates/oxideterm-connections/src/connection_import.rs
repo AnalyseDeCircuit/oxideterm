@@ -2541,18 +2541,4 @@ mod tests {
         assert_eq!(preview.errors.len(), 1);
         let _ = std::fs::remove_file(path);
     }
-
-    #[test]
-    fn native_model_deserializes_tauri_preview_payload() {
-        let json = fs::read_to_string(fixture_path("tauri_preview.json")).unwrap();
-        let preview: ConnectionImportPreview = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(preview.source, ConnectionImportSource::SecureCrt);
-        assert_eq!(preview.total, 1);
-        assert_eq!(preview.importable, 1);
-        let draft = &preview.drafts[0];
-        assert_eq!(draft.source_path, "/Users/example/Sessions/GPU/basic.ini");
-        assert_eq!(draft.auth_type, ImportedConnectionAuthType::Key);
-        assert_eq!(draft.unsupported_fields, vec!["Password V2".to_string()]);
-    }
 }

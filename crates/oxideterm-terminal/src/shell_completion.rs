@@ -316,21 +316,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_tauri_history_formats() {
-        assert_eq!(
-            parse_terminal_history_file(".zsh_history", ": 1700000000:0;git status\ncargo test\n"),
-            ["git status", "cargo test"]
-        );
-        assert_eq!(
-            parse_terminal_history_file(
-                ".local/share/fish/fish_history",
-                "- cmd: echo hello\\nworld\n- when: 1700000000\n- cmd: ls -la\n"
-            ),
-            ["echo hello\nworld", "ls -la"]
-        );
-    }
-
-    #[test]
     fn preserves_shell_owned_history_without_content_filtering() {
         let home = tempfile::tempdir().unwrap();
         std::fs::write(

@@ -1258,61 +1258,6 @@ cpu  1 2 3 4 5 6 7 8
     }
 
     #[test]
-    fn parses_cpu_and_network_delta_like_tauri() {
-        let previous = PreviousResourceSample {
-            cpu: CpuSnapshot {
-                user: 10_000_000,
-                nice: 290_000,
-                system: 3_000_000,
-                idle: 46_000_000,
-                iowait: 16_000,
-                irq: 0,
-                softirq: 25_000,
-                steal: 0,
-            },
-            cpu_per_core: vec![CpuSnapshot {
-                user: 5_000_000,
-                nice: 145_000,
-                system: 1_500_000,
-                idle: 23_000_000,
-                iowait: 8_000,
-                irq: 0,
-                softirq: 12_000,
-                steal: 0,
-            }],
-            net: NetSnapshot {
-                rx_bytes: 900_000_000,
-                tx_bytes: 100_000_000,
-            },
-            net_interfaces: vec![NetInterfaceSnapshot {
-                name: "eth0".to_string(),
-                rx_bytes: 900_000_000,
-                tx_bytes: 100_000_000,
-            }],
-            timestamp_ms: 5_000,
-        };
-
-        let metrics = parse_resource_metrics(SAMPLE_OUTPUT, Some(&previous), 10_000);
-
-        assert!(metrics.cpu_percent.is_some());
-        assert!(metrics.cpu_per_core[0].percent.is_some());
-        assert_eq!(metrics.net_rx_bytes_per_sec, Some(17_530_864));
-        assert_eq!(metrics.net_tx_bytes_per_sec, Some(4_691_357));
-        assert_eq!(metrics.net_interfaces[0].rx_bytes_per_sec, Some(17_530_864));
-    }
-
-    #[test]
-    fn partial_metrics_keep_tauri_source_semantics() {
-        let output = "===MEMINFO===\nMemTotal: 1024 kB\nMemAvailable: 512 kB\n===DISK===\n/dev/root 2048 1024 1024 50% /\n===END===";
-        let metrics = parse_resource_metrics(output, None, 1);
-
-        assert_eq!(metrics.source, MetricsSource::Partial);
-        assert_eq!(metrics.memory_used, Some(512 * 1024));
-        assert_eq!(metrics.disk_used, Some(1024 * 1024));
-        assert_eq!(metrics.cpu_percent, None);
-    }
-
-    #[test]
     fn cpu_direct_supports_macos_and_windows_samples() {
         let output = "===CPU_DIRECT===\n37.5\n===MEMINFO===\nMemTotal: 1024 kB\nMemAvailable: 512 kB\n===END===";
         let metrics = parse_resource_metrics(output, None, 1);

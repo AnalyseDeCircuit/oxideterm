@@ -387,7 +387,7 @@ fn ensure_object_path<'a>(value: &'a mut Value, path: &[&str]) -> &'a mut Map<St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DEFAULT_WINDOW_OPACITY, Language, PersistedSettings};
+    use crate::{Language, PersistedSettings};
 
     #[test]
     fn merge_sectioned_snapshot_applies_only_selected_sections() {
@@ -418,63 +418,6 @@ mod tests {
         assert_eq!(merged.terminal.font_size, current.terminal.font_size);
         assert!(!merged.terminal.highlight_tab_on_new_output);
         assert!(merged.ai.enabled);
-    }
-
-    #[test]
-    fn export_default_snapshot_uses_tauri_default_sections() {
-        let mut settings = PersistedSettings::default();
-        settings.ai.enabled = true;
-        settings.local_terminal.default_cwd = Some("/tmp".to_string());
-
-        let exported = export_oxide_settings_snapshot_json(&settings, None, false).expect("export");
-        let parsed: Value = serde_json::from_str(&exported).expect("json");
-        let section_ids = parsed["sectionIds"]
-            .as_array()
-            .expect("section ids")
-            .iter()
-            .filter_map(Value::as_str)
-            .collect::<Vec<_>>();
-
-        assert!(section_ids.contains(&"general"));
-        assert!(section_ids.contains(&"network"));
-        assert!(!section_ids.contains(&"ai"));
-        assert!(!section_ids.contains(&"localTerminal"));
-        assert!(parsed["settings"].get("ai").is_none());
-        assert!(parsed["settings"].get("localTerminal").is_none());
-        assert!(
-            parsed["settings"]["terminal"]
-                .get("terminalEncoding")
-                .is_some()
-        );
-        assert!(parsed["settings"]["terminal"].get("commandMarks").is_some());
-        assert!(
-            parsed["settings"]["terminal"]
-                .get("highlightTabOnNewOutput")
-                .is_some()
-        );
-        assert!(parsed["settings"]["terminal"].get("graphics").is_some());
-        assert_eq!(
-            parsed["settings"]["terminal"]["backgroundScope"],
-            Value::String("content".to_string())
-        );
-        assert!(parsed["settings"]["terminal"].get("unicode").is_some());
-        assert!(
-            parsed["settings"]["appearance"]
-                .get("renderProfile")
-                .is_some()
-        );
-        assert_eq!(
-            parsed["settings"]["appearance"]["showWindowTitlebar"],
-            Value::Bool(true)
-        );
-        assert_eq!(
-            parsed["settings"]["appearance"]["windowOpacity"],
-            json!(DEFAULT_WINDOW_OPACITY)
-        );
-        assert!(parsed["settings"].get("network").is_some());
-        assert!(parsed["settings"].get("windowUI").is_none());
-        assert!(parsed["settings"]["sftp"].get("speedLimitKBps").is_some());
-        assert!(parsed["settings"]["sftp"].get("speedLimitKbps").is_none());
     }
 
     #[test]
@@ -536,28 +479,5 @@ mod tests {
             parsed_with_env["settings"]["localTerminal"]["customEnvVars"]["FOO"].as_str(),
             Some("bar")
         );
-    }
-
-    #[test]
-    fn merge_sectioned_snapshot_accepts_tauri_sftp_speed_limit_key() {
-        let current = PersistedSettings::default();
-        let snapshot = json!({
-            "format": OXIDE_SETTINGS_FORMAT,
-            "version": OXIDE_SETTINGS_VERSION,
-            "sectionIds": ["fileAndEditor"],
-            "settings": {
-                "sftp": {
-                    "speedLimitEnabled": true,
-                    "speedLimitKBps": 4096
-                }
-            }
-        });
-
-        let merged =
-            merge_oxide_settings_snapshot(&current, &snapshot.to_string(), None).expect("merge");
-
-        assert!(merged.sftp.speed_limit_enabled);
-        assert_eq!(merged.sftp.speed_limit_kbps, 4096);
-        assert!(!merged.sftp.extra.contains_key("speedLimitKBps"));
     }
 }

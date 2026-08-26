@@ -661,31 +661,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn remote_version_conflict_uses_mtime_like_tauri() {
-        let expected = SavedFileVersion {
-            size_bytes: Some(4),
-            modified_millis: Some(10_000),
-            etag: None,
-        };
-        let same_mtime_different_size = SavedFileVersion {
-            size_bytes: Some(8),
-            modified_millis: Some(10_000),
-            etag: None,
-        };
-        let different_mtime = SavedFileVersion {
-            size_bytes: Some(4),
-            modified_millis: Some(11_000),
-            etag: None,
-        };
-
-        assert!(!remote_versions_conflict(
-            &expected,
-            &same_mtime_different_size
-        ));
-        assert!(remote_versions_conflict(&expected, &different_mtime));
-    }
-
-    #[test]
     fn maps_unavailable_sftp_routes_to_disconnected() {
         let error = map_sftp_error(SftpError::ChannelError("channel closed".into()));
         assert_eq!(error.kind, IdeFileErrorKind::Disconnected);

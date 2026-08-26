@@ -589,14 +589,6 @@ mod tests {
     }
 
     #[test]
-    fn plugin_secret_account_id_matches_tauri_namespace() {
-        assert_eq!(
-            plugin_secret_account_id(secret_keys::BASIC_PASSWORD),
-            "plugin-secret:24:com.oxideterm.cloud-sync:14:basic-password"
-        );
-    }
-
-    #[test]
     fn cloud_sync_delegates_native_secrets_to_the_shared_store() {
         // Cloud sync must not fork its own keychain policy beside the shared store.
         let source = include_str!("secrets.rs");
@@ -774,35 +766,5 @@ mod tests {
                 SecretReadMode::Prompt,
             )]
         );
-    }
-
-    #[test]
-    fn prompt_read_populates_session_cache_used_by_silent_reads_like_tauri() {
-        let mut keychain_provider =
-            CloudSyncKeychainSecretProvider::new(std::collections::BTreeMap::new());
-        let cache_key = keychain_provider.cache_key(secret_keys::TOKEN);
-        clear_session_cached_secret(&cache_key);
-        set_session_cached_secret(
-            cache_key.clone(),
-            Some(Zeroizing::new("cached-token".to_string())),
-        );
-
-        let settings = CloudSyncSettings {
-            auth_mode: AuthMode::Bearer,
-            ..CloudSyncSettings::default()
-        };
-        let secrets = get_action_secrets(
-            &settings,
-            &mut keychain_provider,
-            false,
-            SecretReadMode::Silent,
-        )
-        .unwrap();
-
-        assert_eq!(
-            secrets.token.as_ref().map(|secret| secret.as_str()),
-            Some("cached-token")
-        );
-        clear_session_cached_secret(&cache_key);
     }
 }

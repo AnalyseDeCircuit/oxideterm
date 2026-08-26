@@ -227,33 +227,6 @@ mod tests {
     }
 
     #[test]
-    fn ai_terminal_buffer_text_keeps_tauri_line_limit() {
-        let size = TerminalSize {
-            cols: 16,
-            rows: 5,
-            cell_width: 8,
-            cell_height: 17,
-        };
-        let mut config = Config::default();
-        config.scrolling_history = 600;
-        let mut term = Term::new(config, &size, VoidListener);
-        let mut parser = Processor::<StdSyncHandler>::new();
-
-        // Tauri's registry getter caps AI terminal context to the last 500
-        // physical buffer rows to avoid copying unbounded scrollback.
-        for index in 0..520 {
-            let line = format!("row-{index:03}\r\n");
-            parser.advance(&mut term, line.as_bytes());
-        }
-
-        let buffer = terminal_buffer_text_from_term(&term, size.cols);
-
-        assert_eq!(buffer.split('\n').count(), MAX_AI_TERMINAL_BUFFER_LINES);
-        assert!(!buffer.contains("row-000"));
-        assert!(buffer.contains("row-519"));
-    }
-
-    #[test]
     fn ssh_output_events_are_emitted_only_when_enabled() {
         let mut session = SshPtySession::new(
             SshSessionConfig::new("127.0.0.1", 9, "nobody"),

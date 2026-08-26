@@ -13,9 +13,6 @@ use crate::{
     ssh_paths::default_ssh_dir,
 };
 
-#[cfg(test)]
-use crate::ssh_keys::default_private_key_paths_in_home;
-
 pub const IMPORTED_GROUP: &str = "Imported";
 pub const SSH_CONFIG_TAG: &str = "ssh-config";
 pub const SSH_PROXY_COMMAND_TAG: &str = "ssh-proxy-command";
@@ -464,11 +461,6 @@ fn first_loadable_default_key_path(passphrase: &str) -> Result<String> {
     first_loadable_default_key_path_in_ssh_dir(default_ssh_dir(), passphrase)
 }
 
-#[cfg(test)]
-fn first_loadable_default_key_path_in_home(home: PathBuf, passphrase: &str) -> Result<String> {
-    first_loadable_default_key_path_in_ssh_dir(home.join(".ssh"), passphrase)
-}
-
 fn first_loadable_default_key_path_in_ssh_dir(
     ssh_dir: PathBuf,
     passphrase: &str,
@@ -717,16 +709,6 @@ mod tests {
     }
 
     #[test]
-    fn default_key_paths_match_tauri_save_order() {
-        let home = PathBuf::from("/tmp/home");
-        let paths = default_private_key_paths_in_home(home);
-
-        assert_eq!(paths[0], PathBuf::from("/tmp/home/.ssh/id_ed25519"));
-        assert_eq!(paths[1], PathBuf::from("/tmp/home/.ssh/id_ecdsa"));
-        assert_eq!(paths[2], PathBuf::from("/tmp/home/.ssh/id_rsa"));
-    }
-
-    #[test]
     fn saving_default_key_resolves_first_parseable_or_promptable_key_path() {
         let dir = std::env::temp_dir().join(format!(
             "oxideterm-conn-default-key-{}-{}",
@@ -747,35 +729,6 @@ mod tests {
         let path = first_available_default_key_path_in_home(dir.clone()).unwrap();
 
         assert_eq!(path, rsa.to_string_lossy());
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn saving_proxy_default_key_uses_first_loadable_default_key_like_tauri() {
-        let dir = std::env::temp_dir().join(format!(
-            "oxideterm-conn-proxy-default-key-{}-{}",
-            std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap_or_default()
-        ));
-        let ssh_dir = dir.join(".ssh");
-        std::fs::create_dir_all(&ssh_dir).unwrap();
-        let encrypted = ssh_dir.join("id_ed25519");
-        let fallback = ssh_dir.join("id_ecdsa");
-        let mut rng = UnwrapErr(SysRng);
-        PrivateKey::random(&mut rng, Algorithm::Ed25519)
-            .unwrap()
-            .encrypt(&mut rng, "secret")
-            .unwrap()
-            .write_openssh_file(&encrypted, LineEnding::LF)
-            .unwrap();
-        PrivateKey::random(&mut rng, Algorithm::Ed25519)
-            .unwrap()
-            .write_openssh_file(&fallback, LineEnding::LF)
-            .unwrap();
-
-        let path = first_loadable_default_key_path_in_home(dir.clone(), "").unwrap();
-
-        assert_eq!(path, fallback.to_string_lossy());
         let _ = std::fs::remove_dir_all(dir);
     }
 

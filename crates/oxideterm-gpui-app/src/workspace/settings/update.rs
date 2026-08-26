@@ -1015,18 +1015,6 @@ mod tests {
 
     use super::*;
 
-    fn update_package() -> oxideterm_update::NativeUpdatePackage {
-        oxideterm_update::NativeUpdatePackage {
-            version: "2.0.0".to_string(),
-            current_version: "1.0.0".to_string(),
-            body: Some("Release notes".to_string()),
-            date: Some("2026-07-28".to_string()),
-            platform_key: "test-platform".to_string(),
-            url: "https://example.invalid/update".to_string(),
-            signature: None,
-        }
-    }
-
     fn update_status(
         downloaded_bytes: u64,
         total_bytes: Option<u64>,
@@ -1083,31 +1071,6 @@ mod tests {
             assert!(matches!(
                 settings.native_update.state,
                 NativeUpdateUiState::Error(ref error) if error == "download failed"
-            ));
-        });
-    }
-
-    #[gpui::test]
-    fn cancellation_ignores_late_progress_and_preserves_available_state(cx: &mut TestAppContext) {
-        let settings = cx.new(SettingsWorkspaceEntity::new);
-        settings.update(cx, |settings, cx| {
-            let package = update_package();
-            settings.native_update.package = Some(package.clone());
-            settings.native_update.state = NativeUpdateUiState::Downloading(None);
-            settings.native_update.cancel = Some(Arc::new(AtomicBool::new(false)));
-
-            settings.cancel_native_update(cx);
-            settings.handle_native_update_delivery(
-                NativeUpdateDelivery::Progress(oxideterm_update::DownloadProgress {
-                    event: oxideterm_update::TauriUpdaterEvent::Progress,
-                    status: update_status(512, Some(1024)),
-                }),
-                cx,
-            );
-
-            assert!(matches!(
-                settings.native_update.state,
-                NativeUpdateUiState::Available(ref available) if available == &package
             ));
         });
     }

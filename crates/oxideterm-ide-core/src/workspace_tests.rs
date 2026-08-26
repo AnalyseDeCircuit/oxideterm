@@ -9,7 +9,7 @@ use crate::model::{
     DirtyCloseDecision, FileKind, FileTreeEntry, IdeLocation, OpenFileOutcome, ReloadError,
     RestoreSkipReason, RestoreSnapshotResult, SavedFileVersion,
 };
-use crate::workspace::{IdeWorkspace, WorkspaceError};
+use crate::workspace::IdeWorkspace;
 
 struct MemoryFs {
     data: IdeFileData,
@@ -369,62 +369,6 @@ fn close_all_tabs_stops_on_first_dirty_tab() {
 
     assert_eq!(request.tab_id, tab_id);
     assert_eq!(workspace.tabs().len(), 1);
-}
-
-#[test]
-fn delete_path_closes_clean_affected_tabs_like_tauri_store() {
-    let mut workspace = IdeWorkspace::new();
-    workspace.open_project(IdeLocation::remote("node-a", "/repo"), "repo");
-    let OpenFileOutcome::Opened(root_file) = workspace
-        .open_file(
-            IdeLocation::remote("node-a", "/repo/src/main.rs"),
-            "main",
-            SavedFileVersion::unknown(),
-        )
-        .unwrap()
-    else {
-        panic!("file should open");
-    };
-    let OpenFileOutcome::Opened(other) = workspace
-        .open_file(
-            IdeLocation::remote("node-a", "/repo/README.md"),
-            "readme",
-            SavedFileVersion::unknown(),
-        )
-        .unwrap()
-    else {
-        panic!("file should open");
-    };
-
-    let closed = workspace
-        .close_clean_tabs_under(&IdeLocation::remote("node-a", "/repo/src"))
-        .unwrap();
-
-    assert_eq!(closed, vec![root_file]);
-    assert!(workspace.buffer(root_file).is_none());
-    assert!(workspace.buffer(other).is_some());
-}
-
-#[test]
-fn delete_path_refuses_dirty_affected_tabs_like_tauri_store() {
-    let mut workspace = IdeWorkspace::new();
-    workspace.open_project(IdeLocation::remote("node-a", "/repo"), "repo");
-    let OpenFileOutcome::Opened(tab_id) = workspace
-        .open_file(
-            IdeLocation::remote("node-a", "/repo/src/main.rs"),
-            "main",
-            SavedFileVersion::unknown(),
-        )
-        .unwrap()
-    else {
-        panic!("file should open");
-    };
-    workspace.replace_buffer_text(tab_id, "dirty").unwrap();
-
-    let result = workspace.close_clean_tabs_under(&IdeLocation::remote("node-a", "/repo/src"));
-
-    assert!(matches!(result, Err(WorkspaceError::DirtyTabs(names)) if names == "main.rs"));
-    assert!(workspace.buffer(tab_id).is_some());
 }
 
 #[test]

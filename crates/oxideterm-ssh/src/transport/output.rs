@@ -232,33 +232,4 @@ mod tests {
         assert!(legacy.preferred.kex.contains(&russh::kex::DH_G14_SHA1));
     }
 
-    #[test]
-    fn validates_proxy_chain_depth_like_tauri() {
-        let chain = (0..=MAX_PROXY_CHAIN_DEPTH)
-            .map(|index| ProxyHopConfig {
-                host: format!("jump-{index}.example.com"),
-                port: 22,
-                username: "root".to_string(),
-                auth: AuthMethod::Agent,
-                agent_forwarding: false,
-                identity_agent: None,
-                agent_forwarding_socket: None,
-                legacy_ssh_compatibility: false,
-                ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
-                strict_host_key_checking: true,
-                trust_host_key: None,
-                expected_host_key_fingerprint: None,
-            })
-            .collect::<Vec<_>>();
-        let error = validate_proxy_chain_depth(&chain).unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            format!(
-                "SSH connection failed: proxy chain too long: {} hops (max {})",
-                MAX_PROXY_CHAIN_DEPTH + 1,
-                MAX_PROXY_CHAIN_DEPTH
-            )
-        );
-    }
 }

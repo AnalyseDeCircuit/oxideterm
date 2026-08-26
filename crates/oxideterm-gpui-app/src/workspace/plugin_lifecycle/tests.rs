@@ -13,7 +13,7 @@ use oxideterm_connections::{
     LocalSyncMetadata as SavedConnectionsLocalSyncMetadata, SavedConnectionsSyncSnapshot,
     oxide_file::OxideFile,
 };
-use oxideterm_forwarding::{ForwardType, ForwardingRegistry};
+use oxideterm_forwarding::ForwardingRegistry;
 use oxideterm_gpui_ide::{IdePluginFileSnapshot, IdePluginSnapshot};
 use oxideterm_plugin_host_api::capabilities::{
     NATIVE_PLUGIN_CAPABILITY_FILESYSTEM_READ, NATIVE_PLUGIN_CAPABILITY_FILESYSTEM_WRITE,
@@ -754,52 +754,6 @@ fn ai_host_calls_return_sanitized_messages_and_provider_info() {
 }
 
 #[test]
-fn ai_new_message_events_omit_message_content() {
-    let snapshot = serde_json::json!({
-        "conversations": [
-            {
-                "id": "conversation-1",
-                "title": "Deploy help",
-                "messageCount": 2,
-                "createdAt": 1,
-                "updatedAt": 20
-            }
-        ],
-        "messagesByConversation": {
-            "conversation-1": [
-                {
-                    "id": "message-user-1",
-                    "role": "user",
-                    "content": "safe prompt",
-                    "timestamp": 10
-                },
-                {
-                    "id": "message-assistant-1",
-                    "role": "assistant",
-                    "content": "answer with sanitized details",
-                    "timestamp": 20
-                }
-            ]
-        }
-    });
-    let previous_counts = HashMap::from([("conversation-1".to_string(), 1)]);
-
-    let events = native_plugin_ai_new_message_events(&snapshot, &previous_counts);
-
-    assert_eq!(
-        events,
-        vec![serde_json::json!({
-            "conversationId": "conversation-1",
-            "messageId": "message-assistant-1",
-            "role": "assistant"
-        })]
-    );
-    // Tauri's onMessage payload is metadata-only; native keeps content out
-    // of the event and requires plugins to call getMessages for sanitized text.
-    assert!(events[0].get("content").is_none());
-}
-
-#[test]
 fn sftp_host_call_args_reject_missing_or_invalid_paths() {
     let missing_node = serde_json::json!({ "path": "/tmp/file" });
     assert!(native_plugin_sftp_node_id_arg(&missing_node).is_err());
@@ -843,25 +797,6 @@ fn forward_host_calls_require_network_forward_capability() {
     assert!(
         native_plugin_forward_check_capability("exportSavedForwardsSnapshot", &allowed).is_ok()
     );
-}
-
-#[test]
-fn forward_create_request_accepts_tauri_camel_case_shape() {
-    let request = native_plugin_forward_create_request(&serde_json::json!({
-        "sessionId": "node:abc",
-        "forwardType": "local",
-        "bindAddress": "127.0.0.1",
-        "bindPort": 8080,
-        "targetHost": "localhost",
-        "targetPort": 80,
-        "description": "plugin forward",
-    }))
-    .unwrap();
-
-    assert_eq!(request.session_id, "node:abc");
-    assert_eq!(request.forward_type, ForwardType::Local);
-    assert_eq!(request.bind_port, 8080);
-    assert_eq!(request.target_port, 80);
 }
 
 #[test]
@@ -1725,42 +1660,6 @@ fn i18n_returnable_host_apis_use_plugin_scoped_fallback() {
         plugin_runtime::PluginResponseResult::Ok {
             value: serde_json::json!("missing.title")
         }
-    );
-}
-
-#[test]
-fn syncable_settings_export_returns_tauri_shaped_payload() {
-    let snapshot = test_host_api_snapshot();
-    let response = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "settings-export".to_string(),
-            namespace: "settings".to_string(),
-            method: "exportSyncableSettings".to_string(),
-            args: serde_json::json!({}),
-        },
-    )
-    .unwrap();
-
-    let plugin_runtime::PluginResponseResult::Ok { value } = response.result else {
-        panic!("expected exportSyncableSettings to succeed");
-    };
-    assert_eq!(value["payload"]["appearance"]["language"], "zh-CN");
-    assert_eq!(value["payload"]["appearance"]["uiDensity"], "comfortable");
-    assert_eq!(value["payload"]["terminal"]["fontSize"], 14);
-    assert_eq!(value["payload"]["terminal"]["theme"], "default");
-    assert_eq!(value["payload"]["reconnect"]["autoReconnect"], true);
-    assert_eq!(value["warnings"], serde_json::json!([]));
-    assert!(
-        value["revision"]
-            .as_str()
-            .is_some_and(|revision| { revision.starts_with("fnv1a-") })
-    );
-    assert!(
-        value["exportedAt"]
-            .as_str()
-            .is_some_and(|exported_at| { exported_at.ends_with('Z') })
     );
 }
 

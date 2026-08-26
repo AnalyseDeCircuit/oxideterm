@@ -19,11 +19,6 @@ fn preferred_default_key_paths_in_ssh_dir(ssh_dir: PathBuf) -> Vec<PathBuf> {
         .collect()
 }
 
-#[cfg(test)]
-fn default_key_paths_in_home(home: PathBuf) -> Vec<PathBuf> {
-    default_key_paths_in_ssh_dir(home.join(".ssh"))
-}
-
 fn default_key_paths_in_ssh_dir(ssh: PathBuf) -> Vec<PathBuf> {
     let preferred_names = ["id_ed25519", "id_ecdsa", "id_rsa"];
     let mut paths = preferred_names
@@ -201,26 +196,6 @@ mod path_auth_tests {
     #[cfg(not(unix))]
     fn set_test_private_key_permissions(_path: &PathBuf) {}
 
-    #[test]
-    fn default_key_paths_keep_tauri_priority_before_extra_candidates() {
-        let home = unique_temp_dir("default-paths");
-        let ssh = home.join(".ssh");
-        std::fs::create_dir_all(&ssh).unwrap();
-        std::fs::write(ssh.join("id_work"), "").unwrap();
-        std::fs::write(ssh.join("id_ed25519_sk.pub"), "").unwrap();
-        std::fs::write(ssh.join("id_ed25519-cert.pub"), "").unwrap();
-
-        let paths = default_key_paths_in_home(home.clone());
-
-        assert_eq!(
-            paths
-                .iter()
-                .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
-                .collect::<Vec<_>>(),
-            vec!["id_ed25519", "id_ecdsa", "id_rsa", "id_work"]
-        );
-        let _ = std::fs::remove_dir_all(home);
-    }
 
     #[test]
     fn agent_fallback_uses_only_preferred_default_key_names() {

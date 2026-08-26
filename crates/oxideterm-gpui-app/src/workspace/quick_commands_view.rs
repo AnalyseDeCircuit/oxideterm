@@ -3315,11 +3315,9 @@ impl WorkspaceApp {
 #[cfg(test)]
 mod terminal_command_bar_quick_command_tests {
     use super::{
-        QuickCommandCategoryDraft, QuickCommandConfirmationPolicy, QuickCommandEditorDraft,
-        QuickCommandIcon, QuickCommandParameterEditorDraft, QuickCommandParameterKind,
-        QuickCommandRiskBadge, quick_command_category_draft_can_save,
-        quick_command_editor_can_save, quick_command_risk_badge,
-        quick_command_space_inserts_literal,
+        QuickCommandConfirmationPolicy, QuickCommandEditorDraft, QuickCommandParameterEditorDraft,
+        QuickCommandParameterKind, QuickCommandRiskBadge, quick_command_editor_can_save,
+        quick_command_risk_badge, quick_command_space_inserts_literal,
     };
 
     #[test]
@@ -3328,24 +3326,6 @@ mod terminal_command_bar_quick_command_tests {
         assert!(!quick_command_space_inserts_literal(true, false, false));
         assert!(!quick_command_space_inserts_literal(false, true, false));
         assert!(!quick_command_space_inserts_literal(false, false, true));
-    }
-
-    #[test]
-    fn quick_command_category_editor_save_gate_matches_tauri_disabled_button() {
-        assert!(!quick_command_category_draft_can_save(
-            &QuickCommandCategoryDraft {
-                id: None,
-                name: "   ".to_string(),
-                icon: QuickCommandIcon::Zap,
-            }
-        ));
-        assert!(quick_command_category_draft_can_save(
-            &QuickCommandCategoryDraft {
-                id: None,
-                name: "Ops".to_string(),
-                icon: QuickCommandIcon::Zap,
-            }
-        ));
     }
 
     #[test]

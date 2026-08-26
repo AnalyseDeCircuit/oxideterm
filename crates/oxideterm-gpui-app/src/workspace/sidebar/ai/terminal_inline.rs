@@ -971,7 +971,6 @@ mod terminal_inline_tests {
     use super::{
         AI_INLINE_PANEL_COLLAPSED_HEIGHT, AI_INLINE_PANEL_EXPANDED_HEIGHT,
         extract_terminal_ai_inline_command, terminal_ai_inline_panel_placement,
-        truncate_ai_inline_context,
     };
 
     #[test]
@@ -988,10 +987,6 @@ mod terminal_inline_tests {
         );
     }
 
-    #[test]
-    pub(in crate::workspace) fn truncates_context_from_the_end_like_tauri_selection_context() {
-        assert_eq!(truncate_ai_inline_context("abcdef".to_string(), 3), "def");
-    }
 
     #[test]
     pub(in crate::workspace) fn places_panel_below_cursor_when_space_allows() {

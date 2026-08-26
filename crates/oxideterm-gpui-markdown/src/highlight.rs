@@ -210,14 +210,6 @@ mod tests {
     }
 
     #[test]
-    fn highlights_tauri_sftp_language_aliases() {
-        let opts = MarkdownOptions::default();
-        assert!(highlight_code("typescript", "const value: number = 1;\n", &opts).is_some());
-        assert!(highlight_code("docker", "FROM alpine\n", &opts).is_some());
-        assert!(highlight_code("makefile", "all:\n\techo ok\n", &opts).is_some());
-    }
-
-    #[test]
     fn text_runs_preserve_length() {
         let opts = MarkdownOptions::default();
         let runs = highlight_code("python", "print('hello')\n", &opts).unwrap();

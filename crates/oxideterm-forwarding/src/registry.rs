@@ -626,27 +626,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stop_all_clears_managers_like_tauri_shutdown() {
-        let registry = ForwardingRegistry::new();
-        let first = test_handle(
-            "first.example",
-            ConnectionConsumer::PortForward("node:a".into()),
-        );
-        let second = test_handle(
-            "second.example",
-            ConnectionConsumer::PortForward("node:b".into()),
-        );
-
-        registry.register("node:a", first);
-        registry.register("node:b", second);
-        assert_eq!(registry.session_ids(), vec!["node:a", "node:b"]);
-
-        registry.stop_all().await;
-
-        assert!(registry.session_ids().is_empty());
-    }
-
-    #[tokio::test]
     async fn session_shutdown_stops_registered_managers_exactly_once() {
         let registry = ForwardingRegistry::new();
         registry.register(

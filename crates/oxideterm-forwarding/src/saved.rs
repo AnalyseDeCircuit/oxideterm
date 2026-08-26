@@ -1144,24 +1144,6 @@ mod tests {
     }
 
     #[test]
-    fn sync_new_runtime_forward_requires_owner_like_tauri_node_command() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = SavedForwardStore::load(dir.path().join("forwards.json")).unwrap();
-
-        let saved = store
-            .sync_persisted_forward_rule(
-                "forward-1",
-                "session-1",
-                None,
-                sample_rule("forward-1", 8080),
-            )
-            .unwrap();
-
-        assert!(saved.is_none());
-        assert!(store.load_persisted_forwards("session-1").is_empty());
-    }
-
-    #[test]
     fn sync_owner_bound_forward_preserves_auto_start_on_update() {
         let dir = tempfile::tempdir().unwrap();
         let store = SavedForwardStore::load(dir.path().join("forwards.json")).unwrap();

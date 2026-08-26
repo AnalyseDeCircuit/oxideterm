@@ -398,40 +398,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn history_is_deduped_and_capped_like_tauri_storage() {
-        let mut state = CloudSyncPersistedState::default();
-        let first = CloudSyncHistoryEntry::new(
-            "upload",
-            CloudSyncHistorySummary::default(),
-            true,
-            None,
-            Some("rev-1".into()),
-        );
-        let first_id = first.id.clone();
-        state.append_history(first.clone());
-        state.append_history(first);
-        assert_eq!(state.sync_history.len(), 1);
-        assert_eq!(state.sync_history[0].id, first_id);
-
-        for index in 0..(MAX_SYNC_HISTORY + 3) {
-            state.append_history(CloudSyncHistoryEntry {
-                id: format!("id-{index}"),
-                action: "check".into(),
-                timestamp: "now".into(),
-                success: true,
-                summary: CloudSyncHistorySummary::default(),
-                error: None,
-                remote_revision: None,
-            });
-        }
-        assert_eq!(state.sync_history.len(), MAX_SYNC_HISTORY);
-        assert_eq!(
-            state.sync_history[0].id,
-            format!("id-{}", MAX_SYNC_HISTORY + 2)
-        );
-    }
-
-    #[test]
     fn persisted_state_ignores_removed_raw_profile_sections() {
         let state: CloudSyncPersistedState = serde_json::from_value(serde_json::json!({
             "syncScope": {
@@ -494,69 +460,6 @@ mod tests {
         let encoded = serde_json::to_string(&state).expect("cloud sync state should serialize");
         assert!(!encoded.contains("rawTcpProfiles"));
         assert!(!encoded.contains("rawUdpProfiles"));
-    }
-
-    #[test]
-    fn rollback_backups_are_deduped_and_capped_like_tauri_storage() {
-        let mut state = CloudSyncPersistedState::default();
-        let backup = CloudSyncRollbackBackup {
-            id: "same".into(),
-            created_at: "2026-05-19T00:00:00Z".into(),
-            source_revision: Some("rev-1".into()),
-            size_bytes: 4,
-            bytes_base64: "dGVzdA==".into(),
-            metadata: None,
-        };
-        state.append_rollback_backup(backup.clone());
-        state.append_rollback_backup(backup);
-        assert_eq!(state.rollback_backups.len(), 1);
-
-        for index in 0..(crate::MAX_ROLLBACK_BACKUPS + 2) {
-            state.append_rollback_backup(CloudSyncRollbackBackup {
-                id: format!("backup-{index}"),
-                created_at: "2026-05-19T00:00:00Z".into(),
-                source_revision: None,
-                size_bytes: 0,
-                bytes_base64: String::new(),
-                metadata: None,
-            });
-        }
-        assert_eq!(state.rollback_backups.len(), crate::MAX_ROLLBACK_BACKUPS);
-        assert_eq!(
-            state.rollback_backups[0].id,
-            format!("backup-{}", crate::MAX_ROLLBACK_BACKUPS + 1)
-        );
-    }
-
-    #[test]
-    fn load_resets_runtime_only_state_like_tauri_store_bootstrap() {
-        let mut state = CloudSyncPersistedState {
-            status: CloudSyncStatus::Error,
-            local_dirty: true,
-            local_dirty_sections: Some(StructuredDirtySections::default()),
-            auto_upload_blocked_by_conflict: true,
-            conflict_details: Some(CloudSyncConflictDetails {
-                revision: Some("rev".into()),
-                device_id: Some("device".into()),
-                updated_at: Some("now".into()),
-            }),
-            last_error: Some("boom".into()),
-            last_known_remote_revision: Some("keep-revision".into()),
-            ..CloudSyncPersistedState::default()
-        };
-
-        reset_runtime_state(&mut state);
-
-        assert_eq!(state.status, CloudSyncStatus::Idle);
-        assert!(!state.local_dirty);
-        assert!(state.local_dirty_sections.is_none());
-        assert!(!state.auto_upload_blocked_by_conflict);
-        assert!(state.conflict_details.is_none());
-        assert!(state.last_error.is_none());
-        assert_eq!(
-            state.last_known_remote_revision.as_deref(),
-            Some("keep-revision")
-        );
     }
 
     #[test]

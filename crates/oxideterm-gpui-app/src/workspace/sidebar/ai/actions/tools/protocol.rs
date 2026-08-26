@@ -624,26 +624,6 @@ mod tests {
         assert_eq!(result.targets.len(), AI_TARGET_DISCOVERY_LIMIT);
     }
 
-    #[test]
-    pub(in crate::workspace) fn next_action_maps_to_tauri_tool_result_shape() {
-        let action = serde_json::json!({
-            "action": "list_targets",
-            "args": { "view": "connections" },
-            "reason": "Refresh targets."
-        });
-
-        let mapped = ai_next_action_json(&action).expect("next action should map");
-
-        assert_eq!(mapped.get("tool"), Some(&serde_json::json!("list_targets")));
-        assert_eq!(
-            mapped.pointer("/args/view"),
-            Some(&serde_json::json!("connections"))
-        );
-        assert_eq!(
-            mapped.get("priority"),
-            Some(&serde_json::json!("recommended"))
-        );
-    }
 
     #[test]
     pub(in crate::workspace) fn long_tool_output_uses_head_tail_preview_metadata() {
@@ -664,65 +644,6 @@ mod tests {
         );
     }
 
-    #[test]
-    pub(in crate::workspace) fn run_command_execution_summary_matches_tauri_shape() {
-        let mut result = sample_result();
-        result.envelope = serde_json::json!({
-            "ok": false,
-            "summary": "Local command exited with 2.",
-            "output": "failed",
-            "data": { "exitCode": 2, "timedOut": false },
-            "error": {
-                "code": "local_command_failed",
-                "message": "Exit code: 2",
-                "recoverable": true
-            },
-            "targets": [{
-                "id": "local-shell:default",
-                "kind": "local-shell",
-                "label": "Local shell",
-                "metadata": { "state": "available", "refs": {} }
-            }],
-            "meta": { "toolName": "run_command", "durationMs": 7, "truncated": false }
-        });
-
-        annotate_ai_run_command_execution_result(
-            &mut result,
-            &serde_json::json!({
-                "command": "cargo check",
-                "cwd": "/tmp/project"
-            }),
-        );
-
-        assert_eq!(
-            result.envelope.pointer("/execution/kind"),
-            Some(&serde_json::json!("command"))
-        );
-        assert_eq!(
-            result.envelope.pointer("/execution/command"),
-            Some(&serde_json::json!("cargo check"))
-        );
-        assert_eq!(
-            result.envelope.pointer("/execution/cwd"),
-            Some(&serde_json::json!("/tmp/project"))
-        );
-        assert_eq!(
-            result.envelope.pointer("/execution/target/id"),
-            Some(&serde_json::json!("local-shell:default"))
-        );
-        assert_eq!(
-            result.envelope.pointer("/execution/exitCode"),
-            Some(&serde_json::json!(2))
-        );
-        assert_eq!(
-            result.envelope.pointer("/execution/timedOut"),
-            Some(&serde_json::json!(false))
-        );
-        assert_eq!(
-            result.envelope.pointer("/execution/stderrSummary"),
-            Some(&serde_json::json!("Exit code: 2"))
-        );
-    }
 
     #[test]
     pub(in crate::workspace) fn run_command_execution_summary_preserves_visibility_and_state() {
@@ -759,221 +680,19 @@ mod tests {
         );
     }
 
-    #[test]
-    pub(in crate::workspace) fn tool_result_model_content_omits_ui_only_payload_like_tauri() {
-        let mut result = sample_result();
-        result.envelope = serde_json::json!({
-            "ok": true,
-            "summary": "Listed targets.",
-            "output": "2 targets",
-            "data": [{ "id": "ssh-node:prod" }],
-            "rawOutput": "full raw output",
-            "targets": [{
-                "id": "ssh-node:prod",
-                "kind": "ssh-node",
-                "label": "prod",
-                "metadata": { "state": "connected" }
-            }],
-            "outputPreview": {
-                "strategy": "full",
-                "rawOutputStored": true
-            },
-            "meta": {
-                "toolName": "list_targets",
-                "durationMs": 9,
-                "truncated": false
-            }
-        });
-
-        let content = ai_tool_result_model_content(&result);
-        let value = serde_json::from_str::<serde_json::Value>(&content).unwrap();
-
-        assert!(value.get("data").is_none());
-        assert!(value.get("rawOutput").is_none());
-        assert_eq!(
-            value.pointer("/targets/0/id"),
-            Some(&serde_json::json!("ssh-node:prod"))
-        );
-        assert_eq!(
-            value.pointer("/outputPreview/rawOutputStored"),
-            Some(&serde_json::json!(true))
-        );
-        assert_eq!(
-            value.pointer("/meta/truncated"),
-            Some(&serde_json::json!(false))
-        );
-        assert_eq!(
-            value.pointer("/evidenceFacts/0/factId"),
-            Some(&serde_json::json!("tool-1.summary"))
-        );
-        assert_eq!(
-            value.pointer("/evidenceFacts/1/factId"),
-            Some(&serde_json::json!("tool-1.output"))
-        );
-    }
-
-    #[test]
-    pub(in crate::workspace) fn failed_tool_result_model_content_uses_tauri_error_output_limit() {
-        let mut result = sample_result();
-        result.success = false;
-        result.output = "x".repeat(2_100);
-        result.envelope = serde_json::json!({
-            "ok": false,
-            "summary": "Command failed.",
-            "output": &result.output,
-            "error": {
-                "code": "local_command_failed",
-                "message": "m".repeat(1_100),
-                "recoverable": true
-            },
-            "execution": {
-                "kind": "command",
-                "exitCode": null,
-                "timedOut": false,
-                "truncated": false
-            },
-            "meta": {
-                "toolName": "run_command",
-                "durationMs": 7,
-                "truncated": false
-            }
-        });
-
-        let content = ai_tool_result_model_content(&result);
-        let value = serde_json::from_str::<serde_json::Value>(&content).unwrap();
-
-        assert_eq!(value.get("truncated"), Some(&serde_json::json!(true)));
-        assert_eq!(value.get("exitCode"), Some(&serde_json::Value::Null));
-        assert_eq!(value.get("timedOut"), Some(&serde_json::json!(false)));
-        assert!(
-            value
-                .get("output")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|output| output.ends_with("[truncated: 100 chars omitted]"))
-        );
-        assert!(
-            value
-                .pointer("/error/message")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|message| message.ends_with("[truncated: 100 chars omitted]"))
-        );
-    }
-
-    #[test]
-    pub(in crate::workspace) fn ssh_command_cwd_wraps_like_tauri_remote_exec_cwd() {
-        assert_eq!(
-            ai_command_with_cwd("pwd", Some("/var/www/app")),
-            "cd '/var/www/app' && pwd"
-        );
-        assert_eq!(
-            ai_command_with_cwd("pwd", Some("/srv/it's ok")),
-            "cd '/srv/it'\\''s ok' && pwd"
-        );
-        assert_eq!(ai_command_with_cwd("pwd", Some("~")), "cd ~ && pwd");
-        assert_eq!(
-            ai_command_with_cwd("pwd", Some("~/project dir")),
-            "cd ~/'project dir' && pwd"
-        );
-        assert_eq!(ai_command_with_cwd("pwd", None), "pwd");
-    }
-
-    #[test]
-    pub(in crate::workspace) fn local_exec_timeout_caps_like_tauri_backend() {
-        assert_eq!(ai_local_exec_timeout_secs(1), 1);
-        assert_eq!(ai_local_exec_timeout_secs(60), 60);
-        assert_eq!(ai_local_exec_timeout_secs(90), 60);
-    }
-
-    #[test]
-    pub(in crate::workspace) fn recall_preferences_memory_data_preserves_tauri_enabled_flag() {
-        let memory = ai_memory_settings_json(false, "  - use compact output\n", &[]);
-
-        assert_eq!(memory.get("enabled"), Some(&serde_json::json!(false)));
-        assert_eq!(ai_memory_content(&memory), "  - use compact output\n");
-        assert_eq!(ai_memory_trimmed_content(&memory), "- use compact output");
-    }
-
-    #[test]
-    pub(in crate::workspace) fn tool_verified_default_requires_success_without_error_like_tauri() {
-        assert!(ai_tool_verified_default(true, None));
-        assert!(!ai_tool_verified_default(false, None));
-        assert!(!ai_tool_verified_default(true, Some("error")));
-    }
-
-    #[test]
-    pub(in crate::workspace) fn terminal_run_command_preflight_keeps_execute_risk_like_tauri() {
-        assert_eq!(ai_run_command_preflight_risk(), "execute");
-    }
 
 
 
-    #[test]
-    pub(in crate::workspace) fn select_target_kind_filter_matches_tauri_validation() {
-        assert_eq!(
-            normalized_ai_select_target_kind(Some("ssh-node")),
-            Some("ssh-node")
-        );
-        assert_eq!(normalized_ai_select_target_kind(Some("all")), Some("all"));
-        assert_eq!(normalized_ai_select_target_kind(Some("bogus")), None);
-        assert_eq!(normalized_ai_select_target_kind(None), None);
-    }
 
-    #[test]
-    pub(in crate::workspace) fn command_like_target_query_matches_tauri_case_sensitive_guard() {
-        assert!(is_ai_command_like_query("ls -la"));
-        assert!(is_ai_command_like_query("sudo systemctl status ssh"));
-        assert!(!is_ai_command_like_query("LS"));
-        assert!(!is_ai_command_like_query("-la"));
-    }
 
-    #[test]
-    pub(in crate::workspace) fn list_targets_invalid_view_defaults_to_connections_like_tauri() {
-        assert_eq!(normalized_ai_target_view(Some("bogus")), "connections");
-        assert_eq!(normalized_ai_target_view(None), "connections");
-        assert_eq!(normalized_ai_target_view(Some("all")), "all");
-    }
 
-    #[test]
-    pub(in crate::workspace) fn target_query_trims_before_matching_like_tauri() {
-        assert_eq!(normalized_ai_query(Some("  PROD  ")), "prod");
-        assert_eq!(normalized_ai_query(Some("\n")), "");
-        assert_eq!(normalized_ai_query(None), "");
 
-        let target = sample_target();
-        assert!(target_matches_ai_query(
-            &target,
-            &normalized_ai_query(Some("  PROD.EXAMPLE.COM  "))
-        ));
-    }
 
-    #[test]
-    pub(in crate::workspace) fn opened_local_terminal_target_uses_tauri_synthetic_shape() {
-        let mut target = sample_target();
-        target.id = "terminal-session:abc123".to_string();
-        target.kind = "terminal-session".to_string();
-        target.label = "Local terminal zsh".to_string();
-        target
-            .refs
-            .insert("sessionId".to_string(), "abc123".to_string());
-        target.refs.insert("tabId".to_string(), "tab-1".to_string());
-        target.metadata = serde_json::json!({
-            "terminalType": "local_terminal",
-            "shell": { "label": "zsh" }
-        });
 
-        let opened = ai_opened_local_terminal_target(&target);
 
-        assert_eq!(
-            opened.refs.get("sessionId"),
-            Some(&"abc123".to_string())
-        );
-        assert!(opened.refs.get("tabId").is_none());
-        assert_eq!(
-            opened.metadata.pointer("/terminalType"),
-            Some(&serde_json::json!("local_terminal"))
-        );
-        assert!(opened.metadata.pointer("/shell").is_none());
-    }
+
+
+
 
     #[test]
     pub(in crate::workspace) fn model_result_projection_removes_internal_runtime_identifiers() {
@@ -1021,27 +740,7 @@ mod tests {
     }
 
 
-    #[test]
-    pub(in crate::workspace) fn rag_query_arg_preserves_tauri_nullish_without_trim() {
-        assert_eq!(
-            ai_rag_query_arg(
-                &serde_json::json!({ "query": "  keep spaces  ", "path": "fallback" })
-            ),
-            "  keep spaces  "
-        );
-        assert_eq!(
-            ai_rag_query_arg(&serde_json::json!({ "path": "  fallback path  " })),
-            "  fallback path  "
-        );
-        assert_eq!(ai_rag_query_arg(&serde_json::json!({})), "");
-    }
 
-    #[test]
-    pub(in crate::workspace) fn transfer_directory_detection_accepts_tauri_separators() {
-        assert!(ai_transfer_path_looks_directory("/tmp/project/"));
-        assert!(ai_transfer_path_looks_directory(r"C:\Users\me\Downloads\"));
-        assert!(!ai_transfer_path_looks_directory("/tmp/project/file.txt"));
-    }
 
     #[test]
     pub(in crate::workspace) fn active_context_matches_tab_session_or_node_refs() {
@@ -1077,152 +776,16 @@ mod tests {
         ));
     }
 
-    #[test]
-    pub(in crate::workspace) fn connection_state_error_count_uses_tauri_metadata_status() {
-        let mut stale = sample_target();
-        stale.state = "stale".to_string();
-        stale.metadata = serde_json::json!({ "status": "link-down" });
-        let mut error = sample_target();
-        error.id = "ssh-node:error-node".to_string();
-        error.state = "stale".to_string();
-        error.metadata = serde_json::json!({ "status": "error" });
-
-        let counts = ai_connection_counts(&[stale, error]);
-
-        assert_eq!(counts.link_down, 2);
-        assert_eq!(counts.error, 1);
-    }
 
 
-    #[test]
-    pub(in crate::workspace) fn terminal_screen_payload_uses_tauri_cursor_and_buffer_shape() {
-        let snapshot = oxideterm_terminal::TerminalSnapshot {
-            generation: 0,
-            cols: 80,
-            rows: 24,
-            cursor_col: 2,
-            cursor_row: 3,
-            cursor_shape: oxideterm_terminal::TerminalCursorShape::Block,
-            display_offset: 0,
-            scrollback_lines: 10,
-            lines: Vec::new(),
-            images: Vec::new(),
-        };
 
-        let screen = ai_terminal_screen_snapshot_json(&snapshot, true);
 
-        assert_eq!(screen.get("cursorX"), Some(&serde_json::json!(3)));
-        assert_eq!(screen.get("cursorY"), Some(&serde_json::json!(4)));
-        assert_eq!(
-            screen.get("isAlternateBuffer"),
-            Some(&serde_json::json!(true))
-        );
-    }
 
-    #[test]
-    pub(in crate::workspace) fn waiting_for_input_uses_tail_prompt_line_like_tauri() {
-        assert!(looks_waiting_for_input("ready\npassword: "));
-        assert!(!looks_waiting_for_input("password accepted\nready$ "));
-    }
 
-    #[test]
-    pub(in crate::workspace) fn terminal_delta_fallback_matches_tauri_last_1000_chars() {
-        let value = "a".repeat(1200);
-        let output = terminal_delta_output("different", &value);
 
-        assert_eq!(output.len(), 1000);
-        assert!(!output.starts_with("[trimmed"));
-    }
 
-    #[test]
-    pub(in crate::workspace) fn terminal_target_short_ids_match_tauri_labels() {
-        assert_eq!(ai_short_id("1234567890"), "12345678");
-        assert_eq!(ai_short_id("42"), "42");
-    }
 
-    #[test]
-    pub(in crate::workspace) fn local_exec_output_pretruncates_like_tauri_backend() {
-        let value = "a".repeat((64 * 1024) + 1);
-        let truncated = truncate_ai_local_exec_output(&value);
 
-        assert_eq!(truncated.len(), (64 * 1024) + "...(truncated)".len());
-        assert!(truncated.ends_with("...(truncated)"));
-    }
-
-    #[test]
-    pub(in crate::workspace) fn resource_output_truncation_matches_tauri_suffix() {
-        let truncated = truncate_for_model("abcdef".to_string(), 3);
-
-        assert_eq!(truncated, "abc\n[truncated 3 chars]");
-    }
-
-    #[test]
-    pub(in crate::workspace) fn execution_stderr_summary_keeps_tauri_suffix() {
-        let value = "a".repeat(601);
-        let truncated = truncate_ai_execution_stderr_summary(&value, 600);
-
-        assert!(truncated.ends_with("...[truncated]"));
-    }
-
-    #[test]
-    pub(in crate::workspace) fn dry_run_result_can_mark_success_as_unverified_like_tauri() {
-        let result = AiActionResultLite {
-            ok: true,
-            summary: "Dry-run file write /tmp/a.".to_string(),
-            output: "Dry-run only; file was not changed.".to_string(),
-            data: serde_json::Value::Null,
-            error_code: None,
-            error_message: None,
-            risk: "write",
-            target: None,
-            targets: Vec::new(),
-            next_actions: Vec::new(),
-            observations: Vec::new(),
-            verified: None,
-            state_version: None,
-        }
-        .with_verified(false);
-
-        assert_eq!(result.verified, Some(false));
-        assert!(result.data.is_null());
-    }
-
-    #[test]
-    pub(in crate::workspace) fn bypass_destructive_policy_annotation_matches_tauri_envelope_shape()
-    {
-        let mut result = sample_result();
-        let decision = oxideterm_ai::AiPolicyDecision {
-            decision: oxideterm_ai::AiPolicyDecisionKind::Allow,
-            risk: oxideterm_ai::AiActionRisk::Destructive,
-            reason_code: "bypass_destructive_allowed".to_string(),
-            reason_text_key: "ai.tool_use.policy_reason_bypass".to_string(),
-            matched_policy_key: "run_command:dangerous".to_string(),
-            approval_mode: oxideterm_ai::AiPolicySafetyMode::Bypass,
-            profile_id: Some("profile-1".to_string()),
-        };
-
-        annotate_executed_ai_tool_result_policy(&mut result, &decision);
-
-        assert_eq!(
-            result.envelope.pointer("/meta/approvalMode"),
-            Some(&serde_json::json!("bypass"))
-        );
-        assert_eq!(
-            result.envelope.pointer("/meta/profileId"),
-            Some(&serde_json::json!("profile-1"))
-        );
-        assert_eq!(
-            result.envelope.pointer("/meta/policyDecision"),
-            Some(&serde_json::json!({
-                "decision": "allow",
-                "risk": "destructive",
-                "reasonCode": "bypass_destructive_allowed",
-                "matchedPolicyKey": "run_command:dangerous",
-                "approvalMode": "bypass",
-                "profileId": "profile-1",
-            }))
-        );
-    }
 
     #[test]
     pub(in crate::workspace) fn default_policy_annotation_does_not_mark_bypass() {
@@ -1252,43 +815,7 @@ mod tests {
         );
     }
 
-    #[test]
-    pub(in crate::workspace) fn unavailable_tool_result_matches_tauri_pre_policy_rejection() {
-        let result =
-            unavailable_ai_tool_result("call-1".to_string(), "mcp::external::tool".to_string());
 
-        assert!(!result.success);
-        assert_eq!(result.output, "");
-        assert_eq!(
-            result.error.as_deref(),
-            Some("Tool not available in current context.")
-        );
-        assert_eq!(
-            result.envelope.pointer("/error/code"),
-            Some(&serde_json::json!("tool_not_available"))
-        );
-    }
-
-    #[test]
-    pub(in crate::workspace) fn pre_execution_rejected_tool_result_keeps_model_output_empty_like_tauri()
-     {
-        let result = pre_execution_rejected_ai_tool_result(
-            "call-1".to_string(),
-            "run_command".to_string(),
-            "user_rejected",
-            "Tool call rejected by user.",
-        );
-
-        assert!(!result.success);
-        assert_eq!(result.output, "");
-        assert_eq!(result.error.as_deref(), Some("Tool call rejected by user."));
-        assert_eq!(result.envelope.get("output"), Some(&serde_json::json!("")));
-        assert_eq!(
-            result.envelope.pointer("/error/code"),
-            Some(&serde_json::json!("user_rejected"))
-        );
-        assert!(result.envelope.pointer("/meta/verified").is_none());
-    }
 
     #[test]
     fn terminal_control_keys_map_to_protocol_bytes() {

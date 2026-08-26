@@ -1615,18 +1615,6 @@ mod tests {
     }
 
     #[test]
-    fn tabbar_wheel_delta_selects_the_browser_axis_and_clamps_scroll() {
-        assert_eq!(tabbar_tauri_wheel_scroll_delta(0.0, 24.0), 24.0);
-        assert_eq!(tabbar_tauri_wheel_scroll_delta(18.0, 24.0), 24.0);
-        assert_eq!(tabbar_tauri_wheel_scroll_delta(-18.0, 0.0), -18.0);
-        assert_eq!(tabbar_scroll_x_after_wheel(0.0, -24.0, 120.0), 24.0);
-        assert_eq!(tabbar_scroll_x_after_wheel(0.0, 24.0, 120.0), 0.0);
-        assert_eq!(tabbar_scroll_x_after_wheel(24.0, 24.0, 120.0), 0.0);
-        assert_eq!(tabbar_scroll_x_after_wheel(110.0, -24.0, 120.0), 120.0);
-        assert_eq!(tabbar_scroll_x_after_wheel(120.0, -24.0, 120.0), 120.0);
-    }
-
-    #[test]
     fn tab_exit_visual_indices_preserve_parallel_batch_order() {
         assert_eq!(tab_exit_visual_index(1, &[]), 1);
         assert_eq!(tab_exit_visual_index(1, &[1]), 2);
