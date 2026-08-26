@@ -119,6 +119,7 @@ pub(in crate::workspace) enum SettingsManagedKeyDialog {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum PortableSettingsAction {
+    AutoUnlock,
     ChangePassword,
 }
 

@@ -141,6 +141,51 @@ impl SettingsWorkspaceEntity {
         self.portable_action_error.as_deref()
     }
 
+    pub(in crate::workspace) fn portable_auto_unlock_pending(&self) -> bool {
+        self.portable_action_pending == Some(PortableSettingsAction::AutoUnlock)
+    }
+
+    pub(in crate::workspace) fn set_portable_auto_unlock_enabled(
+        &mut self,
+        runtime: std::sync::Arc<tokio::runtime::Runtime>,
+        enabled: bool,
+        action_error: String,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.portable_action_pending.is_some() {
+            return false;
+        }
+        self.portable_action_pending = Some(PortableSettingsAction::AutoUnlock);
+        self.portable_action_error = None;
+        self.portable_action_task = Some(cx.spawn(async move |settings, cx| {
+            let result = runtime
+                .spawn_blocking(move || {
+                    if enabled {
+                        oxideterm_portable_runtime::keystore::enable_portable_auto_unlock()
+                    } else {
+                        oxideterm_portable_runtime::keystore::disable_portable_auto_unlock()
+                    }
+                })
+                .await
+                .map_err(|_| ())
+                .and_then(|result| result.map_err(|_| ()));
+            let _ = settings.update(cx, |settings, cx| {
+                settings.portable_action_task = None;
+                settings.portable_action_pending = None;
+                match result {
+                    Ok(()) => {
+                        settings.portable_action_error = None;
+                        settings.invalidate_portable_status(cx);
+                    }
+                    Err(()) => settings.portable_action_error = Some(action_error),
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+        true
+    }
+
     fn finish_portable_password_dialog_exit(&mut self, generation: u64, cx: &mut Context<Self>) {
         if !self.portable_dialog_presence.finish_exit(generation) {
             return;
@@ -244,6 +289,20 @@ impl WorkspaceApp {
                 mismatch_error,
                 cx,
             );
+        });
+    }
+
+    pub(in crate::workspace) fn set_portable_auto_unlock_enabled(
+        &mut self,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let runtime = self.forwarding_runtime.clone();
+        let action_error = self
+            .i18n
+            .t("settings_view.general.portable_auto_unlock_action_failed");
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.set_portable_auto_unlock_enabled(runtime, enabled, action_error, cx);
         });
     }
 }

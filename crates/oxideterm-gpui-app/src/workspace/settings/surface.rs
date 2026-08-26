@@ -563,6 +563,7 @@ impl WorkspaceApp {
                     status.is_portable.hash(&mut hasher);
                     format!("{:?}", status.status).hash(&mut hasher);
                     status.is_unlocked.hash(&mut hasher);
+                    status.auto_unlock_enabled.hash(&mut hasher);
                 }
             }
             SettingsTab::Ai => {
