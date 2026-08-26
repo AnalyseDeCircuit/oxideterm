@@ -135,6 +135,14 @@ an I-beam or pressed caption control from remaining visible after native pointer
 removal. Client-decorated close buttons must use this request path so future unsaved-work or
 close-to-background policies cannot be bypassed.
 
+### Windows DirectX blur state restoration
+
+`crates/gpui-ce/gpui_windows/src/directx_renderer.rs` restores the scene batch constant buffer
+after each completed blur composite. The blur shaders and ordinary scene vertex shaders both use
+constant-buffer slot `b1`; leaving `BlurParams` bound makes primitives after a backdrop read an
+invalid batch offset, so a modal backdrop can appear while its foreground panel is blank. Preserve
+the restoration when changing blur passes or batch submission.
+
 ### Native window movement, resizing, and ownership
 
 Windows client-decorated windows perform eight-direction outer-frame hit testing instead of

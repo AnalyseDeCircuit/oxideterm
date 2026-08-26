@@ -1,3 +1,4 @@
+// OxideTerm modification: preserve scene batch constants across DirectX blur passes.
 use std::{
     slice,
     sync::{Arc, OnceLock},
@@ -1135,6 +1136,15 @@ impl DirectXRenderer {
             4,
             false,
         )?;
+        unsafe {
+            // Blur shaders reuse b1 for BlurParams; later scene vertices need the
+            // batch offset buffer restored before drawing modal content above a backdrop.
+            self.devices
+                .as_ref()
+                .context("devices missing")?
+                .device_context
+                .VSSetConstantBuffers(1, Some(slice::from_ref(&self.globals.batch_params_buffer)));
+        }
         Ok(())
     }
 
