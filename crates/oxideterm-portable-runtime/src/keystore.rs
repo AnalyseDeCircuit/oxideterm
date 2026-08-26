@@ -9,6 +9,7 @@ use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead};
 use oxideterm_atomic_file::{durable_remove, durable_write};
+use oxideterm_secret_store::NativeSecretStore;
 use parking_lot::RwLock;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,7 @@ const PORTABLE_KEYSTORE_NONCE_LEN: usize = 12;
 const PORTABLE_KEYSTORE_SALT_LEN: usize = 32;
 const PORTABLE_KEYSTORE_KDF_V1: u32 = 0x0001;
 const PORTABLE_KEYSTORE_CURRENT_KDF: u32 = PORTABLE_KEYSTORE_KDF_V1;
+const PORTABLE_AUTO_UNLOCK_SERVICE: &str = "com.oxideterm.portable-auto-unlock";
 
 static PORTABLE_KEYSTORE_SESSION: LazyLock<RwLock<Option<PortableKeystoreSession>>> =
     LazyLock::new(|| RwLock::new(None));
@@ -75,6 +77,12 @@ pub enum PortableKeystoreError {
 
     #[error("Portable keystore decryption failed")]
     DecryptionFailed,
+
+    #[error("Portable automatic unlock credential is invalid")]
+    InvalidAutoUnlockCredential,
+
+    #[error("Failed to access the system credential manager")]
+    CredentialStore,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -109,6 +117,20 @@ struct PortableKeystoreSession {
     salt: [u8; PORTABLE_KEYSTORE_SALT_LEN],
     key: Zeroizing<[u8; 32]>,
     payload: PortableKeystorePayload,
+}
+
+struct DecodedPortableKeystoreEnvelope {
+    kdf_version: u32,
+    salt: [u8; PORTABLE_KEYSTORE_SALT_LEN],
+    nonce: Vec<u8>,
+    ciphertext: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PortableAutoUnlockOutcome {
+    NotConfigured,
+    Unlocked,
+    InvalidCredentialRemoved,
 }
 
 impl fmt::Debug for PortableKeystoreSession {
@@ -156,6 +178,14 @@ fn load_session_from_path(
     path: &Path,
     password: &str,
 ) -> Result<PortableKeystoreSession, PortableKeystoreError> {
+    let decoded = decode_envelope_from_path(path)?;
+    let key = derive_key(password, &decoded.salt, decoded.kdf_version)?;
+    decrypt_session(decoded, key)
+}
+
+fn decode_envelope_from_path(
+    path: &Path,
+) -> Result<DecodedPortableKeystoreEnvelope, PortableKeystoreError> {
     let bytes = fs::read(path)?;
     let envelope: PortableKeystoreEnvelope = serde_json::from_slice(&bytes)?;
     if envelope.format != PORTABLE_KEYSTORE_FORMAT {
@@ -175,16 +205,39 @@ fn load_session_from_path(
         return Err(PortableKeystoreError::Corrupted);
     }
 
-    let key = derive_key(password, &salt, envelope.kdf_version)?;
+    if envelope.kdf_version != PORTABLE_KEYSTORE_KDF_V1 && envelope.kdf_version != 0 {
+        return Err(PortableKeystoreError::UnsupportedVersion(
+            envelope.kdf_version,
+        ));
+    }
+    Ok(DecodedPortableKeystoreEnvelope {
+        kdf_version: envelope.kdf_version,
+        salt,
+        nonce: nonce_vec,
+        ciphertext,
+    })
+}
+
+fn decrypt_session(
+    decoded: DecodedPortableKeystoreEnvelope,
+    key: Zeroizing<[u8; 32]>,
+) -> Result<PortableKeystoreSession, PortableKeystoreError> {
     let cipher =
         ChaCha20Poly1305::new_from_slice(&*key).map_err(|_| PortableKeystoreError::Crypto)?;
     let plaintext = Zeroizing::new(
         cipher
-            .decrypt(Nonce::from_slice(&nonce_vec), ciphertext.as_ref())
+            .decrypt(
+                Nonce::from_slice(&decoded.nonce),
+                decoded.ciphertext.as_ref(),
+            )
             .map_err(|_| PortableKeystoreError::DecryptionFailed)?,
     );
     let payload = rmp_serde::from_slice::<PortableKeystorePayload>(&plaintext)?;
-    Ok(PortableKeystoreSession { salt, key, payload })
+    Ok(PortableKeystoreSession {
+        salt: decoded.salt,
+        key,
+        payload,
+    })
 }
 
 fn persist_session_to_path(
@@ -226,6 +279,108 @@ pub fn lock_portable_keystore() {
     *PORTABLE_KEYSTORE_SESSION.write() = None;
 }
 
+fn portable_auto_unlock_account(path: &Path) -> String {
+    let resolved = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    format!("v1:{}", resolved.display())
+}
+
+fn credential_store_error<T>(_error: T) -> PortableKeystoreError {
+    // Credential backends may include account metadata in their error chain.
+    // Keep that detail outside UI, logs, and diagnostics.
+    PortableKeystoreError::CredentialStore
+}
+
+fn encode_auto_unlock_key(key: &[u8; 32]) -> Zeroizing<String> {
+    // The encoded derived key is an unavoidable OS-store handoff owner and is
+    // wiped immediately after the credential manager consumes it.
+    Zeroizing::new(BASE64.encode(key))
+}
+
+fn decode_auto_unlock_key(token: &str) -> Result<Zeroizing<[u8; 32]>, PortableKeystoreError> {
+    let decoded = Zeroizing::new(
+        BASE64
+            .decode(token)
+            .map_err(|_| PortableKeystoreError::InvalidAutoUnlockCredential)?,
+    );
+    let key = decoded
+        .as_slice()
+        .try_into()
+        .map_err(|_| PortableKeystoreError::InvalidAutoUnlockCredential)?;
+    Ok(Zeroizing::new(key))
+}
+
+fn store_auto_unlock_key(path: &Path, key: &[u8; 32]) -> Result<(), PortableKeystoreError> {
+    let account = portable_auto_unlock_account(path);
+    let token = encode_auto_unlock_key(key);
+    NativeSecretStore::new(PORTABLE_AUTO_UNLOCK_SERVICE)
+        .store(&account, token.as_str())
+        .map_err(credential_store_error)
+}
+
+pub fn portable_auto_unlock_enabled() -> Result<bool, PortableKeystoreError> {
+    let path = portable_keystore_path()?;
+    if !path.exists() {
+        return Ok(false);
+    }
+    NativeSecretStore::new(PORTABLE_AUTO_UNLOCK_SERVICE)
+        .exists(&portable_auto_unlock_account(&path))
+        .map_err(credential_store_error)
+}
+
+pub fn enable_portable_auto_unlock() -> Result<(), PortableKeystoreError> {
+    let path = portable_keystore_path()?;
+    let token = {
+        let guard = PORTABLE_KEYSTORE_SESSION.read();
+        let session = guard.as_ref().ok_or(PortableKeystoreError::Locked)?;
+        encode_auto_unlock_key(&session.key)
+    };
+    NativeSecretStore::new(PORTABLE_AUTO_UNLOCK_SERVICE)
+        .store(&portable_auto_unlock_account(&path), token.as_str())
+        .map_err(credential_store_error)
+}
+
+pub fn disable_portable_auto_unlock() -> Result<(), PortableKeystoreError> {
+    let path = portable_keystore_path()?;
+    NativeSecretStore::new(PORTABLE_AUTO_UNLOCK_SERVICE)
+        .delete(&portable_auto_unlock_account(&path))
+        .map_err(credential_store_error)
+}
+
+pub fn try_portable_auto_unlock() -> Result<PortableAutoUnlockOutcome, PortableKeystoreError> {
+    let path = portable_keystore_path()?;
+    if !path.exists() {
+        return Ok(PortableAutoUnlockOutcome::NotConfigured);
+    }
+    let store = NativeSecretStore::new(PORTABLE_AUTO_UNLOCK_SERVICE);
+    let account = portable_auto_unlock_account(&path);
+    let Some(token) = store.get(&account).map_err(credential_store_error)? else {
+        return Ok(PortableAutoUnlockOutcome::NotConfigured);
+    };
+    let key = match decode_auto_unlock_key(token.as_str()) {
+        Ok(key) => key,
+        Err(PortableKeystoreError::InvalidAutoUnlockCredential) => {
+            store.delete(&account).map_err(credential_store_error)?;
+            return Ok(PortableAutoUnlockOutcome::InvalidCredentialRemoved);
+        }
+        Err(error) => return Err(error),
+    };
+    let decoded = decode_envelope_from_path(&path)?;
+    match decrypt_session(decoded, key) {
+        Ok(session) => {
+            *PORTABLE_KEYSTORE_SESSION.write() = Some(session);
+            let _ = crate::set_portable_bootstrap_status(crate::PortableBootstrapStatus::Unlocked);
+            Ok(PortableAutoUnlockOutcome::Unlocked)
+        }
+        Err(PortableKeystoreError::DecryptionFailed) => {
+            // A stale device credential must not block the password fallback or
+            // be retried on every subsequent launch.
+            store.delete(&account).map_err(credential_store_error)?;
+            Ok(PortableAutoUnlockOutcome::InvalidCredentialRemoved)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 pub fn create_portable_keystore(password: &str) -> Result<(), PortableKeystoreError> {
     let path = portable_keystore_path()?;
     if path.exists() {
@@ -265,6 +420,7 @@ pub fn change_portable_keystore_password(
         return Err(PortableKeystoreError::Missing);
     }
     let current_session = load_session_from_path(&path, current_password)?;
+    let auto_unlock_enabled = portable_auto_unlock_enabled()?;
     let mut new_salt = [0u8; PORTABLE_KEYSTORE_SALT_LEN];
     rand::rngs::OsRng.fill_bytes(&mut new_salt);
     let new_key = derive_key(new_password, &new_salt, PORTABLE_KEYSTORE_CURRENT_KDF)?;
@@ -273,7 +429,19 @@ pub fn change_portable_keystore_password(
         key: new_key,
         payload: current_session.payload,
     };
-    persist_session_to_path(&path, &next_session)?;
+    if auto_unlock_enabled {
+        // Publish the matching device credential first so a successful vault
+        // replacement can never leave automatic unlock bound to the old key.
+        store_auto_unlock_key(&path, &next_session.key)?;
+    }
+    if let Err(error) = persist_session_to_path(&path, &next_session) {
+        if auto_unlock_enabled {
+            // The old vault is still authoritative. Best-effort restoration
+            // avoids turning an atomic file-write failure into a stale binding.
+            let _ = store_auto_unlock_key(&path, &current_session.key);
+        }
+        return Err(error);
+    }
     *PORTABLE_KEYSTORE_SESSION.write() = Some(next_session);
     let _ = crate::set_portable_bootstrap_status(crate::PortableBootstrapStatus::Unlocked);
     Ok(())
@@ -281,8 +449,12 @@ pub fn change_portable_keystore_password(
 
 pub fn delete_portable_keystore() -> Result<(), PortableKeystoreError> {
     let path = portable_keystore_path()?;
+    let auto_unlock_account = portable_auto_unlock_account(&path);
     lock_portable_keystore();
     durable_remove(&path)?;
+    // Once the vault is gone, an orphaned derived key cannot reveal data. Do
+    // not make a completed reset fail solely because the OS store is offline.
+    let _ = NativeSecretStore::new(PORTABLE_AUTO_UNLOCK_SERVICE).delete(&auto_unlock_account);
     let _ = crate::set_portable_bootstrap_status(crate::PortableBootstrapStatus::NeedsSetup);
     Ok(())
 }
@@ -643,6 +815,30 @@ mod tests {
         let error = load_session_from_path(&path, "wrong-password").unwrap_err();
 
         assert!(matches!(error, PortableKeystoreError::DecryptionFailed));
+    }
+
+    #[test]
+    fn encoded_auto_unlock_key_decrypts_the_vault() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(PORTABLE_KEYSTORE_FILENAME);
+        let session = sample_session("secret123");
+        persist_session_to_path(&path, &session).unwrap();
+
+        let token = encode_auto_unlock_key(&session.key);
+        let key = decode_auto_unlock_key(token.as_str()).unwrap();
+        let restored = decrypt_session(decode_envelope_from_path(&path).unwrap(), key).unwrap();
+
+        assert_eq!(restored.salt, session.salt);
+    }
+
+    #[test]
+    fn malformed_auto_unlock_key_is_rejected() {
+        for token in ["not-base64", "c2hvcnQ="] {
+            assert!(matches!(
+                decode_auto_unlock_key(token),
+                Err(PortableKeystoreError::InvalidAutoUnlockCredential)
+            ));
+        }
     }
 
     #[test]

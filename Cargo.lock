@@ -8298,6 +8298,7 @@ dependencies = [
  "chacha20poly1305",
  "fs2",
  "oxideterm-atomic-file",
+ "oxideterm-secret-store",
  "parking_lot",
  "rand 0.8.6",
  "rmp-serde",

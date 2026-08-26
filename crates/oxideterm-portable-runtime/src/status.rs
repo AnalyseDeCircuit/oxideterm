@@ -38,6 +38,7 @@ pub struct PortableStatusSnapshot {
     pub can_launch_app: bool,
     pub has_keystore: bool,
     pub is_unlocked: bool,
+    pub auto_unlock_enabled: bool,
     pub portable_root_dir: String,
     pub marker_path: String,
     pub config_path: String,
@@ -94,6 +95,11 @@ pub fn portable_status_snapshot() -> Result<PortableStatusSnapshot, PortableErro
         can_launch_app: status.can_launch_full_app(),
         has_keystore: status.has_keystore(),
         is_unlocked: crate::keystore::is_portable_keystore_unlocked(),
+        // Status inspection remains usable when the desktop credential manager
+        // is temporarily unavailable; the toggle action will surface failure.
+        auto_unlock_enabled: info.is_portable
+            && status.has_keystore()
+            && crate::keystore::portable_auto_unlock_enabled().unwrap_or(false),
         portable_root_dir: info.host_dir.display().to_string(),
         marker_path: info.marker_path.display().to_string(),
         config_path: info.config_path.display().to_string(),
