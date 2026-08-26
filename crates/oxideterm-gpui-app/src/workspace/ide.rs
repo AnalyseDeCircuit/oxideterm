@@ -327,7 +327,7 @@ impl IdeWorkspaceEntity {
     ) {
         for entry in self.surfaces_by_tab.values() {
             entry.surface.update(cx, |surface, cx| {
-                surface.set_visual_and_runtime_settings(tokens, runtime_settings, cx);
+                surface.set_visual_and_runtime_settings(tokens, runtime_settings.clone(), cx);
             });
         }
     }
@@ -982,6 +982,10 @@ impl WorkspaceApp {
         let settings = self.settings_store.settings();
         IdeRuntimeSettings {
             auto_save: settings.ide.auto_save,
+            editor_font_fallback: oxideterm_gpui_ui::css_font_family_head(
+                &settings.appearance.ui_font_family,
+            )
+            .map(|family| family.to_string()),
             editor_font_size: settings
                 .ide
                 .font_size

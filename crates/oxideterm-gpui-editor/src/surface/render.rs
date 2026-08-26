@@ -179,7 +179,10 @@ impl Render for TextEditorView {
             .track_focus(&self.focus_handle)
             // Paint and measurement must use the same fallback chain, or a
             // missing configured font can make the caret drift on Windows.
-            .font(editor_code_font(&self.appearance.font_family))
+            .font(editor_code_font(
+                &self.appearance.font_family,
+                self.appearance.font_fallback_family.as_deref(),
+            ))
             .text_size(px(self.metrics.font_size))
             .line_height(px(self.metrics.line_height))
             .text_color(rgb(self.appearance.text_hex))

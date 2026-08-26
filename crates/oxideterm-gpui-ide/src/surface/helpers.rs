@@ -49,12 +49,13 @@ fn tree_motion_id(kind: &str, stable_path: &str) -> SharedString {
 fn apply_editor_runtime_settings(
     editor: &Entity<TextEditorView>,
     tokens: ThemeTokens,
-    runtime_settings: IdeRuntimeSettings,
+    runtime_settings: &IdeRuntimeSettings,
     cx: &mut Context<IdeSurface>,
 ) {
     editor.update(cx, |editor, cx| {
         editor.apply_ide_runtime_settings(
             &tokens,
+            runtime_settings.editor_font_fallback.clone(),
             runtime_settings.editor_font_size,
             runtime_settings.editor_line_height,
             runtime_settings.word_wrap,

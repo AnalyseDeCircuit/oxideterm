@@ -28,6 +28,7 @@ pub struct EditorAppearance {
     pub syntax_type_hex: u32,
     pub syntax_variable_hex: u32,
     pub font_family: String,
+    pub font_fallback_family: Option<String>,
 }
 
 impl EditorAppearance {
@@ -51,6 +52,7 @@ impl EditorAppearance {
             syntax_type_hex: tokens.terminal.bright_yellow,
             syntax_variable_hex: tokens.ui.text,
             font_family: tokens.metrics.markdown_code_font_family.to_string(),
+            font_fallback_family: None,
         }
     }
 }
@@ -94,8 +96,13 @@ impl EditorMetrics {
         }
     }
 
-    pub fn measure_code_cell_width(&mut self, window: &mut Window, font_family: &str) -> bool {
-        let font = editor_code_font(font_family);
+    pub fn measure_code_cell_width(
+        &mut self,
+        window: &mut Window,
+        font_family: &str,
+        font_fallback_family: Option<&str>,
+    ) -> bool {
+        let font = editor_code_font(font_family, font_fallback_family);
         let font_size = px(self.font_size);
         let font_id = window.text_system().resolve_font(&font);
         let measured = window
@@ -112,25 +119,58 @@ impl EditorMetrics {
     }
 }
 
-pub(crate) fn editor_code_font(family: &str) -> Font {
+const EDITOR_CODE_FONT_FALLBACKS: &[&str] = &[
+    "JetBrainsMono Nerd Font Mono",
+    "JetBrains Mono NF (Subset)",
+    "JetBrains Mono",
+    "SF Mono",
+    "Menlo",
+    "Monaco",
+    "Cascadia Mono",
+    "DejaVu Sans Mono",
+    "Noto Sans Mono",
+    "Liberation Mono",
+    "Courier New",
+];
+
+pub(crate) fn editor_code_font(family: &str, preferred_fallback: Option<&str>) -> Font {
+    let mut fallbacks = Vec::with_capacity(EDITOR_CODE_FONT_FALLBACKS.len() + 1);
+    if let Some(preferred_fallback) = preferred_fallback
+        .map(str::trim)
+        .filter(|fallback| !fallback.is_empty() && *fallback != family)
+    {
+        // The primary code font keeps Latin glyphs monospaced while the user's
+        // UI family supplies CJK glyphs before platform fallback takes over.
+        fallbacks.push(preferred_fallback.to_string());
+    }
+    fallbacks.extend(
+        EDITOR_CODE_FONT_FALLBACKS
+            .iter()
+            .filter(|fallback| **fallback != family)
+            .map(|fallback| (*fallback).to_string()),
+    );
     Font {
         family: SharedString::from(family.to_string()),
         features: FontFeatures::disable_ligatures(),
-        fallbacks: Some(FontFallbacks::from_fonts(vec![
-            "JetBrainsMono Nerd Font Mono".to_string(),
-            "JetBrains Mono NF (Subset)".to_string(),
-            "JetBrains Mono".to_string(),
-            "SF Mono".to_string(),
-            "Menlo".to_string(),
-            "Monaco".to_string(),
-            "Cascadia Mono".to_string(),
-            "DejaVu Sans Mono".to_string(),
-            "Noto Sans Mono".to_string(),
-            "Liberation Mono".to_string(),
-            "Courier New".to_string(),
-        ])),
+        fallbacks: Some(FontFallbacks::from_fonts(fallbacks)),
         weight: FontWeight::default(),
         style: FontStyle::Normal,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_editor_fallback_precedes_platform_fallbacks() {
+        let font = editor_code_font("JetBrains Mono", Some("DengXian"));
+        let fallbacks = font.fallbacks.expect("editor font fallbacks");
+
+        assert_eq!(
+            fallbacks.fallback_list().first().map(String::as_str),
+            Some("DengXian")
+        );
     }
 }
 

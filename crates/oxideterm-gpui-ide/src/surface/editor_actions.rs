@@ -1173,7 +1173,7 @@ impl IdeSurface {
         cx: &mut Context<Self>,
     ) {
         let tokens = self.tokens;
-        let runtime_settings = self.runtime_settings;
+        let runtime_settings = self.runtime_settings.clone();
         let language = language_for_location(location, &text);
         let surface = cx.entity();
         let save_surface = surface.clone();
@@ -1188,6 +1188,7 @@ impl IdeSurface {
             });
             editor.apply_ide_runtime_settings(
                 &tokens,
+                runtime_settings.editor_font_fallback.clone(),
                 runtime_settings.editor_font_size,
                 runtime_settings.editor_line_height,
                 runtime_settings.word_wrap,

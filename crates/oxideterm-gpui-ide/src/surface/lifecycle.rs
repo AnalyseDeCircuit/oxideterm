@@ -111,26 +111,27 @@ impl IdeSurface {
         cx: &mut Context<Self>,
     ) {
         let previous_agent_mode = self.runtime_settings.agent_mode;
+        let next_agent_mode = runtime_settings.agent_mode;
         self.tokens = tokens;
         self.runtime_settings = runtime_settings;
-        self.fs.set_mode(runtime_settings.agent_mode);
-        if runtime_settings.agent_mode == NodeAgentMode::Disabled {
+        self.fs.set_mode(next_agent_mode);
+        if next_agent_mode == NodeAgentMode::Disabled {
             self.cancel_agent_sampling();
             self.stop_agent_watch(cx);
         } else if previous_agent_mode == NodeAgentMode::Disabled && self.mount.is_visible() {
             self.resume_agent_sampling(cx);
         }
-        if runtime_settings.agent_mode != NodeAgentMode::Ask {
+        if next_agent_mode != NodeAgentMode::Ask {
             self.agent_opt_in_open = false;
         }
         for editor in self.editors.values() {
-            apply_editor_runtime_settings(editor, self.tokens, self.runtime_settings, cx);
+            apply_editor_runtime_settings(editor, self.tokens, &self.runtime_settings, cx);
         }
         cx.notify();
     }
 
     pub fn set_agent_mode(&mut self, agent_mode: NodeAgentMode, cx: &mut Context<Self>) {
-        let mut runtime_settings = self.runtime_settings;
+        let mut runtime_settings = self.runtime_settings.clone();
         runtime_settings.agent_mode = agent_mode;
         self.set_visual_and_runtime_settings(self.tokens, runtime_settings, cx);
     }

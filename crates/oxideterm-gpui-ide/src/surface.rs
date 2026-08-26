@@ -200,9 +200,10 @@ impl IdeSurfaceMount {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct IdeRuntimeSettings {
     pub auto_save: bool,
+    pub editor_font_fallback: Option<String>,
     pub editor_font_size: f32,
     pub editor_line_height: f32,
     pub word_wrap: bool,
@@ -214,6 +215,7 @@ impl Default for IdeRuntimeSettings {
     fn default() -> Self {
         Self {
             auto_save: false,
+            editor_font_fallback: None,
             editor_font_size: 14.0,
             editor_line_height: 1.2,
             word_wrap: false,

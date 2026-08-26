@@ -522,15 +522,17 @@ impl TextEditorView {
     pub fn apply_ide_runtime_settings(
         &mut self,
         tokens: &ThemeTokens,
+        font_fallback_family: Option<String>,
         font_size: f32,
         line_height: f32,
         word_wrap: bool,
         background_active: bool,
         cx: &mut Context<Self>,
     ) {
-        self.apply_runtime_settings(
+        self.apply_runtime_settings_with_fallback(
             tokens,
             tokens.metrics.markdown_code_font_family.to_string(),
+            font_fallback_family,
             font_size,
             line_height,
             word_wrap,
@@ -549,9 +551,33 @@ impl TextEditorView {
         background_active: bool,
         cx: &mut Context<Self>,
     ) {
+        self.apply_runtime_settings_with_fallback(
+            tokens,
+            font_family,
+            None,
+            font_size,
+            line_height,
+            word_wrap,
+            background_active,
+            cx,
+        );
+    }
+
+    fn apply_runtime_settings_with_fallback(
+        &mut self,
+        tokens: &ThemeTokens,
+        font_family: String,
+        font_fallback_family: Option<String>,
+        font_size: f32,
+        line_height: f32,
+        word_wrap: bool,
+        background_active: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.appearance = EditorAppearance::from_theme(tokens);
         // Embedded editors can follow the typography of their owning surface.
         self.appearance.font_family = font_family;
+        self.appearance.font_fallback_family = font_fallback_family;
         self.metrics =
             EditorMetrics::from_theme_with_editor_typography(tokens, font_size, line_height);
         self.transparent_background = background_active;
@@ -1028,10 +1054,11 @@ impl TextEditorView {
         // CodeMirror measures actual font advances through the browser layout
         // engine. GPUI needs the same explicit measurement; the old 0.62 ratio
         // is only a startup fallback before the first render has a Window.
-        if self
-            .metrics
-            .measure_code_cell_width(window, &self.appearance.font_family)
-        {
+        if self.metrics.measure_code_cell_width(
+            window,
+            &self.appearance.font_family,
+            self.appearance.font_fallback_family.as_deref(),
+        ) {
             self.viewport
                 .clamp(self.document_row_count(), self.metrics.line_height);
             cx.notify();
@@ -1212,7 +1239,10 @@ impl TextEditorView {
         let text = SharedString::from(text.to_string());
         let run = TextRun {
             len: text.len(),
-            font: editor_code_font(&self.appearance.font_family),
+            font: editor_code_font(
+                &self.appearance.font_family,
+                self.appearance.font_fallback_family.as_deref(),
+            ),
             color: rgb(self.appearance.text_hex).into_color(),
             background_color: None,
             underline: None,

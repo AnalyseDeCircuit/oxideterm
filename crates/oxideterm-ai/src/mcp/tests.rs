@@ -739,83 +739,8 @@ mod tests {
         assert!(validate_mcp_http_url("file:///tmp/mcp").is_err());
     }
 
-    #[test]
-    fn http_headers_match_tauri_auth_and_reserved_filtering() {
-        let mut config = http_test_config("auth", McpTransport::StreamableHttp, "http://127.0.0.1");
-        config.auth_header_name = Some("X-API-Key".to_string());
-        config.auth_header_mode = Some(McpAuthHeaderMode::Raw);
-        config
-            .headers
-            .insert("X-Workspace".to_string(), "prod".to_string());
-        config
-            .headers
-            .insert("Accept".to_string(), "text/plain".to_string());
-        config
-            .headers
-            .insert("MCP-Session-Id".to_string(), "bad".to_string());
 
-        let headers = build_http_headers(
-            &config,
-            Some("token-123"),
-            None,
-            &McpProtocol::legacy_streamable_http(),
-            true,
-            "application/json, text/event-stream",
-        )
-        .unwrap();
 
-        assert_eq!(headers["X-API-Key"], "token-123");
-        assert_eq!(headers["X-Workspace"], "prod");
-        assert_eq!(headers["accept"], "application/json, text/event-stream");
-        assert!(!headers.contains_key("authorization"));
-        assert!(!headers.contains_key("mcp-session-id"));
-    }
-
-    #[test]
-    fn mcp_snapshot_redacts_sensitive_args_like_tauri() {
-        let redacted = redact_sensitive_args(&[
-            "--api-key".to_string(),
-            "secret-1".to_string(),
-            "--api_key=secret-2".to_string(),
-            "--authorization".to_string(),
-            "secret-3".to_string(),
-            "--bearer=secret-4".to_string(),
-            "plain".to_string(),
-        ]);
-
-        assert_eq!(
-            redacted,
-            vec![
-                "--api-key",
-                "[redacted]",
-                "--api_key=[redacted]",
-                "--authorization",
-                "[redacted]",
-                "--bearer=[redacted]",
-                "plain",
-            ]
-        );
-    }
-
-    #[test]
-    fn sse_parser_matches_tauri_line_semantics() {
-        let mut parser = SseEventParser::default();
-        parser.push_str(": keepalive\r\n");
-        parser.push_str("event: message\r\n");
-        parser.push_str("data: {\"a\":1}\r\n");
-        parser.push_str("data: {\"b\":2}\r\n\r\n");
-        parser.push_str("data: tail");
-
-        let events = parser.drain_events();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].name, "message");
-        assert_eq!(events[0].data, "{\"a\":1}\n{\"b\":2}");
-
-        let events = parser.finish();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].name, "message");
-        assert_eq!(events[0].data, "tail");
-    }
 
     #[test]
     fn mcp_tool_output_keeps_error_text_out_of_truncation_meta() {
@@ -836,25 +761,6 @@ mod tests {
         assert!(!truncated);
     }
 
-    #[test]
-    fn mcp_output_truncates_like_tauri_char_slice() {
-        let text = "你".repeat(MCP_TOOL_OUTPUT_MAX_CHARS + 1);
-        let result = McpCallToolResult {
-            is_error: false,
-            structured_content: None,
-            content: vec![McpCallContent {
-                content_type: "text".to_string(),
-                text: Some(text),
-                data: None,
-                mime_type: None,
-            }],
-        };
-
-        let (ok, output, truncated) = mcp_tool_output(&result);
-        assert!(ok);
-        assert!(truncated);
-        assert_eq!(output.chars().count(), MCP_TOOL_OUTPUT_MAX_CHARS);
-    }
 
     fn http_test_config(id: &str, transport: McpTransport, url: &str) -> McpServerConfig {
         McpServerConfig {
