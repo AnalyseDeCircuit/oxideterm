@@ -852,6 +852,7 @@ pub(crate) struct WorkspaceApp {
     settings_legal_notice_scroll: MarkdownVirtualListScrollHandle,
     _window_intents: Entity<WorkspaceWindowIntentEntity>,
     _window_intent_subscription: Subscription,
+    _window_button_layout_subscription: Subscription,
     window_registry: window_registry::WorkspaceWindowRegistry,
     window_effect_delivery_scheduled: bool,
     connection_flow: Entity<ConnectionFlowEntity>,

@@ -1,3 +1,4 @@
+// OxideTerm modification: child surface ownership is committed only after renderer setup succeeds.
 use std::{
     cell::{Cell, Ref, RefCell, RefMut},
     ffi::c_void,
@@ -231,10 +232,6 @@ impl WaylandSurfaceState {
                 xdg_popup.grab(&seat, serial);
             }
 
-            // Non-blocking: the parent keeps its input so it can dismiss the popup on
-            // clicks in its own window.
-            parent.add_child(surface.id(), false);
-
             return Ok(WaylandSurfaceState::Popup(WaylandPopupSurfaceState {
                 xdg_surface,
                 xdg_popup,
@@ -261,10 +258,6 @@ impl WaylandSurfaceState {
                 xdg_dialog.set_modal();
                 xdg_dialog
             });
-
-            if let Some(parent) = parent.as_ref() {
-                parent.add_child(surface.id(), true);
-            }
 
             dialog
         } else {
@@ -830,6 +823,12 @@ impl WaylandWindow {
         popup_grab: Option<(u32, wl_seat::WlSeat)>,
         target_output: Option<wl_output::WlOutput>,
     ) -> anyhow::Result<(Self, ObjectId)> {
+        let child_blocks_parent = match &params.kind {
+            WindowKind::AnchoredPopup(_) => Some(false),
+            WindowKind::Dialog => Some(true),
+            _ => None,
+        };
+        let child_parent = parent.clone();
         let surface = globals.compositor.create_surface(&globals.qh, ());
         let surface_state = WaylandSurfaceState::new(
             &surface,
@@ -850,21 +849,27 @@ impl WaylandWindow {
             .map(|viewporter| viewporter.get_viewport(&surface, &globals.qh, ()));
 
         let frame_ping = globals.frame_ping.clone();
+        let state = WaylandWindowState::new(
+            handle,
+            surface.clone(),
+            surface_state,
+            appearance,
+            viewport,
+            client,
+            globals,
+            gpu_context,
+            compositor_gpu,
+            gpu_requirements,
+            params,
+            parent,
+        )?;
+        if let (Some(parent), Some(blocking)) = (child_parent, child_blocks_parent) {
+            // No fallible setup remains after this point, so a failed renderer cannot strand a
+            // blocking dialog or stale popup in the parent's ownership registry.
+            parent.add_child(surface.id(), blocking);
+        }
         let this = Self(WaylandWindowStatePtr {
-            state: Rc::new(RefCell::new(WaylandWindowState::new(
-                handle,
-                surface.clone(),
-                surface_state,
-                appearance,
-                viewport,
-                client,
-                globals,
-                gpu_context,
-                compositor_gpu,
-                gpu_requirements,
-                params,
-                parent,
-            )?)),
+            state: Rc::new(RefCell::new(state)),
             callbacks: Rc::new(RefCell::new(Callbacks::default())),
             frame_loop: Rc::new(Cell::new(FrameLoop::Unconfigured)),
             frame_ping,

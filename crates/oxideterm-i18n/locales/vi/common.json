@@ -3,6 +3,12 @@
     "name": "OxideTerm",
     "shellLauncher": "Trình khởi chạy shell"
   },
+  "window_controls": {
+    "minimize": "Thu nhỏ",
+    "maximize": "Phóng to",
+    "restore": "Khôi phục",
+    "close": "Đóng"
+  },
   "language": {
     "english": "English",
     "simplified_chinese": "简体中文",

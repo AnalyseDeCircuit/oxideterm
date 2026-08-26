@@ -3,6 +3,12 @@
     "name": "OxideTerm",
     "shellLauncher": "Shell 启动器"
   },
+  "window_controls": {
+    "minimize": "最小化",
+    "maximize": "最大化",
+    "restore": "还原",
+    "close": "关闭"
+  },
   "language": {
     "english": "English",
     "simplified_chinese": "简体中文",

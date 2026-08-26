@@ -3,6 +3,12 @@
     "name": "OxideTerm",
     "shellLauncher": "Shell Launcher"
   },
+  "window_controls": {
+    "minimize": "Minimize",
+    "maximize": "Maximize",
+    "restore": "Restore",
+    "close": "Close"
+  },
   "language": {
     "english": "English",
     "simplified_chinese": "简体中文",

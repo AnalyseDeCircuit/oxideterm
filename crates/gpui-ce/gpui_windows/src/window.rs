@@ -1,4 +1,5 @@
 #![deny(unsafe_op_in_unsafe_fn)]
+// OxideTerm modification: complete native move, resize, owner, and modal-failure handling.
 
 use std::{
     cell::{Cell, RefCell},
@@ -495,20 +496,19 @@ impl WindowsWindow {
             _ = invalidate_devices;
         }
         register_window_class(icon);
-        let parent_hwnd = if params.kind == WindowKind::Dialog {
+        let owner_hwnd = if matches!(params.kind, WindowKind::Floating | WindowKind::Dialog) {
             let parent_window = unsafe { GetActiveWindow() };
             if parent_window.is_invalid() {
                 None
             } else {
-                // Disable the parent window to make this dialog modal
-                unsafe {
-                    EnableWindow(parent_window, false).as_bool();
-                };
                 Some(parent_window)
             }
         } else {
             None
         };
+        let modal_parent_hwnd = (params.kind == WindowKind::Dialog)
+            .then_some(owner_hwnd)
+            .flatten();
         let hide_title_bar = params
             .titlebar
             .as_ref()
@@ -581,7 +581,7 @@ impl WindowsWindow {
             #[cfg(not(feature = "wgpu"))]
             invalidate_devices,
             draw_coordinator,
-            parent_hwnd,
+            parent_hwnd: modal_parent_hwnd,
         };
         let creation_result = unsafe {
             CreateWindowExW(
@@ -593,7 +593,7 @@ impl WindowsWindow {
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
-                parent_hwnd,
+                owner_hwnd,
                 None,
                 Some(hinstance.into()),
                 Some(&context as *const _ as *const _),
@@ -617,12 +617,26 @@ impl WindowsWindow {
             this.state.scale_factor.get(),
             &this.state.border_offset,
         )?;
+        if let Some(parent_hwnd) = modal_parent_hwnd {
+            // All setup before showing the dialog has succeeded. From this point, failures must
+            // explicitly restore the owner so it cannot remain disabled without a live modal.
+            unsafe {
+                EnableWindow(parent_hwnd, false).as_bool();
+            }
+        }
         if params.show {
             let mut placement = placement;
             if !params.focus {
                 placement.showCmd = SW_SHOWNOACTIVATE.0 as u32;
             }
-            unsafe { SetWindowPlacement(hwnd, &placement)? };
+            if let Err(error) = unsafe { SetWindowPlacement(hwnd, &placement) } {
+                if let Some(parent_hwnd) = modal_parent_hwnd {
+                    unsafe {
+                        EnableWindow(parent_hwnd, true).as_bool();
+                    }
+                }
+                return Err(error.into());
+            }
         } else {
             this.state.initial_placement.set(Some(WindowOpenStatus {
                 placement,
@@ -631,6 +645,29 @@ impl WindowsWindow {
         }
 
         Ok(Self(this))
+    }
+
+    fn start_native_window_operation(&self, hit_test: u32) {
+        let mut cursor_position = POINT::default();
+        if let Err(error) = unsafe { GetCursorPos(&mut cursor_position) } {
+            log::warn!("failed to read cursor position before native window operation: {error}");
+            return;
+        }
+        unsafe { ReleaseCapture() }.log_err();
+        self.state.dragging.set(true);
+        if let Err(error) = unsafe {
+            PostMessageW(
+                Some(self.0.hwnd),
+                WM_NCLBUTTONDOWN,
+                WPARAM(hit_test as usize),
+                packed_point_lparam(cursor_position),
+            )
+        } {
+            // A failed post never enters the native size/move loop, so no exit message can clear
+            // the logical drag state for us.
+            self.state.dragging.set(false);
+            log::warn!("failed to start native window operation: {error}");
+        }
     }
 }
 
@@ -1035,30 +1072,26 @@ impl PlatformWindow for WindowsWindow {
     }
 
     fn start_window_move(&self) {
-        // winit does this by tracking whether the user is mouse-dragging
-        //     https://github.com/rust-windowing/winit/blob/9674d8ceef6976326fe9583a81f2e684daac05d6/winit-win32/src/window.rs#L241-L269
-        //     https://github.com/rust-windowing/winit/blob/9674d8ceef6976326fe9583a81f2e684daac05d6/winit-win32/src/event_loop.rs#L1234-L1243
-        self.state.dragging.set(true);
+        if self.is_movable {
+            self.start_native_window_operation(HTCAPTION);
+        }
+    }
 
-        let cursor_pos = {
-            let mut pos = unsafe { std::mem::zeroed() };
-            let _ = unsafe { GetCursorPos(&mut pos) };
-            pos
+    fn start_window_resize(&self, edge: ResizeEdge) {
+        if !self.is_resizable || self.state.is_maximized() || self.state.is_fullscreen() {
+            return;
+        }
+        let hit_test = match edge {
+            ResizeEdge::Top => HTTOP,
+            ResizeEdge::TopRight => HTTOPRIGHT,
+            ResizeEdge::Right => HTRIGHT,
+            ResizeEdge::BottomRight => HTBOTTOMRIGHT,
+            ResizeEdge::Bottom => HTBOTTOM,
+            ResizeEdge::BottomLeft => HTBOTTOMLEFT,
+            ResizeEdge::Left => HTLEFT,
+            ResizeEdge::TopLeft => HTTOPLEFT,
         };
-        let points = POINTS {
-            x: cursor_pos.x as i16,
-            y: cursor_pos.y as i16,
-        };
-
-        let _ = unsafe { ReleaseCapture() };
-        let _ = unsafe {
-            PostMessageW(
-                Some(self.0.hwnd),
-                WM_NCLBUTTONDOWN,
-                WPARAM(HTCAPTION as usize),
-                LPARAM(&points as *const _ as isize),
-            )
-        };
+        self.start_native_window_operation(hit_test);
     }
 
     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>) {
@@ -1799,11 +1832,18 @@ fn set_non_rude_hwnd(hwnd: HWND, non_rude: bool) {
     }
 }
 
+fn packed_point_lparam(point: POINT) -> LPARAM {
+    let x = point.x as i16 as u16 as u32;
+    let y = point.y as i16 as u16 as u32;
+    LPARAM(((y << 16) | x) as isize)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::ClickState;
+    use super::{ClickState, packed_point_lparam};
     use gpui::{DevicePixels, MouseButton, point};
     use std::time::Duration;
+    use windows::Win32::Foundation::POINT;
 
     #[test]
     fn test_double_click_interval() {
@@ -1852,5 +1892,13 @@ mod tests {
             state.update(MouseButton::Right, point(DevicePixels(10), DevicePixels(0))),
             1
         );
+    }
+
+    #[test]
+    fn native_window_operation_packs_signed_screen_coordinates() {
+        let packed = packed_point_lparam(POINT { x: -20, y: 300 });
+
+        assert_eq!(packed.0 as u32 & 0xffff, (-20_i16) as u16 as u32);
+        assert_eq!((packed.0 as u32 >> 16) & 0xffff, 300);
     }
 }

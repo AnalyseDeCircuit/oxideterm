@@ -1396,6 +1396,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let button_layout = sidebar::client_titlebar_button_layout(cx);
+        let supported_controls = window.window_controls();
         div()
             .h(px(self.tokens.metrics.titlebar_height))
             .w_full()
@@ -1404,9 +1406,21 @@ impl WorkspaceApp {
             .border_b_1()
             .border_color(rgb(theme.border))
             .bg(rgb(theme.bg))
-            .pl(px(72.0))
+            // Linux controls must begin at the configured edge; keep the
+            // existing traffic-light/title inset on the other desktop shells.
+            .when(!cfg!(target_os = "linux"), |bar| bar.pl(px(72.0)))
             .text_size(px(self.tokens.metrics.titlebar_label_font_size))
             .text_color(rgb(theme.text))
+            .when(cfg!(target_os = "linux"), |bar| {
+                bar.child(self.render_client_titlebar_controls(
+                    button_layout.left,
+                    supported_controls,
+                    theme.bg,
+                    theme.text_muted,
+                    window.is_maximized(),
+                    cx,
+                ))
+            })
             .child(
                 div()
                     .id(("detached-tab-title-drag", tab_id.0))
@@ -1426,8 +1440,11 @@ impl WorkspaceApp {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                    if sidebar::handle_window_drag_mouse_down(event, window) {
+                                        cx.stop_propagation();
+                                        return;
+                                    }
                                     this.start_detached_tab_return_drag(tab_id, event, window, cx);
-                                    window.start_window_move();
                                     cx.stop_propagation();
                                 }),
                             )
@@ -1473,18 +1490,43 @@ impl WorkspaceApp {
             )
             .when(
                 cfg!(any(target_os = "windows", target_os = "linux")),
-                |bar| bar.child(self.render_detached_client_titlebar_controls(window, cx)),
+                |bar| {
+                    bar.child(self.render_detached_client_titlebar_controls(
+                        button_layout.right,
+                        supported_controls,
+                        window,
+                        cx,
+                    ))
+                },
+            )
+            .when(
+                cfg!(target_os = "linux") && supported_controls.window_menu,
+                |bar| {
+                    bar.on_mouse_down(MouseButton::Right, |event, window, cx| {
+                        window.show_window_menu(event.position);
+                        cx.stop_propagation();
+                    })
+                },
             )
             .into_any_element()
     }
 
     fn render_detached_client_titlebar_controls(
         &self,
+        buttons: [Option<gpui::WindowButton>; gpui::MAX_BUTTONS_PER_SIDE],
+        supported_controls: gpui::WindowControls,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        self.render_client_titlebar_controls(theme.bg, theme.text_muted, window.is_maximized(), cx)
+        self.render_client_titlebar_controls(
+            buttons,
+            supported_controls,
+            theme.bg,
+            theme.text_muted,
+            window.is_maximized(),
+            cx,
+        )
     }
 
     fn render_detached_tab_message(

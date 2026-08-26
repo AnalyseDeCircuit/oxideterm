@@ -119,6 +119,36 @@ setup has settled. Named stage samples are merged only after a timed iterator re
 histogram aggregation outside the measurement while allowing product benchmarks to split their
 own synchronous pipelines.
 
+### Pointer capture and Windows cursor recovery
+
+`crates/gpui-ce/gpui/src/window.rs` cancels logical pointer capture and application drag state when
+a platform window loses focus or hover ownership. Native platforms may revoke capture without a
+final mouse-up event, and retaining the old hitbox makes a text input remain globally hovered and
+consume later clicks. `crates/gpui-ce/gpui_windows/src/events.rs` immediately applies a changed
+cursor handle to the currently hovered window while respecting cursor hiding, and clears an
+unreleased non-client caption press when the pointer leaves the window. Preserve both parts:
+capture recovery restores hit testing on every desktop backend, while the Windows update prevents
+an I-beam or pressed caption control from remaining visible after native pointer ownership is lost.
+
+`Window::request_close` routes programmatic close controls through the same stored
+`on_window_should_close` handler as an operating-system close event before marking the window for
+removal. Client-decorated close buttons must use this request path so future unsaved-work or
+close-to-background policies cannot be bypassed.
+
+### Native window movement, resizing, and ownership
+
+Windows client-decorated windows perform eight-direction outer-frame hit testing instead of
+leaving the left, right, and bottom resize targets at the system's minimal fallback width.
+`gpui_windows::WindowsWindow` also implements the platform resize entry point and packs screen
+coordinates into `WM_NCLBUTTONDOWN` according to the Win32 message contract. Floating windows are
+owned by the active application window. Modal parents are disabled only after renderer and window
+setup succeeds, and are restored if the final placement operation fails.
+
+X11 and Wayland retain their native compositor move and resize protocols. Dialog and anchored-popup
+ownership is added to the parent registry only after renderer and platform setup succeeds. Keep
+registration at that commit boundary: registering earlier can leave a destroyed child recorded as
+blocking, causing the parent window to reject all later input.
+
 ### Transparent border-only quad overdraw
 
 `crates/gpui-ce/gpui/src/window.rs` limits transparent, border-only quads to four clipped

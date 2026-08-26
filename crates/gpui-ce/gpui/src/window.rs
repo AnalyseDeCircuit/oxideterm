@@ -1,3 +1,4 @@
+// OxideTerm modification: window lifecycle changes cancel stale pointer capture and drag state.
 #[cfg(feature = "profiler")]
 use crate::DebugFrameOverlayMode;
 #[cfg(any(feature = "inspector", debug_assertions))]
@@ -1201,6 +1202,7 @@ pub struct Window {
     appearance: WindowAppearance,
     pub(crate) appearance_observers: SubscriberSet<(), AnyObserver>,
     pub(crate) button_layout_observers: SubscriberSet<(), AnyObserver>,
+    should_close_handler: RefCell<Option<Box<dyn FnMut(&mut Window, &mut App) -> bool>>>,
     active: Rc<Cell<bool>>,
     hovered: Rc<Cell<bool>>,
     pub(crate) needs_present: Rc<Cell<bool>>,
@@ -1800,6 +1802,9 @@ impl Window {
             move |active| {
                 handle
                     .update(&mut cx, |_, window, cx| {
+                        if !active {
+                            window.cancel_pointer_interaction(cx);
+                        }
                         window.active.set(active);
                         window.modifiers = window.platform_window.modifiers();
                         window.capslock = window.platform_window.capslock();
@@ -1820,7 +1825,10 @@ impl Window {
             let mut cx = cx.to_async();
             move |active| {
                 handle
-                    .update(&mut cx, |_, window, _| {
+                    .update(&mut cx, |_, window, cx| {
+                        if !active {
+                            window.cancel_pointer_interaction(cx);
+                        }
                         window.hovered.set(active);
                         window.refresh();
                     })
@@ -1954,6 +1962,7 @@ impl Window {
             appearance,
             appearance_observers: SubscriberSet::new(),
             button_layout_observers: SubscriberSet::new(),
+            should_close_handler: RefCell::new(None),
             active,
             hovered,
             needs_present,
@@ -2113,6 +2122,22 @@ impl Window {
     /// Close this window.
     pub fn remove_window(&mut self) {
         self.removed = true;
+    }
+
+    /// Requests a close through the same interruptible path as a native close event.
+    pub fn request_close(&mut self, cx: &mut App) {
+        if self.run_should_close(cx) {
+            self.remove_window();
+        }
+    }
+
+    fn run_should_close(&mut self, cx: &mut App) -> bool {
+        let Some(mut handler) = self.should_close_handler.borrow_mut().take() else {
+            return true;
+        };
+        let should_close = handler(self, cx);
+        self.should_close_handler.borrow_mut().replace(handler);
+        should_close
     }
 
     /// Obtain the currently focused [`FocusHandle`]. If no elements are focused, returns `None`.
@@ -2921,6 +2946,13 @@ impl Window {
     /// Returns the hitbox that has captured the pointer, if any.
     pub fn captured_hitbox(&self) -> Option<HitboxId> {
         self.captured_hitbox
+    }
+
+    fn cancel_pointer_interaction(&mut self, cx: &mut App) {
+        // Platforms can revoke native capture without delivering MouseUp, for example on Alt-Tab
+        // or when the compositor transfers ownership. Do not leave the old hitbox globally hovered.
+        self.captured_hitbox = None;
+        cx.stop_active_drag(self);
     }
 
     /// The current state of the keyboard's modifiers
@@ -6465,9 +6497,11 @@ impl Window {
         cx: &App,
         f: impl Fn(&mut Window, &mut App) -> bool + 'static,
     ) {
+        self.should_close_handler.borrow_mut().replace(Box::new(f));
         let mut cx = self.to_async(cx);
         self.platform_window.on_should_close(Box::new(move || {
-            cx.update(|window, cx| f(window, cx)).unwrap_or(true)
+            cx.update(|window, cx| window.run_should_close(cx))
+                .unwrap_or(true)
         }))
     }
 
@@ -8058,6 +8092,53 @@ mod tests {
             cx.test_window(failed.window).external_drag_files(),
             [(failed_path, true)]
         );
+    }
+
+    #[gpui::test]
+    fn platform_ownership_loss_releases_pointer_capture(cx: &mut TestAppContext) {
+        let window = cx.add_window(|_, _| EmptyView);
+
+        window
+            .update(cx, |_, window, cx| {
+                window.capture_pointer(super::HitboxId(42));
+                assert!(window.captured_hitbox().is_some());
+
+                window.cancel_pointer_interaction(cx);
+
+                assert!(window.captured_hitbox().is_none());
+            })
+            .expect("test window should remain open");
+    }
+
+    #[gpui::test]
+    fn programmatic_close_uses_native_should_close_handler(cx: &mut TestAppContext) {
+        let allow_close = Rc::new(Cell::new(false));
+        let close_requests = Rc::new(Cell::new(0));
+        let window = cx.add_window(|_, _| EmptyView);
+
+        window
+            .update(cx, |_, window, cx| {
+                let allow_close = allow_close.clone();
+                let close_requests = close_requests.clone();
+                window.on_window_should_close(cx, move |_, _| {
+                    close_requests.set(close_requests.get() + 1);
+                    allow_close.get()
+                });
+
+                window.request_close(cx);
+                assert!(!window.removed);
+            })
+            .expect("rejected close should keep the window open");
+        assert_eq!(close_requests.get(), 1);
+
+        allow_close.set(true);
+        window
+            .update(cx, |_, window, cx| {
+                window.request_close(cx);
+                assert!(window.removed);
+            })
+            .expect("accepted close should mark the window for removal");
+        assert_eq!(close_requests.get(), 2);
     }
 
     struct FocusForwarder {

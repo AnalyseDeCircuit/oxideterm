@@ -3,6 +3,12 @@
     "name": "OxideTerm",
     "shellLauncher": "셸 실행기"
   },
+  "window_controls": {
+    "minimize": "최소화",
+    "maximize": "최대화",
+    "restore": "복원",
+    "close": "닫기"
+  },
   "language": {
     "english": "English",
     "simplified_chinese": "简体中文",

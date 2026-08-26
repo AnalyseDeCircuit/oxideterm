@@ -1,3 +1,4 @@
+// OxideTerm modification: modal parent ownership is registered only after window setup succeeds.
 use anyhow::{Context as _, anyhow};
 use x11rb::connection::RequestConnection;
 
@@ -636,8 +637,6 @@ impl X11WindowState {
             let parent = if params.kind == WindowKind::Dialog
                 && let Some(parent) = parent_window
             {
-                parent.add_child(x_window);
-
                 Some(parent)
             } else {
                 None
@@ -860,6 +859,14 @@ impl X11WindowState {
                 xcb.destroy_window(x_window),
             )?;
             xcb_flush(xcb);
+        }
+
+        if let Ok(state) = &setup_result
+            && let Some(parent) = state.parent.as_ref()
+        {
+            // Registration is deliberately last: setup failures must not leave the parent blocked
+            // by a child window that was already destroyed.
+            parent.add_child(x_window);
         }
 
         setup_result

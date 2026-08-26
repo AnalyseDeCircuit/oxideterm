@@ -20,6 +20,8 @@ impl WorkspaceApp {
                 workspace.enqueue_window_intent(intent, cx);
             },
         );
+        let window_button_layout_subscription =
+            cx.observe_button_layout_changed(window, |_workspace, _window, cx| cx.notify());
         let mut settings_store = SettingsStore::load_default()?;
         settings_store.settings_mut().sidebar_ui.zen_mode = false;
         if let Err(error) = ensure_bundled_workspace_backgrounds(settings_store.path()) {
@@ -785,6 +787,7 @@ impl WorkspaceApp {
             settings_legal_notice_scroll: MarkdownVirtualListScrollHandle::new(),
             _window_intents: window_intents,
             _window_intent_subscription: window_intent_subscription,
+            _window_button_layout_subscription: window_button_layout_subscription,
             window_registry,
             window_effect_delivery_scheduled: false,
             connection_flow,
