@@ -351,7 +351,9 @@ pub(crate) static ACTION_DEFINITIONS: LazyLock<Vec<ActionDefinition>> = LazyLock
             "terminal.clearScreen",
             ActionScope::Terminal,
             KeyCombo::ctrl("l"),
-            KeyCombo::ctrl("l"),
+            // Windows and Linux shells own Ctrl+L and use it to clear and
+            // redraw the prompt. Keep the host-only action on a shifted chord.
+            KeyCombo::ctrl_shift("l"),
         ),
         def(
             "terminal.aiPanel",
@@ -1073,6 +1075,17 @@ mod tests {
         assert_eq!(
             effective_combo(definition, &overrides, side),
             Some(definition.default_combo(side).clone())
+        );
+    }
+
+    #[test]
+    fn windows_and_linux_ctrl_l_remains_terminal_input() {
+        let definition = action_definition("terminal.clearScreen").unwrap();
+        let overrides = Map::new();
+
+        assert_eq!(
+            effective_combo(definition, &overrides, KeybindingSide::Other),
+            Some(KeyCombo::ctrl_shift("l"))
         );
     }
 
