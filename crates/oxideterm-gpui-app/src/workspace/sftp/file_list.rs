@@ -215,6 +215,7 @@ impl WorkspaceApp {
                 .into_any_element();
         }
 
+        let workspace_focus = self.focus_handle.clone();
         let sftp_view = self.sftp_view.clone();
         let visible_indices = std::sync::Arc::new(visible_indices);
         let scroll_handle = match pane {
@@ -229,6 +230,7 @@ impl WorkspaceApp {
             scroll_handle,
             sftp_file_list_virtual_spec(),
             move |range, _window, _cx| {
+                let workspace_focus = workspace_focus.clone();
                 range
                     .map(|index| {
                         let source_index = visible_indices[index];
@@ -334,8 +336,12 @@ impl WorkspaceApp {
                                 )
                             })
                             .on_mouse_down(MouseButton::Left, {
+                                let workspace_focus = workspace_focus.clone();
                                 let sftp_view = sftp_view.clone();
-                                move |event: &MouseDownEvent, _window, cx| {
+                                move |event: &MouseDownEvent, window, cx| {
+                                    // Row handlers stop propagation, so they must restore the
+                                    // workspace focus that owns SFTP keyboard shortcuts.
+                                    window.focus(&workspace_focus, cx);
                                     sftp_view.update(cx, |sftp, cx| {
                                         if event.click_count >= 2 {
                                             sftp.activate_file(pane, row_file.clone(), cx);
@@ -353,8 +359,10 @@ impl WorkspaceApp {
                                 }
                             })
                             .on_mouse_down(MouseButton::Right, {
+                                let workspace_focus = workspace_focus.clone();
                                 let sftp_view = sftp_view.clone();
-                                move |event: &MouseDownEvent, _window, cx| {
+                                move |event: &MouseDownEvent, window, cx| {
+                                    window.focus(&workspace_focus, cx);
                                     sftp_view.update(cx, |sftp, cx| {
                                         let selected = match pane {
                                             SftpPane::Local => &sftp.local_selected,
