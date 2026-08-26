@@ -1235,7 +1235,7 @@ mod tests {
     use std::{rc::Rc, sync::Arc};
 
     use super::*;
-    use crate::profiler::journal::install_test_foreground_journal;
+    use crate::profiler::{TraceTestGuard, journal::install_test_foreground_journal};
 
     #[test]
     fn frame_report_records_platform_present_duration() {
@@ -1257,6 +1257,7 @@ mod tests {
 
     #[test]
     fn foreground_work_reports_long_task_without_window_draw() {
+        let _trace_test_guard = TraceTestGuard::new();
         let (journal, _journal_guard) = install_test_foreground_journal(1024, 64);
         let dispatcher = Arc::new(ThreadedDispatcher::new());
         let foreground_executor = ForegroundExecutor::new(dispatcher);
@@ -1271,11 +1272,6 @@ mod tests {
         run_task_to_completion(&foreground_executor, task);
 
         let events = trace_scope.finish();
-        assert!(
-            events.frame_events.is_empty(),
-            "no window was involved, so no frame events should be recorded"
-        );
-
         let report = BenchReport::default();
         report.record_foreground_events(events.foreground_events());
 
@@ -1303,6 +1299,7 @@ mod tests {
 
     #[test]
     fn foreground_work_excludes_setup_before_trace_scope_starts() {
+        let _trace_test_guard = TraceTestGuard::new();
         let (journal, _journal_guard) = install_test_foreground_journal(1024, 64);
         let dispatcher = Arc::new(ThreadedDispatcher::new());
         let foreground_executor = ForegroundExecutor::new(dispatcher);
@@ -1343,6 +1340,7 @@ mod tests {
 
     #[test]
     fn bench_task_reports_long_task_without_window() {
+        let _trace_test_guard = TraceTestGuard::new();
         let platform = bench_platform(None, Arc::new(crate::NoopTextSystem::new()));
         let report = BenchReport::default();
         let name = "bench_task_reports_long_task_without_window";

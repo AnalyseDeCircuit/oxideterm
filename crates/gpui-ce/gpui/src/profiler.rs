@@ -4,6 +4,8 @@ use itertools::Itertools;
 use scheduler::{Instant, SpawnTime};
 #[cfg(feature = "profiler")]
 use smallvec::SmallVec;
+#[cfg(all(test, feature = "profiler"))]
+use std::sync::{Mutex, MutexGuard};
 use std::{
     cell::LazyCell,
     collections::{HashMap, VecDeque},
@@ -705,6 +707,41 @@ const TRACE_SETTING_ENABLED: u64 = 1 << 63;
 const TRACE_SCOPE_COUNT_MASK: u64 = TRACE_SETTING_ENABLED - 1;
 static TRACE_STATE: AtomicU64 = AtomicU64::new(0);
 
+/// Serializes tests that change process-wide tracing state or keep a trace scope active.
+#[cfg(all(test, feature = "profiler"))]
+pub(crate) struct TraceTestGuard {
+    was_enabled: bool,
+    _lock: MutexGuard<'static, ()>,
+}
+
+#[cfg(all(test, feature = "profiler"))]
+static TRACE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(all(test, feature = "profiler"))]
+impl TraceTestGuard {
+    pub(crate) fn new() -> Self {
+        let lock = TRACE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let was_enabled = trace_enabled();
+        set_trace_enabled(false);
+        Self {
+            was_enabled,
+            _lock: lock,
+        }
+    }
+}
+
+#[cfg(all(test, feature = "profiler"))]
+impl Drop for TraceTestGuard {
+    fn drop(&mut self) {
+        set_trace_enabled(false);
+        if self.was_enabled {
+            set_trace_enabled(true);
+        }
+    }
+}
+
 /// Enables or disables profiler trace collection at runtime.
 ///
 /// When transitioning from enabled to disabled, `add_task_timing` becomes
@@ -1232,7 +1269,6 @@ impl FrameTimingCollector {
 #[cfg(all(test, feature = "profiler"))]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
 
     #[test]
     fn records_draw_events_only_while_tracing() {
@@ -1485,35 +1521,6 @@ mod tests {
     }
 
     const FRAME: Duration = Duration::from_millis(16);
-    static TRACE_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    struct TraceTestGuard {
-        was_enabled: bool,
-        _lock: MutexGuard<'static, ()>,
-    }
-
-    impl TraceTestGuard {
-        fn new() -> Self {
-            let lock = TRACE_TEST_LOCK
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let was_enabled = trace_enabled();
-            set_trace_enabled(false);
-            Self {
-                was_enabled,
-                _lock: lock,
-            }
-        }
-    }
-
-    impl Drop for TraceTestGuard {
-        fn drop(&mut self) {
-            set_trace_enabled(false);
-            if self.was_enabled {
-                set_trace_enabled(true);
-            }
-        }
-    }
 
     fn event_matches_window(event: FrameEvent, window_id: WindowId) -> bool {
         match event {
