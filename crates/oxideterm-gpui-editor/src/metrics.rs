@@ -140,7 +140,7 @@ pub(crate) fn editor_code_font(family: &str, preferred_fallback: Option<&str>) -
         .filter(|fallback| !fallback.is_empty() && *fallback != family)
     {
         // The primary code font keeps Latin glyphs monospaced while the user's
-        // UI family supplies CJK glyphs before platform fallback takes over.
+        // terminal family supplies CJK glyphs before platform fallback takes over.
         fallbacks.push(preferred_fallback.to_string());
     }
     fallbacks.extend(

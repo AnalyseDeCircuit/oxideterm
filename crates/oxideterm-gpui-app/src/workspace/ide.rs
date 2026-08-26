@@ -982,10 +982,7 @@ impl WorkspaceApp {
         let settings = self.settings_store.settings();
         IdeRuntimeSettings {
             auto_save: settings.ide.auto_save,
-            editor_font_fallback: oxideterm_gpui_ui::css_font_family_head(
-                &settings.appearance.ui_font_family,
-            )
-            .map(|family| family.to_string()),
+            editor_font_fallback: ide_editor_font_fallback(settings),
             editor_font_size: settings
                 .ide
                 .font_size
@@ -1131,6 +1128,22 @@ pub(super) fn node_agent_mode_from_settings(settings: &PersistedSettings) -> Nod
     }
 }
 
+fn ide_editor_font_fallback(settings: &PersistedSettings) -> Option<String> {
+    let terminal_family = settings
+        .terminal
+        .font_family
+        .terminal_family_name(&settings.terminal.custom_font_family);
+    let configured_cjk_family = settings.terminal.cjk_font_family.trim();
+    // Code glyphs keep the editor's monospace primary while CJK glyphs follow
+    // the same explicit family preference as terminal content.
+    let preferred_family = if configured_cjk_family.is_empty() {
+        terminal_family.as_str()
+    } else {
+        configured_cjk_family
+    };
+    oxideterm_gpui_ui::css_font_family_head(preferred_family).map(|family| family.to_string())
+}
+
 fn ide_restore_was_closed_after_snapshot(
     closed_at: Option<SystemTime>,
     snapshot_at: Option<SystemTime>,
@@ -1194,6 +1207,25 @@ mod tests {
                 cx,
             )
         })
+    }
+
+    #[test]
+    fn ide_editor_font_fallback_follows_terminal_font_preferences() {
+        let mut settings = PersistedSettings::default();
+        settings.terminal.font_family = oxideterm_settings::FontFamily::Custom;
+        settings.terminal.custom_font_family = "'等线', monospace".to_string();
+
+        assert_eq!(
+            ide_editor_font_fallback(&settings).as_deref(),
+            Some("DengXian")
+        );
+
+        settings.terminal.custom_font_family = "Consolas".to_string();
+        settings.terminal.cjk_font_family = "等线".to_string();
+        assert_eq!(
+            ide_editor_font_fallback(&settings).as_deref(),
+            Some("DengXian")
+        );
     }
 
     #[test]
