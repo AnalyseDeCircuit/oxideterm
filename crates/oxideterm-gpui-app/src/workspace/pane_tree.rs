@@ -5,9 +5,6 @@ const SPLIT_HANDLE_HOVER_BG_ALPHA: u32 = 0x12;
 const SPLIT_HANDLE_ACTIVE_BG_ALPHA: u32 = 0x1f;
 const SPLIT_HANDLE_ACTIVE_LINE_ALPHA: u32 = 0xcc;
 const SPLIT_HANDLE_LINE_WIDTH: f32 = 1.0;
-const ACTIVE_PANE_BORDER_ALPHA: u32 = 0x66;
-const ACTIVE_PANE_SHADOW_ALPHA: u32 = 0x24;
-const ACTIVE_PANE_SHADOW_BLUR: f32 = 10.0;
 
 #[derive(Clone)]
 pub(super) struct SplitDrag {
@@ -701,15 +698,6 @@ impl WorkspaceApp {
         let active_pane_id = tab_id
             .and_then(|tab_id| self.tab_by_id(tab_id, cx))
             .and_then(|tab| tab.active_pane_id);
-        let has_split_panes = if let Some(tab_id) = tab_id {
-            self.tab_by_id(tab_id, cx)
-                .and_then(|tab| tab.root_pane.as_ref())
-                .is_some_and(|root_pane| root_pane.pane_count() > 1)
-        } else {
-            self.active_tab(cx)
-                .and_then(|tab| tab.root_pane.as_ref())
-                .is_some_and(|root_pane| root_pane.pane_count() > 1)
-        };
         match node {
             PaneNode::Leaf { pane_id, .. } => {
                 let active = Some(*pane_id) == active_pane_id;
@@ -763,29 +751,6 @@ impl WorkspaceApp {
                         active && self.ai_entity.read(cx).terminal_inline_panel().open,
                         |pane_frame| pane_frame.child(self.render_terminal_ai_inline_panel(cx)),
                     )
-                    .when(active && has_split_panes, |pane_frame| {
-                        let accent = self.tokens.ui.accent;
-                        let active_shadow = vec![gpui::BoxShadow {
-                            inset: false,
-                            color: rgba((accent << 8) | ACTIVE_PANE_SHADOW_ALPHA).into_color(),
-                            offset: gpui::point(px(0.0), px(0.0)),
-                            blur_radius: px(ACTIVE_PANE_SHADOW_BLUR),
-                            spread_radius: px(0.0),
-                        }];
-                        // This overlay is painted above the terminal content
-                        // without changing pane layout or terminal grid size.
-                        pane_frame.child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .left_0()
-                                .right_0()
-                                .bottom_0()
-                                .border_1()
-                                .border_color(rgba((accent << 8) | ACTIVE_PANE_BORDER_ALPHA))
-                                .shadow(active_shadow),
-                        )
-                    })
                     .into_any_element()
             }
             PaneNode::Group {
