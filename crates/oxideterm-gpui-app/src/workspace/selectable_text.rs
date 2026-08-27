@@ -1016,6 +1016,7 @@ impl SelectableTextRenderState {
             .unwrap_or(runs);
         let workspace = self.workspace.clone();
         let workspace_for_mouse = self.workspace.clone();
+        let workspace_for_move = self.workspace.clone();
         let pending_updates = self.pending_updates.clone();
         let flush_scheduled = self.flush_scheduled.clone();
         let value_for_anchor = value.clone();
@@ -1053,7 +1054,14 @@ impl SelectableTextRenderState {
                             cx.stop_propagation();
                         }
                     },
-                ),
+                )
+                .on_mouse_move(move |event: &gpui::MouseMoveEvent, window, cx| {
+                    // Virtual-list hitboxes can occlude the workspace root, so
+                    // they must update and release their own selection gesture.
+                    let _ = workspace_for_move.update(cx, |this, cx| {
+                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                    });
+                }),
             move |anchor, window: &mut Window, cx| {
                 pending_updates
                     .borrow_mut()
