@@ -47,6 +47,9 @@ impl WorkspaceApp {
         let is_local_terminal = self
             .active_tab(cx)
             .is_some_and(|tab| tab.kind == TabKind::LocalTerminal);
+        let split_controls_visible = self
+            .active_tab(cx)
+            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
         let can_configure_remote_integration = self.active_ssh_terminal_node_id(cx).is_some();
         let remote_integration_pending = self.remote_shell_integration_pending(cx);
         let remote_integration_tooltip_id = "terminal-command-configure-directory-tracking";
@@ -249,7 +252,9 @@ impl WorkspaceApp {
                                     )
                                 },
                             )
-                            .when(is_local_terminal, |actions| {
+                            .when(split_controls_visible, |actions| {
+                                // Transport readiness controls the disabled state; keeping SSH
+                                // actions visible makes their placement match local terminals.
                                 actions
                                     .child(self.terminal_command_action_button(
                                         LucideIcon::SplitSquareHorizontal,
