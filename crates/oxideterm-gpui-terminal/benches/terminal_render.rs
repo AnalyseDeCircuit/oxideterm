@@ -9,6 +9,9 @@ const INITIAL_LINES: usize = 400;
 const OUTPUT_LINES_PER_FRAME: usize = 8;
 const IDLE_STARTUP_SETTLE: Duration = Duration::from_millis(150);
 const PROFILE_SAMPLE_CAPACITY: usize = 16_384;
+const FOLDED_BLOCKS: usize = 200;
+const FOLDED_OUTPUT_ROWS: usize = 4;
+const MAX_COMMAND_MARKS: usize = 2_000;
 
 fn terminal_corpus(lines: usize) -> Vec<u8> {
     terminal_corpus_from(0, lines)
@@ -70,6 +73,28 @@ fn playback_output_chunks() -> Vec<Vec<u8>> {
             )
         })
         .collect()
+}
+
+fn benchmark_terminal_with_command_marks(
+    cx: &mut BenchAppContext<'_, '_>,
+    block_count: usize,
+    output_rows: usize,
+    collapsed: bool,
+) -> Entity<TerminalPane> {
+    let terminal = benchmark_terminal(cx, false);
+    let marked_rows = block_count.saturating_mul(output_rows.saturating_add(1));
+    terminal.update(cx, |terminal, cx| {
+        terminal.feed_recording_output(&terminal_corpus_from(INITIAL_LINES, marked_rows), cx);
+    });
+    cx.run_until_idle();
+    terminal.update(cx, |terminal, cx| {
+        terminal.benchmark_install_command_marks(block_count, output_rows);
+        if collapsed {
+            terminal.benchmark_set_all_command_folds(true, cx);
+        }
+    });
+    cx.run_until_idle();
+    terminal
 }
 
 #[gpui::bench(fps = 120)]
@@ -150,6 +175,40 @@ fn terminal_playback_output_pipeline(cx: &mut BenchAppContext<'_, '_>) {
 }
 
 #[gpui::bench(fps = 120)]
+fn terminal_folded_history_output_frame(cx: &mut BenchAppContext<'_, '_>) {
+    let terminal =
+        benchmark_terminal_with_command_marks(cx, FOLDED_BLOCKS, FOLDED_OUTPUT_ROWS, true);
+    let output_chunks = playback_output_chunks();
+    let mut chunk_index = 0;
+    cx.bench_renderer(terminal, move |terminal, _window, cx| {
+        terminal.feed_recording_output(&output_chunks[chunk_index], cx);
+        chunk_index = (chunk_index + 1) % output_chunks.len();
+    });
+}
+
+#[gpui::bench(fps = 120)]
+fn terminal_max_command_marks_folded_scroll(cx: &mut BenchAppContext<'_, '_>) {
+    let terminal = benchmark_terminal_with_command_marks(cx, MAX_COMMAND_MARKS, 1, true);
+    let mut direction = 1;
+    cx.bench_renderer(terminal, move |terminal, _window, cx| {
+        terminal.benchmark_scroll_command_folds(direction, cx);
+        if terminal.command_marks().len() == MAX_COMMAND_MARKS {
+            direction = -direction;
+        }
+    });
+}
+
+#[gpui::bench(fps = 120)]
+fn terminal_large_command_fold_toggle(cx: &mut BenchAppContext<'_, '_>) {
+    let terminal = benchmark_terminal_with_command_marks(cx, 1, 3_000, false);
+    let mut collapsed = true;
+    cx.bench_renderer(terminal, move |terminal, _window, cx| {
+        terminal.benchmark_set_all_command_folds(collapsed, cx);
+        collapsed = !collapsed;
+    });
+}
+
+#[gpui::bench(fps = 120)]
 fn terminal_idle_no_frames(cx: &mut BenchAppContext<'_, '_>) {
     let _terminal = benchmark_terminal(cx, false);
     // Drain startup sizing and the scheduler's initial maintenance deadline before measuring the
@@ -165,6 +224,9 @@ gpui::bench_group!(
     terminal_warm_cache_redraw_frame,
     terminal_playback_output_frame,
     terminal_playback_output_pipeline,
+    terminal_folded_history_output_frame,
+    terminal_max_command_marks_folded_scroll,
+    terminal_large_command_fold_toggle,
     terminal_idle_no_frames
 );
 gpui::bench_main!(terminal_render);

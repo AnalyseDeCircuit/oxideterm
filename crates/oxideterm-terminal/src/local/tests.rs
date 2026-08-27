@@ -657,6 +657,85 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_with_grid_lines_projects_only_requested_physical_rows() {
+        let size = TerminalSize {
+            cols: 12,
+            rows: 3,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(
+            &mut term,
+            b"alpha\r\nbravo\r\ncharlie\r\ndelta\r\necho\r\nfoxtrot",
+        );
+
+        let snapshot = snapshot_from_term_with_grid_lines(
+            &term,
+            size,
+            &TerminalGraphicsState::default(),
+            &[-2, 0, 2],
+        );
+
+        let lines = snapshot
+            .lines
+            .iter()
+            .map(|row| row.text().trim_end().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(lines, ["bravo", "delta", "foxtrot"]);
+        assert_eq!(snapshot.cursor_row, 2);
+    }
+
+    #[test]
+    fn incremental_grid_projection_reuses_unchanged_projected_rows() {
+        let size = TerminalSize {
+            cols: 12,
+            rows: 3,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(
+            &mut term,
+            b"alpha\r\nbravo\r\ncharlie\r\ndelta\r\necho\r\nfoxtrot",
+        );
+        let graphics = TerminalGraphicsState::default();
+        let fresh = snapshot_from_term(&term, size, &graphics);
+        let previous = snapshot_from_term_with_grid_lines(&term, size, &graphics, &[-2, 0, 2]);
+
+        let next = snapshot_from_term_with_grid_lines_incremental(
+            &term,
+            size,
+            &graphics,
+            &[-2, 0, 2],
+            &fresh,
+            &previous,
+        );
+
+        assert!(Arc::ptr_eq(&next.lines[0].cells, &previous.lines[0].cells));
+        assert_eq!(next.lines[0].text().trim_end(), "bravo");
+
+        parser.advance(&mut term, b"\r\ngolf");
+        let fresh_after_scroll = snapshot_from_term(&term, size, &graphics);
+        let after_scroll = snapshot_from_term_with_grid_lines_incremental(
+            &term,
+            size,
+            &graphics,
+            &[-3, 0, 2],
+            &fresh_after_scroll,
+            &previous,
+        );
+
+        assert!(Arc::ptr_eq(
+            &after_scroll.lines[0].cells,
+            &previous.lines[0].cells
+        ));
+        assert_eq!(after_scroll.lines[0].text().trim_end(), "bravo");
+    }
+
+    #[test]
     fn shell_integration_osc633_creates_and_closes_command_mark() {
         let size = TerminalSize {
             cols: 80,
@@ -680,6 +759,10 @@ mod tests {
         assert_eq!(marks.len(), 1);
         assert_eq!(marks[0].command.as_deref(), Some("echo hi"));
         assert!(marks[0].is_closed);
+        assert!(marks[0].output_start_line.is_some_and(|output_start| {
+            output_start > marks[0].command_line
+                && marks[0].end_line.is_some_and(|end_line| output_start <= end_line)
+        }));
         assert_eq!(
             marks[0].closed_by,
             Some(TerminalCommandMarkClosedBy::ShellIntegration)

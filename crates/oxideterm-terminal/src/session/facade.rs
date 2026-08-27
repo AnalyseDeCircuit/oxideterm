@@ -536,6 +536,20 @@ impl TerminalSession {
         self.backend.snapshot_with_display_offset(display_offset, rows)
     }
 
+    pub fn snapshot_with_grid_lines(&self, grid_lines: &[i32]) -> TerminalSnapshot {
+        self.backend.snapshot_with_grid_lines(grid_lines)
+    }
+
+    pub fn snapshot_with_grid_lines_incremental(
+        &self,
+        grid_lines: &[i32],
+        fresh: &TerminalSnapshot,
+        previous: &TerminalSnapshot,
+    ) -> TerminalSnapshot {
+        self.backend
+            .snapshot_with_grid_lines_incremental(grid_lines, fresh, previous)
+    }
+
     pub fn shutdown(&mut self) {
         self.backend.shutdown();
     }

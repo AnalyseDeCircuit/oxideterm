@@ -121,6 +121,66 @@ impl TerminalPane {
 
     #[cfg(feature = "bench")]
     #[doc(hidden)]
+    pub fn benchmark_install_command_marks(
+        &mut self,
+        block_count: usize,
+        output_rows: usize,
+    ) {
+        let block_rows = output_rows.saturating_add(1);
+        let covered_rows = block_count.saturating_mul(block_rows);
+        let total_rows = self
+            .snapshot
+            .scrollback_lines
+            .saturating_add(self.snapshot.rows);
+        let first_line = total_rows.saturating_sub(covered_rows);
+        self.command_marks = (0..block_count)
+            .map(|block| {
+                let command_line = first_line.saturating_add(block.saturating_mul(block_rows));
+                TerminalCommandMark {
+                    command_id: format!("benchmark-command-{block}"),
+                    command: Some("printf benchmark".to_string()),
+                    start_line: command_line,
+                    command_line,
+                    output_start_line: Some(command_line.saturating_add(1)),
+                    end_line: Some(command_line.saturating_add(output_rows)),
+                    is_closed: true,
+                    closed_by: Some(TerminalCommandMarkClosedBy::ShellIntegration),
+                    exit_code: Some(0),
+                    duration_ms: Some(1),
+                    detection_source: TerminalCommandMarkDetectionSource::ShellIntegration,
+                    submitted_by: None,
+                    confidence: TerminalCommandMarkConfidence::High,
+                    output_confidence: TerminalCommandMarkConfidence::High,
+                    stale: false,
+                    started_at: block as u64,
+                    finished_at: Some(block.saturating_add(1) as u64),
+                }
+            })
+            .collect();
+        self.command_marks_render_cache_dirty = true;
+    }
+
+    #[cfg(feature = "bench")]
+    #[doc(hidden)]
+    pub fn benchmark_set_all_command_folds(
+        &mut self,
+        collapsed: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(anchor_id) = self.command_marks.last().map(|mark| mark.command_id.clone()) else {
+            return;
+        };
+        self.set_all_command_folds(collapsed, &anchor_id, self.snapshot.rows / 2, cx);
+    }
+
+    #[cfg(feature = "bench")]
+    #[doc(hidden)]
+    pub fn benchmark_scroll_command_folds(&mut self, rows: i32, cx: &mut Context<Self>) {
+        self.scroll_folded_rows(rows, cx);
+    }
+
+    #[cfg(feature = "bench")]
+    #[doc(hidden)]
     pub fn feed_recording_output_profiled(
         &mut self,
         bytes: &[u8],

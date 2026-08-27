@@ -17,9 +17,9 @@ use unicode_width::UnicodeWidthStr;
 use zeroize::Zeroizing;
 
 use super::{
-    FreeTypeDragAction, FreeTypeDragState, PendingTerminalEditorClipboard, ScrollbarDrag,
-    ScrollbarGeometry, SmoothScrollAnimation, TerminalContextMenu, TerminalPane, TerminalPaneEvent,
-    TmuxSeparatorDirection, TmuxSeparatorDrag, command_mark_ui_available,
+    FreeTypeDragAction, FreeTypeDragState, PendingCommandFoldClick, PendingTerminalEditorClipboard,
+    ScrollbarDrag, ScrollbarGeometry, SmoothScrollAnimation, TerminalContextMenu, TerminalPane,
+    TerminalPaneEvent, TmuxSeparatorDirection, TmuxSeparatorDrag, command_mark_ui_available,
 };
 use crate::command_facts::TerminalAutosuggestInputState;
 use crate::terminal_ui::*;
@@ -143,6 +143,10 @@ impl TerminalPane {
         }
 
         if key == "end" && modifiers.platform {
+            if self.command_folding_active() {
+                self.scroll_folded_to_display_offset(0, cx);
+                return true;
+            }
             let snapshot = {
                 let mut terminal = self.terminal.lock();
                 terminal.scroll_to_bottom();
@@ -155,6 +159,10 @@ impl TerminalPane {
         }
 
         if key == "home" && modifiers.platform {
+            if self.command_folding_active() {
+                self.scroll_folded_to_display_offset(self.folded_visual_history_rows(), cx);
+                return true;
+            }
             let snapshot = {
                 let mut terminal = self.terminal.lock();
                 terminal.scroll_to_top();
@@ -410,6 +418,12 @@ impl TerminalPane {
             return;
         }
 
+        if self.command_folding_active() {
+            self.clear_smooth_scroll_remainder();
+            self.scroll_folded_rows(scroll_delta.rows, cx);
+            return;
+        }
+
         let previous_offset = self.snapshot.display_offset;
         let snapshot_was_dirty = self.snapshot_dirty;
         let snapshot_started = self.preferences.show_performance_overlay.then(Instant::now);
@@ -486,8 +500,17 @@ impl TerminalPane {
 
     pub(super) fn clamp_smooth_scroll_remainder_to_bounds(&mut self) -> bool {
         let remainder = f32::from(self.smooth_scroll_offset_px);
-        let at_bottom = self.snapshot.display_offset == 0;
-        let at_top = self.snapshot.display_offset >= self.snapshot.scrollback_lines;
+        let (at_bottom, at_top) = if self.command_folding_active() {
+            (
+                self.fold_visual_display_offset == 0,
+                self.fold_visual_display_offset >= self.folded_visual_history_rows(),
+            )
+        } else {
+            (
+                self.snapshot.display_offset == 0,
+                self.snapshot.display_offset >= self.snapshot.scrollback_lines,
+            )
+        };
         if (at_bottom && remainder < 0.0) || (at_top && remainder > 0.0) {
             return self.clear_smooth_scroll_remainder();
         }
@@ -946,8 +969,13 @@ impl TerminalPane {
     }
 
     fn scrollbar_geometry(&self) -> Option<ScrollbarGeometry> {
-        terminal_scrollbar_for_viewport_display_offset(
-            &self.snapshot,
+        let history_rows = if self.command_folding_active() {
+            self.folded_visual_history_rows()
+        } else {
+            self.snapshot.scrollback_lines
+        };
+        terminal_scrollbar_for_history(
+            history_rows,
             &self.metrics,
             self.snapshot.rows,
             self.smooth_scroll_display_offset(),
@@ -982,8 +1010,16 @@ impl TerminalPane {
         let available = (geometry.track_height - geometry.height).max(px(1.0));
         let y = (position.y - geometry.y - thumb_offset_y).clamp(px(0.0), available);
         let scroll_fraction = f32::from(y / available);
-        let history = self.snapshot.scrollback_lines;
+        let history = if self.command_folding_active() {
+            self.folded_visual_history_rows()
+        } else {
+            self.snapshot.scrollback_lines
+        };
         let offset = ((1.0 - scroll_fraction) * history as f32).round() as usize;
+        if self.command_folding_active() {
+            self.scroll_folded_to_display_offset(offset, cx);
+            return;
+        }
         let snapshot = {
             let mut terminal = self.terminal.lock();
             terminal.scroll_to_display_offset(offset);
@@ -1119,15 +1155,30 @@ impl TerminalPane {
             return;
         }
 
-        let current_offset = self.snapshot.display_offset;
+        let current_offset = if self.command_folding_active() {
+            self.fold_visual_display_offset
+        } else {
+            self.snapshot.display_offset
+        };
         let target_offset = if delta_rows > 0 {
             current_offset.saturating_add(delta_rows as usize)
         } else {
             current_offset.saturating_sub(delta_rows.unsigned_abs() as usize)
         }
-        .min(self.snapshot.scrollback_lines);
+        .min(if self.command_folding_active() {
+            self.folded_visual_history_rows()
+        } else {
+            self.snapshot.scrollback_lines
+        });
 
         if target_offset == current_offset {
+            return;
+        }
+
+        if self.command_folding_active() {
+            self.scroll_folded_to_display_offset(target_offset, cx);
+            self.update_selection(position, cx);
+            self.schedule_selection_autoscroll(cx);
             return;
         }
 
@@ -1150,6 +1201,20 @@ impl TerminalPane {
     }
 
     fn apply_scroll_action(&mut self, action: TerminalScrollAction, cx: &mut Context<Self>) {
+        if self.command_folding_active() {
+            let page_rows = self.snapshot.rows.saturating_sub(1).max(1) as i32;
+            match action {
+                TerminalScrollAction::PageUp => self.scroll_folded_rows(page_rows, cx),
+                TerminalScrollAction::PageDown => self.scroll_folded_rows(-page_rows, cx),
+                TerminalScrollAction::LineUp => self.scroll_folded_rows(1, cx),
+                TerminalScrollAction::LineDown => self.scroll_folded_rows(-1, cx),
+                TerminalScrollAction::Top => {
+                    self.scroll_folded_to_display_offset(self.folded_visual_history_rows(), cx)
+                }
+                TerminalScrollAction::Bottom => self.scroll_folded_to_display_offset(0, cx),
+            }
+            return;
+        }
         let snapshot = {
             let mut terminal = self.terminal.lock();
             match action {
@@ -1208,6 +1273,22 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         let desired_row = (self.snapshot.rows / 3).max(1) as i32;
+        let physical_line =
+            usize::try_from(self.snapshot.scrollback_lines as i64 + i64::from(search_match.line))
+                .ok();
+        if let Some(physical_line) = physical_line {
+            self.expand_command_fold_containing_physical_line(physical_line);
+            if self.command_folding_active() {
+                let position = self
+                    .command_fold_projection
+                    .viewport_position_for_anchor(physical_line, desired_row.max(0) as usize);
+                self.fold_visual_display_offset = position.display_offset;
+                self.fold_bottom_padding_rows = position.bottom_padding_rows;
+                self.fold_anchor_bottom_padding_rows = position.bottom_padding_rows;
+                self.refresh_command_fold_projection(cx);
+                return;
+            }
+        }
         let target_offset = desired_row.saturating_sub(search_match.line).max(0) as usize;
         let snapshot = {
             let mut terminal = self.terminal.lock();
@@ -1222,6 +1303,23 @@ impl TerminalPane {
     pub(crate) fn handle_mouse_down(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
         if self.context_menu.is_some() {
             self.dismiss_terminal_context_menu(cx);
+        }
+
+        if event.button == MouseButton::Left
+            && let Some((command_mark_id, viewport_row)) =
+                self.command_fold_target_at_position(event.position)
+        {
+            self.pending_command_fold_click = Some(PendingCommandFoldClick {
+                command_mark_id,
+                viewport_row,
+                click_count: event.click_count,
+                // Command output is OxideTerm's only fold kind, so WindTerm's
+                // Shift-click "same type" action intentionally targets every command block.
+                all_commands: event.modifiers.control || event.modifiers.shift,
+            });
+            self.selecting = false;
+            self.selection_autoscroll_position = None;
+            return;
         }
 
         if event.button == MouseButton::Left
@@ -1475,6 +1573,30 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_mouse_up(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
+        if event.button == MouseButton::Left
+            && let Some(pending) = self.pending_command_fold_click.take()
+        {
+            let released_on_same_control = self
+                .command_fold_target_at_position(event.position)
+                .is_some_and(|(command_mark_id, _)| command_mark_id == pending.command_mark_id);
+            if released_on_same_control {
+                if pending.click_count >= 2 {
+                    self.select_command_fold_range(&pending.command_mark_id, cx);
+                } else if pending.all_commands {
+                    let collapse_all = !self.command_mark_is_collapsed(&pending.command_mark_id);
+                    self.set_all_command_folds(
+                        collapse_all,
+                        &pending.command_mark_id,
+                        pending.viewport_row,
+                        cx,
+                    );
+                } else {
+                    self.toggle_command_fold(&pending.command_mark_id, pending.viewport_row, cx);
+                }
+            }
+            return;
+        }
+
         if self.tmux_separator_drag.take().is_some() {
             cx.notify();
             return;
@@ -2718,8 +2840,7 @@ fn selection_point_offset(
 }
 
 fn viewport_row_for_selection_line(snapshot: &TerminalSnapshot, line: i32) -> Option<usize> {
-    let row = line + snapshot.display_offset as i32;
-    usize::try_from(row).ok().filter(|row| *row < snapshot.rows)
+    (0..snapshot.lines.len()).find(|&row| snapshot_grid_line_for_row(snapshot, row) == Some(line))
 }
 
 fn command_cursor_delta_between(

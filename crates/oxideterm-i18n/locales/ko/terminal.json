@@ -59,6 +59,10 @@
       "find": "찾기...",
       "manage_triggers": "이 세션의 트리거 관리...",
       "select_command": "명령 선택",
+      "fold_command": "명령 접기",
+      "unfold_command": "명령 펼치기",
+      "fold_all_commands": "모든 명령 접기",
+      "unfold_all_commands": "모든 명령 펼치기",
       "previous_command": "이전 명령",
       "next_command": "다음 명령",
       "clear_screen": "화면 지우기"

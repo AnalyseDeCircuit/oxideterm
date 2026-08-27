@@ -773,6 +773,30 @@ impl LocalPtySession {
             rows,
         )
     }
+
+    pub fn snapshot_with_grid_lines(&self, grid_lines: &[i32]) -> TerminalSnapshot {
+        let term = self.display_term();
+        let term = term.lock();
+        snapshot_from_term_with_grid_lines(&term, self.size, &self.graphics, grid_lines)
+    }
+
+    pub fn snapshot_with_grid_lines_incremental(
+        &self,
+        grid_lines: &[i32],
+        fresh: &TerminalSnapshot,
+        previous: &TerminalSnapshot,
+    ) -> TerminalSnapshot {
+        let term = self.display_term();
+        let term = term.lock();
+        snapshot_from_term_with_grid_lines_incremental(
+            &term,
+            self.size,
+            &self.graphics,
+            grid_lines,
+            fresh,
+            previous,
+        )
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -1024,16 +1048,197 @@ pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
     }
 }
 
+pub(crate) fn snapshot_from_term_with_grid_lines<T: EventListener>(
+    term: &Term<T>,
+    size: TerminalSize,
+    graphics: &TerminalGraphicsState,
+    grid_lines: &[i32],
+) -> TerminalSnapshot {
+    let content = term.renderable_content();
+    let scrollback_lines = term.total_lines().saturating_sub(term.screen_lines());
+    let mut rows = grid_lines
+        .iter()
+        .map(|&grid_line| snapshot_row_from_grid_line(term, size, grid_line))
+        .collect::<Vec<_>>();
+    let cursor_grid_line = content.cursor.point.line.0;
+    let cursor_row = grid_lines
+        .iter()
+        .position(|&grid_line| grid_line == cursor_grid_line)
+        .unwrap_or(rows.len());
+    let cursor_col = content.cursor.point.column.0;
+
+    if cursor_row < rows.len() && cursor_col < size.cols {
+        rows[cursor_row].cells_mut()[cursor_col].cursor = true;
+        let active_input_rows = mark_active_input_rows(&mut rows, cursor_row);
+        for row in &mut rows[active_input_rows] {
+            row.refresh_signature();
+        }
+    }
+
+    TerminalSnapshot {
+        generation: 0,
+        cols: size.cols,
+        rows: size.rows,
+        cursor_col,
+        cursor_row,
+        cursor_shape: if cursor_row < rows.len() {
+            content.cursor.shape.into()
+        } else {
+            TerminalCursorShape::Hidden
+        },
+        display_offset: grid_lines
+            .first()
+            .copied()
+            .unwrap_or_default()
+            .saturating_neg() as usize,
+        scrollback_lines,
+        lines: rows,
+        images: graphics.visible_images_for_grid_lines(grid_lines),
+    }
+}
+
+pub(crate) fn snapshot_from_term_with_grid_lines_incremental<T: EventListener>(
+    term: &Term<T>,
+    size: TerminalSize,
+    graphics: &TerminalGraphicsState,
+    grid_lines: &[i32],
+    fresh: &TerminalSnapshot,
+    previous: &TerminalSnapshot,
+) -> TerminalSnapshot {
+    let content = term.renderable_content();
+    let scrollback_lines = term.total_lines().saturating_sub(term.screen_lines());
+    let compatible_fresh = fresh.cols == size.cols;
+    let compatible_previous = previous.cols == size.cols;
+    // Emulator row allocations keep their identity while scrolling. Indexing those identities
+    // lets folded views reuse shared cell buffers without converting every visible cell again.
+    let fresh_rows_by_source = compatible_fresh
+        .then(|| {
+            fresh
+                .lines
+                .iter()
+                .filter(|row| row.source_id != 0)
+                .map(|row| (row.source_id, row))
+                .collect::<HashMap<_, _>>()
+        })
+        .unwrap_or_default();
+    let previous_rows_by_source = compatible_previous
+        .then(|| {
+            previous
+                .lines
+                .iter()
+                .filter(|row| row.source_id != 0)
+                .map(|row| (row.source_id, row))
+                .collect::<HashMap<_, _>>()
+        })
+        .unwrap_or_default();
+
+    let cursor_grid_line = content.cursor.point.line.0;
+    let mut rows = grid_lines
+        .iter()
+        .map(|&grid_line| {
+            let Some(source_id) = snapshot_row_source_id_for_grid_line(term, grid_line) else {
+                return blank_snapshot_row_for_grid_line(size, grid_line);
+            };
+            let reusable_row = fresh_rows_by_source
+                .get(&source_id)
+                .copied()
+                .or_else(|| {
+                    // A cursor row outside the backend viewport may have changed in place, so it
+                    // must be materialized rather than borrowed from an older projection.
+                    (grid_line != cursor_grid_line)
+                        .then(|| previous_rows_by_source.get(&source_id).copied())
+                        .flatten()
+                        // Retained output moves toward lower grid coordinates. A row moving
+                        // downward was recycled by the emulator and must be converted again.
+                        .filter(|row| row.absolute_line >= i64::from(grid_line))
+                });
+            if let Some(reusable_row) = reusable_row {
+                let mut row = reusable_row.clone();
+                row.absolute_line = i64::from(grid_line);
+                return row;
+            }
+            snapshot_row_from_grid_line(term, size, grid_line)
+        })
+        .collect::<Vec<_>>();
+    let cursor_row = grid_lines
+        .iter()
+        .position(|&grid_line| grid_line == cursor_grid_line)
+        .unwrap_or(rows.len());
+    let cursor_col = content.cursor.point.column.0;
+    let active_input_rows = if cursor_row < rows.len() && cursor_col < size.cols {
+        active_input_row_range(&rows, cursor_row)
+    } else {
+        0..0
+    };
+    let mut metadata_rows = Vec::new();
+    for (row_index, row) in rows.iter_mut().enumerate() {
+        let active_input = active_input_rows.contains(&row_index);
+        if row.active_input != active_input {
+            row.active_input = active_input;
+            metadata_rows.push(row_index);
+        }
+        if row_index != cursor_row
+            && cursor_col < row.cells.len()
+            && row.cells[cursor_col].cursor
+        {
+            row.cells_mut()[cursor_col].cursor = false;
+            metadata_rows.push(row_index);
+        }
+    }
+    if cursor_row < rows.len()
+        && cursor_col < size.cols
+        && !rows[cursor_row].cells[cursor_col].cursor
+    {
+        rows[cursor_row].cells_mut()[cursor_col].cursor = true;
+        metadata_rows.push(cursor_row);
+    }
+    metadata_rows.sort_unstable();
+    metadata_rows.dedup();
+    for row_index in metadata_rows {
+        rows[row_index].refresh_signature();
+    }
+
+    TerminalSnapshot {
+        generation: 0,
+        cols: size.cols,
+        rows: size.rows,
+        cursor_col,
+        cursor_row,
+        cursor_shape: if cursor_row < rows.len() {
+            content.cursor.shape.into()
+        } else {
+            TerminalCursorShape::Hidden
+        },
+        display_offset: grid_lines
+            .first()
+            .copied()
+            .unwrap_or_default()
+            .saturating_neg() as usize,
+        scrollback_lines,
+        lines: rows,
+        images: graphics.visible_images_for_grid_lines(grid_lines),
+    }
+}
+
 fn snapshot_row_from_term<T: EventListener>(
     term: &Term<T>,
     size: TerminalSize,
     display_offset: usize,
     row: usize,
 ) -> TerminalRow {
-    let Some(source) = snapshot_row_source(term, size, display_offset, row) else {
-        return blank_snapshot_row(size, display_offset, row);
+    let grid_line = row as i32 - display_offset as i32;
+    snapshot_row_from_grid_line(term, size, grid_line)
+}
+
+fn snapshot_row_from_grid_line<T: EventListener>(
+    term: &Term<T>,
+    size: TerminalSize,
+    grid_line: i32,
+) -> TerminalRow {
+    let Some(source) = snapshot_row_source_for_grid_line(term, size, grid_line) else {
+        return blank_snapshot_row_for_grid_line(size, grid_line);
     };
-    snapshot_row_from_source(term, size, display_offset, row, source)
+    snapshot_row_from_source(term, size, grid_line, source)
 }
 
 #[derive(Clone, Copy)]
@@ -1043,13 +1248,11 @@ struct SnapshotRowSource {
     wrapped: bool,
 }
 
-fn snapshot_row_source<T: EventListener>(
+fn snapshot_row_source_for_grid_line<T: EventListener>(
     term: &Term<T>,
     size: TerminalSize,
-    display_offset: usize,
-    row: usize,
+    grid_line: i32,
 ) -> Option<SnapshotRowSource> {
-    let grid_line = row as i32 - display_offset as i32;
     if grid_line < -(term.grid().history_size() as i32) || grid_line >= term.screen_lines() as i32 {
         return None;
     }
@@ -1075,14 +1278,22 @@ fn snapshot_row_source<T: EventListener>(
     })
 }
 
+fn snapshot_row_source_id_for_grid_line<T: EventListener>(
+    term: &Term<T>,
+    grid_line: i32,
+) -> Option<usize> {
+    if grid_line < -(term.grid().history_size() as i32) || grid_line >= term.screen_lines() as i32 {
+        return None;
+    }
+    Some(term.grid()[Line(grid_line)][..].as_ptr() as usize)
+}
+
 fn snapshot_row_from_source<T: EventListener>(
     term: &Term<T>,
     size: TerminalSize,
-    display_offset: usize,
-    row: usize,
+    grid_line: i32,
     source: SnapshotRowSource,
 ) -> TerminalRow {
-    let grid_line = row as i32 - display_offset as i32;
     let terminal_row = &term.grid()[Line(grid_line)];
     let terminal_cells = &terminal_row[..];
     let mut cells = Vec::with_capacity(size.cols);
@@ -1131,10 +1342,14 @@ fn snapshot_row_from_source<T: EventListener>(
 }
 
 fn blank_snapshot_row(size: TerminalSize, display_offset: usize, row: usize) -> TerminalRow {
+    blank_snapshot_row_for_grid_line(size, row as i32 - display_offset as i32)
+}
+
+fn blank_snapshot_row_for_grid_line(size: TerminalSize, grid_line: i32) -> TerminalRow {
     let mut snapshot_row = TerminalRow {
         line_id: 0,
         source_id: 0,
-        absolute_line: row as i64 - display_offset as i64,
+        absolute_line: i64::from(grid_line),
         wrapped: false,
         active_input: false,
         signature: 0,

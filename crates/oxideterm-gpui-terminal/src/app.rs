@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque, hash_map::DefaultHasher},
     env,
     hash::{Hash, Hasher},
-    ops::Range,
+    ops::{Range, RangeInclusive},
     rc::Rc,
     sync::{
         Arc,
@@ -43,6 +43,7 @@ use crate::command_facts::{
     TerminalAutosuggestCandidate, TerminalAutosuggestCommandRecord, TerminalAutosuggestInputState,
     TerminalCommandFact,
 };
+use crate::command_folding::{CommandFoldProjection, CommandMarkRenderIndex};
 use crate::privilege_prompt::{
     PrivilegeInputObservation, PrivilegePromptMatch, PrivilegePromptSnapshot,
     PrivilegePromptTracker,
@@ -453,8 +454,17 @@ pub struct TerminalPane {
     pending_editor_clipboard: Option<PendingTerminalEditorClipboard>,
     command_marks: Vec<TerminalCommandMark>,
     command_marks_render_cache: Arc<[TerminalCommandMark]>,
+    command_marks_render_ranges: Vec<RangeInclusive<usize>>,
+    command_marks_render_index: CommandMarkRenderIndex,
     command_marks_render_cache_dirty: bool,
     selected_command_mark_id: Option<String>,
+    collapsed_command_ids: Arc<HashSet<String>>,
+    command_fold_projection: CommandFoldProjection,
+    backend_snapshot: Option<TerminalSnapshot>,
+    fold_visual_display_offset: usize,
+    fold_bottom_padding_rows: usize,
+    fold_anchor_bottom_padding_rows: usize,
+    pending_command_fold_click: Option<PendingCommandFoldClick>,
     command_mark_id_aliases: HashMap<String, String>,
     input_tracker: TerminalInputTracker,
     command_history: SharedTerminalCommandHistory,
@@ -543,6 +553,14 @@ pub(crate) struct FreeTypeDragState {
     pub source_selection: Option<TerminalSelection>,
     pub action: FreeTypeDragAction,
     pub active: bool,
+}
+
+#[derive(Clone, Debug)]
+struct PendingCommandFoldClick {
+    command_mark_id: String,
+    viewport_row: usize,
+    click_count: usize,
+    all_commands: bool,
 }
 
 /// Describes the remote editing intent chosen for a Free Type drag.
@@ -1099,8 +1117,17 @@ impl TerminalPane {
             pending_editor_clipboard: None,
             command_marks: Vec::new(),
             command_marks_render_cache: Arc::from([]),
+            command_marks_render_ranges: Vec::new(),
+            command_marks_render_index: CommandMarkRenderIndex::default(),
             command_marks_render_cache_dirty: false,
             selected_command_mark_id: None,
+            collapsed_command_ids: Arc::new(HashSet::new()),
+            command_fold_projection: CommandFoldProjection::default(),
+            backend_snapshot: None,
+            fold_visual_display_offset: 0,
+            fold_bottom_padding_rows: 0,
+            fold_anchor_bottom_padding_rows: 0,
+            pending_command_fold_click: None,
             command_mark_id_aliases: HashMap::new(),
             input_tracker: TerminalInputTracker::default(),
             command_history: preferences.command_history.clone(),
@@ -1190,6 +1217,7 @@ impl TerminalPane {
     }
 
     fn stamp_snapshot(&mut self, mut snapshot: TerminalSnapshot) -> TerminalSnapshot {
+        snapshot = self.project_command_folds(snapshot);
         let backend_reused_rows = snapshot.lines.iter().any(|row| row.line_id != 0);
         reconcile_snapshot_line_ids(
             &mut snapshot,
@@ -1209,6 +1237,49 @@ impl TerminalPane {
             self.snapshot_generation = 1;
         }
         snapshot.with_generation(self.snapshot_generation)
+    }
+
+    fn project_command_folds(&mut self, snapshot: TerminalSnapshot) -> TerminalSnapshot {
+        if self.collapsed_command_ids.is_empty() && self.fold_bottom_padding_rows == 0 {
+            self.backend_snapshot = None;
+            self.fold_visual_display_offset = 0;
+            self.fold_anchor_bottom_padding_rows = 0;
+            return snapshot;
+        }
+        if !self.command_folding_surface_available() {
+            Arc::make_mut(&mut self.collapsed_command_ids).clear();
+            self.command_fold_projection = CommandFoldProjection::default();
+            self.backend_snapshot = None;
+            self.fold_visual_display_offset = 0;
+            self.fold_bottom_padding_rows = 0;
+            self.fold_anchor_bottom_padding_rows = 0;
+            return snapshot;
+        }
+        self.command_fold_projection.update_viewport(
+            snapshot.scrollback_lines.saturating_add(snapshot.rows),
+            snapshot.rows,
+        );
+        if !self.command_fold_projection.is_active() && self.fold_bottom_padding_rows == 0 {
+            self.backend_snapshot = None;
+            self.fold_visual_display_offset = 0;
+            self.fold_anchor_bottom_padding_rows = 0;
+            return snapshot;
+        }
+
+        self.fold_visual_display_offset = self
+            .command_fold_projection
+            .clamp_display_offset(self.fold_visual_display_offset);
+        let grid_lines = self.command_fold_projection.grid_lines_for_viewport(
+            self.fold_visual_display_offset,
+            self.fold_bottom_padding_rows,
+        );
+        let projected = self.terminal.lock().snapshot_with_grid_lines_incremental(
+            &grid_lines,
+            &snapshot,
+            &self.snapshot,
+        );
+        self.backend_snapshot = Some(snapshot);
+        projected
     }
 
     fn record_snapshot_row_timestamps(&mut self, snapshot: &TerminalSnapshot) {
@@ -1439,7 +1510,11 @@ impl TerminalPane {
             || self.context_menu.is_some()
             || self.privilege_prompt_inline_hint.is_some()
             || !cursor_row_is_active_input
-            || self.snapshot.display_offset != 0
+            || if self.command_folding_active() {
+                self.fold_visual_display_offset != 0
+            } else {
+                self.snapshot.display_offset != 0
+            }
         {
             return Vec::new();
         }
@@ -1623,6 +1698,12 @@ impl TerminalPane {
             self.command_marks_render_cache_dirty = true;
             self.selected_command_mark_id = None;
             self.hovered_command_mark_id = None;
+            Arc::make_mut(&mut self.collapsed_command_ids).clear();
+            self.command_fold_projection = CommandFoldProjection::default();
+            self.backend_snapshot = None;
+            self.fold_visual_display_offset = 0;
+            self.fold_bottom_padding_rows = 0;
+            self.fold_anchor_bottom_padding_rows = 0;
             self.command_mark_id_aliases.clear();
         }
         if !next_settings.current_directory_awareness_enabled {
@@ -2434,12 +2515,12 @@ impl TerminalPane {
             terminal.snapshot()
         };
         self.clear_smooth_scroll_remainder();
+        self.reset_command_marks_for_terminal_reset();
         self.snapshot = self.stamp_snapshot(snapshot);
         self.mark_terminal_content_changed(cx);
         self.selection = None;
         self.search_query = None;
         self.selected_search_match = None;
-        self.reset_command_marks_for_terminal_reset();
         cx.notify();
     }
 
@@ -2697,7 +2778,10 @@ impl TerminalPane {
     }
 
     fn clear_command_mark_selection_for_tui_mode(&mut self, mode: TermMode) -> bool {
-        if self.selected_command_mark_id.is_none() && self.hovered_command_mark_id.is_none()
+        if self.selected_command_mark_id.is_none()
+            && self.hovered_command_mark_id.is_none()
+            && self.collapsed_command_ids.is_empty()
+            && self.fold_bottom_padding_rows == 0
             || command_mark_ui_available(self.settings.command_marks_enabled, mode)
         {
             return false;
@@ -2707,10 +2791,20 @@ impl TerminalPane {
         // TUI applications own the active screen and mouse surface instead.
         self.selected_command_mark_id = None;
         self.hovered_command_mark_id = None;
+        Arc::make_mut(&mut self.collapsed_command_ids).clear();
+        self.command_fold_projection = CommandFoldProjection::default();
+        self.backend_snapshot = None;
+        self.fold_visual_display_offset = 0;
+        self.fold_bottom_padding_rows = 0;
+        self.fold_anchor_bottom_padding_rows = 0;
+        self.snapshot_dirty = true;
         true
     }
 
     fn smooth_scroll_display_offset(&self) -> f32 {
+        if self.command_folding_active() {
+            return self.fold_visual_display_offset as f32;
+        }
         if !self.settings.smooth_scroll {
             return self.snapshot.display_offset as f32;
         }
@@ -3239,11 +3333,21 @@ impl TerminalPane {
 
     fn restore_live_output_after_user_input(&mut self) {
         if !viewport_needs_live_output_restore(
-            self.snapshot.display_offset,
+            if self.command_folding_active() {
+                self.fold_visual_display_offset
+            } else {
+                self.snapshot.display_offset
+            },
             self.smooth_scroll_offset_px,
             self.smooth_scroll_animation.is_some(),
         ) {
             return;
+        }
+
+        if self.command_folding_active() {
+            self.fold_visual_display_offset = 0;
+            self.fold_bottom_padding_rows = 0;
+            self.fold_anchor_bottom_padding_rows = 0;
         }
 
         // User-originated input should reveal the live prompt without changing
@@ -3560,13 +3664,13 @@ impl TerminalPane {
                 recorder.record_resize(cols, rows);
             }
             self.clear_smooth_scroll_remainder();
-            self.snapshot = self.stamp_snapshot(snapshot);
-            self.mark_terminal_content_changed(cx);
             if grid_changed {
                 // The backend also resets its shell-integration state. Clear
                 // immediately so stale hit regions cannot survive one UI frame.
                 self.reset_command_marks_while_awaiting_backend_reset();
             }
+            self.snapshot = self.stamp_snapshot(snapshot);
+            self.mark_terminal_content_changed(cx);
             cx.notify();
         }
     }

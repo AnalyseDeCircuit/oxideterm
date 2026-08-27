@@ -59,6 +59,10 @@
       "find": "Suchen...",
       "manage_triggers": "Auslöser für diese Sitzung verwalten...",
       "select_command": "Befehl auswählen",
+      "fold_command": "Befehl einklappen",
+      "unfold_command": "Befehl ausklappen",
+      "fold_all_commands": "Alle Befehle einklappen",
+      "unfold_all_commands": "Alle Befehle ausklappen",
       "previous_command": "Vorheriger Befehl",
       "next_command": "Nächster Befehl",
       "clear_screen": "Bildschirm leeren"

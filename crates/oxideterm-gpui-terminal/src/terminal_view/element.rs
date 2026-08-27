@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque, hash_map::DefaultHasher},
+    collections::{HashMap, HashSet, VecDeque, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     ops::Range,
     sync::{Arc, OnceLock},
@@ -28,7 +28,7 @@ use crate::command_facts::TransientCommandHighlight;
 use crate::terminal_ui::*;
 use crate::terminal_view::highlight::{TerminalHighlightLayout, terminal_highlights_for_rows};
 use crate::terminal_view::links::*;
-use crate::terminal_view::selection::TerminalSelection;
+use crate::terminal_view::selection::{TerminalSelection, snapshot_grid_line_for_row};
 use crate::terminal_view::semantic::{
     append_terminal_semantics_for_rows, semantic_line_role_for_rows,
 };
@@ -62,6 +62,7 @@ pub(crate) struct TerminalElement {
     search_matches_precomputed: bool,
     selected_search_match: Option<usize>,
     command_marks: Arc<[TerminalCommandMark]>,
+    collapsed_command_ids: Arc<HashSet<String>>,
     selected_command_mark_id: Option<String>,
     hovered_command_mark_id: Option<String>,
     highlight_rules: Arc<[TerminalHighlightRule]>,
@@ -82,6 +83,7 @@ pub(crate) struct TerminalElement {
     performance_metrics_enabled: bool,
     viewport_rows: usize,
     scrollbar_display_offset: f32,
+    scrollbar_history_rows: usize,
     scroll_y_offset: Pixels,
     command_mark_gutter_width: f32,
 }
@@ -155,6 +157,9 @@ pub(crate) struct TerminalCommandMarkOverlay {
     pub(crate) hovered: bool,
     pub(crate) running: bool,
     pub(crate) exit_code: Option<i32>,
+    pub(crate) fold_header_row: Option<usize>,
+    pub(crate) foldable: bool,
+    pub(crate) collapsed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -503,6 +508,7 @@ impl TerminalElement {
     ) -> Self {
         let viewport_rows = snapshot.rows;
         let scrollbar_display_offset = snapshot.display_offset as f32;
+        let scrollbar_history_rows = snapshot.scrollback_lines;
         Self {
             snapshot,
             rendered_images,
@@ -516,6 +522,7 @@ impl TerminalElement {
             search_matches_precomputed: false,
             selected_search_match,
             command_marks: Arc::from([]),
+            collapsed_command_ids: Arc::new(HashSet::new()),
             selected_command_mark_id: None,
             hovered_command_mark_id: None,
             highlight_rules: Arc::from([]),
@@ -537,6 +544,7 @@ impl TerminalElement {
             performance_metrics_enabled: false,
             viewport_rows,
             scrollbar_display_offset,
+            scrollbar_history_rows,
             scroll_y_offset: px(0.0),
             command_mark_gutter_width: 0.0,
         }
@@ -613,6 +621,11 @@ impl TerminalElement {
         self
     }
 
+    pub(crate) fn collapsed_command_ids(mut self, command_ids: Arc<HashSet<String>>) -> Self {
+        self.collapsed_command_ids = command_ids;
+        self
+    }
+
     pub(crate) fn transparent_background(mut self, transparent_background: bool) -> Self {
         self.transparent_background = transparent_background;
         self
@@ -630,6 +643,11 @@ impl TerminalElement {
 
     pub(crate) fn scrollbar_display_offset(mut self, display_offset_rows: f32) -> Self {
         self.scrollbar_display_offset = display_offset_rows;
+        self
+    }
+
+    pub(crate) fn scrollbar_history_rows(mut self, history_rows: usize) -> Self {
+        self.scrollbar_history_rows = history_rows;
         self
     }
 
@@ -723,7 +741,7 @@ impl TerminalElement {
             } else {
                 visible_search_match_rects(
                     &self.search_matches,
-                    self.snapshot.display_offset,
+                    &self.snapshot,
                     visible_rows.clone(),
                     self.selected_search_match,
                 )
@@ -732,6 +750,7 @@ impl TerminalElement {
         let command_mark_overlays = command_mark_overlays_for_rows(
             &self.snapshot,
             &self.command_marks,
+            &self.collapsed_command_ids,
             self.selected_command_mark_id.as_deref(),
             self.hovered_command_mark_id.as_deref(),
         );
@@ -752,8 +771,8 @@ impl TerminalElement {
         let mut timestamp_runs = Vec::new();
         let mut cached_rows = Vec::new();
         let mut cursor = None;
-        let scrollbar = terminal_scrollbar_for_viewport_display_offset(
-            &self.snapshot,
+        let scrollbar = terminal_scrollbar_for_history(
+            self.scrollbar_history_rows,
             &self.metrics,
             self.viewport_rows,
             self.scrollbar_display_offset,
@@ -831,6 +850,37 @@ impl TerminalElement {
                 timestamp_runs.push(timestamp_run);
             }
         }
+
+        for overlay in command_mark_overlays
+            .iter()
+            .filter(|overlay| overlay.collapsed)
+        {
+            let Some(row_index) = overlay.fold_header_row else {
+                continue;
+            };
+            let Some(row) = self.snapshot.lines.get(row_index) else {
+                continue;
+            };
+            let command_end_col = row
+                .cells
+                .iter()
+                .rposition(|cell| !cell.ch.is_whitespace())
+                .map_or(0, |col| col.saturating_add(1));
+            let placeholder_col = command_end_col.saturating_add(1);
+            if placeholder_col >= self.snapshot.cols {
+                continue;
+            }
+            let placeholder = "…";
+            text_runs.push(BatchedTextRun {
+                row: row_index,
+                col: placeholder_col,
+                text: SharedString::from(placeholder),
+                cells: 1,
+                style: ghost_text_run(placeholder, &self.theme, &self.metrics),
+                cache: None,
+            });
+        }
+        text_runs.sort_by_key(|run| (run.row, run.col));
 
         TerminalElementLayout {
             backgrounds,
@@ -1072,7 +1122,10 @@ impl TerminalElement {
             }
 
             if self.selection.is_some_and(|selection| {
-                selection.contains_viewport_cell(row_index, col_index, self.snapshot.display_offset)
+                selection.contains_grid_cell(
+                    snapshot_grid_line_for_row(&self.snapshot, row_index).unwrap_or_default(),
+                    col_index,
+                )
             }) {
                 extend_or_push_row_rect(
                     &mut current_selection,
@@ -1218,8 +1271,7 @@ impl TerminalElement {
         }
         hash_selection_for_row(
             self.selection,
-            row_index,
-            self.snapshot.display_offset,
+            snapshot_grid_line_for_row(&self.snapshot, row_index).unwrap_or_default(),
             self.snapshot.cols,
             &mut hasher,
         );
@@ -1575,8 +1627,7 @@ fn relative_link_layout(ranges: Vec<TerminalLinkRange>) -> TerminalRowLinkLayout
 
 fn hash_selection_for_row(
     selection: Option<TerminalSelection>,
-    row: usize,
-    display_offset: usize,
+    line: i32,
     cols: usize,
     hasher: &mut impl Hasher,
 ) {
@@ -1584,7 +1635,6 @@ fn hash_selection_for_row(
         0u8.hash(hasher);
         return;
     };
-    let line = row as i32 - display_offset as i32;
     let selected_span =
         if selection.mode == crate::terminal_view::selection::TerminalSelectionMode::Block {
             let row_start = selection.anchor.line.min(selection.head.line);
@@ -1714,14 +1764,15 @@ fn terminal_semantic_style_signature(
 fn command_mark_overlays_for_rows(
     snapshot: &TerminalSnapshot,
     marks: &[TerminalCommandMark],
+    collapsed_command_ids: &HashSet<String>,
     selected_command_mark_id: Option<&str>,
     hovered_command_mark_id: Option<&str>,
 ) -> Vec<TerminalCommandMarkOverlay> {
-    let viewport_start = snapshot
-        .scrollback_lines
-        .saturating_sub(snapshot.display_offset);
-    let viewport_end = viewport_start.saturating_add(snapshot.rows.saturating_sub(1));
     let mut overlays = Vec::new();
+    let total_physical_lines = snapshot.scrollback_lines.saturating_add(snapshot.rows);
+    let visible_physical_rows = (0..snapshot.lines.len())
+        .filter_map(|row| physical_line_for_snapshot_row(snapshot, row).map(|line| (row, line)))
+        .collect::<Vec<_>>();
 
     for mark in marks {
         let start_line = mark.start_line;
@@ -1730,25 +1781,47 @@ fn command_mark_overlays_for_rows(
                 .saturating_sub(1)
                 .max(mark.start_line)
         });
-        if end_line < start_line || end_line < viewport_start || start_line > viewport_end {
+        if end_line < start_line {
             continue;
         }
 
         let selected = selected_command_mark_id == Some(mark.command_id.as_str());
         let hovered = !selected && hovered_command_mark_id == Some(mark.command_id.as_str());
-        let visible_start_line = start_line.max(viewport_start);
-        let visible_end_line = end_line.min(viewport_end);
-        overlays.push(TerminalCommandMarkOverlay {
-            start_row: visible_start_line.saturating_sub(viewport_start),
-            end_row: visible_end_line.saturating_sub(viewport_start),
-            has_top: start_line >= viewport_start,
-            has_bottom: end_line <= viewport_end,
-            stale: mark.stale,
-            selected,
-            hovered,
-            running: !mark.is_closed,
-            exit_code: mark.exit_code,
-        });
+        let foldable =
+            crate::command_folding::foldable_output_range(mark, total_physical_lines).is_some();
+        let collapsed = collapsed_command_ids.contains(&mark.command_id);
+        let first_visible = visible_physical_rows.partition_point(|(_, line)| *line < start_line);
+        let after_last_visible =
+            visible_physical_rows.partition_point(|(_, line)| *line <= end_line);
+        let visible_rows = &visible_physical_rows[first_visible..after_last_visible];
+        let mut group_start: Option<(usize, usize)> = None;
+        let mut previous: Option<(usize, usize)> = None;
+
+        for &(row, absolute_line) in visible_rows {
+            let contiguous = previous.is_some_and(|(previous_row, previous_line)| {
+                row == previous_row.saturating_add(1)
+                    && absolute_line == previous_line.saturating_add(1)
+            });
+            if !contiguous {
+                if let (Some((start_row, first_line)), Some((end_row, last_line))) =
+                    (group_start.take(), previous.take())
+                {
+                    overlays.push(command_mark_overlay(
+                        mark, start_row, end_row, first_line, last_line, selected, hovered,
+                        foldable, collapsed,
+                    ));
+                }
+                group_start = Some((row, absolute_line));
+            }
+            previous = Some((row, absolute_line));
+        }
+        if let (Some((start_row, first_line)), Some((end_row, last_line))) = (group_start, previous)
+        {
+            overlays.push(command_mark_overlay(
+                mark, start_row, end_row, first_line, last_line, selected, hovered, foldable,
+                collapsed,
+            ));
+        }
     }
 
     // Passive command edges should stay behind hover/selection fills when ranges overlap.
@@ -1756,11 +1829,41 @@ fn command_mark_overlays_for_rows(
     overlays
 }
 
+#[allow(clippy::too_many_arguments)]
+fn command_mark_overlay(
+    mark: &TerminalCommandMark,
+    start_row: usize,
+    end_row: usize,
+    first_line: usize,
+    last_line: usize,
+    selected: bool,
+    hovered: bool,
+    foldable: bool,
+    collapsed: bool,
+) -> TerminalCommandMarkOverlay {
+    TerminalCommandMarkOverlay {
+        start_row,
+        end_row,
+        has_top: first_line == mark.start_line,
+        has_bottom: mark.end_line == Some(last_line),
+        stale: mark.stale,
+        selected,
+        hovered,
+        running: !mark.is_closed,
+        exit_code: mark.exit_code,
+        fold_header_row: (first_line <= mark.command_line && last_line >= mark.command_line)
+            .then_some(start_row.saturating_add(mark.command_line.saturating_sub(first_line))),
+        foldable,
+        collapsed,
+    }
+}
+
 fn snapshot_absolute_cursor_line(snapshot: &TerminalSnapshot) -> usize {
     snapshot
-        .scrollback_lines
-        .saturating_add(snapshot.cursor_row)
-        .saturating_sub(snapshot.display_offset)
+        .lines
+        .get(snapshot.cursor_row)
+        .and_then(|_| physical_line_for_snapshot_row(snapshot, snapshot.cursor_row))
+        .unwrap_or(snapshot.scrollback_lines)
 }
 
 fn snapshot_prompt_block_start_line(snapshot: &TerminalSnapshot, command_line: usize) -> usize {
@@ -1780,11 +1883,20 @@ fn snapshot_prompt_block_start_line(snapshot: &TerminalSnapshot, command_line: u
 }
 
 fn snapshot_line_text(snapshot: &TerminalSnapshot, absolute_line: usize) -> Option<String> {
-    let viewport_start = snapshot
-        .scrollback_lines
-        .saturating_sub(snapshot.display_offset);
-    let row = absolute_line.checked_sub(viewport_start)?;
-    snapshot.lines.get(row).map(|line| line.text())
+    snapshot
+        .lines
+        .iter()
+        .enumerate()
+        .find(|(row, _)| physical_line_for_snapshot_row(snapshot, *row) == Some(absolute_line))
+        .map(|(_, row)| row)
+        .map(|line| line.text())
+}
+
+fn physical_line_for_snapshot_row(snapshot: &TerminalSnapshot, row: usize) -> Option<usize> {
+    usize::try_from(
+        snapshot.scrollback_lines as i64 + i64::from(snapshot_grid_line_for_row(snapshot, row)?),
+    )
+    .ok()
 }
 
 fn is_likely_prompt_input_line(text: String) -> bool {

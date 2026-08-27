@@ -6,14 +6,14 @@ use oxideterm_terminal_unicode::visual_line_for_row_if_bidi;
 
 use crate::terminal_ui::*;
 use crate::terminal_view::element::{TerminalRect, TerminalScrollbar};
+use crate::terminal_view::snapshot_grid_line_for_row;
 
-pub(crate) fn terminal_scrollbar_for_viewport_display_offset(
-    snapshot: &TerminalSnapshot,
+pub(crate) fn terminal_scrollbar_for_history(
+    history: usize,
     metrics: &TerminalMetrics,
     viewport_rows: usize,
     display_offset_rows: f32,
 ) -> Option<TerminalScrollbar> {
-    let history = snapshot.scrollback_lines;
     if history == 0 {
         return None;
     }
@@ -93,7 +93,7 @@ pub(crate) fn search_match_rects_for_rows(
 
 pub(crate) fn visible_search_match_rects(
     matches: &[TerminalSearchMatch],
-    display_offset: usize,
+    snapshot: &TerminalSnapshot,
     rows: Range<usize>,
     selected_match: Option<usize>,
 ) -> Vec<TerminalRect> {
@@ -103,7 +103,9 @@ pub(crate) fn visible_search_match_rects(
         .flat_map(|(index, search_match)| {
             let rows = rows.clone();
             search_match.ranges.iter().filter_map(move |range| {
-                let row = (range.line + display_offset as i32).try_into().ok()?;
+                let row = snapshot.lines.iter().enumerate().find_map(|(row, _)| {
+                    (snapshot_grid_line_for_row(snapshot, row) == Some(range.line)).then_some(row)
+                })?;
                 if !rows.contains(&row) {
                     return None;
                 }

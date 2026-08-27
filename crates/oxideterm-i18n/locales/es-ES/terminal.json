@@ -59,6 +59,10 @@
       "find": "Buscar...",
       "manage_triggers": "Administrar activadores de esta sesión...",
       "select_command": "Seleccionar comando",
+      "fold_command": "Contraer comando",
+      "unfold_command": "Expandir comando",
+      "fold_all_commands": "Contraer todos los comandos",
+      "unfold_all_commands": "Expandir todos los comandos",
       "previous_command": "Comando anterior",
       "next_command": "Comando siguiente",
       "clear_screen": "Limpiar pantalla"

@@ -34,7 +34,7 @@ pub(crate) const TERMINAL_LINE_HEIGHT_RATIO: f32 = 1.2;
 pub(crate) const TERMINAL_CONTENT_PADDING: f32 = 0.0;
 // Command marks no longer reserve a left gutter; column-zero terminal text must
 // start at the pane edge.
-pub(crate) const TERMINAL_COMMAND_MARK_GUTTER_WIDTH: f32 = 0.0;
+pub(crate) const TERMINAL_COMMAND_MARK_GUTTER_WIDTH: f32 = 18.0;
 pub(crate) const OXIDETERM_TERMINAL_BACKGROUND: u32 = 0x0d0f12;
 pub(crate) const OXIDETERM_TERMINAL_FOREGROUND: u32 = 0xe6e8eb;
 pub(crate) const SCROLLBAR_WIDTH: f32 = 10.0;
@@ -379,6 +379,10 @@ pub struct TerminalCommandSelectionLabels {
     pub find: String,
     pub manage_triggers: String,
     pub select_command: String,
+    pub fold_command: String,
+    pub unfold_command: String,
+    pub fold_all_commands: String,
+    pub unfold_all_commands: String,
     pub previous_command: String,
     pub next_command: String,
     pub clear_screen: String,
@@ -399,6 +403,10 @@ impl Default for TerminalCommandSelectionLabels {
             find: "Find...".to_string(),
             manage_triggers: "Manage triggers...".to_string(),
             select_command: "Select command".to_string(),
+            fold_command: "Fold command".to_string(),
+            unfold_command: "Unfold command".to_string(),
+            fold_all_commands: "Fold all commands".to_string(),
+            unfold_all_commands: "Unfold all commands".to_string(),
             previous_command: "Previous command".to_string(),
             next_command: "Next command".to_string(),
             clear_screen: "Clear screen".to_string(),

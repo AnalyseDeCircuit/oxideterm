@@ -1,6 +1,7 @@
 mod app;
 mod background_cache;
 mod command_facts;
+mod command_folding;
 mod image_budget;
 mod modem_worker;
 mod privilege_prompt;

@@ -998,6 +998,41 @@ impl TerminalSessionBackend for SerialSession {
         )
     }
 
+    fn snapshot_with_grid_lines(&self, grid_lines: &[i32]) -> TerminalSnapshot {
+        snapshot_from_term_with_grid_lines(
+            &self.term.lock(),
+            TerminalSize {
+                cols: self.resize.cols,
+                rows: self.resize.rows,
+                cell_width: self.resize.cell_width,
+                cell_height: self.resize.cell_height,
+            },
+            &self.graphics,
+            grid_lines,
+        )
+    }
+
+    fn snapshot_with_grid_lines_incremental(
+        &self,
+        grid_lines: &[i32],
+        fresh: &TerminalSnapshot,
+        previous: &TerminalSnapshot,
+    ) -> TerminalSnapshot {
+        snapshot_from_term_with_grid_lines_incremental(
+            &self.term.lock(),
+            TerminalSize {
+                cols: self.resize.cols,
+                rows: self.resize.rows,
+                cell_width: self.resize.cell_width,
+                cell_height: self.resize.cell_height,
+            },
+            &self.graphics,
+            grid_lines,
+            fresh,
+            previous,
+        )
+    }
+
     fn terminate_active_task(&mut self) -> Result<()> {
         self.write_protocol_bytes(b"\x03")
     }

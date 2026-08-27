@@ -59,6 +59,10 @@
       "find": "Buscar...",
       "manage_triggers": "Gerenciar gatilhos desta sessão...",
       "select_command": "Selecionar comando",
+      "fold_command": "Recolher comando",
+      "unfold_command": "Expandir comando",
+      "fold_all_commands": "Recolher todos os comandos",
+      "unfold_all_commands": "Expandir todos os comandos",
       "previous_command": "Comando anterior",
       "next_command": "Próximo comando",
       "clear_screen": "Limpar tela"

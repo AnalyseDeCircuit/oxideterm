@@ -1239,6 +1239,45 @@ impl TerminalSessionBackend for SshPtySession {
         )
     }
 
+    fn snapshot_with_grid_lines(&self, grid_lines: &[i32]) -> TerminalSnapshot {
+        let size = TerminalSize {
+            cols: self.resize.cols,
+            rows: self.resize.rows,
+            cell_width: self.resize.cell_width,
+            cell_height: self.resize.cell_height,
+        };
+        if let Some(snapshot) = self.tmux_display.snapshot(size, None) {
+            return snapshot;
+        }
+        let term = self.display_term();
+        let term = term.lock();
+        snapshot_from_term_with_grid_lines(&term, size, &self.graphics, grid_lines)
+    }
+
+    fn snapshot_with_grid_lines_incremental(
+        &self,
+        grid_lines: &[i32],
+        fresh: &TerminalSnapshot,
+        previous: &TerminalSnapshot,
+    ) -> TerminalSnapshot {
+        let size = TerminalSize {
+            cols: self.resize.cols,
+            rows: self.resize.rows,
+            cell_width: self.resize.cell_width,
+            cell_height: self.resize.cell_height,
+        };
+        let term = self.display_term();
+        let term = term.lock();
+        snapshot_from_term_with_grid_lines_incremental(
+            &term,
+            size,
+            &self.graphics,
+            grid_lines,
+            fresh,
+            previous,
+        )
+    }
+
     fn terminate_active_task(&mut self) -> Result<()> {
         self.write_protocol_bytes(b"\x03")
     }

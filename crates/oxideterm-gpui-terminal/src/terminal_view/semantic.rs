@@ -3,6 +3,7 @@
 
 use std::ops::Range;
 
+use crate::terminal_view::snapshot_grid_line_for_row;
 use oxideterm_terminal::{TerminalAttrs, TerminalCommandMark, TerminalSnapshot};
 use oxideterm_terminal_semantic::{
     CompiledSemanticScheme, SemanticClass, SemanticLineRole, SemanticShellDialect,
@@ -123,11 +124,17 @@ pub(super) fn semantic_line_role_for_rows(
         return SemanticLineRole::Command;
     }
 
-    let viewport_start = snapshot
-        .scrollback_lines
-        .saturating_sub(snapshot.display_offset);
-    let start_line = viewport_start.saturating_add(rows.start);
-    let end_line = viewport_start.saturating_add(rows.end.saturating_sub(1));
+    let mut physical_lines = rows.clone().filter_map(|row| {
+        usize::try_from(
+            snapshot.scrollback_lines as i64
+                + i64::from(snapshot_grid_line_for_row(snapshot, row)?),
+        )
+        .ok()
+    });
+    let Some(start_line) = physical_lines.next() else {
+        return SemanticLineRole::Unknown;
+    };
+    let end_line = physical_lines.last().unwrap_or(start_line);
     if command_marks
         .iter()
         .any(|mark| (start_line..=end_line).contains(&mark.command_line))
@@ -135,7 +142,9 @@ pub(super) fn semantic_line_role_for_rows(
         return SemanticLineRole::Command;
     }
     if let Some(mark) = command_marks.iter().rev().find(|mark| {
-        let output_start = mark.command_line.saturating_add(1);
+        let output_start = mark
+            .output_start_line
+            .unwrap_or_else(|| mark.command_line.saturating_add(1));
         let output_end = mark.end_line.unwrap_or(end_line);
         output_start <= end_line && output_end >= start_line
     }) {
@@ -327,6 +336,7 @@ mod tests {
             command: Some("ps aux | grep node".to_string()),
             start_line: 0,
             command_line: 0,
+            output_start_line: Some(1),
             end_line: Some(1),
             is_closed: true,
             closed_by: Some(TerminalCommandMarkClosedBy::ShellIntegration),

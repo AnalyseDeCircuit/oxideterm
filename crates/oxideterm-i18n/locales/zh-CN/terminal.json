@@ -138,6 +138,10 @@
       "find": "查找...",
       "manage_triggers": "管理此会话的触发器...",
       "select_command": "选择命令",
+      "fold_command": "折叠命令",
+      "unfold_command": "展开命令",
+      "fold_all_commands": "折叠所有命令",
+      "unfold_all_commands": "展开所有命令",
       "previous_command": "上一个命令",
       "next_command": "下一个命令",
       "clear_screen": "清屏"

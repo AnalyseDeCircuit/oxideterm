@@ -59,6 +59,10 @@
       "find": "尋找...",
       "manage_triggers": "管理此工作階段的觸發器...",
       "select_command": "選取命令",
+      "fold_command": "摺疊命令",
+      "unfold_command": "展開命令",
+      "fold_all_commands": "摺疊所有命令",
+      "unfold_all_commands": "展開所有命令",
       "previous_command": "上一個命令",
       "next_command": "下一個命令",
       "clear_screen": "清除螢幕"

@@ -258,6 +258,17 @@ pub trait TerminalSessionBackend: Send {
         let _ = (display_offset, rows);
         self.snapshot()
     }
+    fn snapshot_with_grid_lines(&self, _grid_lines: &[i32]) -> TerminalSnapshot {
+        self.snapshot()
+    }
+    fn snapshot_with_grid_lines_incremental(
+        &self,
+        grid_lines: &[i32],
+        _fresh: &TerminalSnapshot,
+        _previous: &TerminalSnapshot,
+    ) -> TerminalSnapshot {
+        self.snapshot_with_grid_lines(grid_lines)
+    }
     fn terminate_active_task(&mut self) -> Result<()>;
     fn kill_active_task(&mut self) -> Result<()>;
     fn shutdown(&mut self);

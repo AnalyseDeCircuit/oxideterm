@@ -602,6 +602,7 @@ mod tests {
             command: command.map(str::to_string),
             start_line: 10,
             command_line: 10,
+            output_start_line: closed.then_some(11),
             end_line: closed.then_some(12),
             is_closed: closed,
             closed_by: closed.then_some(TerminalCommandMarkClosedBy::ShellIntegration),

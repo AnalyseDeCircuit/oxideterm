@@ -46,13 +46,7 @@ impl TerminalSelection {
         }
     }
 
-    pub(crate) fn contains_viewport_cell(
-        self,
-        row: usize,
-        col: usize,
-        display_offset: usize,
-    ) -> bool {
-        let line = grid_line_for_viewport_row(row, display_offset);
+    pub(crate) fn contains_grid_cell(self, line: i32, col: usize) -> bool {
         if self.mode == TerminalSelectionMode::Block {
             let row_start = self.anchor.line.min(self.head.line);
             let row_end = self.anchor.line.max(self.head.line);
@@ -70,21 +64,34 @@ pub(crate) fn grid_point_for_viewport_point(
     snapshot: &TerminalSnapshot,
     point: TerminalPoint,
 ) -> Option<TerminalGridPoint> {
-    (point.row < snapshot.rows).then_some(TerminalGridPoint {
-        line: grid_line_for_viewport_row(point.row, snapshot.display_offset),
+    Some(TerminalGridPoint {
+        line: snapshot_grid_line_for_row(snapshot, point.row)?,
         col: point.col.min(snapshot.cols.saturating_sub(1)),
     })
 }
 
-fn grid_line_for_viewport_row(row: usize, display_offset: usize) -> i32 {
-    row as i32 - display_offset as i32
+fn snapshot_row_for_grid_line(snapshot: &TerminalSnapshot, line: i32) -> Option<usize> {
+    (0..snapshot.lines.len()).find(|&row| snapshot_grid_line_for_row(snapshot, row) == Some(line))
 }
 
-fn snapshot_row_for_grid_line(snapshot: &TerminalSnapshot, line: i32) -> Option<usize> {
-    let row = i64::from(line) + i64::try_from(snapshot.display_offset).ok()?;
-    usize::try_from(row)
-        .ok()
-        .filter(|row| *row < snapshot.lines.len())
+pub(crate) fn snapshot_grid_line_for_row(snapshot: &TerminalSnapshot, row: usize) -> Option<i32> {
+    let stored_coordinates_are_ordered = snapshot
+        .lines
+        .windows(2)
+        .all(|rows| rows[0].absolute_line < rows[1].absolute_line);
+    let first_line_matches_contiguous_snapshot = snapshot.lines.first().is_some_and(|row| {
+        row.absolute_line == -(snapshot.display_offset.min(i32::MAX as usize) as i64)
+    });
+    let pane_assigned_line_identity = snapshot.lines.iter().any(|row| row.line_id != 0);
+    if stored_coordinates_are_ordered
+        && (first_line_matches_contiguous_snapshot || pane_assigned_line_identity)
+    {
+        return snapshot.lines.get(row).map(|row| {
+            row.absolute_line
+                .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+        });
+    }
+    (row < snapshot.lines.len()).then(|| row as i32 - snapshot.display_offset as i32)
 }
 
 pub(crate) fn snapshot_request_for_selection(
@@ -96,10 +103,15 @@ pub(crate) fn snapshot_request_for_selection(
     }
 
     let (start, end) = selection.normalized();
-    if snapshot_row_for_grid_line(snapshot, start.line).is_some()
-        && snapshot_row_for_grid_line(snapshot, end.line).is_some()
-    {
-        return None;
+    if let (Some(start_row), Some(end_row)) = (
+        snapshot_row_for_grid_line(snapshot, start.line),
+        snapshot_row_for_grid_line(snapshot, end.line),
+    ) {
+        let physical_span = i64::from(end.line) - i64::from(start.line);
+        let snapshot_span = end_row.saturating_sub(start_row) as i64;
+        if physical_span == snapshot_span {
+            return None;
+        }
     }
 
     let start_line = i64::from(start.line);

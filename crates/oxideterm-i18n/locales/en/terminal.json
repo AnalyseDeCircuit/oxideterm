@@ -138,6 +138,10 @@
       "find": "Find...",
       "manage_triggers": "Manage triggers for this session...",
       "select_command": "Select command",
+      "fold_command": "Fold command",
+      "unfold_command": "Unfold command",
+      "fold_all_commands": "Fold all commands",
+      "unfold_all_commands": "Unfold all commands",
       "previous_command": "Previous command",
       "next_command": "Next command",
       "clear_screen": "Clear screen"

@@ -144,6 +144,101 @@ impl TerminalGraphicsState {
             .collect()
     }
 
+    fn visible_images_for_grid_lines(&self, grid_lines: &[i32]) -> Vec<TerminalImageSnapshot> {
+        let mut images = Vec::new();
+        for placement in &self.placements {
+            let placement_end = placement.line.saturating_add(placement.rows as i32);
+            let mut segment_start = None;
+            let mut previous_viewport_row = 0;
+            let mut previous_source_row = 0;
+
+            for (viewport_row, &grid_line) in grid_lines.iter().enumerate() {
+                if grid_line < placement.line || grid_line >= placement_end {
+                    if let Some((start_viewport_row, start_source_row)) = segment_start.take() {
+                        images.push(self.projected_image_segment(
+                            placement,
+                            start_viewport_row,
+                            start_source_row,
+                            previous_viewport_row - start_viewport_row + 1,
+                        ));
+                    }
+                    continue;
+                }
+
+                let source_row = (grid_line - placement.line) as usize;
+                let continues_segment = segment_start.is_some()
+                    && viewport_row == previous_viewport_row + 1
+                    && source_row == previous_source_row + 1;
+                if !continues_segment {
+                    if let Some((start_viewport_row, start_source_row)) = segment_start.take() {
+                        images.push(self.projected_image_segment(
+                            placement,
+                            start_viewport_row,
+                            start_source_row,
+                            previous_viewport_row - start_viewport_row + 1,
+                        ));
+                    }
+                    segment_start = Some((viewport_row, source_row));
+                }
+                previous_viewport_row = viewport_row;
+                previous_source_row = source_row;
+            }
+
+            if let Some((start_viewport_row, start_source_row)) = segment_start {
+                images.push(self.projected_image_segment(
+                    placement,
+                    start_viewport_row,
+                    start_source_row,
+                    previous_viewport_row - start_viewport_row + 1,
+                ));
+            }
+        }
+        images
+    }
+
+    fn projected_image_segment(
+        &self,
+        placement: &TerminalImagePlacement,
+        viewport_row: usize,
+        source_row: usize,
+        rows: usize,
+    ) -> TerminalImageSnapshot {
+        // Folding changes row adjacency without changing image storage, so each visible
+        // contiguous segment receives the matching vertical source crop.
+        let source_y_offset = proportional_image_extent(
+            placement.source_height,
+            source_row,
+            placement.rows,
+        );
+        let source_height = proportional_image_extent(
+            placement.source_height,
+            rows,
+            placement.rows,
+        );
+        TerminalImageSnapshot {
+            id: placement.id,
+            protocol: placement.protocol,
+            row: viewport_row,
+            col: placement.col,
+            cols: placement.cols,
+            rows,
+            pixel_width: placement.pixel_width,
+            pixel_height: placement.pixel_height,
+            source_x: placement.source_x,
+            source_y: placement.source_y.saturating_add(source_y_offset),
+            source_width: placement.source_width,
+            source_height,
+            z_index: placement.z_index,
+            placeholder: placement.placeholder,
+            version: self
+                .images
+                .get(&placement.id)
+                .map(|image| image.version)
+                .unwrap_or_default(),
+            data: self.images.get(&placement.id).cloned(),
+        }
+    }
+
     fn evict_images_over_budget(&mut self) {
         while self.storage_bytes > self.storage_limit_bytes {
             let Some(id) = self.image_order.pop_front() else {
@@ -173,6 +268,14 @@ fn image_storage_bytes(image: &TerminalImageData) -> usize {
         // once instead of adding the still-preview buffer again.
         image.frames.iter().map(|frame| frame.rgba.len()).sum()
     }
+}
+
+fn proportional_image_extent(source_extent: u32, cells: usize, total_cells: usize) -> u32 {
+    if total_cells == 0 {
+        return 0;
+    }
+    ((u64::from(source_extent) * cells as u64) / total_cells as u64)
+        .min(u64::from(u32::MAX)) as u32
 }
 
 pub(crate) fn graphics_cursor_from_term<T: EventListener>(

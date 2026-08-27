@@ -1195,6 +1195,12 @@ impl WorkspaceApp {
                 find: self.i18n.t("terminal.command_selection.find"),
                 manage_triggers: self.i18n.t("terminal.command_selection.manage_triggers"),
                 select_command: self.i18n.t("terminal.command_selection.select_command"),
+                fold_command: self.i18n.t("terminal.command_selection.fold_command"),
+                unfold_command: self.i18n.t("terminal.command_selection.unfold_command"),
+                fold_all_commands: self.i18n.t("terminal.command_selection.fold_all_commands"),
+                unfold_all_commands: self
+                    .i18n
+                    .t("terminal.command_selection.unfold_all_commands"),
                 previous_command: self.i18n.t("terminal.command_selection.previous_command"),
                 next_command: self.i18n.t("terminal.command_selection.next_command"),
                 clear_screen: self.i18n.t("terminal.command_selection.clear_screen"),

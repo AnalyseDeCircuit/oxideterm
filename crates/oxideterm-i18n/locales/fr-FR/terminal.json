@@ -59,6 +59,10 @@
       "find": "Rechercher...",
       "manage_triggers": "Gérer les déclencheurs de cette session...",
       "select_command": "Sélectionner la commande",
+      "fold_command": "Replier la commande",
+      "unfold_command": "Déplier la commande",
+      "fold_all_commands": "Replier toutes les commandes",
+      "unfold_all_commands": "Déplier toutes les commandes",
       "previous_command": "Commande précédente",
       "next_command": "Commande suivante",
       "clear_screen": "Effacer l'écran"

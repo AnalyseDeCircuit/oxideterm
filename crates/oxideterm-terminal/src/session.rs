@@ -46,7 +46,8 @@ use crate::{
     local_event_channel, privilege_prompt::TerminalPrivilegePromptStream,
     scroll_snapshot_from_term, search_matches_from_term,
     shell_integration::TerminalShellIntegration, snapshot_from_term,
-    snapshot_from_term_with_display_offset,
+    snapshot_from_term_with_display_offset, snapshot_from_term_with_grid_lines,
+    snapshot_from_term_with_grid_lines_incremental,
 };
 
 const MAX_COMMAND_OUTPUT_LINES: usize = 400;
@@ -79,7 +80,9 @@ fn command_output_text_from_term<T: EventListener>(
     term: &Term<T>,
     mark: &TerminalCommandMark,
 ) -> String {
-    let start = mark.command_line.saturating_add(1);
+    let start = mark
+        .output_start_line
+        .unwrap_or_else(|| mark.command_line.saturating_add(1));
     let end = mark.end_line.unwrap_or_else(|| {
         let scrollback = term.total_lines().saturating_sub(term.screen_lines());
         let cursor_line = term.renderable_content().cursor.point.line.0.max(0) as usize;

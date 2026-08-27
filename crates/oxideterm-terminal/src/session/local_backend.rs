@@ -213,6 +213,20 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::snapshot_with_display_offset(self, display_offset, rows)
     }
 
+
+    fn snapshot_with_grid_lines(&self, grid_lines: &[i32]) -> TerminalSnapshot {
+        LocalPtySession::snapshot_with_grid_lines(self, grid_lines)
+    }
+
+    fn snapshot_with_grid_lines_incremental(
+        &self,
+        grid_lines: &[i32],
+        fresh: &TerminalSnapshot,
+        previous: &TerminalSnapshot,
+    ) -> TerminalSnapshot {
+        LocalPtySession::snapshot_with_grid_lines_incremental(self, grid_lines, fresh, previous)
+    }
+
     fn terminate_active_task(&mut self) -> Result<()> {
         LocalPtySession::terminate_active_task(self)
     }

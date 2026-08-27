@@ -1,4 +1,221 @@
 impl TerminalPane {
+    fn command_folding_surface_available(&self) -> bool {
+        let terminal = self.terminal.lock();
+        command_mark_ui_available(self.settings.command_marks_enabled, terminal.mode())
+            && terminal.tmux_state().is_none()
+    }
+
+    fn rebuild_command_fold_projection(&mut self) {
+        self.command_fold_projection = CommandFoldProjection::new(
+            &self.command_marks,
+            self.collapsed_command_ids.as_ref(),
+            self.snapshot
+                .scrollback_lines
+                .saturating_add(self.snapshot.rows),
+            self.snapshot.rows,
+        );
+    }
+
+    fn refresh_command_fold_projection(&mut self, cx: &mut Context<Self>) {
+        let snapshot = {
+            let mut terminal = self.terminal.lock();
+            if self.command_fold_projection.is_active() || self.fold_bottom_padding_rows > 0 {
+                // Folded scrolling owns its projected offset, so the backend snapshot stays on
+                // the live screen and captures every mutable row for incremental projection.
+                terminal.scroll_to_display_offset(0);
+            } else {
+                terminal.scroll_to_display_offset(self.fold_visual_display_offset);
+            }
+            terminal.snapshot()
+        };
+        self.clear_smooth_scroll_remainder();
+        self.snapshot = self.stamp_snapshot(snapshot);
+        cx.notify();
+    }
+
+    pub(super) fn command_folding_active(&self) -> bool {
+        self.fold_bottom_padding_rows > 0 || self.command_fold_projection.is_active()
+    }
+
+    pub(super) fn folded_visual_history_rows(&self) -> usize {
+        self.command_fold_projection.visual_history_rows()
+    }
+
+    pub(super) fn scroll_folded_to_display_offset(
+        &mut self,
+        display_offset: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let display_offset = self
+            .command_fold_projection
+            .clamp_display_offset(display_offset);
+        if display_offset == self.fold_visual_display_offset && self.fold_bottom_padding_rows == 0 {
+            return;
+        }
+        self.fold_visual_display_offset = display_offset;
+        self.fold_bottom_padding_rows = 0;
+        self.fold_anchor_bottom_padding_rows = 0;
+        self.refresh_command_fold_projection(cx);
+    }
+
+    pub(super) fn scroll_folded_rows(&mut self, rows: i32, cx: &mut Context<Self>) {
+        let previous_position = (
+            self.fold_visual_display_offset,
+            self.fold_bottom_padding_rows,
+        );
+        if rows >= 0 {
+            let rows = rows as usize;
+            let consumed_padding = rows.min(self.fold_bottom_padding_rows);
+            self.fold_bottom_padding_rows = self
+                .fold_bottom_padding_rows
+                .saturating_sub(consumed_padding);
+            self.fold_visual_display_offset = self
+                .fold_visual_display_offset
+                .saturating_add(rows.saturating_sub(consumed_padding));
+        } else {
+            let rows = rows.unsigned_abs() as usize;
+            let consumed_offset = rows.min(self.fold_visual_display_offset);
+            self.fold_visual_display_offset = self
+                .fold_visual_display_offset
+                .saturating_sub(consumed_offset);
+            self.fold_bottom_padding_rows = self
+                .fold_bottom_padding_rows
+                .saturating_add(rows.saturating_sub(consumed_offset))
+                .min(self.fold_anchor_bottom_padding_rows);
+        }
+        self.fold_visual_display_offset =
+            self.command_fold_projection
+                .clamp_display_offset(self.fold_visual_display_offset);
+        if previous_position
+            == (
+                self.fold_visual_display_offset,
+                self.fold_bottom_padding_rows,
+            )
+        {
+            return;
+        }
+        self.refresh_command_fold_projection(cx);
+    }
+
+    pub(super) fn expand_command_fold_containing_physical_line(
+        &mut self,
+        physical_line: usize,
+    ) -> bool {
+        let command_id = self
+            .command_marks
+            .iter()
+            .find(|mark| {
+                self.collapsed_command_ids.contains(&mark.command_id)
+                    && crate::command_folding::foldable_output_range(
+                        mark,
+                        self.snapshot
+                            .scrollback_lines
+                            .saturating_add(self.snapshot.rows),
+                    )
+                    .is_some_and(|range| range.contains(&physical_line))
+            })
+            .map(|mark| mark.command_id.clone());
+        let expanded = command_id.is_some_and(|command_id| {
+            Arc::make_mut(&mut self.collapsed_command_ids).remove(&command_id)
+        });
+        if expanded {
+            self.rebuild_command_fold_projection();
+        }
+        expanded
+    }
+
+    pub(crate) fn command_mark_is_foldable(&self, command_mark_id: &str) -> bool {
+        if !self.command_folding_surface_available() {
+            return false;
+        }
+        let total_physical_lines = self
+            .snapshot
+            .scrollback_lines
+            .saturating_add(self.snapshot.rows);
+        self.command_marks
+            .iter()
+            .find(|mark| mark.command_id == command_mark_id)
+            .and_then(|mark| {
+                crate::command_folding::foldable_output_range(mark, total_physical_lines)
+            })
+            .is_some()
+    }
+
+    pub(crate) fn command_mark_is_collapsed(&self, command_mark_id: &str) -> bool {
+        self.collapsed_command_ids.contains(command_mark_id)
+    }
+
+    pub(crate) fn toggle_command_fold(
+        &mut self,
+        command_mark_id: &str,
+        viewport_row: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.command_mark_is_foldable(command_mark_id) {
+            return;
+        }
+        let Some(command_line) = self
+            .command_marks
+            .iter()
+            .find(|mark| mark.command_id == command_mark_id)
+            .map(|mark| mark.command_line)
+        else {
+            return;
+        };
+        if !Arc::make_mut(&mut self.collapsed_command_ids).remove(command_mark_id) {
+            Arc::make_mut(&mut self.collapsed_command_ids)
+                .insert(command_mark_id.to_string());
+        }
+        self.rebuild_command_fold_projection();
+        let position = self
+            .command_fold_projection
+            .viewport_position_for_anchor(command_line, viewport_row);
+        self.fold_visual_display_offset = position.display_offset;
+        self.fold_bottom_padding_rows = position.bottom_padding_rows;
+        self.fold_anchor_bottom_padding_rows = position.bottom_padding_rows;
+        self.refresh_command_fold_projection(cx);
+    }
+
+    pub(crate) fn set_all_command_folds(
+        &mut self,
+        collapsed: bool,
+        anchor_command_mark_id: &str,
+        viewport_row: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let total_physical_lines = self
+            .snapshot
+            .scrollback_lines
+            .saturating_add(self.snapshot.rows);
+        let foldable_ids = self
+            .command_marks
+            .iter()
+            .filter(|mark| {
+                crate::command_folding::foldable_output_range(mark, total_physical_lines).is_some()
+            })
+            .map(|mark| mark.command_id.clone())
+            .collect::<Vec<_>>();
+        if collapsed {
+            Arc::make_mut(&mut self.collapsed_command_ids).extend(foldable_ids);
+        } else {
+            Arc::make_mut(&mut self.collapsed_command_ids).clear();
+        }
+        self.rebuild_command_fold_projection();
+        let anchor_line = self
+            .command_marks
+            .iter()
+            .find(|mark| mark.command_id == anchor_command_mark_id)
+            .map(|mark| mark.command_line)
+            .unwrap_or_default();
+        let position = self
+            .command_fold_projection
+            .viewport_position_for_anchor(anchor_line, viewport_row);
+        self.fold_visual_display_offset = position.display_offset;
+        self.fold_bottom_padding_rows = position.bottom_padding_rows;
+        self.fold_anchor_bottom_padding_rows = position.bottom_padding_rows;
+        self.refresh_command_fold_projection(cx);
+    }
+
     fn observe_terminal_cwd_action_from_closed_command_mark(
         &mut self,
         mark: &TerminalCommandMark,
@@ -86,6 +303,7 @@ impl TerminalPane {
             command: Some(command.to_string()),
             start_line,
             command_line,
+            output_start_line: None,
             end_line: None,
             is_closed: false,
             closed_by: None,
@@ -112,9 +330,19 @@ impl TerminalPane {
 impl TerminalPane {
     fn absolute_cursor_line(&self) -> usize {
         self.snapshot
-            .scrollback_lines
-            .saturating_add(self.snapshot.cursor_row)
-            .saturating_sub(self.snapshot.display_offset)
+            .lines
+            .get(self.snapshot.cursor_row)
+            .and_then(|_| {
+                usize::try_from(
+                    self.snapshot.scrollback_lines as i64
+                        + i64::from(snapshot_grid_line_for_row(
+                            &self.snapshot,
+                            self.snapshot.cursor_row,
+                        )?),
+                )
+                .ok()
+            })
+            .unwrap_or(self.snapshot.scrollback_lines)
     }
 
     fn prompt_block_start_line(&self, command_line: usize) -> usize {
@@ -151,9 +379,84 @@ impl TerminalPane {
     pub(crate) fn absolute_line_for_position(&self, position: Point<Pixels>) -> usize {
         let point = self.terminal_point_for_position(position);
         self.snapshot
+            .lines
+            .get(point.row)
+            .and_then(|_| {
+                usize::try_from(
+                    self.snapshot.scrollback_lines as i64
+                        + i64::from(snapshot_grid_line_for_row(&self.snapshot, point.row)?),
+                )
+                .ok()
+            })
+            .unwrap_or(self.snapshot.scrollback_lines)
+    }
+
+    pub(crate) fn command_fold_target_at_position(
+        &self,
+        position: Point<Pixels>,
+    ) -> Option<(String, usize)> {
+        if !self.command_folding_surface_available() {
+            return None;
+        }
+        let origin = self.content_origin();
+        let gutter_start = f32::from(origin.x)
+            + TERMINAL_CONTENT_PADDING
+            + self.timestamp_gutter_width();
+        let gutter_end = gutter_start + self.command_mark_gutter_width();
+        let pointer_x = f32::from(position.x);
+        if pointer_x < gutter_start || pointer_x >= gutter_end {
+            return None;
+        }
+        let viewport_row = self.terminal_point_for_position(position).row;
+        let absolute_line = self.absolute_line_for_position(position);
+        let total_physical_lines = self
+            .snapshot
             .scrollback_lines
-            .saturating_add(point.row)
-            .saturating_sub(self.snapshot.display_offset)
+            .saturating_add(self.snapshot.rows);
+        self.command_marks
+            .iter()
+            .find(|mark| {
+                mark.command_line == absolute_line
+                    && crate::command_folding::foldable_output_range(mark, total_physical_lines)
+                        .is_some()
+            })
+            .map(|mark| (mark.command_id.clone(), viewport_row))
+    }
+
+    pub(crate) fn select_command_fold_range(
+        &mut self,
+        command_mark_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(mark) = self
+            .command_marks
+            .iter()
+            .find(|mark| mark.command_id == command_mark_id)
+        else {
+            return;
+        };
+        let Some(end_line) = mark.end_line else {
+            return;
+        };
+        let scrollback_lines = self.snapshot.scrollback_lines as i64;
+        let start_line = (mark.start_line as i64 - scrollback_lines)
+            .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+        let end_line = (end_line as i64 - scrollback_lines)
+            .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+        self.selection = Some(TerminalSelection {
+            anchor: TerminalGridPoint {
+                line: start_line,
+                col: 0,
+            },
+            head: TerminalGridPoint {
+                line: end_line,
+                col: self.snapshot.cols.saturating_sub(1),
+            },
+            mode: TerminalSelectionMode::Lines,
+        });
+        self.selecting = false;
+        self.selected_command_mark_id = Some(command_mark_id.to_string());
+        cx.notify();
     }
 
     pub(crate) fn command_mark_id_at_absolute_line(&self, absolute_line: usize) -> Option<String> {
@@ -278,6 +581,17 @@ impl TerminalPane {
 
     fn scroll_to_absolute_line(&mut self, absolute_line: usize, cx: &mut Context<Self>) {
         let desired_row = (self.snapshot.rows / 3).max(1);
+        self.expand_command_fold_containing_physical_line(absolute_line);
+        if self.command_folding_active() {
+            let position = self
+                .command_fold_projection
+                .viewport_position_for_anchor(absolute_line, desired_row);
+            self.fold_visual_display_offset = position.display_offset;
+            self.fold_bottom_padding_rows = position.bottom_padding_rows;
+            self.fold_anchor_bottom_padding_rows = position.bottom_padding_rows;
+            self.refresh_command_fold_projection(cx);
+            return;
+        }
         let target_offset = self
             .snapshot
             .scrollback_lines
@@ -295,12 +609,21 @@ impl TerminalPane {
     }
 
     fn line_text(&self, absolute_line: usize) -> Option<String> {
-        let viewport_start = self
-            .snapshot
-            .scrollback_lines
-            .saturating_sub(self.snapshot.display_offset);
-        let row = absolute_line.checked_sub(viewport_start)?;
-        self.snapshot.lines.get(row).map(|line| line.text())
+        self.snapshot
+            .lines
+            .iter()
+            .enumerate()
+            .find(|(row, _)| {
+                usize::try_from(
+                    self.snapshot.scrollback_lines as i64
+                        + i64::from(
+                            snapshot_grid_line_for_row(&self.snapshot, *row).unwrap_or_default(),
+                        ),
+                )
+                .ok()
+                    == Some(absolute_line)
+            })
+            .map(|(_, line)| line.text())
     }
 
     fn close_open_command_marks_before(
@@ -378,6 +701,11 @@ impl TerminalPane {
         self.command_marks_render_cache_dirty = true;
         self.selected_command_mark_id = None;
         self.hovered_command_mark_id = None;
+        Arc::make_mut(&mut self.collapsed_command_ids).clear();
+        self.command_fold_projection = CommandFoldProjection::default();
+        self.fold_visual_display_offset = 0;
+        self.fold_bottom_padding_rows = 0;
+        self.fold_anchor_bottom_padding_rows = 0;
     }
 
     fn shell_integration_dedup_candidate(
@@ -434,6 +762,15 @@ impl TerminalPane {
                     .any(|mark| &mark.command_id == hovered)
             });
         self.command_marks.drain(..remove_count);
+        let collapsed_count = self.collapsed_command_ids.len();
+        Arc::make_mut(&mut self.collapsed_command_ids).retain(|command_id| {
+            self.command_marks
+                .iter()
+                .any(|mark| mark.command_id == *command_id)
+        });
+        if self.collapsed_command_ids.len() != collapsed_count {
+            self.rebuild_command_fold_projection();
+        }
         self.command_marks_render_cache_dirty = true;
         if removed_selected {
             self.selected_command_mark_id = None;

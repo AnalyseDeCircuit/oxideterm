@@ -59,6 +59,10 @@
       "find": "検索...",
       "manage_triggers": "このセッションのトリガーを管理...",
       "select_command": "コマンドを選択",
+      "fold_command": "コマンドを折りたたむ",
+      "unfold_command": "コマンドを展開",
+      "fold_all_commands": "すべてのコマンドを折りたたむ",
+      "unfold_all_commands": "すべてのコマンドを展開",
       "previous_command": "前のコマンド",
       "next_command": "次のコマンド",
       "clear_screen": "画面をクリア"

@@ -37,7 +37,7 @@ const PASTE_CONFIRM_DIALOG_RADIUS: f32 = 8.0;
 const PASTE_CONFIRM_BUTTON_RADIUS: f32 = 4.0;
 const TERMINAL_KEY_HINT_RADIUS: f32 = 4.0;
 const TERMINAL_CONTEXT_MENU_WIDTH: f32 = 220.0;
-const TERMINAL_CONTEXT_MENU_ACTION_COUNT: f32 = 13.0;
+const TERMINAL_CONTEXT_MENU_ACTION_COUNT: f32 = 16.0;
 const TERMINAL_CONTEXT_MENU_SEPARATOR_COUNT: f32 = 4.0;
 const TERMINAL_MODEM_SUBMENU_ACTION_COUNT: f32 = 6.0;
 const TERMINAL_CONTEXT_MENU_ACTIONS_BEFORE_MODEM: f32 = 9.0;
@@ -137,7 +137,12 @@ impl Render for TerminalPane {
             let snapshot_started = Instant::now();
             #[cfg(feature = "bench")]
             let backend_snapshot_started = Instant::now();
-            let snapshot = self.terminal.lock().snapshot_incremental(&self.snapshot);
+            let previous_backend_snapshot =
+                self.backend_snapshot.as_ref().unwrap_or(&self.snapshot);
+            let snapshot = self
+                .terminal
+                .lock()
+                .snapshot_incremental(previous_backend_snapshot);
             #[cfg(feature = "bench")]
             {
                 self.benchmark_backend_snapshot_micros = backend_snapshot_started
@@ -269,8 +274,18 @@ impl Render for TerminalPane {
         let command_mark_ui_visible =
             command_mark_ui_available(self.settings.command_marks_enabled, terminal_mode);
         if self.command_marks_render_cache_dirty {
-            self.command_marks_render_cache = Arc::from(self.command_marks.clone());
+            self.command_marks_render_index.rebuild(&self.command_marks);
+            self.command_marks_render_ranges.clear();
             self.command_marks_render_cache_dirty = false;
+        }
+        if command_mark_ui_visible {
+            let visible_ranges = crate::command_folding::visible_physical_ranges(&snapshot);
+            if visible_ranges != self.command_marks_render_ranges {
+                self.command_marks_render_cache = self
+                    .command_marks_render_index
+                    .visible_marks(&visible_ranges);
+                self.command_marks_render_ranges = visible_ranges;
+            }
         }
         let selected_command_mark_id = if command_mark_ui_visible {
             self.selected_command_mark_id.clone()
@@ -322,6 +337,7 @@ impl Render for TerminalPane {
             selected_command_mark_id,
             hovered_command_mark_id,
         )
+        .collapsed_command_ids(self.collapsed_command_ids.clone())
         .highlight_rules(self.preferences.highlight_rules.clone())
         .transient_command_highlight(
             self.command_context_highlighting_enabled
@@ -338,6 +354,11 @@ impl Render for TerminalPane {
         .ghost_text(self.terminal_ghost_text())
         .viewport_rows(viewport_rows)
         .scrollbar_display_offset(scrollbar_display_offset)
+        .scrollbar_history_rows(if self.command_folding_active() {
+            self.folded_visual_history_rows()
+        } else {
+            self.snapshot.scrollback_lines
+        })
         .scroll_y_offset(smooth_scroll_y_offset)
         .performance_metrics_enabled(performance_metrics_enabled)
         .command_mark_gutter_width(if command_mark_ui_visible {
@@ -1437,7 +1458,7 @@ impl TerminalPane {
     fn render_snapshot_for_smooth_scroll(&mut self) -> (TerminalSnapshot, gpui::Pixels, usize) {
         let snapshot = self.snapshot.clone();
         let viewport_rows = snapshot.rows;
-        if !self.settings.smooth_scroll {
+        if !self.settings.smooth_scroll || self.command_folding_active() {
             return (snapshot, px(0.0), viewport_rows);
         }
 
@@ -1539,6 +1560,26 @@ impl TerminalPane {
             .command_selection_labels
             .select_command
             .clone();
+        let fold_command_label = self
+            .preferences
+            .command_selection_labels
+            .fold_command
+            .clone();
+        let unfold_command_label = self
+            .preferences
+            .command_selection_labels
+            .unfold_command
+            .clone();
+        let fold_all_commands_label = self
+            .preferences
+            .command_selection_labels
+            .fold_all_commands
+            .clone();
+        let unfold_all_commands_label = self
+            .preferences
+            .command_selection_labels
+            .unfold_all_commands
+            .clone();
         let previous_command_label = self
             .preferences
             .command_selection_labels
@@ -1567,7 +1608,49 @@ impl TerminalPane {
         let previous_reference_line = menu.reference_line;
         let next_reference_line = menu.reference_line;
         let select_command_mark_id = command_mark_id.clone();
-        let copy_command_mark_id = command_mark_id;
+        let copy_command_mark_id = command_mark_id.clone();
+        let fold_command_mark_id = command_mark_id.clone();
+        let fold_all_anchor_id = command_mark_id.clone();
+        let foldable_command = command_mark_id
+            .as_deref()
+            .is_some_and(|command_id| self.command_mark_is_foldable(command_id));
+        let command_collapsed = command_mark_id
+            .as_deref()
+            .is_some_and(|command_id| self.command_mark_is_collapsed(command_id));
+        let fold_current_label = if command_collapsed {
+            unfold_command_label
+        } else {
+            fold_command_label
+        };
+        let foldable_ids = self
+            .command_folding_surface_available()
+            .then(|| {
+                self.command_marks
+                    .iter()
+                    .filter(|mark| {
+                        crate::command_folding::foldable_output_range(
+                            mark,
+                            self.snapshot
+                                .scrollback_lines
+                                .saturating_add(self.snapshot.rows),
+                        )
+                        .is_some()
+                    })
+                    .map(|mark| mark.command_id.as_str())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let has_foldable_commands = !foldable_ids.is_empty();
+        let all_commands_collapsed = has_foldable_commands
+            && foldable_ids
+                .iter()
+                .all(|command_id| self.command_mark_is_collapsed(command_id));
+        let fold_all_label = if all_commands_collapsed {
+            unfold_all_commands_label
+        } else {
+            fold_all_commands_label
+        };
+        let fold_viewport_row = menu.target.row;
         let free_type_insert_selection_available =
             self.free_type_context_insert_selection_available(&menu);
         let free_type_replace_command_available =
@@ -1710,6 +1793,33 @@ impl TerminalPane {
                     move |this, _event, _window, cx| {
                         this.dismiss_terminal_context_menu(cx);
                         this.select_command_mark_by_id(select_command_mark_id.clone(), cx);
+                    },
+                    cx,
+                ))
+                .child(self.render_terminal_context_menu_item(
+                    fold_current_label,
+                    !foldable_command,
+                    move |this, _event, _window, cx| {
+                        this.dismiss_terminal_context_menu(cx);
+                        if let Some(command_mark_id) = fold_command_mark_id.as_deref() {
+                            this.toggle_command_fold(command_mark_id, fold_viewport_row, cx);
+                        }
+                    },
+                    cx,
+                ))
+                .child(self.render_terminal_context_menu_item(
+                    fold_all_label,
+                    !has_foldable_commands,
+                    move |this, _event, _window, cx| {
+                        this.dismiss_terminal_context_menu(cx);
+                        if let Some(command_mark_id) = fold_all_anchor_id.as_deref() {
+                            this.set_all_command_folds(
+                                !all_commands_collapsed,
+                                command_mark_id,
+                                fold_viewport_row,
+                                cx,
+                            );
+                        }
                     },
                     cx,
                 ))
@@ -2303,16 +2413,24 @@ impl TerminalPane {
         let Some(bounds) = self.bounds else {
             return 0.0;
         };
-        let viewport_start = self
-            .snapshot
-            .scrollback_lines
-            .saturating_sub(self.snapshot.display_offset);
         let end_line = self.selectable_command_mark_end_line(mark);
-        let visible_start = mark.start_line.max(viewport_start);
-        let visible_end =
-            end_line.min(viewport_start.saturating_add(self.snapshot.rows.saturating_sub(1)));
-        let start_row = visible_start.saturating_sub(viewport_start);
-        let end_row = visible_end.saturating_sub(viewport_start);
+        let mut visible_rows = self
+            .snapshot
+            .lines
+            .iter()
+            .enumerate()
+            .filter_map(|(row, _)| {
+                let physical_line = usize::try_from(
+                    self.snapshot.scrollback_lines as i64
+                        + i64::from(snapshot_grid_line_for_row(&self.snapshot, row)?),
+                )
+                .ok()?;
+                (physical_line >= mark.start_line && physical_line <= end_line).then_some(row)
+            });
+        let Some(start_row) = visible_rows.next() else {
+            return 0.0;
+        };
+        let end_row = visible_rows.last().unwrap_or(start_row);
         let overlay_top = start_row as f32 * self.metrics.line_height_f32();
         let overlay_bottom = (end_row + 1) as f32 * self.metrics.line_height_f32();
         let actions_height = 22.0;

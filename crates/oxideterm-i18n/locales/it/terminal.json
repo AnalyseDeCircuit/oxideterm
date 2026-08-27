@@ -59,6 +59,10 @@
       "find": "Trova...",
       "manage_triggers": "Gestisci i trigger per questa sessione...",
       "select_command": "Seleziona comando",
+      "fold_command": "Comprimi comando",
+      "unfold_command": "Espandi comando",
+      "fold_all_commands": "Comprimi tutti i comandi",
+      "unfold_all_commands": "Espandi tutti i comandi",
       "previous_command": "Comando precedente",
       "next_command": "Comando successivo",
       "clear_screen": "Pulisci schermo"

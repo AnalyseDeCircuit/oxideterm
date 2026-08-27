@@ -165,6 +165,19 @@ pub(crate) fn paint_command_mark_overlay(
             ),
             accent,
         ));
+        if overlay.foldable
+            && let Some(header_row) = overlay.fold_header_row
+        {
+            paint_command_fold_control(
+                header_row,
+                overlay.collapsed,
+                origin,
+                metrics,
+                command_mark_gutter_width,
+                accent,
+                window,
+            );
+        }
     }
 
     if overlay.selected && overlay.has_top {
@@ -180,6 +193,41 @@ pub(crate) fn paint_command_mark_overlay(
                 size(px(width), px(1.0)),
             ),
             accent,
+        ));
+    }
+}
+
+fn paint_command_fold_control(
+    row: usize,
+    collapsed: bool,
+    origin: gpui::Point<Pixels>,
+    metrics: &TerminalMetrics,
+    gutter_width: f32,
+    color: Rgba,
+    window: &mut Window,
+) {
+    let center_x = -gutter_width / 2.0;
+    let center_y = row as f32 * metrics.line_height_f32() + metrics.line_height_f32() / 2.0;
+    let bars: &[(f32, f32, f32, f32)] = if collapsed {
+        &[
+            (-2.0, -3.0, 1.0, 7.0),
+            (-1.0, -2.0, 1.0, 5.0),
+            (0.0, -1.0, 1.0, 3.0),
+        ]
+    } else {
+        &[
+            (-3.0, -2.0, 7.0, 1.0),
+            (-2.0, -1.0, 5.0, 1.0),
+            (-1.0, 0.0, 3.0, 1.0),
+        ]
+    };
+    for &(x, y, width, height) in bars {
+        window.paint_quad(fill(
+            Bounds::new(
+                origin + point(px(center_x + x), px(center_y + y)),
+                size(px(width), px(height)),
+            ),
+            color,
         ));
     }
 }

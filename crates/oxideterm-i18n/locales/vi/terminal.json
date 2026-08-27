@@ -59,6 +59,10 @@
       "find": "Tìm...",
       "manage_triggers": "Quản lý trình kích hoạt cho phiên này...",
       "select_command": "Chọn lệnh",
+      "fold_command": "Thu gọn lệnh",
+      "unfold_command": "Mở rộng lệnh",
+      "fold_all_commands": "Thu gọn tất cả lệnh",
+      "unfold_all_commands": "Mở rộng tất cả lệnh",
       "previous_command": "Lệnh trước",
       "next_command": "Lệnh tiếp theo",
       "clear_screen": "Xóa màn hình"

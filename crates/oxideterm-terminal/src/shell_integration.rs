@@ -87,6 +87,8 @@ pub struct TerminalCommandMark {
     pub command: Option<String>,
     pub start_line: usize,
     pub command_line: usize,
+    /// First physical row owned by command output, when reported by shell integration.
+    pub output_start_line: Option<usize>,
     pub end_line: Option<usize>,
     pub is_closed: bool,
     pub closed_by: Option<TerminalCommandMarkClosedBy>,
@@ -739,7 +741,12 @@ impl TerminalShellIntegration {
                         event.line,
                     )
                 };
-                let mark = self.create_shell_integrated_mark(command, start_line, command_line);
+                let mark = self.create_shell_integrated_mark(
+                    command,
+                    start_line,
+                    command_line,
+                    event.line.max(command_line.saturating_add(1)),
+                );
                 self.state.active_command_id = Some(mark.command_id.clone());
                 self.state.active_start_line = Some(start_line);
                 self.state.prompt_start = None;
@@ -790,6 +797,7 @@ impl TerminalShellIntegration {
         command: Option<String>,
         start_line: usize,
         command_line: usize,
+        output_start_line: usize,
     ) -> TerminalCommandMark {
         self.next_command_sequence = self.next_command_sequence.saturating_add(1);
         let now = now_millis();
@@ -798,6 +806,7 @@ impl TerminalShellIntegration {
             command,
             start_line,
             command_line: command_line.max(start_line),
+            output_start_line: Some(output_start_line),
             end_line: None,
             is_closed: false,
             closed_by: None,
