@@ -8,15 +8,15 @@ use oxideterm_connections::{
     SaveConnectionRequest, SaveMoshProfileRequest, SaveRemoteDesktopProfileRequest,
     SaveSerialProfileRequest, SaveTelnetProfileRequest, SavedAuth, SavedConnection, SavedProxyHop,
     SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
-    SavedUpstreamProxyProtocol, SecretString, SerialFlowControl, SerialParity,
+    SavedUpstreamProxyProtocol, SecretString, SerialFlowControl, SerialParity, SshChannelStrategy,
 };
 use oxideterm_public_mcp::{
     ClientRef, ConnectionRef, DomainRequest, PublicConnectionAuth, PublicCredentialSlot,
     PublicMoshIpFamily, PublicMoshPredictionMode, PublicMoshUdpPortSelection,
     PublicRdpNetworkProfile, PublicRemoteDesktopOptions, PublicSavedConnectionProfile,
-    PublicSerialFlowControl, PublicSerialParity, PublicTerminalBackspaceSequence,
-    PublicTerminalDeleteSequence, PublicTerminalEncoding, PublicTerminalOptions,
-    PublicTerminalSessionLogPolicy, PublicToolCall, PublicUpstreamProxy,
+    PublicSerialFlowControl, PublicSerialParity, PublicSshChannelStrategy,
+    PublicTerminalBackspaceSequence, PublicTerminalDeleteSequence, PublicTerminalEncoding,
+    PublicTerminalOptions, PublicTerminalSessionLogPolicy, PublicToolCall, PublicUpstreamProxy,
     PublicUpstreamProxyProtocol, PublicVncCompression, PublicVncImageQuality,
     PublicVncSecurityPolicy, PublicVncSessionMode, PublicX11ForwardingMode, ToolEnvelope,
 };
@@ -344,6 +344,12 @@ fn save_profile(
                     .map(|connection| connection.options.ssh_algorithms.clone())
                     .unwrap_or_default(),
                 dedicated_new_terminal_connection: profile.dedicated_new_terminal_connection,
+                ssh_channel_strategy: match profile.ssh_channel_strategy {
+                    PublicSshChannelStrategy::Multiplexed => SshChannelStrategy::Multiplexed,
+                    PublicSshChannelStrategy::DedicatedPerConsumer => {
+                        SshChannelStrategy::DedicatedPerConsumer
+                    }
+                },
                 x11_forwarding: ConnectionX11ForwardingOptions {
                     enabled: profile.x11_forwarding.enabled,
                     mode: match profile.x11_forwarding.mode {
@@ -1073,6 +1079,10 @@ pub(super) fn ssh_connection_projection(
         "agent_forwarding_socket": connection.options.agent_forwarding_socket,
         "legacy_ssh_compatibility": connection.options.legacy_ssh_compatibility,
         "dedicated_new_terminal_connection": connection.options.dedicated_new_terminal_connection,
+        "ssh_channel_strategy": match connection.options.ssh_channel_strategy {
+            SshChannelStrategy::Multiplexed => "multiplexed",
+            SshChannelStrategy::DedicatedPerConsumer => "dedicated_per_consumer",
+        },
         "x11_forwarding": {
             "enabled": connection.options.x11_forwarding.enabled,
             "mode": match connection.options.x11_forwarding.mode {

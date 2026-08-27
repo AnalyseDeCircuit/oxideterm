@@ -286,6 +286,7 @@ pub(super) fn test_connection_store_with_agent_connection(
             legacy_ssh_compatibility: false,
             ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
             dedicated_new_terminal_connection: false,
+            ssh_channel_strategy: oxideterm_connections::SshChannelStrategy::default(),
             x11_forwarding: oxideterm_connections::ConnectionX11ForwardingOptions::default(),
             post_connect_command: None,
             terminal: oxideterm_connections::ConnectionTerminalOptions::default(),

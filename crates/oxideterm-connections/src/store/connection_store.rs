@@ -239,7 +239,13 @@ impl ConnectionStore {
         request.ssh_algorithms.validate()?;
         options.ssh_algorithms = request.ssh_algorithms;
         options.dedicated_new_terminal_connection = request.dedicated_new_terminal_connection;
+        options.ssh_channel_strategy = request.ssh_channel_strategy;
         options.x11_forwarding = request.x11_forwarding;
+        if options.ssh_channel_strategy.requires_dedicated_consumers() {
+            // Shared forwarding channels are outside the single-channel contract.
+            options.agent_forwarding = false;
+            options.x11_forwarding = Default::default();
+        }
         options.terminal = request.terminal;
         let (auth, auth_secret) =
             self.materialize_auth_with_runtime_secret(request.auth, existing_auth.as_ref())?;

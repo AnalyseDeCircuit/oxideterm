@@ -352,6 +352,9 @@ pub struct ConnectionOptions {
     /// Some SSH servers require a new authentication exchange for every terminal.
     #[serde(default, skip_serializing_if = "is_false")]
     pub dedicated_new_terminal_connection: bool,
+    /// Single-channel appliances require every concurrent consumer to use its own transport.
+    #[serde(default, skip_serializing_if = "SshChannelStrategy::is_default")]
+    pub ssh_channel_strategy: SshChannelStrategy,
     /// X11 stores only portable policy; local display and cookies are resolved per shell.
     #[serde(
         default,
@@ -367,6 +370,24 @@ pub struct ConnectionOptions {
         skip_serializing_if = "ConnectionTerminalOptions::inherits_application_defaults"
     )]
     pub terminal: ConnectionTerminalOptions,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SshChannelStrategy {
+    #[default]
+    Multiplexed,
+    DedicatedPerConsumer,
+}
+
+impl SshChannelStrategy {
+    pub fn is_default(value: &Self) -> bool {
+        matches!(value, Self::Multiplexed)
+    }
+
+    pub fn requires_dedicated_consumers(self) -> bool {
+        matches!(self, Self::DedicatedPerConsumer)
+    }
 }
 
 impl ConnectionOptions {
@@ -1722,6 +1743,7 @@ pub struct SaveConnectionRequest {
     pub legacy_ssh_compatibility: bool,
     pub ssh_algorithms: SshAlgorithmPreferences,
     pub dedicated_new_terminal_connection: bool,
+    pub ssh_channel_strategy: SshChannelStrategy,
     pub x11_forwarding: ConnectionX11ForwardingOptions,
     pub post_connect_command: Option<String>,
     pub terminal: ConnectionTerminalOptions,

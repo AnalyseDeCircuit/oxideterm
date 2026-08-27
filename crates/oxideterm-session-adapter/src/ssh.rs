@@ -56,12 +56,22 @@ pub fn ssh_config_from_saved_connection_with_auth(
         proxy_chain: (!proxy_chain.is_empty()).then_some(proxy_chain),
         upstream_proxy,
         proxy_command,
-        agent_forwarding: conn.options.agent_forwarding,
+        agent_forwarding: !conn
+            .options
+            .ssh_channel_strategy
+            .requires_dedicated_consumers()
+            && conn.options.agent_forwarding,
         identity_agent: conn.options.identity_agent.clone(),
         agent_forwarding_socket: conn.options.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
+        ssh_channel_strategy: conn.options.ssh_channel_strategy,
         ssh_algorithms: conn.options.ssh_algorithms.clone(),
-        x11_forwarding: x11_forward_policy(conn.options.x11_forwarding),
+        x11_forwarding: (!conn
+            .options
+            .ssh_channel_strategy
+            .requires_dedicated_consumers())
+        .then(|| x11_forward_policy(conn.options.x11_forwarding))
+        .flatten(),
         strict_host_key_checking: true,
         post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
         ..SshConfig::default()
@@ -143,12 +153,22 @@ pub fn ssh_config_from_saved_connection_with_runtime_secrets(
         proxy_chain: (!proxy_chain.is_empty()).then_some(proxy_chain),
         upstream_proxy,
         proxy_command,
-        agent_forwarding: conn.options.agent_forwarding,
+        agent_forwarding: !conn
+            .options
+            .ssh_channel_strategy
+            .requires_dedicated_consumers()
+            && conn.options.agent_forwarding,
         identity_agent: conn.options.identity_agent.clone(),
         agent_forwarding_socket: conn.options.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
+        ssh_channel_strategy: conn.options.ssh_channel_strategy,
         ssh_algorithms: conn.options.ssh_algorithms.clone(),
-        x11_forwarding: x11_forward_policy(conn.options.x11_forwarding),
+        x11_forwarding: (!conn
+            .options
+            .ssh_channel_strategy
+            .requires_dedicated_consumers())
+        .then(|| x11_forward_policy(conn.options.x11_forwarding))
+        .flatten(),
         strict_host_key_checking: true,
         post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
         ..SshConfig::default()

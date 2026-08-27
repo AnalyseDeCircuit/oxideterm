@@ -1312,6 +1312,52 @@ mod tests {
     }
 
     #[test]
+    fn reconnect_replacement_preserves_the_sibling_split_session() {
+        let mut tab_host = WorkspaceTabHostEntity::new();
+        let tab_id = TabId(1);
+        let first_pane = PaneId(1);
+        let first_session = TerminalSessionId(1);
+        let second_pane = PaneId(2);
+        let second_session = TerminalSessionId(2);
+        tab_host.insert_and_select_main_tab(test_tab(
+            tab_id,
+            Some(PaneNode::leaf(first_pane, first_session)),
+        ));
+        assert!(tab_host.split_pane(
+            tab_id,
+            first_pane,
+            PaneId(3),
+            SplitDirection::Horizontal,
+            second_pane,
+            second_session,
+        ));
+        assert!(tab_host.set_active_pane(Some(tab_id), first_pane));
+
+        let replacement_pane = PaneId(4);
+        let replacement_session = TerminalSessionId(4);
+        assert_eq!(
+            tab_host.replace_terminal_session(
+                tab_id,
+                first_session,
+                first_pane,
+                replacement_pane,
+                replacement_session,
+            ),
+            Some(first_pane)
+        );
+
+        let tab = tab_host.active_tab().expect("split terminal tab");
+        let root = tab.root_pane.as_ref().expect("split pane tree");
+        assert_eq!(root.pane_count(), 2);
+        assert_eq!(
+            root.session_id_for_pane(replacement_pane),
+            Some(replacement_session)
+        );
+        assert_eq!(root.session_id_for_pane(second_pane), Some(second_session));
+        assert_eq!(tab.active_pane_id, Some(replacement_pane));
+    }
+
+    #[test]
     fn terminal_tab_rename_preserves_pane_and_session_ownership() {
         let mut tab_host = WorkspaceTabHostEntity::new();
         let tab_id = TabId(1);

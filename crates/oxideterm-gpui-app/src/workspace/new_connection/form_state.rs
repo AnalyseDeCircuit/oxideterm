@@ -4,9 +4,9 @@ use oxideterm_connections::{
     AuthType, ConnectionInfo, ConnectionTerminalOptions, ConnectionX11ForwardingOptions,
     DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS, MoshIpFamily, MoshPredictionMode, MoshProfile,
     MoshUdpPortSelection, RemoteDesktopProfile, SavedAuth, SavedConnection, SavedProxyHop,
-    SavedUpstreamProxyProtocol, SerialProfile, SshAlgorithmPreferences, StandaloneSftpTransferMode,
-    TelnetProfile, TransportUsernameTransition, transport_port_replacement,
-    transport_username_transition,
+    SavedUpstreamProxyProtocol, SerialProfile, SshAlgorithmPreferences, SshChannelStrategy,
+    StandaloneSftpTransferMode, TelnetProfile, TransportUsernameTransition,
+    transport_port_replacement, transport_username_transition,
 };
 pub(in crate::workspace) use oxideterm_connections::{
     ConnectionTransport as NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
@@ -851,6 +851,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     /// Preserves transient invalid input while the numeric value fails closed at zero.
     pub(in crate::workspace) connect_timeout_seconds_text: String,
     pub(in crate::workspace) dedicated_new_terminal_connection: bool,
+    pub(in crate::workspace) ssh_channel_strategy: SshChannelStrategy,
     pub(in crate::workspace) x11_forwarding: ConnectionX11ForwardingOptions,
     pub(in crate::workspace) terminal: ConnectionTerminalOptions,
     pub(in crate::workspace) agent_available: Option<bool>,
@@ -1022,6 +1023,7 @@ impl fmt::Debug for NewConnectionForm {
                 "dedicated_new_terminal_connection",
                 &self.dedicated_new_terminal_connection,
             )
+            .field("ssh_channel_strategy", &self.ssh_channel_strategy)
             .field("x11_forwarding", &self.x11_forwarding)
             .field("terminal", &self.terminal)
             .field("agent_available", &self.agent_available)
@@ -1137,6 +1139,7 @@ impl Default for NewConnectionForm {
             connect_timeout_seconds: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
             connect_timeout_seconds_text: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS.to_string(),
             dedicated_new_terminal_connection: false,
+            ssh_channel_strategy: SshChannelStrategy::default(),
             x11_forwarding: ConnectionX11ForwardingOptions::default(),
             terminal: ConnectionTerminalOptions::default(),
             agent_available: None,

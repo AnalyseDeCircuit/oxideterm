@@ -1,4 +1,5 @@
 use super::super::*;
+use oxideterm_connections::SshChannelStrategy;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) struct WorkspaceSshNodeEndpoint {
@@ -28,6 +29,8 @@ pub(in crate::workspace) struct WorkspaceSshNode {
     pub(in crate::workspace) terminal_options: ConnectionTerminalOptions,
     /// Manual nodes retain the SSH-only physical connection policy outside terminal overrides.
     pub(in crate::workspace) dedicated_new_terminal_connection: bool,
+    /// The UI mirror retains only the non-secret consumer allocation policy.
+    pub(in crate::workspace) ssh_channel_strategy: SshChannelStrategy,
     pub(in crate::workspace) terminal_ids: Vec<TerminalSessionId>,
     pub(in crate::workspace) readiness: NodeReadiness,
 }
@@ -46,6 +49,7 @@ impl WorkspaceSshNode {
             title,
             terminal_options: ConnectionTerminalOptions::default(),
             dedicated_new_terminal_connection: false,
+            ssh_channel_strategy: config.ssh_channel_strategy,
             terminal_ids,
             readiness,
         }

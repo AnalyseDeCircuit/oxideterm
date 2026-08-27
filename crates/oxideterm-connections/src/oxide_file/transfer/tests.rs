@@ -76,6 +76,7 @@ mod tests {
                 ssh_algorithms: SshAlgorithmPreferences::default(),
                 x11_forwarding: crate::ConnectionX11ForwardingOptions::default(),
                 dedicated_new_terminal_connection: false,
+                ssh_channel_strategy: crate::SshChannelStrategy::default(),
                 post_connect_command: None,
                 terminal: ConnectionTerminalOptions::default(),
             },

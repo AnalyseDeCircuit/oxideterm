@@ -3104,6 +3104,32 @@ mod tests {
         })
     }
 
+    #[gpui::test]
+    fn terminal_sessions_on_one_node_unregister_independently(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        let node_id = NodeId::new("node-a");
+        let first_session = TerminalSessionId(1);
+        let second_session = TerminalSessionId(2);
+
+        entity.update(cx, |entity, _cx| {
+            assert!(entity.register_ssh_terminal_session(first_session, node_id.clone()));
+            assert!(entity.register_ssh_terminal_session(second_session, node_id.clone()));
+            assert_eq!(
+                entity.unregister_ssh_terminal_session(first_session),
+                Some(node_id.clone())
+            );
+            assert_eq!(entity.ssh_terminal_node_id(first_session), None);
+            assert_eq!(
+                entity.ssh_terminal_node_id(second_session),
+                Some(node_id.clone())
+            );
+            assert_eq!(
+                entity.unregister_ssh_terminal_session(second_session),
+                Some(node_id)
+            );
+        });
+    }
+
     fn take_trace_effects(
         entity: &mut WorkspaceRuntimeEntity,
         cx: &mut Context<WorkspaceRuntimeEntity>,

@@ -39,6 +39,7 @@ mod tests {
             ssh_algorithms: SshAlgorithmPreferences::default(),
             x11_forwarding: ConnectionX11ForwardingOptions::default(),
             dedicated_new_terminal_connection: false,
+            ssh_channel_strategy: SshChannelStrategy::default(),
             post_connect_command: None,
             terminal: ConnectionTerminalOptions::default(),
         }
@@ -373,9 +374,11 @@ mod tests {
                 .get("dedicated_new_terminal_connection")
                 .is_none()
         );
+        assert!(default_options.get("ssh_channel_strategy").is_none());
 
         let options = ConnectionOptions {
             dedicated_new_terminal_connection: true,
+            ssh_channel_strategy: SshChannelStrategy::DedicatedPerConsumer,
             terminal: ConnectionTerminalOptions {
                 encoding: Some(ConnectionTerminalEncoding::Utf8),
                 backspace_sequence: Some(ConnectionTerminalBackspaceSequence::ControlH),
@@ -397,6 +400,7 @@ mod tests {
         );
         assert_eq!(serialized["terminal"]["sessionLogPolicy"], "automatic");
         assert_eq!(serialized["dedicated_new_terminal_connection"], true);
+        assert_eq!(serialized["ssh_channel_strategy"], "dedicated_per_consumer");
         assert_eq!(
             serde_json::to_value(ConnectionTerminalEncoding::EucJp).unwrap(),
             "euc-jp"
@@ -409,6 +413,10 @@ mod tests {
         let decoded: ConnectionOptions = serde_json::from_value(serialized).unwrap();
         assert_eq!(decoded.terminal, options.terminal);
         assert!(decoded.dedicated_new_terminal_connection);
+        assert_eq!(
+            decoded.ssh_channel_strategy,
+            SshChannelStrategy::DedicatedPerConsumer
+        );
 
         let legacy: ConnectionOptions = serde_json::from_value(serde_json::json!({})).unwrap();
         assert_eq!(
@@ -417,6 +425,7 @@ mod tests {
         );
         assert!(legacy.terminal.inherits_application_defaults());
         assert!(!legacy.dedicated_new_terminal_connection);
+        assert_eq!(legacy.ssh_channel_strategy, SshChannelStrategy::Multiplexed);
         assert_eq!(
             legacy.x11_forwarding,
             ConnectionX11ForwardingOptions::default()
@@ -427,6 +436,23 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(custom_timeout.effective_connect_timeout_seconds(), 120);
+    }
+
+    #[test]
+    fn single_channel_strategy_disables_shared_forwarding_policies() {
+        let mut store = load_empty_store("single-channel-policy");
+        let mut request = request("single-channel", SavedAuth::Agent);
+        request.ssh_channel_strategy = SshChannelStrategy::DedicatedPerConsumer;
+        request.agent_forwarding = true;
+        request.dedicated_new_terminal_connection = false;
+        request.x11_forwarding.enabled = true;
+
+        store.upsert(request).unwrap();
+        let saved = store.get("single-channel").unwrap();
+
+        assert!(!saved.options.agent_forwarding);
+        assert!(!saved.options.dedicated_new_terminal_connection);
+        assert!(!saved.options.x11_forwarding.enabled);
     }
 
     #[test]
@@ -2251,6 +2277,7 @@ mod tests {
                 untrusted_timeout_seconds: 1_800,
             },
             dedicated_new_terminal_connection: true,
+            ssh_channel_strategy: SshChannelStrategy::DedicatedPerConsumer,
             post_connect_command: Some("uname -a".to_string()),
             terminal: ConnectionTerminalOptions::default(),
         };

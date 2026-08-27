@@ -1252,6 +1252,7 @@ impl WorkspaceApp {
                     dedicated_new_terminal_connection: connection
                         .options
                         .dedicated_new_terminal_connection,
+                    ssh_channel_strategy: connection.options.ssh_channel_strategy,
                 },
             }
         } else {

@@ -513,6 +513,7 @@ fn write_connection_secret(
             legacy_ssh_compatibility: connection.options.legacy_ssh_compatibility,
             ssh_algorithms: connection.options.ssh_algorithms,
             dedicated_new_terminal_connection: connection.options.dedicated_new_terminal_connection,
+            ssh_channel_strategy: connection.options.ssh_channel_strategy,
             x11_forwarding: connection.options.x11_forwarding,
             post_connect_command,
             terminal: connection.options.terminal,

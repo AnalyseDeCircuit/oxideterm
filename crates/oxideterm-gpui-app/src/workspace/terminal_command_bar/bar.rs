@@ -55,14 +55,7 @@ impl WorkspaceApp {
             .t("settings_view.connections.shell_integration.toolbar_action");
         let target_indicator_is_local =
             is_local_terminal && target_label == self.i18n.t("terminal.command_bar.local_shell");
-        let can_split = self.active_tab(cx).is_some_and(|tab| {
-            tab.kind == TabKind::LocalTerminal
-                && !self.active_tab_has_serial_terminal(cx)
-                && tab
-                    .root_pane
-                    .as_ref()
-                    .is_some_and(|root| root.pane_count() < MAX_PANES_PER_TAB)
-        });
+        let can_split = self.can_split_active_pane(cx);
         let broadcast_targets =
             self.terminal_broadcast_target_panes(active_pane_id.unwrap_or(PaneId(0)), cx);
         let (broadcast_enabled, broadcast_targets_empty) = {

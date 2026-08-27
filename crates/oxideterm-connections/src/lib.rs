@@ -59,7 +59,7 @@ pub use store::{
     SavedStandaloneSftpEndpointRuntimeSecrets, SavedStandaloneSftpProfileRuntimeSecrets,
     SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
     SavedUpstreamProxyProtocol, SerialFlowControl, SerialParity, SerialProfile,
-    SerialProfilesSyncSnapshot, SshAlgorithmPreferences, StandaloneSftpEndpoint,
-    StandaloneSftpProfile, StandaloneSftpProfilesSyncSnapshot, StandaloneSftpTransferMode,
-    TelnetProfile, TelnetProfilesSyncSnapshot, validate_group_name,
+    SerialProfilesSyncSnapshot, SshAlgorithmPreferences, SshChannelStrategy,
+    StandaloneSftpEndpoint, StandaloneSftpProfile, StandaloneSftpProfilesSyncSnapshot,
+    StandaloneSftpTransferMode, TelnetProfile, TelnetProfilesSyncSnapshot, validate_group_name,
 };

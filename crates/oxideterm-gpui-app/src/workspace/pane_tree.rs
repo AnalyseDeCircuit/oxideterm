@@ -25,6 +25,29 @@ enum TerminalPaneInteraction {
     ContextAction,
 }
 
+struct ActivePaneSplitTarget {
+    tab_id: TabId,
+    active_pane_id: PaneId,
+    source: TerminalSplitSource,
+}
+
+enum TerminalSplitSource {
+    Local,
+    Ssh(NodeId),
+}
+
+fn terminal_split_supported(
+    tab_kind: &TabKind,
+    contains_serial_terminal: bool,
+    ssh_node_ready: bool,
+) -> bool {
+    match tab_kind {
+        TabKind::LocalTerminal => !contains_serial_terminal,
+        TabKind::SshTerminal => ssh_node_ready,
+        _ => false,
+    }
+}
+
 #[derive(Clone)]
 struct TerminalInputBroadcastRoute {
     source_pane_id: PaneId,
@@ -338,13 +361,12 @@ impl WorkspaceApp {
             .any(|session_id| self.serial_terminal_configs.contains_key(session_id))
     }
 
-    pub(super) fn split_active_pane(
-        &mut self,
-        direction: SplitDirection,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some((tab_id, active_pane_id, pane_count, tab_kind)) =
+    pub(super) fn can_split_active_pane(&self, cx: &App) -> bool {
+        self.active_pane_split_target(cx).is_some()
+    }
+
+    fn active_pane_split_target(&self, cx: &App) -> Option<ActivePaneSplitTarget> {
+        let (tab_id, active_pane_id, pane_count, tab_kind) =
             self.active_tab(cx).and_then(|tab| {
                 Some((
                     tab.id,
@@ -352,48 +374,76 @@ impl WorkspaceApp {
                     tab.root_pane.as_ref()?.pane_count(),
                     tab.kind.clone(),
                 ))
-            })
-        else {
-            return;
-        };
+            })?;
         if pane_count >= MAX_PANES_PER_TAB {
-            return;
+            return None;
         }
 
-        if matches!(tab_kind, TabKind::SshTerminal | TabKind::MoshTerminal) {
-            return;
+        let ssh_node_id = (tab_kind == TabKind::SshTerminal)
+            .then(|| self.active_ssh_terminal_node_id(cx))
+            .flatten();
+        let ssh_node_ready = ssh_node_id
+            .as_ref()
+            .is_some_and(|node_id| self.node_is_ready_for_terminal(node_id));
+        if !terminal_split_supported(
+            &tab_kind,
+            self.active_tab_has_serial_terminal(cx),
+            ssh_node_ready,
+        ) {
+            return None;
         }
-        if self.active_tab_has_serial_terminal(cx) {
+
+        let source = match tab_kind {
+            TabKind::LocalTerminal => TerminalSplitSource::Local,
+            TabKind::SshTerminal => TerminalSplitSource::Ssh(ssh_node_id?),
+            _ => return None,
+        };
+        Some(ActivePaneSplitTarget {
+            tab_id,
+            active_pane_id,
+            source,
+        })
+    }
+
+    pub(super) fn split_active_pane(
+        &mut self,
+        direction: SplitDirection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(target) = self.active_pane_split_target(cx) else {
+            return;
+        };
+        if let TerminalSplitSource::Ssh(node_id) = &target.source {
+            let node_id = node_id.clone();
+            self.split_ssh_terminal_pane(target, node_id, direction, window, cx);
             return;
         }
 
         let group_id = self.alloc_pane_id(cx);
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
-        let mut preferences = self.prepare_terminal_preferences_for_tab_kind(&tab_kind, cx);
-        let local_config =
-            (tab_kind == TabKind::LocalTerminal).then(|| self.local_terminal_config());
-        let local_preference_overrides = local_config.as_ref().map(|config| {
-            self.terminal_preference_overrides_for_local_shell(config.shell.as_ref())
-        });
-        if let Some(overrides) = &local_preference_overrides {
-            overrides.apply_to(&mut preferences);
-        }
+        let mut preferences =
+            self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
+        let local_config = self.local_terminal_config();
+        let local_preference_overrides =
+            self.terminal_preference_overrides_for_local_shell(local_config.shell.as_ref());
+        local_preference_overrides.apply_to(&mut preferences);
         let pane = cx.new(|cx| {
-            if let Some(config) = local_config {
-                TerminalPane::new_local_with_config_and_preferences(config, preferences, window, cx)
-                    .expect("failed to initialize split terminal pane")
-                    .with_preference_overrides(local_preference_overrides.unwrap_or_default())
-            } else {
-                TerminalPane::new_with_preferences(preferences, window, cx)
-                    .expect("failed to initialize split terminal pane")
-            }
+            TerminalPane::new_local_with_config_and_preferences(
+                local_config,
+                preferences,
+                window,
+                cx,
+            )
+            .expect("failed to initialize split terminal pane")
+            .with_preference_overrides(local_preference_overrides)
         });
 
         if self.tab_host.update(cx, |tab_host, _| {
             tab_host.split_pane(
-                tab_id,
-                active_pane_id,
+                target.tab_id,
+                target.active_pane_id,
                 group_id,
                 direction,
                 pane_id,
@@ -401,11 +451,63 @@ impl WorkspaceApp {
             )
         }) {
             self.register_terminal_pane(pane_id, session_id, pane.clone(), window, cx);
-            self.bind_terminal_location(tab_id, pane_id, session_id, cx);
+            self.bind_terminal_location(target.tab_id, pane_id, session_id, cx);
             self.needs_active_pane_focus = true;
             pane.update(cx, |pane, cx| pane.focus(window, cx));
             cx.notify();
         } else {
+            let _ = pane.update(cx, |pane, _cx| pane.shutdown());
+        }
+    }
+
+    fn split_ssh_terminal_pane(
+        &mut self,
+        target: ActivePaneSplitTarget,
+        node_id: NodeId,
+        direction: SplitDirection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let group_id = self.alloc_pane_id(cx);
+        let Ok((pane_id, session_id)) =
+            self.create_ssh_terminal_pane_for_existing_node(&node_id, None, true, window, cx)
+        else {
+            return;
+        };
+        let mounted = self.tab_host.update(cx, |tab_host, _| {
+            tab_host.split_pane(
+                target.tab_id,
+                target.active_pane_id,
+                group_id,
+                direction,
+                pane_id,
+                session_id,
+            )
+        });
+        if mounted {
+            self.bind_terminal_location(target.tab_id, pane_id, session_id, cx);
+            self.needs_active_pane_focus = true;
+            self.focus_active_pane(window, cx);
+            cx.notify();
+        } else {
+            self.rollback_unmounted_ssh_terminal_pane(pane_id, session_id, cx);
+        }
+    }
+
+    fn rollback_unmounted_ssh_terminal_pane(
+        &mut self,
+        pane_id: PaneId,
+        session_id: TerminalSessionId,
+        cx: &mut Context<Self>,
+    ) {
+        // The node remains owned by NodeRouter; only the failed pane's projections and consumer
+        // are revoked before its session is shut down.
+        self.pending_auto_close_terminal_sessions
+            .remove(&session_id);
+        self.terminal_saved_connection_refs.remove(&session_id);
+        self.clear_terminal_trigger_session_overrides(session_id);
+        self.unregister_ssh_terminal_session(session_id, cx);
+        if let Some(pane) = self.remove_terminal_pane(&pane_id, cx) {
             let _ = pane.update(cx, |pane, _cx| pane.shutdown());
         }
     }
@@ -810,5 +912,35 @@ impl WorkspaceApp {
                 group.into_any_element()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod split_tests {
+    use super::*;
+
+    #[test]
+    fn terminal_split_support_matches_transport_ownership() {
+        assert!(terminal_split_supported(
+            &TabKind::LocalTerminal,
+            false,
+            false
+        ));
+        assert!(!terminal_split_supported(
+            &TabKind::LocalTerminal,
+            true,
+            false
+        ));
+        assert!(terminal_split_supported(&TabKind::SshTerminal, false, true));
+        assert!(!terminal_split_supported(
+            &TabKind::SshTerminal,
+            false,
+            false
+        ));
+        assert!(!terminal_split_supported(
+            &TabKind::MoshTerminal,
+            false,
+            true
+        ));
     }
 }

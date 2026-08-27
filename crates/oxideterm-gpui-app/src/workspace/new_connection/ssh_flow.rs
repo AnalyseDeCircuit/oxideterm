@@ -12,7 +12,7 @@ use oxideterm_connections::{
     SaveStandaloneSftpProfileRequest, SaveTelnetProfileRequest, SavedConnectionRuntimeSecrets,
     SavedMoshProfileRuntimeSecrets, SavedProxyCommand, SavedUpstreamProxyAuth,
     SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol, SecretString,
-    first_available_default_key_path,
+    SshChannelStrategy, first_available_default_key_path,
 };
 use oxideterm_mosh::{MoshBootstrapConfig, MoshBootstrapContext};
 use oxideterm_remote_desktop::{
@@ -118,6 +118,7 @@ struct SavedConnectionRuntimeHandoff {
 pub(in crate::workspace) struct SshTerminalConnectionOptions {
     pub(in crate::workspace) terminal: ConnectionTerminalOptions,
     pub(in crate::workspace) dedicated_new_terminal_connection: bool,
+    pub(in crate::workspace) ssh_channel_strategy: SshChannelStrategy,
 }
 
 impl SshTerminalConnectionOptions {
@@ -126,6 +127,7 @@ impl SshTerminalConnectionOptions {
         Self {
             terminal: form.terminal.clone(),
             dedicated_new_terminal_connection: form.dedicated_new_terminal_connection,
+            ssh_channel_strategy: form.ssh_channel_strategy,
         }
     }
 }
@@ -135,6 +137,7 @@ impl Default for SshTerminalConnectionOptions {
         Self {
             terminal: ConnectionTerminalOptions::default(),
             dedicated_new_terminal_connection: false,
+            ssh_channel_strategy: SshChannelStrategy::default(),
         }
     }
 }

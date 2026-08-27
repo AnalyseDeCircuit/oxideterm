@@ -1162,6 +1162,10 @@ fn merge_options(
         existing.agent_forwarding_socket = imported.agent_forwarding_socket;
     }
     existing.legacy_ssh_compatibility |= imported.legacy_ssh_compatibility;
+    existing.dedicated_new_terminal_connection |= imported.dedicated_new_terminal_connection;
+    if imported.ssh_channel_strategy.requires_dedicated_consumers() {
+        existing.ssh_channel_strategy = imported.ssh_channel_strategy;
+    }
     if imported.x11_forwarding.enabled {
         // An imported enabled policy is explicit; absent legacy fields remain disabled.
         existing.x11_forwarding = imported.x11_forwarding;
@@ -1175,6 +1179,11 @@ fn merge_options(
     }
     if imported_has_proxy_chain {
         existing.jump_host = None;
+    }
+    if existing.ssh_channel_strategy.requires_dedicated_consumers() {
+        // Imported single-channel policy must not retain unsupported shared channels.
+        existing.agent_forwarding = false;
+        existing.x11_forwarding = Default::default();
     }
     existing
 }

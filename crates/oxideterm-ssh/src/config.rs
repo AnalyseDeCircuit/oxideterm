@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use oxideterm_connections::SshAlgorithmPreferences;
+use oxideterm_connections::{SshAlgorithmPreferences, SshChannelStrategy};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
@@ -111,6 +111,8 @@ pub struct SshConfig {
     pub agent_forwarding_socket: Option<String>,
     #[serde(default)]
     pub legacy_ssh_compatibility: bool,
+    #[serde(default)]
+    pub ssh_channel_strategy: SshChannelStrategy,
     #[serde(default, skip_serializing_if = "SshAlgorithmPreferences::is_default")]
     pub ssh_algorithms: SshAlgorithmPreferences,
     /// X11 stores only non-secret policy; DISPLAY and cookies are resolved per shell.
@@ -147,6 +149,7 @@ impl fmt::Debug for SshConfig {
                 &self.agent_forwarding_socket.is_some(),
             )
             .field("legacy_ssh_compatibility", &self.legacy_ssh_compatibility)
+            .field("ssh_channel_strategy", &self.ssh_channel_strategy)
             .field(
                 "ssh_algorithm_categories_customized",
                 &[
@@ -326,8 +329,13 @@ impl SshConfig {
             .map_or_else(String::new, ProxyCommandConfig::connection_key_suffix);
         let authentication_key = authentication_key_suffix(&self.auth);
         let algorithm_key = algorithm_preferences_key_suffix(&self.ssh_algorithms);
+        let channel_strategy_key = if self.ssh_channel_strategy.requires_dedicated_consumers() {
+            "|channel_strategy=dedicated_per_consumer"
+        } else {
+            ""
+        };
         format!(
-            "{}@{}:{}|{}{}{}{}{}{}{}{}{}",
+            "{}@{}:{}|{}{}{}{}{}{}{}{}{}{}",
             self.username,
             self.host,
             self.port,
@@ -339,7 +347,8 @@ impl SshConfig {
             agent_forwarding_socket_key,
             proxy_command_key,
             authentication_key,
-            algorithm_key
+            algorithm_key,
+            channel_strategy_key
         )
     }
 
@@ -577,6 +586,7 @@ impl Default for SshConfig {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            ssh_channel_strategy: SshChannelStrategy::default(),
             ssh_algorithms: SshAlgorithmPreferences::default(),
             x11_forwarding: None,
             post_connect_command: None,
@@ -621,6 +631,20 @@ mod tests {
         config.ssh_algorithms.cipher = vec!["aes256-gcm@openssh.com".to_string()];
 
         assert_ne!(default_key, config.connection_key());
+    }
+
+    #[test]
+    fn channel_strategy_separates_physical_connection_pool_identity() {
+        let mut config = SshConfig::password("host", 22, "operator", "pw");
+        let multiplexed_key = config.connection_key();
+        config.ssh_channel_strategy = SshChannelStrategy::DedicatedPerConsumer;
+
+        assert_ne!(multiplexed_key, config.connection_key());
+        assert!(
+            config
+                .connection_key()
+                .contains("channel_strategy=dedicated_per_consumer")
+        );
     }
 
     #[test]

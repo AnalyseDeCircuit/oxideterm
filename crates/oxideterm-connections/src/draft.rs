@@ -124,6 +124,7 @@ pub struct ConnectionDraft {
     pub legacy_ssh_compatibility: bool,
     pub ssh_algorithms: SshAlgorithmPreferences,
     pub dedicated_new_terminal_connection: bool,
+    pub ssh_channel_strategy: crate::SshChannelStrategy,
     pub x11_forwarding: crate::ConnectionX11ForwardingOptions,
     pub post_connect_command: String,
     pub terminal: ConnectionTerminalOptions,
@@ -283,6 +284,7 @@ pub fn save_request_from_draft(
         legacy_ssh_compatibility: draft.legacy_ssh_compatibility,
         ssh_algorithms: draft.ssh_algorithms,
         dedicated_new_terminal_connection: draft.dedicated_new_terminal_connection,
+        ssh_channel_strategy: draft.ssh_channel_strategy,
         x11_forwarding: draft.x11_forwarding,
         post_connect_command: (!draft.post_connect_command.trim().is_empty())
             .then(|| draft.post_connect_command.trim().to_string()),
@@ -696,6 +698,7 @@ mod tests {
             ssh_algorithms: SshAlgorithmPreferences::default(),
             x11_forwarding: crate::ConnectionX11ForwardingOptions::default(),
             dedicated_new_terminal_connection: false,
+            ssh_channel_strategy: crate::SshChannelStrategy::default(),
             post_connect_command: String::new(),
             terminal: ConnectionTerminalOptions::default(),
         };

@@ -5,6 +5,7 @@ use std::{fs, io::Read};
 
 use oxideterm_connections::{
     SaveConnectionRequest, SavedAuth, SavedConnection, SavedProxyHop, SecretString,
+    SshChannelStrategy,
 };
 use serde::Deserialize;
 use zeroize::Zeroizing;
@@ -31,6 +32,7 @@ pub(super) struct ConnectionSpec {
     proxy_chain: Option<Vec<ConnectionProxyHopSpec>>,
     agent_forwarding: Option<bool>,
     legacy_ssh_compatibility: Option<bool>,
+    ssh_channel_strategy: Option<SshChannelStrategy>,
     post_connect_command: Option<Option<String>>,
 }
 
@@ -114,6 +116,7 @@ pub(super) fn connection_spec_from_direct_args(
         proxy_chain: None,
         agent_forwarding: args.agent_forwarding,
         legacy_ssh_compatibility: args.legacy_ssh_compatibility,
+        ssh_channel_strategy: None,
         post_connect_command: args.post_connect_command.map(Some),
     }))
 }
@@ -215,6 +218,11 @@ pub(super) fn connection_request_from_spec(
         dedicated_new_terminal_connection: existing
             .map(|connection| connection.options.dedicated_new_terminal_connection)
             .unwrap_or(false),
+        ssh_channel_strategy: spec.ssh_channel_strategy.unwrap_or_else(|| {
+            existing
+                .map(|connection| connection.options.ssh_channel_strategy)
+                .unwrap_or_default()
+        }),
         x11_forwarding: existing
             .map(|connection| connection.options.x11_forwarding)
             .unwrap_or_default(),

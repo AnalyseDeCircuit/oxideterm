@@ -215,6 +215,7 @@ pub(super) fn form_from_runtime_config(
     form.identity_agent = config.identity_agent.clone().unwrap_or_default();
     form.agent_forwarding_socket = config.agent_forwarding_socket.clone();
     form.legacy_ssh_compatibility = config.legacy_ssh_compatibility;
+    form.ssh_channel_strategy = config.ssh_channel_strategy;
     form.connect_timeout_seconds = config.timeout_secs;
     form.connect_timeout_seconds_text = config.timeout_secs.to_string();
     form.x11_forwarding = connection_x11_options(config.x11_forwarding);

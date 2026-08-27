@@ -769,6 +769,12 @@ impl WorkspaceApp {
             .and_then(|id| self.connection_store.get(id))
             .map(|connection| connection.name.clone())
             .unwrap_or_else(|| format!("{}@{}", snapshot.username, snapshot.host));
+        let ssh_channel_strategy = snapshot
+            .origin
+            .saved_connection_id()
+            .and_then(|id| self.connection_store.get(id))
+            .map(|connection| connection.options.ssh_channel_strategy)
+            .unwrap_or_default();
         self.ssh_nodes.insert(
             node_id.clone(),
             WorkspaceSshNode {
@@ -781,6 +787,7 @@ impl WorkspaceApp {
                 title,
                 terminal_options: ConnectionTerminalOptions::default(),
                 dedicated_new_terminal_connection: false,
+                ssh_channel_strategy,
                 terminal_ids: Vec::new(),
                 readiness: snapshot.readiness,
             },
@@ -932,8 +939,15 @@ impl WorkspaceApp {
             };
             let tab_id = location.tab_id;
             let old_pane_id = location.pane_id;
-            let Ok((new_pane_id, new_session_id)) =
-                self.create_ssh_terminal_pane_for_existing_node(node_id, None, false, window, cx)
+            let allow_dedicated_connection = remounted > 0;
+            let Ok((new_pane_id, new_session_id)) = self
+                .create_ssh_terminal_pane_for_existing_node(
+                    node_id,
+                    None,
+                    allow_dedicated_connection,
+                    window,
+                    cx,
+                )
             else {
                 continue;
             };

@@ -161,6 +161,14 @@ pub struct PublicX11ForwardingOptions {
     pub untrusted_timeout_seconds: Option<u32>,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicSshChannelStrategy {
+    #[default]
+    Multiplexed,
+    DedicatedPerConsumer,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PublicUpstreamProxyProtocol {
@@ -242,6 +250,8 @@ pub struct PublicSshProfile {
     pub legacy_ssh_compatibility: bool,
     #[serde(default)]
     pub dedicated_new_terminal_connection: bool,
+    #[serde(default)]
+    pub ssh_channel_strategy: PublicSshChannelStrategy,
     #[serde(default)]
     pub x11_forwarding: PublicX11ForwardingOptions,
     #[serde(default)]
