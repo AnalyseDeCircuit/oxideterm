@@ -469,40 +469,113 @@ mod tests {
     }
 
     #[test]
-    fn kitty_file_transmission_decodes_image_from_path() {
-        let mut png = RgbaImage::new(1, 1);
-        png.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
-        let mut bytes = Vec::new();
-        image::DynamicImage::ImageRgba8(png)
-            .write_to(
-                &mut std::io::Cursor::new(&mut bytes),
-                image::ImageFormat::Png,
-            )
-            .unwrap();
-
-        let path = std::env::temp_dir().join(format!(
-            "oxideterm-kitty-file-{}-图片.png",
-            std::process::id()
-        ));
-        std::fs::write(&path, bytes).unwrap();
+    fn kitty_file_transmission_cannot_access_local_paths() {
+        let outside = tempfile::tempdir().unwrap();
+        let path = outside.path().join("tty-graphics-protocol-图片.png");
+        let bytes = one_pixel_png();
+        std::fs::write(&path, &bytes).unwrap();
 
         let payload = BASE64.encode(path.to_string_lossy().as_bytes());
-        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
-        let seq = format!("\x1b_Ga=T,t=f,f=100,i=12;{payload}\x1b\\");
-        let result = ingress.advance(seq.as_bytes(), cursor());
+        for transmission in ["f", "t"] {
+            let options = GraphicsOptions::default();
+            let control = options.kitty_file_transmission.clone();
+            let mut ingress = GraphicsIngress::new(options);
+            let sequence =
+                format!("\x1b_Ga=T,t={transmission},f=100,i=12;{payload}\x1b\\");
+            let result = ingress.advance(sequence.as_bytes(), cursor());
 
-        let _ = std::fs::remove_file(path);
+            assert!(result.events.iter().any(|event| {
+                matches!(
+                    event,
+                    TerminalGraphicsEvent::Error(message)
+                        if message == "Kitty local file transmission is disabled"
+                )
+            }));
+            assert!(control.take_authorization_request());
+            assert!(path.exists());
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+    }
 
+    #[test]
+    fn kitty_file_transmission_is_confined_to_the_approved_session_sandbox() {
+        let options = GraphicsOptions::default();
+        let control = options.kitty_file_transmission.clone();
+        let sandbox = control.authorize_for_session().unwrap();
+        let bytes = one_pixel_png();
+        let approved_file = sandbox.join("tty-graphics-protocol-图片.png");
+        std::fs::write(&approved_file, &bytes).unwrap();
+        let mut ingress = GraphicsIngress::new(options);
+
+        for transmission in ["f", "t"] {
+            let result = kitty_file_advance(&mut ingress, transmission, &approved_file);
+            assert!(result.events.iter().any(|event| {
+                matches!(
+                    event,
+                    TerminalGraphicsEvent::ImageReady(TerminalImageData {
+                        protocol: TerminalImageProtocol::Kitty,
+                        width: 1,
+                        height: 1,
+                        ..
+                    })
+                )
+            }));
+            // Temporary-mode files remain owned by the sandbox until the
+            // session control is dropped; payload data never chooses deletion.
+            assert!(approved_file.exists());
+        }
+
+        let outside = tempfile::tempdir().unwrap();
+        let outside_file = outside.path().join("tty-graphics-protocol-outside.png");
+        std::fs::write(&outside_file, &bytes).unwrap();
+        let outside_result = kitty_file_advance(&mut ingress, "t", &outside_file);
+        assert!(outside_result.events.iter().any(|event| {
+            matches!(
+                event,
+                TerminalGraphicsEvent::Error(message)
+                    if message == "Kitty local file transmission path is not allowed"
+            )
+        }));
+        assert!(outside_file.exists());
+
+        let directory = sandbox.join("tty-graphics-protocol-directory");
+        std::fs::create_dir(&directory).unwrap();
+        let directory_result = kitty_file_advance(&mut ingress, "f", &directory);
+        assert!(directory_result.events.iter().any(|event| {
+            matches!(
+                event,
+                TerminalGraphicsEvent::Error(message)
+                    if message == "Kitty local file transmission path is not allowed"
+            )
+        }));
+
+        let debug = format!("{control:?}");
+        assert!(!debug.contains(&sandbox.to_string_lossy().into_owned()));
+        assert!(debug.contains("[redacted session capability]"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kitty_file_transmission_rejects_unreadable_sandbox_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let options = GraphicsOptions::default();
+        let control = options.kitty_file_transmission.clone();
+        let sandbox = control.authorize_for_session().unwrap();
+        let path = sandbox.join("tty-graphics-protocol-unreadable.png");
+        std::fs::write(&path, one_pixel_png()).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let mut ingress = GraphicsIngress::new(options);
+        let result = kitty_file_advance(&mut ingress, "f", &path);
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         assert!(result.events.iter().any(|event| {
             matches!(
                 event,
-                TerminalGraphicsEvent::ImageReady(TerminalImageData {
-                    id: TerminalImageId(12),
-                    protocol: TerminalImageProtocol::Kitty,
-                    width: 1,
-                    height: 1,
-                    ..
-                })
+                TerminalGraphicsEvent::Error(message)
+                    if message
+                        == "Kitty local file transmission could not read the approved file"
             )
         }));
     }
@@ -614,5 +687,28 @@ mod tests {
         first.terminal_bytes.extend(second.terminal_bytes);
         first.events.extend(second.events);
         first
+    }
+
+    fn one_pixel_png() -> Vec<u8> {
+        let mut png = RgbaImage::new(1, 1);
+        png.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+        bytes
+    }
+
+    fn kitty_file_advance(
+        ingress: &mut GraphicsIngress,
+        transmission: &str,
+        path: &Path,
+    ) -> GraphicsAdvance {
+        let payload = BASE64.encode(path.to_string_lossy().as_bytes());
+        let sequence = format!("\x1b_Ga=T,t={transmission},f=100,i=12;{payload}\x1b\\");
+        ingress.advance(sequence.as_bytes(), cursor())
     }
 }

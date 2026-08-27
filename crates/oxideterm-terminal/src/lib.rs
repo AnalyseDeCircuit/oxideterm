@@ -54,10 +54,10 @@ pub use command_sender::{
     TerminalSenderPlanError, build_terminal_sender_plan,
 };
 pub use data::{
-    GraphicsOptions, TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape,
-    TerminalImageAnimationState, TerminalImageData, TerminalImageFrame, TerminalImageId,
-    TerminalImageProtocol, TerminalImageSnapshot, TerminalRow, TerminalSearchMatch,
-    TerminalSearchRange, TerminalSnapshot, TerminalStyleOrigin,
+    GraphicsOptions, KittyFileTransmissionControl, TerminalAttrs, TerminalCell, TerminalColor,
+    TerminalCursorShape, TerminalImageAnimationState, TerminalImageData, TerminalImageFrame,
+    TerminalImageId, TerminalImageProtocol, TerminalImageSnapshot, TerminalRow,
+    TerminalSearchMatch, TerminalSearchRange, TerminalSnapshot, TerminalStyleOrigin,
 };
 pub use editor_integration::{
     EMACS_FREE_TYPE_INTEGRATION_SOURCE, TerminalEditorApplication, TerminalEditorCapabilities,

@@ -21,11 +21,11 @@ use gpui::{
 };
 use oxideterm_ssh::SshConnectionHandle;
 use oxideterm_terminal::{
-    GraphicsOptions, LocalPtyConfig, SerialControlLine, SerialControlState, SerialDisplayMode,
-    SerialLineEnding, SerialRuntimeOptions, SerialSendMode, SerialSessionConfig,
-    ShellIntegrationLifecycleState, ShellIntegrationStatus, SshSessionConfig, TelnetSessionConfig,
-    TermMode, TerminalCommandMark, TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence,
-    TerminalCommandMarkDetectionSource, TerminalCommandMarkEvent,
+    GraphicsOptions, KittyFileTransmissionControl, LocalPtyConfig, SerialControlLine,
+    SerialControlState, SerialDisplayMode, SerialLineEnding, SerialRuntimeOptions, SerialSendMode,
+    SerialSessionConfig, ShellIntegrationLifecycleState, ShellIntegrationStatus, SshSessionConfig,
+    TelnetSessionConfig, TermMode, TerminalCommandMark, TerminalCommandMarkClosedBy,
+    TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource, TerminalCommandMarkEvent,
     TerminalCwdIntegrationLaunchState, TerminalDrainBudget, TerminalDrainReport,
     TerminalEditorApplication, TerminalEditorClipboardOperation, TerminalEditorIntegrationEvent,
     TerminalEvent, TerminalLifecycle, TerminalOutputProcessor, TerminalProcessInfo,
@@ -416,6 +416,9 @@ pub struct TerminalPane {
     selection: Option<TerminalSelection>,
     pending_paste: Option<String>,
     pending_paste_prefix: Option<Vec<u8>>,
+    // The pane observes only its session's capability and never stores the sandbox path.
+    kitty_file_transmission: Option<KittyFileTransmissionControl>,
+    kitty_file_transmission_confirm_open: bool,
     // Control-mode prompts stay pane-owned so text never reaches the hosted shell.
     tmux_prompt: Option<TmuxPromptState>,
     dismissed_tmux_message_generation: u64,
@@ -915,6 +918,7 @@ impl TerminalPane {
                 terminal.cwd_integration_launch_state(),
             )
         };
+        let kitty_file_transmission = terminal.lock().kitty_file_transmission_control();
         let mut next_snapshot_line_id = 1;
         assign_initial_snapshot_line_ids(&mut snapshot, &mut next_snapshot_line_id);
         let cwd_shell_integration_status = initial_cwd_shell_integration_status(
@@ -1058,6 +1062,8 @@ impl TerminalPane {
             selection: None,
             pending_paste: None,
             pending_paste_prefix: None,
+            kitty_file_transmission,
+            kitty_file_transmission_confirm_open: false,
             tmux_prompt: None,
             dismissed_tmux_message_generation: 0,
             context_menu: None,
@@ -2496,6 +2502,61 @@ impl TerminalPane {
         }
     }
 
+    pub(crate) fn confirm_kitty_file_transmission(&mut self, cx: &mut Context<Self>) {
+        self.kitty_file_transmission_confirm_open = false;
+        let labels = &self.preferences.kitty_file_transmission_labels;
+        let result = self
+            .kitty_file_transmission
+            .as_ref()
+            .ok_or_else(|| std::io::Error::other("Kitty file transmission is unavailable"))
+            .and_then(KittyFileTransmissionControl::authorize_for_session);
+        match result {
+            Ok(sandbox_path) => {
+                // Clipboard export is the explicit user-authorized capability boundary;
+                // the path is never retained by pane state, logs, or persistence.
+                cx.write_to_clipboard(ClipboardItem::new_string(
+                    sandbox_path.to_string_lossy().into_owned(),
+                ));
+                self.emit_kitty_file_transmission_notice(
+                    labels.allowed_title.clone(),
+                    labels.allowed_description.clone(),
+                    TerminalNoticeVariant::Success,
+                );
+            }
+            Err(_) => self.emit_kitty_file_transmission_notice(
+                labels.failed_title.clone(),
+                labels.failed_description.clone(),
+                TerminalNoticeVariant::Error,
+            ),
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn deny_kitty_file_transmission(&mut self, cx: &mut Context<Self>) {
+        self.kitty_file_transmission_confirm_open = false;
+        if let Some(control) = &self.kitty_file_transmission {
+            control.deny_for_session();
+        }
+        cx.notify();
+    }
+
+    fn emit_kitty_file_transmission_notice(
+        &self,
+        title: String,
+        description: String,
+        variant: TerminalNoticeVariant,
+    ) {
+        if let Some(sink) = &self.preferences.notice_sink {
+            sink(TerminalNotice {
+                title,
+                description: Some(description),
+                status_text: None,
+                progress: None,
+                variant,
+            });
+        }
+    }
+
     fn tick(&mut self, cx: &mut Context<Self>) {
         let now = Instant::now();
         let budget = self.next_drain_budget();
@@ -2532,6 +2593,15 @@ impl TerminalPane {
             false
         };
         let mut needs_notify = event_effect.needs_notify || report.changed;
+        if self
+            .kitty_file_transmission
+            .as_ref()
+            .is_some_and(KittyFileTransmissionControl::take_authorization_request)
+            && !self.kitty_file_transmission_confirm_open
+        {
+            self.kitty_file_transmission_confirm_open = true;
+            needs_notify = true;
+        }
         if (self.preferences.show_performance_overlay && render_stats_changed)
             || cleared_command_mark_selection
             || cleared_privilege_prompt_hint
@@ -3643,6 +3713,7 @@ fn graphics_options_from_preferences(preferences: &TerminalUiPreferences) -> Gra
         pixel_limit: graphics.pixel_limit.min(u32::MAX as usize) as u32,
         storage_limit_mb: storage_limit_mb.min(u32::MAX as usize) as u32,
         show_placeholder: graphics.show_placeholders,
+        kitty_file_transmission: KittyFileTransmissionControl::new(),
     }
 }
 

@@ -47,6 +47,16 @@
       "cancel": "Abbrechen",
       "paste": "Einfügen"
     },
+    "kitty_file_transmission": {
+      "title": "Kitty-Zugriff auf lokale Dateien für diese Sitzung erlauben?",
+      "description": "Die Anfrage wurde blockiert. Nach der Freigabe erstellt OxideTerm ein privates Sitzungsverzeichnis und kopiert dessen Pfad. Wiederholen Sie die Übertragung mit einer tty-graphics-protocol-Datei direkt in diesem Verzeichnis.",
+      "cancel": "Ablehnen",
+      "allow": "Für diese Sitzung erlauben",
+      "allowed_title": "Kitty-Dateizugriff für diese Sitzung erlaubt",
+      "allowed_description": "Das private Übertragungsverzeichnis wurde in die Zwischenablage kopiert. Die Berechtigung endet mit dieser Terminalsitzung.",
+      "failed_title": "Kitty-Dateizugriff konnte nicht aktiviert werden",
+      "failed_description": "OxideTerm konnte das private Übertragungsverzeichnis nicht erstellen."
+    },
     "command_selection": {
       "actions": "Aktionen für Befehlsauswahl",
       "copy": "Kopieren",

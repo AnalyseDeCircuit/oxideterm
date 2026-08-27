@@ -8586,7 +8586,10 @@ dependencies = [
  "criterion 0.5.1",
  "icy_sixel",
  "image",
+ "tempfile",
  "thiserror 2.0.18",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]

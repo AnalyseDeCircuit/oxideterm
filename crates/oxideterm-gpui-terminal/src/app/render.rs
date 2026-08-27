@@ -6,6 +6,7 @@ use gpui::{
     RenderImage, SharedString, StyledImage, Window, anchored, deferred, div, point, prelude::*, px,
     rgb, rgba,
 };
+use oxideterm_gpui_ui::confirm::{ConfirmDialogVariant, ConfirmDialogView, confirm_dialog};
 use oxideterm_gpui_ui::context_menu::{
     ContextMenuItemKind, context_menu_action, context_menu_backdrop, context_menu_content,
     context_menu_event_boundary, context_menu_item, context_menu_item_height_estimate,
@@ -450,6 +451,10 @@ impl Render for TerminalPane {
             .when_some(self.pending_paste.clone(), |pane, paste| {
                 pane.child(self.render_paste_confirm_overlay(&paste, cx))
             })
+            .when(
+                self.kitty_file_transmission_confirm_open && self.pending_paste.is_none(),
+                |pane| pane.child(self.render_kitty_file_transmission_confirm(cx)),
+            )
             .when_some(self.modem_progress.clone(), |pane, transfer| {
                 pane.child(self.render_modem_progress_overlay(transfer, cx))
             })
@@ -2335,6 +2340,28 @@ impl TerminalPane {
     ) {
         let output = self.terminal.lock().command_output_text(mark);
         cx.write_to_clipboard(ClipboardItem::new_string(output));
+    }
+
+    fn render_kitty_file_transmission_confirm(&self, cx: &mut Context<Self>) -> AnyElement {
+        let labels = &self.preferences.kitty_file_transmission_labels;
+        confirm_dialog(
+            &self.theme.tokens,
+            ConfirmDialogView {
+                variant: ConfirmDialogVariant::Danger,
+                title: div().child(labels.title.clone()).into_any_element(),
+                description: Some(div().child(labels.description.clone()).into_any_element()),
+                cancel_label: div().child(labels.cancel.clone()).into_any_element(),
+                confirm_label: div().child(labels.allow.clone()).into_any_element(),
+            },
+            cx.listener(|this, _event, _window, cx| {
+                this.deny_kitty_file_transmission(cx);
+                cx.stop_propagation();
+            }),
+            cx.listener(|this, _event, _window, cx| {
+                this.confirm_kitty_file_transmission(cx);
+                cx.stop_propagation();
+            }),
+        )
     }
 
     fn render_paste_confirm_overlay(&self, content: &str, cx: &mut Context<Self>) -> AnyElement {

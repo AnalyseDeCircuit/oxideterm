@@ -47,6 +47,16 @@
       "cancel": "Annuler",
       "paste": "Coller"
     },
+    "kitty_file_transmission": {
+      "title": "Autoriser Kitty à accéder aux fichiers locaux pour cette session ?",
+      "description": "La demande a été bloquée. Si vous l’autorisez, OxideTerm crée un dossier privé pour la session et copie son chemin. Relancez le transfert avec un fichier tty-graphics-protocol placé directement dans ce dossier.",
+      "cancel": "Refuser",
+      "allow": "Autoriser pour cette session",
+      "allowed_title": "Accès de Kitty autorisé pour cette session",
+      "allowed_description": "Le dossier privé de transfert a été copié dans le presse-papiers. L’autorisation prend fin à la fermeture de cette session de terminal.",
+      "failed_title": "Impossible d’activer l’accès de Kitty",
+      "failed_description": "OxideTerm n’a pas pu créer le dossier privé de transfert."
+    },
     "command_selection": {
       "actions": "Actions de sélection de commande",
       "copy": "Copier",

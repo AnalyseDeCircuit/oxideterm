@@ -47,6 +47,16 @@
       "cancel": "キャンセル",
       "paste": "ペースト"
     },
+    "kitty_file_transmission": {
+      "title": "このセッションで Kitty のローカルファイルアクセスを許可しますか？",
+      "description": "要求はブロックされました。許可すると、OxideTerm はセッション専用の非公開ディレクトリを作成し、そのパスをコピーします。そのディレクトリ直下に tty-graphics-protocol ファイルを置いて転送を再試行してください。",
+      "cancel": "拒否",
+      "allow": "このセッションで許可",
+      "allowed_title": "このセッションで Kitty のファイルアクセスを許可しました",
+      "allowed_description": "非公開の転送ディレクトリをクリップボードにコピーしました。この権限はターミナルセッションを閉じると失効します。",
+      "failed_title": "Kitty のファイルアクセスを有効にできませんでした",
+      "failed_description": "OxideTerm は非公開の転送ディレクトリを作成できませんでした。"
+    },
     "command_selection": {
       "actions": "コマンド選択アクション",
       "copy": "コピー",

@@ -126,6 +126,16 @@
       "cancel": "Cancel",
       "paste": "Paste"
     },
+    "kitty_file_transmission": {
+      "title": "Allow Kitty local-file access for this session?",
+      "description": "The request was blocked. If you allow it, OxideTerm creates a private session directory and copies its path. Retry the transfer using a tty-graphics-protocol file directly inside that directory.",
+      "cancel": "Deny",
+      "allow": "Allow for this session",
+      "allowed_title": "Kitty file access allowed for this session",
+      "allowed_description": "The private transfer directory was copied to the clipboard. The permission ends when this terminal session closes.",
+      "failed_title": "Could not enable Kitty file access",
+      "failed_description": "OxideTerm could not create the private transfer directory."
+    },
     "command_selection": {
       "actions": "Command selection actions",
       "copy": "Copy",

@@ -9,7 +9,10 @@ anyhow.workspace = true
 base64.workspace = true
 icy_sixel.workspace = true
 image.workspace = true
+tempfile = "3.23"
 thiserror.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

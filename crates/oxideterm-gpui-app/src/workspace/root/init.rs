@@ -1176,6 +1176,22 @@ impl WorkspaceApp {
                 cancel: self.i18n.t("terminal.paste.cancel"),
                 paste: self.i18n.t("terminal.paste.paste"),
             },
+            kitty_file_transmission_labels: TerminalKittyFileTransmissionLabels {
+                title: self.i18n.t("terminal.kitty_file_transmission.title"),
+                description: self.i18n.t("terminal.kitty_file_transmission.description"),
+                cancel: self.i18n.t("terminal.kitty_file_transmission.cancel"),
+                allow: self.i18n.t("terminal.kitty_file_transmission.allow"),
+                allowed_title: self
+                    .i18n
+                    .t("terminal.kitty_file_transmission.allowed_title"),
+                allowed_description: self
+                    .i18n
+                    .t("terminal.kitty_file_transmission.allowed_description"),
+                failed_title: self.i18n.t("terminal.kitty_file_transmission.failed_title"),
+                failed_description: self
+                    .i18n
+                    .t("terminal.kitty_file_transmission.failed_description"),
+            },
             autosuggest_labels: TerminalAutosuggestLabels {
                 history_source: self.i18n.t("terminal.command_bar.source_history"),
             },

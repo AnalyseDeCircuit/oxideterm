@@ -107,6 +107,7 @@ pub struct TerminalUiPreferences {
     pub background: Option<TerminalBackgroundPreferences>,
     pub transparent_background: bool,
     pub paste_labels: TerminalPasteLabels,
+    pub kitty_file_transmission_labels: TerminalKittyFileTransmissionLabels,
     pub autosuggest_labels: TerminalAutosuggestLabels,
     pub command_selection_labels: TerminalCommandSelectionLabels,
     pub modem_labels: TerminalModemLabels,
@@ -221,6 +222,7 @@ impl Default for TerminalUiPreferences {
             background: None,
             transparent_background: false,
             paste_labels: TerminalPasteLabels::default(),
+            kitty_file_transmission_labels: TerminalKittyFileTransmissionLabels::default(),
             autosuggest_labels: TerminalAutosuggestLabels::default(),
             command_selection_labels: TerminalCommandSelectionLabels::default(),
             modem_labels: TerminalModemLabels::default(),
@@ -658,6 +660,34 @@ impl Default for TerminalTrzszLabels {
             disabled_description:
                 "The remote server started a trzsz transfer, but in-band file transfer is not enabled. Enable trzsz in Settings -> Terminal."
                     .to_string(),
+        }
+    }
+}
+
+/// Localized copy for the per-session Kitty file-access decision.
+#[derive(Clone, Debug)]
+pub struct TerminalKittyFileTransmissionLabels {
+    pub title: String,
+    pub description: String,
+    pub cancel: String,
+    pub allow: String,
+    pub allowed_title: String,
+    pub allowed_description: String,
+    pub failed_title: String,
+    pub failed_description: String,
+}
+
+impl Default for TerminalKittyFileTransmissionLabels {
+    fn default() -> Self {
+        Self {
+            title: "Allow Kitty local-file access for this session?".to_string(),
+            description: "The request was blocked. If you allow it, OxideTerm creates a private session directory and copies its path. Retry the transfer using a tty-graphics-protocol file directly inside that directory.".to_string(),
+            cancel: "Deny".to_string(),
+            allow: "Allow for this session".to_string(),
+            allowed_title: "Kitty file access allowed for this session".to_string(),
+            allowed_description: "The private transfer directory was copied to the clipboard. The permission ends when this terminal session closes.".to_string(),
+            failed_title: "Could not enable Kitty file access".to_string(),
+            failed_description: "OxideTerm could not create the private transfer directory.".to_string(),
         }
     }
 }

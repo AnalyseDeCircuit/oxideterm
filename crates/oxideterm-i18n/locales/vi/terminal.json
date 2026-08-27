@@ -47,6 +47,16 @@
       "cancel": "Hủy",
       "paste": "Dán"
     },
+    "kitty_file_transmission": {
+      "title": "Cho phép Kitty truy cập tệp cục bộ trong phiên này?",
+      "description": "Yêu cầu đã bị chặn. Nếu cho phép, OxideTerm sẽ tạo thư mục riêng cho phiên và sao chép đường dẫn. Hãy thử lại quá trình truyền với tệp tty-graphics-protocol nằm trực tiếp trong thư mục đó.",
+      "cancel": "Từ chối",
+      "allow": "Cho phép trong phiên này",
+      "allowed_title": "Đã cho phép Kitty truy cập tệp trong phiên này",
+      "allowed_description": "Thư mục truyền riêng đã được sao chép vào bảng tạm. Quyền này hết hiệu lực khi phiên terminal đóng.",
+      "failed_title": "Không thể bật quyền truy cập tệp cho Kitty",
+      "failed_description": "OxideTerm không thể tạo thư mục truyền riêng."
+    },
     "command_selection": {
       "actions": "Thao tác chọn lệnh",
       "copy": "Sao chép",

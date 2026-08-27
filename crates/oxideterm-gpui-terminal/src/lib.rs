@@ -37,9 +37,9 @@ pub use session_log::{
 pub use terminal_ui::{
     TerminalAutosuggestLabels, TerminalBackgroundFit, TerminalBackgroundPreferences,
     TerminalCommandSelectionLabels, TerminalHighlightMatchScope, TerminalHighlightRenderMode,
-    TerminalHighlightRule, TerminalHighlightRuleSetOverride, TerminalModemLabels, TerminalNotice,
-    TerminalNoticeVariant, TerminalPasteLabels, TerminalSerialControlLabels,
-    TerminalSessionLogLabels, TerminalTmuxLabels, TerminalTrzszLabels,
+    TerminalHighlightRule, TerminalHighlightRuleSetOverride, TerminalKittyFileTransmissionLabels,
+    TerminalModemLabels, TerminalNotice, TerminalNoticeVariant, TerminalPasteLabels,
+    TerminalSerialControlLabels, TerminalSessionLogLabels, TerminalTmuxLabels, TerminalTrzszLabels,
     TerminalUiPreferenceOverrides, TerminalUiPreferences, TerminalUiTheme,
     resolved_terminal_semantic_scheme,
 };

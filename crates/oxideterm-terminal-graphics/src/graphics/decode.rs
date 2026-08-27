@@ -92,29 +92,78 @@ fn decode_kitty_payload(
     params: &HashMap<String, String>,
     encoded: &[u8],
     storage_limit_mb: u32,
+    file_transmission: &KittyFileTransmissionControl,
 ) -> Result<Vec<u8>, GraphicsError> {
+    let transmission = params.get("t").map(String::as_str).unwrap_or("d");
     let payload = BASE64
         .decode(encoded)
         .map_err(|_| GraphicsError::InvalidBase64)?;
     enforce_storage_limit(payload.len(), storage_limit_mb)?;
 
-    let transmission = params.get("t").map(String::as_str).unwrap_or("d");
     match transmission {
         "d" => Ok(payload),
         "f" | "t" => {
-            let path = String::from_utf8(payload).map_err(|_| GraphicsError::InvalidPath)?;
-            let path = path.trim_end_matches('\0');
-            let metadata =
-                fs::metadata(path).map_err(|error| GraphicsError::Io(error.to_string()))?;
-            enforce_storage_limit(metadata.len() as usize, storage_limit_mb)?;
-            let bytes = fs::read(path).map_err(|error| GraphicsError::Io(error.to_string()))?;
-            if transmission == "t" {
-                let _ = fs::remove_file(path);
-            }
-            Ok(bytes)
+            let path = String::from_utf8(payload)
+                .map_err(|_| GraphicsError::InvalidLocalFileTransmissionPath)?;
+            let path = Path::new(path.trim_end_matches('\0'));
+            read_kitty_file_from_session_sandbox(path, storage_limit_mb, file_transmission)
         }
         _ => Err(GraphicsError::UnsupportedImage),
     }
+}
+
+fn read_kitty_file_from_session_sandbox(
+    requested_path: &Path,
+    storage_limit_mb: u32,
+    file_transmission: &KittyFileTransmissionControl,
+) -> Result<Vec<u8>, GraphicsError> {
+    let Some(sandbox_root) = file_transmission.authorized_root() else {
+        file_transmission.note_authorization_request();
+        return Err(GraphicsError::LocalFileTransmissionDisabled);
+    };
+    if !requested_path.is_absolute() {
+        return Err(GraphicsError::InvalidLocalFileTransmissionPath);
+    }
+
+    let requested_metadata = fs::symlink_metadata(requested_path)
+        .map_err(|_| GraphicsError::LocalFileTransmissionAccessFailed)?;
+    if requested_metadata.file_type().is_symlink() || !requested_metadata.is_file() {
+        return Err(GraphicsError::InvalidLocalFileTransmissionPath);
+    }
+
+    let canonical_root = fs::canonicalize(&sandbox_root)
+        .map_err(|_| GraphicsError::LocalFileTransmissionAccessFailed)?;
+    let canonical_path = fs::canonicalize(requested_path)
+        .map_err(|_| GraphicsError::LocalFileTransmissionAccessFailed)?;
+    let is_direct_sandbox_file = canonical_path.parent() == Some(canonical_root.as_path());
+    let has_protocol_marker = canonical_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.contains("tty-graphics-protocol"));
+    if !is_direct_sandbox_file || !has_protocol_marker {
+        return Err(GraphicsError::InvalidLocalFileTransmissionPath);
+    }
+
+    enforce_storage_limit(requested_metadata.len() as usize, storage_limit_mb)?;
+    let file = fs::File::open(&canonical_path)
+        .map_err(|_| GraphicsError::LocalFileTransmissionAccessFailed)?;
+    if !file
+        .metadata()
+        .map_err(|_| GraphicsError::LocalFileTransmissionAccessFailed)?
+        .is_file()
+    {
+        return Err(GraphicsError::InvalidLocalFileTransmissionPath);
+    }
+    let limit = storage_limit_mb.max(1) as u64 * 1024 * 1024;
+    let mut bytes = Vec::with_capacity(requested_metadata.len() as usize);
+    file.take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|_| GraphicsError::LocalFileTransmissionAccessFailed)?;
+    enforce_storage_limit(bytes.len(), storage_limit_mb)?;
+
+    // `t=t` is intentionally not unlinked here. The private TempDir owner
+    // performs bounded cleanup when the session is denied, revoked, or dropped.
+    Ok(bytes)
 }
 
 fn decode_raw_rgb(

@@ -103,6 +103,25 @@ impl TerminalPane {
             }
         }
 
+        if self.kitty_file_transmission_confirm_open
+            && !modifiers.platform
+            && !modifiers.control
+            && !modifiers.alt
+        {
+            // Only unmodified confirmation keys may resolve the security prompt.
+            match key {
+                "enter" => {
+                    self.confirm_kitty_file_transmission(cx);
+                    return true;
+                }
+                "escape" => {
+                    self.deny_kitty_file_transmission(cx);
+                    return true;
+                }
+                _ => {}
+            }
+        }
+
         let has_privilege_prompt_inline_hint = self.privilege_prompt_inline_hint.is_some();
         let privilege_prompt_submit = privilege_prompt_enter_requests_submit(
             key,

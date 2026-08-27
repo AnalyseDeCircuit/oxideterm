@@ -1,7 +1,156 @@
 pub const DEFAULT_PIXEL_LIMIT: u32 = 16_777_216;
 pub const DEFAULT_STORAGE_LIMIT_MB: u32 = 16;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Per-session authority for Kitty's local-file transmission modes.
+#[derive(Clone)]
+pub struct KittyFileTransmissionControl {
+    inner: Arc<KittyFileTransmissionControlInner>,
+}
+
+struct KittyFileTransmissionControlInner {
+    state: Mutex<KittyFileTransmissionState>,
+}
+
+enum KittyFileTransmissionState {
+    AwaitingDecision { request_pending: bool },
+    Denied,
+    Trusted(KittyFileTransmissionSandbox),
+}
+
+struct KittyFileTransmissionSandbox {
+    directory: TempDir,
+    session_token: Zeroizing<String>,
+}
+
+impl KittyFileTransmissionControl {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(KittyFileTransmissionControlInner {
+                state: Mutex::new(KittyFileTransmissionState::AwaitingDecision {
+                    request_pending: false,
+                }),
+            }),
+        }
+    }
+
+    pub fn take_authorization_request(&self) -> bool {
+        let Ok(mut state) = self.inner.state.lock() else {
+            return false;
+        };
+        let KittyFileTransmissionState::AwaitingDecision { request_pending } = &mut *state else {
+            return false;
+        };
+        std::mem::take(request_pending)
+    }
+
+    pub fn authorize_for_session(&self) -> std::io::Result<PathBuf> {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .map_err(|_| std::io::Error::other("Kitty file transmission state is unavailable"))?;
+        match &*state {
+            KittyFileTransmissionState::Trusted(sandbox) => {
+                return Ok(sandbox.directory.path().to_path_buf());
+            }
+            KittyFileTransmissionState::Denied => {
+                // A denial is final for this session so stale UI actions cannot
+                // revive a capability after the user rejected the request.
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "Kitty file transmission was denied for this session",
+                ));
+            }
+            KittyFileTransmissionState::AwaitingDecision { .. } => {}
+        }
+
+        // The random directory name is the session capability. It is never
+        // persisted or logged, and TempDir removes the owned root on drop.
+        let session_token = Zeroizing::new(Uuid::new_v4().simple().to_string());
+        let directory_prefix =
+            Zeroizing::new(format!("oxideterm-kitty-{}-", session_token.as_str()));
+        let directory = tempfile::Builder::new()
+            .prefix(directory_prefix.as_str())
+            .tempdir()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700))?;
+        }
+        let path = directory.path().to_path_buf();
+        *state = KittyFileTransmissionState::Trusted(KittyFileTransmissionSandbox {
+            directory,
+            session_token,
+        });
+        Ok(path)
+    }
+
+    pub fn deny_for_session(&self) {
+        if let Ok(mut state) = self.inner.state.lock() {
+            *state = KittyFileTransmissionState::Denied;
+        }
+    }
+
+    fn note_authorization_request(&self) {
+        let Ok(mut state) = self.inner.state.lock() else {
+            return;
+        };
+        if let KittyFileTransmissionState::AwaitingDecision { request_pending } = &mut *state {
+            *request_pending = true;
+        }
+    }
+
+    fn authorized_root(&self) -> Option<PathBuf> {
+        let state = self.inner.state.lock().ok()?;
+        match &*state {
+            KittyFileTransmissionState::Trusted(sandbox) => sandbox
+                .directory
+                .path()
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.contains(sandbox.session_token.as_str()))
+                .then(|| sandbox.directory.path().to_path_buf()),
+            KittyFileTransmissionState::AwaitingDecision { .. }
+            | KittyFileTransmissionState::Denied => None,
+        }
+    }
+}
+
+impl Default for KittyFileTransmissionControl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for KittyFileTransmissionControl {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let decision = self
+            .inner
+            .state
+            .lock()
+            .map(|state| match &*state {
+                KittyFileTransmissionState::AwaitingDecision { .. } => "awaiting-decision",
+                KittyFileTransmissionState::Denied => "denied",
+                KittyFileTransmissionState::Trusted(_) => "trusted",
+            })
+            .unwrap_or("unavailable");
+        formatter
+            .debug_struct("KittyFileTransmissionControl")
+            .field("decision", &decision)
+            .field("sandbox", &"[redacted session capability]")
+            .finish()
+    }
+}
+
+impl PartialEq for KittyFileTransmissionControl {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
+impl Eq for KittyFileTransmissionControl {}
+
+#[derive(Clone, Debug)]
 pub struct GraphicsOptions {
     pub enabled: bool,
     pub sixel: bool,
@@ -10,7 +159,23 @@ pub struct GraphicsOptions {
     pub pixel_limit: u32,
     pub storage_limit_mb: u32,
     pub show_placeholder: bool,
+    pub kitty_file_transmission: KittyFileTransmissionControl,
 }
+
+impl PartialEq for GraphicsOptions {
+    fn eq(&self, other: &Self) -> bool {
+        // The session capability is runtime state, not a graphics preference.
+        self.enabled == other.enabled
+            && self.sixel == other.sixel
+            && self.iterm2_inline == other.iterm2_inline
+            && self.kitty == other.kitty
+            && self.pixel_limit == other.pixel_limit
+            && self.storage_limit_mb == other.storage_limit_mb
+            && self.show_placeholder == other.show_placeholder
+    }
+}
+
+impl Eq for GraphicsOptions {}
 
 impl Default for GraphicsOptions {
     fn default() -> Self {
@@ -22,6 +187,7 @@ impl Default for GraphicsOptions {
             pixel_limit: DEFAULT_PIXEL_LIMIT,
             storage_limit_mb: DEFAULT_STORAGE_LIMIT_MB,
             show_placeholder: true,
+            kitty_file_transmission: KittyFileTransmissionControl::new(),
         }
     }
 }
@@ -146,10 +312,12 @@ pub enum GraphicsError {
     InvalidBase64,
     #[error("unsupported image payload")]
     UnsupportedImage,
-    #[error("invalid image path payload")]
-    InvalidPath,
-    #[error("{0}")]
-    Io(String),
+    #[error("Kitty local file transmission is disabled")]
+    LocalFileTransmissionDisabled,
+    #[error("Kitty local file transmission path is not allowed")]
+    InvalidLocalFileTransmissionPath,
+    #[error("Kitty local file transmission could not read the approved file")]
+    LocalFileTransmissionAccessFailed,
     #[error("image payload is larger than the configured storage limit")]
     StorageLimitExceeded,
     #[error("{0}")]

@@ -126,6 +126,16 @@
       "cancel": "取消",
       "paste": "粘贴"
     },
+    "kitty_file_transmission": {
+      "title": "允许此会话使用 Kitty 本地文件访问？",
+      "description": "此请求已被阻止。允许后，OxideTerm 会创建会话私有目录并复制其路径。请把带有 tty-graphics-protocol 标记的文件直接放入该目录后重试传输。",
+      "cancel": "拒绝",
+      "allow": "仅此会话允许",
+      "allowed_title": "此会话已允许 Kitty 文件访问",
+      "allowed_description": "私有传输目录已复制到剪贴板。终端会话关闭后，此权限自动失效。",
+      "failed_title": "无法启用 Kitty 文件访问",
+      "failed_description": "OxideTerm 无法创建私有传输目录。"
+    },
     "command_selection": {
       "actions": "命令选区操作",
       "copy": "复制",

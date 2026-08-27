@@ -2,8 +2,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use alacritty_terminal::vte::ansi::CursorShape as AlacCursorShape;
 pub use oxideterm_terminal_graphics::{
-    GraphicsOptions, TerminalImageAnimationState, TerminalImageData, TerminalImageFrame,
-    TerminalImageId, TerminalImageProtocol,
+    GraphicsOptions, KittyFileTransmissionControl, TerminalImageAnimationState, TerminalImageData,
+    TerminalImageFrame, TerminalImageId, TerminalImageProtocol,
 };
 pub use oxideterm_terminal_model::{
     TerminalAttrs, TerminalCell, TerminalColor, TerminalRow, TerminalStyleOrigin,

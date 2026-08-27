@@ -1,5 +1,8 @@
 pub struct TerminalSession {
     backend: Box<dyn TerminalSessionBackend>,
+    // The session owns the capability so sandbox cleanup follows the backend
+    // lifetime instead of any transient graphics request or UI prompt.
+    kitty_file_transmission: Option<KittyFileTransmissionControl>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -76,6 +79,7 @@ impl TerminalSession {
         encoding: TerminalEncoding,
         scrollback_lines: usize,
     ) -> Result<Self> {
+        let kitty_file_transmission = Some(graphics_options.kitty_file_transmission.clone());
         Ok(Self {
             backend: Box::new(LocalPtySession::spawn_with_graphics_and_encoding(
                 cols,
@@ -84,6 +88,7 @@ impl TerminalSession {
                 encoding,
                 scrollback_lines,
             )?),
+            kitty_file_transmission,
         })
     }
 
@@ -95,6 +100,7 @@ impl TerminalSession {
         encoding: TerminalEncoding,
         scrollback_lines: usize,
     ) -> Result<Self> {
+        let kitty_file_transmission = Some(graphics_options.kitty_file_transmission.clone());
         Ok(Self {
             backend: Box::new(LocalPtySession::spawn_with_config_graphics_and_encoding(
                 cols,
@@ -104,6 +110,7 @@ impl TerminalSession {
                 encoding,
                 scrollback_lines,
             )?),
+            kitty_file_transmission,
         })
     }
 
@@ -120,6 +127,7 @@ impl TerminalSession {
                 graphics_options,
                 scrollback_lines,
             )),
+            kitty_file_transmission: None,
         }
     }
 
@@ -151,6 +159,7 @@ impl TerminalSession {
         encoding: TerminalEncoding,
         scrollback_lines: usize,
     ) -> Self {
+        let kitty_file_transmission = Some(graphics_options.kitty_file_transmission.clone());
         Self {
             backend: Box::new(SshPtySession::new(
                 config,
@@ -160,6 +169,7 @@ impl TerminalSession {
                 encoding,
                 scrollback_lines,
             )),
+            kitty_file_transmission,
         }
     }
 
@@ -191,6 +201,7 @@ impl TerminalSession {
         encoding: TerminalEncoding,
         scrollback_lines: usize,
     ) -> Self {
+        let kitty_file_transmission = Some(graphics_options.kitty_file_transmission.clone());
         Self {
             backend: Box::new(TelnetSession::new_with_login(
                 config,
@@ -201,6 +212,7 @@ impl TerminalSession {
                 encoding,
                 scrollback_lines,
             )),
+            kitty_file_transmission,
         }
     }
 
@@ -211,6 +223,7 @@ impl TerminalSession {
         graphics_options: GraphicsOptions,
         scrollback_lines: usize,
     ) -> Self {
+        let kitty_file_transmission = Some(graphics_options.kitty_file_transmission.clone());
         Self {
             backend: Box::new(MoshTerminalSession::new(
                 config,
@@ -219,6 +232,7 @@ impl TerminalSession {
                 graphics_options,
                 scrollback_lines,
             )),
+            kitty_file_transmission,
         }
     }
 
@@ -239,11 +253,16 @@ impl TerminalSession {
                 encoding,
                 scrollback_lines,
             )?),
+            kitty_file_transmission: None,
         })
     }
 
     pub fn kind(&self) -> TerminalSessionKind {
         self.backend.kind()
+    }
+
+    pub fn kitty_file_transmission_control(&self) -> Option<KittyFileTransmissionControl> {
+        self.kitty_file_transmission.clone()
     }
 
     pub fn title(&self) -> Option<String> {

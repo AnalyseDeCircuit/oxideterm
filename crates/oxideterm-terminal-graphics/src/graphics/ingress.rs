@@ -574,8 +574,12 @@ impl GraphicsIngress {
         if action != "t" && action != "T" && action != "f" {
             return Err(GraphicsError::UnsupportedImage);
         }
-        let complete =
-            decode_kitty_payload(&params, &assembly.encoded, self.options.storage_limit_mb)?;
+        let complete = decode_kitty_payload(
+            &params,
+            &assembly.encoded,
+            self.options.storage_limit_mb,
+            &self.options.kitty_file_transmission,
+        )?;
 
         let decoded = match params.get("f").map(String::as_str) {
             Some("24") => decode_raw_rgb(&complete, &params)?,

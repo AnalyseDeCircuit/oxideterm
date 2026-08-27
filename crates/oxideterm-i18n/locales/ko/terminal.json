@@ -47,6 +47,16 @@
       "cancel": "취소",
       "paste": "붙여넣기"
     },
+    "kitty_file_transmission": {
+      "title": "이 세션에서 Kitty의 로컬 파일 접근을 허용할까요?",
+      "description": "요청이 차단되었습니다. 허용하면 OxideTerm이 세션 전용 비공개 디렉터리를 만들고 경로를 복사합니다. 해당 디렉터리 바로 아래에 tty-graphics-protocol 파일을 두고 전송을 다시 시도하세요.",
+      "cancel": "거부",
+      "allow": "이 세션에서 허용",
+      "allowed_title": "이 세션에서 Kitty 파일 접근을 허용했습니다",
+      "allowed_description": "비공개 전송 디렉터리를 클립보드에 복사했습니다. 터미널 세션을 닫으면 권한이 만료됩니다.",
+      "failed_title": "Kitty 파일 접근을 활성화할 수 없음",
+      "failed_description": "OxideTerm이 비공개 전송 디렉터리를 만들 수 없습니다."
+    },
     "command_selection": {
       "actions": "명령 선택 작업",
       "copy": "복사",
