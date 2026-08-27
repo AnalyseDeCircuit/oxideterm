@@ -1403,7 +1403,15 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !event.dragging() || self.ime_drag_selection.is_none() {
+        if self.ime_drag_selection.is_none() {
+            return;
+        }
+        if !event.dragging() {
+            // Selectable text can sit inside an occluding virtual list, so its
+            // own move handler must recover a release that never reached the
+            // workspace root instead of retaining global input ownership.
+            self.finish_ime_selection_drag(cx);
+            self.stop_selectable_text_autoscroll();
             return;
         }
         self.update_ime_selection_drag(event.position, window, cx);
