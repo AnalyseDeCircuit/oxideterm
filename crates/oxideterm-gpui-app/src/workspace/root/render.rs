@@ -57,7 +57,7 @@ impl WorkspaceApp {
                     )
                 };
                 if show_group_manager {
-                    modals.push(self.render_group_manager_dialog(cx));
+                    modals.push(self.render_group_manager_dialog(window, cx));
                 }
                 if show_delete_confirm {
                     modals.push(self.render_session_manager_delete_confirm(cx));

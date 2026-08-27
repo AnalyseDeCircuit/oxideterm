@@ -1339,12 +1339,31 @@ impl WorkspaceApp {
                 .get(*item_index)
                 .map(|item| {
                     let context_target = item.row_action_target();
+                    let drop_group = item.group().map(ToOwned::to_owned);
+                    let theme = self.tokens.ui;
                     self.render_session_manager_display_item_row(
                         item,
                         *depth,
                         has_background,
                         true,
                         cx,
+                    )
+                    .drag_over::<SessionManagerDrag>(move |row, _drag, _window, _cx| {
+                        // Every visible child row participates in its nearest folder's drop area.
+                        row.border_1()
+                            .border_color(rgb(theme.accent))
+                            .bg(rgba((theme.accent << 8) | MANAGER_DRAG_GROUP_BG_ALPHA))
+                    })
+                    .can_drop(|drag, _window, _cx| drag.is::<SessionManagerDrag>())
+                    .on_drop(
+                        cx.listener(move |this, drag: &SessionManagerDrag, _window, cx| {
+                            this.move_dragged_sessions_to_group(
+                                &drag.targets,
+                                drop_group.as_deref(),
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
                     )
                     .on_mouse_down(
                         MouseButton::Right,

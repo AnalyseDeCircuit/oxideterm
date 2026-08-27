@@ -165,7 +165,9 @@ impl WorkspaceApp {
             (
                 session_manager.view_mode,
                 session_manager.status.clone(),
-                session_manager.row_action_menu.clone(),
+                (!session_manager.show_group_manager)
+                    .then(|| session_manager.row_action_menu.clone())
+                    .flatten(),
                 session_manager.view_mode_menu_open,
                 session_manager.sort_menu_open,
                 session_manager.show_batch_move,

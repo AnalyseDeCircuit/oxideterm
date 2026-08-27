@@ -1101,7 +1101,11 @@ impl WorkspaceApp {
                     return true;
                 }
                 if event.keystroke.key.as_str() == "escape" {
-                    self.close_session_group_manager(cx);
+                    if self.session_manager.read(cx).row_action_menu.is_some() {
+                        self.close_session_row_menus(cx);
+                    } else {
+                        self.close_session_group_manager(cx);
+                    }
                 }
                 true
             }
