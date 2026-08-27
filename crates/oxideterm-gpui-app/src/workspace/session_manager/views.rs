@@ -1,4 +1,25 @@
 use super::*;
+use gpui::StatefulInteractiveElement;
+
+impl Render for SessionManagerDrag {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        // The preview stays compact so the destination folder remains visible while dragging.
+        div().pl(self.position.x).pt(self.position.y).child(
+            div()
+                .max_w(px(MANAGER_DRAG_PREVIEW_MAX_WIDTH))
+                .px_3()
+                .py_2()
+                .rounded(px(MANAGER_DRAG_PREVIEW_RADIUS))
+                .border_1()
+                .border_color(self.border)
+                .bg(self.background)
+                .text_color(self.text)
+                .text_size(px(MANAGER_ROW_TEXT_SIZE))
+                .shadow_lg()
+                .child(self.label.clone()),
+        )
+    }
+}
 
 #[derive(Clone)]
 pub(super) enum SessionManagerDisplayItem {
@@ -1019,7 +1040,7 @@ impl WorkspaceApp {
                     let Some(item) = items.get(index) else {
                         return div().into_any_element();
                     };
-                    this.render_session_manager_display_item_row(item, 0, has_background, cx)
+                    this.render_session_manager_display_item_row(item, 0, has_background, false, cx)
                         .into_any_element()
                 })
             },
@@ -1121,8 +1142,22 @@ impl WorkspaceApp {
             .child(self.render_session_manager_view_actions(true, has_background, cx))
             .child(
                 div()
+                    .id("session-manager-tree-root-drop-target")
                     .flex_1()
                     .min_h(px(0.0))
+                    .drag_over::<SessionManagerDrag>(move |target, _drag, _window, _cx| {
+                        target
+                            .border_1()
+                            .border_dashed()
+                            .border_color(rgb(theme.accent))
+                            .bg(rgba((theme.accent << 8) | MANAGER_DRAG_ROOT_BG_ALPHA))
+                    })
+                    .can_drop(|drag, _window, _cx| drag.is::<SessionManagerDrag>())
+                    .on_drop(cx.listener(|this, drag: &SessionManagerDrag, _window, cx| {
+                        // Empty tree space and ungrouped rows both represent the root group.
+                        this.move_dragged_sessions_to_group(&drag.targets, None, cx);
+                        cx.stop_propagation();
+                    }))
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(|this, event: &MouseDownEvent, _window, cx| {
@@ -1196,6 +1231,17 @@ impl WorkspaceApp {
                             manager.expanded_groups.clear();
                             cx.notify();
                         });
+                        cx.stop_propagation();
+                    }),
+                    cx,
+                ))
+                .child(self.render_tree_mode_action_button(
+                    LucideIcon::FolderPlus,
+                    self.i18n.t("sessionManager.folder_tree.new_group"),
+                    has_background,
+                    cx.listener(|this, _event, _window, cx| {
+                        // Root-level creation is visible without requiring a context menu.
+                        this.open_session_group_creation(cx);
                         cx.stop_propagation();
                     }),
                     cx,
@@ -1293,22 +1339,28 @@ impl WorkspaceApp {
                 .get(*item_index)
                 .map(|item| {
                     let context_target = item.row_action_target();
-                    self.render_session_manager_display_item_row(item, *depth, has_background, cx)
-                        .on_mouse_down(
-                            MouseButton::Right,
-                            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                                if let Some(target) = context_target.clone() {
-                                    this.open_session_manager_context_menu(
-                                        target,
-                                        f32::from(event.position.x),
-                                        f32::from(event.position.y),
-                                        cx,
-                                    );
-                                }
-                                cx.stop_propagation();
-                            }),
-                        )
-                        .into_any_element()
+                    self.render_session_manager_display_item_row(
+                        item,
+                        *depth,
+                        has_background,
+                        true,
+                        cx,
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                            if let Some(target) = context_target.clone() {
+                                this.open_session_manager_context_menu(
+                                    target,
+                                    f32::from(event.position.x),
+                                    f32::from(event.position.y),
+                                    cx,
+                                );
+                            }
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .into_any_element()
                 })
                 .unwrap_or_else(|| div().into_any_element()),
             None => div().into_any_element(),
@@ -1329,6 +1381,13 @@ impl WorkspaceApp {
         let group_id = group.to_string();
         let context_group = group.to_string();
         let menu_group = group.to_string();
+        let drop_group = group.to_string();
+        let subgroup_parent = group.to_string();
+        let subgroup_tooltip = format!(
+            "{} — {group}",
+            self.i18n.t("sessionManager.folder_tree.new_subgroup")
+        );
+        let workspace = cx.entity();
         div()
             .w_full()
             .min_w(px(0.0))
@@ -1341,6 +1400,18 @@ impl WorkspaceApp {
             .items_center()
             .gap(px(self.tokens.spacing.two))
             .hover(|row| row.bg(theme_row_hover_bg(theme.bg_hover, has_background)))
+            .drag_over::<SessionManagerDrag>(move |row, _drag, _window, _cx| {
+                row.border_1()
+                    .border_color(rgb(theme.accent))
+                    .bg(rgba((theme.accent << 8) | MANAGER_DRAG_GROUP_BG_ALPHA))
+            })
+            .can_drop(|drag, _window, _cx| drag.is::<SessionManagerDrag>())
+            .on_drop(
+                cx.listener(move |this, drag: &SessionManagerDrag, _window, cx| {
+                    this.move_dragged_sessions_to_group(&drag.targets, Some(&drop_group), cx);
+                    cx.stop_propagation();
+                }),
+            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
@@ -1401,6 +1472,23 @@ impl WorkspaceApp {
                     .text_color(rgb(theme.text_muted))
                     .child(self.connection_count_for_group(group).to_string()),
             )
+            .child(self.workspace_tooltip_icon_button(
+                LucideIcon::FolderPlus,
+                MANAGER_ROW_ACTION_ICON_SIZE,
+                rgb(theme.text),
+                IconButtonOptions {
+                    has_background,
+                    ..IconButtonOptions::opaque_toolbar(MANAGER_ROW_ACTION_BUTTON, ButtonRadius::Sm)
+                },
+                subgroup_tooltip,
+                "session-manager-new-subgroup",
+                true,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.open_session_subgroup_creation(&subgroup_parent, cx);
+                    cx.stop_propagation();
+                }),
+                workspace,
+            ))
             .child(self.render_row_icon_button(
                 LucideIcon::MoreVertical,
                 MANAGER_ROW_ACTION_BUTTON,
@@ -1425,6 +1513,7 @@ impl WorkspaceApp {
         item: &SessionManagerDisplayItem,
         depth: usize,
         has_background: bool,
+        allow_drag: bool,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = self.tokens.ui;
@@ -1448,6 +1537,78 @@ impl WorkspaceApp {
                 .selected_items
                 .contains(target)
         });
+        let drag_handle = if allow_drag
+            && self.session_manager.read(cx).search_query.trim().is_empty()
+        {
+            selection_target.clone().map(|target| {
+                let selected_targets = &self.session_manager.read(cx).selected_items;
+                let targets = if is_selected {
+                    selected_targets.iter().cloned().collect::<Vec<_>>()
+                } else {
+                    vec![target.clone()]
+                };
+                let label = if targets.len() > 1 {
+                    selected_count_label(&self.i18n, targets.len())
+                } else {
+                    item.name().to_string()
+                };
+                let drag = SessionManagerDrag {
+                    targets,
+                    label,
+                    position: Point::default(),
+                    background: rgb(theme.bg_panel),
+                    border: rgb(theme.accent),
+                    text: rgb(theme.text),
+                };
+                let drag_workspace = cx.entity();
+                let grip_color = rgba((theme.text_muted << 8) | MANAGER_DRAG_GRIP_ALPHA);
+                div()
+                    .id(format!(
+                        "session-manager-item-drag-{}",
+                        session_manager_display_item_signature(item)
+                    ))
+                    .size(px(MANAGER_ROW_DRAG_HANDLE_SIZE))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(self.tokens.radii.sm))
+                    .cursor(CursorStyle::OpenHand)
+                    .hover(move |handle| {
+                        handle.bg(theme_row_hover_bg(theme.bg_hover, has_background))
+                    })
+                    .child(
+                        // A six-dot grip distinguishes moving from opening the connection row.
+                        div()
+                            .w(px(MANAGER_DRAG_GRIP_WIDTH))
+                            .flex()
+                            .flex_wrap()
+                            .gap(px(MANAGER_DRAG_GRIP_DOT_SIZE))
+                            .children((0..MANAGER_DRAG_GRIP_DOT_COUNT).map(move |_| {
+                                div()
+                                    .size(px(MANAGER_DRAG_GRIP_DOT_SIZE))
+                                    .rounded(px(MANAGER_DRAG_GRIP_DOT_SIZE / 2.0))
+                                    .bg(grip_color)
+                            })),
+                    )
+                    .on_drag(drag, move |drag, position, _window, cx| {
+                        let dragged_targets = drag.targets.iter().cloned().collect::<HashSet<_>>();
+                        let _ = drag_workspace.update(cx, |this, cx| {
+                            this.session_manager.update(cx, |session_manager, cx| {
+                                // Row mouse-down selection is restored to the exact drag payload.
+                                if session_manager.selected_items != dragged_targets {
+                                    session_manager.selected_items = dragged_targets;
+                                    cx.notify();
+                                }
+                            });
+                        });
+                        cx.new(|_| drag.with_position(position))
+                    })
+                    .into_any_element()
+            })
+        } else {
+            None
+        };
         let selection = if let Some(target) = checkbox_target {
             checkbox(&self.tokens, String::new(), is_selected)
                 .on_mouse_down(
@@ -1499,6 +1660,7 @@ impl WorkspaceApp {
                     }
                 }),
             )
+            .when_some(drag_handle, |row, handle| row.child(handle))
             .child(selection)
             .child(self.render_session_manager_item_icon(item, theme.text))
             .child(

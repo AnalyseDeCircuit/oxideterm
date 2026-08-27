@@ -8,6 +8,12 @@ use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopSecret,
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SessionManagerMoveInteraction {
+    BatchMenu,
+    DragDrop,
+}
+
 impl WorkspaceApp {
     pub(super) fn connection_count_for_group(&self, group: &str) -> usize {
         let connection_count = self
@@ -1348,23 +1354,74 @@ impl WorkspaceApp {
             .iter()
             .cloned()
             .collect::<Vec<_>>();
+        self.move_session_targets_to_group(
+            &targets,
+            group,
+            SessionManagerMoveInteraction::BatchMenu,
+            cx,
+        );
+    }
+
+    pub(super) fn move_dragged_sessions_to_group(
+        &mut self,
+        targets: &[SessionManagerSelectionTarget],
+        group: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_session_targets_to_group(
+            targets,
+            group,
+            SessionManagerMoveInteraction::DragDrop,
+            cx,
+        );
+    }
+
+    fn move_session_targets_to_group(
+        &mut self,
+        targets: &[SessionManagerSelectionTarget],
+        group: Option<&str>,
+        interaction: SessionManagerMoveInteraction,
+        cx: &mut Context<Self>,
+    ) {
         let mut connection_ids = Vec::new();
         let mut serial_profile_ids = Vec::new();
         let mut telnet_profile_ids = Vec::new();
         let mut mosh_profile_ids = Vec::new();
         let mut standalone_sftp_profile_ids = Vec::new();
         let mut remote_desktop_ids = Vec::new();
-        for target in targets {
+        for target in targets.iter().filter(|target| {
+            // Drop evaluation never writes metadata; only assets whose group changes reach storage.
+            self.session_target_group(target)
+                .is_some_and(|current_group| current_group != group)
+        }) {
             match target {
-                SessionManagerSelectionTarget::Connection(id) => connection_ids.push(id),
-                SessionManagerSelectionTarget::Serial(id) => serial_profile_ids.push(id),
-                SessionManagerSelectionTarget::Telnet(id) => telnet_profile_ids.push(id),
-                SessionManagerSelectionTarget::Mosh(id) => mosh_profile_ids.push(id),
+                SessionManagerSelectionTarget::Connection(id) => connection_ids.push(id.clone()),
+                SessionManagerSelectionTarget::Serial(id) => serial_profile_ids.push(id.clone()),
+                SessionManagerSelectionTarget::Telnet(id) => telnet_profile_ids.push(id.clone()),
+                SessionManagerSelectionTarget::Mosh(id) => mosh_profile_ids.push(id.clone()),
                 SessionManagerSelectionTarget::StandaloneSftp(id) => {
-                    standalone_sftp_profile_ids.push(id)
+                    standalone_sftp_profile_ids.push(id.clone())
                 }
-                SessionManagerSelectionTarget::RemoteDesktop(id) => remote_desktop_ids.push(id),
+                SessionManagerSelectionTarget::RemoteDesktop(id) => {
+                    remote_desktop_ids.push(id.clone())
+                }
             }
+        }
+        let has_group_changes = !connection_ids.is_empty()
+            || !serial_profile_ids.is_empty()
+            || !telnet_profile_ids.is_empty()
+            || !mosh_profile_ids.is_empty()
+            || !standalone_sftp_profile_ids.is_empty()
+            || !remote_desktop_ids.is_empty();
+        if !has_group_changes {
+            if interaction == SessionManagerMoveInteraction::BatchMenu {
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.selected_items.clear();
+                    session_manager.show_batch_move = false;
+                    cx.notify();
+                });
+            }
+            return;
         }
         match self.connection_store.move_session_assets_to_group(
             &connection_ids,
@@ -1376,12 +1433,24 @@ impl WorkspaceApp {
             group,
         ) {
             Ok(count) => {
-                let status =
-                    connections_moved_label(&self.i18n, count, group_label(&self.i18n, group));
                 self.session_manager.update(cx, |session_manager, cx| {
-                    session_manager.status = Some(status);
-                    session_manager.selected_items.clear();
-                    session_manager.show_batch_move = false;
+                    match interaction {
+                        SessionManagerMoveInteraction::BatchMenu => {
+                            session_manager.status = Some(connections_moved_label(
+                                &self.i18n,
+                                count,
+                                group_label(&self.i18n, group),
+                            ));
+                            session_manager.selected_items.clear();
+                            session_manager.show_batch_move = false;
+                        }
+                        SessionManagerMoveInteraction::DragDrop => {
+                            // Keep moved rows selected and reveal their destination as direct feedback.
+                            if let Some(group) = group {
+                                expand_group_path(group, &mut session_manager.expanded_groups);
+                            }
+                        }
+                    }
                     cx.notify();
                 });
                 if count > 0 {
@@ -1394,6 +1463,43 @@ impl WorkspaceApp {
                     session_manager.set_status(Some(status), cx)
                 });
             }
+        }
+    }
+
+    fn session_target_group<'a>(
+        &'a self,
+        target: &SessionManagerSelectionTarget,
+    ) -> Option<Option<&'a str>> {
+        // Returning an outer Option distinguishes missing assets from the ungrouped root.
+        match target {
+            SessionManagerSelectionTarget::Connection(id) => self
+                .connection_store
+                .get(id)
+                .map(|connection| connection.group.as_deref()),
+            SessionManagerSelectionTarget::Serial(id) => self
+                .connection_store
+                .serial_profiles()
+                .iter()
+                .find(|profile| profile.id == id.as_str())
+                .map(|profile| profile.group.as_deref()),
+            SessionManagerSelectionTarget::Telnet(id) => self
+                .connection_store
+                .telnet_profiles()
+                .iter()
+                .find(|profile| profile.id == id.as_str())
+                .map(|profile| profile.group.as_deref()),
+            SessionManagerSelectionTarget::Mosh(id) => self
+                .connection_store
+                .get_mosh_profile(id)
+                .map(|profile| profile.group.as_deref()),
+            SessionManagerSelectionTarget::StandaloneSftp(id) => self
+                .connection_store
+                .get_standalone_sftp_profile(id)
+                .map(|profile| profile.group.as_deref()),
+            SessionManagerSelectionTarget::RemoteDesktop(id) => self
+                .connection_store
+                .get_remote_desktop_profile(id)
+                .map(|profile| profile.group.as_deref()),
         }
     }
 }

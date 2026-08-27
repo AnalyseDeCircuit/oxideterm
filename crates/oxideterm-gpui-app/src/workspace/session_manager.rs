@@ -13,7 +13,7 @@ use crate::workspace::new_connection::{
 use crate::workspace::quick_commands::QuickCommandImportStrategy;
 use crate::workspace::session_icons;
 use chrono::{DateTime, Datelike, Local, Utc};
-use gpui::{Div, EventEmitter, Task, prelude::*, rgba};
+use gpui::{Div, EventEmitter, Pixels, Point, Rgba, Task, prelude::*, rgba};
 use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
     ConnectionStore, MoshProfile, ProxyHopDraft, RemoteDesktopProfile, SaveConnectionRequest,
@@ -75,6 +75,15 @@ const MANAGER_ROW_ACTION_BUTTON: f32 = 24.0; // Tauri h-6 w-6
 const MANAGER_ROW_ACTION_ICON_SIZE: f32 = 12.0;
 const MANAGER_ROW_ACTION_GAP: f32 = 2.0;
 const MANAGER_ROW_ICON_SIZE: f32 = 40.0;
+const MANAGER_ROW_DRAG_HANDLE_SIZE: f32 = 24.0;
+const MANAGER_DRAG_PREVIEW_MAX_WIDTH: f32 = 280.0;
+const MANAGER_DRAG_PREVIEW_RADIUS: f32 = 8.0;
+const MANAGER_DRAG_GRIP_WIDTH: f32 = 6.0;
+const MANAGER_DRAG_GRIP_DOT_SIZE: f32 = 2.0;
+const MANAGER_DRAG_GRIP_DOT_COUNT: usize = 6;
+const MANAGER_DRAG_GRIP_ALPHA: u32 = 0xb8;
+const MANAGER_DRAG_ROOT_BG_ALPHA: u32 = 0x0d;
+const MANAGER_DRAG_GROUP_BG_ALPHA: u32 = 0x16;
 const MANAGER_SELECTION_COLUMN_WIDTH: f32 = 16.0;
 const MANAGER_LIST_LAST_USED_WIDTH: f32 = 96.0;
 const MANAGER_ROW_ACTIONS_WIDTH: f32 = 76.0; // Three compact actions and their two gaps.
@@ -304,6 +313,25 @@ pub(super) enum SessionManagerSelectionTarget {
     Mosh(String),
     StandaloneSftp(String),
     RemoteDesktop(String),
+}
+
+#[derive(Clone)]
+pub(super) struct SessionManagerDrag {
+    // The payload owns stable saved-asset identities so virtual rows may be recycled mid-drag.
+    pub(super) targets: Vec<SessionManagerSelectionTarget>,
+    pub(super) label: String,
+    pub(super) position: Point<Pixels>,
+    pub(super) background: Rgba,
+    pub(super) border: Rgba,
+    pub(super) text: Rgba,
+}
+
+impl SessionManagerDrag {
+    pub(super) fn with_position(&self, position: Point<Pixels>) -> Self {
+        let mut preview = self.clone();
+        preview.position = position;
+        preview
+    }
 }
 
 #[derive(Clone, Debug)]
