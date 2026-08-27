@@ -1274,12 +1274,12 @@ impl WorkspaceApp {
         extend: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let Some(index) = self.ime_index_for_position(target, position, window, cx) else {
             if self.clear_ime_selection() {
                 cx.notify();
             }
-            return;
+            return false;
         };
 
         let anchor = if extend {
@@ -1301,6 +1301,7 @@ impl WorkspaceApp {
         self.set_ime_selection_from_anchor(target, anchor, index);
         self.ime_marked_text = None;
         cx.notify();
+        true
     }
 
     pub(super) fn begin_ime_selection_from_mouse_down(
@@ -1309,25 +1310,30 @@ impl WorkspaceApp {
         event: &gpui::MouseDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         // This helper owns the repaint notification for all mouse-down
         // selection paths, so callers must not issue a second cx.notify().
         if event.click_count <= 1 || event.modifiers.shift {
-            self.begin_ime_selection(target, event.position, event.modifiers.shift, window, cx);
-            return;
+            return self.begin_ime_selection(
+                target,
+                event.position,
+                event.modifiers.shift,
+                window,
+                cx,
+            );
         }
 
         let Some(index) = self.ime_index_for_position(target, event.position, window, cx) else {
             if self.clear_ime_selection() {
                 cx.notify();
             }
-            return;
+            return false;
         };
         let Some(text) = self.text_for_ime_target(target, cx) else {
             if self.clear_ime_selection() {
                 cx.notify();
             }
-            return;
+            return false;
         };
         let text_len = text.encode_utf16().count();
         let range = if event.click_count >= 3 {
@@ -1348,6 +1354,7 @@ impl WorkspaceApp {
         self.ime_drag_selection = None;
         self.ime_marked_text = None;
         cx.notify();
+        true
     }
 
     pub(super) fn update_ime_selection_drag(
