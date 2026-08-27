@@ -269,6 +269,7 @@ impl WorkspaceApp {
             || self.sidebar_resizing
             || self.ai_entity.read(cx).chat_ui().sidebar_resizing;
         let embedded_sftp_resize_cursor_active = self.embedded_sftp_sidebar_resizing;
+        let read_only_selection_workspace = cx.entity();
         self.update_main_window_tabbar_drop_bounds(window, titlebar_visible, zen_mode, cx);
 
         div()
@@ -539,6 +540,13 @@ impl WorkspaceApp {
                 // Continue scrollbar dragging after the pointer leaves its thin hit target.
                 this.update_host_tools_tab_scrollbar_drag(event, cx);
                 this.update_tabbar_scrollbar_drag(event, window, cx);
+                if this.read_only_selection_drag_active() && !event.dragging() {
+                    // A platform capture loss can omit the matching mouse-up. The
+                    // next buttonless move must release the logical text drag so
+                    // it cannot keep swallowing unrelated workspace input.
+                    this.finish_ime_selection_drag(cx);
+                    this.stop_selectable_text_autoscroll();
+                }
                 this.update_ime_selection_drag(event.position, window, cx);
                 if this.read_only_selection_drag_active() {
                     this.update_selectable_text_autoscroll(event.position, cx);
@@ -581,6 +589,19 @@ impl WorkspaceApp {
                     cx.notify();
                 }
             }))
+            .on_mouse_up_all(move |event, phase, _hitbox, _window, cx| {
+                if phase == gpui::DispatchPhase::Capture && event.button == MouseButton::Left {
+                    read_only_selection_workspace.update(cx, |this, cx| {
+                        if this.read_only_selection_drag_active() {
+                            // This listener deliberately ignores hit testing: a
+                            // release outside the window or behind an occluding
+                            // surface still owns the active text selection drag.
+                            this.finish_ime_selection_drag(cx);
+                            this.stop_selectable_text_autoscroll();
+                        }
+                    });
+                }
+            })
             .capture_any_mouse_up(cx.listener(|this, event: &MouseUpEvent, window, cx| {
                 if event.button == MouseButton::Left
                     && this.browser_pointer_capture_owner(cx).is_some()
