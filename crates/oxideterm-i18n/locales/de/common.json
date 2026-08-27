@@ -1201,7 +1201,6 @@
     "vnc_preview_title": "VNC-Vorschau",
     "provider_missing": "Remote-Desktop-Anbieter ist nicht verfügbar.",
     "session_missing": "Remote-Desktop-Sitzung ist nicht verfügbar.",
-    "force_recover": "Wiederherstellen",
     "reconnect": "Neu verbinden",
     "resize_fixed": "Serverseitig feste Größe",
     "resize_unknown": "Größenänderung nicht erkannt",

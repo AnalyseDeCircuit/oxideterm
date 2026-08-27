@@ -81,7 +81,6 @@
       "port_missing": "Port absent",
       "port_unknown": "Port inconnu",
       "refresh": "Actualiser",
-      "reconnect": "Reconnecter",
       "send_break": "Break",
       "dtr": "DTR",
       "rts": "RTS",
@@ -100,8 +99,7 @@
       "line_ending_lf": "LF",
       "line_ending_crlf": "CRLF",
       "line_ending_cr": "CR",
-      "line_ending_none": "Brut",
-      "reconnect_failed": "Échec de la reconnexion série"
+      "line_ending_none": "Brut"
     },
     "recording": {
       "started": "Terminal recording started",

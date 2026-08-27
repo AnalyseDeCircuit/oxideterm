@@ -1201,7 +1201,6 @@
     "vnc_preview_title": "Anteprima VNC",
     "provider_missing": "Il provider desktop remoto non è disponibile.",
     "session_missing": "La sessione desktop remoto non è disponibile.",
-    "force_recover": "Ripristina",
     "reconnect": "Riconnetti",
     "resize_fixed": "Dimensione fissata dal server",
     "resize_unknown": "Ridimensionamento non rilevato",

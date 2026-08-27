@@ -31,7 +31,8 @@ impl RemoteDesktopSessionEntity {
             "pending_resize": snapshot.pending_resize,
             "provider_capabilities": self.provider.capabilities,
             "negotiated_capabilities": snapshot.negotiated_capabilities,
-            "can_reconnect": self.ai_can_reconnect(),
+            // Reconnect is exposed by the logical Active Sessions record, not this tab handle.
+            "can_reconnect": false,
             "clipboard": {
                 "read_text": clipboard.text && self.provider.capabilities.clipboard_text,
                 "write_text": !snapshot.read_only && clipboard.text && self.provider.capabilities.clipboard_text,

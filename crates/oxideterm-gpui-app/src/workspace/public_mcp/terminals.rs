@@ -273,6 +273,12 @@ impl WorkspaceApp {
             ));
             return;
         }
+        if matches!(action, TerminalControlAction::SerialReconnect) {
+            request.finish(ToolEnvelope::failed(
+                "Serial reconnect must create a new terminal tab from Active Sessions",
+            ));
+            return;
+        }
         let result = pane.update(cx, |pane, cx| match action {
             TerminalControlAction::Interrupt => pane
                 .send_command_sender_raw_bytes(&[0x03], cx)
@@ -291,9 +297,7 @@ impl WorkspaceApp {
             TerminalControlAction::SerialBreak => {
                 pane.apply_serial_action(TerminalSerialAction::SendBreak, cx)
             }
-            TerminalControlAction::SerialReconnect => {
-                pane.apply_serial_action(TerminalSerialAction::Reconnect, cx)
-            }
+            TerminalControlAction::SerialReconnect => unreachable!("handled above"),
             TerminalControlAction::SerialDataTerminalReady { asserted } => {
                 pane.apply_serial_action(TerminalSerialAction::SetDataTerminalReady(asserted), cx)
             }
@@ -792,6 +796,14 @@ impl WorkspaceApp {
         intent: &SshConnectionIntent,
         error: impl Into<String>,
     ) {
+        if let SshConnectionIntent::Mosh(MoshConnectionOptions {
+            runtime_connection_attempt_id: Some(connection_attempt_id),
+            ..
+        }) = intent
+        {
+            self.standalone_connections
+                .mark_attempt_error(connection_attempt_id);
+        }
         let SshConnectionIntent::Mosh(MoshConnectionOptions {
             public_mcp_open_token: Some(token),
             ..

@@ -81,7 +81,6 @@
       "port_missing": "Porta assente",
       "port_unknown": "Porta sconosciuta",
       "refresh": "Aggiorna",
-      "reconnect": "Riconnetti",
       "send_break": "Break",
       "dtr": "DTR",
       "rts": "RTS",
@@ -100,8 +99,7 @@
       "line_ending_lf": "LF",
       "line_ending_crlf": "CRLF",
       "line_ending_cr": "CR",
-      "line_ending_none": "Grezzo",
-      "reconnect_failed": "Riconnessione seriale non riuscita"
+      "line_ending_none": "Grezzo"
     },
     "recording": {
       "started": "Terminal recording started",

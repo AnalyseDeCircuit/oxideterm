@@ -160,7 +160,6 @@
       "port_missing": "端口缺失",
       "port_unknown": "端口未知",
       "refresh": "刷新",
-      "reconnect": "重连",
       "send_break": "Break",
       "dtr": "DTR",
       "rts": "RTS",
@@ -179,8 +178,7 @@
       "line_ending_lf": "LF",
       "line_ending_crlf": "CRLF",
       "line_ending_cr": "CR",
-      "line_ending_none": "原样",
-      "reconnect_failed": "串口重连失败"
+      "line_ending_none": "原样"
     },
     "recording": {
       "started": "终端录制已开始",

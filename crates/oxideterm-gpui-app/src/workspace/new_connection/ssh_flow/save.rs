@@ -4,6 +4,7 @@
 use super::*;
 use crate::workspace::{
     WorkspaceNotificationKind, WorkspaceNotificationScope, WorkspaceNotificationSeverity,
+    standalone_connections::{StandaloneConnectionKind, StandaloneConnectionLaunch},
 };
 use gpui::App;
 use oxideterm_connections::{
@@ -546,6 +547,7 @@ pub(in crate::workspace) fn mosh_options_from_profile(
         locale: profile.locale.clone(),
         terminal: profile.terminal.clone(),
         public_mcp_open_token: None,
+        runtime_connection_attempt_id: None,
     }
 }
 
@@ -1722,6 +1724,7 @@ impl WorkspaceApp {
                     .then(|| form.mosh_locale.trim().to_string()),
                 terminal: form.terminal.clone(),
                 public_mcp_open_token: None,
+                runtime_connection_attempt_id: None,
             };
             let ssh_port = ssh_port.expect("validated Mosh SSH port must exist");
 
@@ -3071,12 +3074,30 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_saved_mosh_profile_for_connection(id, None, window, cx);
+    }
+
+    pub(in crate::workspace) fn open_saved_mosh_profile_for_connection(
+        &mut self,
+        id: &str,
+        runtime_connection_attempt_id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(profile) = self.connection_store.get_mosh_profile(id).cloned() else {
+            if let Some(connection_attempt_id) = runtime_connection_attempt_id.as_deref() {
+                self.standalone_connections
+                    .mark_attempt_error(connection_attempt_id);
+            }
             return;
         };
         let runtime_secrets = match self.connection_store.load_mosh_profile_runtime_secrets(id) {
             Ok(secrets) => secrets,
             Err(_) => {
+                if let Some(connection_attempt_id) = runtime_connection_attempt_id.as_deref() {
+                    self.standalone_connections
+                        .mark_attempt_error(connection_attempt_id);
+                }
                 self.open_saved_mosh_profile_editor(id, window, cx);
                 let missing_credentials = self
                     .i18n
@@ -3092,6 +3113,10 @@ impl WorkspaceApp {
             }
         };
         let Some(config) = runtime_mosh_config_from_saved(&profile, runtime_secrets, None) else {
+            if let Some(connection_attempt_id) = runtime_connection_attempt_id.as_deref() {
+                self.standalone_connections
+                    .mark_attempt_error(connection_attempt_id);
+            }
             // Portable profiles intentionally omit credentials. Open the editor at the
             // matching secret field so the device-local value can be supplied safely.
             self.open_saved_mosh_profile_editor(id, window, cx);
@@ -3115,7 +3140,8 @@ impl WorkspaceApp {
             return;
         };
         let title = profile.name.clone();
-        let options = mosh_options_from_profile(&profile);
+        let mut options = mosh_options_from_profile(&profile);
+        options.runtime_connection_attempt_id = runtime_connection_attempt_id;
         self.session_manager.update(cx, |session_manager, cx| {
             session_manager.set_status(Some(self.i18n.t("ssh.form.checking_host_key")), cx);
         });
@@ -3124,12 +3150,34 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn start_ssh_preflight(
-        &self,
+        &mut self,
         mut config: SshConfig,
         title: String,
-        intent: SshConnectionIntent,
+        mut intent: SshConnectionIntent,
         cx: &App,
     ) {
+        if let SshConnectionIntent::Mosh(options) = &mut intent
+            && options.runtime_connection_attempt_id.is_none()
+        {
+            let mut reconnect_options = options.clone();
+            // A later manual retry must not reuse an automation request correlation token.
+            reconnect_options.public_mcp_open_token = None;
+            let reconnect_launch = options.saved_profile_id.as_ref().map_or_else(
+                || StandaloneConnectionLaunch::MoshPreflight {
+                    config: config.clone(),
+                    options: reconnect_options,
+                },
+                |profile_id| StandaloneConnectionLaunch::SavedMosh {
+                    profile_id: profile_id.clone(),
+                },
+            );
+            let connection_attempt_id = self.standalone_connections.insert_pending(
+                StandaloneConnectionKind::Mosh,
+                title.clone(),
+                reconnect_launch,
+            );
+            options.runtime_connection_attempt_id = Some(connection_attempt_id);
+        }
         let tx = self.ssh_worker_sender(cx);
         let host = config.host.clone();
         let port = config.port;

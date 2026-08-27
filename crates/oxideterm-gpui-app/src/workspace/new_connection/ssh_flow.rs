@@ -199,6 +199,8 @@ pub(in crate::workspace) struct MoshConnectionOptions {
     pub(in crate::workspace) terminal: ConnectionTerminalOptions,
     // Correlates an asynchronous verified Mosh launch without exposing a GPUI identity.
     pub(in crate::workspace) public_mcp_open_token: Option<String>,
+    // Reconnect binds the new terminal surface to an existing logical connection record.
+    pub(in crate::workspace) runtime_connection_attempt_id: Option<String>,
 }
 
 pub(in crate::workspace) enum SshConnectionWorkerResult {

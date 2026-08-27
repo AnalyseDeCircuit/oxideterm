@@ -627,6 +627,7 @@ impl WorkspaceApp {
             detached_local_terminal_order: Vec::new(),
             serial_terminal_configs: HashMap::new(),
             telnet_terminal_profile_ids: HashMap::new(),
+            standalone_connections: standalone_connections::StandaloneConnectionRegistry::default(),
             detached_local_terminals_popover_open: false,
             command_palette,
             _command_palette_observation: command_palette_observation,
@@ -1206,7 +1207,6 @@ impl WorkspaceApp {
                 port_missing: self.i18n.t("terminal.serial_control.port_missing"),
                 port_unknown: self.i18n.t("terminal.serial_control.port_unknown"),
                 refresh: self.i18n.t("terminal.serial_control.refresh"),
-                reconnect: self.i18n.t("terminal.serial_control.reconnect"),
                 send_break: self.i18n.t("terminal.serial_control.send_break"),
                 dtr: self.i18n.t("terminal.serial_control.dtr"),
                 rts: self.i18n.t("terminal.serial_control.rts"),
@@ -1226,7 +1226,6 @@ impl WorkspaceApp {
                 line_ending_crlf: self.i18n.t("terminal.serial_control.line_ending_crlf"),
                 line_ending_cr: self.i18n.t("terminal.serial_control.line_ending_cr"),
                 line_ending_none: self.i18n.t("terminal.serial_control.line_ending_none"),
-                reconnect_failed: self.i18n.t("terminal.serial_control.reconnect_failed"),
             },
             tmux_labels: TerminalTmuxLabels {
                 tmux: self.i18n.t("terminal.tmux.tmux"),

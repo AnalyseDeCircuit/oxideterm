@@ -81,7 +81,6 @@
       "port_missing": "連接埠遺失",
       "port_unknown": "連接埠未知",
       "refresh": "重新整理",
-      "reconnect": "重新連線",
       "send_break": "Break",
       "dtr": "DTR",
       "rts": "RTS",
@@ -100,8 +99,7 @@
       "line_ending_lf": "LF",
       "line_ending_crlf": "CRLF",
       "line_ending_cr": "CR",
-      "line_ending_none": "原樣",
-      "reconnect_failed": "串口重新連線失敗"
+      "line_ending_none": "原樣"
     },
     "recording": {
       "started": "終端錄製已開始",

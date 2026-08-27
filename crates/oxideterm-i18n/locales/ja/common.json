@@ -1201,7 +1201,6 @@
     "vnc_preview_title": "VNC プレビュー",
     "provider_missing": "リモートデスクトッププロバイダーを利用できません。",
     "session_missing": "リモートデスクトップセッションを利用できません。",
-    "force_recover": "復旧",
     "reconnect": "再接続",
     "resize_fixed": "サーバー固定サイズ",
     "resize_unknown": "サイズ変更は未検出",

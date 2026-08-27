@@ -430,6 +430,9 @@ impl WorkspaceApp {
         }
 
         if let Some(session_id) = session_id {
+            self.standalone_connections.release_surface(
+                standalone_connections::StandaloneConnectionSurface::Terminal(session_id),
+            );
             self.release_public_mcp_terminal_for_closed_session(session_id, cx);
             self.serial_terminal_configs.remove(&session_id);
             self.telnet_terminal_profile_ids.remove(&session_id);
@@ -482,6 +485,9 @@ impl WorkspaceApp {
             .into_iter()
             .filter(|session_id| *session_id != active_session_id)
         {
+            self.standalone_connections.release_surface(
+                standalone_connections::StandaloneConnectionSurface::Terminal(session_id),
+            );
             self.release_public_mcp_terminal_for_closed_session(session_id, cx);
             self.serial_terminal_configs.remove(&session_id);
             self.telnet_terminal_profile_ids.remove(&session_id);

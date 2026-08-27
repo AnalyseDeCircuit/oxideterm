@@ -1201,7 +1201,6 @@
     "vnc_preview_title": "VNC 미리보기",
     "provider_missing": "원격 데스크톱 제공자를 사용할 수 없습니다.",
     "session_missing": "원격 데스크톱 세션을 사용할 수 없습니다.",
-    "force_recover": "복구",
     "reconnect": "다시 연결",
     "resize_fixed": "서버 고정 크기",
     "resize_unknown": "크기 조정 감지 안 됨",

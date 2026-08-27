@@ -804,32 +804,15 @@ impl WorkspaceApp {
     fn apply_public_mcp_desktop_reconnect(
         &mut self,
         request: DomainRequest,
-        window: &mut Window,
-        cx: &mut Context<Self>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
     ) {
-        let PublicToolCall::ReconnectDesktop(args) = &request.call else {
+        let PublicToolCall::ReconnectDesktop(_) = &request.call else {
             return;
         };
-        let desktop_ref = args.desktop_ref.clone();
-        let Ok((record, session)) =
-            self.public_mcp_desktop_session(&request.client_ref, &desktop_ref, cx)
-        else {
-            request.finish(ToolEnvelope::failed(
-                "The remote desktop handle is unavailable",
-            ));
-            return;
-        };
-        if !session.read(cx).ai_can_reconnect() {
-            request.finish(ToolEnvelope::failed(
-                "The remote desktop session cannot reconnect in its current state",
-            ));
-            return;
-        }
-        self.reconnect_remote_desktop(record.tab_id, window, cx);
-        finish_serialized(
-            request,
-            json!({ "desktop_ref": desktop_ref, "reconnect_requested": true }),
-        );
+        request.finish(ToolEnvelope::failed(
+            "Remote desktop reconnect creates a new tab and must be requested from Active Sessions",
+        ));
     }
 
     fn apply_public_mcp_desktop_close(

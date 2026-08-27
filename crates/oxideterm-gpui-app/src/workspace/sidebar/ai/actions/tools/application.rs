@@ -565,7 +565,12 @@ impl WorkspaceApp {
         let value = arguments.get("value").and_then(serde_json::Value::as_str);
         let serial_action = match action {
             "refresh_port" => oxideterm_gpui_terminal::TerminalSerialAction::RefreshPortPresence,
-            "reconnect" => oxideterm_gpui_terminal::TerminalSerialAction::Reconnect,
+            "reconnect" => {
+                return Err(
+                    "Serial reconnect must create a new terminal tab from Active Sessions."
+                        .to_string(),
+                );
+            }
             "send_break" => oxideterm_gpui_terminal::TerminalSerialAction::SendBreak,
             "set_dtr" => oxideterm_gpui_terminal::TerminalSerialAction::SetDataTerminalReady(
                 enabled.ok_or_else(|| "The DTR state is required.".to_string())?,
@@ -664,7 +669,11 @@ impl WorkspaceApp {
             "go_ahead" => oxideterm_gpui_terminal::TerminalTelnetAction::SendControl(
                 oxideterm_terminal::TelnetControlCommand::GoAhead,
             ),
-            "disconnect" => oxideterm_gpui_terminal::TerminalTelnetAction::Disconnect,
+            "disconnect" => {
+                return Err(
+                    "Telnet disconnect must be requested from Active Sessions.".to_string(),
+                );
+            }
             _ => return Err("The requested Telnet action is unsupported.".to_string()),
         };
         pane.update(cx, |pane, cx| pane.apply_telnet_action(telnet_action, cx))?;
@@ -711,10 +720,10 @@ impl WorkspaceApp {
                 self.disconnect_remote_desktop(tab_id, window, cx);
             }
             "reconnect" => {
-                if !session.read(cx).ai_can_reconnect() {
-                    return Err("The remote desktop session is not ready to reconnect.".to_string());
-                }
-                self.reconnect_remote_desktop(tab_id, window, cx);
+                return Err(
+                    "Remote desktop reconnect creates a new tab from Active Sessions."
+                        .to_string(),
+                );
             }
             _ => return Err("Unsupported remote desktop session action.".to_string()),
         }

@@ -21,36 +21,10 @@ pub(super) fn remote_desktop_status_color(
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum RemoteDesktopReconnectMode {
-    ProtocolRequest,
-    RestartHelper,
-}
-
-pub(super) fn remote_desktop_reconnect_mode(
-    status: RemoteDesktopSessionStatus,
-) -> Option<RemoteDesktopReconnectMode> {
-    match status {
-        RemoteDesktopSessionStatus::Connected => Some(RemoteDesktopReconnectMode::ProtocolRequest),
-        RemoteDesktopSessionStatus::Idle
-        | RemoteDesktopSessionStatus::Disconnected
-        | RemoteDesktopSessionStatus::Failed => Some(RemoteDesktopReconnectMode::RestartHelper),
-        RemoteDesktopSessionStatus::Connecting | RemoteDesktopSessionStatus::Reconnecting => None,
-    }
-}
-
-pub(super) fn remote_desktop_force_recover_enabled(status: RemoteDesktopSessionStatus) -> bool {
-    // A session can be operationally stuck even while it still reports
-    // connected or connecting. Keep the hard recovery action reachable for
-    // every visible session state.
-    matches!(
+pub(super) fn remote_desktop_reconnect_enabled(status: RemoteDesktopSessionStatus) -> bool {
+    !matches!(
         status,
-        RemoteDesktopSessionStatus::Idle
-            | RemoteDesktopSessionStatus::Connecting
-            | RemoteDesktopSessionStatus::Connected
-            | RemoteDesktopSessionStatus::Reconnecting
-            | RemoteDesktopSessionStatus::Disconnected
-            | RemoteDesktopSessionStatus::Failed
+        RemoteDesktopSessionStatus::Connecting | RemoteDesktopSessionStatus::Reconnecting
     )
 }
 

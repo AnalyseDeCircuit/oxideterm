@@ -3,12 +3,6 @@
 
 use super::*;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RemoteDesktopRestartPresentation {
-    Reset,
-    Preserve,
-}
-
 impl RemoteDesktopSessionEntity {
     pub(super) fn install_release_handler(&self, cx: &mut Context<Self>) {
         cx.on_release(|session, _cx| {
@@ -126,48 +120,6 @@ impl RemoteDesktopSessionEntity {
         let textures = self.state.take_all_textures();
         self.drop_images(images, window, cx);
         Self::drop_textures(textures, window);
-    }
-
-    fn disconnect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.cancel_automatic_reconnect();
-        self.public_mcp_clipboard = None;
-        if let Some(worker) = self.worker.as_ref() {
-            worker.send(RemoteDesktopHelperRequest::Close);
-            return;
-        }
-        self.state
-            .apply_event(RemoteDesktopHelperEvent::Disconnected { reason: None });
-        let retired_images = self.state.take_retired_images();
-        let retired_textures = self.state.take_retired_textures();
-        self.drop_images(retired_images, window, cx);
-        Self::drop_textures(retired_textures, window);
-        cx.notify();
-    }
-
-    fn force_recover(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.cancel_automatic_reconnect();
-        self.public_mcp_clipboard = None;
-        self.release_inputs();
-        if self.worker.is_some() {
-            self.send_request(RemoteDesktopHelperRequest::RequestFrame);
-        }
-        self.restart_worker(window, cx);
-    }
-
-    fn reconnect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.cancel_automatic_reconnect();
-        self.public_mcp_clipboard = None;
-        match remote_desktop_reconnect_mode(self.state.snapshot().status) {
-            Some(RemoteDesktopReconnectMode::ProtocolRequest) => {
-                self.release_inputs();
-                self.send_request(RemoteDesktopHelperRequest::Reconnect);
-            }
-            Some(RemoteDesktopReconnectMode::RestartHelper) => {
-                self.release_inputs();
-                self.restart_worker(window, cx);
-            }
-            None => {}
-        }
     }
 
     fn poll_deliveries(
@@ -544,24 +496,7 @@ impl RemoteDesktopSessionEntity {
         true
     }
 
-    fn restart_worker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.restart_worker_with_presentation(RemoteDesktopRestartPresentation::Reset, window, cx);
-    }
-
     fn restart_worker_preserving_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.restart_worker_with_presentation(
-            RemoteDesktopRestartPresentation::Preserve,
-            window,
-            cx,
-        );
-    }
-
-    fn restart_worker_with_presentation(
-        &mut self,
-        presentation: RemoteDesktopRestartPresentation,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
         let (initial_request_size, initial_viewport_size) =
             initial_remote_desktop_sizes_for_session(self);
         let profile = self.profile.clone();
@@ -593,26 +528,11 @@ impl RemoteDesktopSessionEntity {
             self.delivery_tx.clone(),
         );
         let previous_worker_wake = self.worker_wake.replace(worker_wake.clone());
-        let (old_images, old_textures) =
-            if presentation == RemoteDesktopRestartPresentation::Preserve {
-                // Automatic transport recovery keeps the last complete frame but
-                // starts the replacement helper with a fresh graphics epoch.
-                self.state.begin_transport_reconnect();
-                (
-                    self.state.take_retired_images(),
-                    self.state.take_retired_textures(),
-                )
-            } else {
-                let old_images = self.state.take_all_images();
-                let old_textures = self.state.take_all_textures();
-                self.state = RemoteDesktopViewState::new(profile.label.clone(), profile.protocol)
-                    .with_read_only(profile.read_only);
-                self.state.apply_event(RemoteDesktopHelperEvent::Status {
-                    status: RemoteDesktopSessionStatus::Reconnecting,
-                    message: None,
-                });
-                (old_images, old_textures)
-            };
+        // Automatic transport recovery keeps the last complete frame but starts
+        // the replacement helper with a fresh graphics epoch.
+        self.state.begin_transport_reconnect();
+        let old_images = self.state.take_retired_images();
+        let old_textures = self.state.take_retired_textures();
         self.frame_slot = frame_slot;
         self.worker = Some(worker);
         self.worker_generation = generation;
@@ -1412,7 +1332,7 @@ impl WorkspaceApp {
         let snapshot = session.state.snapshot();
         let status = snapshot.status;
         let status_color = remote_desktop_status_color(&self.tokens, status);
-        let reconnect_disabled = remote_desktop_reconnect_mode(status).is_none();
+        let reconnect_disabled = !remote_desktop_reconnect_enabled(status);
         let resize_capability = snapshot
             .negotiated_capabilities
             .as_ref()
@@ -1546,30 +1466,6 @@ impl WorkspaceApp {
                             }),
                         ))
                     })
-                    .child(self.workspace_toolbar_action_button(
-                        self.i18n.t("remote_desktop.force_recover"),
-                        Some(Self::render_lucide_icon(
-                            LucideIcon::Wrench,
-                            12.0,
-                            rgb(theme.text_muted),
-                        )),
-                        ToolbarButtonOptions {
-                            button: ButtonOptions {
-                                variant: ButtonVariant::Secondary,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: !remote_desktop_force_recover_enabled(status),
-                            },
-                            height: Some(24.0),
-                            padding_x: Some(8.0),
-                            font_size: Some(self.tokens.metrics.ui_text_xs),
-                            ..ToolbarButtonOptions::default()
-                        },
-                        cx.listener(move |this, _event, window, cx| {
-                            this.force_recover_remote_desktop(tab_id, window, cx);
-                            cx.notify();
-                        }),
-                    ))
                     .child(self.workspace_toolbar_action_button(
                         self.i18n.t("remote_desktop.reconnect"),
                         Some(Self::render_lucide_icon(
@@ -1744,25 +1640,18 @@ impl WorkspaceApp {
         (label, lines.join("\n"))
     }
 
-    pub(in crate::workspace) fn force_recover_remote_desktop(
-        &mut self,
-        tab_id: TabId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
-            session.update(cx, |session, cx| session.force_recover(window, cx));
-        }
-    }
-
     pub(in crate::workspace) fn disconnect_remote_desktop(
         &mut self,
         tab_id: TabId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
-            session.update(cx, |session, cx| session.disconnect(window, cx));
+        let surface = standalone_connections::StandaloneConnectionSurface::RemoteDesktop(tab_id);
+        if let Some(connection_id) = self
+            .standalone_connections
+            .connection_id_for_surface(surface)
+        {
+            self.disconnect_standalone_connection(&connection_id, window, cx);
         }
     }
 
@@ -1772,8 +1661,12 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
-            session.update(cx, |session, cx| session.reconnect(window, cx));
+        let surface = standalone_connections::StandaloneConnectionSurface::RemoteDesktop(tab_id);
+        if let Some(connection_id) = self
+            .standalone_connections
+            .connection_id_for_surface(surface)
+        {
+            self.reconnect_standalone_connection(&connection_id, window, cx);
         }
     }
 }
@@ -2198,14 +2091,10 @@ mod tests {
 
         window
             .update(cx, |_root, window, cx| {
-                session.update(cx, |session, cx| session.disconnect(window, cx));
+                session.update(cx, |session, cx| session.shutdown(window, cx));
             })
             .unwrap();
 
-        assert_eq!(
-            cx.read(|cx| session.read(cx).state.snapshot().status),
-            RemoteDesktopSessionStatus::Disconnected
-        );
         assert!(cx.read(|cx| {
             let session = session.read(cx);
             session.automatic_reconnect_worker_generation.is_none()

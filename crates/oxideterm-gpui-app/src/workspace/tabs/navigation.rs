@@ -985,6 +985,9 @@ impl WorkspaceApp {
             });
         }
         if tab.kind == TabKind::RemoteDesktop {
+            self.standalone_connections.release_surface(
+                standalone_connections::StandaloneConnectionSurface::RemoteDesktop(tab.id),
+            );
             self.close_remote_desktop_tab(tab.id, window, cx);
         }
         // Tauri keeps node SFTP alive when the SFTP tab is closed; the tab is
@@ -1022,6 +1025,9 @@ impl WorkspaceApp {
             root_pane.collect_session_ids(&mut session_ids);
         }
         for session_id in session_ids {
+            self.standalone_connections.release_surface(
+                standalone_connections::StandaloneConnectionSurface::Terminal(session_id),
+            );
             self.release_public_mcp_terminal_for_closed_session(session_id, cx);
             self.serial_terminal_configs.remove(&session_id);
             self.telnet_terminal_profile_ids.remove(&session_id);

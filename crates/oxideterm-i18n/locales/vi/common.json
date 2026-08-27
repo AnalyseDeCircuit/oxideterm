@@ -1201,7 +1201,6 @@
     "vnc_preview_title": "Xem trước VNC",
     "provider_missing": "Trình cung cấp máy tính từ xa không khả dụng.",
     "session_missing": "Phiên máy tính từ xa không khả dụng.",
-    "force_recover": "Khôi phục",
     "reconnect": "Kết nối lại",
     "resize_fixed": "Kích thước do máy chủ cố định",
     "resize_unknown": "Chưa phát hiện đổi kích thước",

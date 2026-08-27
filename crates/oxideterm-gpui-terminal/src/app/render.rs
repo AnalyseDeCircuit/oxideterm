@@ -328,11 +328,11 @@ impl Render for TerminalPane {
                 .then(|| self.command_fact_ledger.transient_command_highlight())
                 .flatten(),
         )
-        .semantic_coloring(
+        .semantic_configuration(
             self.semantic_coloring_enabled() && !terminal_mode.contains(TermMode::ALT_SCREEN),
+            self.preferences.semantic_scheme.clone(),
+            self.preferences.semantic_shell,
         )
-        .semantic_scheme(self.preferences.semantic_scheme.clone())
-        .semantic_shell(self.preferences.semantic_shell)
         .row_timestamps(row_timestamps)
         .transparent_background(background.is_some() || self.preferences.transparent_background)
         .ghost_text(self.terminal_ghost_text())
@@ -1177,21 +1177,6 @@ impl TerminalPane {
                             this.refresh_serial_port_presence(cx);
                         }),
                     ),
-            )
-            .child(
-                self.render_serial_control_button(
-                    labels.reconnect.clone(),
-                    status.can_reconnect,
-                    false,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        this.reconnect_serial(cx);
-                    }),
-                ),
             )
             .child(
                 self.render_serial_control_button(labels.send_break.clone(), running, false)

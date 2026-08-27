@@ -1201,7 +1201,6 @@
     "vnc_preview_title": "VNC Preview",
     "provider_missing": "Remote desktop provider is unavailable.",
     "session_missing": "Remote desktop session is unavailable.",
-    "force_recover": "Recover",
     "reconnect": "Reconnect",
     "resize_fixed": "Server fixed size",
     "resize_unknown": "Resize not detected",

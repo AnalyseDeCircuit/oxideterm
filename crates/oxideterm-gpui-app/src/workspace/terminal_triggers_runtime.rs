@@ -289,8 +289,20 @@ impl WorkspaceApp {
         id: String,
         cx: &mut Context<Self>,
     ) {
+        let saved_profile_id = id.clone();
         self.terminal_saved_connection_refs
             .insert(session_id, SavedConnectionRef { kind, id });
+        if matches!(
+            kind,
+            SavedConnectionKind::Mosh | SavedConnectionKind::Telnet | SavedConnectionKind::Serial
+        ) {
+            self.standalone_connections.replace_with_saved_profile(
+                crate::workspace::standalone_connections::StandaloneConnectionSurface::Terminal(
+                    session_id,
+                ),
+                saved_profile_id,
+            );
+        }
         if let Some(location) = self.tab_host.read(cx).terminal_location(session_id) {
             self.refresh_terminal_trigger_pane(location.pane_id, cx);
         }

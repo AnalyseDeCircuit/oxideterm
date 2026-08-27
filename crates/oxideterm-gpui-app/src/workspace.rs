@@ -53,6 +53,7 @@ mod session_manager;
 mod settings;
 mod sftp;
 mod sidebar;
+mod standalone_connections;
 mod tabs;
 mod terminal_cast;
 mod terminal_command_bar;
@@ -766,6 +767,8 @@ pub(crate) struct WorkspaceApp {
     serial_terminal_configs: HashMap<TerminalSessionId, SerialSessionConfig>,
     // A Telnet pane keeps only the stable profile owner needed for toolbar persistence.
     telnet_terminal_profile_ids: HashMap<TerminalSessionId, String>,
+    // Non-SSH connection records outlive their current terminal or desktop surface.
+    standalone_connections: standalone_connections::StandaloneConnectionRegistry,
     detached_local_terminals_popover_open: bool,
     command_palette: Entity<command_palette::CommandPaletteEntity>,
     _command_palette_observation: Subscription,

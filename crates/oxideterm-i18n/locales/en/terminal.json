@@ -160,7 +160,6 @@
       "port_missing": "Port missing",
       "port_unknown": "Port unknown",
       "refresh": "Refresh",
-      "reconnect": "Reconnect",
       "send_break": "Break",
       "dtr": "DTR",
       "rts": "RTS",
@@ -179,8 +178,7 @@
       "line_ending_lf": "LF",
       "line_ending_crlf": "CRLF",
       "line_ending_cr": "CR",
-      "line_ending_none": "Raw",
-      "reconnect_failed": "Serial reconnect failed"
+      "line_ending_none": "Raw"
     },
     "recording": {
       "started": "Terminal recording started",

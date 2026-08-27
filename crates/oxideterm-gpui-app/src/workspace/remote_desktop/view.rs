@@ -7,16 +7,85 @@ use oxideterm_session_adapter::ssh_config_from_saved_connection;
 impl WorkspaceApp {
     pub(in crate::workspace) fn open_remote_desktop_connection_with_gateway(
         &mut self,
-        mut profile: RemoteDesktopConnectionProfile,
+        profile: RemoteDesktopConnectionProfile,
         password: Option<RemoteDesktopSecret>,
         ssh_gateway_connection_id: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_remote_desktop_connection_for_connection(
+            profile,
+            password,
+            ssh_gateway_connection_id,
+            None,
+            window,
+            cx,
+        );
+    }
+
+    pub(in crate::workspace) fn open_remote_desktop_connection_for_connection(
+        &mut self,
+        mut profile: RemoteDesktopConnectionProfile,
+        password: Option<RemoteDesktopSecret>,
+        ssh_gateway_connection_id: Option<String>,
+        mut connection_attempt_id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(ssh_gateway_connection_id) = ssh_gateway_connection_id else {
-            self.open_remote_desktop_connection_tab(profile, password, window, cx);
+            self.open_remote_desktop_connection_tab_for_connection(
+                profile,
+                password,
+                None,
+                None,
+                connection_attempt_id,
+                window,
+                cx,
+            );
             return;
         };
+        if connection_attempt_id.is_none() {
+            let saved_profile_id = self
+                .connection_store
+                .get_remote_desktop_profile(&profile.id)
+                .map(|saved| saved.id.clone());
+            let kind = match profile.protocol {
+                RemoteDesktopProtocol::Rdp => standalone_connections::StandaloneConnectionKind::Rdp,
+                RemoteDesktopProtocol::Vnc => standalone_connections::StandaloneConnectionKind::Vnc,
+            };
+            let launch = if let Some(profile_id) = saved_profile_id {
+                standalone_connections::StandaloneConnectionLaunch::SavedRemoteDesktop {
+                    profile_id,
+                }
+            } else {
+                let Some(provider) = builtin_provider_registry()
+                    .ok()
+                    .and_then(|registry| registry.get_for_protocol(profile.protocol).cloned())
+                else {
+                    self.push_command_palette_toast(
+                        self.i18n.t("remote_desktop.provider_missing"),
+                        None,
+                        TerminalNoticeVariant::Error,
+                        cx,
+                    );
+                    return;
+                };
+                standalone_connections::StandaloneConnectionLaunch::RemoteDesktop {
+                    profile: profile.clone(),
+                    provider,
+                    password: password
+                        .as_ref()
+                        .map(RemoteDesktopSecret::duplicate_for_reauthentication),
+                    ssh_gateway_connection_id: Some(ssh_gateway_connection_id.clone()),
+                }
+            };
+            connection_attempt_id = Some(self.standalone_connections.insert_pending(
+                kind,
+                profile.label.clone(),
+                launch,
+            ));
+        }
+        let reconnect_gateway_connection_id = ssh_gateway_connection_id.clone();
         let pending_tunnel = match self.start_remote_desktop_ssh_tunnel(
             ssh_gateway_connection_id,
             profile.endpoint.clone(),
@@ -25,6 +94,10 @@ impl WorkspaceApp {
             Ok(pending_tunnel) => pending_tunnel,
             Err(error) => {
                 self.report_remote_desktop_ssh_gateway_error(error, cx);
+                if let Some(connection_attempt_id) = connection_attempt_id.as_deref() {
+                    self.standalone_connections
+                        .mark_attempt_error(connection_attempt_id);
+                }
                 return;
             }
         };
@@ -35,10 +108,20 @@ impl WorkspaceApp {
                     profile.transport_endpoint = Some(transport_endpoint);
                     let _ = cx.update_window(window_handle, move |_, window, cx| {
                         let _ = workspace.update(cx, |workspace, cx| {
-                            workspace.open_remote_desktop_connection_tab_with_tunnel(
+                            if connection_attempt_id.as_deref().is_some_and(|attempt_id| {
+                                !workspace
+                                    .standalone_connections
+                                    .is_connecting_attempt(attempt_id)
+                            }) {
+                                // A disconnect during tunnel setup must not resurrect the session.
+                                return;
+                            }
+                            workspace.open_remote_desktop_connection_tab_for_connection(
                                 profile,
                                 password,
                                 Some(lease),
+                                Some(reconnect_gateway_connection_id),
+                                connection_attempt_id,
                                 window,
                                 cx,
                             );
@@ -50,6 +133,11 @@ impl WorkspaceApp {
                 Err(error) => {
                     let _ = workspace.update(cx, |workspace, cx| {
                         workspace.report_remote_desktop_ssh_gateway_error(error, cx);
+                        if let Some(connection_attempt_id) = connection_attempt_id.as_deref() {
+                            workspace
+                                .standalone_connections
+                                .mark_attempt_error(connection_attempt_id);
+                        }
                     });
                 }
             }
@@ -193,6 +281,21 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_remote_desktop_connection_tab_for_connection(
+            profile, password, ssh_tunnel, None, None, window, cx,
+        );
+    }
+
+    pub(in crate::workspace) fn open_remote_desktop_connection_tab_for_connection(
+        &mut self,
+        profile: RemoteDesktopConnectionProfile,
+        password: Option<RemoteDesktopSecret>,
+        ssh_tunnel: Option<RemoteDesktopSshTunnelLease>,
+        ssh_gateway_connection_id: Option<String>,
+        connection_attempt_id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let provider = match builtin_provider_registry()
             .ok()
             .and_then(|registry| registry.get_for_protocol(profile.protocol).cloned())
@@ -205,13 +308,25 @@ impl WorkspaceApp {
                     TerminalNoticeVariant::Error,
                     cx,
                 );
+                if let Some(connection_attempt_id) = connection_attempt_id.as_deref() {
+                    self.standalone_connections
+                        .mark_attempt_error(connection_attempt_id);
+                }
                 return;
             }
         };
         let title = profile.label.clone();
 
-        self.open_remote_desktop_tab_with_tunnel(
-            profile, provider, title, password, ssh_tunnel, window, cx,
+        self.open_remote_desktop_tab_for_connection(
+            profile,
+            provider,
+            title,
+            password,
+            ssh_tunnel,
+            ssh_gateway_connection_id,
+            connection_attempt_id,
+            window,
+            cx,
         );
     }
 
@@ -239,7 +354,38 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> TabId {
+        self.open_remote_desktop_tab_for_connection(
+            profile, provider, title, password, ssh_tunnel, None, None, window, cx,
+        )
+    }
+
+    pub(in crate::workspace) fn open_remote_desktop_tab_for_connection(
+        &mut self,
+        profile: RemoteDesktopConnectionProfile,
+        provider: RemoteDesktopProviderManifest,
+        title: String,
+        password: Option<RemoteDesktopSecret>,
+        ssh_tunnel: Option<RemoteDesktopSshTunnelLease>,
+        ssh_gateway_connection_id: Option<String>,
+        connection_attempt_id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> TabId {
         let tab_id = self.alloc_tab_id(cx);
+        let saved_profile_id = self
+            .connection_store
+            .get_remote_desktop_profile(&profile.id)
+            .map(|saved| saved.id.clone());
+        let reconnect_profile = profile.clone();
+        let reconnect_provider = provider.clone();
+        let reconnect_password = saved_profile_id
+            .is_none()
+            .then(|| {
+                password
+                    .as_ref()
+                    .map(RemoteDesktopSecret::duplicate_for_reauthentication)
+            })
+            .flatten();
         let frame_slot = RemoteDesktopFrameDeliverySlot::new();
         let certificate_store_path =
             oxideterm_remote_desktop::RemoteDesktopCertificateStore::path_next_to_settings(
@@ -285,13 +431,37 @@ impl WorkspaceApp {
             Tab {
                 id: tab_id,
                 kind: TabKind::RemoteDesktop,
-                title,
+                title: title.clone(),
                 title_source: TabTitleSource::Static,
                 root_pane: None,
                 active_pane_id: None,
             },
             cx,
         );
+        let surface = standalone_connections::StandaloneConnectionSurface::RemoteDesktop(tab_id);
+        if let Some(connection_attempt_id) = connection_attempt_id {
+            self.standalone_connections
+                .bind_surface_for_attempt(&connection_attempt_id, surface);
+        } else {
+            let kind = match reconnect_profile.protocol {
+                RemoteDesktopProtocol::Rdp => standalone_connections::StandaloneConnectionKind::Rdp,
+                RemoteDesktopProtocol::Vnc => standalone_connections::StandaloneConnectionKind::Vnc,
+            };
+            let launch = if let Some(profile_id) = saved_profile_id {
+                standalone_connections::StandaloneConnectionLaunch::SavedRemoteDesktop {
+                    profile_id,
+                }
+            } else {
+                standalone_connections::StandaloneConnectionLaunch::RemoteDesktop {
+                    profile: reconnect_profile,
+                    provider: reconnect_provider,
+                    password: reconnect_password,
+                    ssh_gateway_connection_id,
+                }
+            };
+            self.standalone_connections
+                .insert(kind, title.clone(), launch, surface);
+        }
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;

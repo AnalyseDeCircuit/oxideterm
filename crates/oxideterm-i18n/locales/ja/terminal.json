@@ -81,7 +81,6 @@
       "port_missing": "ポートなし",
       "port_unknown": "ポート不明",
       "refresh": "更新",
-      "reconnect": "再接続",
       "send_break": "Break",
       "dtr": "DTR",
       "rts": "RTS",
@@ -100,8 +99,7 @@
       "line_ending_lf": "LF",
       "line_ending_crlf": "CRLF",
       "line_ending_cr": "CR",
-      "line_ending_none": "そのまま",
-      "reconnect_failed": "シリアル再接続に失敗"
+      "line_ending_none": "そのまま"
     },
     "recording": {
       "started": "Terminal recording started",

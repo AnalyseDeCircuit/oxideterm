@@ -81,7 +81,6 @@
       "port_missing": "Thiếu cổng",
       "port_unknown": "Chưa rõ cổng",
       "refresh": "Làm mới",
-      "reconnect": "Kết nối lại",
       "send_break": "Break",
       "dtr": "DTR",
       "rts": "RTS",
@@ -100,8 +99,7 @@
       "line_ending_lf": "LF",
       "line_ending_crlf": "CRLF",
       "line_ending_cr": "CR",
-      "line_ending_none": "Thô",
-      "reconnect_failed": "Kết nối lại serial thất bại"
+      "line_ending_none": "Thô"
     },
     "recording": {
       "started": "Terminal recording started",

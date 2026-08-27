@@ -1038,11 +1038,25 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_saved_remote_desktop_profile_for_connection(id, None, window, cx);
+    }
+
+    pub(in crate::workspace) fn open_saved_remote_desktop_profile_for_connection(
+        &mut self,
+        id: &str,
+        runtime_connection_attempt_id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(saved) = self
             .connection_store
             .get_remote_desktop_profile(id)
             .cloned()
         else {
+            if let Some(connection_attempt_id) = runtime_connection_attempt_id.as_deref() {
+                self.standalone_connections
+                    .mark_attempt_error(connection_attempt_id);
+            }
             return;
         };
         let password = match self.connection_store.get_remote_desktop_credential(id) {
@@ -1050,6 +1064,10 @@ impl WorkspaceApp {
                 .map(SecretString::into_zeroizing)
                 .map(RemoteDesktopSecret::from),
             Err(error) => {
+                if let Some(connection_attempt_id) = runtime_connection_attempt_id.as_deref() {
+                    self.standalone_connections
+                        .mark_attempt_error(connection_attempt_id);
+                }
                 let status = format!(
                     "{}: {error}",
                     self.i18n
@@ -1064,6 +1082,10 @@ impl WorkspaceApp {
         if saved.protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp
             && password.is_none()
         {
+            if let Some(connection_attempt_id) = runtime_connection_attempt_id.as_deref() {
+                self.standalone_connections
+                    .mark_attempt_error(connection_attempt_id);
+            }
             // Synced and imported assets intentionally omit device-local credentials.
             // Reopen the regular form so the user can authenticate on this device.
             self.open_new_connection_form(window, cx);
@@ -1098,10 +1120,11 @@ impl WorkspaceApp {
             read_only: saved.read_only,
             session_options: saved.session_options,
         };
-        self.open_remote_desktop_connection_with_gateway(
+        self.open_remote_desktop_connection_for_connection(
             profile,
             password,
             saved.ssh_gateway_connection_id,
+            runtime_connection_attempt_id,
             window,
             cx,
         );

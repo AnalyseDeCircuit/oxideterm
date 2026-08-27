@@ -571,10 +571,6 @@ pub(in crate::workspace) struct RemoteDesktopSessionEntity {
 }
 
 impl RemoteDesktopSessionEntity {
-    pub(in crate::workspace) fn active_session_protocol(&self) -> RemoteDesktopProtocol {
-        self.profile.protocol
-    }
-
     pub(in crate::workspace) fn active_session_status(&self) -> RemoteDesktopSessionStatus {
         // The protocol entity remains the authoritative source for sidebar liveness.
         self.state.snapshot().status
@@ -587,10 +583,6 @@ impl RemoteDesktopSessionEntity {
                 | RemoteDesktopSessionStatus::Connected
                 | RemoteDesktopSessionStatus::Reconnecting
         )
-    }
-
-    pub(in crate::workspace) fn ai_can_reconnect(&self) -> bool {
-        remote_desktop_reconnect_mode(self.state.snapshot().status).is_some()
     }
 
     fn new(
@@ -776,7 +768,8 @@ impl RemoteDesktopWorkspaceEntity {
                         .map(|category| format!("{category:?}").to_lowercase()),
                     "negotiatedCapabilities": snapshot.negotiated_capabilities,
                     "canDisconnect": session.ai_can_disconnect(),
-                    "canReconnect": remote_desktop_reconnect_mode(snapshot.status).is_some(),
+                    // Tab-scoped automation handles cannot follow a fresh reconnect tab.
+                    "canReconnect": false,
                 })
             })
             .collect::<Vec<_>>();
@@ -961,35 +954,29 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_mode_restarts_helper_after_terminal_states() {
-        assert_eq!(
-            remote_desktop_reconnect_mode(RemoteDesktopSessionStatus::Disconnected),
-            Some(RemoteDesktopReconnectMode::RestartHelper)
-        );
-        assert_eq!(
-            remote_desktop_reconnect_mode(RemoteDesktopSessionStatus::Failed),
-            Some(RemoteDesktopReconnectMode::RestartHelper)
-        );
-        assert_eq!(
-            remote_desktop_reconnect_mode(RemoteDesktopSessionStatus::Idle),
-            Some(RemoteDesktopReconnectMode::RestartHelper)
-        );
+    fn manual_reconnect_is_available_after_terminal_states() {
+        assert!(remote_desktop_reconnect_enabled(
+            RemoteDesktopSessionStatus::Disconnected
+        ));
+        assert!(remote_desktop_reconnect_enabled(
+            RemoteDesktopSessionStatus::Failed
+        ));
+        assert!(remote_desktop_reconnect_enabled(
+            RemoteDesktopSessionStatus::Idle
+        ));
     }
 
     #[test]
-    fn reconnect_mode_uses_live_helper_only_when_connected() {
-        assert_eq!(
-            remote_desktop_reconnect_mode(RemoteDesktopSessionStatus::Connected),
-            Some(RemoteDesktopReconnectMode::ProtocolRequest)
-        );
-        assert_eq!(
-            remote_desktop_reconnect_mode(RemoteDesktopSessionStatus::Connecting),
-            None
-        );
-        assert_eq!(
-            remote_desktop_reconnect_mode(RemoteDesktopSessionStatus::Reconnecting),
-            None
-        );
+    fn manual_reconnect_waits_for_in_flight_connection_attempts() {
+        assert!(remote_desktop_reconnect_enabled(
+            RemoteDesktopSessionStatus::Connected
+        ));
+        assert!(!remote_desktop_reconnect_enabled(
+            RemoteDesktopSessionStatus::Connecting
+        ));
+        assert!(!remote_desktop_reconnect_enabled(
+            RemoteDesktopSessionStatus::Reconnecting
+        ));
     }
 
     #[test]
