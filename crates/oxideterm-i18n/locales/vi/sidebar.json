@@ -19,7 +19,6 @@
       "runtime_description": "Giám sát mức sử dụng kết nối và cấu trúc liên kết",
       "runtime_overview": "Tổng quan",
       "connection_pool": "Nhóm kết nối",
-      "connection_monitor": "Giám sát kết nối",
       "connection_matrix": "Ma trận kết nối",
       "ai": "OxideSens",
       "ai_assistant": "OxideSens (Sắp ra mắt)",

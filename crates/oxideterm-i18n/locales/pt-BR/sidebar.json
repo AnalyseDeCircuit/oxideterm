@@ -19,7 +19,6 @@
       "runtime_description": "Monitore o uso das conexões e a topologia",
       "runtime_overview": "Visão geral",
       "connection_pool": "Pool de conexões",
-      "connection_monitor": "Monitor de conexão",
       "connection_matrix": "Matriz de conexões",
       "ai": "OxideSens",
       "ai_assistant": "OxideSens (em breve)",

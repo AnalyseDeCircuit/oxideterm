@@ -58,7 +58,6 @@ pub(super) enum SidebarSection {
     Automation,
     Workspace,
     Files,
-    Monitor,
     Notifications,
     Settings,
 }
@@ -128,7 +127,9 @@ impl SidebarSection {
             "automation" => Self::Automation,
             "workspace" => Self::Workspace,
             "files" => Self::Files,
-            "monitor" => Self::Monitor,
+            // The standalone monitor activity button was retired after Host Tools
+            // became the cross-platform owner of connection monitoring.
+            "monitor" => Self::HostTools,
             "notifications" => Self::Notifications,
             "settings" => Self::Settings,
             _ => Self::Sessions,
@@ -152,7 +153,6 @@ impl SidebarSection {
             Self::Automation => "automation",
             Self::Workspace => "workspace",
             Self::Files => "files",
-            Self::Monitor => "monitor",
             Self::Notifications => "notifications",
             Self::Settings => "settings",
         }
@@ -177,7 +177,6 @@ impl WorkspaceApp {
             | SidebarSection::Automation
             | SidebarSection::Workspace
             | SidebarSection::Files
-            | SidebarSection::Monitor
             | SidebarSection::Notifications
             | SidebarSection::Settings => SidebarSection::Sessions,
         }
@@ -224,7 +223,6 @@ mod sidebar_persistence_tests {
             SidebarSection::Automation,
             SidebarSection::Workspace,
             SidebarSection::Files,
-            SidebarSection::Monitor,
             SidebarSection::Notifications,
             SidebarSection::Settings,
         ];
@@ -245,5 +243,13 @@ mod sidebar_persistence_tests {
                 SidebarSection::Sessions
             );
         }
+    }
+
+    #[test]
+    fn retired_monitor_key_restores_host_tools() {
+        assert_eq!(
+            SidebarSection::from_settings_key("monitor"),
+            SidebarSection::HostTools
+        );
     }
 }

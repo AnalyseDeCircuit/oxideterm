@@ -19,7 +19,6 @@
       "runtime_description": "Verbindungsnutzung und Topologie überwachen",
       "runtime_overview": "Übersicht",
       "connection_pool": "Verbindungspool",
-      "connection_monitor": "Verbindungsmonitor",
       "connection_matrix": "Verbindungsmatrix",
       "ai": "OxideSens",
       "ai_assistant": "OxideSens (Demnächst verfügbar)",

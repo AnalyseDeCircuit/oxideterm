@@ -19,7 +19,6 @@
       "runtime_description": "監控連線使用情況與拓撲",
       "runtime_overview": "概覽",
       "connection_pool": "連線池",
-      "connection_monitor": "連線監控",
       "connection_matrix": "連線矩陣",
       "ai": "OxideSens",
       "ai_assistant": "OxideSens（即將推出）",

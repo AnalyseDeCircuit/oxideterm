@@ -21,17 +21,12 @@ impl WorkspaceApp {
             (SidebarSection::Assistant, LucideIcon::Sparkles),
             (SidebarSection::HostTools, LucideIcon::Wrench),
         ];
-        let mut bottom_items = vec![
+        let bottom_items = [
             (SidebarSection::Workspace, LucideIcon::Square),
             (SidebarSection::Files, LucideIcon::FolderOpen),
             (SidebarSection::Notifications, LucideIcon::Bell),
             (SidebarSection::Settings, LucideIcon::Settings),
         ];
-        if !cfg!(target_os = "windows") {
-            // WSL Graphics now lives under Connections on Windows, not as an
-            // independent activity-bar tool.
-            bottom_items.insert(2, (SidebarSection::Monitor, LucideIcon::Monitor));
-        }
         let mut bar = div()
             .w(px(self.tokens.metrics.activity_bar_width))
             .h_full()
@@ -419,7 +414,6 @@ impl WorkspaceApp {
             SidebarSection::Automation => self.i18n.t("sidebar.panels.activity"),
             SidebarSection::Workspace => self.i18n.t("sidebar.actions.new_local_terminal"),
             SidebarSection::Files => self.i18n.t("sidebar.panels.files"),
-            SidebarSection::Monitor => self.i18n.t("sidebar.panels.connection_monitor"),
             SidebarSection::Notifications => self.i18n.t("sidebar.panels.notifications"),
             SidebarSection::Settings => self.i18n.t("sidebar.tooltips.settings"),
         }

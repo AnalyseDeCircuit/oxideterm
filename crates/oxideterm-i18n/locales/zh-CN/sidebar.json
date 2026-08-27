@@ -19,7 +19,6 @@
       "runtime_description": "监控连接使用情况和拓扑",
       "runtime_overview": "概览",
       "connection_pool": "连接池",
-      "connection_monitor": "连接监控",
       "connection_matrix": "连接矩阵",
       "ai": "OxideSens",
       "ai_assistant": "OxideSens (敬请期待)",
