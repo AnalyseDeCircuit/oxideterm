@@ -1,10 +1,13 @@
 use super::*;
 
-const SPLIT_HANDLE_LINE_ALPHA: u32 = 0x80;
+const SPLIT_HANDLE_LINE_ALPHA: u32 = 0xb3;
 const SPLIT_HANDLE_HOVER_BG_ALPHA: u32 = 0x12;
 const SPLIT_HANDLE_ACTIVE_BG_ALPHA: u32 = 0x1f;
-const SPLIT_HANDLE_ACTIVE_LINE_ALPHA: u32 = 0xcc;
+const SPLIT_HANDLE_HOVER_LINE_ALPHA: u32 = 0xcc;
+const SPLIT_HANDLE_ACTIVE_LINE_ALPHA: u32 = 0xff;
 const SPLIT_HANDLE_LINE_WIDTH: f32 = 1.0;
+const SPLIT_HANDLE_HOVER_LINE_WIDTH: f32 = 3.0;
+const SPLIT_HANDLE_ACTIVE_LINE_WIDTH: f32 = 4.0;
 
 #[derive(Clone)]
 pub(super) struct SplitDrag {
@@ -809,37 +812,71 @@ impl WorkspaceApp {
                         } else {
                             rgba((self.tokens.ui.divider << 8) | SPLIT_HANDLE_LINE_ALPHA)
                         };
-                        // Keep the drag target wide while drawing only a
-                        // hairline in the center, matching common terminal and
-                        // editor splitters without making the seam look heavy.
+                        let line_width = if active_drag {
+                            SPLIT_HANDLE_ACTIVE_LINE_WIDTH
+                        } else {
+                            SPLIT_HANDLE_LINE_WIDTH
+                        };
+                        let highlighted_line_width = if active_drag {
+                            SPLIT_HANDLE_ACTIVE_LINE_WIDTH
+                        } else {
+                            SPLIT_HANDLE_HOVER_LINE_WIDTH
+                        };
+                        let highlighted_line_alpha = if active_drag {
+                            SPLIT_HANDLE_ACTIVE_LINE_ALPHA
+                        } else {
+                            SPLIT_HANDLE_HOVER_LINE_ALPHA
+                        };
+                        let highlighted_line_color =
+                            rgba((self.tokens.ui.accent << 8) | highlighted_line_alpha);
+                        let split_handle_size = self.tokens.metrics.split_handle_size;
+                        let handle_group = SharedString::from(format!(
+                            "workspace-split-handle-{}-{index}",
+                            group_id.0
+                        ));
+                        // The full handle remains easy to acquire while only the
+                        // centered visual line grows on hover and during drag.
                         let line = div()
                             .absolute()
                             .bg(line_color)
                             .when(direction == SplitDirection::Horizontal, |line| {
                                 line.top_0()
                                     .bottom_0()
-                                    .left(px((self.tokens.metrics.split_handle_size
-                                        - SPLIT_HANDLE_LINE_WIDTH)
-                                        / 2.0))
-                                    .w(px(SPLIT_HANDLE_LINE_WIDTH))
+                                    .left(px((split_handle_size - line_width) / 2.0))
+                                    .w(px(line_width))
                             })
                             .when(direction == SplitDirection::Vertical, |line| {
                                 line.left_0()
                                     .right_0()
-                                    .top(px((self.tokens.metrics.split_handle_size
-                                        - SPLIT_HANDLE_LINE_WIDTH)
-                                        / 2.0))
-                                    .h(px(SPLIT_HANDLE_LINE_WIDTH))
+                                    .top(px((split_handle_size - line_width) / 2.0))
+                                    .h(px(line_width))
+                            })
+                            .group_hover(handle_group.clone(), move |style| {
+                                let style = style.bg(highlighted_line_color);
+                                match direction {
+                                    SplitDirection::Horizontal => style
+                                        .left(
+                                            px((split_handle_size - highlighted_line_width) / 2.0),
+                                        )
+                                        .w(px(highlighted_line_width)),
+                                    SplitDirection::Vertical => style
+                                        .top(px((split_handle_size - highlighted_line_width) / 2.0))
+                                        .h(px(highlighted_line_width)),
+                                }
                             });
                         let mut handle = div()
                             .flex_none()
                             .relative()
+                            .group(handle_group)
                             .bg(handle_bg)
                             .hover({
                                 let accent = self.tokens.ui.accent;
-                                move |style| {
-                                    style.bg(rgba((accent << 8) | SPLIT_HANDLE_HOVER_BG_ALPHA))
-                                }
+                                let hover_bg_alpha = if active_drag {
+                                    SPLIT_HANDLE_ACTIVE_BG_ALPHA
+                                } else {
+                                    SPLIT_HANDLE_HOVER_BG_ALPHA
+                                };
+                                move |style| style.bg(rgba((accent << 8) | hover_bg_alpha))
                             })
                             .on_mouse_down(
                                 MouseButton::Left,
