@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     fmt,
     future::Future,
     path::{Path, PathBuf},
@@ -88,6 +88,25 @@ struct UploadFileJob {
     local_path: String,
     remote_path: String,
     total_bytes: u64,
+}
+
+// Local metadata is collected before remote jobs are queued so directory scans
+// can overlap filesystem latency without moving it into every transfer worker.
+struct LocalUploadEntry {
+    name: String,
+    path: PathBuf,
+    metadata: std::fs::Metadata,
+}
+
+// Recursive operations keep only protocol metadata needed for scheduling. The
+// richer browser projection would add sorting and symlink-target round trips.
+#[derive(Debug)]
+struct RemoteTreeEntry {
+    name: String,
+    path: String,
+    file_type: FileType,
+    size: u64,
+    is_symlink: bool,
 }
 
 impl fmt::Debug for SftpSession {

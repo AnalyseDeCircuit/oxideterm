@@ -387,6 +387,7 @@ impl SftpSession {
             self.produce_download_jobs(
                 &canonical_remote,
                 local_path,
+                plan,
                 transfer_id,
                 &transfer_manager,
                 job_tx,
@@ -417,29 +418,45 @@ impl SftpSession {
         const MAX_DEPTH: u32 = 64;
         let canonical_remote = self.resolve_path(remote_path).await?;
         let mut profile = TarDirectoryProfile::default();
-        let mut stack = VecDeque::from([(canonical_remote, 0)]);
-        while let Some((remote_dir, depth)) = stack.pop_back() {
-            check_transfer_control(transfer_manager, transfer_id).await?;
-            if depth >= MAX_DEPTH {
-                return Err(SftpError::TransferError(format!(
-                    "directory profile recursion depth {MAX_DEPTH} reached at {remote_dir}"
-                )));
-            }
-            for entry in self
-                .list_dir(
-                    &remote_dir,
-                    Some(ListFilter {
-                        show_hidden: true,
-                        pattern: None,
-                        sort: SortOrder::Name,
-                    }),
-                )
-                .await?
+        let requested_parallelism = transfer_manager
+            .as_ref()
+            .map(|manager| manager.directory_parallelism())
+            .unwrap_or(crate::DEFAULT_SFTP_DIRECTORY_PARALLELISM);
+        let scan_parallelism = plan_directory_transfer(
+            requested_parallelism,
+            self.sftp.advertised_open_handle_limit(),
+        )
+        .worker_count;
+        let mut pending = VecDeque::from([(canonical_remote, 0)]);
+        let mut scans = stream::FuturesUnordered::new();
+
+        loop {
+            while scans.len() < scan_parallelism
+                && let Some((remote_dir, depth)) = pending.pop_front()
             {
+                scans.push(async move {
+                    check_transfer_control(transfer_manager, transfer_id).await?;
+                    if depth >= MAX_DEPTH {
+                        return Err(SftpError::TransferError(format!(
+                            "directory profile recursion depth {MAX_DEPTH} reached at {remote_dir}"
+                        )));
+                    }
+                    let entries = self.list_tree_entries_resolved(&remote_dir).await?;
+                    Ok::<_, SftpError>((depth, entries))
+                });
+            }
+
+            let Some(scan) = scans.next().await else {
+                break;
+            };
+            let (depth, entries) = scan?;
+            for entry in entries {
                 match entry.file_type {
-                    FileType::Directory => stack.push_back((entry.path, depth + 1)),
+                    FileType::Directory if !entry.is_symlink => {
+                        pending.push_back((entry.path, depth + 1));
+                    }
                     FileType::File => profile.record_file(Path::new(&entry.name), entry.size),
-                    FileType::Symlink | FileType::Unknown => {}
+                    FileType::Directory | FileType::Symlink | FileType::Unknown => {}
                 }
             }
         }
@@ -471,6 +488,7 @@ impl SftpSession {
             self.produce_upload_jobs(
                 local_path,
                 &canonical_remote,
+                plan,
                 transfer_id,
                 &transfer_manager,
                 job_tx,
@@ -497,7 +515,7 @@ impl SftpSession {
         let requested_parallelism = transfer_manager
             .as_ref()
             .map(|manager| manager.directory_parallelism())
-            .unwrap_or(1);
+            .unwrap_or(crate::DEFAULT_SFTP_DIRECTORY_PARALLELISM);
         plan_directory_transfer(
             requested_parallelism,
             self.sftp.advertised_open_handle_limit(),
@@ -508,47 +526,76 @@ impl SftpSession {
         &self,
         remote_path: &str,
         local_path: &str,
+        plan: DirectoryTransferPlan,
         transfer_id: &str,
         transfer_manager: &Option<Arc<SftpTransferManager>>,
         job_tx: tokio::sync::mpsc::Sender<DownloadFileJob>,
     ) -> Result<(), SftpError> {
         const MAX_DEPTH: u32 = 64;
-        let mut stack = VecDeque::from([(remote_path.to_string(), local_path.to_string(), 0)]);
-        while let Some((remote_dir, local_dir, current_depth)) = stack.pop_back() {
-            check_transfer_control(transfer_manager, transfer_id).await?;
-            if current_depth >= MAX_DEPTH {
-                return Err(SftpError::TransferError(format!(
-                    "download recursion depth {MAX_DEPTH} reached at {remote_dir}"
-                )));
+        let mut pending = VecDeque::from([(
+            remote_path.to_string(),
+            local_path.to_string(),
+            0,
+            false,
+        )]);
+        let mut scans = stream::FuturesUnordered::new();
+
+        loop {
+            while scans.len() < plan.worker_count
+                && let Some((remote_dir, local_dir, current_depth, create_local_dir)) =
+                    pending.pop_front()
+            {
+                scans.push(async move {
+                    check_transfer_control(transfer_manager, transfer_id).await?;
+                    if current_depth >= MAX_DEPTH {
+                        return Err(SftpError::TransferError(format!(
+                            "download recursion depth {MAX_DEPTH} reached at {remote_dir}"
+                        )));
+                    }
+                    if create_local_dir {
+                        // Parent scans enqueue children only after their own local
+                        // directory exists, while sibling creation remains concurrent.
+                        tokio::fs::create_dir_all(&local_dir)
+                            .await
+                            .map_err(SftpError::IoError)?;
+                    }
+                    let entries = self.list_tree_entries_resolved(&remote_dir).await?;
+                    Ok::<_, SftpError>((local_dir, current_depth, entries))
+                });
             }
-            let entries = self
-                .list_dir(
-                    &remote_dir,
-                    Some(ListFilter {
-                        show_hidden: true,
-                        pattern: None,
-                        sort: SortOrder::Name,
-                    }),
-                )
-                .await?;
+
+            let Some(scan) = scans.next().await else {
+                break;
+            };
+            let (local_dir, current_depth, entries) = scan?;
             for entry in entries {
                 let local_entry = join_local_path(&local_dir, &entry.name);
-                if entry.file_type == FileType::Directory {
-                    tokio::fs::create_dir_all(&local_entry)
-                        .await
-                        .map_err(SftpError::IoError)?;
-                    stack.push_back((entry.path, local_entry, current_depth + 1));
-                } else {
-                    // A bounded send lets workers start immediately while keeping
-                    // large directory trees from accumulating in memory.
-                    job_tx
-                        .send(DownloadFileJob {
-                            remote_path: entry.path,
-                            local_path: local_entry,
-                            total_bytes: entry.size,
-                        })
-                        .await
-                        .map_err(|_| SftpError::TransferCancelled)?;
+                match entry.file_type {
+                    FileType::Directory if !entry.is_symlink => {
+                        pending.push_back((
+                            entry.path,
+                            local_entry,
+                            current_depth + 1,
+                            true,
+                        ));
+                    }
+                    FileType::File => {
+                        // A bounded send lets workers start immediately while keeping
+                        // large directory trees from accumulating in memory.
+                        job_tx
+                            .send(DownloadFileJob {
+                                remote_path: entry.path,
+                                local_path: local_entry,
+                                total_bytes: entry.size,
+                            })
+                            .await
+                            .map_err(|_| SftpError::TransferCancelled)?;
+                    }
+                    FileType::Directory | FileType::Symlink | FileType::Unknown => {
+                        // Recursive transfers never follow links or guess the type
+                        // of entries whose server metadata is incomplete.
+                        debug!("Skipping unsupported entry during SFTP download");
+                    }
                 }
             }
         }
@@ -559,41 +606,71 @@ impl SftpSession {
         &self,
         local_path: &str,
         remote_path: &str,
+        plan: DirectoryTransferPlan,
         transfer_id: &str,
         transfer_manager: &Option<Arc<SftpTransferManager>>,
         job_tx: tokio::sync::mpsc::Sender<UploadFileJob>,
     ) -> Result<(), SftpError> {
         const MAX_DEPTH: u32 = 64;
-        let mut stack =
+        let mut pending =
             VecDeque::from([(PathBuf::from(local_path), remote_path.to_string(), 0)]);
-        while let Some((local_dir, remote_dir, current_depth)) = stack.pop_back() {
-            check_transfer_control(transfer_manager, transfer_id).await?;
-            if current_depth >= MAX_DEPTH {
-                return Err(SftpError::TransferError(format!(
-                    "upload recursion depth {MAX_DEPTH} reached at {}",
-                    local_dir.display()
-                )));
-            }
-            // Parent directories are created before their file jobs enter the
-            // queue. Existing-directory responses remain intentionally benign.
-            let _ = self.mkdir(&remote_dir).await;
-            let mut entries = tokio::fs::read_dir(&local_dir)
-                .await
-                .map_err(SftpError::IoError)?;
-            while let Some(entry) = entries.next_entry().await.map_err(SftpError::IoError)? {
-                let name = entry.file_name().to_string_lossy().to_string();
-                let local_entry = entry.path();
-                let remote_entry = join_remote_path(&remote_dir, &name);
-                let metadata = match tokio::fs::symlink_metadata(&local_entry).await {
-                    Ok(metadata) => metadata,
-                    Err(error) => {
-                        warn!(
-                            "Skipping inaccessible local entry {:?}: {error}",
-                            local_entry
-                        );
-                        continue;
+        let mut scans = stream::FuturesUnordered::new();
+
+        loop {
+            while scans.len() < plan.worker_count
+                && let Some((local_dir, remote_dir, current_depth)) = pending.pop_front()
+            {
+                scans.push(async move {
+                    check_transfer_control(transfer_manager, transfer_id).await?;
+                    if current_depth >= MAX_DEPTH {
+                        return Err(SftpError::TransferError(format!(
+                            "upload recursion depth {MAX_DEPTH} reached at {}",
+                            local_dir.display()
+                        )));
                     }
-                };
+                    // A child directory is scheduled only after its parent scan
+                    // completes, preserving remote creation dependencies.
+                    let _ = self.mkdir(&remote_dir).await;
+                    let mut read_dir = tokio::fs::read_dir(&local_dir)
+                        .await
+                        .map_err(SftpError::IoError)?;
+                    let mut entries = Vec::new();
+                    while let Some(entry) =
+                        read_dir.next_entry().await.map_err(SftpError::IoError)?
+                    {
+                        entries.push(entry);
+                    }
+                    let entries = stream::iter(entries)
+                        .map(|entry| async move {
+                            let path = entry.path();
+                            match tokio::fs::symlink_metadata(&path).await {
+                                Ok(metadata) => Some(LocalUploadEntry {
+                                    name: entry.file_name().to_string_lossy().to_string(),
+                                    path,
+                                    metadata,
+                                }),
+                                Err(error) => {
+                                    warn!("Skipping inaccessible local entry {:?}: {error}", path);
+                                    None
+                                }
+                            }
+                        })
+                        .buffer_unordered(plan.worker_count)
+                        .filter_map(|entry| async move { entry })
+                        .collect::<Vec<_>>()
+                        .await;
+                    Ok::<_, SftpError>((remote_dir, current_depth, entries))
+                });
+            }
+
+            let Some(scan) = scans.next().await else {
+                break;
+            };
+            let (remote_dir, current_depth, entries) = scan?;
+            for entry in entries {
+                let remote_entry = join_remote_path(&remote_dir, &entry.name);
+                let local_entry = entry.path;
+                let metadata = entry.metadata;
                 if metadata.file_type().is_symlink() {
                     warn!(
                         "Skipping local symlink during SFTP upload: {:?}",
@@ -602,7 +679,7 @@ impl SftpSession {
                     continue;
                 }
                 if metadata.is_dir() {
-                    stack.push_back((local_entry, remote_entry, current_depth + 1));
+                    pending.push_back((local_entry, remote_entry, current_depth + 1));
                 } else if metadata.is_file() {
                     job_tx
                         .send(UploadFileJob {

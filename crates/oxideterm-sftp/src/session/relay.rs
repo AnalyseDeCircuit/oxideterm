@@ -448,7 +448,7 @@ impl SftpSession {
         let requested_parallelism = transfer_manager
             .as_ref()
             .map(|manager| manager.directory_parallelism())
-            .unwrap_or(1);
+            .unwrap_or(crate::DEFAULT_SFTP_DIRECTORY_PARALLELISM);
         let handle_limit = minimum_advertised_handle_limit(
             self.sftp.advertised_open_handle_limit(),
             destination.sftp.advertised_open_handle_limit(),
@@ -468,6 +468,7 @@ impl SftpSession {
                 &canonical_source,
                 &write_root,
                 &canonical_destination,
+                plan,
                 transfer_id,
                 &transfer_manager,
                 job_tx,
@@ -684,33 +685,48 @@ impl SftpSession {
         source_root: &str,
         write_root: &str,
         destination_root: &str,
+        plan: DirectoryTransferPlan,
         transfer_id: &str,
         transfer_manager: &Option<Arc<SftpTransferManager>>,
         job_tx: tokio::sync::mpsc::Sender<RelayFileJob>,
     ) -> Result<(), SftpError> {
-        let mut stack = VecDeque::from([(
+        let mut pending = VecDeque::from([(
             source_root.to_string(),
             write_root.to_string(),
             destination_root.to_string(),
             0,
+            false,
         )]);
-        while let Some((source_dir, write_dir, destination_dir, depth)) = stack.pop_back() {
-            check_transfer_control(transfer_manager, transfer_id).await?;
-            if depth >= RELAY_MAX_DIRECTORY_DEPTH {
-                return Err(SftpError::TransferError(format!(
-                    "remote relay recursion depth {RELAY_MAX_DIRECTORY_DEPTH} reached"
-                )));
+        let mut scans = stream::FuturesUnordered::new();
+
+        loop {
+            while scans.len() < plan.worker_count
+                && let Some((source_dir, write_dir, destination_dir, depth, create_write_dir)) =
+                    pending.pop_front()
+            {
+                scans.push(async move {
+                    check_transfer_control(transfer_manager, transfer_id).await?;
+                    if depth >= RELAY_MAX_DIRECTORY_DEPTH {
+                        return Err(SftpError::TransferError(format!(
+                            "remote relay recursion depth {RELAY_MAX_DIRECTORY_DEPTH} reached"
+                        )));
+                    }
+                    if create_write_dir {
+                        // Child creation stays on the destination's node-backed
+                        // session and completes before any child file is queued.
+                        destination
+                            .create_owned_relay_directory(&write_dir)
+                            .await?;
+                    }
+                    let entries = self.list_tree_entries_resolved(&source_dir).await?;
+                    Ok::<_, SftpError>((write_dir, destination_dir, depth, entries))
+                });
             }
-            let entries = self
-                .list_dir(
-                    &source_dir,
-                    Some(ListFilter {
-                        show_hidden: true,
-                        pattern: None,
-                        sort: SortOrder::Name,
-                    }),
-                )
-                .await?;
+
+            let Some(scan) = scans.next().await else {
+                break;
+            };
+            let (write_dir, destination_dir, depth, entries) = scan?;
             for entry in entries {
                 if entry.is_symlink {
                     debug!("Skipping symbolic link during remote SFTP relay");
@@ -720,14 +736,12 @@ impl SftpSession {
                 let destination_path = join_remote_path(&destination_dir, &entry.name);
                 match entry.file_type {
                     FileType::Directory => {
-                        destination
-                            .create_owned_relay_directory(&write_path)
-                            .await?;
-                        stack.push_back((
+                        pending.push_back((
                             entry.path,
                             write_path,
                             destination_path,
                             depth + 1,
+                            true,
                         ));
                     }
                     FileType::File => {
@@ -1093,27 +1107,15 @@ impl SftpSession {
                 .await
                 .map_err(|error| self.map_sftp_error(error, path));
         }
-
-        let entries = self
-            .sftp
-            .read_dir(path)
+        let plan = plan_directory_transfer(
+            crate::DEFAULT_SFTP_DIRECTORY_PARALLELISM,
+            self.sftp.advertised_open_handle_limit(),
+        );
+        // Cleanup shares the same bounded post-order scheduler as user deletion;
+        // it never follows links and does not outlive this relay operation.
+        self.delete_directory_tree_resolved(path, plan.worker_count)
             .await
-            .map_err(|error| self.map_sftp_error(error, path))?;
-        for entry in entries {
-            let name = entry.file_name();
-            if name == "." || name == ".." {
-                continue;
-            }
-            validate_remote_entry_name(&name)?;
-            let child_path = join_remote_path(path, &name);
-            // Cleanup never follows links, so it can safely remove a partially
-            // created tree even when enumeration stopped at its depth limit.
-            Box::pin(self.remove_relay_path_if_exists(&child_path)).await?;
-        }
-        self.sftp
-            .remove_dir(path)
-            .await
-            .map_err(|error| self.map_sftp_error(error, path))
+            .map(|_| ())
     }
 }
 

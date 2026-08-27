@@ -100,6 +100,7 @@ const SFTP_MODIFIED_COL: f32 = 96.0; // Tauri w-24
 const SFTP_DIRECTORY_PROGRESS_SAVE_INTERVAL_MS: u64 = 1_000; // Keep resume progress fresh without writing on every file tick.
 const SFTP_DIRECTORY_SPEED_WINDOW: Duration = Duration::from_secs(2); // Smooth bursts from parallel file workers.
 const SFTP_DIRECTORY_SPEED_SAMPLE_INTERVAL: Duration = Duration::from_millis(100); // Keep rolling history bounded at high event rates.
+const SFTP_DIRECTORY_PROGRESS_DELIVERY_INTERVAL: Duration = Duration::from_millis(100); // Coalesce small-file completion bursts before crossing into GPUI.
 const SFTP_BG_ACTIVE_BG_ALPHA: u32 = 0x66; // [data-bg-active] --color-theme-bg 40%
 const SFTP_BG_ACTIVE_PANEL_ALPHA: u32 = 0x66; // [data-bg-active] --color-theme-bg-panel 40%
 const SFTP_BG_ACTIVE_HOVER_ALPHA: u32 = 0x80; // [data-bg-active] --color-theme-bg-hover 50%

@@ -152,6 +152,39 @@ impl SftpSession {
         Ok(entries)
     }
 
+    async fn list_tree_entries_resolved(
+        &self,
+        canonical_path: &str,
+    ) -> Result<Vec<RemoteTreeEntry>, SftpError> {
+        let read_dir = self
+            .sftp
+            .read_dir(canonical_path)
+            .await
+            .map_err(|error| self.map_sftp_error(error, canonical_path))?;
+        let mut entries = Vec::new();
+
+        for entry in read_dir {
+            let name = entry.file_name();
+            if name == "." || name == ".." {
+                continue;
+            }
+            // Recursive operations need wire metadata only. Avoid canonicalizing,
+            // sorting, and resolving symlink targets on their latency-sensitive path.
+            validate_remote_entry_name(&name)?;
+            let metadata = entry.metadata();
+            let file_type = file_type_from_attrs(&metadata);
+            entries.push(RemoteTreeEntry {
+                path: join_remote_path(canonical_path, &name),
+                name,
+                file_type,
+                size: metadata.size.unwrap_or(0),
+                is_symlink: file_type == FileType::Symlink,
+            });
+        }
+
+        Ok(entries)
+    }
+
     pub async fn stat(&self, path: &str) -> Result<FileInfo, SftpError> {
         let canonical_path = self.resolve_path(path).await?;
         let metadata = self

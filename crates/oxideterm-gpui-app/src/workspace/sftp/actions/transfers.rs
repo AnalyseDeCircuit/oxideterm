@@ -714,13 +714,40 @@ impl WorkspaceApp {
             let progress_delivery = tx.clone();
             let progress_id = id;
             tokio::spawn(async move {
-                while let Some(progress) = progress_rx.recv().await {
+                let mut accumulator = DirectoryProgressAccumulator::default();
+                while let Some(first_progress) = progress_rx.recv().await {
+                    let mut progress = if is_directory {
+                        accumulator.update(first_progress)
+                    } else {
+                        first_progress
+                    };
+                    let mut progress_stream_closed = false;
+                    if is_directory {
+                        let delivery_deadline =
+                            tokio::time::sleep(SFTP_DIRECTORY_PROGRESS_DELIVERY_INTERVAL);
+                        tokio::pin!(delivery_deadline);
+                        loop {
+                            tokio::select! {
+                                next = progress_rx.recv() => match next {
+                                    Some(next) => progress = accumulator.update(next),
+                                    None => {
+                                        progress_stream_closed = true;
+                                        break;
+                                    }
+                                },
+                                _ = &mut delivery_deadline => break,
+                            }
+                        }
+                    }
                     let _ = progress_delivery.send(SftpWorkerResult::TransferProgress {
                         id: progress_id,
                         transferred: progress.transferred_bytes,
                         total: progress.total_bytes,
                         speed: progress.speed,
                     });
+                    if progress_stream_closed {
+                        break;
+                    }
                 }
             });
             let result = if is_directory && resume_progress.is_some() {
@@ -1082,12 +1109,33 @@ impl WorkspaceApp {
             tokio::spawn(async move {
                 let mut accumulator = DirectoryProgressAccumulator::default();
                 let mut last_directory_progress_save = std::time::Instant::now();
-                while let Some(progress) = progress_rx.recv().await {
-                    let progress = if is_directory {
-                        accumulator.update(progress)
+                while let Some(first_progress) = progress_rx.recv().await {
+                    let mut progress = if is_directory {
+                        accumulator.update(first_progress)
                     } else {
-                        progress
+                        first_progress
                     };
+                    let mut progress_stream_closed = false;
+                    if is_directory {
+                        // Drain every file event so aggregate totals remain exact,
+                        // but publish only the latest snapshot at the UI cadence.
+                        let delivery_deadline = tokio::time::sleep(
+                            SFTP_DIRECTORY_PROGRESS_DELIVERY_INTERVAL,
+                        );
+                        tokio::pin!(delivery_deadline);
+                        loop {
+                            tokio::select! {
+                                next = progress_rx.recv() => match next {
+                                    Some(next) => progress = accumulator.update(next),
+                                    None => {
+                                        progress_stream_closed = true;
+                                        break;
+                                    }
+                                },
+                                _ = &mut delivery_deadline => break,
+                            }
+                        }
+                    }
                     if let Some(stored) = directory_progress.as_mut() {
                         stored.total_bytes = stored.total_bytes.max(progress.total_bytes);
                         stored.update_progress(progress.transferred_bytes);
@@ -1116,6 +1164,9 @@ impl WorkspaceApp {
                         total: progress.total_bytes,
                         speed: progress.speed,
                     });
+                    if progress_stream_closed {
+                        break;
+                    }
                 }
             });
 

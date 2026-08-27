@@ -24,6 +24,24 @@ fn file_type_from_attrs(metadata: &FileAttributes) -> FileType {
 }
 
 fn sort_entries(entries: &mut [FileInfo], order: SortOrder) {
+    if matches!(order, SortOrder::Name | SortOrder::NameDesc) {
+        // Cache Unicode case folding once per entry. Comparator-side folding
+        // otherwise allocates for every O(n log n) name comparison.
+        match order {
+            SortOrder::Name => entries.sort_by_cached_key(|entry| {
+                (entry.file_type != FileType::Directory, entry.name.to_lowercase())
+            }),
+            SortOrder::NameDesc => entries.sort_by_cached_key(|entry| {
+                (
+                    entry.file_type != FileType::Directory,
+                    std::cmp::Reverse(entry.name.to_lowercase()),
+                )
+            }),
+            _ => unreachable!(),
+        }
+        return;
+    }
+
     entries.sort_by(|a, b| {
         let a_is_dir = a.file_type == FileType::Directory;
         let b_is_dir = b.file_type == FileType::Directory;
@@ -31,8 +49,7 @@ fn sort_entries(entries: &mut [FileInfo], order: SortOrder) {
             return b_is_dir.cmp(&a_is_dir);
         }
         match order {
-            SortOrder::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-            SortOrder::NameDesc => b.name.to_lowercase().cmp(&a.name.to_lowercase()),
+            SortOrder::Name | SortOrder::NameDesc => unreachable!(),
             SortOrder::Size => a.size.cmp(&b.size),
             SortOrder::SizeDesc => b.size.cmp(&a.size),
             SortOrder::Modified => a.modified.cmp(&b.modified),
@@ -434,5 +451,47 @@ mod local_diagnostics_tests {
         ] {
             assert!(!output.contains(forbidden), "{forbidden} leaked in {output}");
         }
+    }
+}
+
+#[cfg(test)]
+mod entry_sort_tests {
+    use super::*;
+
+    fn entry(name: &str, file_type: FileType) -> FileInfo {
+        FileInfo {
+            name: name.to_string(),
+            path: format!("/{name}"),
+            file_type,
+            size: 0,
+            modified: 0,
+            permissions: "000".to_string(),
+            owner: None,
+            group: None,
+            is_symlink: false,
+            symlink_target: None,
+        }
+    }
+
+    #[test]
+    fn cached_name_sort_keeps_directories_first_in_both_directions() {
+        let mut entries = vec![
+            entry("beta", FileType::File),
+            entry("Alpha", FileType::Directory),
+            entry("alpha", FileType::File),
+            entry("Beta", FileType::Directory),
+        ];
+
+        sort_entries(&mut entries, SortOrder::Name);
+        assert_eq!(
+            entries.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(),
+            ["Alpha", "Beta", "alpha", "beta"]
+        );
+
+        sort_entries(&mut entries, SortOrder::NameDesc);
+        assert_eq!(
+            entries.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(),
+            ["Beta", "Alpha", "beta", "alpha"]
+        );
     }
 }
