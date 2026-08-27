@@ -113,7 +113,7 @@ impl WorkspaceApp {
                 variant: copy.variant,
                 title: div()
                     .child(self.render_display_text_with_role(
-                        SelectableTextRole::PlainDocument,
+                        SelectableTextRole::NonSelectable,
                         "cloud-sync-confirm",
                         "title",
                         self.i18n.t(copy.title_key),

@@ -21,7 +21,7 @@ impl CloudSyncPageRenderer {
         cloud_sync_fact_card(
             &self.tokens,
             self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
+                SelectableTextRole::NonSelectable,
                 "cloud-sync-fact-label",
                 label_key,
                 label.clone(),
@@ -118,7 +118,7 @@ impl CloudSyncPageRenderer {
         let theme = self.tokens.ui;
         let model = cloud_sync_preview_card_model(preview, state, current_selection);
         let title = self.render_display_text_with_role(
-            SelectableTextRole::PlainDocument,
+            SelectableTextRole::NonSelectable,
             "cloud-sync-preview-title",
             model.copy.title_identity,
             self.i18n.t(model.copy.title_key),
@@ -234,7 +234,7 @@ impl CloudSyncPageRenderer {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let title = self.render_display_text_with_role(
-            SelectableTextRole::PlainDocument,
+            SelectableTextRole::NonSelectable,
             "cloud-sync-upload-preview-title",
             "upload",
             self.i18n.t("plugin.cloud_sync.sections.upload_preview"),
@@ -857,7 +857,7 @@ impl CloudSyncPageRenderer {
         self.render_cloud_sync_tone_chip(
             local_diff_tone(status),
             self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
+                SelectableTextRole::NonSelectable,
                 "cloud-sync-section-diff-chip",
                 (self.cloud_sync_local_diff_status_key(status), "local"),
                 label,
@@ -876,7 +876,7 @@ impl CloudSyncPageRenderer {
         self.render_cloud_sync_tone_chip(
             remote_diff_tone(status),
             self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
+                SelectableTextRole::NonSelectable,
                 "cloud-sync-section-diff-chip",
                 (self.cloud_sync_remote_diff_status_key(status), "remote"),
                 label,
@@ -895,7 +895,7 @@ impl CloudSyncPageRenderer {
         self.render_cloud_sync_tone_chip(
             health_tone(status),
             self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
+                SelectableTextRole::NonSelectable,
                 "cloud-sync-health-chip",
                 (self.cloud_sync_health_status_key(status), "status"),
                 label,
@@ -1172,7 +1172,7 @@ impl CloudSyncPageRenderer {
             ),
             Some(detail.into_any_element()),
             self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
+                SelectableTextRole::NonSelectable,
                 "cloud-sync-field-diff-row",
                 (item.section_label_key, item.item_name.as_str(), "status"),
                 self.i18n.t(status_key),

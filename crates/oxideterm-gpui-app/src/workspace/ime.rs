@@ -1275,7 +1275,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(index) = self.ime_index_for_position(target, position, window, cx) else {
+        let Some(index) = self.ime_index_for_selection_start(target, position, window, cx) else {
             if self.clear_ime_selection() {
                 cx.notify();
             }
@@ -1323,7 +1323,8 @@ impl WorkspaceApp {
             );
         }
 
-        let Some(index) = self.ime_index_for_position(target, event.position, window, cx) else {
+        let Some(index) = self.ime_index_for_selection_start(target, event.position, window, cx)
+        else {
             if self.clear_ime_selection() {
                 cx.notify();
             }
@@ -1395,7 +1396,7 @@ impl WorkspaceApp {
             };
             utf16_offset_for_byte_index(&text, byte_index)
         } else {
-            self.selectable_text_group_index_for_position(id, position)
+            self.selectable_text_group_closest_index_for_position(id, position)
                 .unwrap_or(text_len)
                 .min(text_len)
         };
@@ -1482,7 +1483,7 @@ impl WorkspaceApp {
         }
 
         if let WorkspaceImeTarget::ReadOnlyText(id) = target
-            && let Some(index) = self.selectable_text_group_index_for_position(id, position)
+            && let Some(index) = self.selectable_text_group_closest_index_for_position(id, position)
         {
             return Some(index.min(text_len));
         }
@@ -1551,6 +1552,32 @@ impl WorkspaceApp {
             ));
         }
         Some(self.ime_index_for_relative_x(target, &text, relative_x, window))
+    }
+
+    fn ime_index_for_selection_start(
+        &self,
+        target: WorkspaceImeTarget,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &App,
+    ) -> Option<usize> {
+        let WorkspaceImeTarget::ReadOnlyText(id) = target else {
+            // Editable controls intentionally map padding and trailing space to
+            // the nearest caret position across their complete input surface.
+            return self.ime_index_for_position(target, position, window, cx);
+        };
+        let text = self.text_for_ime_target(target, cx)?;
+        if text.is_empty() {
+            return None;
+        }
+
+        if let Some(layout) = self.selectable_text_layouts.get(&id) {
+            let byte_index = layout.index_for_position(position).ok()?.min(text.len());
+            return Some(utf16_offset_for_byte_index(&text, byte_index));
+        }
+
+        self.selectable_text_group_exact_index_for_position(id, position)
+            .map(|index| index.min(text.encode_utf16().count()))
     }
 
     fn multiline_ime_index_for_position(

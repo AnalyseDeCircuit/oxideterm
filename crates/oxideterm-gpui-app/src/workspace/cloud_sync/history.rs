@@ -109,7 +109,7 @@ impl CloudSyncPageRenderer {
             cloud_sync_history_empty(
                 &self.tokens,
                 self.render_display_text_with_role(
-                    SelectableTextRole::PlainDocument,
+                    SelectableTextRole::NonSelectable,
                     "cloud-sync-recent-history",
                     "empty",
                     self.i18n.t("plugin.cloud_sync.history_empty"),
@@ -230,7 +230,7 @@ impl CloudSyncPageRenderer {
             .unwrap_or_else(|| "—".to_string());
         self.cloud_sync_plugin_card(self.cloud_sync_has_background())
             .child(self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
+                SelectableTextRole::NonSelectable,
                 "cloud-sync-notes",
                 "title",
                 self.i18n.t("plugin.cloud_sync.sections.notes"),
@@ -346,7 +346,7 @@ impl CloudSyncPageRenderer {
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(rgb(theme.text))
                             .child(self.render_display_text_with_role(
-                                SelectableTextRole::PlainDocument,
+                                SelectableTextRole::NonSelectable,
                                 "cloud-sync-health-row",
                                 (label_key, "label"),
                                 self.i18n.t(label_key),
@@ -450,7 +450,7 @@ impl CloudSyncPageRenderer {
         cloud_sync_status_row(
             &self.tokens,
             self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
+                SelectableTextRole::NonSelectable,
                 "cloud-sync-status-row",
                 (label_key, "label"),
                 label,
@@ -468,7 +468,7 @@ impl CloudSyncPageRenderer {
                 )
             }),
             self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
+                SelectableTextRole::NonSelectable,
                 "cloud-sync-status-row",
                 (label_key, "status"),
                 self.i18n.t(status_key),
@@ -577,7 +577,7 @@ impl CloudSyncListRenderProjection {
         cloud_sync_section_title(
             &self.tokens,
             self.selectable_text(
-                SelectableTextRole::PlainDocument,
+                SelectableTextRole::NonSelectable,
                 "cloud-sync-section-title",
                 key,
                 self.i18n.t(key).to_uppercase(),
@@ -931,7 +931,7 @@ impl CloudSyncWorkspaceEntity {
             cloud_sync_history_empty(
                 &render.tokens,
                 render.selectable_text(
-                    SelectableTextRole::PlainDocument,
+                    SelectableTextRole::NonSelectable,
                     "cloud-sync-history",
                     "empty",
                     render.i18n.t("plugin.cloud_sync.history_empty"),
@@ -965,7 +965,7 @@ impl CloudSyncWorkspaceEntity {
             .justify_between()
             .gap(px(12.0))
             .child(render.selectable_text(
-                SelectableTextRole::PlainDocument,
+                SelectableTextRole::NonSelectable,
                 "cloud-sync-history",
                 "title",
                 render.i18n.t("plugin.cloud_sync.sections.sync_history"),

@@ -318,7 +318,7 @@ impl CloudSyncPageRenderer {
                 .font_weight(gpui::FontWeight::MEDIUM)
                 .text_color(rgb(theme.text_muted))
                 .child(self.render.selectable_text(
-                    SelectableTextRole::PlainDocument,
+                    SelectableTextRole::NonSelectable,
                     "cloud-sync-text-field-label",
                     label_key,
                     self.i18n.t(label_key),
@@ -498,7 +498,7 @@ impl CloudSyncPageRenderer {
         cloud_sync_select_field(
             &self.tokens,
             self.render.selectable_text(
-                SelectableTextRole::PlainDocument,
+                SelectableTextRole::NonSelectable,
                 "cloud-sync-select-label",
                 label_key,
                 self.i18n.t(label_key),
