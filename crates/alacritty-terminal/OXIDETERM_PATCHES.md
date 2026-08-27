@@ -25,13 +25,18 @@ source files are retained from the published package.
 - `src/term/mod.rs` implements `Handler::input_text` for printable ASCII spans.
 - The fast path is restricted to the ASCII charset, line-wrap mode, overwrite
   mode, single-column printable ASCII, and destinations without wide-cell
-  metadata. Every unsupported case resumes the existing scalar `input` path.
+  metadata. It uses VTE's printable-text callback contract with `str::is_ascii`
+  to avoid rescanning every byte; unsupported terminal state resumes the scalar
+  `input` path.
 - Batched cells clone the current cursor template, preserve hyperlink and style
   state, and keep cursor wrapping, scrolling, and damage behavior equivalent to
   scalar input.
 - `src/term/mod.rs` batches complete short ASCII lines when the cursor and full
   scroll region permit it, advancing the existing grid in bounded groups while
   retaining the scalar path for selections, scrollback views, and complex state.
+- `src/term/mod.rs` reports accumulated full-viewport upward scrolling separately
+  from incompatible full damage. This adds no work to printable-cell writes and
+  lets OxideTerm reuse retained snapshot rows after ordinary output scrolling.
 - Differential tests compare the batch and scalar paths across wrapping,
   scrolling, history, styles, Unicode, DEC charset, insert mode, and wide-cell
   overlap.

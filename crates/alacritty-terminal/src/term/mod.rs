@@ -193,6 +193,14 @@ pub enum TermDamage<'a> {
     /// The entire terminal is damaged.
     Full,
 
+    /// The full viewport scrolled upward, with additional row damage collected around it.
+    ScrollUp {
+        /// Number of rows shifted upward.
+        lines: usize,
+        /// Rows touched before or after the scroll operation.
+        damage: TermDamageIterator<'a>,
+    },
+
     /// Iterator over damaged lines in the terminal.
     Partial(TermDamageIterator<'a>),
 }
@@ -232,6 +240,9 @@ struct TermDamageState {
     /// Hint whether terminal should be damaged entirely regardless of the actual damage changes.
     full: bool,
 
+    /// Accumulated full-viewport upward scroll since the last damage reset.
+    scroll_up: usize,
+
     /// Information about damage on terminal lines.
     lines: Vec<LineDamageBounds>,
 
@@ -244,7 +255,7 @@ impl TermDamageState {
         let lines =
             (0..num_lines).map(|line| LineDamageBounds::undamaged(line, num_cols)).collect();
 
-        Self { full: true, lines, last_cursor: Default::default() }
+        Self { full: true, scroll_up: 0, lines, last_cursor: Default::default() }
     }
 
     #[inline]
@@ -252,6 +263,7 @@ impl TermDamageState {
         // Reset point, so old cursor won't end up outside of the viewport.
         self.last_cursor = Default::default();
         self.full = true;
+        self.scroll_up = 0;
 
         self.lines.clear();
         self.lines.reserve(num_lines);
@@ -275,7 +287,16 @@ impl TermDamageState {
     /// Reset information about terminal damage.
     fn reset(&mut self, num_cols: usize) {
         self.full = false;
+        self.scroll_up = 0;
         self.lines.iter_mut().for_each(|line| line.reset(num_cols));
+    }
+
+    /// Record a scroll without adding work to the per-cell damage path.
+    #[inline]
+    fn scroll_up(&mut self, lines: usize) {
+        // Compatibility and viewport-size checks are deferred until damage is consumed. Keeping
+        // this to one branch-free accumulation avoids taxing terminal parsing for render policy.
+        self.scroll_up = self.scroll_up.wrapping_add(lines);
     }
 }
 
@@ -478,7 +499,7 @@ impl<T> Term<T> {
 
         let previous_cursor = mem::replace(&mut self.damage.last_cursor, self.grid.cursor.point);
 
-        if self.damage.full {
+        if self.damage.full || self.damage.scroll_up >= self.screen_lines() {
             return TermDamage::Full;
         }
 
@@ -493,10 +514,15 @@ impl<T> Term<T> {
         // Always damage current cursor.
         self.damage_cursor();
 
-        // NOTE: damage which changes all the content when the display offset is non-zero (e.g.
-        // scrolling) is handled via full damage.
+        // The iterator remains viewport-relative. Snapshot consumers decide whether a scroll can
+        // be reused at the current display offset or must fall back to full damage.
         let display_offset = self.grid().display_offset();
-        TermDamage::Partial(TermDamageIterator::new(&self.damage.lines, display_offset))
+        let damage = TermDamageIterator::new(&self.damage.lines, display_offset);
+        if self.damage.scroll_up > 0 {
+            TermDamage::ScrollUp { lines: self.damage.scroll_up, damage }
+        } else {
+            TermDamage::Partial(damage)
+        }
     }
 
     /// Resets the terminal damage information.
@@ -800,7 +826,14 @@ impl<T> Term<T> {
         if (top <= *line) && region.end > *line {
             *line = cmp::max(*line - lines, top);
         }
-        self.mark_fully_damaged();
+        if region.start == 0 && region.end == Line(self.screen_lines() as i32) {
+            // Full-screen upward scrolling preserves retained row identity. Keep only the
+            // aggregate transform so snapshot consumers can reuse those rows without charging
+            // every parsed cell for generation bookkeeping.
+            self.damage.scroll_up(lines);
+        } else {
+            self.mark_fully_damaged();
+        }
     }
 
     fn deccolm(&mut self)
@@ -1154,8 +1187,7 @@ impl<T: EventListener> Handler for Term<T> {
     /// A printable text span to write through the common single-column ASCII path.
     fn input_text(&mut self, text: &str) {
         let active_charset = self.grid.cursor.charsets[self.active_charset];
-        let printable_ascii = text.bytes().all(|byte| (b' '..=b'~').contains(&byte));
-        let supports_batch = printable_ascii
+        let supports_batch = text.is_ascii()
             && active_charset == StandardCharset::Ascii
             && self.mode.contains(TermMode::LINE_WRAP)
             && !self.mode.contains(TermMode::INSERT)
@@ -2732,7 +2764,11 @@ mod tests {
             assert_eq!(batch.grid[Line(line)], scalar.grid[Line(line)]);
         }
         assert_eq!(batch.damage.full, scalar.damage.full);
-        if !batch.damage.full {
+        assert_eq!(batch.damage.scroll_up, scalar.damage.scroll_up);
+        if !batch.damage.full && batch.damage.scroll_up == 0 {
+            // Scroll damage implicitly replaces every newly exposed row. The scalar path also
+            // records cell bounds for those rows, while the batched path relies on that stronger
+            // scroll contract, so raw line bounds need only match when no scroll occurred.
             assert_eq!(batch.damage.lines, scalar.damage.lines);
         }
     }
@@ -3296,6 +3332,9 @@ mod tests {
 
         let mut damaged_lines = match term.damage() {
             TermDamage::Full => panic!("Expected partial damage, however got Full"),
+            TermDamage::ScrollUp { .. } => {
+                panic!("Expected partial damage, however got scrolling damage")
+            },
             TermDamage::Partial(damaged_lines) => damaged_lines,
         };
         assert_eq!(damaged_lines.next(), Some(LineDamageBounds { line: 0, left, right }));
@@ -3309,6 +3348,9 @@ mod tests {
 
         match term.damage() {
             TermDamage::Full => (),
+            TermDamage::ScrollUp { .. } => {
+                panic!("Expected Full damage, however got scrolling damage")
+            },
             TermDamage::Partial(_) => panic!("Expected Full damage, however got Partial "),
         };
         term.reset_damage();
@@ -3322,6 +3364,9 @@ mod tests {
         }
         let mut damaged_lines = match term.damage() {
             TermDamage::Full => panic!("Expected partial damage, however got Full"),
+            TermDamage::ScrollUp { .. } => {
+                panic!("Expected partial damage, however got scrolling damage")
+            },
             TermDamage::Partial(damaged_lines) => damaged_lines,
         };
         assert_eq!(damaged_lines.next(), None);
@@ -3337,6 +3382,9 @@ mod tests {
         let display_offset = term.grid().display_offset();
         let mut damaged_lines = match term.damage() {
             TermDamage::Full => panic!("Expected partial damage, however got Full"),
+            TermDamage::ScrollUp { .. } => {
+                panic!("Expected partial damage, however got scrolling damage")
+            },
             TermDamage::Partial(damaged_lines) => damaged_lines,
         };
         assert_eq!(
@@ -3446,6 +3494,24 @@ mod tests {
         term.reverse_index();
         assert_eq!(term.damage.lines[7], LineDamageBounds { line: 7, left: 8, right: 8 });
         assert_eq!(term.damage.lines[6], LineDamageBounds { line: 6, left: 8, right: 8 });
+    }
+
+    #[test]
+    fn full_viewport_scroll_damage_accumulates_until_an_incompatible_change() {
+        let size = TermSize::new(10, 10);
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        term.goto(9, 0);
+        term.reset_damage();
+
+        term.newline();
+        term.newline();
+        match term.damage() {
+            TermDamage::ScrollUp { lines, .. } => assert_eq!(lines, 2),
+            _ => panic!("Expected accumulated full-viewport scrolling damage"),
+        }
+
+        term.set_color(1, Rgb::default());
+        assert!(matches!(term.damage(), TermDamage::Full));
     }
 
     #[test]

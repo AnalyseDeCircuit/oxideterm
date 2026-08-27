@@ -804,24 +804,52 @@ pub(crate) fn incremental_snapshot_from_term<T: EventListener>(
 ) -> TerminalSnapshot {
     let scrollback_lines = term.total_lines().saturating_sub(term.screen_lines());
     let display_offset = term.grid().display_offset().min(scrollback_lines);
-    let compatible = previous.cols == size.cols
+    let shape_compatible = previous.cols == size.cols
         && previous.rows == size.rows
         && previous.display_offset == display_offset
-        && previous.scrollback_lines == scrollback_lines
         && previous.lines.len() == size.rows;
 
-    let dirty_rows = match term.damage() {
-        TermDamage::Full => None,
-        TermDamage::Partial(damage) => Some(
-            damage
-                .filter(|line| line.is_damaged() && line.line < size.rows)
-                .map(|line| line.line)
-                .collect::<Vec<_>>(),
+    let (dirty_rows, scroll_up) = match term.damage() {
+        TermDamage::Full => (None, None),
+        TermDamage::ScrollUp { lines, damage } => (
+            Some(
+                damage
+                    .filter(|line| line.is_damaged() && line.line < size.rows)
+                    .map(|line| line.line)
+                    .collect::<Vec<_>>(),
+            ),
+            Some(lines),
+        ),
+        TermDamage::Partial(damage) => (
+            Some(
+                damage
+                    .filter(|line| line.is_damaged() && line.line < size.rows)
+                    .map(|line| line.line)
+                    .collect::<Vec<_>>(),
+            ),
+            None,
         ),
     };
     term.reset_damage();
 
-    if !compatible || dirty_rows.is_none() {
+    if let (Some(scroll_up), Some(dirty_rows)) = (scroll_up, dirty_rows.as_deref())
+        && shape_compatible
+        && display_offset == 0
+        && scroll_up < size.rows
+    {
+        return snapshot_from_term_after_scroll_up(
+            term,
+            size,
+            graphics,
+            scrollback_lines,
+            scroll_up,
+            dirty_rows,
+            previous,
+        );
+    }
+
+    let compatible = shape_compatible && previous.scrollback_lines == scrollback_lines;
+    if !compatible || dirty_rows.is_none() || scroll_up.is_some() {
         return snapshot_from_term_with_display_offset(
             term,
             size,
@@ -839,6 +867,46 @@ pub(crate) fn incremental_snapshot_from_term<T: EventListener>(
         snapshot.lines[row] = next_row;
     }
     refresh_snapshot_metadata(&mut snapshot, term, size, graphics, display_offset);
+    snapshot
+}
+
+fn snapshot_from_term_after_scroll_up<T: EventListener>(
+    term: &Term<T>,
+    size: TerminalSize,
+    graphics: &TerminalGraphicsState,
+    scrollback_lines: usize,
+    scroll_up: usize,
+    dirty_rows: &[usize],
+    previous: &TerminalSnapshot,
+) -> TerminalSnapshot {
+    let mut rebuild_rows = vec![false; size.rows];
+    rebuild_rows[size.rows - scroll_up..].fill(true);
+    for &dirty_row in dirty_rows {
+        // Damage can be recorded on either side of one or more scrolls. Rebuilding every possible
+        // destination keeps the transform correct without adding per-cell generations to parsing.
+        let first_possible_row = dirty_row.saturating_sub(scroll_up);
+        let last_possible_row = dirty_row.min(size.rows - 1);
+        rebuild_rows[first_possible_row..=last_possible_row].fill(true);
+    }
+
+    let mut snapshot = previous.clone();
+    snapshot.display_offset = 0;
+    snapshot.scrollback_lines = scrollback_lines;
+    for (row, rebuild) in rebuild_rows.into_iter().enumerate() {
+        let previous_row = row + scroll_up;
+        if !rebuild {
+            snapshot.lines[row] = previous.lines[previous_row].clone();
+            snapshot.lines[row].absolute_line = row as i64;
+            continue;
+        }
+
+        let mut next_row = snapshot_row_from_term(term, size, 0, row);
+        if previous_row < previous.lines.len() {
+            next_row.line_id = previous.lines[previous_row].line_id;
+        }
+        snapshot.lines[row] = next_row;
+    }
+    refresh_snapshot_metadata(&mut snapshot, term, size, graphics, 0);
     snapshot
 }
 
@@ -1243,6 +1311,70 @@ mod incremental_snapshot_tests {
         let full = snapshot_from_term(&term, size, &graphics);
 
         assert!(next.lines[1].text().starts_with("prompt-completed"));
+        assert_snapshot_content_eq(&next, &full);
+    }
+
+    #[test]
+    fn incremental_snapshot_reuses_unchanged_rows_after_output_scroll() {
+        let size = TerminalSize {
+            cols: 16,
+            rows: 3,
+            cell_width: 0,
+            cell_height: 0,
+        };
+        let (listener, _events) = local_event_channel();
+        let mut term = Term::new(Config::default(), &size, listener);
+        let graphics = TerminalGraphicsState::default();
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(&mut term, b"one\r\ntwo\r\nprompt");
+        let initial = snapshot_from_term(&term, size, &graphics);
+        // Consume startup full damage so this assertion covers the steady output path.
+        let previous = incremental_snapshot_from_term(&mut term, size, &graphics, &initial);
+
+        parser.advance(&mut term, b"-completed\r\nnext");
+        let next = incremental_snapshot_from_term(&mut term, size, &graphics, &previous);
+        let full = snapshot_from_term(&term, size, &graphics);
+
+        assert!(Arc::ptr_eq(
+            &previous.lines[1].cells,
+            &next.lines[0].cells
+        ));
+        assert!(!Arc::ptr_eq(
+            &previous.lines[2].cells,
+            &next.lines[1].cells
+        ));
+        assert_snapshot_content_eq(&next, &full);
+    }
+
+    #[test]
+    fn incremental_snapshot_preserves_rows_across_multiple_output_scrolls() {
+        let size = TerminalSize {
+            cols: 16,
+            rows: 5,
+            cell_width: 0,
+            cell_height: 0,
+        };
+        let (listener, _events) = local_event_channel();
+        let mut term = Term::new(Config::default(), &size, listener);
+        let graphics = TerminalGraphicsState::default();
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(&mut term, b"zero\r\none\r\ntwo\r\nthree\r\nprompt");
+        let initial = snapshot_from_term(&term, size, &graphics);
+        let previous = incremental_snapshot_from_term(&mut term, size, &graphics, &initial);
+
+        parser.advance(&mut term, b"-completed\r\nnext-a\r\nnext-b");
+        let next = incremental_snapshot_from_term(&mut term, size, &graphics, &previous);
+        let full = snapshot_from_term(&term, size, &graphics);
+
+        assert!(Arc::ptr_eq(
+            &previous.lines[2].cells,
+            &next.lines[0].cells
+        ));
+        assert!(Arc::ptr_eq(
+            &previous.lines[3].cells,
+            &next.lines[1].cells
+        ));
+        assert!(next.lines[2].text().starts_with("prompt-completed"));
         assert_snapshot_content_eq(&next, &full);
     }
 

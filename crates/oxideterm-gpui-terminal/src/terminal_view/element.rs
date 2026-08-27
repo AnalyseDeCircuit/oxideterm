@@ -69,7 +69,7 @@ pub(crate) struct TerminalElement {
     transient_command_highlight: Option<TransientCommandHighlight>,
     transient_command_highlight_signature: u64,
     semantic_coloring: bool,
-    semantic_scheme: Arc<CompiledSemanticScheme>,
+    semantic_scheme: Option<Arc<CompiledSemanticScheme>>,
     semantic_shell: SemanticShellDialect,
     semantic_style_signature: u64,
     hovered_link: Option<TerminalLinkRange>,
@@ -112,6 +112,7 @@ pub(crate) struct TerminalElementLayout {
     pub(crate) ime_cursor_bounds: Option<Bounds<Pixels>>,
     pub(crate) cursor: Option<TerminalCursor>,
     pub(crate) scrollbar: Option<TerminalScrollbar>,
+    cached_rows: Vec<CachedTerminalRowLayout>,
 }
 
 #[derive(Clone)]
@@ -175,6 +176,12 @@ struct TerminalRowLayout {
     selections: Vec<TerminalRowRect>,
     text_runs: Vec<TerminalRowTextRun>,
     cursor: Option<TerminalRowCursor>,
+}
+
+#[derive(Clone)]
+struct CachedTerminalRowLayout {
+    row: usize,
+    layout: Arc<TerminalRowLayout>,
 }
 
 #[derive(Clone)]
@@ -496,17 +503,6 @@ impl TerminalElement {
     ) -> Self {
         let viewport_rows = snapshot.rows;
         let scrollbar_display_offset = snapshot.display_offset as f32;
-        let highlight_rules = Arc::from(Vec::<TerminalHighlightRule>::new());
-        let semantic_coloring = false;
-        let semantic_scheme = Arc::new(compiled_builtin_scheme(SemanticScheme::Balanced).clone());
-        let semantic_shell = SemanticShellDialect::Auto;
-        let highlight_rules_signature = terminal_highlight_rules_signature(&highlight_rules);
-        let semantic_style_signature = terminal_semantic_style_signature(
-            semantic_coloring,
-            &theme,
-            &semantic_scheme,
-            semantic_shell,
-        );
         Self {
             snapshot,
             rendered_images,
@@ -522,14 +518,14 @@ impl TerminalElement {
             command_marks: Arc::from([]),
             selected_command_mark_id: None,
             hovered_command_mark_id: None,
-            highlight_rules,
-            highlight_rules_signature,
+            highlight_rules: Arc::from([]),
+            highlight_rules_signature: 0,
             transient_command_highlight: None,
             transient_command_highlight_signature: 0,
-            semantic_coloring,
-            semantic_scheme,
-            semantic_shell,
-            semantic_style_signature,
+            semantic_coloring: false,
+            semantic_scheme: None,
+            semantic_shell: SemanticShellDialect::Auto,
+            semantic_style_signature: 0,
             hovered_link,
             detect_file_paths_as_links: true,
             bidi_enabled,
@@ -566,31 +562,38 @@ impl TerminalElement {
         self
     }
 
-    pub(crate) fn semantic_coloring(mut self, enabled: bool) -> Self {
+    pub(crate) fn semantic_configuration(
+        mut self,
+        enabled: bool,
+        scheme: Arc<CompiledSemanticScheme>,
+        shell: SemanticShellDialect,
+    ) -> Self {
+        // Production rendering supplies all semantic inputs together, so hash the final state once
+        // instead of rebuilding the same cache signature after three builder calls.
         self.semantic_coloring = enabled;
-        self.refresh_semantic_style_signature();
-        self
-    }
-
-    pub(crate) fn semantic_scheme(mut self, scheme: Arc<CompiledSemanticScheme>) -> Self {
-        self.semantic_scheme = scheme;
-        self.refresh_semantic_style_signature();
-        self
-    }
-
-    pub(crate) fn semantic_shell(mut self, shell: SemanticShellDialect) -> Self {
+        self.semantic_scheme = Some(scheme);
         self.semantic_shell = shell;
         self.refresh_semantic_style_signature();
         self
     }
 
     fn refresh_semantic_style_signature(&mut self) {
+        let semantic_scheme = self
+            .semantic_scheme
+            .as_deref()
+            .unwrap_or_else(|| compiled_builtin_scheme(SemanticScheme::Balanced));
         self.semantic_style_signature = terminal_semantic_style_signature(
             self.semantic_coloring,
             &self.theme,
-            &self.semantic_scheme,
+            semantic_scheme,
             self.semantic_shell,
         );
+    }
+
+    fn semantic_scheme(&self) -> &CompiledSemanticScheme {
+        self.semantic_scheme
+            .as_deref()
+            .unwrap_or_else(|| compiled_builtin_scheme(SemanticScheme::Balanced))
     }
 
     pub(crate) fn detect_file_paths_as_links(mut self, enabled: bool) -> Self {
@@ -747,6 +750,7 @@ impl TerminalElement {
         images.sort_by_key(|image| (image.image.snapshot.z_index, image.image.snapshot.id.0));
         let mut text_runs = Vec::new();
         let mut timestamp_runs = Vec::new();
+        let mut cached_rows = Vec::new();
         let mut cursor = None;
         let scrollbar = terminal_scrollbar_for_viewport_display_offset(
             &self.snapshot,
@@ -773,7 +777,7 @@ impl TerminalElement {
             let Some(row) = self.snapshot.lines.get(row_index) else {
                 continue;
             };
-            let row_layout = if let Some(cache) = cache.as_deref_mut() {
+            if let Some(cache) = cache.as_deref_mut() {
                 let logical_line = logical_lines
                     .line_for_row(row_index)
                     .expect("visible snapshot rows must have logical line metadata");
@@ -783,32 +787,46 @@ impl TerminalElement {
                     logical_line,
                     semantic_role,
                 );
-                cache.get_or_insert_row_with(key, self.performance_metrics_enabled, || {
-                    self.row_layout(
-                        row_index,
-                        row,
-                        &highlight_layout,
-                        &link_ranges,
-                        terminal_background,
-                    )
-                })
+                let row_layout =
+                    cache.get_or_insert_row_with(key, self.performance_metrics_enabled, || {
+                        self.row_layout(
+                            row_index,
+                            row,
+                            &highlight_layout,
+                            &link_ranges,
+                            terminal_background,
+                        )
+                    });
+                if let Some(row_cursor) = row_layout.cursor {
+                    cursor = Some(TerminalCursor {
+                        row: row_index,
+                        col: row_cursor.col,
+                        shape: row_cursor.shape,
+                    });
+                }
+                // Keep cached row data shared through paint instead of rebuilding flattened
+                // vectors after every cache hit.
+                cached_rows.push(CachedTerminalRowLayout {
+                    row: row_index,
+                    layout: row_layout,
+                });
             } else {
-                Arc::new(self.row_layout(
+                let row_layout = self.row_layout(
                     row_index,
                     row,
                     &highlight_layout,
                     &link_ranges,
                     terminal_background,
-                ))
-            };
-            append_cached_row_layout(
-                row_index,
-                &row_layout,
-                &mut backgrounds,
-                &mut selections,
-                &mut text_runs,
-                &mut cursor,
-            );
+                );
+                append_cached_row_layout(
+                    row_index,
+                    &row_layout,
+                    &mut backgrounds,
+                    &mut selections,
+                    &mut text_runs,
+                    &mut cursor,
+                );
+            }
             if let Some(timestamp_run) = self.timestamp_run_for_row(row_index, row.line_id) {
                 timestamp_runs.push(timestamp_run);
             }
@@ -859,6 +877,7 @@ impl TerminalElement {
             ime_cursor_bounds,
             cursor,
             scrollbar,
+            cached_rows,
         }
     }
 
@@ -945,7 +964,7 @@ impl TerminalElement {
                 &self.command_marks,
                 rows,
                 &self.theme,
-                &self.semantic_scheme,
+                self.semantic_scheme(),
                 self.semantic_shell,
                 &mut layout,
             );
@@ -2088,6 +2107,17 @@ impl Element for TerminalElement {
                 for rect in &layout.backgrounds {
                     paint_terminal_rect(rect, origin, &self.metrics, window);
                 }
+                for cached_row in &layout.cached_rows {
+                    for rect in &cached_row.layout.backgrounds {
+                        paint_terminal_row_rect(
+                            cached_row.row,
+                            rect,
+                            origin,
+                            &self.metrics,
+                            window,
+                        );
+                    }
+                }
                 for rect in &layout.highlight_backgrounds {
                     paint_terminal_rect(rect, origin, &self.metrics, window);
                 }
@@ -2114,6 +2144,17 @@ impl Element for TerminalElement {
                 for rect in &layout.selections {
                     paint_terminal_rect(rect, origin, &self.metrics, window);
                 }
+                for cached_row in &layout.cached_rows {
+                    for rect in &cached_row.layout.selections {
+                        paint_terminal_row_rect(
+                            cached_row.row,
+                            rect,
+                            origin,
+                            &self.metrics,
+                            window,
+                        );
+                    }
+                }
                 paint_text_runs_by_row(
                     &layout.text_runs,
                     origin,
@@ -2122,6 +2163,17 @@ impl Element for TerminalElement {
                     window,
                     cx,
                 );
+                for cached_row in &layout.cached_rows {
+                    paint_cached_text_runs_for_row(
+                        cached_row.row,
+                        &cached_row.layout.text_runs,
+                        origin,
+                        self.snapshot.cols,
+                        &self.metrics,
+                        window,
+                        cx,
+                    );
+                }
                 if let Some(ghost_text) = &layout.ghost_text {
                     paint_ghost_text_run(ghost_text, origin, &self.metrics, window, cx);
                 }
@@ -2315,8 +2367,8 @@ mod cache_tests {
         let mut cache = TerminalLayoutCache::default();
         let first = stable.layout_for_rows(0..1, Some(&mut cache));
         let second = stable.layout_for_rows(0..1, Some(&mut cache));
-        let first_cache = first.text_runs[0].cache.as_ref().expect("cached text run");
-        let second_cache = second.text_runs[0].cache.as_ref().expect("cached text run");
+        let first_cache = &first.cached_rows[0].layout.text_runs[0].cache;
+        let second_cache = &second.cached_rows[0].layout.text_runs[0].cache;
         assert!(Arc::ptr_eq(first_cache, second_cache));
 
         let mut changed_row = row;
@@ -2325,10 +2377,7 @@ mod cache_tests {
         changed_row.refresh_signature();
         let changed = element(snapshot(0, vec![changed_row]));
         let changed_layout = changed.layout_for_rows(0..1, Some(&mut cache));
-        let changed_cache = changed_layout.text_runs[0]
-            .cache
-            .as_ref()
-            .expect("changed cached text run");
+        let changed_cache = &changed_layout.cached_rows[0].layout.text_runs[0].cache;
         assert!(!Arc::ptr_eq(first_cache, changed_cache));
     }
 
