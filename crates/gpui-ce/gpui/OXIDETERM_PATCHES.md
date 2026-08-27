@@ -128,9 +128,11 @@ consume later clicks. `crates/gpui-ce/gpui_windows/src/events.rs` immediately ap
 cursor handle to the currently hovered window while respecting cursor hiding, clears an unreleased
 non-client caption press when the pointer leaves the window, and converts `WM_CAPTURECHANGED` or
 `WM_CANCELMODE` into exactly one deferred mouse-up event. The deferred delivery is required because
-Win32 can revoke capture re-entrantly while GPUI's input callback is borrowed. Preserve both parts:
-capture recovery restores hit testing on every desktop backend, while the Windows update prevents
-an I-beam, drag, or pressed caption control from surviving native pointer ownership loss.
+Win32 can revoke capture re-entrantly while GPUI's input callback is borrowed. Every client mouse
+move also reconciles the captured button against the authoritative Win32 message flags and emits a
+missing mouse-up before the move when they disagree. Preserve all three parts: capture recovery
+restores hit testing on every desktop backend, while the Windows updates prevent an I-beam, drag,
+or pressed caption control from surviving native pointer ownership loss or a dropped release.
 
 `Window::request_close` routes programmatic close controls through the same stored
 `on_window_should_close` handler as an operating-system close event before marking the window for

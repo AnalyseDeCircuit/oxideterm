@@ -37,6 +37,32 @@ pub(crate) const WM_GPUI_MOUSE_CAPTURE_LOST: u32 = WM_USER + 11;
 
 const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
 
+fn pressed_mouse_button(flags: MODIFIERKEYS_FLAGS) -> Option<MouseButton> {
+    if flags.contains(MK_LBUTTON) {
+        Some(MouseButton::Left)
+    } else if flags.contains(MK_RBUTTON) {
+        Some(MouseButton::Right)
+    } else if flags.contains(MK_MBUTTON) {
+        Some(MouseButton::Middle)
+    } else if flags.contains(MK_XBUTTON1) {
+        Some(MouseButton::Navigate(NavigationDirection::Back))
+    } else if flags.contains(MK_XBUTTON2) {
+        Some(MouseButton::Navigate(NavigationDirection::Forward))
+    } else {
+        None
+    }
+}
+
+fn mouse_button_is_pressed(flags: MODIFIERKEYS_FLAGS, button: MouseButton) -> bool {
+    match button {
+        MouseButton::Left => flags.contains(MK_LBUTTON),
+        MouseButton::Right => flags.contains(MK_RBUTTON),
+        MouseButton::Middle => flags.contains(MK_MBUTTON),
+        MouseButton::Navigate(NavigationDirection::Back) => flags.contains(MK_XBUTTON1),
+        MouseButton::Navigate(NavigationDirection::Forward) => flags.contains(MK_XBUTTON2),
+    }
+}
+
 /// Coordinates window draws on the UI thread. Owned by the platform and
 /// shared with every window (like `WindowsPlatformState::cursor_visible`),
 /// because the coordination is inherently cross-window: while window A is
@@ -396,25 +422,28 @@ impl WindowsWindowInner {
         self.start_tracking_mouse(handle, TME_LEAVE);
         self.restore_cursor_after_hide();
 
+        let button_flags = MODIFIERKEYS_FLAGS(wparam.loword() as u32);
+        let pressed_button = pressed_mouse_button(button_flags);
+        let x = lparam.signed_loword() as f32;
+        let y = lparam.signed_hiword() as f32;
+        if let Some(captured_button) = self.state.captured_mouse_button.get()
+            && !mouse_button_is_pressed(button_flags, captured_button)
+        {
+            // Win32 can omit both the matching button-up and capture-loss
+            // notification around nested native loops. The message flags are
+            // authoritative, so unwind GPUI before dispatching this move.
+            self.state.captured_mouse_button.set(None);
+            if self.state.pending_capture_lost.get() == Some(captured_button) {
+                self.state.pending_capture_lost.set(None);
+            }
+            unsafe { ReleaseCapture().log_err() };
+            self.dispatch_mouse_up(handle, captured_button, x, y);
+        }
+
         let Some(mut func) = self.state.callbacks.input.take() else {
             return Some(1);
         };
         let scale_factor = self.state.scale_factor.get();
-
-        let pressed_button = match MODIFIERKEYS_FLAGS(wparam.loword() as u32) {
-            flags if flags.contains(MK_LBUTTON) => Some(MouseButton::Left),
-            flags if flags.contains(MK_RBUTTON) => Some(MouseButton::Right),
-            flags if flags.contains(MK_MBUTTON) => Some(MouseButton::Middle),
-            flags if flags.contains(MK_XBUTTON1) => {
-                Some(MouseButton::Navigate(NavigationDirection::Back))
-            }
-            flags if flags.contains(MK_XBUTTON2) => {
-                Some(MouseButton::Navigate(NavigationDirection::Forward))
-            }
-            _ => None,
-        };
-        let x = lparam.signed_loword() as f32;
-        let y = lparam.signed_hiword() as f32;
         let input = PlatformInput::MouseMove(MouseMoveEvent {
             position: logical_point(x, y, scale_factor),
             pressed_button,
