@@ -757,7 +757,7 @@ impl WorkspaceApp {
                     .text_size(px(SESSION_FOCUS_EMPTY_TITLE_TEXT_SIZE))
                     .text_color(rgb(theme.text_muted))
                     .child(self.render_display_text_with_role(
-                        SelectableTextRole::PlainDocument,
+                        SelectableTextRole::NonSelectable,
                         "session-focus-empty-title",
                         title_key,
                         self.i18n.t(title_key),
@@ -774,7 +774,7 @@ impl WorkspaceApp {
                             | (SESSION_FOCUS_EMPTY_SUBTITLE_ALPHA * 255.0).round() as u32,
                     ))
                     .child(self.render_display_text_with_role_and_alpha(
-                        SelectableTextRole::PlainDocument,
+                        SelectableTextRole::NonSelectable,
                         "session-focus-empty-subtitle",
                         subtitle_key,
                         self.i18n.t(subtitle_key),
