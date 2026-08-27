@@ -48,6 +48,30 @@ mod tests {
     }
 
     #[test]
+    fn single_channel_nodes_reject_unmanaged_shared_consumers() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry);
+        let node_id = NodeId::new("single-channel");
+        router.upsert_node(
+            node_id.clone(),
+            SshConfig {
+                ssh_channel_strategy:
+                    oxideterm_connections::SshChannelStrategy::DedicatedPerConsumer,
+                ..SshConfig::default()
+            },
+        );
+
+        let error = router
+            .acquire_connection(
+                &node_id,
+                ConnectionConsumer::Sftp("unmanaged".to_string()),
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, RouteError::CapabilityUnavailable(_)));
+    }
+
+    #[test]
     fn terminal_url_tracks_bound_endpoint() {
         let registry = SshConnectionRegistry::default();
         let router = NodeRouter::new(registry);

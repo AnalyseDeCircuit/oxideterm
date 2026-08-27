@@ -44,8 +44,8 @@ use zeroize::Zeroizing;
 
 use crate::{
     AuthMethod, ConnectionConsumer, ConnectionProgressReporter, ConnectionState,
-    ConnectionTraceStage, ConnectionTransportStatus, KeepaliveProbeResult, ProxyHopConfig,
-    SshConfig, SshConnectionHandle, SshConnectionRegistry,
+    ConnectionTraceStage, ConnectionTransportStatus, DedicatedConnectionLease,
+    KeepaliveProbeResult, ProxyHopConfig, SshConfig, SshConnectionHandle, SshConnectionRegistry,
     agent_endpoint::{
         SshAgentEndpoint, resolve_ssh_agent_endpoint, resolve_ssh_agent_forwarding_endpoint,
     },

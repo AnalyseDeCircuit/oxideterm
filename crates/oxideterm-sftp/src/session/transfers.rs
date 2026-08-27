@@ -719,7 +719,8 @@ impl SftpSession {
 
     async fn open_directory_pool(&self, channel_count: usize) -> DirectorySftpPool {
         let mut pool = DirectorySftpPool::new(self.sftp.clone());
-        let auxiliary_count = channel_count.saturating_sub(1);
+        let auxiliary_count =
+            directory_auxiliary_channel_count(channel_count, self.single_channel_transport);
         // Auxiliary sessions are owned by this directory batch. Opening them
         // concurrently shortens startup without tying them to any file future.
         let mut openings = stream::iter(0..auxiliary_count)
@@ -1291,6 +1292,17 @@ fn should_retry_upload_without_temporary_file(
         )
 }
 
+fn directory_auxiliary_channel_count(
+    channel_count: usize,
+    single_channel_transport: bool,
+) -> usize {
+    if single_channel_transport {
+        0
+    } else {
+        channel_count.saturating_sub(1)
+    }
+}
+
 fn upload_buffer_len(total_bytes: u64, offset: u64) -> usize {
     // Tiny uploads should not allocate and zero the full large-file work buffer.
     total_bytes
@@ -1301,6 +1313,12 @@ fn upload_buffer_len(total_bytes: u64, offset: u64) -> usize {
 #[cfg(test)]
 mod transfer_safety_tests {
     use super::*;
+
+    #[test]
+    fn single_channel_directory_transfers_never_open_sibling_channels() {
+        assert_eq!(directory_auxiliary_channel_count(8, true), 0);
+        assert_eq!(directory_auxiliary_channel_count(8, false), 7);
+    }
 
     fn resumable_download() -> StoredTransferProgress {
         let mut progress = StoredTransferProgress::new(

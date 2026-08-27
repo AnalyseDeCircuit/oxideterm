@@ -682,6 +682,41 @@ impl SshTransportClient {
             .await
     }
 
+    pub async fn connect_dedicated_consumer_with_registry(
+        self,
+        registry: SshConnectionRegistry,
+        consumer: ConnectionConsumer,
+        parent_connection_id: Option<String>,
+    ) -> Result<DedicatedConnectionLease, SshTransportError> {
+        let handle = if let Some(parent_connection_id) = parent_connection_id {
+            let connection = registry.acquire_dedicated(self.config.clone(), consumer.clone());
+            let connection_id = connection.connection_id().to_string();
+            let parent_consumer =
+                ConnectionConsumer::NodeRouter(format!("{connection_id}:ancestor"));
+            let Some(parent) = registry.acquire_consumer_for_connection(
+                &parent_connection_id,
+                parent_consumer.clone(),
+            ) else {
+                registry.release(&connection_id, &consumer);
+                return Err(SshTransportError::ConnectionFailed(
+                    "parent SSH connection is unavailable for dedicated consumer".to_string(),
+                ));
+            };
+            self.connect_child_node_via_parent_with_registry(
+                registry.clone(),
+                consumer.clone(),
+                connection,
+                parent,
+                parent_consumer,
+            )
+            .await?
+        } else {
+            self.connect_dedicated_node_with_registry(registry.clone(), consumer.clone())
+                .await?
+        };
+        Ok(DedicatedConnectionLease::new(registry, handle, consumer))
+    }
+
     pub async fn connect_existing_node_with_registry(
         self,
         registry: SshConnectionRegistry,

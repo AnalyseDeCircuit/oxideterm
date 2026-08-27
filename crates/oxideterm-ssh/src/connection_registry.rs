@@ -64,6 +64,7 @@ pub enum ConnectionConsumer {
     Terminal(String),
     Sftp(String),
     PortForward(String),
+    Monitor(String),
     X11Forward(String),
     Ide(String),
     NodeRouter(String),
@@ -416,6 +417,44 @@ pub struct SshConnectionHandle {
     entry: Arc<ConnectionEntry>,
 }
 
+/// Owns one registry-managed physical connection for a single logical consumer.
+pub struct DedicatedConnectionLease {
+    registry: SshConnectionRegistry,
+    handle: SshConnectionHandle,
+    consumer: ConnectionConsumer,
+}
+
+impl DedicatedConnectionLease {
+    pub(crate) fn new(
+        registry: SshConnectionRegistry,
+        handle: SshConnectionHandle,
+        consumer: ConnectionConsumer,
+    ) -> Self {
+        Self {
+            registry,
+            handle,
+            consumer,
+        }
+    }
+
+    pub fn handle(&self) -> &SshConnectionHandle {
+        &self.handle
+    }
+
+    pub fn connection_id(&self) -> &str {
+        self.handle.connection_id()
+    }
+}
+
+impl Drop for DedicatedConnectionLease {
+    fn drop(&mut self) {
+        // The lease is the consumer lifetime boundary; the registry retires the
+        // isolated transport without changing the parent node's readiness.
+        self.registry
+            .release(self.handle.connection_id(), &self.consumer);
+    }
+}
+
 impl SshConnectionHandle {
     pub fn connection_id(&self) -> &str {
         &self.entry.connection_id
@@ -718,8 +757,8 @@ impl SshConnectionRegistry {
         consumer: ConnectionConsumer,
     ) -> SshConnectionHandle {
         let pool_key = format!("{}|dedicated={}", config.connection_key(), Uuid::new_v4());
-        // Dedicated terminals remain registry-owned without joining the shared
-        // node pool. Their transport is retired as soon as its terminal exits.
+        // Dedicated consumers remain registry-owned without joining the shared
+        // node pool. Their transport retires when the explicit owner releases it.
         let entry = Arc::new(ConnectionEntry::new_with_key(
             config,
             pool_key.clone(),
@@ -1125,6 +1164,15 @@ impl SshConnectionRegistry {
         ) {
             return ProbeConnectionStatus::NotApplicable;
         }
+        if handle
+            .config()
+            .ssh_channel_strategy
+            .requires_dedicated_consumers()
+        {
+            // Some one-channel appliances treat keepalive global requests as
+            // an unsupported second operation and close an otherwise healthy link.
+            return ProbeConnectionStatus::NotApplicable;
+        }
 
         match handle.probe_alive(timeout).await {
             KeepaliveProbeResult::Ok => {
@@ -1185,6 +1233,13 @@ impl SshConnectionRegistry {
             | ConnectionState::Disconnecting
             | ConnectionState::Disconnected
             | ConnectionState::Error(_) => return ProbeConnectionStatus::NotApplicable,
+        }
+        if handle
+            .config()
+            .ssh_channel_strategy
+            .requires_dedicated_consumers()
+        {
+            return ProbeConnectionStatus::NotApplicable;
         }
 
         match handle.probe_alive(timeout).await {
@@ -1590,6 +1645,9 @@ fn topology_consumer_summary(
             ConnectionConsumer::PortForward(_) | ConnectionConsumer::X11Forward(_) => {
                 summary.port_forwards += 1
             }
+            // Monitor leases are visible as isolated transports but do not
+            // masquerade as terminal, SFTP, IDE, or forwarding ownership.
+            ConnectionConsumer::Monitor(_) => {}
             ConnectionConsumer::Ide(_) => summary.ide += 1,
             ConnectionConsumer::NodeRouter(_) => summary.node_router += 1,
             ConnectionConsumer::PublicMcp(_) => summary.public_mcp += 1,
@@ -1829,6 +1887,7 @@ impl From<&ConnectionConsumer> for ConnectionMonitorConsumerKind {
             ConnectionConsumer::PortForward(_) | ConnectionConsumer::X11Forward(_) => {
                 Self::PortForward
             }
+            ConnectionConsumer::Monitor(_) => Self::Other,
             ConnectionConsumer::Ide(_)
             | ConnectionConsumer::NodeRouter(_)
             | ConnectionConsumer::PublicMcp(_)
@@ -2048,6 +2107,22 @@ mod tests {
     }
 
     #[test]
+    fn dedicated_lease_retires_connection_on_drop() {
+        let registry = SshConnectionRegistry::default();
+        let consumer = ConnectionConsumer::Sftp("node-1:browse".into());
+        let handle = registry.acquire_dedicated(
+            SshConfig::password("dedicated.example", 22, "alice", "pw"),
+            consumer.clone(),
+        );
+        let connection_id = handle.connection_id().to_string();
+        let lease = DedicatedConnectionLease::new(registry.clone(), handle, consumer);
+
+        drop(lease);
+
+        assert!(registry.get(&connection_id).is_none());
+    }
+
+    #[test]
     fn dedicated_child_retirement_releases_parent_ownership() {
         let registry = SshConnectionRegistry::default();
         let parent_owner = ConnectionConsumer::NodeRouter("parent".into());
@@ -2102,6 +2177,27 @@ mod tests {
         let info = registry.get(handle.connection_id()).unwrap().info();
         assert_eq!(info.state, ConnectionState::Idle);
         assert!(info.keep_alive);
+    }
+
+    #[tokio::test]
+    async fn single_channel_connections_skip_global_keepalive_probes() {
+        let registry = SshConnectionRegistry::default();
+        let consumer = ConnectionConsumer::NodeRouter("single-channel".into());
+        let handle = registry.acquire(
+            SshConfig {
+                ssh_channel_strategy:
+                    oxideterm_connections::SshChannelStrategy::DedicatedPerConsumer,
+                ..SshConfig::default()
+            },
+            consumer,
+        );
+        registry.mark_state(handle.connection_id(), ConnectionState::Active);
+
+        let status = registry
+            .probe_single_connection(handle.connection_id(), Duration::from_millis(1))
+            .await;
+
+        assert_eq!(status, ProbeConnectionStatus::NotApplicable);
     }
 
     #[tokio::test]

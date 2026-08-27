@@ -208,6 +208,7 @@ impl NodeRouter {
         node_id: &NodeId,
         consumer: ConnectionConsumer,
     ) -> Result<ResolvedConnection, RouteError> {
+        self.require_shared_consumer_allowed(node_id, &consumer)?;
         let runtime = self
             .runtime
             .connection_runtime(node_id)?;
@@ -248,6 +249,43 @@ impl NodeRouter {
     ) -> Result<ResolvedConnection, RouteError> {
         self.resolve_connection_wait_inner(node_id, max_wait, Some(consumer))
             .await
+    }
+
+    pub async fn acquire_dedicated_connection(
+        &self,
+        node_id: &NodeId,
+        consumer: ConnectionConsumer,
+        prompt_handler: Arc<dyn SshPromptHandler>,
+        managed_key_resolver: ManagedKeyResolver,
+    ) -> Result<DedicatedConnectionLease, RouteError> {
+        // Validate the logical node before copying its zeroizing runtime snapshot
+        // into the short-lived authentication task owned by this lease request.
+        self.resolve_connection_wait(node_id, Duration::from_secs(15))
+            .await?;
+        let runtime_snapshot = self
+            .node_runtime_snapshot(node_id)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        let parent_connection_id = runtime_snapshot
+            .parent_id
+            .map(|parent_id| {
+                self.connection_id_for_node(&parent_id)
+                    .ok_or_else(|| RouteError::ParentNotConnected(parent_id.0))
+            })
+            .transpose()?;
+        SshTransportClient::new(runtime_snapshot.config)
+            .with_prompt_handler(prompt_handler)
+            .with_managed_key_resolver(managed_key_resolver)
+            .connect_dedicated_consumer_with_registry(
+                self.registry.clone(),
+                consumer,
+                parent_connection_id,
+            )
+            .await
+            .map_err(|_| {
+                RouteError::CapabilityUnavailable(
+                    "Dedicated SSH consumer connection failed".to_string(),
+                )
+            })
     }
 
     pub fn release_consumer(&self, connection_id: &str, consumer: &ConnectionConsumer) {
@@ -628,6 +666,9 @@ impl NodeRouter {
         max_wait: Duration,
         consumer: Option<ConnectionConsumer>,
     ) -> Result<ResolvedConnection, RouteError> {
+        if let Some(consumer) = consumer.as_ref() {
+            self.require_shared_consumer_allowed(node_id, consumer)?;
+        }
         let started_at = Instant::now();
         loop {
             let runtime = self
@@ -704,6 +745,29 @@ impl NodeRouter {
             // link-down child id captured at the start of the restore phase.
             sleep(Duration::from_millis(200)).await;
         }
+    }
+
+    fn require_shared_consumer_allowed(
+        &self,
+        node_id: &NodeId,
+        consumer: &ConnectionConsumer,
+    ) -> Result<(), RouteError> {
+        let dedicated_consumers_required = self
+            .node_runtime_snapshot(node_id)
+            .is_some_and(|snapshot| {
+                snapshot
+                    .config
+                    .ssh_channel_strategy
+                    .requires_dedicated_consumers()
+            });
+        if dedicated_consumers_required
+            && !matches!(consumer, ConnectionConsumer::NodeRouter(_))
+        {
+            return Err(RouteError::CapabilityUnavailable(
+                "The SSH node requires a dedicated consumer connection".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     fn require_resolvable_state(

@@ -19,10 +19,25 @@ impl SftpSession {
         Ok(Self {
             sftp: Arc::new(sftp),
             channel_factory,
+            _connection_owner: None,
+            single_channel_transport: false,
             session_id,
             home: cwd.clone(),
             cwd,
         })
+    }
+
+    pub fn with_connection_owner(mut self, owner: Arc<dyn Send + Sync>) -> Self {
+        // Short-lived dedicated transports must survive until the SFTP channel
+        // and every sibling channel opened by this session have been dropped.
+        self._connection_owner = Some(owner);
+        self
+    }
+
+    /// Prevents directory batching from opening sibling SSH channels.
+    pub fn with_single_channel_transport(mut self) -> Self {
+        self.single_channel_transport = true;
+        self
     }
 
     async fn open_sibling_sftp(&self) -> Result<RusshSftpSession, SftpError> {

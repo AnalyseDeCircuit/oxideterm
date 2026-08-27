@@ -35,10 +35,10 @@ pub use capability::{
 pub use config::{AuthMethod, ProxyCommandConfig, ProxyHopConfig, SshConfig};
 pub use connection_registry::{
     AcquiredSftpMeta, ConnectionConsumer, ConnectionInfo, ConnectionPoolConfig,
-    ConnectionPoolStats, ConnectionState, ConnectionTransportStatus, HEARTBEAT_FAIL_THRESHOLD,
-    HEARTBEAT_INTERVAL, KeepaliveProbeResult, ProbeConnectionStatus, RemoteEnvInfo,
-    SftpSessionState, SshConnectionHandle, SshConnectionRegistry, WS_BRIDGE_HEARTBEAT_INTERVAL,
-    WS_BRIDGE_HEARTBEAT_TIMEOUT,
+    ConnectionPoolStats, ConnectionState, ConnectionTransportStatus, DedicatedConnectionLease,
+    HEARTBEAT_FAIL_THRESHOLD, HEARTBEAT_INTERVAL, KeepaliveProbeResult, ProbeConnectionStatus,
+    RemoteEnvInfo, SftpSessionState, SshConnectionHandle, SshConnectionRegistry,
+    WS_BRIDGE_HEARTBEAT_INTERVAL, WS_BRIDGE_HEARTBEAT_TIMEOUT,
 };
 pub use connection_trace::{
     ConnectionProgressReporter, ConnectionTraceEvent, ConnectionTraceMode, ConnectionTracePlan,
@@ -50,6 +50,7 @@ pub use host_key::{
     HostKeyStatus, check_host_key, check_host_key_with_route, check_host_key_with_upstream_proxy,
     remove_host_key,
 };
+pub use monitor::DedicatedNodeResourceSampler;
 pub use oxideterm_connection_monitor::ConnectionPoolMonitorStats;
 pub use oxideterm_sftp::{
     DEFAULT_SFTP_CONCURRENT_TRANSFERS, DEFAULT_SFTP_DIRECTORY_PARALLELISM, FileInfo, FileType,

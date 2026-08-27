@@ -22,7 +22,8 @@ use zeroize::Zeroizing;
 
 use crate::{
     AcquiredSftpMeta, ConnectionConsumer, ConnectionInfo, ConnectionState,
-    ConnectionTransportStatus, SshConfig, SshConnectionHandle, SshConnectionRegistry,
+    ConnectionTransportStatus, DedicatedConnectionLease, ManagedKeyResolver, SshConfig,
+    SshConnectionHandle, SshConnectionRegistry, SshPromptHandler, SshTransportClient,
     X11ForwardPolicy,
 };
 

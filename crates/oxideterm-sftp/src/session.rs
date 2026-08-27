@@ -69,6 +69,8 @@ pub struct WriteContentResult {
 pub struct SftpSession {
     sftp: Arc<RusshSftpSession>,
     channel_factory: SftpChannelFactory,
+    _connection_owner: Option<Arc<dyn Send + Sync>>,
+    single_channel_transport: bool,
     session_id: String,
     home: String,
     cwd: String,
