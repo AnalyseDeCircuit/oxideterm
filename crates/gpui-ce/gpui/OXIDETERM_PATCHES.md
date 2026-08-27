@@ -125,10 +125,12 @@ own synchronous pipelines.
 a platform window loses focus or hover ownership. Native platforms may revoke capture without a
 final mouse-up event, and retaining the old hitbox makes a text input remain globally hovered and
 consume later clicks. `crates/gpui-ce/gpui_windows/src/events.rs` immediately applies a changed
-cursor handle to the currently hovered window while respecting cursor hiding, and clears an
-unreleased non-client caption press when the pointer leaves the window. Preserve both parts:
+cursor handle to the currently hovered window while respecting cursor hiding, clears an unreleased
+non-client caption press when the pointer leaves the window, and converts `WM_CAPTURECHANGED` or
+`WM_CANCELMODE` into exactly one deferred mouse-up event. The deferred delivery is required because
+Win32 can revoke capture re-entrantly while GPUI's input callback is borrowed. Preserve both parts:
 capture recovery restores hit testing on every desktop backend, while the Windows update prevents
-an I-beam or pressed caption control from remaining visible after native pointer ownership is lost.
+an I-beam, drag, or pressed caption control from surviving native pointer ownership loss.
 
 `Window::request_close` routes programmatic close controls through the same stored
 `on_window_should_close` handler as an operating-system close event before marking the window for

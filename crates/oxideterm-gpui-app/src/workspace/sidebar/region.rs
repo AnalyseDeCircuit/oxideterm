@@ -1197,7 +1197,8 @@ impl WorkspaceApp {
                                                 gpui::FontWeight::NORMAL
                                             })
                                             .text_color(rgb(theme.text_heading))
-                                            .child(self.render_selectable_text_scoped(
+                                            .child(self.render_display_text_with_role(
+                                                SelectableTextRole::NonSelectable,
                                                 "notification-title",
                                                 entry.id,
                                                 entry.title.clone(),
@@ -1224,7 +1225,8 @@ impl WorkspaceApp {
                                         .mt_1()
                                         .text_size(px(11.0))
                                         .text_color(rgb(theme.text_muted))
-                                        .child(self.render_selectable_text_scoped(
+                                        .child(self.render_display_text_with_role(
+                                            SelectableTextRole::NonSelectable,
                                             "notification-body",
                                             id,
                                             detail,
@@ -1239,7 +1241,8 @@ impl WorkspaceApp {
                                     .truncate()
                                     .text_size(px(10.0))
                                     .text_color(rgb(theme.text_muted))
-                                    .child(self.render_selectable_text_scoped(
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::NonSelectable,
                                         "notification-meta",
                                         id,
                                         format!("{timestamp} | {kind} | {scope}"),

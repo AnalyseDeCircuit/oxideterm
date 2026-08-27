@@ -33,6 +33,7 @@ pub(crate) const WM_GPUI_GPU_DEVICE_LOST: u32 = WM_USER + 7;
 pub(crate) const WM_GPUI_KEYDOWN: u32 = WM_USER + 8;
 pub(crate) const WM_GPUI_END_SESSION: u32 = WM_USER + 9;
 pub(crate) const WM_GPUI_REQUEST_FRAME: u32 = WM_USER + 10;
+pub(crate) const WM_GPUI_MOUSE_CAPTURE_LOST: u32 = WM_USER + 11;
 
 const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
 
@@ -99,6 +100,8 @@ impl WindowsWindowInner {
             // So, let's eagerly activate the window.
             WM_MOUSEACTIVATE => Some(MA_ACTIVATE as isize),
             WM_ACTIVATE => self.handle_activate_msg(wparam),
+            WM_CANCELMODE => self.handle_cancel_mode_msg(handle),
+            WM_CAPTURECHANGED => self.handle_capture_changed_msg(handle),
             WM_CREATE => self.handle_create_msg(handle),
             WM_MOVE => self.handle_move_msg(handle, lparam),
             WM_SIZE => self.handle_size_msg(wparam, lparam),
@@ -169,6 +172,7 @@ impl WindowsWindowInner {
                 self.state.frame_request_pending.set(false);
                 self.draw_window(handle, false)
             }
+            WM_GPUI_MOUSE_CAPTURE_LOST => self.handle_deferred_capture_lost_msg(handle),
             WM_GPUI_GPU_DEVICE_LOST => self.handle_device_lost(lparam),
             DM_POINTERHITTEST => self.handle_dm_pointer_hit_test(wparam),
             WM_GETOBJECT => self.handle_wm_getobject(wparam, lparam),
@@ -515,11 +519,11 @@ impl WindowsWindowInner {
         button: MouseButton,
         lparam: LPARAM,
     ) -> Option<isize> {
-        unsafe { SetCapture(handle) };
-
         let Some(mut func) = self.state.callbacks.input.take() else {
             return Some(1);
         };
+        unsafe { SetCapture(handle) };
+        self.state.captured_mouse_button.set(Some(button));
         let x = lparam.signed_loword();
         let y = lparam.signed_hiword();
         let physical_point = point(DevicePixels(x as i32), DevicePixels(y as i32));
@@ -541,17 +545,96 @@ impl WindowsWindowInner {
 
     fn handle_mouse_up_msg(
         &self,
-        _handle: HWND,
+        handle: HWND,
         button: MouseButton,
         lparam: LPARAM,
     ) -> Option<isize> {
+        self.state.captured_mouse_button.set(None);
+        if self.state.pending_capture_lost.get() == Some(button) {
+            self.state.pending_capture_lost.set(None);
+        }
         unsafe { ReleaseCapture().log_err() };
 
-        let Some(mut func) = self.state.callbacks.input.take() else {
-            return Some(1);
-        };
         let x = lparam.signed_loword() as f32;
         let y = lparam.signed_hiword() as f32;
+        self.dispatch_mouse_up(handle, button, x, y)
+    }
+
+    fn handle_cancel_mode_msg(&self, handle: HWND) -> Option<isize> {
+        self.queue_capture_lost(handle);
+        unsafe { ReleaseCapture().log_err() };
+        Some(0)
+    }
+
+    fn handle_capture_changed_msg(&self, handle: HWND) -> Option<isize> {
+        self.queue_capture_lost(handle);
+        Some(0)
+    }
+
+    fn queue_capture_lost(&self, handle: HWND) {
+        let Some(button) = self.state.captured_mouse_button.take() else {
+            return;
+        };
+        if self
+            .state
+            .pending_capture_lost
+            .replace(Some(button))
+            .is_none()
+        {
+            // Capture loss can arrive re-entrantly while GPUI's input callback is borrowed.
+            // Defer one synthetic release so logical hitboxes, drags, and text selection unwind.
+            unsafe {
+                PostMessageW(
+                    Some(handle),
+                    WM_GPUI_MOUSE_CAPTURE_LOST,
+                    WPARAM::default(),
+                    LPARAM::default(),
+                )
+            }
+            .log_err();
+        }
+    }
+
+    fn handle_deferred_capture_lost_msg(&self, handle: HWND) -> Option<isize> {
+        let Some(button) = self.state.pending_capture_lost.take() else {
+            return Some(0);
+        };
+        let mut cursor_point = POINT::default();
+        unsafe {
+            GetCursorPos(&mut cursor_point).log_err();
+            ScreenToClient(handle, &mut cursor_point).ok().log_err();
+        }
+        self.dispatch_mouse_up(handle, button, cursor_point.x as f32, cursor_point.y as f32)
+    }
+
+    fn dispatch_mouse_up(
+        &self,
+        handle: HWND,
+        button: MouseButton,
+        x: f32,
+        y: f32,
+    ) -> Option<isize> {
+        let Some(mut func) = self.state.callbacks.input.take() else {
+            // A native nested message loop can temporarily borrow the input callback.
+            // Retain one pending release and retry after the current dispatch unwinds.
+            if self
+                .state
+                .pending_capture_lost
+                .replace(Some(button))
+                .is_none()
+            {
+                unsafe {
+                    PostMessageW(
+                        Some(handle),
+                        WM_GPUI_MOUSE_CAPTURE_LOST,
+                        WPARAM::default(),
+                        LPARAM::default(),
+                    )
+                }
+                .log_err();
+            }
+            return Some(1);
+        };
         let click_count = self.state.click_state.current_count.get();
         let scale_factor = self.state.scale_factor.get();
 

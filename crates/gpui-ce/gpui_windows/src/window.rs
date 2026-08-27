@@ -87,6 +87,10 @@ pub struct WindowsWindowState {
     /// Shared with [`WindowsPlatformState::cursor_visible`].
     pub cursor_visible: Arc<AtomicBool>,
     pub nc_button_pressed: Cell<Option<u32>>,
+    /// Client button whose native capture must terminate with one GPUI mouse-up event.
+    pub captured_mouse_button: Cell<Option<MouseButton>>,
+    /// Capture loss is deferred because Win32 can notify us inside GPUI input dispatch.
+    pub pending_capture_lost: Cell<Option<MouseButton>>,
     pub dragging: Cell<bool>,
 
     pub display: Cell<WindowsDisplay>,
@@ -203,6 +207,8 @@ impl WindowsWindowState {
             current_cursor: Cell::new(current_cursor),
             cursor_visible,
             nc_button_pressed: Cell::new(nc_button_pressed),
+            captured_mouse_button: Cell::new(None),
+            pending_capture_lost: Cell::new(None),
             dragging: Cell::new(false),
             display: Cell::new(display),
             fullscreen: Cell::new(fullscreen),
