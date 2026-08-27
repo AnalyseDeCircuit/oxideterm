@@ -518,8 +518,10 @@ impl CloudSyncPageRenderer {
                                     .text_size(px(self.tokens.metrics.ui_text_2xl))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(rgb(theme.text_heading))
+                                    // Page chrome must not start a text drag that
+                                    // competes with window-level pointer handling.
                                     .child(self.render_display_text_with_role(
-                                        SelectableTextRole::PlainDocument,
+                                        SelectableTextRole::NonSelectable,
                                         "cloud-sync-panel",
                                         "title",
                                         self.i18n.t("plugin.cloud_sync.panel_title"),
@@ -533,7 +535,7 @@ impl CloudSyncPageRenderer {
                                     .text_size(px(self.tokens.metrics.ui_text_base))
                                     .text_color(rgb(theme.text_muted))
                                     .child(self.render_display_text_with_role(
-                                        SelectableTextRole::PlainDocument,
+                                        SelectableTextRole::NonSelectable,
                                         "cloud-sync-panel",
                                         "subtitle",
                                         self.i18n.t("plugin.cloud_sync.native_description"),

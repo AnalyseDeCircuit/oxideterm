@@ -117,8 +117,10 @@ impl WorkspaceApp {
                                     // Match the shared manager-page title hierarchy.
                                     .font_weight(gpui::FontWeight::NORMAL)
                                     .text_color(rgb(theme.text_heading))
+                                    // Runtime page chrome is a navigation label,
+                                    // not selectable dashboard data.
                                     .child(self.render_display_text_with_role(
-                                        SelectableTextRole::PlainDocument,
+                                        SelectableTextRole::NonSelectable,
                                         "connection-runtime-header",
                                         "title",
                                         self.i18n.t("sidebar.panels.runtime"),
@@ -131,7 +133,7 @@ impl WorkspaceApp {
                                     .text_size(px(self.tokens.metrics.ui_text_base))
                                     .text_color(rgb(theme.text_muted))
                                     .child(self.render_display_text_with_role(
-                                        SelectableTextRole::PlainDocument,
+                                        SelectableTextRole::NonSelectable,
                                         "connection-runtime-header",
                                         "description",
                                         self.i18n.t("sidebar.panels.runtime_description"),

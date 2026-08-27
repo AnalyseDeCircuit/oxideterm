@@ -1051,11 +1051,11 @@ impl WorkspaceApp {
                     .text_size(px(24.0))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(self.tokens.ui.text_heading))
-                    // Settings headers mirror Tauri block text. Keep the
-                    // wrapper full-width so CJK descriptions are never measured
-                    // as a one-glyph column by nested flex layout.
+                    // Settings headers are page chrome, so they stay outside the
+                    // selectable document while preserving the full-width CJK layout.
                     .line_height(px(30.0))
-                    .child(self.render_selectable_text_scoped(
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
                         "settings-page-title",
                         tab.title_key(),
                         title,
@@ -1070,7 +1070,8 @@ impl WorkspaceApp {
                     .text_size(px(self.tokens.metrics.ui_text_base))
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .line_height(px((self.tokens.metrics.ui_text_base + 6.0).max(20.0)))
-                    .child(self.render_selectable_text_scoped(
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
                         "settings-page-description",
                         tab.description_key(),
                         description,

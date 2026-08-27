@@ -33,8 +33,10 @@ impl WorkspaceApp {
                             .text_size(px(24.0))
                             .font_weight(gpui::FontWeight::BOLD)
                             .text_color(rgb(theme.text_heading))
+                            // Page headings are navigation chrome and must not
+                            // enter the shared read-only selection lifecycle.
                             .child(self.render_display_text_with_role(
-                                SelectableTextRole::PlainDocument,
+                                SelectableTextRole::NonSelectable,
                                 "topology-page-header",
                                 "title",
                                 self.i18n.t("topology.page.title"),
@@ -47,7 +49,7 @@ impl WorkspaceApp {
                             .text_size(px(14.0))
                             .text_color(rgb(theme.text_muted))
                             .child(self.render_display_text_with_role(
-                                SelectableTextRole::PlainDocument,
+                                SelectableTextRole::NonSelectable,
                                 "topology-page-header",
                                 "description",
                                 self.i18n.t("topology.page.description"),
