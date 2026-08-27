@@ -590,6 +590,22 @@ impl WorkspaceOverlayEntity {
                 changed |= self.connection_trace_cards.remove(&attempt_id).is_some();
                 continue;
             }
+            if !self.connection_trace_cards.contains_key(&attempt_id) {
+                // A node owns one visible connection trace. A retry replaces the
+                // failed physical attempt instead of accumulating another card.
+                let superseded_attempt_ids = self
+                    .connection_trace_cards
+                    .iter()
+                    .filter(|(_, trace)| trace.latest.node_id == event.node_id)
+                    .map(|(attempt_id, _)| attempt_id.clone())
+                    .collect::<Vec<_>>();
+                for superseded_attempt_id in superseded_attempt_ids {
+                    self.connection_trace_cards.remove(&superseded_attempt_id);
+                    self.dismissed_connection_traces
+                        .retain(|dismissed| dismissed != &superseded_attempt_id);
+                    changed = true;
+                }
+            }
             let trace = self
                 .connection_trace_cards
                 .entry(attempt_id.clone())
@@ -1771,6 +1787,49 @@ mod tests {
                 now,
             );
             assert!(overlay.dismissed_connection_traces.is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn retry_replaces_the_previous_card_for_the_same_node(cx: &mut TestAppContext) {
+        let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::ZERO, cx));
+        let event = |attempt_id: &str, status| ConnectionTraceEvent {
+            attempt_id: attempt_id.to_string(),
+            node_id: NodeId::new("retry-node"),
+            stage: ConnectionTraceStage::OpeningTransport,
+            status,
+            progress: 100.0,
+            elapsed_ms: 0,
+            detail: None,
+            label: None,
+            endpoint: None,
+            step_index: Some(1),
+            total_steps: Some(1),
+            mode: ConnectionTraceMode::Reconnect,
+        };
+
+        overlay.update(cx, |overlay, _cx| {
+            let now = Instant::now();
+            overlay.apply_connection_trace_events(
+                vec![event("retry-attempt-1", ConnectionTraceStatus::Failed)],
+                now,
+            );
+            overlay.apply_connection_trace_events(
+                vec![event("retry-attempt-2", ConnectionTraceStatus::Running)],
+                now,
+            );
+
+            assert_eq!(overlay.connection_trace_cards.len(), 1);
+            assert!(
+                !overlay
+                    .connection_trace_cards
+                    .contains_key("retry-attempt-1")
+            );
+            assert!(
+                overlay
+                    .connection_trace_cards
+                    .contains_key("retry-attempt-2")
+            );
         });
     }
 

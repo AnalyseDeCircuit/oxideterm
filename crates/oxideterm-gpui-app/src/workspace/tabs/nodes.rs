@@ -336,6 +336,11 @@ impl WorkspaceApp {
                             delay,
                             job_id,
                         } => {
+                            if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
+                                // The retry timer is idle work, not an active transport attempt.
+                                // Show the failed state until the next attempt actually starts.
+                                node.readiness = NodeReadiness::Error;
+                            }
                             self.log_reconnect_phase(
                                 &node_id,
                                 ReconnectPhase::Queued,

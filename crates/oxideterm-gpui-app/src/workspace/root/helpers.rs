@@ -876,17 +876,22 @@ impl WorkspaceApp {
         if affected_nodes.is_empty() {
             affected_nodes.push(node_id.clone());
         }
-        let cancelled = self.workspace_runtime.update(cx, |runtime, _cx| {
-            runtime.cancel_queued_reconnects(&affected_nodes);
-            let mut cancelled = 0_u32;
-            for affected_node_id in affected_nodes {
-                if runtime.cancel_reconnect_job(&affected_node_id) {
-                    cancelled = cancelled.saturating_add(1);
+        let reconnect_was_active = affected_nodes.iter().any(|affected_node_id| {
+            self.workspace_runtime
+                .read(cx)
+                .has_active_reconnect_job(affected_node_id)
+        });
+        if reconnect_was_active {
+            // Runtime owns retry tasks, transport attempts, traces, and node state;
+            // cancel them together so the UI cannot remain stuck at Connecting.
+            let disconnected_nodes = self.workspace_runtime.update(cx, |runtime, cx| {
+                runtime.disconnect_node_runtime_subtree(node_id, cx)
+            });
+            for disconnected_node_id in disconnected_nodes {
+                if let Some(node) = self.ssh_nodes.get_mut(&disconnected_node_id) {
+                    node.readiness = NodeReadiness::Disconnected;
                 }
             }
-            cancelled
-        });
-        if cancelled > 0 {
             self.push_event_log_entry(
                 WorkspaceEventSeverity::Warn,
                 WorkspaceEventCategory::Reconnect,
@@ -902,6 +907,7 @@ impl WorkspaceApp {
                 TerminalNoticeVariant::Default,
                 cx,
             );
+            self.persist_session_tree_snapshot();
             cx.notify();
         }
     }

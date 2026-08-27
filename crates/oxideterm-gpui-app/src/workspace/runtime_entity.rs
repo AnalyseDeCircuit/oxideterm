@@ -826,11 +826,6 @@ impl WorkspaceRuntimeEntity {
         }
     }
 
-    pub(in crate::workspace) fn cancel_reconnect_job(&mut self, node_id: &NodeId) -> bool {
-        self.cancel_reconnect_grace_probe(node_id);
-        self.reconnect_orchestrator.cancel(&node_id.0).is_some()
-    }
-
     pub(in crate::workspace) fn start_node_transport(
         &mut self,
         node_id: &NodeId,
@@ -3782,6 +3777,76 @@ mod tests {
 
             assert!(!entity.reconnect_grace_probe_tasks.contains_key(&node_id));
         });
+    }
+
+    #[gpui::test]
+    fn disconnecting_a_reconnecting_node_cancels_trace_and_transport(cx: &mut TestAppContext) {
+        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        let node_router = NodeRouter::new(ssh_registry.clone());
+        let node_id = NodeId::new("node-a");
+        let config = SshConfig {
+            host: "node-a.example.test".to_string(),
+            ..SshConfig::default()
+        };
+        node_router.upsert_node(node_id.clone(), config.clone());
+        let connection =
+            ssh_registry.acquire(config, ConnectionConsumer::NodeRouter(node_id.0.clone()));
+        let connection_id = connection.connection_id().to_string();
+        node_router
+            .bind_connection(&node_id, connection_id.clone())
+            .expect("node connection binding");
+        let entity = cx.new(|cx| {
+            WorkspaceRuntimeEntity::new(
+                ssh_registry.clone(),
+                node_router,
+                test_task_runtime(),
+                true,
+                ReconnectTiming::default(),
+                3,
+                cx,
+            )
+        });
+
+        entity.update(cx, |entity, cx| {
+            entity.start_reconnect_job(
+                &node_id,
+                "Node A".to_string(),
+                ReconnectSnapshot::default(),
+            );
+            let trace_plan = entity
+                .new_connection_trace_plan(ConnectionTraceMode::Reconnect, vec![node_id.clone()]);
+            entity.begin_connection_trace(
+                &node_id,
+                Some("Node A".to_string()),
+                None,
+                Some(&trace_plan),
+                None,
+                cx,
+            );
+            take_trace_effects(entity, cx);
+            let attempt_id = register_test_node_transport_attempt(entity, &node_id, &connection_id);
+
+            assert_eq!(
+                entity.disconnect_node_runtime_subtree(&node_id, cx),
+                vec![node_id.clone()]
+            );
+            assert!(!entity.has_active_reconnect_job(&node_id));
+            assert!(!entity.node_transport_result_is_current(&node_id, attempt_id));
+            assert_eq!(
+                entity
+                    .node_router
+                    .node_runtime_snapshot(&node_id)
+                    .expect("node runtime")
+                    .state
+                    .readiness,
+                NodeReadiness::Disconnected
+            );
+            assert!(take_trace_effects(entity, cx).iter().any(|event| {
+                event.node_id == node_id && event.status == ConnectionTraceStatus::Cancelled
+            }));
+        });
+
+        assert!(ssh_registry.get(&connection_id).is_none());
     }
 
     #[gpui::test]
