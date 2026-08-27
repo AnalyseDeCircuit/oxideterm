@@ -490,7 +490,11 @@ async fn load_remote_sftp_listing_inner(
         .map_err(|error| error.to_string())?;
     match list_remote_sftp_once(&transfer, path).await {
         Ok(listing) => {
-            if update_ready_path && let SftpRemoteBackend::Node { router, node_id } = &backend {
+            if update_ready_path
+                && let SftpRemoteBackend::Node {
+                    router, node_id, ..
+                } = &backend
+            {
                 let connection = router
                     .resolve_connection(node_id)
                     .await
@@ -516,7 +520,11 @@ async fn load_remote_sftp_listing_inner(
             let listing = list_remote_sftp_once(&transfer, path)
                 .await
                 .map_err(|retry_error| retry_error.to_string())?;
-            if update_ready_path && let SftpRemoteBackend::Node { router, node_id } = &backend {
+            if update_ready_path
+                && let SftpRemoteBackend::Node {
+                    router, node_id, ..
+                } = &backend
+            {
                 let connection = router
                     .resolve_connection(node_id)
                     .await

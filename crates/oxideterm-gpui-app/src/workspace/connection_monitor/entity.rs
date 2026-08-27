@@ -5,11 +5,19 @@ use oxideterm_connection_monitor::ResourceSampler;
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_topology::ConnectionTopologySnapshot;
 
+#[derive(Clone)]
+struct HostToolsSshConsumerContext {
+    node_router: NodeRouter,
+    prompt_handler: Arc<dyn SshPromptHandler>,
+    managed_key_resolver: ManagedKeyResolver,
+}
+
 /// Owns Host Tools sampling state independently from WorkspaceApp and SSH nodes.
 pub(in crate::workspace) struct HostToolsEntity {
     // This handle is private to the Entity. Host Tools exposes snapshots and
     // sampler acquisition only; page code cannot disconnect shared nodes.
     ssh_registry: SshConnectionRegistry,
+    ssh_consumer_context: Option<HostToolsSshConsumerContext>,
     pub(super) profiler_registry: ProfilerRegistry,
     pub(super) profiler_update_tx: tokio::sync::mpsc::UnboundedSender<ProfilerUpdate>,
     pub(super) sampler_delivery_wake: crate::workspace::delivery::ActiveDeliveryWake,
@@ -521,6 +529,7 @@ impl HostToolsEntity {
             );
         let mut entity = Self {
             ssh_registry,
+            ssh_consumer_context: None,
             profiler_registry: ProfilerRegistry::new(),
             profiler_update_tx,
             sampler_delivery_wake,
@@ -587,6 +596,19 @@ impl HostToolsEntity {
         entity.schedule_reliable_delivery(cx);
         entity.schedule_lifecycle_refresh(cx);
         entity
+    }
+
+    pub(in crate::workspace) fn set_ssh_consumer_context(
+        &mut self,
+        node_router: NodeRouter,
+        prompt_handler: Arc<dyn SshPromptHandler>,
+        managed_key_resolver: ManagedKeyResolver,
+    ) {
+        self.ssh_consumer_context = Some(HostToolsSshConsumerContext {
+            node_router,
+            prompt_handler,
+            managed_key_resolver,
+        });
     }
 
     pub(in crate::workspace) fn replace_text_input(
@@ -1614,6 +1636,27 @@ impl HostToolsEntity {
         if let Some(sampler) = self.test_resource_sampler.as_ref() {
             // Tests share one counting sampler across profiler and GPU tasks.
             return sampler.clone();
+        }
+        if let Some(context) = self.ssh_consumer_context.as_ref()
+            && let Some(node_id) = context
+                .node_router
+                .node_id_for_connection(handle.connection_id())
+            && context
+                .node_router
+                .node_runtime_snapshot(&node_id)
+                .is_some_and(|snapshot| {
+                    snapshot
+                        .config
+                        .ssh_channel_strategy
+                        .requires_dedicated_consumers()
+                })
+        {
+            return Arc::new(oxideterm_ssh::DedicatedNodeResourceSampler::new(
+                context.node_router.clone(),
+                node_id,
+                context.prompt_handler.clone(),
+                context.managed_key_resolver.clone(),
+            ));
         }
         Arc::new(handle)
     }

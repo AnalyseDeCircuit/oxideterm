@@ -533,6 +533,11 @@ impl WorkspaceApp {
             nodes_to_disconnect.push(node_id.clone());
         }
         for affected_node_id in &nodes_to_disconnect {
+            // Dropping the node-scoped slot releases the dedicated browsing
+            // transport without affecting transfers that still own their lease.
+            self.dedicated_sftp_connections
+                .lock()
+                .remove(affected_node_id);
             let _ = self.interrupt_sftp_transfers_by_node(
                 affected_node_id,
                 "Connection closed".to_string(),

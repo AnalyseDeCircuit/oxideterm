@@ -151,6 +151,7 @@ pub(in crate::workspace) struct ForwardingRuntimeService {
     ssh_registry: SshConnectionRegistry,
     node_router: NodeRouter,
     task_runtime: Arc<tokio::runtime::Runtime>,
+    single_channel_forwarding_error: Arc<String>,
     bindings: Arc<Mutex<ForwardingBindingState>>,
     remote_desktop_tunnels: Arc<Mutex<RemoteDesktopTunnelState>>,
 }
@@ -161,12 +162,14 @@ impl ForwardingRuntimeService {
         ssh_registry: SshConnectionRegistry,
         node_router: NodeRouter,
         task_runtime: Arc<tokio::runtime::Runtime>,
+        single_channel_forwarding_error: String,
     ) -> Self {
         Self {
             registry,
             ssh_registry,
             node_router,
             task_runtime,
+            single_channel_forwarding_error: Arc::new(single_channel_forwarding_error),
             bindings: Arc::new(Mutex::new(ForwardingBindingState::default())),
             remote_desktop_tunnels: Arc::new(Mutex::new(RemoteDesktopTunnelState::default())),
         }
@@ -187,6 +190,7 @@ impl ForwardingRuntimeService {
             ssh_registry,
             node_router,
             task_runtime,
+            "single-channel forwarding unavailable".to_string(),
         )
     }
 
@@ -1148,6 +1152,20 @@ impl ForwardingRuntimeService {
             return Err(FORWARDING_SESSION_SHUTTING_DOWN.to_string());
         }
         let session_id = Self::session_id_for_node(node_id);
+        if self
+            .node_router
+            .node_runtime_snapshot(node_id)
+            .is_some_and(|snapshot| {
+                snapshot
+                    .config
+                    .ssh_channel_strategy
+                    .requires_dedicated_consumers()
+            })
+        {
+            // Forward listeners can create multiple concurrent SSH channels;
+            // a per-consumer transport cannot make that safe on one-channel appliances.
+            return Err(self.single_channel_forwarding_error.as_ref().clone());
+        }
         let manager_existed = self.registry.get(&session_id).is_some();
         let consumer = ConnectionConsumer::PortForward(session_id.clone());
         let resolved = self
@@ -1287,6 +1305,29 @@ fn node_id_from_forwarding_session(session_id: &str) -> Option<NodeId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn single_channel_nodes_reject_forwarding_before_connection_acquisition() {
+        let service = ForwardingRuntimeService::test_fixture();
+        let node_id = NodeId::new("single-channel-node");
+        service.node_router.upsert_node(
+            node_id.clone(),
+            oxideterm_ssh::SshConfig {
+                ssh_channel_strategy:
+                    oxideterm_connections::SshChannelStrategy::DedicatedPerConsumer,
+                ..oxideterm_ssh::SshConfig::default()
+            },
+        );
+
+        let result = service
+            .task_runtime
+            .block_on(service.manager_for_node_async(&node_id, None));
+
+        assert_eq!(
+            result.err().as_deref(),
+            Some("single-channel forwarding unavailable")
+        );
+    }
 
     #[test]
     fn binding_state_replaces_and_removes_one_logical_consumer() {

@@ -364,7 +364,9 @@ impl WorkspaceApp {
                 let standalone_endpoint_id =
                     remote_id.standalone_endpoint_id().map(ToOwned::to_owned);
                 let connection_id = match &backend {
-                    SftpRemoteBackend::Node { router, node_id } => {
+                    SftpRemoteBackend::Node {
+                        router, node_id, ..
+                    } => {
                         router
                             .resolve_connection(node_id)
                             .await

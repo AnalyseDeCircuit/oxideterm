@@ -704,6 +704,14 @@ impl SftpWorkspaceEntity {
 }
 
 impl WorkspaceApp {
+    fn dedicated_sftp_connection_slot(&self, node_id: &NodeId) -> DedicatedSftpConnectionSlot {
+        self.dedicated_sftp_connections
+            .lock()
+            .entry(node_id.clone())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(None)))
+            .clone()
+    }
+
     pub(in crate::workspace::sftp) fn sftp_remote_backend(
         &self,
         remote_id: &SftpRemoteId,
@@ -712,6 +720,14 @@ impl WorkspaceApp {
             SftpRemoteId::Node(node_id) => Some(SftpRemoteBackend::Node {
                 router: self.node_router.clone(),
                 node_id: node_id.clone(),
+                channel_strategy: self
+                    .ssh_nodes
+                    .get(node_id)
+                    .map(|node| node.ssh_channel_strategy)
+                    .unwrap_or_default(),
+                prompt_handler: self.ssh_consumer_prompt_handler.clone(),
+                managed_key_resolver: self.ssh_consumer_managed_key_resolver.clone(),
+                dedicated_slot: self.dedicated_sftp_connection_slot(node_id),
             }),
             SftpRemoteId::Standalone(profile_id) => self
                 .standalone_sftp_sessions
@@ -732,6 +748,14 @@ impl WorkspaceApp {
                 SftpRemoteBackend::Node {
                     router: self.node_router.clone(),
                     node_id: node_id.clone(),
+                    channel_strategy: self
+                        .ssh_nodes
+                        .get(node_id)
+                        .map(|node| node.ssh_channel_strategy)
+                        .unwrap_or_default(),
+                    prompt_handler: self.ssh_consumer_prompt_handler.clone(),
+                    managed_key_resolver: self.ssh_consumer_managed_key_resolver.clone(),
+                    dedicated_slot: self.dedicated_sftp_connection_slot(node_id),
                 },
                 None,
             )),

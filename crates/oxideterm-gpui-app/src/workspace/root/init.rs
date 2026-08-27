@@ -179,6 +179,7 @@ impl WorkspaceApp {
             ssh_registry.clone(),
             node_router.clone(),
             forwarding_runtime.clone(),
+            i18n.t("ssh.form.single_channel_forwarding_unavailable"),
         );
         let connection_flow = cx.new(ConnectionFlowEntity::new);
         let settings_path = settings_store.path().to_path_buf();
@@ -250,6 +251,8 @@ impl WorkspaceApp {
                 settings.terminal.command_bar.current_directory_awareness,
             );
         });
+        let ssh_consumer_prompt_handler = workspace_runtime.read(cx).native_ssh_prompt_handler();
+        let ssh_consumer_managed_key_resolver = managed_key_resolver_from_store(&connection_store);
         let workspace_runtime_subscription = cx.subscribe(
             &workspace_runtime,
             |workspace, _runtime, event: &runtime_entity::WorkspaceRuntimeEvent, cx| {
@@ -403,6 +406,11 @@ impl WorkspaceApp {
                 profiler_update_rx,
                 ssh_registry.clone(),
                 cx,
+            );
+            host_tools.set_ssh_consumer_context(
+                node_router.clone(),
+                ssh_consumer_prompt_handler.clone(),
+                ssh_consumer_managed_key_resolver.clone(),
             );
             host_tools.set_messages(host_tools_messages);
             host_tools
@@ -800,6 +808,9 @@ impl WorkspaceApp {
             sftp_tab_nodes: HashMap::new(),
             standalone_sftp_tabs: HashMap::new(),
             standalone_sftp_sessions: HashMap::new(),
+            dedicated_sftp_connections: Arc::new(parking_lot::Mutex::new(HashMap::new())),
+            ssh_consumer_prompt_handler,
+            ssh_consumer_managed_key_resolver,
             pending_standalone_sftp_pair_launches: HashMap::new(),
             embedded_sftp_node_id: None,
             sftp_presentation_request: None,
