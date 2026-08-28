@@ -440,6 +440,7 @@ fn scan_wsl_distributions(shells: &mut Vec<ShellInfo>) {
     }
 }
 
+#[cfg(unix)]
 fn capitalize_first(value: &str) -> String {
     let mut chars = value.chars();
     match chars.next() {

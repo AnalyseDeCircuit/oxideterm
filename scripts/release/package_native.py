@@ -1147,6 +1147,9 @@ InstallDir "{identity.windows_install_dir}"
 InstallDirRegKey HKCU "Software\\{identity.windows_registry_key}" "InstallDir"
 BrandingText "{identity.app_name}"
 VIProductVersion "{windows_numeric_version(version)}"
+VIAddVersionKey /LANG=1033 "FileVersion" "{nsis_string(version)}"
+VIAddVersionKey /LANG=1033 "FileDescription" "{nsis_string(identity.app_name)} Installer"
+VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright (C) 2026 AnalyseDeCircuit"
 VIAddVersionKey /LANG=1033 "ProductVersion" "{nsis_string(version)}"
 
 !insertmacro MUI_PAGE_WELCOME

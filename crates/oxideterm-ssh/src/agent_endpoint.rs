@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
 
 const SSH_AUTH_SOCK_ENV: &str = "SSH_AUTH_SOCK";

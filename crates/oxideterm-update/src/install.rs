@@ -807,6 +807,7 @@ fn current_macos_app_bundle(current_exe: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn shell_escape_path(path: &Path) -> String {
     // Scripts quote the returned path, so escape characters that still carry
     // meaning inside double quotes.

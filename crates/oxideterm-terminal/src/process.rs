@@ -295,6 +295,7 @@ fn process_command(_pid: u32) -> Option<String> {
     None
 }
 
+#[cfg(any(unix, test))]
 pub(crate) fn parse_process_table_for_group(output: &str, process_group_id: u32) -> Option<u32> {
     output
         .lines()
@@ -308,6 +309,7 @@ pub(crate) fn parse_process_table_for_group(output: &str, process_group_id: u32)
         .max()
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn parse_lsof_cwd(output: &str) -> Option<PathBuf> {
     output
         .lines()

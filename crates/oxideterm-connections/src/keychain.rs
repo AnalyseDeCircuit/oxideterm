@@ -146,6 +146,9 @@ impl ConnectionKeychain {
         id: &str,
         authenticate_device_owner: bool,
     ) -> Result<Option<SecretString>> {
+        #[cfg(not(target_os = "macos"))]
+        let _ = authenticate_device_owner;
+
         #[cfg(test)]
         if let Some(store) = &self.test_store {
             return Ok(store

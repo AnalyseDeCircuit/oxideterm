@@ -136,6 +136,7 @@ impl ForwardRule {
         }
     }
 
+    #[cfg(any(feature = "runtime", test))]
     pub(crate) fn normalize_hosts_for_runtime(&mut self) {
         self.bind_address = normalize_forward_host(std::mem::take(&mut self.bind_address));
         if self.forward_type != ForwardType::Dynamic {

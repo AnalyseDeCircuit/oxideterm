@@ -60,7 +60,7 @@ pub(crate) fn cleanup_local_pty_process_tree(shell_pid: Option<u32>) {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(windows)))]
 pub(crate) fn cleanup_local_pty_process_tree(_shell_pid: Option<u32>) {}
 
 #[cfg(unix)]

@@ -7,8 +7,10 @@ use std::{
     fs, io,
     path::{Component, Path, PathBuf},
     process::Command,
-    time::Duration,
 };
+
+#[cfg(not(windows))]
+use std::time::Duration;
 
 use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};

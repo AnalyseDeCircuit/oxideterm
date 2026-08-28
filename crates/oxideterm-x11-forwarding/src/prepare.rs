@@ -1,12 +1,10 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    fmt,
-    path::{Path, PathBuf},
-    process::Stdio,
-    time::Duration,
-};
+use std::{fmt, path::Path, process::Stdio, time::Duration};
+
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
 
 use tempfile::TempDir;
 use tokio::{io::AsyncReadExt, process::Command, time::timeout};
