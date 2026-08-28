@@ -256,7 +256,7 @@ impl TerminalPane {
         modifiers: Modifiers,
         cx: &mut Context<Self>,
     ) -> bool {
-        if modifiers.platform || modifiers.control || modifiers.alt {
+        if modifiers.platform || modifiers.control {
             return false;
         }
         let candidates = self.terminal_autosuggest_candidates();
@@ -266,11 +266,11 @@ impl TerminalPane {
         }
 
         match key {
-            "escape" => {
+            "escape" if !modifiers.alt => {
                 self.dismiss_terminal_autosuggest(cx);
                 true
             }
-            "down" if !modifiers.shift => {
+            "down" if modifiers.alt && !modifiers.shift => {
                 self.autosuggest_selected_index = Some(
                     self.autosuggest_selected_index
                         .map(|index| (index + 1) % candidates.len())
@@ -279,7 +279,7 @@ impl TerminalPane {
                 cx.notify();
                 true
             }
-            "up" if !modifiers.shift => {
+            "up" if modifiers.alt && !modifiers.shift => {
                 self.autosuggest_selected_index = Some(
                     self.autosuggest_selected_index
                         .map(|index| index.checked_sub(1).unwrap_or(candidates.len() - 1))
@@ -288,7 +288,13 @@ impl TerminalPane {
                 cx.notify();
                 true
             }
-            "delete" if modifiers.shift => {
+            "down" | "up" if !modifiers.alt => {
+                // Shell line editors own unmodified arrows for history and
+                // completion menus; hiding our overlay keeps that handoff clear.
+                self.dismiss_terminal_autosuggest(cx);
+                false
+            }
+            "delete" if modifiers.shift && !modifiers.alt => {
                 let Some(index) = self.autosuggest_selected_index else {
                     return false;
                 };
@@ -305,7 +311,7 @@ impl TerminalPane {
                 }
                 true
             }
-            "enter" if !modifiers.shift => {
+            "enter" if !modifiers.shift && !modifiers.alt => {
                 let Some(index) = self.autosuggest_selected_index else {
                     // WindTerm leaves the list unselected so Enter keeps the shell's normal meaning.
                     return false;
@@ -2871,6 +2877,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
+    use crate::SharedTerminalCommandHistory;
     use gpui::{AppContext, IntoElement, Render, ScrollDelta, TestAppContext, Window, div, point};
     #[cfg(unix)]
     use oxideterm_terminal::{
@@ -2889,6 +2896,49 @@ mod tests {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
             div()
         }
+    }
+
+    #[gpui::test]
+    fn plain_arrows_remain_owned_by_shell_when_history_suggestions_are_visible(
+        cx: &mut TestAppContext,
+    ) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalScrollTestRoot);
+        let pane = cx.update(|window, cx| {
+            let mut preferences = TerminalUiPreferences::default();
+            preferences.command_history =
+                SharedTerminalCommandHistory::from_commands(vec!["ls -la".to_string()]);
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    preferences,
+                    window,
+                    cx,
+                )
+                .expect("test terminal pane")
+            })
+        });
+
+        pane.update(cx, |pane, cx| {
+            pane.test_accepts_input = true;
+            pane.snapshot.lines[pane.snapshot.cursor_row].active_input = true;
+            pane.observe_autosuggest_input_bytes(b"ls", cx);
+            pane.autosuggest_prompt_active = true;
+
+            assert!(pane.handle_terminal_autosuggest_key(
+                "down",
+                Modifiers {
+                    alt: true,
+                    ..Modifiers::default()
+                },
+                cx,
+            ));
+            assert_eq!(pane.autosuggest_selected_index, Some(0));
+
+            assert!(!pane.handle_terminal_autosuggest_key("up", Modifiers::default(), cx));
+            assert_eq!(pane.autosuggest_selected_index, None);
+            assert_eq!(pane.autosuggest_dismissed_query.as_deref(), Some("ls"));
+        });
     }
 
     #[gpui::test]

@@ -13,6 +13,7 @@ use oxideterm_gpui_ui::context_menu::{
     context_menu_item_with_shortcut, context_menu_separator,
     context_menu_separator_height_estimate, context_menu_sub_content, context_menu_sub_trigger,
 };
+use oxideterm_gpui_ui::menu::{MenuItemKind, menu_content, menu_item, menu_label};
 use oxideterm_gpui_ui::modal::{TAURI_POPOVER_LAYER_PRIORITY, overlay_content_boundary};
 use oxideterm_gpui_ui::progress::progress;
 use oxideterm_gpui_ui::scroll::ScrollableElement;
@@ -491,7 +492,7 @@ impl TerminalPane {
         let popup_gap = tokens.spacing.one;
         let row_height = tokens.metrics.ui_button_sm_height;
         let popup_padding = tokens.metrics.ui_menu_padding;
-        let badge_width = row_height;
+        let header_height = tokens.metrics.ui_text_sm + tokens.metrics.ui_menu_item_padding_y * 2.0;
         let widest_command_cells = candidates
             .iter()
             .map(|candidate| UnicodeWidthStr::width(candidate.command.as_str()))
@@ -499,7 +500,6 @@ impl TerminalPane {
             .unwrap_or_default();
         let available_width = (anchor.container_width - popup_margin * 2.0).max(0.0);
         let desired_width = widest_command_cells as f32 * anchor.char_width
-            + badge_width
             + tokens.metrics.ui_menu_item_padding_x * 2.0
             + popup_padding * 2.0;
         let popup_width = desired_width
@@ -510,7 +510,8 @@ impl TerminalPane {
         let preferred_left = anchor.x - query_width;
         let max_left = (anchor.container_width - popup_width - popup_margin).max(popup_margin);
         let popup_left = preferred_left.max(popup_margin).min(max_left);
-        let popup_height = row_height * candidates.len() as f32 + popup_padding * 2.0;
+        let popup_height =
+            header_height + row_height * candidates.len() as f32 + popup_padding * 2.0;
         let cursor_top = terminal_top + anchor.y;
         let container_height = terminal_top + anchor.container_height;
         let max_top = (container_height - popup_height - popup_margin).max(popup_margin);
@@ -522,65 +523,28 @@ impl TerminalPane {
         let selected_index = self
             .autosuggest_selected_index
             .filter(|index| *index < candidates.len());
-        let history_source_short = self
-            .preferences
-            .autosuggest_labels
-            .history_source
-            .chars()
-            .next()
-            .map(|character| character.to_string())
-            .unwrap_or_default();
-
-        let mut list = div()
+        let mut list = menu_content(tokens)
             .w(px(popup_width))
-            .rounded(px(tokens.radii.md))
-            .border_1()
-            .border_color(rgb(tokens.ui.border_strong))
-            .bg(rgb(tokens.ui.bg_elevated))
-            .p(px(popup_padding))
-            .shadow_lg()
-            .overflow_hidden()
-            .on_scroll_wheel(|_event, _window, cx| cx.stop_propagation());
+            .min_w(px(0.0))
+            .on_scroll_wheel(|_event, _window, cx| cx.stop_propagation())
+            .child(menu_label(
+                tokens,
+                self.preferences.autosuggest_labels.history_source.clone(),
+                false,
+            ));
         for (index, candidate) in candidates.into_iter().enumerate() {
             let command = candidate.command;
             let command_for_click = command.clone();
             list = list.child(
-                div()
+                menu_item(tokens, command, MenuItemKind::Plain, false, false)
                     .id(("terminal-autosuggest-row", index))
                     .h(px(row_height))
                     .min_w_0()
-                    .flex()
-                    .items_center()
-                    .rounded(px(tokens.radii.sm))
-                    .cursor_pointer()
+                    .truncate()
                     .when(selected_index == Some(index), |row| {
                         row.bg(rgb(tokens.ui.bg_active))
                     })
                     .hover(|row| row.bg(rgb(tokens.ui.bg_hover)))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .px(px(tokens.metrics.ui_menu_item_padding_x))
-                            .truncate()
-                            .text_size(px(tokens.metrics.ui_text_sm))
-                            .text_color(rgb(tokens.ui.text))
-                            .child(command),
-                    )
-                    .child(
-                        div()
-                            .w(px(badge_width))
-                            .h_full()
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .bg(rgb(tokens.ui.accent))
-                            .text_size(px(tokens.metrics.ui_text_xs))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(tokens.ui.accent_text))
-                            .child(history_source_short.clone()),
-                    )
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
