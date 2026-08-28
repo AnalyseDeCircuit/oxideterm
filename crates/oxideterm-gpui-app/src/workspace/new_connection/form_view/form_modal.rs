@@ -487,19 +487,6 @@ impl WorkspaceApp {
                                             false,
                                             cx,
                                         ))
-                                        .child(self.render_connection_group_select(
-                                            if edit_properties_mode
-                                                || mosh_edit_mode
-                                                || standalone_sftp_edit_mode
-                                            {
-                                                self.i18n.t("sessionManager.edit_properties.group")
-                                            } else {
-                                                self.i18n.t("ssh.form.group")
-                                            },
-                                            &form.group,
-                                            cx,
-                                        ))
-                                        .child(self.render_connection_notes_fields(&form.notes, cx))
                                         .child(
                                             div()
                                                 .flex()
@@ -549,6 +536,19 @@ impl WorkspaceApp {
                                             false,
                                             cx,
                                         ))
+                                        .child(self.render_connection_group_select(
+                                            if edit_properties_mode
+                                                || mosh_edit_mode
+                                                || standalone_sftp_edit_mode
+                                            {
+                                                self.i18n.t("sessionManager.edit_properties.group")
+                                            } else {
+                                                self.i18n.t("ssh.form.group")
+                                            },
+                                            &form.group,
+                                            cx,
+                                        ))
+                                        .child(self.render_connection_notes_fields(&form.notes, cx))
                                         .into_any_element();
                                         content.child(self.render_connection_form_section(
                                             ConnectionFormSection::Basic,
