@@ -83,6 +83,17 @@ struct SelectableTextFragmentUpdate {
     anchor: TextInputAnchor,
 }
 
+fn selectable_text_fragment_selection_content_changed(
+    existing: Option<(u64, usize, &str)>,
+    group_id: u64,
+    order: usize,
+    text: &str,
+) -> bool {
+    existing.is_none_or(|(existing_group_id, existing_order, existing_text)| {
+        existing_group_id != group_id || existing_order != order || existing_text != text
+    })
+}
+
 fn begin_selectable_text_frame_flush(flush_scheduled: &Cell<bool>) -> bool {
     !flush_scheduled.replace(true)
 }
@@ -797,9 +808,35 @@ impl WorkspaceApp {
             _ => None,
         };
         let should_notify = active_group.is_some_and(|active_group_id| {
-            updates
+            let updated_fragment_ids = updates
                 .iter()
-                .any(|update| update.group_id == active_group_id)
+                .filter(|update| update.group_id == active_group_id)
+                .map(|update| update.fragment_id)
+                .collect::<HashSet<_>>();
+            let fragment_changed =
+                updates
+                    .iter()
+                    .filter(|update| update.group_id == active_group_id)
+                    .any(|update| {
+                        let existing = self.selectable_text_fragments.get(&update.fragment_id).map(
+                            |fragment| (fragment.group_id, fragment.order, fragment.text.as_str()),
+                        );
+                        selectable_text_fragment_selection_content_changed(
+                            existing,
+                            update.group_id,
+                            update.order,
+                            &update.text,
+                        )
+                    });
+            let fragment_removed = replaced_groups.contains(&active_group_id)
+                && self
+                    .selectable_text_fragments
+                    .iter()
+                    .any(|(fragment_id, fragment)| {
+                        fragment.group_id == active_group_id
+                            && !updated_fragment_ids.contains(fragment_id)
+                    });
+            fragment_changed || fragment_removed
         });
         for update in updates {
             self.selectable_text_fragments.insert(
@@ -1383,5 +1420,23 @@ mod tests {
 
         flush_scheduled.set(false);
         assert!(begin_selectable_text_frame_flush(&flush_scheduled));
+    }
+
+    #[test]
+    fn unchanged_selectable_text_fragment_does_not_request_another_render() {
+        let existing = Some((7, 3, "same text"));
+
+        assert!(!selectable_text_fragment_selection_content_changed(
+            existing,
+            7,
+            3,
+            "same text",
+        ));
+        assert!(selectable_text_fragment_selection_content_changed(
+            existing,
+            7,
+            3,
+            "changed text",
+        ));
     }
 }
