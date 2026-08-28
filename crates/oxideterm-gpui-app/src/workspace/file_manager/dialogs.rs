@@ -854,7 +854,6 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let target = WorkspaceImeTarget::FileManager(FileManagerInput::DialogValue);
-        let workspace = cx.entity();
         let (dialog, dialog_value, focused) = {
             let file_manager = self.file_manager.read(cx);
             (
@@ -874,47 +873,33 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(text_input_anchor_probe(
-                target.anchor_id(),
-                text_input(
-                    &self.tokens,
-                    TextInputView {
-                        value: &dialog_value,
-                        placeholder,
-                        focused,
-                        caret_visible: self.input_caret.visible(),
-                        secret: false,
-                        selected_all: false,
-                        selected_range: self.ime_selected_range_for_target(target, cx),
-                        marked_text: self.marked_text_for_target(target, cx),
-                    },
-                )
-                .bg(file_manager_bg(self.tokens.ui.bg_sunken, has_background))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                        window.focus(&this.focus_handle, cx);
+            .child(
+                self.text_input_with_workspace_ime(
+                    target,
+                    text_input(
+                        &self.tokens,
+                        TextInputView {
+                            value: &dialog_value,
+                            placeholder,
+                            focused,
+                            caret_visible: self.input_caret.visible(),
+                            secret: false,
+                            selected_all: false,
+                            selected_range: self.ime_selected_range_for_target(target, cx),
+                            marked_text: self.marked_text_for_target(target, cx),
+                        },
+                    )
+                    .bg(file_manager_bg(self.tokens.ui.bg_sunken, has_background)),
+                    |this, cx| {
                         this.file_manager.update(cx, |file_manager, cx| {
                             file_manager.focused_input = Some(FileManagerInput::DialogValue);
                             file_manager.focused_dialog_footer_action = None;
                             cx.notify();
                         });
-                        this.ime_marked_text = None;
-                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_move(cx.listener(
-                    |this, event: &gpui::MouseMoveEvent, window, cx| {
-                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
                     },
-                )),
-                move |anchor, _window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_text_input_anchor(anchor, cx);
-                    });
-                },
-            ))
+                    cx,
+                ),
+            )
             .child(self.render_file_manager_dialog_buttons(false, cx))
             .into_any_element()
     }
@@ -926,7 +911,6 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let target = WorkspaceImeTarget::FileManager(FileManagerInput::DialogValue);
-        let workspace = cx.entity();
         let (dialog_value, focused) = {
             let file_manager = self.file_manager.read(cx);
             (
@@ -952,46 +936,32 @@ impl WorkspaceApp {
                         cx,
                     )),
             )
-            .child(text_input_anchor_probe(
-                target.anchor_id(),
-                text_input(
-                    &self.tokens,
-                    TextInputView {
-                        value: &dialog_value,
-                        placeholder: self.i18n.t("fileManager.bookmarkName"),
-                        focused,
-                        caret_visible: self.input_caret.visible(),
-                        secret: false,
-                        selected_all: false,
-                        selected_range: self.ime_selected_range_for_target(target, cx),
-                        marked_text: self.marked_text_for_target(target, cx),
-                    },
-                )
-                .bg(file_manager_bg(self.tokens.ui.bg_sunken, has_background))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                        window.focus(&this.focus_handle, cx);
+            .child(
+                self.text_input_with_workspace_ime(
+                    target,
+                    text_input(
+                        &self.tokens,
+                        TextInputView {
+                            value: &dialog_value,
+                            placeholder: self.i18n.t("fileManager.bookmarkName"),
+                            focused,
+                            caret_visible: self.input_caret.visible(),
+                            secret: false,
+                            selected_all: false,
+                            selected_range: self.ime_selected_range_for_target(target, cx),
+                            marked_text: self.marked_text_for_target(target, cx),
+                        },
+                    )
+                    .bg(file_manager_bg(self.tokens.ui.bg_sunken, has_background)),
+                    |this, cx| {
                         this.file_manager.update(cx, |file_manager, cx| {
                             file_manager.focused_input = Some(FileManagerInput::DialogValue);
                             cx.notify();
                         });
-                        this.ime_marked_text = None;
-                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_move(cx.listener(
-                    |this, event: &gpui::MouseMoveEvent, window, cx| {
-                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
                     },
-                )),
-                move |anchor, _window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_text_input_anchor(anchor, cx);
-                    });
-                },
-            ))
+                    cx,
+                ),
+            )
             .child(
                 div()
                     .flex()

@@ -15,9 +15,10 @@ impl WorkspaceApp {
             value.as_str()
         };
         let target = WorkspaceImeTarget::Settings(input);
-        let workspace = cx.entity();
-        text_input_anchor_probe(
-            target.anchor_id(),
+        // Numeric settings keep centered text while sharing the same input
+        // ownership and selection behavior as other Workspace controls.
+        self.text_input_with_workspace_ime(
+            target,
             text_input_with_content_align(
                 &self.tokens,
                 TextInputView {
@@ -32,32 +33,12 @@ impl WorkspaceApp {
                 },
                 TextInputContentAlign::Center,
             )
-            .w(px(width))
-            // Tauri number inputs use the browser input text box; keep numeric
-            // settings values centered in the padded field instead of inheriting
-            // the old right-aligned GPUI flex row.
-            .cursor(CursorStyle::IBeam)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    let current = this.current_settings_input_value(input, cx);
-                    this.focus_settings_input(input, current, cx);
-                    this.ime_marked_text = None;
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(
-                |this, event: &gpui::MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                },
-            )),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
+            .w(px(width)),
+            move |this, cx| {
+                let current = this.current_settings_input_value(input, cx);
+                this.focus_settings_input(input, current, cx);
             },
+            cx,
         )
         .into_any_element()
     }
@@ -317,9 +298,8 @@ impl WorkspaceApp {
             value.as_ref()
         };
         let target = WorkspaceImeTarget::Settings(input);
-        let workspace = cx.entity();
-        text_input_anchor_probe(
-            target.anchor_id(),
+        self.text_input_with_workspace_ime(
+            target,
             text_input_with_content_align(
                 &self.tokens,
                 TextInputView {
@@ -338,29 +318,12 @@ impl WorkspaceApp {
             )
             .when_some(width, |input, width| input.w(px(width)).max_w_full())
             .when(width.is_none(), |input| input.w_full())
-            .min_w(px(0.0))
-            .cursor(CursorStyle::IBeam)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    let current = this.current_settings_input_value(input, cx);
-                    this.focus_settings_input(input, current, cx);
-                    this.ime_marked_text = None;
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(
-                |this, event: &gpui::MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                },
-            )),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
+            .min_w(px(0.0)),
+            move |this, cx| {
+                let current = this.current_settings_input_value(input, cx);
+                this.focus_settings_input(input, current, cx);
             },
+            cx,
         )
         .into_any_element()
     }

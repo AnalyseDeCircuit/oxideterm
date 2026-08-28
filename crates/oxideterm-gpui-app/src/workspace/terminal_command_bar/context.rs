@@ -468,12 +468,11 @@ impl WorkspaceApp {
 
     pub(super) fn render_terminal_cwd_search(&self, cx: &mut Context<Self>) -> AnyElement {
         let target = WorkspaceImeTarget::TerminalCwdSearch;
-        let workspace = cx.entity();
         let selected_range = self.ime_selected_range_for_target(target, cx);
         let marked_text = self.marked_text_for_target(target, cx);
         let terminal = self.terminal.read(cx);
-        text_input_anchor_probe(
-            target.anchor_id(),
+        self.text_input_with_workspace_ime(
+            target,
             text_input(
                 &self.tokens,
                 TextInputView {
@@ -487,27 +486,9 @@ impl WorkspaceApp {
                     marked_text,
                 },
             )
-            .h(px(32.0))
-            .cursor(CursorStyle::IBeam)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle, cx);
-                    this.ime_marked_text = None;
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(
-                |this, event: &gpui::MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                },
-            )),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
-            },
+            .h(px(32.0)),
+            |_this, _cx| {},
+            cx,
         )
         .into_any_element()
     }
@@ -1019,12 +1000,11 @@ impl WorkspaceApp {
 
     pub(super) fn render_terminal_project_search(&self, cx: &mut Context<Self>) -> AnyElement {
         let target = WorkspaceImeTarget::TerminalProjectSearch;
-        let workspace = cx.entity();
         let selected_range = self.ime_selected_range_for_target(target, cx);
         let marked_text = self.marked_text_for_target(target, cx);
         let terminal = self.terminal.read(cx);
-        text_input_anchor_probe(
-            target.anchor_id(),
+        self.text_input_with_workspace_ime(
+            target,
             text_input(
                 &self.tokens,
                 TextInputView {
@@ -1038,27 +1018,9 @@ impl WorkspaceApp {
                     marked_text,
                 },
             )
-            .h(px(32.0))
-            .cursor(CursorStyle::IBeam)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle, cx);
-                    this.ime_marked_text = None;
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(
-                |this, event: &gpui::MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                },
-            )),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
-            },
+            .h(px(32.0)),
+            |_this, _cx| {},
+            cx,
         )
         .into_any_element()
     }

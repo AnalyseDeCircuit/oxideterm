@@ -1,9 +1,10 @@
 use std::{cell::RefCell, collections::HashMap, fmt, ops::Range, rc::Rc, time::Instant};
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, Element, ElementId, Entity, FocusHandle, GlobalElementId,
-    InputHandler, InspectorElementId, IntoColor, Keystroke, LayoutId, Pixels, Point, SharedString,
-    Style, TextRun, Timer, UTF16Selection, Window, font, point, px, rgb,
+    App, Bounds, ClipboardItem, Context, CursorStyle, Element, ElementId, Entity, FocusHandle,
+    GlobalElementId, InputHandler, InspectorElementId, InteractiveElement, IntoColor, IntoElement,
+    Keystroke, LayoutId, MouseButton, Pixels, Point, SharedString, Style, Styled, TextRun, Timer,
+    UTF16Selection, Window, font, point, px, rgb,
 };
 use oxideterm_editor_core::utf16::{
     byte_index_for_utf16, control_k_delete_end, floor_char_boundary, line_end_for_utf16_offset,
@@ -31,7 +32,8 @@ use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::{
     tauri_ui_font_family,
     text_input::{
-        TextInputAnchor, TextInputAnchorId, TextInputContentAlign, text_input_secret_mask,
+        TextInputAnchor, TextInputAnchorId, TextInputAnchorProbe, TextInputContentAlign,
+        text_input_anchor_probe, text_input_secret_mask,
     },
 };
 use zeroize::{Zeroize, Zeroizing};
@@ -884,6 +886,48 @@ impl WorkspaceApp {
         _cx: &mut Context<Self>,
     ) {
         self.text_input_anchors.update(anchor);
+    }
+
+    /// Applies the shared pointer, focus, selection, and anchor behavior for a
+    /// Workspace-owned single-line input without taking ownership of its text.
+    pub(super) fn text_input_with_workspace_ime<E>(
+        &self,
+        target: WorkspaceImeTarget,
+        input: E,
+        prepare_focus: impl Fn(&mut Self, &mut Context<Self>) + 'static,
+        cx: &Context<Self>,
+    ) -> TextInputAnchorProbe
+    where
+        E: IntoElement + InteractiveElement + Styled,
+    {
+        let anchors = self.text_input_anchors.clone();
+        text_input_anchor_probe(
+            target.anchor_id(),
+            input
+                .cursor(CursorStyle::IBeam)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                        // Domain state must identify the active input before the
+                        // shared IME resolves its text and selection geometry.
+                        prepare_focus(this, cx);
+                        this.ime_marked_text = None;
+                        window.focus(&this.focus_handle, cx);
+                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_move(
+                    cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
+                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                    }),
+                ),
+            move |anchor, _window, _cx| {
+                // Geometry is frame-local layout state and does not require a
+                // WorkspaceApp update or an additional render notification.
+                anchors.update(anchor);
+            },
+        )
     }
 
     pub(super) fn host_tools_plain_text_ime_frame(

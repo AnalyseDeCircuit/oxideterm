@@ -1556,40 +1556,21 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let target = WorkspaceImeTarget::NewConnection(field);
-        let anchors = self.text_input_anchors.clone();
-        text_input_anchor_probe(
-            target.anchor_id(),
-            input
-                .id(("connection-field", field as u32))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                        this.update_connection_form_state(cx, |state| {
-                            if let Some(form) = state.form.as_mut() {
-                                form.field_focused = true;
-                                form.focused_field = field;
-                                clear_connection_selection(form);
-                            }
-                        });
-                        this.close_new_connection_select(cx);
-                        this.ime_marked_text = None;
-                        this.show_active_input_caret(cx);
-                        window.focus(&this.focus_handle, cx);
-                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_move(
-                    cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
-                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                    }),
-                ),
-            move |anchor, _window, _cx| {
-                // Text geometry is layout-only state. Writing the shared store
-                // directly avoids re-entering WorkspaceApp once per input on
-                // every frame of an inertial form scroll.
-                anchors.update(anchor);
+        self.text_input_with_workspace_ime(
+            target,
+            input.id(("connection-field", field as u32)),
+            move |this, cx| {
+                this.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.field_focused = true;
+                        form.focused_field = field;
+                        clear_connection_selection(form);
+                    }
+                });
+                this.close_new_connection_select(cx);
+                this.show_active_input_caret(cx);
             },
+            cx,
         )
         .into_any_element()
     }

@@ -1283,7 +1283,6 @@ impl WorkspaceApp {
             )
         };
         let target = WorkspaceImeTarget::FileManager(input);
-        let workspace = cx.entity();
         div()
             .h(px(32.0))
             .px(px(8.0))
@@ -1291,48 +1290,34 @@ impl WorkspaceApp {
             .border_b_1()
             .border_color(file_manager_border(theme.border, has_background))
             .bg(file_manager_panel_bg(theme.bg_panel, has_background, 0xff))
-            .child(text_input_anchor_probe(
-                target.anchor_id(),
-                text_input(
-                    &self.tokens,
-                    TextInputView {
-                        value: &filter,
-                        placeholder: self.i18n.t("fileManager.filterPlaceholder"),
-                        focused,
-                        caret_visible: self.input_caret.visible(),
-                        secret: false,
-                        selected_all: false,
-                        selected_range: self.ime_selected_range_for_target(target, cx),
-                        marked_text: self.marked_text_for_target(target, cx),
-                    },
-                )
-                .h(px(24.0))
-                .bg(file_manager_bg(theme.bg_sunken, has_background))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                        window.focus(&this.focus_handle, cx);
+            .child(
+                self.text_input_with_workspace_ime(
+                    target,
+                    text_input(
+                        &self.tokens,
+                        TextInputView {
+                            value: &filter,
+                            placeholder: self.i18n.t("fileManager.filterPlaceholder"),
+                            focused,
+                            caret_visible: self.input_caret.visible(),
+                            secret: false,
+                            selected_all: false,
+                            selected_range: self.ime_selected_range_for_target(target, cx),
+                            marked_text: self.marked_text_for_target(target, cx),
+                        },
+                    )
+                    .h(px(24.0))
+                    .bg(file_manager_bg(theme.bg_sunken, has_background)),
+                    |this, cx| {
                         this.file_manager.update(cx, |file_manager, cx| {
                             file_manager.focused_input = Some(FileManagerInput::Filter);
                             cx.notify();
                         });
                         this.dismiss_file_manager_context_menu(cx);
-                        this.ime_marked_text = None;
-                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_move(cx.listener(
-                    |this, event: &gpui::MouseMoveEvent, window, cx| {
-                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
                     },
-                )),
-                move |anchor, _window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_text_input_anchor(anchor, cx);
-                    });
-                },
-            ))
+                    cx,
+                ),
+            )
             .into_any_element()
     }
 

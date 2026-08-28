@@ -9,7 +9,7 @@ use super::{
     AnyElement, ConfirmDialogVariant, ConfirmDialogView, Context, FORWARDS_TW_ALPHA_30,
     FORWARDS_TW_ALPHA_50, ForwardInput, ForwardType, ForwardingRuntimeOperation, LucideIcon,
     MouseButton, NodeId, TW_BLACK, TabId, TextInputView, WorkspaceApp, WorkspaceImeTarget,
-    confirm_dialog, div, px, rgb, settings_mono_font_family, text_input, text_input_anchor_probe,
+    confirm_dialog, div, px, rgb, settings_mono_font_family, text_input,
 };
 
 impl WorkspaceApp {
@@ -615,12 +615,11 @@ impl WorkspaceApp {
         fill: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let workspace = cx.entity();
         let focused = self.forwarding.read(cx).view().focused_input == Some(input);
         let value = self.forward_input_value(input, cx);
         let target = WorkspaceImeTarget::Forwards(input);
-        text_input_anchor_probe(
-            target.anchor_id(),
+        self.text_input_with_workspace_ime(
+            target,
             div()
                 .when(fill, |wrapper| wrapper.w_full())
                 .font_family(self.forward_mono_font())
@@ -636,29 +635,13 @@ impl WorkspaceApp {
                         selected_range: self.ime_selected_range_for_target(target, cx),
                         marked_text: self.marked_text_for_target(target, cx),
                     },
-                ))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                        this.forwarding
-                            .update(cx, |forwarding, _cx| forwarding.focus_input(input));
-                        this.ime_marked_text = None;
-                        this.needs_active_pane_focus = false;
-                        window.focus(&this.focus_handle, cx);
-                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_move(
-                    cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
-                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                    }),
-                ),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
+                )),
+            move |this, cx| {
+                this.forwarding
+                    .update(cx, |forwarding, _cx| forwarding.focus_input(input));
+                this.needs_active_pane_focus = false;
             },
+            cx,
         )
         .into_any_element()
     }

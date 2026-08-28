@@ -63,7 +63,6 @@ use oxideterm_gpui_ui::{
     text_input::{
         text_caret, text_input_value_segments, text_input_value_segments_with_marked_range,
     },
-    text_input_anchor_probe,
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopVncCompression, RemoteDesktopVncImageQuality, RemoteDesktopVncSecurityPolicy,

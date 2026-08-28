@@ -279,30 +279,14 @@ impl WorkspaceApp {
                 marked_text: self.marked_text_for_target(target, cx),
             },
         )
-        .h(px(34.0))
-        .cursor(CursorStyle::IBeam);
-        let workspace = cx.entity();
-        let input = text_input_anchor_probe(
-            target.anchor_id(),
-            input
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                        this.ime_marked_text = None;
-                        this.show_active_input_caret(cx);
-                        window.focus(&this.focus_handle, cx);
-                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                })),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
+        .h(px(34.0));
+        let input = self.text_input_with_workspace_ime(
+            target,
+            input,
+            |this, cx| {
+                this.show_active_input_caret(cx);
             },
+            cx,
         );
         let cancel_action = self.workspace_confirm_footer_action_button(
             self.i18n.t("common.cancel"),

@@ -1134,7 +1134,6 @@ impl WorkspaceApp {
 
         if let Some((edit_kind, value)) = group_editor {
             let target = WorkspaceImeTarget::TerminalBroadcastGroupName;
-            let workspace = cx.entity();
             let valid = self.terminal_broadcast_group_name_valid(edit_kind, &value);
             menu = menu.child(
                 div()
@@ -1144,38 +1143,29 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap(px(6.0))
-                    .child(text_input_anchor_probe(
-                        target.anchor_id(),
-                        text_input(
-                            &self.tokens,
-                            TextInputView {
-                                value: &value,
-                                placeholder: self
-                                    .i18n
-                                    .t("terminal.broadcast.group_name_placeholder"),
-                                focused: true,
-                                caret_visible: self.input_caret.visible(),
-                                secret: false,
-                                selected_all: false,
-                                selected_range: self.ime_selected_range_for_target(target, cx),
-                                marked_text: self.marked_text_for_target(target, cx),
-                            },
-                        )
-                        .h(px(28.0))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, event, window, cx| {
-                                window.focus(&this.focus_handle, cx);
-                                this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                                cx.stop_propagation();
-                            }),
+                    .child(
+                        self.text_input_with_workspace_ime(
+                            target,
+                            text_input(
+                                &self.tokens,
+                                TextInputView {
+                                    value: &value,
+                                    placeholder: self
+                                        .i18n
+                                        .t("terminal.broadcast.group_name_placeholder"),
+                                    focused: true,
+                                    caret_visible: self.input_caret.visible(),
+                                    secret: false,
+                                    selected_all: false,
+                                    selected_range: self.ime_selected_range_for_target(target, cx),
+                                    marked_text: self.marked_text_for_target(target, cx),
+                                },
+                            )
+                            .h(px(28.0)),
+                            |_this, _cx| {},
+                            cx,
                         ),
-                        move |anchor, _window, cx| {
-                            let _ = workspace.update(cx, |this, cx| {
-                                this.update_text_input_anchor(anchor, cx);
-                            });
-                        },
-                    ))
+                    )
                     .child(
                         div()
                             .size(px(24.0))

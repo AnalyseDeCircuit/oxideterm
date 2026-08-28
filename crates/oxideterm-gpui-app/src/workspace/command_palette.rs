@@ -10,7 +10,7 @@ use oxideterm_gpui_ui::{
         dialog_content, dismissible_command_palette_backdrop, dismissible_dialog_backdrop,
         overlay_content_boundary, rounded_shell_child_radius,
     },
-    text_input::{text_input_anchor_probe, text_input_value_segments},
+    text_input::text_input_value_segments,
 };
 use oxideterm_remote_desktop::{RemoteDesktopConnectionProfile, RemoteDesktopProtocol};
 use oxideterm_ssh_launch::{format_user_host_port_target, parse_explicit_user_host_port_target};
@@ -327,10 +327,8 @@ impl WorkspaceApp {
             .filter(|range| range.start == range.end)
             .map(|range| range.start);
         let marked_text = self.marked_text_for_target(target, cx).unwrap_or_default();
-        let workspace = cx.entity();
-
-        text_input_anchor_probe(
-            target.anchor_id(),
+        self.text_input_with_workspace_ime(
+            target,
             div()
                 .flex_1()
                 .min_w_0()
@@ -343,7 +341,6 @@ impl WorkspaceApp {
                 } else {
                     rgb(self.tokens.ui.text)
                 })
-                .cursor(gpui::CursorStyle::IBeam)
                 .overflow_hidden()
                 .child(text_input_value_segments(
                     &self.tokens,
@@ -360,23 +357,9 @@ impl WorkspaceApp {
                             .text_color(rgb(self.tokens.ui.text))
                             .child(marked_text.to_string()),
                     )
-                })
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                        window.focus(&this.focus_handle, cx);
-                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                })),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
-            },
+                }),
+            |_this, _cx| {},
+            cx,
         )
         .into_any_element()
     }

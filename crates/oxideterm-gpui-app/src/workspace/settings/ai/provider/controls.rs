@@ -289,9 +289,8 @@ impl WorkspaceApp {
             value.as_str()
         };
         let target = WorkspaceImeTarget::Settings(input);
-        let workspace = cx.entity();
-        text_input_anchor_probe(
-            target.anchor_id(),
+        self.text_input_with_workspace_ime(
+            target,
             text_input(
                 &self.tokens,
                 TextInputView {
@@ -308,29 +307,12 @@ impl WorkspaceApp {
             .w_full()
             .h(px(32.0))
             .min_w(px(0.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .cursor(CursorStyle::IBeam)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    let current = this.current_settings_input_value(input, cx);
-                    this.focus_settings_input(input, current, cx);
-                    this.ime_marked_text = None;
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(
-                |this, event: &gpui::MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                },
-            )),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
+            .text_size(px(self.tokens.metrics.ui_text_xs)),
+            move |this, cx| {
+                let current = this.current_settings_input_value(input, cx);
+                this.focus_settings_input(input, current, cx);
             },
+            cx,
         )
         .into_any_element()
     }

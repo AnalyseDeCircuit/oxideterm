@@ -185,7 +185,7 @@ use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{
     ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, checkbox,
     modal::{popover_backdrop, set_tauri_backdrop_blur_allowed},
-    text_input::{TextInputView, text_input, text_input_anchor_probe},
+    text_input::{TextInputView, text_input},
     toast::{ToastVariant, ToastView, toast_action, toast_close},
     toaster::toaster,
     tooltip::tooltip_content,

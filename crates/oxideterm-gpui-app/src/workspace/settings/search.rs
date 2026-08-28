@@ -885,8 +885,8 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::Settings(SettingsInput::SettingsSearch);
         let workspace = cx.entity();
         let search_input =
-            text_input_anchor_probe(
-                target.anchor_id(),
+            self.text_input_with_workspace_ime(
+                target,
                 text_input(
                     &self.tokens,
                     TextInputView {
@@ -905,7 +905,6 @@ impl WorkspaceApp {
                 .h(px(SETTINGS_SEARCH_INPUT_HEIGHT))
                 .pl(px(34.0))
                 .pr(px(if query.is_empty() { 12.0 } else { 34.0 }))
-                .cursor(CursorStyle::IBeam)
                 .child(div().absolute().left(px(12.0)).top(px(10.0)).child(
                     Self::render_lucide_icon(
                         LucideIcon::Search,
@@ -940,27 +939,11 @@ impl WorkspaceApp {
                             workspace.clone(),
                         ),
                     ))
-                })
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                        this.focus_settings_input(SettingsInput::SettingsSearch, String::new(), cx);
-                        this.ime_marked_text = None;
-                        window.focus(&this.focus_handle, cx);
-                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_move(cx.listener(
-                    |this, event: &gpui::MouseMoveEvent, window, cx| {
-                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                    },
-                )),
-                move |anchor, _window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_text_input_anchor(anchor, cx);
-                    });
+                }),
+                |this, cx| {
+                    this.focus_settings_input(SettingsInput::SettingsSearch, String::new(), cx);
                 },
+                cx,
             );
         let results = settings_search_results(&self.i18n, query);
         let result_scroll = self.selectable_text_scroll_handle("settings-search-results-scroll");

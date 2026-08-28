@@ -198,9 +198,8 @@ impl WorkspaceApp {
             == Some(SettingsInput::KeybindingSearch);
         let value = settings_workspace.keybinding_search_query();
         let target = WorkspaceImeTarget::Settings(SettingsInput::KeybindingSearch);
-        let workspace = cx.entity();
-        text_input_anchor_probe(
-            target.anchor_id(),
+        self.text_input_with_workspace_ime(
+            target,
             text_input(
                 &self.tokens,
                 TextInputView {
@@ -217,7 +216,6 @@ impl WorkspaceApp {
             .w(px(280.0))
             .h(px(36.0))
             .pl(px(34.0))
-            .cursor(CursorStyle::IBeam)
             .child(
                 div()
                     .absolute()
@@ -228,27 +226,11 @@ impl WorkspaceApp {
                         15.0,
                         rgb(self.tokens.ui.text_muted),
                     )),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    this.focus_settings_input(SettingsInput::KeybindingSearch, String::new(), cx);
-                    this.ime_marked_text = None;
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(
-                |this, event: &gpui::MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                },
-            )),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
+            ),
+            |this, cx| {
+                this.focus_settings_input(SettingsInput::KeybindingSearch, String::new(), cx);
             },
+            cx,
         )
         .into_any_element()
     }

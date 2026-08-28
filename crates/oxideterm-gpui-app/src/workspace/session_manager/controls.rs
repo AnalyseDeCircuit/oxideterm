@@ -81,7 +81,6 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let workspace = cx.entity();
         let active = self.session_manager.read(cx).focused_input() == Some(target);
         let has_background = self.background_surface_active("session_manager");
         let marked = self
@@ -119,8 +118,8 @@ impl WorkspaceApp {
             .map(|range| range.start);
         let shows_selection = selection_range.is_some();
         let shows_positioned_caret = caret_offset.is_some() && !shows_selection;
-        text_input_anchor_probe(
-            input_target.anchor_id(),
+        self.text_input_with_workspace_ime(
+            input_target,
             div()
                 .h(px(32.0))
                 .w_full()
@@ -184,36 +183,15 @@ impl WorkspaceApp {
                                 input.child(text_caret(&self.tokens, self.input_caret.visible()))
                             },
                         ),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                        this.session_manager.update(cx, |manager, cx| {
-                            manager.focused_input = Some(target);
-                            cx.notify();
-                        });
-                        this.ime_marked_text = None;
-                        this.needs_active_pane_focus = false;
-                        window.focus(&this.focus_handle, cx);
-                        this.begin_ime_selection_from_mouse_down(
-                            WorkspaceImeTarget::SessionManager(target),
-                            event,
-                            window,
-                            cx,
-                        );
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_move(
-                    cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
-                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                    }),
                 ),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
+            move |this, cx| {
+                this.session_manager.update(cx, |manager, cx| {
+                    manager.focused_input = Some(target);
+                    cx.notify();
                 });
+                this.needs_active_pane_focus = false;
             },
+            cx,
         )
         .into_any_element()
     }

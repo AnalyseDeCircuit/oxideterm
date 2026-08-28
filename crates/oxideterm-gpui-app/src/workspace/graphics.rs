@@ -15,7 +15,6 @@ use oxideterm_gpui_ui::{
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions, button_with,
     },
-    text_input_anchor_probe,
 };
 use oxideterm_workspace::{Tab, TabKind, TabTitleSource};
 use oxideterm_wsl_graphics::{
@@ -1253,50 +1252,37 @@ impl WorkspaceApp {
         let focused = graphics.focused_input == Some(GraphicsInput::AppCommand);
         let target = WorkspaceImeTarget::Graphics(GraphicsInput::AppCommand);
         let marked = self.marked_text_for_target(target, cx);
-        let workspace = cx.entity();
         div()
             .relative()
-            .child(text_input_anchor_probe(
-                target.anchor_id(),
-                oxideterm_gpui_ui::text_input(
-                    &self.tokens,
-                    TextInputView {
-                        value: &graphics.app_command,
-                        placeholder: self.i18n.t("graphics.app_command_placeholder"),
-                        focused,
-                        caret_visible: self.input_caret.visible(),
-                        secret: false,
-                        selected_all: false,
-                        selected_range: self.ime_selected_range_for_target(target, cx),
-                        marked_text: marked,
-                    },
-                )
-                .h(px(GRAPHICS_INPUT_H))
-                .bg(rgb(theme.bg))
-                .border_color(rgb(theme.border))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+            .child(
+                self.text_input_with_workspace_ime(
+                    target,
+                    oxideterm_gpui_ui::text_input(
+                        &self.tokens,
+                        TextInputView {
+                            value: &graphics.app_command,
+                            placeholder: self.i18n.t("graphics.app_command_placeholder"),
+                            focused,
+                            caret_visible: self.input_caret.visible(),
+                            secret: false,
+                            selected_all: false,
+                            selected_range: self.ime_selected_range_for_target(target, cx),
+                            marked_text: marked,
+                        },
+                    )
+                    .h(px(GRAPHICS_INPUT_H))
+                    .bg(rgb(theme.bg))
+                    .border_color(rgb(theme.border)),
+                    |this, cx| {
                         this.graphics.update(cx, |graphics, cx| {
                             graphics.focused_input = Some(GraphicsInput::AppCommand);
                             cx.notify();
                         });
                         this.show_active_input_caret(cx);
-                        window.focus(&this.focus_handle, cx);
-                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    }),
-                )
-                .on_mouse_move(cx.listener(
-                    |this, event: &gpui::MouseMoveEvent, window, cx| {
-                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
                     },
-                )),
-                move |anchor, _window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_text_input_anchor(anchor, cx);
-                    });
-                },
-            ))
+                    cx,
+                ),
+            )
             .into_any_element()
     }
 

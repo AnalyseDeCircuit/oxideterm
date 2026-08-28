@@ -7,8 +7,8 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, App, Context, CursorStyle, KeyDownEvent, MouseButton, PathPromptOptions,
-    SharedString, div, prelude::*, px, rgb, rgba,
+    AnyElement, App, Context, KeyDownEvent, MouseButton, PathPromptOptions, SharedString, div,
+    prelude::*, px, rgb, rgba,
 };
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_gpui_ui::{
@@ -17,7 +17,7 @@ use oxideterm_gpui_ui::{
     scroll::ScrollableElement,
     select::SelectAnchorId,
     status_pill,
-    text_input::{TextInputView, text_input_anchor_probe, text_input_with_viewport},
+    text_input::{TextInputView, text_input_with_viewport},
 };
 use oxideterm_i18n::I18n;
 use oxideterm_quick_commands::{
@@ -3212,11 +3212,10 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let focused = focused_input == Some(input);
         let target = WorkspaceImeTarget::QuickCommand(input);
-        let workspace = cx.entity();
         let viewport = self.terminal.read(cx).quick_commands.input_viewport(input);
         let active_offset = self.ime_active_offset_for_target(target, cx);
-        text_input_anchor_probe(
-            target.anchor_id(),
+        self.text_input_with_workspace_ime(
+            target,
             text_input_with_viewport(
                 &self.tokens,
                 TextInputView {
@@ -3235,30 +3234,13 @@ impl WorkspaceApp {
             .h(px(32.0))
             .when(quick_command_input_uses_monospace(input), |field| {
                 field.font_family(settings_mono_font_family(self.settings_store.settings()))
-            })
-            .cursor(CursorStyle::IBeam)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    this.terminal.update(cx, |terminal, _cx| {
-                        terminal.quick_commands.set_focused_input(input)
-                    });
-                    this.ime_marked_text = None;
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(
-                |this, event: &gpui::MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                },
-            )),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
+            }),
+            move |this, cx| {
+                this.terminal.update(cx, |terminal, _cx| {
+                    terminal.quick_commands.set_focused_input(input)
                 });
             },
+            cx,
         )
         .into_any_element()
     }

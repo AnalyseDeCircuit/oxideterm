@@ -3,7 +3,7 @@ use crate::workspace::ime::WorkspaceImeTarget;
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions, ToolbarButtonOptions,
 };
-use oxideterm_gpui_ui::text_input::{text_caret, text_input_anchor_probe};
+use oxideterm_gpui_ui::text_input::text_caret;
 use oxideterm_terminal_recording::{format_cast_time, format_recording_elapsed};
 
 impl WorkspaceApp {
@@ -210,7 +210,6 @@ impl WorkspaceApp {
         let search_result_count = search_results.len();
         let search_results_empty = search_results.is_empty();
         let pane = player.pane;
-        let workspace = cx.entity();
         Some(
             div()
                 .absolute()
@@ -289,7 +288,7 @@ impl WorkspaceApp {
                                                     terminal.toggle_cast_search(cx);
                                                 });
                                                 this.ime_marked_text = None;
-window.focus(&this.focus_handle, cx);
+                                                window.focus(&this.focus_handle, cx);
                                                 cx.stop_propagation();
                                                 cx.notify();
                                             }),
@@ -359,88 +358,75 @@ window.focus(&this.focus_handle, cx);
                                                 14.0,
                                                 rgb(theme.text_muted),
                                             ))
-                                            .child(text_input_anchor_probe(
-                                                search_target.anchor_id(),
-                                                div()
-                                                    .h(px(30.0))
-                                                    .flex_1()
-                                                    .min_w(px(0.0))
-                                                    .flex()
-                                                    .items_center()
-                                                    .rounded_md()
-                                                    .border_1()
-                                                    .border_color(if player.search_focused {
-                                                        rgba((theme.accent << 8) | 0x80)
-                                                    } else {
-                                                        rgba((theme.border << 8) | 0x80)
-                                                    })
-                                                    .bg(rgba((theme.bg_hover << 8) | 0x99))
-                                                    .px(px(8.0))
-                                                    .text_size(px(13.0))
-                                                    .text_color(if search_empty {
-                                                        rgb(theme.text_muted)
-                                                    } else {
-                                                        rgb(theme.text)
-                                                    })
-                                                    .cursor_text()
-                                                    .on_mouse_down(
-                                                        MouseButton::Left,
-                                                        cx.listener(
-                                                            move |this, event: &gpui::MouseDownEvent, window, cx| {
-                                                                this.terminal.update(cx, |terminal, _cx| {
-                                                                    terminal.focus_cast_search();
-                                                                });
-                                                                this.ime_marked_text = None;
-window.focus(&this.focus_handle, cx);
-                                                                this.begin_ime_selection_from_mouse_down(search_target, event, window, cx);
-                                                                cx.stop_propagation();
-                                                            },
+                                            .child(
+                                                self.text_input_with_workspace_ime(
+                                                    search_target,
+                                                    div()
+                                                        .h(px(30.0))
+                                                        .flex_1()
+                                                        .min_w(px(0.0))
+                                                        .flex()
+                                                        .items_center()
+                                                        .rounded_md()
+                                                        .border_1()
+                                                        .border_color(if player.search_focused {
+                                                            rgba((theme.accent << 8) | 0x80)
+                                                        } else {
+                                                            rgba((theme.border << 8) | 0x80)
+                                                        })
+                                                        .bg(rgba((theme.bg_hover << 8) | 0x99))
+                                                        .px(px(8.0))
+                                                        .text_size(px(13.0))
+                                                        .text_color(if search_empty {
+                                                            rgb(theme.text_muted)
+                                                        } else {
+                                                            rgb(theme.text)
+                                                        })
+                                                        .child(
+                                                            div()
+                                                                .flex()
+                                                                .items_center()
+                                                                .overflow_hidden()
+                                                                .child(search_text)
+                                                                .when_some(
+                                                                    search_marked,
+                                                                    |input, marked| {
+                                                                        input.child(
+                                                                            div()
+                                                                                .underline()
+                                                                                .text_color(rgb(
+                                                                                    theme.text,
+                                                                                ))
+                                                                                .child(
+                                                                                    marked
+                                                                                        .to_string(
+                                                                                        ),
+                                                                                ),
+                                                                        )
+                                                                    },
+                                                                )
+                                                                .when(
+                                                                    player.search_focused,
+                                                                    |input| {
+                                                                        input.child(text_caret(
+                                                                            &self.tokens,
+                                                                            self.input_caret
+                                                                                .visible(),
+                                                                        ))
+                                                                    },
+                                                                ),
                                                         ),
-                                                    )
-                                                    .on_mouse_move(cx.listener(
-                                                        |this, event: &gpui::MouseMoveEvent, window, cx| {
-                                                            this.update_ime_selection_drag_from_mouse_move(
-                                                                event, window, cx,
-                                                            );
-                                                        },
-                                                    ))
-                                                    .child(
-                                                        div()
-                                                            .flex()
-                                                            .items_center()
-                                                            .overflow_hidden()
-                                                            .child(search_text)
-                                                            .when_some(
-                                                                search_marked,
-                                                                |input, marked| {
-                                                                    input.child(
-                                                                        div()
-                                                                            .underline()
-                                                                            .text_color(rgb(
-                                                                                theme.text,
-                                                                            ))
-                                                                            .child(
-                                                                                marked.to_string(),
-                                                                            ),
-                                                                    )
-                                                                },
-                                                            )
-                                                            .when(
-                                                                player.search_focused,
-                                                                |input| {
-                                                                    input.child(text_caret(
-                                                                        &self.tokens,
-                                                                        self.input_caret.visible(),
-                                                                    ))
-                                                                },
-                                                            ),
-                                                    ),
-                                                move |anchor, _window, cx| {
-                                                    let _ = workspace.update(cx, |this, cx| {
-                                                        this.update_text_input_anchor(anchor, cx);
-                                                    });
-                                                },
-                                            ))
+                                                    |this, cx| {
+                                                        this.terminal.update(
+                                                            cx,
+                                                            |terminal, _cx| {
+                                                                terminal.focus_cast_search();
+                                                            },
+                                                        );
+                                                    },
+                                                    cx,
+                                                ),
+                                            )
                                             .when(!player.search_query.is_empty(), |row| {
                                                 row.child(
                                                     div()
@@ -502,8 +488,7 @@ window.focus(&this.focus_handle, cx);
                                                         cx.listener(
                                                             move |this, _event, _window, cx| {
                                                                 this.seek_terminal_cast(
-                                                                    seek_ratio,
-                                                                    cx,
+                                                                    seek_ratio, cx,
                                                                 );
                                                                 cx.stop_propagation();
                                                             },
@@ -664,14 +649,18 @@ window.focus(&this.focus_handle, cx);
                                                 .child(self.terminal_cast_text_button(
                                                     "-10s",
                                                     cx.listener(|this, _event, _window, cx| {
-                                                        this.seek_terminal_cast_by_seconds(-10.0, cx);
+                                                        this.seek_terminal_cast_by_seconds(
+                                                            -10.0, cx,
+                                                        );
                                                         cx.stop_propagation();
                                                     }),
                                                 ))
                                                 .child(self.terminal_cast_text_button(
                                                     "+10s",
                                                     cx.listener(|this, _event, _window, cx| {
-                                                        this.seek_terminal_cast_by_seconds(10.0, cx);
+                                                        this.seek_terminal_cast_by_seconds(
+                                                            10.0, cx,
+                                                        );
                                                         cx.stop_propagation();
                                                     }),
                                                 )),
