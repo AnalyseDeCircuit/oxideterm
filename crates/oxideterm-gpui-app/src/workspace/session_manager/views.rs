@@ -1234,26 +1234,16 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }),
                     cx,
-                ))
-                .child(self.render_tree_mode_action_button(
-                    LucideIcon::FolderPlus,
-                    self.i18n.t("sessionManager.folder_tree.new_group"),
-                    has_background,
-                    cx.listener(|this, _event, _window, cx| {
-                        // Root-level creation is visible without requiring a context menu.
-                        this.open_session_group_creation(cx);
-                        cx.stop_propagation();
-                    }),
-                    cx,
                 ));
         }
-        // Group maintenance is a manager-level action shared by every view.
+        // Root-level creation remains available in every layout while object-specific
+        // maintenance stays beside each group through its menu.
         row = row.child(self.render_tree_mode_action_button(
-            LucideIcon::FolderOpen,
-            self.i18n.t("sessionManager.folder_tree.manage_groups"),
+            LucideIcon::FolderPlus,
+            self.i18n.t("sessionManager.folder_tree.new_group"),
             has_background,
             cx.listener(|this, _event, _window, cx| {
-                this.open_session_group_manager(cx);
+                this.open_session_group_creation(cx);
                 cx.stop_propagation();
             }),
             cx,

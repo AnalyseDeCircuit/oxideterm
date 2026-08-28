@@ -471,20 +471,6 @@ impl WorkspaceApp {
         });
     }
 
-    pub(super) fn open_session_group_manager(&mut self, cx: &mut Context<Self>) {
-        self.session_manager.update(cx, |session_manager, cx| {
-            close_session_menu_state(session_manager);
-            session_manager.show_group_manager = true;
-            session_manager.group_editor = None;
-            session_manager.group_name_draft.clear();
-            session_manager.group_editor_error = None;
-            session_manager.group_manager_error = None;
-            session_manager.focused_input = None;
-            session_manager.focused_basic_dialog_footer_action = None;
-            cx.notify();
-        });
-    }
-
     pub(in crate::workspace) fn close_session_group_manager(&mut self, cx: &mut Context<Self>) {
         self.session_manager.update(cx, |session_manager, cx| {
             if session_manager.show_group_manager {
