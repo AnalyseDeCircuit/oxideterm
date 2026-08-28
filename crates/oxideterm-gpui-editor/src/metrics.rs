@@ -120,7 +120,7 @@ impl EditorMetrics {
 }
 
 const EDITOR_CODE_FONT_FALLBACKS: &[&str] = &[
-    "JetBrainsMono Nerd Font Mono",
+    "JetBrainsMono NFM",
     "JetBrains Mono NF (Subset)",
     "JetBrains Mono",
     "SF Mono",

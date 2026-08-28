@@ -1212,6 +1212,17 @@ mod tests {
     #[test]
     fn ide_editor_font_fallback_follows_terminal_font_preferences() {
         let mut settings = PersistedSettings::default();
+        assert_eq!(
+            oxideterm_theme::default_tokens()
+                .metrics
+                .markdown_code_font_family,
+            oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY
+        );
+        assert_eq!(
+            ide_editor_font_fallback(&settings).as_deref(),
+            Some(oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY)
+        );
+
         settings.terminal.font_family = oxideterm_settings::FontFamily::Custom;
         settings.terminal.custom_font_family = "'等线', monospace".to_string();
 

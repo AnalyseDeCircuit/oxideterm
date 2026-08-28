@@ -406,7 +406,7 @@ impl UiMetrics {
             sidebar_vibrancy_alpha: 0.64,
             terminal_vibrancy_alpha: 0.92,
             markdown_body_font_family: "SF Pro Text",
-            markdown_code_font_family: "JetBrainsMono Nerd Font",
+            markdown_code_font_family: "JetBrainsMono NFM",
             markdown_body_font_size: 14.0,
             markdown_heading_h1_scale: 2.0,
             markdown_heading_h2_scale: 1.5,

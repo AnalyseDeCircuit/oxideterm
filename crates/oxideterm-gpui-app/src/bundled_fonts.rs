@@ -141,10 +141,20 @@ fn critical_faces_for_family(family: FontFamily) -> &'static [BundledTerminalFac
 }
 
 fn critical_faces_for_settings(settings: &PersistedSettings) -> Vec<BundledTerminalFace> {
-    let mut faces = critical_faces_for_family(settings.terminal.font_family).to_vec();
-    if faces.is_empty() {
+    // The editor and Markdown code surfaces always use the bundled JetBrains family,
+    // independently of the terminal's selected family.
+    let mut faces = vec![BundledTerminalFace::JetBrainsRegular];
+    let terminal_faces = critical_faces_for_family(settings.terminal.font_family);
+    let terminal_faces = if terminal_faces.is_empty() {
         // System and custom choices still need a bundled monospace fallback if lookup fails.
-        faces.extend_from_slice(critical_faces_for_family(FontFamily::Jetbrains));
+        critical_faces_for_family(FontFamily::Jetbrains)
+    } else {
+        terminal_faces
+    };
+    for face in terminal_faces {
+        if !faces.contains(face) {
+            faces.push(*face);
+        }
     }
     if settings.terminal.cjk_font_family.trim() == oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY
         && !faces.contains(&BundledTerminalFace::MapleRegular)
@@ -256,6 +266,28 @@ mod tests {
                     .iter()
                     .all(|family| family == expected_family),
                 "{face:?} declares conflicting runtime family names: {runtime_family_names:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn app_code_font_is_loaded_for_every_terminal_family() {
+        for family in [
+            FontFamily::Jetbrains,
+            FontFamily::Meslo,
+            FontFamily::Maple,
+            FontFamily::Cascadia,
+            FontFamily::Consolas,
+            FontFamily::Menlo,
+            FontFamily::Custom,
+        ] {
+            let mut settings = PersistedSettings::default();
+            settings.terminal.font_family = family;
+
+            assert!(
+                critical_faces_for_settings(&settings)
+                    .contains(&BundledTerminalFace::JetBrainsRegular),
+                "{family:?} must keep the app code font available"
             );
         }
     }
