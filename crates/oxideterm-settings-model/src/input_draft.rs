@@ -12,9 +12,10 @@ use oxideterm_ai::{
 };
 use oxideterm_settings::{
     DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND, DEFAULT_AI_TOOL_MAX_ROUNDS,
-    MAX_AI_TOOL_MAX_CALLS_PER_ROUND, MAX_AI_TOOL_MAX_ROUNDS, MIN_AI_TOOL_MAX_CALLS_PER_ROUND,
-    MIN_AI_TOOL_MAX_ROUNDS, PersistedSettings, RECOMMENDED_FOCUS_HANDOFF_COMMANDS,
-    SettingsUpstreamProxyAuth, UpdateProxyMode, parse_terminal_session_log_content_template,
+    MAX_AI_TOOL_MAX_CALLS_PER_ROUND, MAX_AI_TOOL_MAX_ROUNDS, MAX_TERMINAL_FONT_WEIGHT,
+    MIN_AI_TOOL_MAX_CALLS_PER_ROUND, MIN_AI_TOOL_MAX_ROUNDS, MIN_TERMINAL_FONT_WEIGHT,
+    PersistedSettings, RECOMMENDED_FOCUS_HANDOFF_COMMANDS, SettingsUpstreamProxyAuth,
+    UpdateProxyMode, parse_terminal_session_log_content_template,
     parse_terminal_session_log_file_name_template, reindex_highlight_rules,
 };
 use oxideterm_terminal_semantic::SEMANTIC_CLASSES;
@@ -38,6 +39,7 @@ pub fn persisted_settings_input_value(
     let value = match input {
         SettingsInput::TerminalCustomFontFamily => settings.terminal.custom_font_family.clone(),
         SettingsInput::TerminalFontSize => settings.terminal.font_size.to_string(),
+        SettingsInput::TerminalFontWeight => settings.terminal.font_weight.to_string(),
         SettingsInput::TerminalScrollback => settings.terminal.scrollback.to_string(),
         SettingsInput::TerminalLineHeight => compact_decimal(settings.terminal.line_height),
         SettingsInput::IdeFontSize => settings
@@ -331,6 +333,12 @@ pub fn apply_persisted_settings_input_draft(
         }
         SettingsInput::TerminalFontSize => parse_i64(draft)
             .map(|value| settings.terminal.font_size = value.clamp(8, 32))
+            .into(),
+        SettingsInput::TerminalFontWeight => parse_i64(draft)
+            .map(|value| {
+                settings.terminal.font_weight =
+                    value.clamp(MIN_TERMINAL_FONT_WEIGHT, MAX_TERMINAL_FONT_WEIGHT)
+            })
             .into(),
         SettingsInput::TerminalScrollback => parse_i64(draft)
             .map(|value| settings.terminal.scrollback = value.clamp(500, 20_000))
@@ -846,6 +854,16 @@ mod tests {
         );
 
         assert_eq!(settings.terminal.font_size, 32);
+
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::TerminalFontWeight,
+                "950",
+            ),
+            SettingsInputDraftApply::Applied
+        );
+        assert_eq!(settings.terminal.font_weight, MAX_TERMINAL_FONT_WEIGHT);
 
         assert_eq!(
             apply_persisted_settings_input_draft(

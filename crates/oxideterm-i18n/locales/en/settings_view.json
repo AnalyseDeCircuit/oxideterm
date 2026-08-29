@@ -234,6 +234,8 @@
       "font_preview": "Font Preview",
       "font_size": "Font Size",
       "font_size_hint": "Size of terminal characters",
+      "font_weight": "Font Weight",
+      "font_weight_hint": "Enter 100–900. The selected font may use the nearest available weight.",
       "font_ligatures": "Font Ligatures",
       "font_ligatures_hint": "Use programming ligatures when the selected font supports them.",
       "line_height": "Line Height",

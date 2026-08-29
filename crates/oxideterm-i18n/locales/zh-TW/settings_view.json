@@ -234,6 +234,8 @@
       "font_preview": "字型預覽",
       "font_size": "字型大小",
       "font_size_hint": "終端機字元的大小",
+      "font_weight": "字重",
+      "font_weight_hint": "輸入 100–900。所選字型可能使用最接近的可用字重。",
       "font_ligatures": "字型連字",
       "font_ligatures_hint": "所選字型支援時，啟用程式符號連字。",
       "line_height": "行高",

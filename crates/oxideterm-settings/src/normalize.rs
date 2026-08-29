@@ -702,6 +702,12 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
             BACKEND_HOT_BUFFER_MAX,
         ),
         ("terminal.fontSize", 14, 8, 32),
+        (
+            "terminal.fontWeight",
+            DEFAULT_TERMINAL_FONT_WEIGHT,
+            MIN_TERMINAL_FONT_WEIGHT,
+            MAX_TERMINAL_FONT_WEIGHT,
+        ),
         ("terminal.backgroundBlur", 0, 0, 20),
         ("appearance.borderRadius", 6, 0, 16),
         ("appearance.uiFontSize", DEFAULT_UI_FONT_SIZE, 11, 20),

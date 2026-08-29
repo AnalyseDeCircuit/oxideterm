@@ -234,6 +234,8 @@
       "font_preview": "フォントプレビュー",
       "font_size": "フォントサイズ",
       "font_size_hint": "ターミナル文字のサイズ",
+      "font_weight": "フォントの太さ",
+      "font_weight_hint": "100～900を入力します。フォントによっては最も近い利用可能な太さが使われます。",
       "font_ligatures": "フォントリガチャ",
       "font_ligatures_hint": "選択したフォントが対応している場合、プログラミング用リガチャを使います。",
       "line_height": "行の高さ",

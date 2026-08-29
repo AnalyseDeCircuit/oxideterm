@@ -14,9 +14,9 @@ pub(crate) fn text_run_for_cell(
 ) -> TextRun {
     let text_len = cell.ch.len_utf8() + cell.zerowidth().len();
     let weight = if cell.attrs.bold() {
-        FontWeight::BOLD
+        FontWeight(metrics.font.weight.0.max(FontWeight::BOLD.0))
     } else {
-        FontWeight::default()
+        metrics.font.weight
     };
     let style = if cell.attrs.italic() {
         FontStyle::Italic

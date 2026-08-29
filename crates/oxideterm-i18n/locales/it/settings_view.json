@@ -234,6 +234,8 @@
       "font_preview": "Anteprima font",
       "font_size": "Dimensione Font",
       "font_size_hint": "Dimensione dei caratteri del terminale",
+      "font_weight": "Peso del carattere",
+      "font_weight_hint": "Inserisci un valore da 100 a 900. Il carattere può usare il peso disponibile più vicino.",
       "font_ligatures": "Legature del font",
       "font_ligatures_hint": "Usa le legature di programmazione quando il font selezionato le supporta.",
       "line_height": "Altezza Linea",

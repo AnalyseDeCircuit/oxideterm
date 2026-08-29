@@ -1715,6 +1715,7 @@ impl WorkspaceApp {
         match target {
             WorkspaceImeTarget::Settings(
                 SettingsInput::TerminalFontSize
+                | SettingsInput::TerminalFontWeight
                 | SettingsInput::TerminalLineHeight
                 | SettingsInput::IdeFontSize
                 | SettingsInput::IdeLineHeight,

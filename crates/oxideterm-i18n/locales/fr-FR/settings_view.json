@@ -234,6 +234,8 @@
       "font_preview": "Aperçu de la police",
       "font_size": "Taille de police",
       "font_size_hint": "Taille des caractères du terminal",
+      "font_weight": "Graisse de police",
+      "font_weight_hint": "Saisissez une valeur de 100 à 900. La police peut utiliser la graisse disponible la plus proche.",
       "font_ligatures": "Ligatures de police",
       "font_ligatures_hint": "Utiliser les ligatures de programmation lorsque la police choisie les prend en charge.",
       "line_height": "Hauteur de ligne",

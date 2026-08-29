@@ -234,6 +234,8 @@
       "font_preview": "Pré-visualização da fonte",
       "font_size": "Tamanho da fonte",
       "font_size_hint": "Tamanho dos caracteres do terminal",
+      "font_weight": "Peso da fonte",
+      "font_weight_hint": "Insira um valor de 100 a 900. A fonte pode usar o peso disponível mais próximo.",
       "font_ligatures": "Ligaduras da fonte",
       "font_ligatures_hint": "Usar ligaduras de programação quando a fonte selecionada oferecer suporte.",
       "line_height": "Altura da linha",

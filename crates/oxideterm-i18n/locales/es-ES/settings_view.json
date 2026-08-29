@@ -234,6 +234,8 @@
       "font_preview": "Vista previa de fuente",
       "font_size": "Tamaño de fuente",
       "font_size_hint": "Tamaño de los caracteres del terminal",
+      "font_weight": "Grosor de fuente",
+      "font_weight_hint": "Introduce un valor de 100 a 900. La fuente puede usar el grosor disponible más cercano.",
       "font_ligatures": "Ligaduras de fuente",
       "font_ligatures_hint": "Usar ligaduras de programación cuando la fuente seleccionada las admita.",
       "line_height": "Altura de línea",

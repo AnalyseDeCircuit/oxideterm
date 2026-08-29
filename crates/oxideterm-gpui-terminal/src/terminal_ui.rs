@@ -30,6 +30,7 @@ pub(crate) const DEFAULT_ROWS: usize = 40;
 pub(crate) const DEFAULT_SCROLLBACK_LINES: usize = 1000;
 pub const TERMINAL_FONT: &str = oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY;
 pub(crate) const TERMINAL_FONT_SIZE: f32 = 14.0;
+pub(crate) const TERMINAL_FONT_WEIGHT: f32 = 400.0;
 pub(crate) const TERMINAL_LINE_HEIGHT_RATIO: f32 = 1.2;
 pub(crate) const TERMINAL_CONTENT_PADDING: f32 = 0.0;
 // Command marks no longer reserve a left gutter; column-zero terminal text must
@@ -72,6 +73,7 @@ pub struct TerminalUiPreferences {
     pub cjk_font_family: Option<String>,
     pub font_ligatures: bool,
     pub font_size: f32,
+    pub font_weight: f32,
     pub line_height: f32,
     pub cursor_shape: TerminalCursorShape,
     pub cursor_blink: bool,
@@ -183,6 +185,7 @@ impl Default for TerminalUiPreferences {
             cjk_font_family: None,
             font_ligatures: TERMINAL_FONT_LIGATURES,
             font_size: TERMINAL_FONT_SIZE,
+            font_weight: TERMINAL_FONT_WEIGHT,
             line_height: TERMINAL_LINE_HEIGHT_RATIO,
             cursor_shape: TerminalCursorShape::Block,
             cursor_blink: true,
@@ -900,6 +903,7 @@ impl TerminalMetrics {
             &preferences.font_family,
             preferences.cjk_font_family.as_deref(),
             preferences.font_ligatures,
+            preferences.font_weight,
         );
         let font_id = window.text_system().resolve_font(&font);
         let measured_width = window
@@ -956,6 +960,7 @@ pub(crate) fn terminal_font_with_family_and_cjk(
     family: &str,
     cjk_family: Option<&str>,
     font_ligatures: bool,
+    font_weight: f32,
 ) -> Font {
     let mut fallback_families = Vec::new();
     push_font_fallback(&mut fallback_families, family);
@@ -1004,7 +1009,7 @@ pub(crate) fn terminal_font_with_family_and_cjk(
         family: SharedString::from(family.to_string()),
         features: terminal_font_features(font_ligatures),
         fallbacks: Some(FontFallbacks::from_fonts(fallback_families)),
-        weight: FontWeight::default(),
+        weight: FontWeight(font_weight.clamp(100.0, 900.0)),
         style: FontStyle::Normal,
     }
 }

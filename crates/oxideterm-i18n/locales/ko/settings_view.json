@@ -234,6 +234,8 @@
       "font_preview": "글꼴 미리보기",
       "font_size": "글꼴 크기",
       "font_size_hint": "터미널 문자 크기",
+      "font_weight": "글꼴 굵기",
+      "font_weight_hint": "100~900을 입력하세요. 글꼴에 따라 가장 가까운 사용 가능한 굵기가 적용될 수 있습니다.",
       "font_ligatures": "글꼴 리가처",
       "font_ligatures_hint": "선택한 글꼴이 지원할 때 프로그래밍 리가처를 사용합니다.",
       "line_height": "줄 높이",

@@ -893,6 +893,14 @@ impl WorkspaceApp {
                     cx,
                 ));
                 rows.extend([
+                    self.card_separator(),
+                    self.decimal_row(
+                        "settings_view.terminal.font_weight",
+                        "settings_view.terminal.font_weight_hint",
+                        SettingsInput::TerminalFontWeight,
+                        settings.terminal.font_weight.to_string(),
+                        cx,
+                    ),
                     self.terminal_preview(settings),
                     self.card_separator(),
                     self.checkbox_row(

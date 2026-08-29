@@ -234,6 +234,8 @@
       "font_preview": "字体预览",
       "font_size": "字号",
       "font_size_hint": "终端字符大小",
+      "font_weight": "字重",
+      "font_weight_hint": "输入 100–900。所选字体可能使用最接近的可用字重。",
       "font_ligatures": "字体连字",
       "font_ligatures_hint": "所选字体支持时，启用编程符号连字。",
       "line_height": "行高",

@@ -1622,6 +1622,7 @@ impl TerminalPane {
             || self.preferences.cjk_font_family != preferences.cjk_font_family
             || self.preferences.font_ligatures != preferences.font_ligatures
             || self.preferences.font_size.to_bits() != preferences.font_size.to_bits()
+            || self.preferences.font_weight.to_bits() != preferences.font_weight.to_bits()
             || self.preferences.line_height.to_bits() != preferences.line_height.to_bits();
         let next_settings = TerminalUiSettings::from_preferences(&preferences);
         if !next_settings.command_marks_enabled {

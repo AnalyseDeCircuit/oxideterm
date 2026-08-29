@@ -35,6 +35,7 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .font_family(&family)
+                    .font_weight(gpui::FontWeight(settings.terminal.font_weight as f32))
                     .text_size(px(settings.terminal.font_size as f32))
                     .text_color(rgb(self.tokens.ui.text))
                     .child(

@@ -234,6 +234,8 @@
       "font_preview": "Schriftartvorschau",
       "font_size": "Schriftgröße",
       "font_size_hint": "Größe der Terminalzeichen",
+      "font_weight": "Schriftstärke",
+      "font_weight_hint": "Wert von 100–900. Die Schrift verwendet gegebenenfalls die nächste verfügbare Stärke.",
       "font_ligatures": "Schriftligaturen",
       "font_ligatures_hint": "Programmierligaturen verwenden, wenn die ausgewählte Schrift sie unterstützt.",
       "line_height": "Zeilenhöhe",

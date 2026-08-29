@@ -364,6 +364,9 @@ pub struct TerminalSettings {
     #[serde(default)]
     pub cjk_font_family: String,
     pub font_size: i64,
+    /// CSS-compatible weight requested for regular terminal text.
+    #[serde(default = "default_terminal_font_weight")]
+    pub font_weight: i64,
     // Terminal ligatures stay opt-in so existing monospace rendering remains stable.
     #[serde(default)]
     pub font_ligatures: bool,
@@ -452,7 +455,14 @@ pub struct TerminalSettings {
 pub const DEFAULT_TERMINAL_BACKGROUND_OPACITY: f64 = 0.15;
 pub const MIN_TERMINAL_BACKGROUND_OPACITY: f64 = 0.03;
 pub const MAX_TERMINAL_BACKGROUND_OPACITY: f64 = 1.0;
+pub const DEFAULT_TERMINAL_FONT_WEIGHT: i64 = 400;
+pub const MIN_TERMINAL_FONT_WEIGHT: i64 = 100;
+pub const MAX_TERMINAL_FONT_WEIGHT: i64 = 900;
 pub const MAX_CUSTOM_SEMANTIC_SCHEMES: usize = 32;
+
+const fn default_terminal_font_weight() -> i64 {
+    DEFAULT_TERMINAL_FONT_WEIGHT
+}
 
 impl TerminalSettings {
     pub fn active_custom_semantic_scheme(&self) -> Option<&SemanticSchemeDocument> {
@@ -505,6 +515,7 @@ impl Default for TerminalSettings {
             custom_font_family: String::new(),
             cjk_font_family: String::new(),
             font_size: 14,
+            font_weight: DEFAULT_TERMINAL_FONT_WEIGHT,
             font_ligatures: false,
             line_height: 1.2,
             cursor_style: CursorStyle::Block,
