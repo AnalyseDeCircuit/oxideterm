@@ -79,6 +79,7 @@ pub(super) fn remote_desktop_protocol_chip(
     let label = match protocol {
         RemoteDesktopProtocol::Rdp => "RDP",
         RemoteDesktopProtocol::Vnc => "VNC",
+        RemoteDesktopProtocol::Spice => "SPICE",
     };
 
     div()

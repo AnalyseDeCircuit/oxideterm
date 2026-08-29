@@ -63,6 +63,7 @@ members = [
   "crates/oxideterm-settings-model",
   "crates/oxideterm-session-adapter",
   "crates/oxideterm-sftp",
+  "crates/oxideterm-spice",
   "crates/oxideterm-ssh-launch",
   "crates/oxideterm-ssh",
   "crates/oxideterm-terminal",
@@ -205,6 +206,7 @@ objc2-foundation = { version = "=0.3.2", default-features = false, features = ["
 objc2-user-notifications = "0.3"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSButton", "NSControl", "NSGraphics", "NSResponder", "NSView", "NSWindow"] }
 ocb3 = { version = "0.1.0", default-features = false, features = ["alloc"] }
+oxide-spice-helper-protocol = { git = "https://github.com/AnalyseDeCircuit/OxideSpice", rev = "5d6c961aeff43ca284d94ce76600910e00ee94fd" }
 palette = { version = "0.7.6", features = ["serializing"] }
 parking_lot = "0.12"
 pathfinder_geometry = "0.5"

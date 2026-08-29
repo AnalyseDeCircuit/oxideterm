@@ -61,6 +61,11 @@ class ArtifactNameTests(unittest.TestCase):
 
 class PortableArchiveTests(unittest.TestCase):
     def required_entries(self, root: str, executable: str) -> list[str]:
+        target = (
+            "x86_64-pc-windows-msvc"
+            if executable.endswith(".exe")
+            else "x86_64-unknown-linux-gnu"
+        )
         return [
             f"{root}/{executable}",
             f"{root}/portable",
@@ -73,6 +78,10 @@ class PortableArchiveTests(unittest.TestCase):
                 else f"{root}/tools/oxideterm-update-helper"
             ),
             *(f"{root}/{name}" for name in verify_native_package.REQUIRED_DOCUMENTS),
+            *(
+                f"{root}/{name}"
+                for name in verify_native_package.required_helper_suffixes(target)
+            ),
         ]
 
     def entry_bytes(self, name: str, executable: str) -> bytes:

@@ -540,6 +540,9 @@ fn save_remote_desktop_profile(
             credential_ref: existing.and_then(|profile| profile.credential_ref.clone()),
             credential: None,
             clear_credential: false,
+            sasl_credential_ref: existing.and_then(|profile| profile.sasl_credential_ref.clone()),
+            sasl_credential: None,
+            clear_sasl_credential: false,
             ssh_gateway_connection_id: existing
                 .and_then(|profile| profile.ssh_gateway_connection_id.clone()),
             read_only: profile.read_only,
@@ -801,6 +804,7 @@ fn remote_desktop_options(options: &PublicRemoteDesktopOptions) -> RemoteDesktop
                 PublicVncCompression::High => RemoteDesktopVncCompression::High,
             },
         },
+        spice: Default::default(),
     }
 }
 

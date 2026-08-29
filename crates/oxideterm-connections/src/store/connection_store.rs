@@ -1546,10 +1546,23 @@ impl ConnectionStore {
         let old_credential_ref = existing
             .as_ref()
             .and_then(|profile| profile.credential_ref.clone());
+        let old_sasl_credential_ref = existing
+            .as_ref()
+            .and_then(|profile| profile.sasl_credential_ref.clone());
         if request.clear_credential
             && (request.credential.is_some() || request.credential_ref.is_some())
         {
             bail!("Cannot replace and clear a remote desktop credential in one update");
+        }
+        if request.clear_sasl_credential
+            && (request.sasl_credential.is_some() || request.sasl_credential_ref.is_some())
+        {
+            bail!("Cannot replace and clear a SPICE SASL credential in one update");
+        }
+        if request.protocol != oxideterm_remote_desktop::RemoteDesktopProtocol::Spice
+            && (request.sasl_credential.is_some() || request.sasl_credential_ref.is_some())
+        {
+            bail!("Only a SPICE profile can own a SASL credential");
         }
         let requested_credential_ref = normalize_optional_text(request.credential_ref);
         let mut credential_ref = if request.clear_credential {
@@ -1559,6 +1572,17 @@ impl ConnectionStore {
         };
         if request.credential.is_some() && credential_ref.is_none() {
             credential_ref = Some(remote_desktop_credential_ref(&id));
+        }
+        let requested_sasl_credential_ref = normalize_optional_text(request.sasl_credential_ref);
+        let mut sasl_credential_ref = if request.clear_sasl_credential
+            || request.protocol != oxideterm_remote_desktop::RemoteDesktopProtocol::Spice
+        {
+            None
+        } else {
+            requested_sasl_credential_ref.or_else(|| old_sasl_credential_ref.clone())
+        };
+        if request.sasl_credential.is_some() && sasl_credential_ref.is_none() {
+            sasl_credential_ref = Some(remote_desktop_sasl_credential_ref(&id));
         }
 
         let mut profile = existing.unwrap_or_else(|| {
@@ -1585,6 +1609,7 @@ impl ConnectionStore {
         profile.ssh_gateway_connection_id =
             normalize_optional_text(request.ssh_gateway_connection_id);
         profile.credential_ref = credential_ref.clone();
+        profile.sasl_credential_ref = sasl_credential_ref.clone();
         profile.read_only = request.read_only;
         profile.session_options = request.session_options;
         profile.updated_at = now;
@@ -1594,6 +1619,12 @@ impl ConnectionStore {
             (request.credential.as_ref(), credential_ref.as_deref())
         {
             // Validation runs first; only the protected backend receives a valid asset's secret.
+            self.keychain.store(reference, credential)?;
+        }
+        if let (Some(credential), Some(reference)) = (
+            request.sasl_credential.as_ref(),
+            sasl_credential_ref.as_deref(),
+        ) {
             self.keychain.store(reference, credential)?;
         }
 
@@ -1619,6 +1650,11 @@ impl ConnectionStore {
         {
             self.delete_or_queue_connection_keychain_entry(stale_reference)?;
         }
+        if old_sasl_credential_ref != sasl_credential_ref
+            && let Some(stale_reference) = old_sasl_credential_ref
+        {
+            self.delete_or_queue_connection_keychain_entry(stale_reference)?;
+        }
         Ok(profile)
     }
 
@@ -1626,6 +1662,9 @@ impl ConnectionStore {
         let credential_ref = self
             .get_remote_desktop_profile(id)
             .and_then(|profile| profile.credential_ref.clone());
+        let sasl_credential_ref = self
+            .get_remote_desktop_profile(id)
+            .and_then(|profile| profile.sasl_credential_ref.clone());
         let before = self.data.remote_desktop_profiles.len();
         self.data
             .remote_desktop_profiles
@@ -1634,6 +1673,9 @@ impl ConnectionStore {
         if deleted {
             self.save()?;
             if let Some(reference) = credential_ref {
+                self.delete_or_queue_connection_keychain_entry(reference)?;
+            }
+            if let Some(reference) = sasl_credential_ref {
                 self.delete_or_queue_connection_keychain_entry(reference)?;
             }
         }
@@ -1692,6 +1734,45 @@ impl ConnectionStore {
         self.keychain.get_optional(reference)
     }
 
+    pub fn get_remote_desktop_sasl_credential(
+        &self,
+        profile_id: &str,
+    ) -> Result<Option<SecretString>> {
+        let Some(reference) = self
+            .get_remote_desktop_profile(profile_id)
+            .and_then(|profile| profile.sasl_credential_ref.as_deref())
+        else {
+            return Ok(None);
+        };
+        self.keychain.get_optional(reference)
+    }
+
+    pub fn save_remote_desktop_sasl_credential(
+        &mut self,
+        profile_id: &str,
+        credential: &SecretString,
+    ) -> Result<String> {
+        let existing_ref = self
+            .get_remote_desktop_profile(profile_id)
+            .ok_or_else(|| anyhow::anyhow!("Remote desktop profile not found"))?
+            .sasl_credential_ref
+            .clone();
+        let reference =
+            existing_ref.unwrap_or_else(|| remote_desktop_sasl_credential_ref(profile_id));
+        // Publish the device-local reference only after the protected value exists.
+        self.keychain.store(&reference, credential)?;
+        let profile = self
+            .data
+            .remote_desktop_profiles
+            .iter_mut()
+            .find(|profile| profile.id == profile_id)
+            .expect("remote desktop profile checked above");
+        profile.sasl_credential_ref = Some(reference.clone());
+        profile.updated_at = Utc::now();
+        self.save()?;
+        Ok(reference)
+    }
+
     pub fn delete_remote_desktop_credential(&mut self, profile_id: &str) -> Result<bool> {
         let Some(profile) = self
             .data
@@ -1702,6 +1783,24 @@ impl ConnectionStore {
             return Ok(false);
         };
         let Some(reference) = profile.credential_ref.take() else {
+            return Ok(false);
+        };
+        profile.updated_at = Utc::now();
+        self.save()?;
+        self.delete_or_queue_connection_keychain_entry(reference)?;
+        Ok(true)
+    }
+
+    pub fn delete_remote_desktop_sasl_credential(&mut self, profile_id: &str) -> Result<bool> {
+        let Some(profile) = self
+            .data
+            .remote_desktop_profiles
+            .iter_mut()
+            .find(|profile| profile.id == profile_id)
+        else {
+            return Ok(false);
+        };
+        let Some(reference) = profile.sasl_credential_ref.take() else {
             return Ok(false);
         };
         profile.updated_at = Utc::now();

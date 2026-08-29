@@ -109,10 +109,52 @@ jobs:
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
+  stage-spice-helpers:
+    name: Verify OxideSpice helper release
+    needs: validate-release-request
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate-release-request.outputs.release_commit }}
+
+      - name: Install Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install Minisign
+        run: sudo apt-get update && sudo apt-get install --yes minisign
+
+      - name: Fetch and verify six pinned helper artifacts
+        run: >-
+          python scripts/release/fetch_oxide_spice_helper.py
+          --all
+          --output staged/helpers
+
+      - name: Preserve helper permissions and symbolic links
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staged/archives
+          for target_dir in staged/helpers/*; do
+            target="$(basename "${target_dir}")"
+            tar -C "${target_dir}" -czf "staged/archives/oxide-spice-helper-${target}.tar.gz" oxide-spice-helper
+          done
+
+      - name: Upload verified helper archives
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oxide-spice-helpers
+          path: staged/archives
+          if-no-files-found: error
+          retention-days: 2
+
   # ── Six-platform matrix (macOS / Linux / Windows, arm64 + x64) ─────────
   package:
     name: Package ${{ matrix.label }}
-    needs: validate-release-request
+    needs: [validate-release-request, stage-spice-helpers]
     runs-on: ${{ matrix.os }}
     permissions:
       actions: write
@@ -158,6 +200,20 @@ jobs:
         with:
           toolchain: 1.94.1
           targets: ${{ matrix.target }}
+
+      - name: Download verified OxideSpice helper archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: oxide-spice-helpers
+          path: staged/archives
+
+      - name: Restore verified OxideSpice helper directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_dir="crates/oxideterm-gpui-app/resources/helpers/${{ matrix.target }}"
+          mkdir -p "${target_dir}"
+          tar -xzf "staged/archives/oxide-spice-helper-${{ matrix.target }}.tar.gz" -C "${target_dir}"
 
       - name: Rust cache
         id: rust_cache
@@ -323,6 +379,7 @@ jobs:
       - name: Package native app
         env:
           OXIDETERM_VERSION: ${{ needs.validate-release-request.outputs.raw_version }}
+          OXIDETERM_USE_STAGED_SPICE_HELPER: '1'
           APPIMAGE_EXTRACT_AND_RUN: ${{ runner.os == 'Linux' && '1' || '' }}
         run: python scripts/release/package_native.py ${{ matrix.target }}
 

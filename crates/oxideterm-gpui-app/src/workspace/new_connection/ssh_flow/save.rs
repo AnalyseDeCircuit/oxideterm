@@ -12,6 +12,7 @@ use oxideterm_connections::{
     StandaloneSftpTransferMode,
 };
 use oxideterm_gpui_terminal::TerminalNoticeVariant;
+use oxideterm_spice::SpiceSecret;
 
 struct PreparedMoshConnect {
     config: SshConfig,
@@ -2144,146 +2145,231 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((mut profile, save_request, mut runtime_password, ssh_gateway_connection_id)) =
-            self.with_connection_form_mut(cx, |this, form, cx| {
-                let form = form?;
-                let Some(protocol) = remote_desktop_protocol_for_transport(form.transport) else {
-                    return None;
+        let Some((
+            mut profile,
+            save_request,
+            mut runtime_password,
+            mut runtime_spice_sasl_password,
+            ssh_gateway_connection_id,
+        )) = self.with_connection_form_mut(cx, |this, form, cx| {
+            let form = form?;
+            let Some(protocol) = remote_desktop_protocol_for_transport(form.transport) else {
+                return None;
+            };
+            let host = form.host.trim().to_string();
+            let port = form
+                .port
+                .trim()
+                .parse::<u16>()
+                .ok()
+                .filter(|port| *port > 0);
+            if host.is_empty() {
+                form.error = Some(
+                    this.i18n
+                        .t("modals.new_connection.remote_desktop_host_required"),
+                );
+                cx.notify();
+                return None;
+            }
+            let Some(port) = port else {
+                form.error = Some(
+                    this.i18n
+                        .t("modals.new_connection.remote_desktop_invalid_port"),
+                );
+                cx.notify();
+                return None;
+            };
+            if protocol == RemoteDesktopProtocol::Rdp && form.username.trim().is_empty() {
+                form.error = Some(
+                    this.i18n
+                        .t("modals.new_connection.remote_desktop_username_required"),
+                );
+                cx.notify();
+                return None;
+            }
+            if form
+                .remote_desktop_ssh_gateway_connection_id
+                .as_deref()
+                .is_some_and(|connection_id| this.connection_store.get(connection_id).is_none())
+            {
+                form.error = Some(
+                    this.i18n
+                        .t("modals.new_connection.remote_desktop_ssh_gateway_missing"),
+                );
+                cx.notify();
+                return None;
+            }
+            let editing_profile_id = form.remote_desktop_profile_id.clone();
+            let existing_profile = editing_profile_id
+                .as_deref()
+                .and_then(|id| this.connection_store.get_remote_desktop_profile(id))
+                .cloned();
+            let has_saved_credential = form.saved_password_keychain_id.is_some();
+            let has_saved_spice_sasl_credential = form.saved_spice_sasl_credential_ref.is_some();
+            if protocol == RemoteDesktopProtocol::Rdp
+                && action != NewConnectionSubmitAction::Save
+                && form.password.is_empty()
+                && !has_saved_credential
+            {
+                form.error = Some(
+                    this.i18n
+                        .t("modals.new_connection.remote_desktop_password_required"),
+                );
+                cx.notify();
+                return None;
+            }
+            let mut session_options = form.remote_desktop_session_options.clone();
+            if protocol == RemoteDesktopProtocol::Spice {
+                let spice = &mut session_options.spice;
+                let normalize = |value: &str| {
+                    let value = value.trim();
+                    (!value.is_empty()).then(|| value.to_string())
                 };
-                let host = form.host.trim().to_string();
-                let port = form
-                    .port
-                    .trim()
-                    .parse::<u16>()
-                    .ok()
-                    .filter(|port| *port > 0);
-                if host.is_empty() {
-                    form.error = Some(
-                        this.i18n
-                            .t("modals.new_connection.remote_desktop_host_required"),
-                    );
-                    cx.notify();
-                    return None;
-                }
-                let Some(port) = port else {
-                    form.error = Some(
-                        this.i18n
-                            .t("modals.new_connection.remote_desktop_invalid_port"),
-                    );
-                    cx.notify();
-                    return None;
-                };
-                if protocol == RemoteDesktopProtocol::Rdp && form.username.trim().is_empty() {
-                    form.error = Some(
-                        this.i18n
-                            .t("modals.new_connection.remote_desktop_username_required"),
-                    );
-                    cx.notify();
-                    return None;
-                }
-                if form
-                    .remote_desktop_ssh_gateway_connection_id
-                    .as_deref()
-                    .is_some_and(|connection_id| this.connection_store.get(connection_id).is_none())
+                spice.tls_server_name = normalize(&form.spice_tls_server_name);
+                spice.sasl_hostname = normalize(&form.spice_sasl_hostname);
+                spice.sasl_service = form.spice_sasl_service.trim().to_string();
+                spice.sasl_authentication_id = normalize(&form.spice_sasl_authentication_id);
+                spice.sasl_authorization_id = normalize(&form.spice_sasl_authorization_id);
+                if spice.transport_security
+                    == oxideterm_remote_desktop::RemoteDesktopSpiceTransportSecurity::Tls
+                    && spice.tls_root_certificates_der.is_empty()
                 {
                     form.error = Some(
                         this.i18n
-                            .t("modals.new_connection.remote_desktop_ssh_gateway_missing"),
+                            .t("modals.new_connection.spice_tls_certificate_required"),
                     );
                     cx.notify();
                     return None;
                 }
-                let editing_profile_id = form.remote_desktop_profile_id.clone();
-                let existing_profile = editing_profile_id
-                    .as_deref()
-                    .and_then(|id| this.connection_store.get_remote_desktop_profile(id))
-                    .cloned();
-                let has_saved_credential = form.saved_password_keychain_id.is_some();
-                if protocol == RemoteDesktopProtocol::Rdp
-                    && action != NewConnectionSubmitAction::Save
-                    && form.password.is_empty()
-                    && !has_saved_credential
+                if spice.sasl_mode != oxideterm_remote_desktop::RemoteDesktopSpiceSaslMode::Disabled
+                    && spice.sasl_service.is_empty()
                 {
                     form.error = Some(
                         this.i18n
-                            .t("modals.new_connection.remote_desktop_password_required"),
+                            .t("modals.new_connection.spice_sasl_service_required"),
                     );
                     cx.notify();
                     return None;
                 }
-                let label = remote_desktop_profile_label(&form.name, protocol, &host, port);
-                let username =
-                    Some(form.username.trim().to_string()).filter(|username| !username.is_empty());
-                let password = if !form.password.is_empty() {
-                    // Move the UI draft into a zeroizing type before saving or starting a worker.
-                    Some(SecretString::from(std::mem::take(&mut form.password)))
+                if spice.sasl_mode == oxideterm_remote_desktop::RemoteDesktopSpiceSaslMode::Password
+                {
+                    if spice.sasl_authentication_id.is_none() {
+                        form.error = Some(
+                            this.i18n
+                                .t("modals.new_connection.spice_sasl_authentication_id_required"),
+                        );
+                        cx.notify();
+                        return None;
+                    }
+                    if action != NewConnectionSubmitAction::Save
+                        && form.spice_sasl_password.is_empty()
+                        && !has_saved_spice_sasl_credential
+                    {
+                        form.error = Some(
+                            this.i18n
+                                .t("modals.new_connection.spice_sasl_password_required"),
+                        );
+                        cx.notify();
+                        return None;
+                    }
+                }
+            }
+            let label = remote_desktop_profile_label(&form.name, protocol, &host, port);
+            let username =
+                Some(form.username.trim().to_string()).filter(|username| !username.is_empty());
+            let password = if !form.password.is_empty() {
+                // Move the UI draft into a zeroizing type before saving or starting a worker.
+                Some(SecretString::from(std::mem::take(&mut form.password)))
+            } else {
+                None
+            };
+            let spice_sasl_password = if !form.spice_sasl_password.is_empty() {
+                // The SASL password has a distinct protected-store and runtime owner.
+                Some(SecretString::from(std::mem::take(
+                    &mut form.spice_sasl_password,
+                )))
+            } else {
+                None
+            };
+            let save_credential = form.save_password;
+            let save_spice_sasl_credential = form.save_spice_sasl_password
+                && session_options.spice.sasl_mode
+                    == oxideterm_remote_desktop::RemoteDesktopSpiceSaslMode::Password;
+            let ssh_gateway_connection_id = form.remote_desktop_ssh_gateway_connection_id.clone();
+            let should_save =
+                editing_profile_id.is_some() || action != NewConnectionSubmitAction::Connect;
+            let clear_credential =
+                editing_profile_id.is_some() && has_saved_credential && !save_credential;
+            let (credential_to_save, runtime_password) = if should_save && save_credential {
+                // Saving and connecting reloads the protected value below instead of cloning it.
+                (password, None)
+            } else {
+                (None, password)
+            };
+            let clear_spice_sasl_credential = editing_profile_id.is_some()
+                && has_saved_spice_sasl_credential
+                && !save_spice_sasl_credential;
+            let (spice_sasl_credential_to_save, runtime_spice_sasl_password) =
+                if should_save && save_spice_sasl_credential {
+                    // Reload after persistence so the connection owns only one plaintext copy.
+                    (spice_sasl_password, None)
                 } else {
-                    None
+                    (None, spice_sasl_password)
                 };
-                let save_credential = form.save_password;
-                let ssh_gateway_connection_id =
-                    form.remote_desktop_ssh_gateway_connection_id.clone();
-                let should_save =
-                    editing_profile_id.is_some() || action != NewConnectionSubmitAction::Connect;
-                let clear_credential =
-                    editing_profile_id.is_some() && has_saved_credential && !save_credential;
-                let (credential_to_save, runtime_password) = if should_save && save_credential {
-                    // Saving and connecting reloads the protected value below instead of cloning it.
-                    (password, None)
-                } else {
-                    (None, password)
-                };
-                let domain = existing_profile
-                    .as_ref()
-                    .and_then(|profile| profile.domain.clone());
-                let read_only = existing_profile
-                    .as_ref()
-                    .is_some_and(|profile| profile.read_only);
-                let save_request = should_save.then(|| SaveRemoteDesktopProfileRequest {
-                    id: editing_profile_id,
-                    name: label.clone(),
-                    group: serial_profile_group_from_form(&form.group, &this.i18n),
-                    notes: saved_profile_notes(&form.notes),
-                    icon: asset_icon_from_form(&form.icon),
-                    color: asset_color_from_form(&form.color),
-                    icon_background_color: asset_color_from_form(&form.icon_background_color),
-                    protocol,
-                    host: host.clone(),
-                    port,
-                    username: username.clone(),
-                    domain: domain.clone(),
-                    ssh_gateway_connection_id: form
-                        .remote_desktop_ssh_gateway_connection_id
-                        .clone(),
-                    credential_ref: None,
-                    credential: credential_to_save,
-                    clear_credential,
-                    read_only,
-                    session_options: form.remote_desktop_session_options,
-                });
-                let profile = RemoteDesktopConnectionProfile {
-                    id: format!("new-remote-desktop-{}", uuid::Uuid::new_v4()),
-                    label,
-                    protocol,
-                    endpoint: RemoteDesktopEndpoint::new(host, port),
-                    transport_endpoint: None,
-                    username,
-                    domain,
-                    credential_ref: None,
-                    read_only,
-                    // A reconnect reuses the profile, so keep the user's per-session
-                    // redirection choices on the profile instead of rebuilding defaults.
-                    session_options: form.remote_desktop_session_options,
-                };
-                form.pending = true;
-                form.error = None;
-                Some((
-                    profile,
-                    save_request,
-                    runtime_password,
-                    ssh_gateway_connection_id,
-                ))
-            })
+            let domain = existing_profile
+                .as_ref()
+                .and_then(|profile| profile.domain.clone());
+            let read_only = existing_profile
+                .as_ref()
+                .is_some_and(|profile| profile.read_only);
+            let save_request = should_save.then(|| SaveRemoteDesktopProfileRequest {
+                id: editing_profile_id,
+                name: label.clone(),
+                group: serial_profile_group_from_form(&form.group, &this.i18n),
+                notes: saved_profile_notes(&form.notes),
+                icon: asset_icon_from_form(&form.icon),
+                color: asset_color_from_form(&form.color),
+                icon_background_color: asset_color_from_form(&form.icon_background_color),
+                protocol,
+                host: host.clone(),
+                port,
+                username: username.clone(),
+                domain: domain.clone(),
+                ssh_gateway_connection_id: form.remote_desktop_ssh_gateway_connection_id.clone(),
+                credential_ref: None,
+                credential: credential_to_save,
+                clear_credential,
+                sasl_credential_ref: None,
+                sasl_credential: spice_sasl_credential_to_save,
+                clear_sasl_credential: clear_spice_sasl_credential,
+                read_only,
+                session_options: session_options.clone(),
+            });
+            let profile = RemoteDesktopConnectionProfile {
+                id: format!("new-remote-desktop-{}", uuid::Uuid::new_v4()),
+                label,
+                protocol,
+                endpoint: RemoteDesktopEndpoint::new(host, port),
+                transport_endpoint: None,
+                username,
+                domain,
+                credential_ref: None,
+                sasl_credential_ref: None,
+                read_only,
+                // A reconnect reuses the profile, so keep the user's per-session
+                // redirection choices on the profile instead of rebuilding defaults.
+                session_options,
+            };
+            form.pending = true;
+            form.error = None;
+            Some((
+                profile,
+                save_request,
+                runtime_password,
+                runtime_spice_sasl_password,
+                ssh_gateway_connection_id,
+            ))
+        })
         else {
             return;
         };
@@ -2294,6 +2380,7 @@ impl WorkspaceApp {
                     profile.id = saved.id;
                     profile.label = saved.name;
                     profile.credential_ref = saved.credential_ref;
+                    profile.sasl_credential_ref = saved.sasl_credential_ref;
                     self.queue_cloud_sync_dirty_refresh(cx);
                     if action != NewConnectionSubmitAction::Save && runtime_password.is_none() {
                         match self
@@ -2301,6 +2388,34 @@ impl WorkspaceApp {
                             .get_remote_desktop_credential(&profile.id)
                         {
                             Ok(password) => runtime_password = password,
+                            Err(error) => {
+                                self.update_connection_form_state(cx, |state| {
+                                    if let Some(form) = state.form.as_mut() {
+                                        form.pending = false;
+                                        form.error = Some(format!(
+                                            "{}: {error}",
+                                            self.i18n.t(
+                                                "sessionManager.remote_desktop_profiles.open_failed"
+                                            )
+                                        ));
+                                    }
+                                });
+                                cx.notify();
+                                return;
+                            }
+                        }
+                    }
+                    if action != NewConnectionSubmitAction::Save
+                        && profile.protocol == RemoteDesktopProtocol::Spice
+                        && profile.session_options.spice.sasl_mode
+                            == oxideterm_remote_desktop::RemoteDesktopSpiceSaslMode::Password
+                        && runtime_spice_sasl_password.is_none()
+                    {
+                        match self
+                            .connection_store
+                            .get_remote_desktop_sasl_credential(&profile.id)
+                        {
+                            Ok(password) => runtime_spice_sasl_password = password,
                             Err(error) => {
                                 self.update_connection_form_state(cx, |state| {
                                     if let Some(form) = state.form.as_mut() {
@@ -2340,9 +2455,13 @@ impl WorkspaceApp {
         if action != NewConnectionSubmitAction::Save {
             let runtime_password =
                 runtime_password.map(|secret| RemoteDesktopSecret::from(secret.into_zeroizing()));
+            let runtime_spice_sasl_password = runtime_spice_sasl_password
+                .map(SecretString::into_zeroizing)
+                .map(SpiceSecret::from);
             self.open_remote_desktop_connection_with_gateway(
                 profile,
                 runtime_password,
+                runtime_spice_sasl_password,
                 ssh_gateway_connection_id,
                 window,
                 cx,

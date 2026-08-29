@@ -130,6 +130,10 @@ fn remote_desktop_credential_ref(profile_id: &str) -> String {
     format!("remote-desktop:{profile_id}")
 }
 
+fn remote_desktop_sasl_credential_ref(profile_id: &str) -> String {
+    format!("remote-desktop:{profile_id}:sasl")
+}
+
 fn managed_key_display_name(name: Option<String>, fallback: &str) -> String {
     name.as_deref()
         .map(str::trim)

@@ -7,6 +7,7 @@ use crate::workspace::new_connection::{
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopSecret,
 };
+use oxideterm_spice::SpiceSecret;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SessionManagerMoveInteraction {
@@ -1071,6 +1072,34 @@ impl WorkspaceApp {
                 return;
             }
         };
+        let spice_requires_sasl_password = saved.protocol
+            == oxideterm_remote_desktop::RemoteDesktopProtocol::Spice
+            && saved.session_options.spice.sasl_mode
+                == oxideterm_remote_desktop::RemoteDesktopSpiceSaslMode::Password;
+        let spice_sasl_password = if spice_requires_sasl_password {
+            match self.connection_store.get_remote_desktop_sasl_credential(id) {
+                Ok(secret) => secret
+                    .map(SecretString::into_zeroizing)
+                    .map(SpiceSecret::from),
+                Err(error) => {
+                    if let Some(connection_attempt_id) = runtime_connection_attempt_id.as_deref() {
+                        self.standalone_connections
+                            .mark_attempt_error(connection_attempt_id);
+                    }
+                    let status = format!(
+                        "{}: {error}",
+                        self.i18n
+                            .t("sessionManager.remote_desktop_profiles.open_failed")
+                    );
+                    self.session_manager.update(cx, |session_manager, cx| {
+                        session_manager.set_status(Some(status), cx)
+                    });
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         if saved.protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp
             && password.is_none()
         {
@@ -1100,6 +1129,24 @@ impl WorkspaceApp {
             });
             return;
         }
+        if spice_requires_sasl_password && spice_sasl_password.is_none() {
+            if let Some(connection_attempt_id) = runtime_connection_attempt_id.as_deref() {
+                self.standalone_connections
+                    .mark_attempt_error(connection_attempt_id);
+            }
+            // Synced profiles preserve SASL policy but never carry a device-local password.
+            self.open_new_connection_form(window, cx);
+            let mut form =
+                form_from_remote_desktop_profile(&saved, self.i18n.t("ssh.form.ungrouped"));
+            form.error = Some(
+                self.i18n
+                    .t("modals.new_connection.spice_sasl_password_required"),
+            );
+            form.focused_field = NewConnectionField::SpiceSaslPassword;
+            self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
+            cx.notify();
+            return;
+        }
         let profile = RemoteDesktopConnectionProfile {
             id: saved.id.clone(),
             label: saved.name,
@@ -1109,12 +1156,14 @@ impl WorkspaceApp {
             username: saved.username,
             domain: saved.domain,
             credential_ref: saved.credential_ref,
+            sasl_credential_ref: saved.sasl_credential_ref,
             read_only: saved.read_only,
             session_options: saved.session_options,
         };
         self.open_remote_desktop_connection_for_connection(
             profile,
             password,
+            spice_sasl_password,
             saved.ssh_gateway_connection_id,
             runtime_connection_attempt_id,
             window,

@@ -524,6 +524,7 @@ impl WorkspaceApp {
         match protocol {
             RemoteDesktopProtocol::Rdp => self.i18n.t("remote_desktop.rdp_preview_title"),
             RemoteDesktopProtocol::Vnc => self.i18n.t("remote_desktop.vnc_preview_title"),
+            RemoteDesktopProtocol::Spice => self.i18n.t("remote_desktop.spice_preview_title"),
         }
     }
 }

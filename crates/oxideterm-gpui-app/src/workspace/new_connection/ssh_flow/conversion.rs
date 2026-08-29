@@ -714,6 +714,7 @@ pub(super) fn remote_desktop_protocol_for_transport(
     match transport {
         NewConnectionTransport::Rdp => Some(RemoteDesktopProtocol::Rdp),
         NewConnectionTransport::Vnc => Some(RemoteDesktopProtocol::Vnc),
+        NewConnectionTransport::Spice => Some(RemoteDesktopProtocol::Spice),
         _ => None,
     }
 }

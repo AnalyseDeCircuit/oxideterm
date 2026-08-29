@@ -1,0 +1,13 @@
+[package]
+name = "oxideterm-spice"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+crossbeam-channel.workspace = true
+oxide-spice-helper-protocol.workspace = true
+oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
+oxideterm-pcm-audio = { path = "../oxideterm-pcm-audio" }
+thiserror.workspace = true
+zeroize.workspace = true

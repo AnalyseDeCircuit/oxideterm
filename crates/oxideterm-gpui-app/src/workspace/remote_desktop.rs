@@ -19,6 +19,7 @@ use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions, ToolbarButtonOptions,
 };
 use oxideterm_gpui_ui::{
+    TextInputView,
     context_menu::{
         context_menu_event_boundary, context_menu_item_height_estimate,
         context_menu_separator_height_estimate,
@@ -31,6 +32,7 @@ use oxideterm_gpui_ui::{
         dialog_overlay, modal_body, modal_container, modal_footer, modal_header,
         overlay_content_boundary,
     },
+    text_input,
 };
 use oxideterm_remote_desktop::{
     NegotiatedCapabilities, NegotiatedCapabilityStatus, RemoteDesktopClipboardData,
@@ -44,6 +46,11 @@ use oxideterm_remote_desktop::{
     RemoteDesktopSecret, RemoteDesktopSessionStatus, RemoteDesktopSize, RemoteDesktopWheelDelta,
     builtin_preview_provider_registry, builtin_provider_registry,
 };
+use oxideterm_spice::{
+    SpiceConnectOptions, SpiceEndpoint, SpiceFileUploadAction, SpiceFileUploadRuntime,
+    SpiceHelperEvent, SpiceRemoteDesktopAdapter, SpiceSasl, SpiceSecret, SpiceTransportSecurity,
+    SpiceWorkerConfig, SpiceWorkerDelivery, SpiceWorkerRequest, resolve_spice_helper_command,
+};
 use oxideterm_workspace::{Tab, TabKind, TabTitleSource};
 use tokio::sync::Notify;
 use zeroize::Zeroizing;
@@ -56,6 +63,7 @@ mod input;
 mod interaction;
 mod public_mcp;
 mod session;
+mod spice;
 mod vendor_files;
 mod view;
 mod worker;
@@ -65,6 +73,7 @@ pub(in crate::workspace) use public_mcp::RemoteDesktopPublicClipboardSnapshot;
 use certificate::*;
 use clipboard::*;
 use input::*;
+use spice::*;
 use vendor_files::*;
 use worker::*;
 
@@ -146,7 +155,6 @@ fn remote_desktop_resolution_label(size: RemoteDesktopSize) -> String {
     format!("{} × {}", size.width, size.height)
 }
 
-#[derive(Debug)]
 pub(super) enum RemoteDesktopWorkerDelivery {
     FrameReady {
         tab_id: TabId,
@@ -165,6 +173,11 @@ pub(super) enum RemoteDesktopWorkerDelivery {
         tab_id: TabId,
         generation: u64,
         message: String,
+    },
+    SpiceEvent {
+        tab_id: TabId,
+        generation: u64,
+        event: SpiceHelperEvent,
     },
 }
 
@@ -381,16 +394,19 @@ impl RemoteDesktopModifierState {
 
 struct RemoteDesktopWorkerOwner {
     request_tx: Option<mpsc::Sender<RemoteDesktopHelperRequest>>,
+    spice_request_tx: Option<mpsc::Sender<SpiceWorkerRequest>>,
     worker_thread: Option<thread::JoinHandle<()>>,
 }
 
 impl RemoteDesktopWorkerOwner {
     fn new(
         request_tx: mpsc::Sender<RemoteDesktopHelperRequest>,
+        spice_request_tx: Option<mpsc::Sender<SpiceWorkerRequest>>,
         worker_thread: thread::JoinHandle<()>,
     ) -> Self {
         Self {
             request_tx: Some(request_tx),
+            spice_request_tx,
             worker_thread: Some(worker_thread),
         }
     }
@@ -409,7 +425,15 @@ impl RemoteDesktopWorkerOwner {
         }
     }
 
+    fn send_spice(&self, request: SpiceWorkerRequest) {
+        if let Some(request_tx) = self.spice_request_tx.as_ref() {
+            let _ = request_tx.send(request);
+        }
+    }
+
     fn shutdown(&mut self) {
+        // SPICE-only tools share this tab's helper lifetime and cannot outlive it.
+        self.spice_request_tx.take();
         if let Some(request_tx) = self.request_tx.take() {
             // Session shutdown and helper replacement release input state before
             // asking the helper to exit cooperatively.
@@ -536,6 +560,7 @@ pub(in crate::workspace) struct RemoteDesktopSessionEntity {
     profile: RemoteDesktopConnectionProfile,
     provider: RemoteDesktopProviderManifest,
     password: Option<RemoteDesktopSecret>,
+    spice_sasl_password: Option<SpiceSecret>,
     certificate_store_path: PathBuf,
     certificate_challenge: Option<RemoteDesktopCertificateChallengeState>,
     session_trusted_certificate_fingerprint: Option<String>,
@@ -568,6 +593,7 @@ pub(in crate::workspace) struct RemoteDesktopSessionEntity {
     wheel_pixel_remainder: RemoteDesktopWheelDelta,
     render_diagnostics: RemoteDesktopRenderDiagnostics,
     vnc_files: RemoteDesktopVncFileBrowserState,
+    spice: SpiceSessionRuntimeState,
 }
 
 impl RemoteDesktopSessionEntity {
@@ -608,6 +634,7 @@ impl RemoteDesktopSessionEntity {
             // The tab retains one zeroizing credential owner so a reconnect
             // can answer a fresh certificate-gated authentication request.
             password,
+            spice_sasl_password: None,
             certificate_store_path,
             certificate_challenge: None,
             session_trusted_certificate_fingerprint: None,
@@ -642,6 +669,7 @@ impl RemoteDesktopSessionEntity {
             wheel_pixel_remainder: remote_desktop_empty_wheel_delta(),
             render_diagnostics: RemoteDesktopRenderDiagnostics::default(),
             vnc_files: RemoteDesktopVncFileBrowserState::default(),
+            spice: SpiceSessionRuntimeState::default(),
         }
     }
 
@@ -896,6 +924,7 @@ mod tests {
             session.worker_wake = Some(worker_wake);
             session.worker = Some(RemoteDesktopWorkerOwner::new(
                 request_tx,
+                None,
                 thread::spawn(|| {}),
             ));
             session.install_release_handler(cx);

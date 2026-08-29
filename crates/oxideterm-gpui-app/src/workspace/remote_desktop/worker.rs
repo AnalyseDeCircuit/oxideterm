@@ -9,6 +9,7 @@ pub(super) fn preview_remote_desktop_profile(
     let label = match protocol {
         RemoteDesktopProtocol::Rdp => "RDP Preview",
         RemoteDesktopProtocol::Vnc => "VNC Preview",
+        RemoteDesktopProtocol::Spice => "SPICE Preview",
     };
 
     RemoteDesktopConnectionProfile {
@@ -20,6 +21,7 @@ pub(super) fn preview_remote_desktop_profile(
         username: None,
         domain: None,
         credential_ref: None,
+        sasl_credential_ref: None,
         read_only: false,
         session_options: Default::default(),
     }
@@ -30,6 +32,8 @@ pub(super) fn run_remote_desktop_worker(
     generation: u64,
     profile: RemoteDesktopConnectionProfile,
     provider: RemoteDesktopProviderManifest,
+    spice_ticket: Option<SpiceSecret>,
+    spice_sasl_password: Option<SpiceSecret>,
     password_available: bool,
     initial_size: RemoteDesktopSize,
     scale_factor: Option<u32>,
@@ -37,8 +41,26 @@ pub(super) fn run_remote_desktop_worker(
     frame_slot: RemoteDesktopFrameDeliverySlot,
     worker_wake: RemoteDesktopWorkerWake,
     request_rx: mpsc::Receiver<RemoteDesktopHelperRequest>,
+    spice_tool_request_rx: Option<mpsc::Receiver<SpiceWorkerRequest>>,
     delivery_tx: mpsc::Sender<RemoteDesktopWorkerDelivery>,
 ) {
+    if profile.protocol == RemoteDesktopProtocol::Spice {
+        run_spice_remote_desktop_worker(
+            tab_id,
+            generation,
+            profile,
+            spice_ticket.unwrap_or_else(|| SpiceSecret::new(String::new())),
+            spice_sasl_password,
+            initial_size,
+            monitor_layout,
+            frame_slot,
+            worker_wake,
+            request_rx,
+            spice_tool_request_rx.expect("SPICE sessions own a tool request channel"),
+            delivery_tx,
+        );
+        return;
+    }
     let worker_id = oxideterm_remote_desktop::RemoteDesktopWorkerId::new(
         oxideterm_remote_desktop::RemoteDesktopSessionId::new(),
         generation,
@@ -74,6 +96,370 @@ pub(super) fn run_remote_desktop_worker(
         let _ = bridge_thread.join();
     }
     worker_wake.stop();
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_spice_remote_desktop_worker(
+    tab_id: TabId,
+    generation: u64,
+    profile: RemoteDesktopConnectionProfile,
+    ticket: SpiceSecret,
+    sasl_password: Option<SpiceSecret>,
+    initial_size: RemoteDesktopSize,
+    monitor_layout: RemoteDesktopMonitorLayout,
+    frame_slot: RemoteDesktopFrameDeliverySlot,
+    worker_wake: RemoteDesktopWorkerWake,
+    request_rx: mpsc::Receiver<RemoteDesktopHelperRequest>,
+    spice_tool_request_rx: mpsc::Receiver<SpiceWorkerRequest>,
+    delivery_tx: mpsc::Sender<RemoteDesktopWorkerDelivery>,
+) {
+    let worker_id = oxideterm_remote_desktop::RemoteDesktopWorkerId::new(
+        oxideterm_remote_desktop::RemoteDesktopSessionId::new(),
+        generation,
+    );
+    let helper = match resolve_spice_helper_command() {
+        Ok(helper) => helper,
+        Err(error) => {
+            send_remote_desktop_worker_delivery(
+                &delivery_tx,
+                &worker_wake,
+                RemoteDesktopWorkerDelivery::TransportFailed {
+                    tab_id,
+                    generation,
+                    message: error.to_string(),
+                },
+            );
+            worker_wake.stop();
+            return;
+        }
+    };
+    let audio_playback = profile.session_options.audio.playback;
+    let audio_capture = profile.session_options.audio.capture;
+    let connect = match spice_connect_options(profile, ticket, sasl_password) {
+        Ok(connect) => connect,
+        Err(message) => {
+            send_remote_desktop_worker_delivery(
+                &delivery_tx,
+                &worker_wake,
+                RemoteDesktopWorkerDelivery::TransportFailed {
+                    tab_id,
+                    generation,
+                    message,
+                },
+            );
+            worker_wake.stop();
+            return;
+        }
+    };
+    let (spice_request_tx, spice_request_rx) = crossbeam_channel::bounded(256);
+    let (spice_delivery_tx, spice_delivery_rx) = mpsc::channel();
+    let spice_worker = thread::Builder::new()
+        .name(format!("spice-worker-{}", tab_id.0))
+        .spawn(move || {
+            oxideterm_spice::run_spice_worker(
+                SpiceWorkerConfig {
+                    worker_id,
+                    helper,
+                    connect,
+                    frame_slot,
+                    audio_playback,
+                    audio_capture,
+                },
+                spice_request_rx,
+                spice_delivery_tx,
+            );
+        });
+    let Ok(spice_worker) = spice_worker else {
+        send_remote_desktop_worker_delivery(
+            &delivery_tx,
+            &worker_wake,
+            RemoteDesktopWorkerDelivery::TransportFailed {
+                tab_id,
+                generation,
+                message: "failed to start the SPICE worker".to_string(),
+            },
+        );
+        worker_wake.stop();
+        return;
+    };
+
+    let mut adapter = SpiceRemoteDesktopAdapter::new(initial_size, monitor_layout);
+    let mut file_uploads = SpiceFileUploadRuntime::default();
+    let mut closing = false;
+    let mut terminated = false;
+    while !terminated {
+        terminated |= deliver_spice_file_upload_actions(
+            tab_id,
+            generation,
+            file_uploads.poll(),
+            &spice_request_tx,
+            &delivery_tx,
+            &worker_wake,
+        );
+        while let Ok(delivery) = spice_delivery_rx.try_recv() {
+            if let SpiceWorkerDelivery::Event { event, .. } = &delivery {
+                terminated |= deliver_spice_file_upload_actions(
+                    tab_id,
+                    generation,
+                    file_uploads.handle_event(event),
+                    &spice_request_tx,
+                    &delivery_tx,
+                    &worker_wake,
+                );
+            }
+            terminated |= deliver_spice_worker_event(
+                tab_id,
+                generation,
+                delivery,
+                &mut adapter,
+                &spice_request_tx,
+                &delivery_tx,
+                &worker_wake,
+            );
+        }
+        if terminated {
+            break;
+        }
+        while let Ok(request) = spice_tool_request_rx.try_recv() {
+            // Handshake and process shutdown remain owned by this adapter, not UI tools.
+            if matches!(
+                request,
+                SpiceWorkerRequest::Hello { .. }
+                    | SpiceWorkerRequest::Connect { .. }
+                    | SpiceWorkerRequest::Close
+            ) {
+                continue;
+            }
+            if spice_request_tx.send(request).is_err() {
+                terminated = true;
+                break;
+            }
+        }
+        if terminated {
+            break;
+        }
+        match request_rx.recv_timeout(Duration::from_millis(10)) {
+            Ok(request) => {
+                let close = matches!(request, RemoteDesktopHelperRequest::Close);
+                let upload_actions = match request {
+                    RemoteDesktopHelperRequest::ClipboardFiles { transfer_id, paths } => {
+                        file_uploads.start_group(transfer_id, paths)
+                    }
+                    RemoteDesktopHelperRequest::CancelClipboardTransfer { transfer_id } => {
+                        file_uploads.cancel_group(&transfer_id)
+                    }
+                    request => {
+                        for request in adapter.map_request(request) {
+                            if spice_request_tx.send(request).is_err() {
+                                terminated = true;
+                                break;
+                            }
+                        }
+                        Vec::new()
+                    }
+                };
+                terminated |= deliver_spice_file_upload_actions(
+                    tab_id,
+                    generation,
+                    upload_actions,
+                    &spice_request_tx,
+                    &delivery_tx,
+                    &worker_wake,
+                );
+                if terminated {
+                    break;
+                }
+                closing |= close;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) if !closing => {
+                let _ = spice_request_tx.send(SpiceWorkerRequest::Close);
+                closing = true;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {}
+        }
+    }
+    drop(spice_request_tx);
+    let _ = spice_worker.join();
+    worker_wake.stop();
+}
+
+fn deliver_spice_file_upload_actions(
+    tab_id: TabId,
+    generation: u64,
+    actions: Vec<SpiceFileUploadAction>,
+    request_tx: &crossbeam_channel::Sender<SpiceWorkerRequest>,
+    delivery_tx: &mpsc::Sender<RemoteDesktopWorkerDelivery>,
+    worker_wake: &RemoteDesktopWorkerWake,
+) -> bool {
+    for action in actions {
+        match action {
+            SpiceFileUploadAction::Request(request) => {
+                if request_tx.send(request).is_err() {
+                    return true;
+                }
+            }
+            SpiceFileUploadAction::Failed { group_id, message } => {
+                send_remote_desktop_worker_delivery(
+                    delivery_tx,
+                    worker_wake,
+                    RemoteDesktopWorkerDelivery::Event {
+                        tab_id,
+                        generation,
+                        event: RemoteDesktopHelperEvent::ClipboardTransferFailed {
+                            transfer_id: group_id,
+                            message,
+                        },
+                    },
+                );
+            }
+        }
+    }
+    false
+}
+
+fn spice_connect_options(
+    profile: RemoteDesktopConnectionProfile,
+    ticket: SpiceSecret,
+    sasl_password: Option<SpiceSecret>,
+) -> Result<SpiceConnectOptions, String> {
+    let public_host = profile.endpoint.host.clone();
+    let endpoint = profile.transport_endpoint.unwrap_or(profile.endpoint);
+    let spice = profile.session_options.spice;
+    let transport_security = match spice.transport_security {
+        oxideterm_remote_desktop::RemoteDesktopSpiceTransportSecurity::Plain => {
+            SpiceTransportSecurity::Plain
+        }
+        oxideterm_remote_desktop::RemoteDesktopSpiceTransportSecurity::Tls => {
+            if spice.tls_root_certificates_der.is_empty() {
+                return Err("SPICE TLS requires at least one root certificate".to_string());
+            }
+            SpiceTransportSecurity::Tls {
+                server_name: spice.tls_server_name.unwrap_or_else(|| public_host.clone()),
+                root_certificates_der: spice.tls_root_certificates_der,
+            }
+        }
+    };
+    let sasl_hostname = spice.sasl_hostname.unwrap_or_else(|| public_host.clone());
+    let sasl = match spice.sasl_mode {
+        oxideterm_remote_desktop::RemoteDesktopSpiceSaslMode::Disabled => None,
+        oxideterm_remote_desktop::RemoteDesktopSpiceSaslMode::Gssapi => Some(SpiceSasl::Gssapi {
+            hostname: sasl_hostname,
+            service: spice.sasl_service,
+        }),
+        oxideterm_remote_desktop::RemoteDesktopSpiceSaslMode::Password => {
+            let Some(password) = sasl_password.filter(|password| !password.is_empty()) else {
+                return Err("The SPICE SASL password is unavailable for this session".to_string());
+            };
+            let authentication_id = spice
+                .sasl_authentication_id
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "SPICE SASL requires an authentication identity".to_string())?;
+            Some(SpiceSasl::Password {
+                hostname: sasl_hostname,
+                service: spice.sasl_service,
+                authentication_id,
+                authorization_id: spice.sasl_authorization_id,
+                password,
+                allow_gssapi: spice.sasl_allow_gssapi,
+            })
+        }
+    };
+    Ok(SpiceConnectOptions {
+        endpoint: SpiceEndpoint::Tcp {
+            host: endpoint.host,
+            port: endpoint.port,
+        },
+        ticket,
+        transport_security,
+        sasl,
+    })
+}
+
+fn deliver_spice_worker_event(
+    tab_id: TabId,
+    generation: u64,
+    delivery: SpiceWorkerDelivery,
+    adapter: &mut SpiceRemoteDesktopAdapter,
+    request_tx: &crossbeam_channel::Sender<SpiceWorkerRequest>,
+    delivery_tx: &mpsc::Sender<RemoteDesktopWorkerDelivery>,
+    worker_wake: &RemoteDesktopWorkerWake,
+) -> bool {
+    let delivery = match delivery {
+        SpiceWorkerDelivery::FrameReady { worker_id } => {
+            debug_assert_eq!(worker_id.request_id, generation);
+            RemoteDesktopWorkerDelivery::FrameReady { tab_id, generation }
+        }
+        SpiceWorkerDelivery::FrameRecoveryRequired { worker_id } => {
+            debug_assert_eq!(worker_id.request_id, generation);
+            RemoteDesktopWorkerDelivery::FrameRecoveryRequired { tab_id, generation }
+        }
+        SpiceWorkerDelivery::RemoteDesktopEvent { worker_id, event } => {
+            debug_assert_eq!(worker_id.request_id, generation);
+            RemoteDesktopWorkerDelivery::Event {
+                tab_id,
+                generation,
+                event,
+            }
+        }
+        SpiceWorkerDelivery::Event { worker_id, event } => {
+            debug_assert_eq!(worker_id.request_id, generation);
+            let actions = adapter.map_event(event);
+            if let Some(response) = actions.response {
+                let _ = request_tx.send(response);
+            }
+            if let Some(event) = actions.shared_event {
+                send_remote_desktop_worker_delivery(
+                    delivery_tx,
+                    worker_wake,
+                    RemoteDesktopWorkerDelivery::Event {
+                        tab_id,
+                        generation,
+                        event,
+                    },
+                );
+            }
+            let Some(event) = actions.event else {
+                return false;
+            };
+            RemoteDesktopWorkerDelivery::SpiceEvent {
+                tab_id,
+                generation,
+                event,
+            }
+        }
+        SpiceWorkerDelivery::TransportFailed { worker_id, message } => {
+            debug_assert_eq!(worker_id.request_id, generation);
+            send_remote_desktop_worker_delivery(
+                delivery_tx,
+                worker_wake,
+                RemoteDesktopWorkerDelivery::TransportFailed {
+                    tab_id,
+                    generation,
+                    message,
+                },
+            );
+            return true;
+        }
+        SpiceWorkerDelivery::Terminated {
+            worker_id,
+            exit_code,
+        } => {
+            debug_assert_eq!(worker_id.request_id, generation);
+            send_remote_desktop_worker_delivery(
+                delivery_tx,
+                worker_wake,
+                RemoteDesktopWorkerDelivery::Event {
+                    tab_id,
+                    generation,
+                    event: RemoteDesktopHelperEvent::Terminated { exit_code },
+                },
+            );
+            return true;
+        }
+    };
+    send_remote_desktop_worker_delivery(delivery_tx, worker_wake, delivery);
+    false
 }
 
 pub(super) fn map_remote_desktop_worker_delivery(

@@ -657,6 +657,7 @@ impl WorkspaceApp {
             username: saved.username,
             domain: saved.domain,
             credential_ref: saved.credential_ref,
+            sasl_credential_ref: saved.sasl_credential_ref,
             read_only: saved.read_only,
             session_options: saved.session_options,
         };

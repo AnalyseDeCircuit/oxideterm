@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
+use oxideterm_connections::SecretString;
 use oxideterm_session_adapter::ssh_config_from_saved_connection;
 
 impl WorkspaceApp {
@@ -9,6 +10,7 @@ impl WorkspaceApp {
         &mut self,
         profile: RemoteDesktopConnectionProfile,
         password: Option<RemoteDesktopSecret>,
+        spice_sasl_password: Option<SpiceSecret>,
         ssh_gateway_connection_id: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -16,6 +18,7 @@ impl WorkspaceApp {
         self.open_remote_desktop_connection_for_connection(
             profile,
             password,
+            spice_sasl_password,
             ssh_gateway_connection_id,
             None,
             window,
@@ -27,6 +30,7 @@ impl WorkspaceApp {
         &mut self,
         mut profile: RemoteDesktopConnectionProfile,
         password: Option<RemoteDesktopSecret>,
+        spice_sasl_password: Option<SpiceSecret>,
         ssh_gateway_connection_id: Option<String>,
         mut connection_attempt_id: Option<String>,
         window: &mut Window,
@@ -36,6 +40,7 @@ impl WorkspaceApp {
             self.open_remote_desktop_connection_tab_for_connection(
                 profile,
                 password,
+                spice_sasl_password,
                 None,
                 None,
                 connection_attempt_id,
@@ -52,6 +57,9 @@ impl WorkspaceApp {
             let kind = match profile.protocol {
                 RemoteDesktopProtocol::Rdp => standalone_connections::StandaloneConnectionKind::Rdp,
                 RemoteDesktopProtocol::Vnc => standalone_connections::StandaloneConnectionKind::Vnc,
+                RemoteDesktopProtocol::Spice => {
+                    standalone_connections::StandaloneConnectionKind::Spice
+                }
             };
             let launch = if let Some(profile_id) = saved_profile_id {
                 standalone_connections::StandaloneConnectionLaunch::SavedRemoteDesktop {
@@ -76,6 +84,9 @@ impl WorkspaceApp {
                     password: password
                         .as_ref()
                         .map(RemoteDesktopSecret::duplicate_for_reauthentication),
+                    spice_sasl_password: spice_sasl_password
+                        .as_ref()
+                        .map(SpiceSecret::duplicate_for_reauthentication),
                     ssh_gateway_connection_id: Some(ssh_gateway_connection_id.clone()),
                 }
             };
@@ -119,6 +130,7 @@ impl WorkspaceApp {
                             workspace.open_remote_desktop_connection_tab_for_connection(
                                 profile,
                                 password,
+                                spice_sasl_password,
                                 Some(lease),
                                 Some(reconnect_gateway_connection_id),
                                 connection_attempt_id,
@@ -282,7 +294,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.open_remote_desktop_connection_tab_for_connection(
-            profile, password, ssh_tunnel, None, None, window, cx,
+            profile, password, None, ssh_tunnel, None, None, window, cx,
         );
     }
 
@@ -290,6 +302,7 @@ impl WorkspaceApp {
         &mut self,
         profile: RemoteDesktopConnectionProfile,
         password: Option<RemoteDesktopSecret>,
+        spice_sasl_password: Option<SpiceSecret>,
         ssh_tunnel: Option<RemoteDesktopSshTunnelLease>,
         ssh_gateway_connection_id: Option<String>,
         connection_attempt_id: Option<String>,
@@ -322,6 +335,7 @@ impl WorkspaceApp {
             provider,
             title,
             password,
+            spice_sasl_password,
             ssh_tunnel,
             ssh_gateway_connection_id,
             connection_attempt_id,
@@ -355,7 +369,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> TabId {
         self.open_remote_desktop_tab_for_connection(
-            profile, provider, title, password, ssh_tunnel, None, None, window, cx,
+            profile, provider, title, password, None, ssh_tunnel, None, None, window, cx,
         )
     }
 
@@ -365,12 +379,52 @@ impl WorkspaceApp {
         provider: RemoteDesktopProviderManifest,
         title: String,
         password: Option<RemoteDesktopSecret>,
+        mut spice_sasl_password: Option<SpiceSecret>,
         ssh_tunnel: Option<RemoteDesktopSshTunnelLease>,
         ssh_gateway_connection_id: Option<String>,
         connection_attempt_id: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> TabId {
+        if profile.protocol != RemoteDesktopProtocol::Spice
+            || profile.session_options.spice.sasl_mode
+                != oxideterm_remote_desktop::RemoteDesktopSpiceSaslMode::Password
+        {
+            // A credential passed for a non-password profile has no legitimate runtime owner.
+            spice_sasl_password = None;
+        }
+        if spice_sasl_password.is_none()
+            && profile.protocol == RemoteDesktopProtocol::Spice
+            && profile.session_options.spice.sasl_mode
+                == oxideterm_remote_desktop::RemoteDesktopSpiceSaslMode::Password
+        {
+            match self
+                .connection_store
+                .get_remote_desktop_sasl_credential(&profile.id)
+            {
+                Ok(password) => {
+                    spice_sasl_password = password
+                        .map(SecretString::into_zeroizing)
+                        .map(SpiceSecret::from)
+                }
+                Err(error) => {
+                    self.push_command_palette_toast(
+                        format!(
+                            "{}: {error}",
+                            self.i18n
+                                .t("sessionManager.remote_desktop_profiles.open_failed")
+                        ),
+                        None,
+                        TerminalNoticeVariant::Error,
+                        cx,
+                    );
+                    if let Some(connection_attempt_id) = connection_attempt_id.as_deref() {
+                        self.standalone_connections
+                            .mark_attempt_error(connection_attempt_id);
+                    }
+                }
+            }
+        }
         let tab_id = self.alloc_tab_id(cx);
         let saved_profile_id = self
             .connection_store
@@ -384,6 +438,14 @@ impl WorkspaceApp {
                 password
                     .as_ref()
                     .map(RemoteDesktopSecret::duplicate_for_reauthentication)
+            })
+            .flatten();
+        let reconnect_spice_sasl_password = saved_profile_id
+            .is_none()
+            .then(|| {
+                spice_sasl_password
+                    .as_ref()
+                    .map(SpiceSecret::duplicate_for_reauthentication)
             })
             .flatten();
         let frame_slot = RemoteDesktopFrameDeliverySlot::new();
@@ -401,6 +463,7 @@ impl WorkspaceApp {
                 frame_slot,
                 window.window_handle(),
             );
+            session.spice_sasl_password = spice_sasl_password;
             session.ssh_tunnel = ssh_tunnel;
             session.install_release_handler(cx);
             session
@@ -446,6 +509,9 @@ impl WorkspaceApp {
             let kind = match reconnect_profile.protocol {
                 RemoteDesktopProtocol::Rdp => standalone_connections::StandaloneConnectionKind::Rdp,
                 RemoteDesktopProtocol::Vnc => standalone_connections::StandaloneConnectionKind::Vnc,
+                RemoteDesktopProtocol::Spice => {
+                    standalone_connections::StandaloneConnectionKind::Spice
+                }
             };
             let launch = if let Some(profile_id) = saved_profile_id {
                 standalone_connections::StandaloneConnectionLaunch::SavedRemoteDesktop {
@@ -456,6 +522,7 @@ impl WorkspaceApp {
                     profile: reconnect_profile,
                     provider: reconnect_provider,
                     password: reconnect_password,
+                    spice_sasl_password: reconnect_spice_sasl_password,
                     ssh_gateway_connection_id,
                 }
             };
@@ -501,6 +568,9 @@ impl WorkspaceApp {
         let geometry = session.geometry.clone();
         let certificate_challenge = session.certificate_challenge.clone();
         let vnc_file_browser = session.vnc_files.open.then(|| session.vnc_files.clone());
+        let spice_tools = (session.profile.protocol == RemoteDesktopProtocol::Spice
+            && session.spice.tools_open)
+            .then(|| session.spice.tools_snapshot());
         let worker_generation = session.worker_generation;
         let resize_menu_open = self.remote_desktop_resize_menu_tab_id == Some(tab_id);
         let resize_session = session_entity.clone();
@@ -779,6 +849,9 @@ impl WorkspaceApp {
             })
             .when_some(vnc_file_browser, |surface, browser| {
                 surface.child(self.render_vnc_file_browser(tab_id, browser, cx))
+            })
+            .when_some(spice_tools, |surface, snapshot| {
+                surface.child(self.render_spice_tools(tab_id, snapshot, cx))
             })
             .into_any_element()
     }

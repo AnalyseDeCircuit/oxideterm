@@ -41,8 +41,9 @@ BASE_APP_NAME = "OxideTerm"
 STABLE_APP_IDENTIFIER = "com.oxideterm.app"
 APP_BIN = "oxideterm-native"
 CLI_BIN = "oxideterm"
-CONNECTION_URI_SCHEMES = ("ssh", "telnet", "mosh", "rdp", "vnc")
+CONNECTION_URI_SCHEMES = ("ssh", "telnet", "mosh", "rdp", "vnc", "spice")
 HELPER_BINS = ("oxideterm-rdp-helper", "oxideterm-vnc-helper")
+OXIDE_SPICE_FETCH_SCRIPT = Path(__file__).with_name("fetch_oxide_spice_helper.py")
 UPDATE_HELPER_PACKAGE = "oxideterm-update"
 UPDATE_HELPER_BIN = "oxideterm-update-helper"
 AGENT_RESOURCE_DIR = "agents"
@@ -490,6 +491,20 @@ def build_helper(package: str, target: str, target_was_explicit: bool) -> Path:
 def build_remote_desktop_helpers(target: str, target_was_explicit: bool) -> None:
     for package in HELPER_BINS:
         build_helper(package, target, target_was_explicit)
+    # OxideSpice owns its native dependency closure; OxideTerm only stages a
+    # release whose signature, digest, target, IPC version, and capabilities match the pin.
+    fetch_command = [
+        sys.executable,
+        str(OXIDE_SPICE_FETCH_SCRIPT),
+        "--target",
+        target,
+        "--output",
+        str(RESOURCE_DIR / HELPER_RESOURCE_DIR),
+    ]
+    if os.environ.get("OXIDETERM_USE_STAGED_SPICE_HELPER") == "1":
+        # CI transfers the already verified directory from its release-verification job.
+        fetch_command.append("--verify-staged")
+    run(fetch_command)
 
 
 def build_update_helper(target: str, target_was_explicit: bool) -> Path:

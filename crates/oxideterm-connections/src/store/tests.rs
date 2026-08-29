@@ -2987,6 +2987,7 @@ mod tests {
                     oxideterm_remote_desktop::RemoteDesktopVncImageQuality::BestQuality,
                 compression: oxideterm_remote_desktop::RemoteDesktopVncCompression::High,
             },
+            spice: Default::default(),
         };
         let created = store
             .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
@@ -2999,7 +3000,7 @@ mod tests {
                 domain: Some("EXAMPLE".to_string()),
                 credential: Some(SecretString::from("original-secret")),
                 read_only: true,
-                session_options: initial_options,
+                session_options: initial_options.clone(),
                 ..SaveRemoteDesktopProfileRequest::default()
             })
             .unwrap();

@@ -31,6 +31,20 @@ PORTABLE_UPDATE_MANIFEST_FILENAME = "portable-update.json"
 PORTABLE_UPDATE_MANIFEST_FORMAT = 1
 
 
+def required_helper_suffixes(target: str) -> set[str]:
+    executable_suffix = ".exe" if "windows" in target else ""
+    helper_root = f"resources/helpers/{target}"
+    spice_root = f"{helper_root}/oxide-spice-helper"
+    return {
+        f"{helper_root}/oxideterm-rdp-helper{executable_suffix}",
+        f"{helper_root}/oxideterm-vnc-helper{executable_suffix}",
+        f"{spice_root}/bin/oxide-spice-helper{executable_suffix}",
+        f"{spice_root}/helper-metadata.json",
+        f"{spice_root}/oxide-spice-helper.cdx.json",
+        f"{spice_root}/THIRD-PARTY-NOTICES.md",
+    }
+
+
 def normalized_version(raw: str) -> str:
     """Match the package script's tag-to-artifact version normalization."""
     for prefix in ("refs/tags/", "native-v", "gpui-v", "v"):
@@ -139,6 +153,7 @@ def verify_portable_archive(path: Path, target: str, expected_version: str) -> N
     require_archive_suffixes(
         archive_names(path),
         REQUIRED_DOCUMENTS
+        | required_helper_suffixes(target)
         | {
             PACKAGE_VERSION_FILENAME,
             PORTABLE_PLUGINS_DIR,

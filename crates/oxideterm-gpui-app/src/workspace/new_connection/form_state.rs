@@ -9,8 +9,8 @@ use oxideterm_connections::{
     transport_port_replacement, transport_username_transition,
 };
 pub(in crate::workspace) use oxideterm_connections::{
-    ConnectionTransport as NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
-    TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT,
+    ConnectionTransport as NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SPICE_DEFAULT_PORT_TEXT,
+    SSH_DEFAULT_PORT_TEXT, TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT,
 };
 
 /// Shared geometry keeps textarea rendering and IME hit testing aligned.
@@ -260,6 +260,12 @@ pub(in crate::workspace) enum NewConnectionField {
     MoshUdpHost,
     MoshUdpPort,
     MoshLocale,
+    SpiceTlsServerName,
+    SpiceSaslHostname,
+    SpiceSaslService,
+    SpiceSaslAuthenticationId,
+    SpiceSaslAuthorizationId,
+    SpiceSaslPassword,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -769,6 +775,15 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) gssapi_credentials_check_pending: bool,
     pub(in crate::workspace) password: String,
     pub(in crate::workspace) remote_desktop_session_options: RemoteDesktopSessionOptions,
+    pub(in crate::workspace) spice_tls_server_name: String,
+    pub(in crate::workspace) spice_sasl_hostname: String,
+    pub(in crate::workspace) spice_sasl_service: String,
+    pub(in crate::workspace) spice_sasl_authentication_id: String,
+    pub(in crate::workspace) spice_sasl_authorization_id: String,
+    pub(in crate::workspace) spice_sasl_password: String,
+    pub(in crate::workspace) spice_sasl_password_visible: bool,
+    pub(in crate::workspace) save_spice_sasl_password: bool,
+    pub(in crate::workspace) saved_spice_sasl_credential_ref: Option<String>,
     /// Identifies an existing RDP/VNC asset without overloading SSH edit state.
     pub(in crate::workspace) remote_desktop_profile_id: Option<String>,
     /// References saved SSH metadata only; credentials remain in the protected store.
@@ -814,6 +829,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) terminal_section_expanded: Option<bool>,
     pub(in crate::workspace) appearance_section_expanded: Option<bool>,
     pub(in crate::workspace) remote_gateway_section_expanded: Option<bool>,
+    pub(in crate::workspace) spice_security_section_expanded: Option<bool>,
     pub(in crate::workspace) vnc_preferences_section_expanded: Option<bool>,
     pub(in crate::workspace) remote_features_section_expanded: Option<bool>,
     pub(in crate::workspace) serial_parameters_section_expanded: Option<bool>,
@@ -902,6 +918,27 @@ impl fmt::Debug for NewConnectionForm {
                 "remote_desktop_session_options",
                 &self.remote_desktop_session_options,
             )
+            .field("spice_tls_server_name", &self.spice_tls_server_name)
+            .field("spice_sasl_hostname", &self.spice_sasl_hostname)
+            .field("spice_sasl_service", &self.spice_sasl_service)
+            .field(
+                "spice_sasl_authentication_id",
+                &self.spice_sasl_authentication_id,
+            )
+            .field(
+                "spice_sasl_authorization_id",
+                &self.spice_sasl_authorization_id,
+            )
+            .field("spice_sasl_password", &"[redacted secret]")
+            .field(
+                "spice_sasl_password_visible",
+                &self.spice_sasl_password_visible,
+            )
+            .field("save_spice_sasl_password", &self.save_spice_sasl_password)
+            .field(
+                "saved_spice_sasl_credential_ref",
+                &self.saved_spice_sasl_credential_ref,
+            )
             .field("remote_desktop_profile_id", &self.remote_desktop_profile_id)
             .field(
                 "remote_desktop_ssh_gateway_connection_id",
@@ -961,6 +998,10 @@ impl fmt::Debug for NewConnectionForm {
             .field(
                 "remote_gateway_section_expanded",
                 &self.remote_gateway_section_expanded,
+            )
+            .field(
+                "spice_security_section_expanded",
+                &self.spice_security_section_expanded,
             )
             .field(
                 "vnc_preferences_section_expanded",
@@ -1070,6 +1111,15 @@ impl Default for NewConnectionForm {
             gssapi_credentials_check_pending: false,
             password: String::new(),
             remote_desktop_session_options: RemoteDesktopSessionOptions::default(),
+            spice_tls_server_name: String::new(),
+            spice_sasl_hostname: String::new(),
+            spice_sasl_service: "spice".to_string(),
+            spice_sasl_authentication_id: String::new(),
+            spice_sasl_authorization_id: String::new(),
+            spice_sasl_password: String::new(),
+            spice_sasl_password_visible: false,
+            save_spice_sasl_password: false,
+            saved_spice_sasl_credential_ref: None,
             remote_desktop_profile_id: None,
             remote_desktop_ssh_gateway_connection_id: None,
             mosh_profile_id: None,
@@ -1106,6 +1156,7 @@ impl Default for NewConnectionForm {
             terminal_section_expanded: None,
             appearance_section_expanded: None,
             remote_gateway_section_expanded: None,
+            spice_security_section_expanded: None,
             vnc_preferences_section_expanded: None,
             remote_features_section_expanded: None,
             serial_parameters_section_expanded: None,
@@ -1190,8 +1241,28 @@ impl NewConnectionForm {
         self.standalone_sftp_transfer_mode = mode;
     }
 
+    pub(in crate::workspace) fn set_spice_sasl_mode(
+        &mut self,
+        mode: oxideterm_remote_desktop::RemoteDesktopSpiceSaslMode,
+    ) {
+        if mode != oxideterm_remote_desktop::RemoteDesktopSpiceSaslMode::Password {
+            // A hidden password draft must not outlive password-based SASL selection.
+            self.spice_sasl_password.zeroize();
+            self.spice_sasl_password_visible = false;
+            self.save_spice_sasl_password = false;
+        }
+        self.remote_desktop_session_options.spice.sasl_mode = mode;
+    }
+
+    pub(in crate::workspace) fn clear_spice_sasl_secret_draft(&mut self) {
+        // Switching protocols must not retain an unreachable plaintext credential in the form.
+        self.spice_sasl_password.zeroize();
+        self.spice_sasl_password_visible = false;
+    }
+
     fn zeroize_secret_drafts(&mut self) {
         self.password.zeroize();
+        self.spice_sasl_password.zeroize();
         self.passphrase.zeroize();
         self.upstream_proxy_password.zeroize();
         self.proxy_command.zeroize();
@@ -1214,12 +1285,40 @@ pub(in crate::workspace) fn form_from_remote_desktop_profile(
     form.transport = match profile.protocol {
         oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp => NewConnectionTransport::Rdp,
         oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc => NewConnectionTransport::Vnc,
+        oxideterm_remote_desktop::RemoteDesktopProtocol::Spice => NewConnectionTransport::Spice,
     };
     form.name = profile.name.clone();
     form.host = profile.host.clone();
     form.port = profile.port.to_string();
     form.username = profile.username.clone().unwrap_or_default();
-    form.remote_desktop_session_options = profile.session_options;
+    form.remote_desktop_session_options = profile.session_options.clone();
+    form.spice_tls_server_name = profile
+        .session_options
+        .spice
+        .tls_server_name
+        .clone()
+        .unwrap_or_default();
+    form.spice_sasl_hostname = profile
+        .session_options
+        .spice
+        .sasl_hostname
+        .clone()
+        .unwrap_or_default();
+    form.spice_sasl_service = profile.session_options.spice.sasl_service.clone();
+    form.spice_sasl_authentication_id = profile
+        .session_options
+        .spice
+        .sasl_authentication_id
+        .clone()
+        .unwrap_or_default();
+    form.spice_sasl_authorization_id = profile
+        .session_options
+        .spice
+        .sasl_authorization_id
+        .clone()
+        .unwrap_or_default();
+    form.saved_spice_sasl_credential_ref = profile.sasl_credential_ref.clone();
+    form.save_spice_sasl_password = profile.sasl_credential_ref.is_some();
     form.remote_desktop_profile_id = Some(profile.id.clone());
     form.remote_desktop_ssh_gateway_connection_id = profile.ssh_gateway_connection_id.clone();
     form.saved_password_keychain_id = profile.credential_ref.clone();
@@ -1384,6 +1483,7 @@ pub(in crate::workspace) fn connection_secret_field_visible(
 ) -> Option<bool> {
     match field {
         NewConnectionField::Password => Some(form.password_visible),
+        NewConnectionField::SpiceSaslPassword => Some(form.spice_sasl_password_visible),
         NewConnectionField::Passphrase => Some(form.passphrase_visible),
         NewConnectionField::StandaloneSftpSecondaryPassword => {
             Some(form.standalone_sftp_secondary.password_visible)
@@ -1403,6 +1503,10 @@ pub(in crate::workspace) fn toggle_connection_secret_field_visibility(
     match field {
         NewConnectionField::Password => {
             form.password_visible = !form.password_visible;
+            true
+        }
+        NewConnectionField::SpiceSaslPassword => {
+            form.spice_sasl_password_visible = !form.spice_sasl_password_visible;
             true
         }
         NewConnectionField::Passphrase => {
@@ -1530,16 +1634,26 @@ pub(in crate::workspace) fn next_connection_field(
     }
     if matches!(
         transport,
-        NewConnectionTransport::Rdp | NewConnectionTransport::Vnc
+        NewConnectionTransport::Rdp | NewConnectionTransport::Vnc | NewConnectionTransport::Spice
     ) {
-        let fields = [
-            NewConnectionField::Name,
-            NewConnectionField::Group,
-            NewConnectionField::Host,
-            NewConnectionField::Port,
-            NewConnectionField::Username,
-            NewConnectionField::Password,
-        ];
+        let fields = if transport == NewConnectionTransport::Spice {
+            vec![
+                NewConnectionField::Name,
+                NewConnectionField::Group,
+                NewConnectionField::Host,
+                NewConnectionField::Port,
+                NewConnectionField::Password,
+            ]
+        } else {
+            vec![
+                NewConnectionField::Name,
+                NewConnectionField::Group,
+                NewConnectionField::Host,
+                NewConnectionField::Port,
+                NewConnectionField::Username,
+                NewConnectionField::Password,
+            ]
+        };
         let index = fields
             .iter()
             .position(|candidate| *candidate == field)
@@ -2007,6 +2121,12 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::MoshUdpHost => &mut form.mosh_udp_host,
         NewConnectionField::MoshUdpPort => &mut form.mosh_udp_port,
         NewConnectionField::MoshLocale => &mut form.mosh_locale,
+        NewConnectionField::SpiceTlsServerName => &mut form.spice_tls_server_name,
+        NewConnectionField::SpiceSaslHostname => &mut form.spice_sasl_hostname,
+        NewConnectionField::SpiceSaslService => &mut form.spice_sasl_service,
+        NewConnectionField::SpiceSaslAuthenticationId => &mut form.spice_sasl_authentication_id,
+        NewConnectionField::SpiceSaslAuthorizationId => &mut form.spice_sasl_authorization_id,
+        NewConnectionField::SpiceSaslPassword => &mut form.spice_sasl_password,
     }
 }
 
@@ -2164,6 +2284,12 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::MoshUdpHost => &form.mosh_udp_host,
         NewConnectionField::MoshUdpPort => &form.mosh_udp_port,
         NewConnectionField::MoshLocale => &form.mosh_locale,
+        NewConnectionField::SpiceTlsServerName => &form.spice_tls_server_name,
+        NewConnectionField::SpiceSaslHostname => &form.spice_sasl_hostname,
+        NewConnectionField::SpiceSaslService => &form.spice_sasl_service,
+        NewConnectionField::SpiceSaslAuthenticationId => &form.spice_sasl_authentication_id,
+        NewConnectionField::SpiceSaslAuthorizationId => &form.spice_sasl_authorization_id,
+        NewConnectionField::SpiceSaslPassword => &form.spice_sasl_password,
     }
 }
 
@@ -2434,6 +2560,7 @@ mod tests {
                 image_quality: RemoteDesktopVncImageQuality::BestQuality,
                 compression: RemoteDesktopVncCompression::High,
             },
+            spice: Default::default(),
         };
         let now = Utc::now();
         let profile = RemoteDesktopProfile {
@@ -2450,9 +2577,10 @@ mod tests {
             username: Some("operator".to_string()),
             domain: Some("EXAMPLE".to_string()),
             credential_ref: Some("remote-desktop:remote-1".to_string()),
+            sasl_credential_ref: None,
             ssh_gateway_connection_id: Some("gateway-1".to_string()),
             read_only: true,
-            session_options,
+            session_options: session_options.clone(),
             created_at: now,
             updated_at: now,
             last_used_at: None,

@@ -1382,6 +1382,9 @@ pub struct RemoteDesktopProfile {
     /// Stable protected-store reference; the credential value is never serialized here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_ref: Option<String>,
+    /// Device-local protected-store reference for a distinct SPICE SASL password.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sasl_credential_ref: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub read_only: bool,
     #[serde(default)]
@@ -1413,6 +1416,12 @@ pub struct SaveRemoteDesktopProfileRequest {
     pub credential: Option<SecretString>,
     /// Explicitly removes the device-local protected credential while updating the profile.
     pub clear_credential: bool,
+    /// An explicit SASL reference is primarily used by trusted import and sync paths.
+    pub sasl_credential_ref: Option<String>,
+    /// The SPICE SASL password remains separately owned from the Ticket secret.
+    pub sasl_credential: Option<SecretString>,
+    /// Explicitly removes the device-local SASL password while updating the profile.
+    pub clear_sasl_credential: bool,
     pub read_only: bool,
     pub session_options: RemoteDesktopSessionOptions,
 }
@@ -1676,6 +1685,7 @@ impl RemoteDesktopProfile {
             domain: None,
             ssh_gateway_connection_id: None,
             credential_ref: None,
+            sasl_credential_ref: None,
             read_only: false,
             session_options: RemoteDesktopSessionOptions::default(),
             created_at: now,
@@ -1710,6 +1720,16 @@ impl RemoteDesktopProfile {
             .is_some_and(|reference| reference.trim().is_empty())
         {
             bail!("Remote desktop credential reference cannot be empty");
+        }
+        if self
+            .sasl_credential_ref
+            .as_deref()
+            .is_some_and(|reference| reference.trim().is_empty())
+        {
+            bail!("SPICE SASL credential reference cannot be empty");
+        }
+        if self.protocol != RemoteDesktopProtocol::Spice && self.sasl_credential_ref.is_some() {
+            bail!("Only a SPICE profile can own a SASL credential reference");
         }
         Ok(())
     }

@@ -1,7 +1,10 @@
 use super::*;
+use base64::Engine as _;
 use gpui::{Animation, AnimationExt, App, CursorStyle};
 use oxideterm_connections::{ConnectionTerminalSessionLogPolicy, SshChannelStrategy};
-use oxideterm_remote_desktop::RemoteDesktopRdpNetworkProfile;
+use oxideterm_remote_desktop::{
+    RemoteDesktopRdpNetworkProfile, RemoteDesktopSpiceSaslMode, RemoteDesktopSpiceTransportSecurity,
+};
 use oxideterm_settings_model::parse_rgb24_hex;
 
 const NEW_CONNECTION_TRANSPORT_ROW_HEIGHT: f32 = 36.0;
@@ -9,6 +12,53 @@ const NEW_CONNECTION_TRANSPORT_ROW_GAP: f32 = 4.0;
 const NEW_CONNECTION_ADVANCED_GROUP_HEIGHT: f32 = 28.0;
 const NEW_CONNECTION_ADVANCED_GROUP_OFFSET: f32 =
     NEW_CONNECTION_ADVANCED_GROUP_HEIGHT + NEW_CONNECTION_TRANSPORT_ROW_GAP;
+const SPICE_TLS_MAX_CERTIFICATE_FILES: usize = 64;
+const SPICE_TLS_MAX_CERTIFICATE_FILE_BYTES: usize = 4 * 1024 * 1024;
+const SPICE_TLS_PEM_BEGIN: &[u8] = b"-----BEGIN CERTIFICATE-----";
+const SPICE_TLS_PEM_END: &[u8] = b"-----END CERTIFICATE-----";
+
+fn parse_spice_tls_certificate_file(bytes: Vec<u8>) -> Result<Vec<Vec<u8>>, ()> {
+    // Certificate imports are bounded before parsing because profile data is synced and persisted.
+    if bytes.len() > SPICE_TLS_MAX_CERTIFICATE_FILE_BYTES {
+        return Err(());
+    }
+    let mut certificates = Vec::new();
+    let mut remaining = bytes.as_slice();
+    while let Some(begin) = remaining
+        .windows(SPICE_TLS_PEM_BEGIN.len())
+        .position(|window| window == SPICE_TLS_PEM_BEGIN)
+    {
+        let encoded = &remaining[begin + SPICE_TLS_PEM_BEGIN.len()..];
+        let Some(end) = encoded
+            .windows(SPICE_TLS_PEM_END.len())
+            .position(|window| window == SPICE_TLS_PEM_END)
+        else {
+            return Err(());
+        };
+        let compact = encoded[..end]
+            .iter()
+            .copied()
+            .filter(|byte| !byte.is_ascii_whitespace())
+            .collect::<Vec<_>>();
+        let certificate = base64::engine::general_purpose::STANDARD
+            .decode(compact)
+            .map_err(|_| ())?;
+        if certificate.is_empty() {
+            return Err(());
+        }
+        certificates.push(certificate);
+        remaining = &encoded[end + SPICE_TLS_PEM_END.len()..];
+    }
+    if certificates.is_empty() {
+        if bytes.is_empty() {
+            Err(())
+        } else {
+            Ok(vec![bytes])
+        }
+    } else {
+        Ok(certificates)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ConnectionFormSection {
@@ -20,6 +70,7 @@ pub(super) enum ConnectionFormSection {
     Terminal,
     Appearance,
     RemoteGateway,
+    SpiceSecurity,
     VncPreferences,
     RemoteFeatures,
     SerialParameters,
@@ -41,6 +92,7 @@ impl ConnectionFormSection {
             Self::Terminal => "new-connection-terminal-section",
             Self::Appearance => "new-connection-appearance-section",
             Self::RemoteGateway => "new-connection-remote-gateway-section",
+            Self::SpiceSecurity => "new-connection-spice-security-section",
             Self::VncPreferences => "new-connection-vnc-preferences-section",
             Self::RemoteFeatures => "new-connection-remote-features-section",
             Self::SerialParameters => "new-connection-serial-parameters-section",
@@ -60,6 +112,7 @@ impl ConnectionFormSection {
             Self::Terminal => "ssh.form.terminal_options",
             Self::Appearance => "ssh.form.appearance",
             Self::RemoteGateway => "modals.new_connection.remote_desktop_ssh_gateway",
+            Self::SpiceSecurity => "modals.new_connection.spice_security_title",
             Self::VncPreferences => "modals.new_connection.vnc_preferences_title",
             Self::RemoteFeatures => "modals.new_connection.remote_desktop_features_title",
             Self::SerialParameters => "modals.new_connection.serial_section_title",
@@ -79,6 +132,7 @@ impl ConnectionFormSection {
             Self::Terminal => "ssh.form.terminal_options_hint",
             Self::Appearance => "ssh.form.appearance_hint",
             Self::RemoteGateway => "modals.new_connection.remote_desktop_ssh_gateway_hint",
+            Self::SpiceSecurity => "modals.new_connection.spice_security_hint",
             Self::VncPreferences => "modals.new_connection.vnc_preferences_hint",
             Self::RemoteFeatures => "modals.new_connection.remote_desktop_features_hint",
             Self::SerialParameters => "modals.new_connection.serial_connect_hint",
@@ -106,6 +160,7 @@ fn connection_form_section_expanded_for_form(
         ConnectionFormSection::Terminal => form.terminal_section_expanded,
         ConnectionFormSection::Appearance => form.appearance_section_expanded,
         ConnectionFormSection::RemoteGateway => form.remote_gateway_section_expanded,
+        ConnectionFormSection::SpiceSecurity => form.spice_security_section_expanded,
         ConnectionFormSection::VncPreferences => form.vnc_preferences_section_expanded,
         ConnectionFormSection::RemoteFeatures => form.remote_features_section_expanded,
         ConnectionFormSection::SerialParameters => form.serial_parameters_section_expanded,
@@ -243,19 +298,20 @@ fn new_connection_transport_index(transport: NewConnectionTransport) -> usize {
         NewConnectionTransport::Serial => 3,
         NewConnectionTransport::Rdp => 4,
         NewConnectionTransport::Vnc => 5,
-        NewConnectionTransport::WslGraphics => 6,
+        NewConnectionTransport::Spice => 6,
+        NewConnectionTransport::WslGraphics => 7,
         NewConnectionTransport::LocalTerminal => {
-            if cfg!(target_os = "windows") {
-                7
-            } else {
-                6
-            }
-        }
-        NewConnectionTransport::StandaloneSftp => {
             if cfg!(target_os = "windows") {
                 8
             } else {
                 7
+            }
+        }
+        NewConnectionTransport::StandaloneSftp => {
+            if cfg!(target_os = "windows") {
+                9
+            } else {
+                8
             }
         }
     }
@@ -296,6 +352,7 @@ fn connection_secret_field_value(
     // second credential owner before the text input builds its presentation.
     match field {
         NewConnectionField::Password => Some(&form.password),
+        NewConnectionField::SpiceSaslPassword => Some(&form.spice_sasl_password),
         NewConnectionField::Passphrase => Some(&form.passphrase),
         NewConnectionField::StandaloneSftpSecondaryPassword => {
             Some(&form.standalone_sftp_secondary.password)
@@ -450,6 +507,9 @@ impl WorkspaceApp {
                                     }
                                     ConnectionFormSection::RemoteGateway => {
                                         form.remote_gateway_section_expanded = override_value;
+                                    }
+                                    ConnectionFormSection::SpiceSecurity => {
+                                        form.spice_security_section_expanded = override_value;
                                     }
                                     ConnectionFormSection::VncPreferences => {
                                         form.vnc_preferences_section_expanded = override_value;
@@ -2515,6 +2575,13 @@ impl WorkspaceApp {
                 LucideIcon::Monitor,
                 false,
             ),
+            (
+                NewConnectionTransport::Spice,
+                self.i18n.t("modals.new_connection.transport_spice"),
+                NewConnectionField::Host,
+                LucideIcon::Monitor,
+                false,
+            ),
         ];
         if cfg!(target_os = "windows") {
             choices.push((
@@ -2709,6 +2776,11 @@ impl WorkspaceApp {
                             }
                             apply_transport_default_port(form, previous_transport, transport);
                             apply_transport_default_username(form, previous_transport, transport);
+                            if previous_transport == NewConnectionTransport::Spice
+                                && transport != NewConnectionTransport::Spice
+                            {
+                                form.clear_spice_sasl_secret_draft();
+                            }
                             form.transport = transport;
                             form.focused_field = focus_field;
                             form.field_focused = false;
@@ -3008,6 +3080,7 @@ impl WorkspaceApp {
         let port_placeholder = match protocol {
             oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp => RDP_DEFAULT_PORT_TEXT,
             oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc => VNC_DEFAULT_PORT_TEXT,
+            oxideterm_remote_desktop::RemoteDesktopProtocol::Spice => SPICE_DEFAULT_PORT_TEXT,
         };
         let port_invalid =
             !port.trim().is_empty() && !port.trim().parse::<u16>().is_ok_and(|port| port > 0);
@@ -3067,23 +3140,33 @@ impl WorkspaceApp {
             } else {
                 self.i18n.t("modals.new_connection.remote_desktop_username")
             };
+        let spice = protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Spice;
         let authentication = div()
             .flex()
             .flex_col()
             .gap(px(self.tokens.metrics.modal_section_gap))
-            .child(self.render_connection_field(
-                self.i18n.t("modals.new_connection.remote_desktop_username"),
-                &username,
-                username_placeholder,
-                NewConnectionField::Username,
-                false,
-                cx,
-            ))
+            .when(!spice, |section| {
+                section.child(self.render_connection_field(
+                    self.i18n.t("modals.new_connection.remote_desktop_username"),
+                    &username,
+                    username_placeholder,
+                    NewConnectionField::Username,
+                    false,
+                    cx,
+                ))
+            })
             .child(self.render_connection_secret_field(
-                self.i18n.t("ssh.form.password"),
+                if spice {
+                    self.i18n.t("modals.new_connection.spice_ticket")
+                } else {
+                    self.i18n.t("ssh.form.password")
+                },
                 if keeps_saved_password {
                     self.i18n
                         .t("modals.new_connection.remote_desktop_password_keep_placeholder")
+                } else if spice {
+                    self.i18n
+                        .t("modals.new_connection.spice_ticket_placeholder")
                 } else if protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp {
                     self.i18n
                         .t("modals.new_connection.remote_desktop_password_placeholder")
@@ -3111,6 +3194,14 @@ impl WorkspaceApp {
                 authentication,
                 cx,
             ))
+            .when(spice, |section| {
+                let security = self.render_spice_connection_security(cx);
+                section.child(self.render_connection_form_section(
+                    ConnectionFormSection::SpiceSecurity,
+                    security,
+                    cx,
+                ))
+            })
             .child({
                 let gateway = self.render_remote_desktop_ssh_gateway_select(
                     ssh_gateway_connection_id.as_deref(),
@@ -3142,6 +3233,334 @@ impl WorkspaceApp {
                 )
             })
             .into_any_element()
+    }
+
+    fn render_spice_connection_security(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some((
+            transport_security,
+            tls_server_name,
+            certificate_count,
+            sasl_mode,
+            sasl_hostname,
+            sasl_service,
+            sasl_authentication_id,
+            sasl_authorization_id,
+            keeps_saved_sasl_password,
+            save_sasl_password,
+            allow_gssapi,
+        )) = self.connection_form_state(cx).form.as_ref().map(|form| {
+            let spice = &form.remote_desktop_session_options.spice;
+            (
+                spice.transport_security,
+                form.spice_tls_server_name.clone(),
+                spice.tls_root_certificates_der.len(),
+                spice.sasl_mode,
+                form.spice_sasl_hostname.clone(),
+                form.spice_sasl_service.clone(),
+                form.spice_sasl_authentication_id.clone(),
+                form.spice_sasl_authorization_id.clone(),
+                form.remote_desktop_profile_id.is_some()
+                    && form.saved_spice_sasl_credential_ref.is_some(),
+                form.save_spice_sasl_password,
+                spice.sasl_allow_gssapi,
+            )
+        })
+        else {
+            return div().into_any_element();
+        };
+
+        let transport_choices = [
+            (
+                RemoteDesktopSpiceTransportSecurity::Plain,
+                "modals.new_connection.spice_transport_plain",
+            ),
+            (
+                RemoteDesktopSpiceTransportSecurity::Tls,
+                "modals.new_connection.spice_transport_tls",
+            ),
+        ];
+        let transport = form_field(
+            &self.tokens,
+            self.i18n
+                .t("modals.new_connection.spice_transport_security"),
+            segmented_tabs(&self.tokens).children(transport_choices.into_iter().enumerate().map(
+                |(index, (value, label_key))| {
+                    segmented_tab(
+                        &self.tokens,
+                        self.i18n.t(label_key),
+                        transport_security == value,
+                    )
+                    .id(SharedString::from(format!("spice-transport-{index}")))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.update_connection_form_state(cx, |state| {
+                                if let Some(form) = state.form.as_mut() {
+                                    form.remote_desktop_session_options.spice.transport_security =
+                                        value;
+                                }
+                            });
+                            cx.notify();
+                        }),
+                    )
+                },
+            )),
+        );
+
+        let sasl_choices = [
+            (
+                RemoteDesktopSpiceSaslMode::Disabled,
+                "modals.new_connection.spice_sasl_disabled",
+            ),
+            (
+                RemoteDesktopSpiceSaslMode::Gssapi,
+                "modals.new_connection.spice_sasl_gssapi",
+            ),
+            (
+                RemoteDesktopSpiceSaslMode::Password,
+                "modals.new_connection.spice_sasl_password_mode",
+            ),
+        ];
+        let sasl = form_field(
+            &self.tokens,
+            self.i18n.t("modals.new_connection.spice_sasl_mode"),
+            segmented_tabs(&self.tokens).children(sasl_choices.into_iter().enumerate().map(
+                |(index, (value, label_key))| {
+                    segmented_tab(&self.tokens, self.i18n.t(label_key), sasl_mode == value)
+                        .id(SharedString::from(format!("spice-sasl-{index}")))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.update_connection_form_state(cx, |state| {
+                                    if let Some(form) = state.form.as_mut() {
+                                        form.set_spice_sasl_mode(value);
+                                    }
+                                });
+                                cx.notify();
+                            }),
+                        )
+                },
+            )),
+        );
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.modal_section_gap))
+            .child(transport)
+            .when(
+                transport_security == RemoteDesktopSpiceTransportSecurity::Tls,
+                |content| {
+                    content
+                        .child(
+                            self.render_connection_field(
+                                self.i18n.t("modals.new_connection.spice_tls_server_name"),
+                                &tls_server_name,
+                                self.i18n
+                                    .t("modals.new_connection.spice_tls_server_name_placeholder"),
+                                NewConnectionField::SpiceTlsServerName,
+                                false,
+                                cx,
+                            ),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(self.tokens.spacing.two))
+                                .child(
+                                    button(
+                                        &self.tokens,
+                                        self.i18n.t("modals.new_connection.spice_tls_import"),
+                                        ButtonTone::Secondary,
+                                    )
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            this.pick_spice_tls_certificates(cx);
+                                        }),
+                                    ),
+                                )
+                                .when(certificate_count > 0, |row| {
+                                    row.child(
+                                        button(
+                                            &self.tokens,
+                                            self.i18n.t("modals.new_connection.spice_tls_clear"),
+                                            ButtonTone::Secondary,
+                                        )
+                                        .on_mouse_down(
+                                            MouseButton::Left,
+                                            cx.listener(|this, _event, _window, cx| {
+                                                this.update_connection_form_state(cx, |state| {
+                                                    if let Some(form) = state.form.as_mut() {
+                                                        form.remote_desktop_session_options
+                                                            .spice
+                                                            .tls_root_certificates_der
+                                                            .clear();
+                                                    }
+                                                });
+                                                cx.notify();
+                                            }),
+                                        ),
+                                    )
+                                }),
+                        )
+                        .child(
+                            self.render_connection_hint(
+                                self.i18n
+                                    .t("modals.new_connection.spice_tls_certificate_count")
+                                    .replace("{{count}}", &certificate_count.to_string()),
+                            ),
+                        )
+                },
+            )
+            .child(sasl)
+            .when(
+                sasl_mode != RemoteDesktopSpiceSaslMode::Disabled,
+                |content| {
+                    content
+                        .child(
+                            self.render_connection_field(
+                                self.i18n.t("modals.new_connection.spice_sasl_hostname"),
+                                &sasl_hostname,
+                                self.i18n
+                                    .t("modals.new_connection.spice_sasl_hostname_placeholder"),
+                                NewConnectionField::SpiceSaslHostname,
+                                false,
+                                cx,
+                            ),
+                        )
+                        .child(self.render_connection_field(
+                            self.i18n.t("modals.new_connection.spice_sasl_service"),
+                            &sasl_service,
+                            "spice".to_string(),
+                            NewConnectionField::SpiceSaslService,
+                            false,
+                            cx,
+                        ))
+                },
+            )
+            .when(
+                sasl_mode == RemoteDesktopSpiceSaslMode::Password,
+                |content| {
+                    content
+                    .child(self.render_connection_field(
+                        self.i18n
+                            .t("modals.new_connection.spice_sasl_authentication_id"),
+                        &sasl_authentication_id,
+                        self.i18n.t(
+                            "modals.new_connection.spice_sasl_authentication_id_placeholder",
+                        ),
+                        NewConnectionField::SpiceSaslAuthenticationId,
+                        false,
+                        cx,
+                    ))
+                    .child(self.render_connection_field(
+                        self.i18n
+                            .t("modals.new_connection.spice_sasl_authorization_id"),
+                        &sasl_authorization_id,
+                        self.i18n.t(
+                            "modals.new_connection.spice_sasl_authorization_id_placeholder",
+                        ),
+                        NewConnectionField::SpiceSaslAuthorizationId,
+                        false,
+                        cx,
+                    ))
+                    .child(self.render_connection_secret_field(
+                        self.i18n.t("ssh.form.password"),
+                        if keeps_saved_sasl_password {
+                            self.i18n.t(
+                                "modals.new_connection.remote_desktop_password_keep_placeholder",
+                            )
+                        } else {
+                            self.i18n
+                                .t("modals.new_connection.spice_sasl_password_placeholder")
+                        },
+                        NewConnectionField::SpiceSaslPassword,
+                        cx,
+                    ))
+                    .child(self.render_connection_checkbox(
+                        self.i18n.t("ssh.form.save_password"),
+                        save_sasl_password,
+                        |form| {
+                            form.save_spice_sasl_password = !form.save_spice_sasl_password;
+                        },
+                        cx,
+                    ))
+                    .child(self.render_connection_checkbox(
+                        self.i18n.t("modals.new_connection.spice_sasl_allow_gssapi"),
+                        allow_gssapi,
+                        |form| {
+                            form.remote_desktop_session_options.spice.sasl_allow_gssapi =
+                                !form.remote_desktop_session_options.spice.sasl_allow_gssapi;
+                        },
+                        cx,
+                    ))
+                },
+            )
+            .into_any_element()
+    }
+
+    fn pick_spice_tls_certificates(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some(SharedString::from(
+                self.i18n.t("modals.new_connection.spice_tls_import"),
+            )),
+        });
+        let read_task = cx.background_executor().spawn(async move {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return None;
+            };
+            if paths.is_empty() || paths.len() > SPICE_TLS_MAX_CERTIFICATE_FILES {
+                return Some(Err(()));
+            }
+            let mut certificates = Vec::new();
+            for path in paths {
+                let Ok(bytes) = std::fs::read(path) else {
+                    return Some(Err(()));
+                };
+                let Ok(imported) = parse_spice_tls_certificate_file(bytes) else {
+                    return Some(Err(()));
+                };
+                certificates.extend(imported);
+                if certificates.len() > SPICE_TLS_MAX_CERTIFICATE_FILES {
+                    return Some(Err(()));
+                }
+            }
+            Some(Ok(certificates))
+        });
+        cx.spawn(async move |workspace, cx| {
+            let Some(result) = read_task.await else {
+                return;
+            };
+            let _ = workspace.update(cx, |workspace, cx| {
+                workspace.update_connection_form_state(cx, |state| {
+                    let Some(form) = state.form.as_mut() else {
+                        return;
+                    };
+                    match result {
+                        Ok(certificates) => {
+                            form.remote_desktop_session_options
+                                .spice
+                                .tls_root_certificates_der = certificates;
+                            form.error = None;
+                        }
+                        Err(()) => {
+                            form.error = Some(
+                                workspace
+                                    .i18n
+                                    .t("modals.new_connection.spice_tls_import_failed"),
+                            );
+                        }
+                    }
+                });
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn render_vnc_connection_preferences(&self, cx: &mut Context<Self>) -> AnyElement {

@@ -162,6 +162,7 @@ impl RemoteDesktopFakeBackend {
         let protocol_bias = match self.protocol {
             RemoteDesktopProtocol::Rdp => 0x30,
             RemoteDesktopProtocol::Vnc => 0x80,
+            RemoteDesktopProtocol::Spice => 0xc0,
         };
 
         // The fake frame is deterministic so tests can validate lifecycle code

@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "repository": "AnalyseDeCircuit/OxideSpice",
+  "version": "0.1.0",
+  "tag": "v0.1.0",
+  "ipcProtocolVersion": 1,
+  "minisignPublicKey": "RWSTFhGkwjRnYCd3GfHgJ5mVE5pDnwvwlZJdrtUfbkOf8Gfogj0u4+T1",
+  "requiredCapabilities": [
+    "core-session",
+    "tls",
+    "sasl-password",
+    "sasl-gssapi",
+    "display-canvas",
+    "composite-pixman",
+    "audio-raw",
+    "audio-opus",
+    "video-mjpeg",
+    "video-vp8",
+    "video-vp9",
+    "video-h264",
+    "video-h265",
+    "clipboard",
+    "file-transfer",
+    "web-dav",
+    "usb-redir",
+    "smartcard",
+    "multi-display",
+    "playback",
+    "record",
+    "port"
+  ],
+  "targets": {
+    "aarch64-apple-darwin": {
+      "archive": "oxide-spice-helper-aarch64-apple-darwin.tar.gz",
+      "sha256": "13b0395304bd463b99f427b716fcc2f748b8fc548bda83e2dfd7926ceeb5c538"
+    },
+    "x86_64-apple-darwin": {
+      "archive": "oxide-spice-helper-x86_64-apple-darwin.tar.gz",
+      "sha256": "4cf8e40b3647cc5cdb34d3f0b11a809aa9c10c568fc16420c0d37fb68e154b47"
+    },
+    "aarch64-unknown-linux-gnu": {
+      "archive": "oxide-spice-helper-aarch64-unknown-linux-gnu.tar.gz",
+      "sha256": "52797aee313976b79a379cb29b95f5c08b6d47a7b6e540deed6af006fbe470fd"
+    },
+    "x86_64-unknown-linux-gnu": {
+      "archive": "oxide-spice-helper-x86_64-unknown-linux-gnu.tar.gz",
+      "sha256": "24d33f425ede913f18c536f82df91e0425aefa38e86b8bc578a3a80143618338"
+    },
+    "aarch64-pc-windows-msvc": {
+      "archive": "oxide-spice-helper-aarch64-pc-windows-msvc.zip",
+      "sha256": "8756fa1397c853fe5c8f255710569c1a7048499aca4cffb02d3f1d433ad96b30"
+    },
+    "x86_64-pc-windows-msvc": {
+      "archive": "oxide-spice-helper-x86_64-pc-windows-msvc.zip",
+      "sha256": "3dcec185fe744e425b134157e9629c7639ea3b780aed8ac80c39d6a384352df0"
+    }
+  }
+}

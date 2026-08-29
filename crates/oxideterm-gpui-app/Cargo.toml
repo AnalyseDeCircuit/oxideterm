@@ -17,6 +17,7 @@ anyhow.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 chrono.workspace = true
+crossbeam-channel.workspace = true
 fs2.workspace = true
 gpui.workspace = true
 image.workspace = true
@@ -67,6 +68,7 @@ oxideterm-session-adapter = { path = "../oxideterm-session-adapter" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }
 oxideterm-ssh-launch = { path = "../oxideterm-ssh-launch" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
+oxideterm-spice = { path = "../oxideterm-spice" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
 oxideterm-terminal-triggers = { path = "../oxideterm-terminal-triggers" }
 oxideterm-terminal-recording = { path = "../oxideterm-terminal-recording" }

@@ -197,6 +197,9 @@ impl WorkspaceApp {
                     NewConnectionTransport::Vnc => {
                         Some(oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc)
                     }
+                    NewConnectionTransport::Spice => {
+                        Some(oxideterm_remote_desktop::RemoteDesktopProtocol::Spice)
+                    }
                     _ => None,
                 }
             } else {
@@ -281,6 +284,10 @@ impl WorkspaceApp {
             == Some(oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc)
         {
             self.i18n.t("modals.new_connection.vnc_description")
+        } else if remote_desktop_protocol
+            == Some(oxideterm_remote_desktop::RemoteDesktopProtocol::Spice)
+        {
+            self.i18n.t("modals.new_connection.spice_description")
         } else if wsl_graphics_mode {
             self.i18n
                 .t("modals.new_connection.wsl_graphics_description")

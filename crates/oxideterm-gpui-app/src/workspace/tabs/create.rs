@@ -267,6 +267,7 @@ impl WorkspaceApp {
         let protocol = match launch.protocol {
             RemoteDesktopLaunchProtocol::Rdp => RemoteDesktopProtocol::Rdp,
             RemoteDesktopLaunchProtocol::Vnc => RemoteDesktopProtocol::Vnc,
+            RemoteDesktopLaunchProtocol::Spice => RemoteDesktopProtocol::Spice,
         };
         let endpoint = RemoteDesktopEndpoint::new(launch.host, launch.port);
         let profile = RemoteDesktopConnectionProfile {
@@ -282,6 +283,7 @@ impl WorkspaceApp {
             username: launch.username,
             domain: launch.domain,
             credential_ref: None,
+            sasl_credential_ref: None,
             read_only: false,
             session_options: Default::default(),
         };

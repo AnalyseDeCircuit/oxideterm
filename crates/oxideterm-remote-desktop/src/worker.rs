@@ -236,7 +236,7 @@ pub fn initial_connect_request(
     scale_factor: Option<u32>,
     monitor_layout: RemoteDesktopMonitorLayout,
 ) -> RemoteDesktopHelperRequest {
-    let session_options = effective_session_options(profile.session_options, provider);
+    let session_options = effective_session_options(profile.session_options.clone(), provider);
     let monitor_layout = if session_options.display.use_all_monitors {
         monitor_layout
     } else {
@@ -282,6 +282,8 @@ pub fn effective_session_options(
         rdp: requested.rdp,
         // VNC connection preferences are policy inputs, not negotiated provider capabilities.
         vnc: requested.vnc,
+        // SPICE negotiation inputs are consumed by its dedicated helper worker.
+        spice: requested.spice,
     }
 }
 

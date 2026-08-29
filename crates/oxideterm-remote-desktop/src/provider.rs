@@ -14,6 +14,7 @@ use crate::RemoteDesktopProtocol;
 pub const REMOTE_DESKTOP_PROVIDER_MANIFEST: &str = "remote_desktop_provider.json";
 const BUILTIN_RDP_PROVIDER_ID: &str = "builtin-rdp";
 const BUILTIN_VNC_PROVIDER_ID: &str = "builtin-vnc";
+const BUILTIN_SPICE_PROVIDER_ID: &str = "builtin-spice";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -194,6 +195,11 @@ fn builtin_provider_manifest_with_mode(
             "Built-in VNC Helper",
             "oxideterm-vnc-helper",
         ),
+        RemoteDesktopProtocol::Spice => (
+            BUILTIN_SPICE_PROVIDER_ID,
+            "Bundled OxideSpice Helper",
+            "oxide-spice-helper",
+        ),
     };
     let mut args = vec!["--stdio".to_string()];
     if fake_preview {
@@ -243,6 +249,7 @@ pub fn builtin_provider_registry()
     RemoteDesktopProviderRegistry::from_manifests([
         builtin_provider_manifest(RemoteDesktopProtocol::Rdp),
         builtin_provider_manifest(RemoteDesktopProtocol::Vnc),
+        builtin_provider_manifest(RemoteDesktopProtocol::Spice),
     ])
 }
 
@@ -251,6 +258,7 @@ pub fn builtin_preview_provider_registry()
     RemoteDesktopProviderRegistry::from_manifests([
         builtin_preview_provider_manifest(RemoteDesktopProtocol::Rdp),
         builtin_preview_provider_manifest(RemoteDesktopProtocol::Vnc),
+        builtin_preview_provider_manifest(RemoteDesktopProtocol::Spice),
     ])
 }
 
