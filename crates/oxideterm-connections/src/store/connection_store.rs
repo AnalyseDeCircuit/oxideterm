@@ -2454,17 +2454,30 @@ impl ConnectionStore {
     }
 
     pub fn resolve_managed_ssh_key_private_key(&self, id: &str) -> Result<SecretString> {
-        let secret_id = self
+        let managed_key = self
             .data
             .managed_ssh_keys
             .iter()
             .find(|key| key.id == id)
-            .map(|key| key.secret_id.clone())
             .ok_or_else(|| anyhow::anyhow!("Managed SSH key not found"))?;
+        let private_key = self.get_managed_ssh_key_secret(&managed_key.secret_id)?;
+        let Some(recovery) = recover_legacy_hex_managed_private_key(
+            &private_key,
+            &managed_key.fingerprint,
+            managed_key.requires_passphrase,
+        )? else {
+            // Secret material leaves the managed backend only at the SSH auth boundary.
+            // Callers must decode/use it immediately and must not persist this value.
+            return Ok(private_key);
+        };
 
-        // Secret material leaves the managed backend only at the SSH auth boundary.
-        // Callers must decode/use it immediately and must not persist this value.
-        self.get_managed_ssh_key_secret(&secret_id)
+        if recovery.safe_to_persist {
+            // Older macOS builds could rewrite a multiline Keychain value as hexadecimal text.
+            // Persist only fingerprint-validated recovery so later reads use the original bytes.
+            self.store_managed_ssh_key_secret(&managed_key.secret_id, &recovery.private_key)
+                .context("failed to repair a legacy managed SSH key")?;
+        }
+        Ok(recovery.private_key)
     }
 
     fn create_managed_ssh_key(

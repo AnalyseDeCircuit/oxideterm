@@ -138,6 +138,99 @@ fn managed_key_display_name(name: Option<String>, fallback: &str) -> String {
         .to_string()
 }
 
+struct LegacyManagedPrivateKeyRecovery {
+    private_key: SecretString,
+    safe_to_persist: bool,
+}
+
+fn recover_legacy_hex_managed_private_key(
+    private_key: &SecretString,
+    expected_fingerprint: &str,
+    requires_passphrase: bool,
+) -> Result<Option<LegacyManagedPrivateKeyRecovery>> {
+    if has_supported_private_key_container(private_key.expose_secret()) {
+        return Ok(None);
+    }
+
+    let Some(recovered) = decode_ascii_hex_secret(private_key.expose_secret()) else {
+        return Ok(None);
+    };
+    if !has_supported_private_key_container(recovered.expose_secret()) {
+        return Ok(None);
+    }
+    let safe_to_persist = if requires_passphrase {
+        // The encrypted key cannot be fingerprint-validated until the caller supplies its
+        // passphrase. Return the recovered value for authentication, but leave Keychain
+        // unchanged rather than persisting unverified material.
+        false
+    } else {
+        let decoded_key = decode_managed_private_key(&recovered, None)?;
+        if fingerprint_public_key(decoded_key.public_key()) != expected_fingerprint {
+            bail!("Managed SSH key integrity check failed");
+        }
+        true
+    };
+    Ok(Some(LegacyManagedPrivateKeyRecovery {
+        private_key: recovered,
+        safe_to_persist,
+    }))
+}
+
+fn has_supported_private_key_container(private_key: &str) -> bool {
+    let private_key = private_key.trim();
+    if private_key.starts_with("PuTTY-User-Key-File-") {
+        return private_key.lines().any(|line| line.starts_with("Private-Lines:"))
+            && private_key.lines().any(|line| line.starts_with("Private-MAC:"));
+    }
+
+    [
+        (
+            "-----BEGIN OPENSSH PRIVATE KEY-----",
+            "-----END OPENSSH PRIVATE KEY-----",
+        ),
+        (
+            "-----BEGIN RSA PRIVATE KEY-----",
+            "-----END RSA PRIVATE KEY-----",
+        ),
+        (
+            "-----BEGIN ENCRYPTED PRIVATE KEY-----",
+            "-----END ENCRYPTED PRIVATE KEY-----",
+        ),
+        ("-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----"),
+        (
+            "-----BEGIN EC PRIVATE KEY-----",
+            "-----END EC PRIVATE KEY-----",
+        ),
+    ]
+    .iter()
+    .any(|(begin, end)| private_key.starts_with(begin) && private_key.ends_with(end))
+}
+
+fn decode_ascii_hex_secret(secret: &str) -> Option<SecretString> {
+    let encoded = secret.as_bytes();
+    if encoded.is_empty() || encoded.len() % 2 != 0 {
+        return None;
+    }
+
+    let mut decoded = zeroize::Zeroizing::new(Vec::with_capacity(encoded.len() / 2));
+    for pair in encoded.chunks_exact(2) {
+        let high = decode_ascii_hex_digit(pair[0])?;
+        let low = decode_ascii_hex_digit(pair[1])?;
+        decoded.push((high << 4) | low);
+    }
+    let decoded = std::str::from_utf8(decoded.as_slice()).ok()?;
+    Some(SecretString::from(decoded.to_owned()))
+}
+
+fn decode_ascii_hex_digit(digit: u8) -> Option<u8> {
+    match digit {
+        b'0'..=b'9' => Some(digit - b'0'),
+        b'a'..=b'f' => Some(digit - b'a' + 10),
+        b'A'..=b'F' => Some(digit - b'A' + 10),
+        _ => None,
+    }
+}
+
 fn decode_managed_private_key(
     private_key: &SecretString,
     passphrase: Option<&SecretString>,
