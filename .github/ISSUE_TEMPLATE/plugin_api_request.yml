@@ -6,9 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Use this template to request a new plugin host API.** Code contributions (Pull Requests) are not accepted — see [CONTRIBUTING.md](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/CONTRIBUTING.md).
+        **Use this template to request a new plugin host API.** Review [CONTRIBUTING.md](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/CONTRIBUTING.md) before proposing related core changes.
 
-        **使用此模板请求新的插件宿主接口。** 本项目目前不接受 PR——详见 [CONTRIBUTING.md](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/CONTRIBUTING.md)。
+        **使用此模板请求新的插件宿主接口。** 如需同时修改核心功能，请先阅读 [CONTRIBUTING.md](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/CONTRIBUTING.md)。
 
         ---
 

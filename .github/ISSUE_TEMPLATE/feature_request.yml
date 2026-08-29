@@ -6,9 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Code contributions (Pull Requests) are not accepted** — see [CONTRIBUTING.md](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/CONTRIBUTING.md) for details. If you want to extend functionality yourself, consider building a [plugin](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/reference/PLUGIN_DEVELOPMENT.md).
+        Before starting a substantial code change, review [CONTRIBUTING.md](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/CONTRIBUTING.md) and discuss the intended behavior here. Features that do not require core changes may be a better fit for a [plugin](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/user-guide/en/plugin-development.md).
 
-        **PR：** 本项目目前不接受 PR——详见 [CONTRIBUTING.md](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/CONTRIBUTING.md)。如需自行扩展功能，可考虑构建[插件](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/reference/PLUGIN_DEVELOPMENT.md)。
+        开始较大的代码改动前，请先阅读 [CONTRIBUTING.md](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/CONTRIBUTING.md)，并在此讨论预期行为。不需要修改核心功能的扩展可能更适合通过[插件](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/user-guide/zh-Hans/plugin-development.md)实现。
 
         ---
 

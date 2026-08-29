@@ -17,4 +17,4 @@ contact_links:
   - name: Contributing & PR policy
     url: https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/CONTRIBUTING.md
     about: >
-      PRs are currently not accepted — read CONTRIBUTING.md for the policy and plugin alternatives.
+      Read CONTRIBUTING.md before proposing code changes or substantial implementation work.
