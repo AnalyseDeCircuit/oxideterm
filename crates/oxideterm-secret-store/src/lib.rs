@@ -75,18 +75,6 @@ impl NativeSecretStore {
         }
     }
 
-    /// Loads a secret and restores the Preview 14 ACL after a successful read.
-    pub fn get_and_relax(&self, account: &str) -> Result<Option<Zeroizing<String>>> {
-        let secret = self.get(account)?;
-        #[cfg(target_os = "macos")]
-        if let Some(secret) = secret.as_ref() {
-            // Callers use this only after accepting the stored value as a valid
-            // domain secret, so invalid config keys take the plain get path.
-            self.store(account, secret.as_str())?;
-        }
-        Ok(secret)
-    }
-
     pub fn delete(&self, account: &str) -> Result<()> {
         #[cfg(target_os = "macos")]
         {

@@ -181,7 +181,7 @@ impl ConnectionKeychain {
         }
 
         NativeSecretStore::new(&self.service)
-            .get_and_relax(&self.native_account(id))
+            .get(&self.native_account(id))
             // Move the keychain result directly into its zeroizing domain owner
             // so no unmanaged String copy survives this boundary.
             .map(|secret| secret.map(SecretString::from))

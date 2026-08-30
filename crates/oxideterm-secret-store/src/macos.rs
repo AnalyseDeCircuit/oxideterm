@@ -63,6 +63,8 @@ pub(super) fn exists(service: &str, account: &str) -> Result<bool> {
 fn read_password(service: &str, account: &str) -> Result<Option<Zeroizing<String>>> {
     // The security CLI renders multiline generic-password data as hexadecimal on
     // newer macOS releases, while the native Keychain backend returns the bytes intact.
+    // Keep reads non-mutating: recreating the item through the CLI would replace any
+    // persisted application approval with the CLI's `apple-tool:` ACL partition.
     let entry = Entry::new(service, account)
         .context("failed to open a macOS keychain entry for secret loading")?;
     match entry.get_password() {

@@ -156,7 +156,7 @@ impl CloudSyncKeychainSecretProvider {
         }
 
         NativeSecretStore::new(&self.service)
-            .get_and_relax(&account)
+            .get(&account)
             .map_err(|error| CloudSyncSecretError::AccessFailed(error.to_string()))
     }
 
@@ -165,7 +165,7 @@ impl CloudSyncKeychainSecretProvider {
         key: &str,
     ) -> Result<Option<CloudSyncSecretValue>, CloudSyncSecretError> {
         NativeSecretStore::new(&self.legacy_service)
-            .get_and_relax(&self.legacy_account(key))
+            .get(&self.legacy_account(key))
             .map_err(|error| CloudSyncSecretError::AccessFailed(error.to_string()))
     }
 

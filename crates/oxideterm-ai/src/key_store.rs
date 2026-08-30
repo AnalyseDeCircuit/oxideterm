@@ -208,7 +208,7 @@ impl AiProviderKeyStore {
         provider_id: &str,
     ) -> Result<Option<Zeroizing<String>>> {
         NativeSecretStore::new(&self.service)
-            .get_and_relax(&self.account(provider_id))
+            .get(&self.account(provider_id))
             .with_context(|| format!("failed to load AI provider key for {provider_id}"))
     }
 
