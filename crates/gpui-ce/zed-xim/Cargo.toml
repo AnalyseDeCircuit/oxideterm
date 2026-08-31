@@ -1,0 +1,30 @@
+[workspace]
+
+[package]
+name = "zed-xim"
+description = "XIM protocol parser and handler with OxideTerm crash-safety fixes"
+version = "0.4.0-zed"
+authors = ["Riey <creeper844@gmail.com>"]
+repository = "https://github.com/Riey/xim-rs"
+edition = "2018"
+license = "MIT"
+rust-version = "1.64"
+
+[features]
+default = ["std"]
+std = ["xim-parser/std", "xim-ctext/std", "ahash/std"]
+x11rb-client = ["client", "x11rb", "std"]
+xlib-client = ["client", "x11-dl", "std"]
+x11rb-xcb = ["x11rb/allow-unsafe-code", "std"]
+x11rb-server = ["server", "x11rb", "std"]
+client = []
+server = []
+
+[dependencies]
+xim-parser = { version = "0.2.0", default-features = false }
+xim-ctext = { path = "../xim-ctext", version = "0.3.0", default-features = false }
+log = { version = "0.4", default-features = false }
+ahash = { version = "0.8", default-features = false, features = ["compile-time-rng"] }
+x11rb = { version = "0.13", optional = true }
+x11-dl = { version = "2.18.5", optional = true }
+hashbrown = { version = "0.14.0", default-features = false }

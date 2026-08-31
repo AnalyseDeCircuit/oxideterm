@@ -101,6 +101,10 @@ members = [
   "crates/russh",
   "crates/russh-sftp",
 ]
+exclude = [
+  "crates/gpui-ce/xim-ctext",
+  "crates/gpui-ce/zed-xim",
+]
 default-members = ["crates/oxideterm-gpui-app"]
 resolver = "2"
 

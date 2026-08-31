@@ -1,0 +1,17 @@
+[workspace]
+
+[package]
+name = "xim-ctext"
+description = "Compound Text encoder and decoder with CJK support"
+version = "0.3.0"
+authors = ["Riey <creeper844@gmail.com>"]
+repository = "https://github.com/Riey/xim-rs"
+edition = "2018"
+license = "MIT"
+
+[dependencies]
+encoding_rs = "0.8.28"
+
+[features]
+default = ["std"]
+std = []
