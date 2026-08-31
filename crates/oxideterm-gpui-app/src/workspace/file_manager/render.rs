@@ -1086,61 +1086,39 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let target = WorkspaceImeTarget::FileManager(input);
-        let workspace = cx.entity();
-        text_input_anchor_probe(
-            target.anchor_id(),
-            text_input(
-                &self.tokens,
-                TextInputView {
-                    value,
-                    placeholder: self.i18n.t("fileManager.pathPlaceholder"),
-                    focused,
-                    caret_visible: self.input_caret.visible(),
-                    secret: false,
-                    selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target, cx),
-                    marked_text: self.marked_text_for_target(target, cx),
-                },
-            )
-            .flex_1()
-            .min_w(px(0.0))
-            .h_full()
-            .px(px(0.0))
-            .border_0()
-            .bg(rgba(0x00000000))
-            .text_size(px(FILE_MANAGER_TEXT_XS))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle, cx);
-                    this.file_manager.update(cx, |file_manager, cx| {
-                        file_manager.focused_input = Some(input);
-                        cx.notify();
-                    });
-                    this.dismiss_file_manager_context_menu(cx);
-                    this.ime_marked_text = None;
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(
-                |this, event: &gpui::MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                },
-            )),
-            move |anchor, _window, cx| {
-                workspace.update(cx, |this, cx| {
-                    if input == FileManagerInput::Path {
-                        this.update_path_completion_anchor(
-                            PathCompletionOwner::FileManager,
-                            anchor,
-                            cx,
-                        );
-                    } else {
-                        this.update_text_input_anchor(anchor, cx);
-                    }
-                });
+        let control = text_input(
+            &self.tokens,
+            TextInputView {
+                value,
+                placeholder: self.i18n.t("fileManager.pathPlaceholder"),
+                focused,
+                caret_visible: self.input_caret.visible(),
+                secret: false,
+                selected_all: false,
+                selected_range: self.ime_selected_range_for_target(target, cx),
+                marked_text: self.marked_text_for_target(target, cx),
             },
+        )
+        .flex_1()
+        .min_w(px(0.0))
+        .h_full()
+        .px(px(0.0))
+        .border_0()
+        .bg(rgba(0x00000000))
+        .text_size(px(FILE_MANAGER_TEXT_XS));
+
+        // The shared primitive keeps address completion geometry out of the render update path.
+        self.text_input_with_workspace_ime(
+            target,
+            control,
+            move |this, cx| {
+                this.file_manager.update(cx, |file_manager, cx| {
+                    file_manager.focused_input = Some(input);
+                    cx.notify();
+                });
+                this.dismiss_file_manager_context_menu(cx);
+            },
+            cx,
         )
         .into_any_element()
     }

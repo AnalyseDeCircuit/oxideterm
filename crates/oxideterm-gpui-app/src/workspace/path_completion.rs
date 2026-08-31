@@ -262,20 +262,6 @@ fn trim_completion_trailing_separators(path: &str, is_separator: &impl Fn(char) 
 }
 
 impl WorkspaceApp {
-    pub(super) fn update_path_completion_anchor(
-        &mut self,
-        owner: PathCompletionOwner,
-        anchor: oxideterm_gpui_ui::text_input::TextInputAnchor,
-        cx: &mut Context<Self>,
-    ) {
-        let changed = self.text_input_anchors.changed(anchor);
-        self.update_text_input_anchor(anchor, cx);
-        if changed && self.path_completion_is_visible(owner, cx) {
-            // Geometry-only updates repaint only while a visible popup depends on them.
-            cx.notify();
-        }
-    }
-
     pub(super) fn render_path_completion_overlay(
         &self,
         owner: PathCompletionOwner,
@@ -374,20 +360,6 @@ impl WorkspaceApp {
             .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY)
             .into_any_element(),
         )
-    }
-
-    fn path_completion_is_visible(&self, owner: PathCompletionOwner, cx: &App) -> bool {
-        match owner {
-            PathCompletionOwner::FileManager => {
-                self.file_manager.read(cx).path_completion.is_visible()
-            }
-            PathCompletionOwner::SftpLocal => {
-                self.sftp_view.read(cx).local_path_completion.is_visible()
-            }
-            PathCompletionOwner::SftpRemote => {
-                self.sftp_view.read(cx).remote_path_completion.is_visible()
-            }
-        }
     }
 
     fn path_completion_snapshot(

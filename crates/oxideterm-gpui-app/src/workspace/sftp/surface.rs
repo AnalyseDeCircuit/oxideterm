@@ -1405,64 +1405,41 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let target = WorkspaceImeTarget::Sftp(input);
-        let workspace = cx.entity();
-        text_input_anchor_probe(
-            target.anchor_id(),
-            text_input(
-                &self.tokens,
-                TextInputView {
-                    value,
-                    placeholder: self.i18n.t(placeholder_key),
-                    focused,
-                    caret_visible: self.input_caret.visible(),
-                    secret: false,
-                    selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target, cx),
-                    marked_text: self.marked_text_for_target(target, cx),
-                },
-            )
-            .flex_1()
-            .min_w(px(0.0))
-            .h_full()
-            .px(px(0.0))
-            .border_0()
-            .bg(rgba(0x00000000))
-            .text_size(px(SFTP_TEXT_XS))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle, cx);
-                    this.sftp_view.update(cx, |sftp, cx| {
-                        if let Some(pane) = pane {
-                            sftp.active_pane = pane;
-                        }
-                        sftp.focused_input = Some(input);
-                        cx.notify();
-                    });
-                    this.ime_marked_text = None;
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(
-                |this, event: &gpui::MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                },
-            )),
-            move |anchor, _window, cx| {
-                workspace.update(cx, |this, cx| {
-                    let owner = match input {
-                        SftpInput::LocalPath => Some(PathCompletionOwner::SftpLocal),
-                        SftpInput::RemotePath => Some(PathCompletionOwner::SftpRemote),
-                        _ => None,
-                    };
-                    if let Some(owner) = owner {
-                        this.update_path_completion_anchor(owner, anchor, cx);
-                    } else {
-                        this.update_text_input_anchor(anchor, cx);
+        let control = text_input(
+            &self.tokens,
+            TextInputView {
+                value,
+                placeholder: self.i18n.t(placeholder_key),
+                focused,
+                caret_visible: self.input_caret.visible(),
+                secret: false,
+                selected_all: false,
+                selected_range: self.ime_selected_range_for_target(target, cx),
+                marked_text: self.marked_text_for_target(target, cx),
+            },
+        )
+        .flex_1()
+        .min_w(px(0.0))
+        .h_full()
+        .px(px(0.0))
+        .border_0()
+        .bg(rgba(0x00000000))
+        .text_size(px(SFTP_TEXT_XS));
+
+        // Path completion reads the same frame-local anchor stored by the shared IME primitive.
+        self.text_input_with_workspace_ime(
+            target,
+            control,
+            move |this, cx| {
+                this.sftp_view.update(cx, |sftp, cx| {
+                    if let Some(pane) = pane {
+                        sftp.active_pane = pane;
                     }
+                    sftp.focused_input = Some(input);
+                    cx.notify();
                 });
             },
+            cx,
         )
         .into_any_element()
     }
