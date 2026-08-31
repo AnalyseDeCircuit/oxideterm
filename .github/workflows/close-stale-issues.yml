@@ -1,0 +1,34 @@
+name: Close Stale Issues
+
+on:
+  schedule:
+    - cron: '23 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  close-stale-issues:
+    name: Close inactive stale issues
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Process manually labeled stale issues
+        uses: actions/stale@1e223db275d687790206a7acac4d1a11bd6fe629 # v10.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          days-before-issue-stale: -1
+          days-before-issue-close: 5
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
+          stale-issue-label: stale
+          remove-issue-stale-when-updated: true
+          close-issue-reason: not_planned
+          close-issue-message: |
+            This issue was automatically closed because it received no activity for 5 days after being marked stale.
+
+            此 Issue 在标记为 stale 后连续 5 天没有新的活动，现已自动关闭。
+          operations-per-run: 100
