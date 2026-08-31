@@ -147,6 +147,14 @@ body:
       required: false
 
   - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution / 参与贡献
+      options:
+        - label: I am willing to submit a pull request to help resolve this issue / 我愿意提交 PR 协助解决此问题
+          required: false
+
+  - type: checkboxes
     id: checklist
     attributes:
       label: Checklist
