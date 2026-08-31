@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use keyring::{Entry, Error as KeyringError};
 use std::process::Command;
 use zeroize::Zeroizing;
 
@@ -60,24 +61,16 @@ pub(super) fn exists(service: &str, account: &str) -> Result<bool> {
 }
 
 fn read_password(service: &str, account: &str) -> Result<Option<Zeroizing<String>>> {
-    let output = Command::new(SECURITY_TOOL_PATH)
-        .args(["find-generic-password", "-s", service, "-a", account, "-w"])
-        .output()
-        .context("failed to run the macOS keychain tool to load a secret")?;
-    if output.status.success() {
-        // The command output owns secret bytes, so zeroize that allocation after
-        // moving the decoded value into its domain owner.
-        let output = Zeroizing::new(output.stdout);
-        let secret = std::str::from_utf8(output.as_slice())
-            .context("macOS keychain secret is not valid UTF-8")?;
-        return Ok(Some(Zeroizing::new(
-            secret.trim_end_matches(['\r', '\n']).to_owned(),
-        )));
-    }
-    if output.status.code() == Some(SECURITY_ITEM_NOT_FOUND_EXIT_CODE) {
-        Ok(None)
-    } else {
-        anyhow::bail!("failed to load a secret from the macOS keychain")
+    // The security CLI renders multiline generic-password data as hexadecimal on
+    // newer macOS releases, while the native Keychain backend returns the bytes intact.
+    // Keep reads non-mutating: recreating the item through the CLI would replace any
+    // persisted application approval with the CLI's `apple-tool:` ACL partition.
+    let entry = Entry::new(service, account)
+        .context("failed to open a macOS keychain entry for secret loading")?;
+    match entry.get_password() {
+        Ok(secret) => Ok(Some(Zeroizing::new(secret))),
+        Err(KeyringError::NoEntry) => Ok(None),
+        Err(error) => Err(error).context("failed to load a secret from the macOS keychain"),
     }
 }
 
