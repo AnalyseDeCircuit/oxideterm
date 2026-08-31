@@ -1495,6 +1495,13 @@ impl WorkspaceApp {
         let Some(mut drag) = self.main_window_tabs.drag.clone() else {
             return;
         };
+        if event.pressed_button != Some(MouseButton::Left) {
+            // Win32 can lose the matching mouse-up during a re-entrant native callback.
+            // A buttonless move is authoritative and must release the logical tab capture.
+            self.main_window_tabs.drag = None;
+            cx.notify();
+            return;
+        }
         let was_active = drag.active;
         let previous_mode = drag.mode.clone();
         let previous_drop_target_index = drag.drop_target_index;

@@ -978,32 +978,9 @@ impl WorkspaceApp {
                             .child(self.i18n.t("tabbar.detach_to_window")),
                     ),
             );
-        let preview = if self.tokens.motion.enabled {
-            preview
-                .with_animation(
-                    ("tab-detach-drag-preview", drag.tab_id.0),
-                    Animation::new(oxideterm_gpui_ui::motion::scaled_duration(
-                        &self.tokens,
-                        760,
-                    ))
-                    .repeat(),
-                    |preview, delta| {
-                        let pulse = if delta < 0.5 {
-                            delta * 2.0
-                        } else {
-                            (1.0 - delta) * 2.0
-                        };
-                        preview.opacity(
-                            0.82 + oxideterm_gpui_ui::motion::ease_in_out_cubic(pulse) * 0.16,
-                        )
-                    },
-                )
-                .into_any_element()
-        } else {
-            preview.opacity(0.96).into_any_element()
-        };
-
-        Some(preview)
+        // A drag preview is pointer feedback, not an autonomous animation owner.
+        // Keeping it static avoids re-entrant frame requests during Win32 input dispatch.
+        Some(preview.opacity(0.96).into_any_element())
     }
 
     fn render_detached_tab_return_drag_preview(
