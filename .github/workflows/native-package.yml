@@ -133,7 +133,9 @@ jobs:
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
           - label: linux-arm64
-            os: ubuntu-24.04-arm
+            # Keep the Linux release baseline at glibc 2.35 for distributions
+            # such as Kylin V11, matching the existing x64 package baseline.
+            os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
           - label: windows-x64
             os: windows-latest

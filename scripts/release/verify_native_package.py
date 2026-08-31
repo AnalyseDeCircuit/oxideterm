@@ -25,6 +25,7 @@ REQUIRED_DOCUMENTS = {
 }
 LINUX_DEB_GRAPHICS_RECOMMENDS = {"libegl1", "libvulkan1"}
 LINUX_RPM_GRAPHICS_RECOMMENDS = {"libglvnd-egl", "vulkan-loader"}
+LINUX_GLIBC_MAX_VERSION = (2, 35)
 PACKAGE_VERSION_FILENAME = "VERSION"
 PORTABLE_PLUGINS_DIR = "data/plugins"
 PORTABLE_UPDATE_MANIFEST_FILENAME = "portable-update.json"
@@ -247,6 +248,36 @@ def verify_linux_dynamic_libraries(binary: Path) -> None:
     # graphics path is installed. Package metadata and VM smoke tests cover it.
 
 
+def parse_glibc_versions(version_info: str) -> set[tuple[int, int]]:
+    """Collect the glibc symbol versions required by an ELF binary."""
+    return {
+        (int(major), int(minor))
+        for major, minor in re.findall(r"GLIBC_(\d+)\.(\d+)", version_info)
+    }
+
+
+def verify_linux_glibc_compatibility(binary: Path) -> None:
+    """Reject release binaries that exceed the supported glibc baseline."""
+    readelf = shutil.which("readelf")
+    if not readelf:
+        raise RuntimeError(
+            "readelf is required for Linux glibc compatibility verification"
+        )
+    versions = parse_glibc_versions(
+        run_checked([readelf, "--version-info", str(binary)])
+    )
+    if not versions:
+        raise RuntimeError(f"{binary.name} does not declare any glibc symbol versions")
+    required_version = max(versions)
+    if required_version > LINUX_GLIBC_MAX_VERSION:
+        required = ".".join(str(component) for component in required_version)
+        supported = ".".join(str(component) for component in LINUX_GLIBC_MAX_VERSION)
+        raise RuntimeError(
+            f"{binary.name} requires glibc {required}, "
+            f"exceeding the supported {supported} baseline"
+        )
+
+
 def require_metadata_values(
     metadata: str,
     expected_values: set[str],
@@ -381,6 +412,7 @@ def verify_release(dist: Path, target: str, version: str) -> dict[str, object]:
         verify_binary_architecture(binary, target)
         if "linux" in target:
             verify_linux_dynamic_libraries(binary)
+            verify_linux_glibc_compatibility(binary)
 
     if "windows" in target:
         verify_windows_installer(dist / f"OxideTerm_{version}_{label}-setup.exe", version)

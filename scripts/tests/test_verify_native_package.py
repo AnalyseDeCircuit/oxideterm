@@ -6,6 +6,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 # Import the release helpers from their responsibility-specific directory.
@@ -198,6 +199,38 @@ class LinuxMetadataTests(unittest.TestCase):
                 verify_native_package.LINUX_DEB_GRAPHICS_RECOMMENDS,
                 Path("OxideTerm.deb"),
                 "Recommends field",
+            )
+
+
+class LinuxCompatibilityTests(unittest.TestCase):
+    def test_glibc_symbol_versions_are_parsed_without_duplicates(self) -> None:
+        version_info = """
+          0x0010: Name: GLIBC_2.35  Flags: none  Version: 4
+          0x0020: Name: GLIBC_2.17  Flags: none  Version: 3
+          004:   3 (GLIBC_2.17)    4 (GLIBC_2.35)
+        """
+
+        self.assertEqual(
+            verify_native_package.parse_glibc_versions(version_info),
+            {(2, 17), (2, 35)},
+        )
+
+    def test_binary_requiring_newer_glibc_is_rejected(self) -> None:
+        with (
+            patch.object(
+                verify_native_package.shutil,
+                "which",
+                return_value="/usr/bin/readelf",
+            ),
+            patch.object(
+                verify_native_package,
+                "run_checked",
+                return_value="Name: GLIBC_2.39",
+            ),
+            self.assertRaisesRegex(RuntimeError, "exceeding the supported 2.35"),
+        ):
+            verify_native_package.verify_linux_glibc_compatibility(
+                Path("oxideterm-native")
             )
 
 if __name__ == "__main__":
