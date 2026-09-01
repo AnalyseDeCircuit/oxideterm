@@ -13,6 +13,7 @@ const CHECKBOX_ENABLED_OPACITY: f32 = 1.0;
 const CHECKBOX_FOCUS_RING_ALPHA: u32 = 0xb3; // Tauri focus-visible:ring-theme-accent/70.
 const CHECKBOX_FOCUS_RING_WIDTH: f32 = 2.0; // Tauri focus-visible:ring-2.
 const CHECKBOX_FOCUS_RING_OFFSET: f32 = 1.0; // Tauri focus-visible:ring-offset-1.
+const CHECKBOX_UNCHECKED_BORDER_ALPHA: u32 = 0xe6;
 const CHECKBOX_ICON_PATH: &str = "lucide/check.svg";
 const CHECKBOX_INDETERMINATE_MARK_WIDTH: f32 = 8.0;
 const CHECKBOX_INDETERMINATE_MARK_HEIGHT: f32 = 2.0;
@@ -114,7 +115,8 @@ pub fn checkbox_with_state(
                 .border_color(if selected {
                     rgb(theme.accent)
                 } else {
-                    rgb(theme.border)
+                    // Derive a high-contrast boundary from theme text instead of passive dividers.
+                    rgba((theme.text << 8) | CHECKBOX_UNCHECKED_BORDER_ALPHA)
                 })
                 .bg(if selected {
                     rgba((theme.accent << 8) | CHECKBOX_CHECKED_BG_ALPHA)

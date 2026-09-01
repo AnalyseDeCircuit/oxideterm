@@ -6,12 +6,13 @@ use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonIconPosition,
     ToolbarButtonOptions,
 };
+use oxideterm_gpui_ui::checkbox::{CheckboxOptions, checkbox_with};
 
 use crate::assets::LucideIcon;
 
 use super::{
     PORTABLE_SETTINGS_BUTTON_GAP, PORTABLE_SETTINGS_PATH_CARD_GAP, SelectableTextRole,
-    WorkspaceApp, checkbox, portable_activation_label, portable_status_badge_color,
+    WorkspaceApp, portable_activation_label, portable_status_badge_color,
     settings_mono_font_family,
 };
 
@@ -282,26 +283,25 @@ impl WorkspaceApp {
                                 ),
                             ),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .opacity(if can_toggle_auto_unlock { 1.0 } else { 0.5 })
-                            .child(
-                                checkbox(&self.tokens, String::new(), auto_unlock_enabled)
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(move |this, _event, _window, cx| {
-                                            if can_toggle_auto_unlock {
-                                                this.set_portable_auto_unlock_enabled(
-                                                    !auto_unlock_enabled,
-                                                    cx,
-                                                );
-                                            }
-                                            cx.stop_propagation();
-                                        }),
-                                    ),
-                            ),
-                    ),
+                    .child(div().flex_none().child(checkbox_with(
+                        &self.tokens,
+                        String::new(),
+                        auto_unlock_enabled,
+                        CheckboxOptions {
+                            disabled: !can_toggle_auto_unlock,
+                            ..CheckboxOptions::default()
+                        },
+                    )))
+                    .when(can_toggle_auto_unlock, |row| {
+                        // The label and hint provide a discoverable target around the compact control.
+                        row.cursor_pointer().on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.set_portable_auto_unlock_enabled(!auto_unlock_enabled, cx);
+                                cx.stop_propagation();
+                            }),
+                        )
+                    }),
             )
             .child(
                 div()
