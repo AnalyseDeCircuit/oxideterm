@@ -75,6 +75,20 @@ impl NativeSecretStore {
         }
     }
 
+    /// Loads a secret through the macOS backend that preserves multiline content exactly.
+    ///
+    /// This mode can request application-specific Keychain authorization, so only domains
+    /// whose secret format permits newlines should select it.
+    pub fn get_preserving_multiline(&self, account: &str) -> Result<Option<Zeroizing<String>>> {
+        #[cfg(target_os = "macos")]
+        {
+            return macos::get_preserving_multiline(&self.service, account);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        self.get(account)
+    }
+
     pub fn delete(&self, account: &str) -> Result<()> {
         #[cfg(target_os = "macos")]
         {

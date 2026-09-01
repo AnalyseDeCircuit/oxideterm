@@ -19,7 +19,11 @@ fn real_keychain_round_trip_preserves_multiline_secret() {
     let result = (|| -> Result<()> {
         store.store(account, secret)?;
         ensure!(
-            store.get(account)?.as_ref().map(|value| value.as_str()) == Some(secret),
+            store
+                .get_preserving_multiline(account)?
+                .as_ref()
+                .map(|value| value.as_str())
+                == Some(secret),
             "stored multiline keychain secret must round-trip"
         );
         Ok(())

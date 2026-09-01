@@ -27,6 +27,12 @@ pub(crate) struct ConnectionKeychainBatchAccess<'a> {
     keychain: &'a ConnectionKeychain,
 }
 
+#[derive(Clone, Copy)]
+enum ConnectionSecretReadMode {
+    Standard,
+    PreserveMultiline,
+}
+
 impl Default for ConnectionKeychain {
     fn default() -> Self {
         Self {
@@ -124,7 +130,16 @@ impl ConnectionKeychain {
     }
 
     pub(crate) fn get_optional(&self, id: &str) -> Result<Option<SecretString>> {
-        self.get_optional_with_authentication(id, true)
+        self.get_optional_with_authentication(id, true, ConnectionSecretReadMode::Standard)
+    }
+
+    pub(crate) fn get_preserving_multiline(&self, id: &str) -> Result<SecretString> {
+        self.get_optional_with_authentication(
+            id,
+            true,
+            ConnectionSecretReadMode::PreserveMultiline,
+        )?
+        .ok_or_else(|| anyhow::anyhow!("Password not saved for this connection"))
     }
 
     pub(crate) fn authenticate_batch_access(&self) -> Result<ConnectionKeychainBatchAccess<'_>> {
@@ -145,6 +160,7 @@ impl ConnectionKeychain {
         &self,
         id: &str,
         authenticate_device_owner: bool,
+        read_mode: ConnectionSecretReadMode,
     ) -> Result<Option<SecretString>> {
         #[cfg(not(target_os = "macos"))]
         let _ = authenticate_device_owner;
@@ -180,8 +196,16 @@ impl ConnectionKeychain {
                 .with_context(|| format!("failed to authenticate keychain access for {id}"))?;
         }
 
-        NativeSecretStore::new(&self.service)
-            .get(&self.native_account(id))
+        let secret_store = NativeSecretStore::new(&self.service);
+        let secret = match read_mode {
+            ConnectionSecretReadMode::Standard => secret_store.get(&self.native_account(id)),
+            ConnectionSecretReadMode::PreserveMultiline => {
+                // Managed private keys are the only connection secrets whose
+                // newline-preserving representation requires native macOS reads.
+                secret_store.get_preserving_multiline(&self.native_account(id))
+            }
+        };
+        secret
             // Move the keychain result directly into its zeroizing domain owner
             // so no unmanaged String copy survives this boundary.
             .map(|secret| secret.map(SecretString::from))
@@ -222,7 +246,11 @@ impl ConnectionKeychain {
 impl ConnectionKeychainBatchAccess<'_> {
     pub(crate) fn get_optional(&self, id: &str) -> Result<Option<SecretString>> {
         // The guard can only be constructed after the batch authorization step.
-        self.keychain.get_optional_with_authentication(id, false)
+        self.keychain.get_optional_with_authentication(
+            id,
+            false,
+            ConnectionSecretReadMode::Standard,
+        )
     }
 }
 

@@ -149,7 +149,7 @@ impl ConnectionStore {
     }
 
     fn get_managed_ssh_key_secret(&self, secret_id: &str) -> Result<SecretString> {
-        match self.managed_keychain.get(secret_id) {
+        match self.managed_keychain.get_preserving_multiline(secret_id) {
             Ok(secret) => Ok(secret),
             Err(keychain_error) => {
                 let config_key = load_config_encryption_key()?.ok_or_else(|| {
