@@ -3,6 +3,66 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.0.26
+
+### English
+
+OxideTerm 2.0.26 adds configurable terminal font weight and multiline Quick Command editing, improves native drag-and-drop and input handling across all three desktop platforms, and repairs macOS Keychain compatibility without reintroducing duplicate startup authentication.
+
+#### ✨ Terminal Display and Quick Commands
+
+- Added a terminal font-weight setting from 100 to 900. Regular text uses the selected weight, bold terminal cells remain at least bold, and fonts without an exact face may select their nearest available weight.
+- Replaced the Quick Command body field with a multiline editor. Enter and pasted line breaks are preserved so shell continuations, heredocs, and other structured commands can be stored without flattening them into one line.
+- Limited Quick Command template expansion to the explicit `{{param.*}}` and `{{ctx.*}}` namespaces. Other double-brace syntax, including Docker Go templates such as `{{.LogPath}}`, now remains literal.
+- Added deletion for every custom Quick Command group. A confirmation explains the operation, and commands in the removed group move to the built-in default group instead of being deleted.
+
+#### 🖥️ Desktop Input and Drag Reliability
+
+- Added macOS file and folder drag-and-drop for local terminal panes. Dropped paths are inserted as POSIX-quoted shell words with a trailing space and are never executed automatically; remote and non-terminal sessions do not accept this drop path.
+- Restored safe Linux XIM `COMPOUND_TEXT` decoding with the vendored protocol implementation, including explicit rejection of malformed or unsupported encodings instead of accepting invalid input data.
+- Moved SFTP and local file-manager address fields onto the shared IME input primitive, preventing render-time anchor updates from causing the Windows path-input redraw loop.
+- Reconciled Windows tab dragging with the actual left-button state and removed the autonomous drag-preview animation, so a lost mouse-up no longer leaves a stale logical drag that interferes with later clicks.
+
+#### 🔐 macOS Keychain and Managed SSH Keys
+
+- Preserved multiline managed SSH private keys when reading from newer macOS Keychain implementations, and added a guarded recovery path for entries previously stored as hexadecimal text. Unencrypted recovery is persisted only after the public-key fingerprint matches the saved metadata; encrypted recovery is not rewritten before it can be validated with its passphrase.
+- Kept ordinary single-line secrets on the non-mutating command-line read path while reserving native Keychain reads for multiline managed keys. This removes the added password prompt during encrypted-connection startup and restores the single Touch ID flow verified in the release GUI run.
+
+#### 🧰 Packaging and Project Maintenance
+
+- Moved Linux arm64 release builds to the Ubuntu 22.04 runner and added an ELF symbol-version check that rejects binaries requiring newer than glibc 2.35, matching the existing Linux compatibility baseline for distributions such as Kylin V11.
+- Updated pinned GitHub Actions and Windows installer version resources, including file description and copyright metadata, while retaining reproducible release inputs.
+- Added an optional pull-request contribution checkbox to issue templates and an automation that closes only manually labeled `stale` issues after five days without activity. The maintainer completed GUI validation for this release.
+
+### 中文
+
+OxideTerm 2.0.26 新增可配置终端字重和多行快捷命令编辑，改进三个桌面平台的原生拖放与输入处理，并修复 macOS 钥匙串兼容性，同时避免重新引入启动时重复认证。
+
+#### ✨ 终端显示与快捷命令
+
+- 新增 100 至 900 的终端字重设置。普通文本使用所选字重，终端粗体单元格至少保持粗体；若字体没有完全对应的字重，系统可选择最接近的可用字重。
+- 将快捷命令正文改为多行编辑器。Enter 和粘贴内容中的换行会被保留，因此 Shell 续行、heredoc 及其它结构化命令不再被压成一行。
+- 将快捷命令模板展开限制在明确的 `{{param.*}}` 和 `{{ctx.*}}` 命名空间。其它双花括号语法会保持原文，包括 `{{.LogPath}}` 等 Docker Go 模板。
+- 支持删除所有自定义快捷命令分组。操作前会显示确认说明，被删除分组中的命令会移至内置默认分组，而不会随分组一起删除。
+
+#### 🖥️ 桌面输入与拖放可靠性
+
+- 为 macOS 本地终端窗格新增文件和文件夹拖放。拖入路径会作为经过 POSIX 引用的 Shell 单词插入，并在末尾保留空格，但绝不会自动执行；远程及非终端会话不会接受该拖放路径。
+- 通过内置协议实现恢复 Linux XIM `COMPOUND_TEXT` 的安全解码，并明确拒绝格式错误或不支持的编码，不再接受无效输入数据。
+- 将 SFTP 与本地文件管理器地址栏迁移到共享输入法原语，避免绘制期间更新锚点造成 Windows 路径输入框重绘循环。
+- 让 Windows 标签拖动状态与实际鼠标左键状态保持一致，并移除拖动预览的自主动画；即使丢失鼠标松开消息，也不会留下影响后续点击的过期逻辑拖动。
+
+#### 🔐 macOS 钥匙串与托管 SSH 密钥
+
+- 在新版 macOS 钥匙串中完整保留多行托管 SSH 私钥，并为此前被保存为十六进制文本的条目增加受限恢复路径。未加密私钥只有在公钥指纹与已保存元数据一致后才会写回；加密私钥在使用口令完成验证前不会改写钥匙串。
+- 普通单行敏感值继续使用不修改条目的命令行读取路径，仅多行托管密钥使用原生钥匙串读取。这样可移除加密连接配置启动时新增的密码提示，并恢复本次发布 GUI 验证中确认的单次 Touch ID 流程。
+
+#### 🧰 打包与项目维护
+
+- 将 Linux arm64 发布构建迁移至 Ubuntu 22.04 runner，并增加 ELF 符号版本检查，拒绝依赖高于 glibc 2.35 的二进制文件，使其与现有 Linux 兼容基线一致并覆盖银河麒麟 V11 等发行版。
+- 更新固定版本的 GitHub Actions 和 Windows 安装器版本资源，补齐文件描述与版权元数据，同时继续保持可复现的发布输入。
+- 为 Issue 模板新增可选的 PR 参与勾选项，并增加自动化流程：只有手动标记为 `stale` 且连续五天无活动的 Issue 才会关闭。维护者已完成本版本的 GUI 验证。
+
 ## 2.0.25
 
 ### English
