@@ -240,6 +240,10 @@ impl WorkspaceApp {
             self.render_workspace_window_background(window_background, window, cx);
         let has_window_background = window_background_layer.is_some();
         let native_update_notification = self.render_native_update_notification(cx);
+        let show_connection_cards = !self
+            .connection_flow
+            .read(cx)
+            .has_keyboard_interactive_challenge();
         let overlay_layers = {
             let tokens = self.tokens;
             let i18n = &self.i18n;
@@ -255,6 +259,7 @@ impl WorkspaceApp {
                     i18n,
                     mono_font_family,
                     native_update_notification,
+                    show_connection_cards,
                     cx,
                 )
             })

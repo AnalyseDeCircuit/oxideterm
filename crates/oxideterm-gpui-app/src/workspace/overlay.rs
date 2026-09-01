@@ -939,6 +939,7 @@ impl WorkspaceOverlayEntity {
         i18n: &I18n,
         mono_font_family: SharedString,
         native_update: Option<ToastView>,
+        show_connection_cards: bool,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let mut layers = Vec::new();
@@ -954,8 +955,11 @@ impl WorkspaceOverlayEntity {
         if let Some(toasts) = self.render_toasts(tokens, native_update, cx) {
             layers.push(toasts);
         }
-        if let Some(connection_cards) = self.render_connection_cards(tokens, i18n, cx) {
-            layers.push(connection_cards);
+        // Connection cards use a deferred layer and must yield while the MFA dialog owns input.
+        if show_connection_cards {
+            if let Some(connection_cards) = self.render_connection_cards(tokens, i18n, cx) {
+                layers.push(connection_cards);
+            }
         }
         if let Some(hud) = self.terminal_font_size_hud {
             layers.push(render_terminal_font_size_hud(
