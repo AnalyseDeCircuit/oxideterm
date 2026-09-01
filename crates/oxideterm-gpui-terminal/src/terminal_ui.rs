@@ -962,8 +962,16 @@ pub(crate) fn terminal_font_with_family_and_cjk(
     font_ligatures: bool,
     font_weight: f32,
 ) -> Font {
+    let configured_families = oxideterm_gpui_ui::css_font_family_stack(family);
+    let primary_family = configured_families
+        .first()
+        .cloned()
+        .unwrap_or_else(|| SharedString::from(TERMINAL_FONT));
     let mut fallback_families = Vec::new();
-    push_font_fallback(&mut fallback_families, family);
+    // Preserve the user-defined stack before appending built-in recovery fonts.
+    for configured_fallback in configured_families.iter().skip(1) {
+        push_font_fallback(&mut fallback_families, configured_fallback);
+    }
     // A bundled Latin monospace must precede optional CJK and system fallbacks.
     push_font_fallback(
         &mut fallback_families,
@@ -1006,7 +1014,7 @@ pub(crate) fn terminal_font_with_family_and_cjk(
     }
 
     Font {
-        family: SharedString::from(family.to_string()),
+        family: primary_family,
         features: terminal_font_features(font_ligatures),
         fallbacks: Some(FontFallbacks::from_fonts(fallback_families)),
         weight: FontWeight(font_weight.clamp(100.0, 900.0)),
@@ -1034,6 +1042,23 @@ pub(crate) fn terminal_font_features(font_ligatures: bool) -> FontFeatures {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_font_stack_uses_first_family_and_preserves_fallback_order() {
+        let font = terminal_font_with_family_and_cjk(
+            "\"Maple Mono\",\"Maple Mono NF CN\"",
+            None,
+            false,
+            400.0,
+        );
+        let fallbacks = font.fallbacks.expect("terminal font fallbacks");
+
+        assert_eq!(font.family.as_ref(), "Maple Mono");
+        assert_eq!(
+            fallbacks.fallback_list().first().map(String::as_str),
+            Some("Maple Mono NF CN")
+        );
+    }
 
     #[test]
     fn host_overrides_replace_only_terminal_protocol_defaults() {

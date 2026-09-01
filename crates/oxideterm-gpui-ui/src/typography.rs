@@ -132,11 +132,17 @@ pub fn tauri_cjk_ui_font_family(configured_family: &str) -> SharedString {
 }
 
 pub fn css_font_family_head(configured_family: &str) -> Option<SharedString> {
+    css_font_family_stack(configured_family).into_iter().next()
+}
+
+/// Parses the comma-separated font stack accepted by settings into GPUI family names.
+pub fn css_font_family_stack(configured_family: &str) -> Vec<SharedString> {
     configured_family
         .split(',')
         .map(|family| family.trim().trim_matches(['"', '\'']))
-        .find(|family| !family.is_empty())
+        .filter(|family| !family.is_empty())
         .map(gpui_font_family_name)
+        .collect()
 }
 
 pub fn gpui_font_family_name(family: &str) -> SharedString {

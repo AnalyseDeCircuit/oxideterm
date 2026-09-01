@@ -85,7 +85,7 @@ pub use tabs::{segmented_tab, segmented_tabs};
 pub use text_input::{TextInputView, text_input, text_input_anchor_probe};
 pub use tree::{TreeBranchMetrics, tree_child};
 pub use typography::{
-    MonospaceDatumOptions, MonospaceDatumTone, css_font_family_head, gpui_font_family_name,
-    middle_truncate_text, monospace_datum, monospace_datum_color, tauri_cjk_ui_font_family,
-    tauri_ui_font_family,
+    MonospaceDatumOptions, MonospaceDatumTone, css_font_family_head, css_font_family_stack,
+    gpui_font_family_name, middle_truncate_text, monospace_datum, monospace_datum_color,
+    tauri_cjk_ui_font_family, tauri_ui_font_family,
 };
