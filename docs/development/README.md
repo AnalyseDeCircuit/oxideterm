@@ -44,6 +44,11 @@ Move inward only when evidence says the outer layer is correct. For example, an 
 | Change a shared SSH connection or long-running task | [Runtime ownership](runtime-ownership.md) |
 | Investigate or modify the vendored UI framework | [GPUI CE maintenance](gpui-ce.md) |
 | Collect a minimal reproduction, logs, or a performance sample | [Debugging](debugging.md) |
+| Write or review regression coverage and fixtures | [Testing and fixtures](testing-and-fixtures.md) |
+| Add product copy or a localized control | [Internationalization and product copy](i18n-and-product-copy.md) |
+| Handle credentials, diagnostics, or external process input | [Secrets and sensitive data](secrets-and-sensitive-data.md) |
+| Change persisted settings, export, sync, or migration behavior | [Settings, data, and migrations](settings-data-and-migrations.md) |
+| Make a performance claim or change a hot path | [Performance and benchmarking](performance-and-benchmarking.md) |
 | Prepare a stable release or repair release assets | [Release process](release-process.md) |
 
 ## Scope
