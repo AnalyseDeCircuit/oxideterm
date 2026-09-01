@@ -3,7 +3,9 @@
 
 use std::io::{Read, Write};
 
-use oxideterm_terminal::{SerialFlowControl, SerialParity, SerialSessionConfig};
+use oxideterm_terminal::{
+    SerialFlowControl, SerialParity, SerialRuntimeOptions, SerialSessionConfig,
+};
 
 #[test]
 #[ignore = "requires OXIDETERM_SERIAL_MANUAL_PORT to point at a real or pseudo serial device"]
@@ -17,6 +19,7 @@ fn manual_serial_pseudo_device_round_trip_and_reopen() {
         stop_bits: 1,
         parity: SerialParity::None,
         flow_control: SerialFlowControl::None,
+        runtime_options: SerialRuntimeOptions::default(),
     };
     config.validate().unwrap();
 

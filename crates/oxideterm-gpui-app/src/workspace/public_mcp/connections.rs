@@ -395,6 +395,8 @@ fn save_profile(
                         PublicSerialFlowControl::Software => SerialFlowControl::Software,
                         PublicSerialFlowControl::Hardware => SerialFlowControl::Hardware,
                     }),
+                    input_line_ending: None,
+                    output_line_ending: None,
                     terminal: terminal_options(&profile.terminal),
                     connect_on_open: Some(profile.connect_on_open),
                 })

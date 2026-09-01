@@ -2425,6 +2425,8 @@ mod tests {
             stop_bits: 1,
             parity: SerialParity::None,
             flow_control: SerialFlowControl::Hardware,
+            input_line_ending: SerialLineEnding::CrLf,
+            output_line_ending: SerialLineEnding::Lf,
             terminal: ConnectionTerminalOptions::default(),
             connect_on_open: true,
             created_at: now,
@@ -2446,9 +2448,30 @@ mod tests {
             "#451a03"
         );
         assert_eq!(value["serial_profiles"][0]["flow_control"], "hardware");
+        assert_eq!(value["serial_profiles"][0]["input_line_ending"], "crlf");
+        assert_eq!(value["serial_profiles"][0]["output_line_ending"], "lf");
         assert!(value["serial_profiles"][0].get("host").is_none());
         assert!(value["serial_profiles"][0].get("username").is_none());
         assert!(value["serial_profiles"][0].get("auth").is_none());
+
+        let mut legacy_value = value.clone();
+        legacy_value["serial_profiles"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("input_line_ending");
+        legacy_value["serial_profiles"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("output_line_ending");
+        let legacy_round_trip: ConnectionStoreData = serde_json::from_value(legacy_value).unwrap();
+        assert_eq!(
+            legacy_round_trip.serial_profiles[0].input_line_ending,
+            SerialLineEnding::None
+        );
+        assert_eq!(
+            legacy_round_trip.serial_profiles[0].output_line_ending,
+            SerialLineEnding::None
+        );
 
         let round_trip: ConnectionStoreData = serde_json::from_value(value).unwrap();
         assert_eq!(round_trip.serial_profiles, vec![profile]);
@@ -2549,6 +2572,51 @@ mod tests {
         profile.baud_rate = 115_200;
         profile.port_path.clear();
         assert!(profile.validate().is_err());
+    }
+
+    #[test]
+    fn serial_line_endings_persist_in_sync_snapshot() {
+        let mut store = load_empty_store("serial-line-endings-sync");
+        let profile = store
+            .upsert_serial_profile(SaveSerialProfileRequest {
+                name: "Serial".to_string(),
+                port_path: "/dev/ttyUSB0".to_string(),
+                ..SaveSerialProfileRequest::default()
+            })
+            .unwrap();
+
+        assert!(
+            store
+                .set_serial_profile_line_endings(
+                    &profile.id,
+                    Some(SerialLineEnding::CrLf),
+                    None,
+                )
+                .unwrap()
+        );
+        assert!(
+            store
+                .set_serial_profile_line_endings(
+                    &profile.id,
+                    None,
+                    Some(SerialLineEnding::Lf),
+                )
+                .unwrap()
+        );
+
+        let snapshot = store.export_serial_profiles_snapshot().unwrap();
+        assert_eq!(snapshot.records[0].input_line_ending, SerialLineEnding::CrLf);
+        assert_eq!(snapshot.records[0].output_line_ending, SerialLineEnding::Lf);
+
+        let reloaded = ConnectionStore::load(store.path()).unwrap();
+        assert_eq!(
+            reloaded.serial_profiles()[0].input_line_ending,
+            SerialLineEnding::CrLf
+        );
+        assert_eq!(
+            reloaded.serial_profiles()[0].output_line_ending,
+            SerialLineEnding::Lf
+        );
     }
 
     #[test]

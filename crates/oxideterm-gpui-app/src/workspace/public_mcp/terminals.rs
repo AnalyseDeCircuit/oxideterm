@@ -23,6 +23,7 @@ use crate::workspace::{
     new_connection::{
         MoshConnectionOptions, SshConnectionIntent, mosh_options_from_profile,
         terminal_serial_flow_from_profile, terminal_serial_parity_from_profile,
+        terminal_serial_runtime_options_from_profile,
     },
 };
 
@@ -521,6 +522,7 @@ impl WorkspaceApp {
                 return;
             };
             let title = requested_title.unwrap_or_else(|| profile.name.clone());
+            let runtime_options = terminal_serial_runtime_options_from_profile(&profile);
             let config = SerialSessionConfig {
                 port_path: profile.port_path,
                 baud_rate: profile.baud_rate,
@@ -528,6 +530,7 @@ impl WorkspaceApp {
                 stop_bits: profile.stop_bits,
                 parity: terminal_serial_parity_from_profile(&profile.parity),
                 flow_control: terminal_serial_flow_from_profile(&profile.flow_control),
+                runtime_options,
             };
             match self.create_serial_terminal_tab_with_title(
                 config,

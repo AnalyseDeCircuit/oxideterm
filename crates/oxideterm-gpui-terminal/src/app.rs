@@ -115,7 +115,9 @@ const TERMINAL_AUTOSUGGEST_MAX_CANDIDATES: usize = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalPaneEvent {
-    Exited { exit_code: Option<i32> },
+    Exited {
+        exit_code: Option<i32>,
+    },
     // Output contents stay pane-owned; consumers only learn that the visible buffer changed.
     OutputActivity,
     // CWD payloads stay pane-owned; Workspace only recomputes the active metadata key.
@@ -134,6 +136,11 @@ pub enum TerminalPaneEvent {
     TriggerMatchesAvailable,
     // Search completion is asynchronous; Workspace reads the latest pane-owned status.
     SearchStatusChanged,
+    // Persistence stays workspace-owned because panes do not own saved connection profiles.
+    SerialLineEndingsChanged {
+        input: Option<SerialLineEnding>,
+        output: Option<SerialLineEnding>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1826,11 +1833,7 @@ impl TerminalPane {
                     .serial_runtime_options()
                     .ok_or_else(|| "Serial runtime options are unavailable.".to_string())?;
                 options.local_echo = enabled;
-                self.terminal
-                    .lock()
-                    .set_serial_runtime_options(options)
-                    .map_err(|error| error.to_string())?;
-                cx.notify();
+                self.update_serial_runtime_options(options, cx)?;
             }
             TerminalSerialAction::SetLineEnding(line_ending) => {
                 let mut options = self
@@ -1839,11 +1842,7 @@ impl TerminalPane {
                     .serial_runtime_options()
                     .ok_or_else(|| "Serial runtime options are unavailable.".to_string())?;
                 options.line_ending = line_ending;
-                self.terminal
-                    .lock()
-                    .set_serial_runtime_options(options)
-                    .map_err(|error| error.to_string())?;
-                cx.notify();
+                self.update_serial_runtime_options(options, cx)?;
             }
             TerminalSerialAction::SetOutputLineEnding(line_ending) => {
                 let mut options = self
@@ -1852,11 +1851,7 @@ impl TerminalPane {
                     .serial_runtime_options()
                     .ok_or_else(|| "Serial runtime options are unavailable.".to_string())?;
                 options.output_line_ending = line_ending;
-                self.terminal
-                    .lock()
-                    .set_serial_runtime_options(options)
-                    .map_err(|error| error.to_string())?;
-                cx.notify();
+                self.update_serial_runtime_options(options, cx)?;
             }
             TerminalSerialAction::SetDisplayMode(display_mode) => {
                 let mut options = self
@@ -1865,11 +1860,7 @@ impl TerminalPane {
                     .serial_runtime_options()
                     .ok_or_else(|| "Serial runtime options are unavailable.".to_string())?;
                 options.display_mode = display_mode;
-                self.terminal
-                    .lock()
-                    .set_serial_runtime_options(options)
-                    .map_err(|error| error.to_string())?;
-                cx.notify();
+                self.update_serial_runtime_options(options, cx)?;
             }
             TerminalSerialAction::SetSendMode(send_mode) => {
                 let mut options = self
@@ -1878,11 +1869,7 @@ impl TerminalPane {
                     .serial_runtime_options()
                     .ok_or_else(|| "Serial runtime options are unavailable.".to_string())?;
                 options.send_mode = send_mode;
-                self.terminal
-                    .lock()
-                    .set_serial_runtime_options(options)
-                    .map_err(|error| error.to_string())?;
-                cx.notify();
+                self.update_serial_runtime_options(options, cx)?;
             }
         }
         Ok(())
@@ -1949,14 +1936,36 @@ impl TerminalPane {
         options: SerialRuntimeOptions,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .terminal
-            .lock()
-            .set_serial_runtime_options(options)
-            .is_ok()
-        {
-            cx.notify();
+        let _ = self.update_serial_runtime_options(options, cx);
+    }
+
+    fn update_serial_runtime_options(
+        &mut self,
+        options: SerialRuntimeOptions,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let previous_options = {
+            let mut terminal = self.terminal.lock();
+            let previous_options = terminal.serial_runtime_options();
+            terminal
+                .set_serial_runtime_options(options)
+                .map_err(|error| error.to_string())?;
+            previous_options
+        };
+        let changed_input = previous_options
+            .filter(|previous| previous.line_ending != options.line_ending)
+            .map(|_| options.line_ending);
+        let changed_output = previous_options
+            .filter(|previous| previous.output_line_ending != options.output_line_ending)
+            .map(|_| options.output_line_ending);
+        if changed_input.is_some() || changed_output.is_some() {
+            cx.emit(TerminalPaneEvent::SerialLineEndingsChanged {
+                input: changed_input,
+                output: changed_output,
+            });
         }
+        cx.notify();
+        Ok(())
     }
 
     fn cycle_serial_send_mode(&mut self, cx: &mut Context<Self>) {
@@ -3947,6 +3956,7 @@ mod tests {
             stop_bits: 1,
             parity: oxideterm_terminal::SerialParity::None,
             flow_control: oxideterm_terminal::SerialFlowControl::None,
+            runtime_options: SerialRuntimeOptions::default(),
         };
 
         let result = TerminalPane::open_serial_session_with_preferences(

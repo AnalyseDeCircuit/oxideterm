@@ -23,6 +23,7 @@ pub struct SerialSessionConfig {
     pub stop_bits: u8,
     pub parity: SerialParity,
     pub flow_control: SerialFlowControl,
+    pub runtime_options: SerialRuntimeOptions,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -357,6 +358,7 @@ impl SerialSession {
         // terminal features and should not parse arbitrary device boot noise.
         serial_graphics_options.enabled = false;
 
+        let runtime_options = config.runtime_options;
         Ok(Self {
             config,
             term,
@@ -387,7 +389,7 @@ impl SerialSession {
             serial_console_ingress: SerialConsoleIngress::default(),
             serial_line_ending_ingress: SerialLineEndingIngress::default(),
             control_state: SerialControlState::default(),
-            runtime_options: SerialRuntimeOptions::default(),
+            runtime_options,
             hexdump_offset: 0,
         })
     }
@@ -1578,6 +1580,7 @@ mod serial_tests {
             stop_bits: 1,
             parity: SerialParity::None,
             flow_control: SerialFlowControl::None,
+            runtime_options: SerialRuntimeOptions::default(),
         }
     }
 

@@ -333,6 +333,10 @@ impl WorkspaceApp {
                             flow_control: new_connection::terminal_serial_flow_from_profile(
                                 &profile.flow_control,
                             ),
+                            runtime_options:
+                                new_connection::terminal_serial_runtime_options_from_profile(
+                                    profile,
+                                ),
                         },
                     ),
                     terminal_options: current_profile.map_or_else(
@@ -422,6 +426,7 @@ mod tests {
                 stop_bits: 1,
                 parity: oxideterm_terminal::SerialParity::None,
                 flow_control: oxideterm_terminal::SerialFlowControl::None,
+                runtime_options: Default::default(),
             },
             terminal_options: ConnectionTerminalOptions::default(),
         }

@@ -4,6 +4,7 @@
 use super::*;
 use crate::workspace::{
     WorkspaceNotificationKind, WorkspaceNotificationScope, WorkspaceNotificationSeverity,
+    new_connection::terminal_serial_runtime_options_from_profile,
     standalone_connections::{StandaloneConnectionKind, StandaloneConnectionLaunch},
 };
 use gpui::App;
@@ -1370,6 +1371,17 @@ impl WorkspaceApp {
                     cx.notify();
                     return None;
                 };
+                let runtime_options = form
+                    .serial_profile_id
+                    .as_deref()
+                    .and_then(|id| {
+                        this.connection_store
+                            .serial_profiles()
+                            .iter()
+                            .find(|profile| profile.id == id)
+                    })
+                    .map(terminal_serial_runtime_options_from_profile)
+                    .unwrap_or_default();
                 let config = SerialSessionConfig {
                     port_path: port_path.clone(),
                     baud_rate,
@@ -1377,6 +1389,7 @@ impl WorkspaceApp {
                     stop_bits: form.serial_stop_bits,
                     parity: form.serial_parity,
                     flow_control: form.serial_flow_control,
+                    runtime_options,
                 };
                 let editing_profile_id = form.serial_profile_id.clone();
                 let existing_connect_on_open = editing_profile_id.as_deref().and_then(|id| {
@@ -1403,6 +1416,8 @@ impl WorkspaceApp {
                     stop_bits: Some(form.serial_stop_bits),
                     parity: Some(serial_profile_parity_from_terminal(form.serial_parity)),
                     flow_control: Some(serial_profile_flow_from_terminal(form.serial_flow_control)),
+                    input_line_ending: None,
+                    output_line_ending: None,
                     terminal: form.terminal.clone(),
                     connect_on_open: existing_connect_on_open,
                 });

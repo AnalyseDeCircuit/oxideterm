@@ -58,7 +58,7 @@ pub use store::{
     SavedPrivilegeCredential, SavedProxyCommand, SavedProxyHop,
     SavedStandaloneSftpEndpointRuntimeSecrets, SavedStandaloneSftpProfileRuntimeSecrets,
     SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
-    SavedUpstreamProxyProtocol, SerialFlowControl, SerialParity, SerialProfile,
+    SavedUpstreamProxyProtocol, SerialFlowControl, SerialLineEnding, SerialParity, SerialProfile,
     SerialProfilesSyncSnapshot, SshAlgorithmPreferences, SshChannelStrategy,
     StandaloneSftpEndpoint, StandaloneSftpProfile, StandaloneSftpProfilesSyncSnapshot,
     StandaloneSftpTransferMode, TelnetProfile, TelnetProfilesSyncSnapshot, validate_group_name,

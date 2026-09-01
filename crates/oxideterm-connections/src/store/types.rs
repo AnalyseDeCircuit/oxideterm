@@ -844,6 +844,17 @@ pub enum SerialFlowControl {
     Hardware,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SerialLineEnding {
+    Lf,
+    #[serde(rename = "crlf")]
+    CrLf,
+    Cr,
+    #[default]
+    None,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SerialProfile {
     pub id: String,
@@ -865,6 +876,10 @@ pub struct SerialProfile {
     pub stop_bits: u8,
     pub parity: SerialParity,
     pub flow_control: SerialFlowControl,
+    #[serde(default)]
+    pub input_line_ending: SerialLineEnding,
+    #[serde(default)]
+    pub output_line_ending: SerialLineEnding,
     #[serde(
         default,
         skip_serializing_if = "ConnectionTerminalOptions::inherits_application_defaults"
@@ -893,6 +908,8 @@ pub struct SaveSerialProfileRequest {
     pub stop_bits: Option<u8>,
     pub parity: Option<SerialParity>,
     pub flow_control: Option<SerialFlowControl>,
+    pub input_line_ending: Option<SerialLineEnding>,
+    pub output_line_ending: Option<SerialLineEnding>,
     pub terminal: ConnectionTerminalOptions,
     pub connect_on_open: Option<bool>,
 }
@@ -1434,6 +1451,8 @@ impl SerialProfile {
             stop_bits: 1,
             parity: SerialParity::None,
             flow_control: SerialFlowControl::None,
+            input_line_ending: SerialLineEnding::None,
+            output_line_ending: SerialLineEnding::None,
             terminal: ConnectionTerminalOptions::default(),
             connect_on_open: false,
             created_at: now,

@@ -1,4 +1,5 @@
 use super::*;
+use oxideterm_terminal_triggers::SavedConnectionKind;
 
 const SPLIT_HANDLE_LINE_ALPHA: u32 = 0xd9;
 const SPLIT_HANDLE_HOVER_BG_ALPHA: u32 = 0x12;
@@ -45,6 +46,17 @@ fn terminal_split_supported(
         TabKind::LocalTerminal => !contains_serial_terminal,
         TabKind::SshTerminal => ssh_node_ready,
         _ => false,
+    }
+}
+
+fn serial_profile_line_ending(
+    line_ending: oxideterm_terminal::SerialLineEnding,
+) -> oxideterm_connections::SerialLineEnding {
+    match line_ending {
+        oxideterm_terminal::SerialLineEnding::Lf => oxideterm_connections::SerialLineEnding::Lf,
+        oxideterm_terminal::SerialLineEnding::CrLf => oxideterm_connections::SerialLineEnding::CrLf,
+        oxideterm_terminal::SerialLineEnding::Cr => oxideterm_connections::SerialLineEnding::Cr,
+        oxideterm_terminal::SerialLineEnding::None => oxideterm_connections::SerialLineEnding::None,
     }
 }
 
@@ -184,6 +196,9 @@ impl WorkspaceApp {
                     cx.notify();
                 }
             }
+            TerminalPaneEvent::SerialLineEndingsChanged { input, output } => {
+                self.persist_serial_line_endings(session_id, input, output, cx);
+            }
             TerminalPaneEvent::PrivilegePromptStateChanged => {
                 if self.active_pane_id(cx) == Some(pane_id)
                     && self.sync_active_privilege_prompt_inline_hint(cx)
@@ -204,6 +219,35 @@ impl WorkspaceApp {
                 TerminalPaneInteraction::ContextAction,
                 cx,
             ),
+        }
+    }
+
+    fn persist_serial_line_endings(
+        &mut self,
+        session_id: TerminalSessionId,
+        input: Option<oxideterm_terminal::SerialLineEnding>,
+        output: Option<oxideterm_terminal::SerialLineEnding>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(saved_connection) = self.terminal_saved_connection_refs.get(&session_id) else {
+            return;
+        };
+        if saved_connection.kind != SavedConnectionKind::Serial {
+            return;
+        }
+        let profile_id = saved_connection.id.clone();
+        let input_line_ending = input.map(serial_profile_line_ending);
+        let output_line_ending = output.map(serial_profile_line_ending);
+        match self.connection_store.set_serial_profile_line_endings(
+            &profile_id,
+            input_line_ending,
+            output_line_ending,
+        ) {
+            Ok(true) => self.queue_cloud_sync_dirty_refresh(cx),
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(%profile_id, %error, "failed to persist serial line endings");
+            }
         }
     }
 

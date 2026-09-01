@@ -179,6 +179,7 @@ mod tests {
                 stop_bits: 1,
                 parity: SerialParity::None,
                 flow_control: SerialFlowControl::Hardware,
+                runtime_options: Default::default(),
             },
         );
 

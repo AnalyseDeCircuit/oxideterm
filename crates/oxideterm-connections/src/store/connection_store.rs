@@ -897,6 +897,12 @@ impl ConnectionStore {
         profile.stop_bits = request.stop_bits.unwrap_or(1);
         profile.parity = request.parity.unwrap_or(SerialParity::None);
         profile.flow_control = request.flow_control.unwrap_or(SerialFlowControl::None);
+        if let Some(line_ending) = request.input_line_ending {
+            profile.input_line_ending = line_ending;
+        }
+        if let Some(line_ending) = request.output_line_ending {
+            profile.output_line_ending = line_ending;
+        }
         profile.terminal = request.terminal;
         profile.connect_on_open = request.connect_on_open.unwrap_or(false);
         if !self
@@ -923,6 +929,39 @@ impl ConnectionStore {
         self.normalize();
         self.save()?;
         Ok(profile)
+    }
+
+    /// Persists terminal-side newline handling without replacing unrelated profile fields.
+    pub fn set_serial_profile_line_endings(
+        &mut self,
+        id: &str,
+        input_line_ending: Option<SerialLineEnding>,
+        output_line_ending: Option<SerialLineEnding>,
+    ) -> Result<bool> {
+        let Some(profile) = self
+            .data
+            .serial_profiles
+            .iter_mut()
+            .find(|profile| profile.id == id)
+        else {
+            return Ok(false);
+        };
+        let input_changed = input_line_ending
+            .is_some_and(|line_ending| profile.input_line_ending != line_ending);
+        let output_changed = output_line_ending
+            .is_some_and(|line_ending| profile.output_line_ending != line_ending);
+        if !input_changed && !output_changed {
+            return Ok(false);
+        }
+        if let Some(line_ending) = input_line_ending {
+            profile.input_line_ending = line_ending;
+        }
+        if let Some(line_ending) = output_line_ending {
+            profile.output_line_ending = line_ending;
+        }
+        profile.updated_at = Utc::now();
+        self.save()?;
+        Ok(true)
     }
 
     pub fn delete_serial_profile(&mut self, id: &str) -> Result<bool> {

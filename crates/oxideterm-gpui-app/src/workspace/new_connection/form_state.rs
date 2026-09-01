@@ -1331,6 +1331,27 @@ pub(in crate::workspace) fn terminal_serial_flow_from_profile(
     }
 }
 
+pub(in crate::workspace) fn terminal_serial_runtime_options_from_profile(
+    profile: &SerialProfile,
+) -> oxideterm_terminal::SerialRuntimeOptions {
+    oxideterm_terminal::SerialRuntimeOptions {
+        line_ending: terminal_serial_line_ending_from_profile(profile.input_line_ending),
+        output_line_ending: terminal_serial_line_ending_from_profile(profile.output_line_ending),
+        ..Default::default()
+    }
+}
+
+fn terminal_serial_line_ending_from_profile(
+    line_ending: oxideterm_connections::SerialLineEnding,
+) -> oxideterm_terminal::SerialLineEnding {
+    match line_ending {
+        oxideterm_connections::SerialLineEnding::Lf => oxideterm_terminal::SerialLineEnding::Lf,
+        oxideterm_connections::SerialLineEnding::CrLf => oxideterm_terminal::SerialLineEnding::CrLf,
+        oxideterm_connections::SerialLineEnding::Cr => oxideterm_terminal::SerialLineEnding::Cr,
+        oxideterm_connections::SerialLineEnding::None => oxideterm_terminal::SerialLineEnding::None,
+    }
+}
+
 pub(in crate::workspace) fn form_from_serial_profile(
     profile: &SerialProfile,
     ungrouped_label: String,
