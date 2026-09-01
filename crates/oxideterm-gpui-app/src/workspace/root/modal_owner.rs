@@ -1007,6 +1007,21 @@ impl WorkspaceApp {
                     .terminal
                     .read(cx)
                     .quick_commands
+                    .category_delete_pending()
+                {
+                    match event.keystroke.key.as_str() {
+                        "escape" => {
+                            self.cancel_quick_command_category_delete(cx);
+                        }
+                        "enter" => {
+                            self.confirm_quick_command_category_delete(cx);
+                        }
+                        _ => {}
+                    }
+                } else if self
+                    .terminal
+                    .read(cx)
+                    .quick_commands
                     .focused_input()
                     .is_some()
                 {

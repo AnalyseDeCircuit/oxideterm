@@ -302,11 +302,26 @@ fn resolve_template(
         push_expanded(&mut resolved, &remainder[..token_offset], target)?;
         cursor += token_offset + 2;
         let Some(token_end) = template[cursor..].find("}}") else {
-            errors.push(QuickCommandTemplateError::UnterminatedToken);
+            let unfinished = &template[cursor..];
+            if quick_command_token_namespace(unfinished.trim_start()) {
+                errors.push(QuickCommandTemplateError::UnterminatedToken);
+            } else {
+                // Double braces belong to many command syntaxes; preserve them unless they
+                // explicitly opt into an OxideTerm parameter or context namespace.
+                push_expanded(&mut resolved, "{{", target)?;
+                push_expanded(&mut resolved, unfinished, target)?;
+            }
             break;
         };
-        let token = template[cursor..cursor + token_end].trim();
+        let raw_token = &template[cursor..cursor + token_end];
+        let token = raw_token.trim();
         cursor += token_end + 2;
+        if !quick_command_token_namespace(token) {
+            push_expanded(&mut resolved, "{{", target)?;
+            push_expanded(&mut resolved, raw_token, target)?;
+            push_expanded(&mut resolved, "}}", target)?;
+            continue;
+        }
         match resolve_token(token, parameters, parameter_values, target) {
             Ok(value) => push_expanded(&mut resolved, &value, target)?,
             Err(error) => errors.push(error),
@@ -317,6 +332,10 @@ fn resolve_template(
     } else {
         Err(errors)
     }
+}
+
+fn quick_command_token_namespace(token: &str) -> bool {
+    token.starts_with("param.") || token.starts_with("ctx.")
 }
 
 fn push_expanded(
@@ -468,6 +487,33 @@ mod tests {
             errors.as_slice(),
             [QuickCommandTemplateError::UnknownParameter(parameter)] if parameter == "sevrice"
         ));
+    }
+
+    #[test]
+    fn non_oxideterm_double_braces_remain_literal_command_text() {
+        let command = QuickCommand {
+            id: "docker-log".to_string(),
+            name: "Docker log".to_string(),
+            command: "docker inspect --format='{{.LogPath}}' container".to_string(),
+            category: "custom".to_string(),
+            description: None,
+            parameters: Vec::new(),
+            availability: QuickCommandAvailability::default(),
+            confirmation: QuickCommandConfirmationPolicy::Inherit,
+            sort_order: 0,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let target = QuickCommandTargetContext {
+            target_id: "local".to_string(),
+            label: "Local".to_string(),
+            protocol: QuickCommandTargetProtocol::Local,
+            values: QuickCommandContextValues::default(),
+        };
+
+        let prepared = prepare_quick_command(&command, &[target], &BTreeMap::new()).unwrap();
+
+        assert_eq!(prepared.targets[0].command.as_str(), command.command);
     }
 
     #[test]

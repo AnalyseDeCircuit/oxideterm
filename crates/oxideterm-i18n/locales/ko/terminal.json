@@ -252,6 +252,7 @@
       "add_group": "Add group",
       "edit_group": "Edit group",
       "delete_group": "Delete group",
+      "delete_group_description": "\"{{name}}\"의 명령은 그룹을 삭제하기 전에 기본 그룹으로 이동됩니다.",
       "save_group": "Save group",
       "group_name_placeholder": "Group name",
       "icon_terminal": "Terminal",

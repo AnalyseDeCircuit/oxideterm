@@ -9,6 +9,8 @@ use crate::{
     default_quick_command_categories, new_quick_category_id, new_quick_command_id,
 };
 
+const FALLBACK_QUICK_COMMAND_CATEGORY_ID: &str = "custom";
+
 #[derive(Clone, Eq, PartialEq)]
 pub struct QuickCommandDraft {
     pub id: Option<String>,
@@ -198,19 +200,24 @@ pub fn upsert_quick_command_category(
 
 pub fn delete_quick_command_category(
     categories: &mut Vec<QuickCommandCategory>,
-    commands: &[QuickCommand],
+    commands: &mut [QuickCommand],
     id: &str,
 ) -> bool {
     if default_quick_command_categories()
         .iter()
         .any(|category| category.id == id)
-        || commands.iter().any(|command| command.category == id)
+        || !categories.iter().any(|category| category.id == id)
     {
         return false;
     }
-    let previous_len = categories.len();
+
+    // Custom groups are presentation metadata. Preserve their commands by
+    // returning them to the built-in fallback group before removing the group.
+    for command in commands.iter_mut().filter(|command| command.category == id) {
+        command.category = FALLBACK_QUICK_COMMAND_CATEGORY_ID.to_string();
+    }
     categories.retain(|category| category.id != id);
-    categories.len() != previous_len
+    true
 }
 
 pub fn ensure_active_quick_command_category(

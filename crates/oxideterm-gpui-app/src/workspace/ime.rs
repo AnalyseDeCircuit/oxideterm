@@ -24,7 +24,9 @@ use super::new_connection::{
     CONNECTION_NOTES_LINE_HEIGHT, CONNECTION_NOTES_VERTICAL_PADDING, NewConnectionField,
     refresh_connection_timeout_seconds, refresh_identity_agent_availability,
 };
-use super::quick_commands::QuickCommandInput;
+use super::quick_commands::{
+    QUICK_COMMAND_TEXTAREA_LINE_HEIGHT, QUICK_COMMAND_TEXTAREA_VERTICAL_PADDING, QuickCommandInput,
+};
 use super::session_manager::{SessionManagerInput, SessionManagerState};
 use super::sftp::SftpInput;
 use super::terminal_git::TerminalGitPanelSection;
@@ -1672,6 +1674,9 @@ impl WorkspaceApp {
             WorkspaceImeTarget::NewConnection(NewConnectionField::Notes) => {
                 px(CONNECTION_NOTES_LINE_HEIGHT)
             }
+            WorkspaceImeTarget::QuickCommand(QuickCommandInput::CommandText) => {
+                px(QUICK_COMMAND_TEXTAREA_LINE_HEIGHT)
+            }
             _ if ime_target_is_read_only(target) && line_count > 0 => {
                 let inferred = f32::from(bounds.size.height) / line_count as f32;
                 px(inferred.clamp(16.0, 40.0))
@@ -1706,6 +1711,9 @@ impl WorkspaceApp {
             }
             WorkspaceImeTarget::NewConnection(NewConnectionField::Notes) => {
                 px(CONNECTION_NOTES_VERTICAL_PADDING)
+            }
+            WorkspaceImeTarget::QuickCommand(QuickCommandInput::CommandText) => {
+                px(QUICK_COMMAND_TEXTAREA_VERTICAL_PADDING)
             }
             _ => px(0.0),
         }
@@ -3374,6 +3382,7 @@ fn ime_target_accepts_newline(target: WorkspaceImeTarget) -> bool {
         WorkspaceImeTarget::Settings(input) => input.accepts_newline(),
         WorkspaceImeTarget::AiChatInput | WorkspaceImeTarget::AiMessageEdit => true,
         WorkspaceImeTarget::NewConnection(NewConnectionField::Notes) => true,
+        WorkspaceImeTarget::QuickCommand(QuickCommandInput::CommandText) => true,
         WorkspaceImeTarget::SessionManager(SessionManagerInput::OxideExportDescription) => true,
         _ => false,
     }
@@ -3628,7 +3637,7 @@ mod tests {
 
     use super::{
         CopyShortcutOwner, FileManagerInput, HostToolsPlainTextImeFrame, HostToolsTextInput,
-        NewConnectionField, PendingPlatformTextCommit, SettingsInput, SftpInput,
+        NewConnectionField, PendingPlatformTextCommit, QuickCommandInput, SettingsInput, SftpInput,
         TextInputAnchorStore, WorkspaceCaretState, WorkspaceCaretVisibility,
         WorkspaceImeMarkedText, WorkspaceImeTarget, active_ime_should_defer_input_key,
         collapsed_copy_shortcut_is_owned_by_target, control_k_delete_end,
@@ -3987,6 +3996,16 @@ mod tests {
             normalized.as_str(),
             "-----BEGIN TEST KEY-----\nfake-material\n-----END TEST KEY-----"
         );
+    }
+
+    #[test]
+    fn quick_command_clipboard_normalization_preserves_command_lines() {
+        let normalized = normalize_clipboard_text_for_ime_target(
+            WorkspaceImeTarget::QuickCommand(QuickCommandInput::CommandText),
+            "first\r\nsecond\rthird",
+        );
+
+        assert_eq!(normalized.as_str(), "first\nsecond\nthird");
     }
 
     #[test]

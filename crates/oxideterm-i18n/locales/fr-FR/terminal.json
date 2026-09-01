@@ -252,6 +252,7 @@
       "add_group": "Add group",
       "edit_group": "Edit group",
       "delete_group": "Delete group",
+      "delete_group_description": "Les commandes de « {{name}} » seront déplacées vers le groupe par défaut avant sa suppression.",
       "save_group": "Save group",
       "group_name_placeholder": "Group name",
       "icon_terminal": "Terminal",

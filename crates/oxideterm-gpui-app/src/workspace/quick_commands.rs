@@ -16,6 +16,10 @@ use super::{
     QUICK_COMMAND_LIST_OVERSCAN, TauriVirtualListSpec, VirtualListSignatureCache,
 };
 
+pub(super) const QUICK_COMMAND_TEXTAREA_LINE_HEIGHT: f32 = 22.0;
+pub(super) const QUICK_COMMAND_TEXTAREA_MIN_HEIGHT: f32 = 126.0;
+pub(super) const QUICK_COMMAND_TEXTAREA_VERTICAL_PADDING: f32 = 8.0;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum QuickCommandInput {
     Search,
@@ -80,6 +84,12 @@ pub(super) struct QuickCommandExecutionDraft {
     pub parameter_values: Vec<Zeroizing<String>>,
 }
 
+#[derive(Clone)]
+pub(super) struct QuickCommandCategoryDeletePrompt {
+    pub id: String,
+    pub name: String,
+}
+
 fn quick_command_icon_source_id(icon: QuickCommandIcon) -> &'static str {
     match icon {
         QuickCommandIcon::Terminal => "terminal",
@@ -114,6 +124,7 @@ pub(in crate::workspace) struct TerminalQuickCommandsState {
     pub(super) manager_open: bool,
     pub(super) pinned: bool,
     pub(super) pending_execution: Option<QuickCommandExecutionDraft>,
+    pub(super) pending_category_delete: Option<QuickCommandCategoryDeletePrompt>,
     pub(super) list_state: ListState,
     pub(super) list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) input_viewports: RefCell<HashMap<QuickCommandInput, TextInputViewport>>,
@@ -127,6 +138,7 @@ impl TerminalQuickCommandsState {
             manager_open: false,
             pinned: false,
             pending_execution: None,
+            pending_category_delete: None,
             // User-defined command sets are unbounded, so the surface owns a
             // virtual list instead of rebuilding every row on root repaint.
             list_state: ListState::new(

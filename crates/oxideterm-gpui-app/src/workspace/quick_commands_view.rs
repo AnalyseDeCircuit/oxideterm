@@ -7,17 +7,22 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, App, Context, KeyDownEvent, MouseButton, PathPromptOptions, SharedString, div,
-    prelude::*, px, rgb, rgba,
+    AnyElement, App, Context, CursorStyle, KeyDownEvent, MouseButton, PathPromptOptions,
+    SharedString, div, prelude::*, px, rgb, rgba,
 };
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_gpui_ui::{
-    CommandPanelOptions, StatusPillOptions, StatusTone, SurfacePadding, command_panel,
+    CommandPanelOptions, ConfirmDialogVariant, ConfirmDialogView, StatusPillOptions, StatusTone,
+    SurfacePadding, command_panel,
+    confirm::confirm_dialog,
     modal::{dismissible_dialog_backdrop, overlay_content_boundary, rounded_shell_child_radius},
     scroll::ScrollableElement,
     select::SelectAnchorId,
     status_pill,
-    text_input::{TextInputView, text_input_with_viewport},
+    text_input::{
+        TextInputView, text_caret, text_input_value_segments,
+        text_input_value_segments_with_marked_range, text_input_with_viewport,
+    },
 };
 use oxideterm_i18n::I18n;
 use oxideterm_quick_commands::{
@@ -35,7 +40,9 @@ use super::super::{
     sync_tauri_variable_list_state_by_signatures, tauri_virtual_list,
 };
 use super::{
-    QuickCommand, QuickCommandCategory, QuickCommandCategoryDraft, QuickCommandConfirmationPolicy,
+    QUICK_COMMAND_TEXTAREA_LINE_HEIGHT, QUICK_COMMAND_TEXTAREA_MIN_HEIGHT,
+    QUICK_COMMAND_TEXTAREA_VERTICAL_PADDING, QuickCommand, QuickCommandCategory,
+    QuickCommandCategoryDeletePrompt, QuickCommandCategoryDraft, QuickCommandConfirmationPolicy,
     QuickCommandEditorDraft, QuickCommandExecutionDraft, QuickCommandIcon,
     QuickCommandImportStrategy, QuickCommandInput, QuickCommandParameter,
     QuickCommandParameterEditorDraft, QuickCommandParameterKind, QuickCommandTargetProtocol,
@@ -43,6 +50,7 @@ use super::{
     quick_command_icon_source_id,
 };
 use crate::assets::LucideIcon;
+use oxideterm_settings_model::{settings_multiline_line_ranges, settings_multiline_line_selection};
 
 fn quick_command_lucide_icon(icon: QuickCommandIcon) -> LucideIcon {
     match icon {
@@ -342,6 +350,7 @@ struct QuickCommandsRenderSnapshot {
     command_editor: Option<QuickCommandEditorDraft>,
     category_editor: Option<QuickCommandCategoryDraft>,
     pending_execution: Option<QuickCommandExecutionDraft>,
+    pending_category_delete: Option<QuickCommandCategoryDeletePrompt>,
     last_persist_error: Option<String>,
     visible_commands: Arc<Vec<QuickCommand>>,
     pinned: bool,
@@ -477,6 +486,7 @@ impl TerminalQuickCommandsState {
         self.open = false;
         self.pinned = false;
         self.pending_execution = None;
+        self.pending_category_delete = None;
         self.manager_open = true;
         self.store.command_editor = None;
         self.store.category_editor = None;
@@ -488,8 +498,10 @@ impl TerminalQuickCommandsState {
         let changed = self.manager_open
             || self.store.command_editor.is_some()
             || self.store.category_editor.is_some()
-            || self.store.focused_input.is_some();
+            || self.store.focused_input.is_some()
+            || self.pending_category_delete.is_some();
         self.manager_open = false;
+        self.pending_category_delete = None;
         self.store.command_editor = None;
         self.store.category_editor = None;
         self.store.focused_input = None;
@@ -508,9 +520,35 @@ impl TerminalQuickCommandsState {
         );
     }
 
-    fn delete_category(&mut self, category_id: &str) {
-        self.store.delete_category(category_id);
+    fn request_category_delete(&mut self, category: QuickCommandCategory) {
+        if default_quick_command_categories()
+            .iter()
+            .any(|default| default.id == category.id)
+        {
+            return;
+        }
+        self.pending_category_delete = Some(QuickCommandCategoryDeletePrompt {
+            id: category.id,
+            name: category.name,
+        });
+        self.store.focused_input = None;
         self.store.highlighted_command = None;
+    }
+
+    pub(in crate::workspace) fn category_delete_pending(&self) -> bool {
+        self.pending_category_delete.is_some()
+    }
+
+    fn cancel_category_delete(&mut self) -> bool {
+        self.pending_category_delete.take().is_some()
+    }
+
+    fn confirm_category_delete(&mut self) -> bool {
+        let Some(prompt) = self.pending_category_delete.take() else {
+            return false;
+        };
+        self.store.highlighted_command = None;
+        self.store.delete_category(&prompt.id)
     }
 
     pub(in crate::workspace) fn delete_command(&mut self, command_id: &str) {
@@ -1032,6 +1070,7 @@ impl TerminalQuickCommandsState {
             command_editor: self.store.command_editor.clone(),
             category_editor: self.store.category_editor.clone(),
             pending_execution: self.pending_execution.clone(),
+            pending_category_delete: self.pending_category_delete.clone(),
             last_persist_error: self.store.last_persist_error.clone(),
             visible_commands,
             pinned: self.pinned,
@@ -1088,6 +1127,32 @@ impl WorkspaceApp {
         if changed {
             self.ime_marked_text = None;
             self.clear_ime_selection();
+            cx.notify();
+        }
+        changed
+    }
+
+    pub(in crate::workspace) fn cancel_quick_command_category_delete(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let changed = self.terminal.update(cx, |terminal, _cx| {
+            terminal.quick_commands.cancel_category_delete()
+        });
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    pub(in crate::workspace) fn confirm_quick_command_category_delete(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let changed = self.terminal.update(cx, |terminal, _cx| {
+            terminal.quick_commands.confirm_category_delete()
+        });
+        if changed {
             cx.notify();
         }
         changed
@@ -1449,7 +1514,7 @@ impl WorkspaceApp {
                     .child(self.render_quick_command_manager_inspector(&snapshot, cx)),
             );
 
-        dismissible_dialog_backdrop()
+        let manager_dialog = dismissible_dialog_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
@@ -1458,6 +1523,41 @@ impl WorkspaceApp {
                 }),
             )
             .child(overlay_content_boundary(manager))
+            .into_any_element();
+
+        div()
+            .size_full()
+            .child(manager_dialog)
+            .when_some(snapshot.pending_category_delete.as_ref(), |root, prompt| {
+                let description = self
+                    .i18n
+                    .t("terminal.quick_commands.delete_group_description")
+                    .replace("{{name}}", &prompt.name);
+                root.child(confirm_dialog(
+                    &self.tokens,
+                    ConfirmDialogView {
+                        variant: ConfirmDialogVariant::Danger,
+                        title: div()
+                            .child(self.i18n.t("terminal.quick_commands.delete_group"))
+                            .into_any_element(),
+                        description: Some(div().child(description).into_any_element()),
+                        cancel_label: div()
+                            .child(self.i18n.t("common.actions.cancel"))
+                            .into_any_element(),
+                        confirm_label: div()
+                            .child(self.i18n.t("terminal.quick_commands.delete_group"))
+                            .into_any_element(),
+                    },
+                    cx.listener(|this, _event, _window, cx| {
+                        this.cancel_quick_command_category_delete(cx);
+                        cx.stop_propagation();
+                    }),
+                    cx.listener(|this, _event, _window, cx| {
+                        this.confirm_quick_command_category_delete(cx);
+                        cx.stop_propagation();
+                    }),
+                ))
+            })
             .into_any_element()
     }
 
@@ -1787,8 +1887,7 @@ impl WorkspaceApp {
                 .unwrap_or_default();
             let can_delete = !default_quick_command_categories()
                 .iter()
-                .any(|default| default.id == category.id)
-                && count == 0;
+                .any(|default| default.id == category.id);
             category_list = category_list.child(
                 div()
                     .group("quick-command-category")
@@ -1882,11 +1981,15 @@ impl WorkspaceApp {
                         row.child(self.quick_command_mini_button(
                             LucideIcon::Trash2,
                             {
-                                let category_id = category_id.clone();
+                                let category = category.clone();
                                 move |this, _event, _window, cx| {
                                     this.terminal.update(cx, |terminal, _cx| {
-                                        terminal.quick_commands.delete_category(&category_id)
+                                        terminal
+                                            .quick_commands
+                                            .request_category_delete(category.clone())
                                     });
+                                    this.ime_marked_text = None;
+                                    this.clear_ime_selection();
                                     cx.stop_propagation();
                                     cx.notify();
                                 }
@@ -3187,7 +3290,127 @@ impl WorkspaceApp {
         placeholder: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if input == QuickCommandInput::CommandText {
+            return self.render_quick_command_multiline_input(
+                input,
+                &value,
+                focused_input,
+                placeholder,
+                cx,
+            );
+        }
         self.render_quick_command_input(input, &value, focused_input, placeholder, false, cx)
+    }
+
+    fn render_quick_command_multiline_input(
+        &self,
+        input: QuickCommandInput,
+        value: &str,
+        focused_input: Option<QuickCommandInput>,
+        placeholder: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let focused = focused_input == Some(input);
+        let target = WorkspaceImeTarget::QuickCommand(input);
+        let marked_range = self.ime_marked_virtual_range_for_target(target, cx);
+        let selection = self.ime_selected_range_for_target(target, cx);
+        let showing_placeholder = value.is_empty() && marked_range.is_none();
+        let display = if showing_placeholder {
+            placeholder
+        } else {
+            self.ime_text_with_marked_text_for_target(target, cx)
+                .unwrap_or_else(|| value.to_string())
+        };
+        let theme = self.tokens.ui;
+        let lines = settings_multiline_line_ranges(&display);
+        let mut textarea = div()
+            .w_full()
+            .min_h(px(QUICK_COMMAND_TEXTAREA_MIN_HEIGHT))
+            .px(px(self.tokens.metrics.ui_control_padding_x))
+            .py(px(QUICK_COMMAND_TEXTAREA_VERTICAL_PADDING))
+            .flex()
+            .flex_col()
+            .items_start()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(if focused {
+                rgb(theme.accent)
+            } else {
+                rgb(theme.border)
+            })
+            .bg(rgba((theme.bg << 8) | 0x80))
+            .cursor(CursorStyle::IBeam)
+            .overflow_hidden()
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .line_height(px(QUICK_COMMAND_TEXTAREA_LINE_HEIGHT))
+            .font_family(settings_mono_font_family(self.settings_store.settings()))
+            .text_color(if showing_placeholder {
+                rgb(theme.text_muted)
+            } else {
+                rgb(theme.text)
+            });
+
+        for (index, (line_range, line_text)) in lines.iter().enumerate() {
+            let is_last_line = index + 1 == lines.len();
+            let local_marked_range = marked_range.as_ref().and_then(|marked| {
+                let start = marked.start.max(line_range.start);
+                let end = marked.end.min(line_range.end);
+                (start < end).then_some(start - line_range.start..end - line_range.start)
+            });
+            let (line_selection, line_caret) = if showing_placeholder || marked_range.is_some() {
+                (None, None)
+            } else {
+                settings_multiline_line_selection(selection.as_ref(), line_range)
+            };
+            let segments = if showing_placeholder {
+                div().child(line_text.as_str().to_string())
+            } else if let Some(marked_range) = local_marked_range {
+                text_input_value_segments_with_marked_range(&self.tokens, line_text, marked_range)
+            } else {
+                text_input_value_segments(
+                    &self.tokens,
+                    line_text,
+                    false,
+                    line_selection,
+                    line_caret,
+                    self.input_caret.visible(),
+                )
+            };
+            textarea = textarea.child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .h(px(QUICK_COMMAND_TEXTAREA_LINE_HEIGHT))
+                    .min_h(px(QUICK_COMMAND_TEXTAREA_LINE_HEIGHT))
+                    .flex()
+                    .items_center()
+                    .whitespace_nowrap()
+                    .when(focused && showing_placeholder && index == 0, |line| {
+                        line.child(text_caret(&self.tokens, self.input_caret.visible()))
+                    })
+                    .child(segments)
+                    .when(
+                        focused
+                            && is_last_line
+                            && !showing_placeholder
+                            && selection.is_none()
+                            && marked_range.is_none(),
+                        |line| line.child(text_caret(&self.tokens, self.input_caret.visible())),
+                    ),
+            );
+        }
+
+        self.text_input_with_workspace_ime(
+            target,
+            textarea,
+            move |this, cx| {
+                this.terminal.update(cx, |terminal, _cx| {
+                    terminal.quick_commands.set_focused_input(input)
+                });
+            },
+            cx,
+        )
+        .into_any_element()
     }
 
     fn render_quick_command_secret_input(

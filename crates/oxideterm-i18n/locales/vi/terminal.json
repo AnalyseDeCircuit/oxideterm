@@ -252,6 +252,7 @@
       "add_group": "Add group",
       "edit_group": "Edit group",
       "delete_group": "Delete group",
+      "delete_group_description": "Các lệnh trong “{{name}}” sẽ được chuyển sang nhóm mặc định trước khi xóa nhóm.",
       "save_group": "Save group",
       "group_name_placeholder": "Group name",
       "icon_terminal": "Terminal",

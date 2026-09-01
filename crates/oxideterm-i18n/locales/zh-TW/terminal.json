@@ -252,6 +252,7 @@
       "add_group": "新增组",
       "edit_group": "编辑组",
       "delete_group": "删除组",
+      "delete_group_description": "刪除前，「{{name}}」中的快速命令會移至預設群組。",
       "save_group": "保存组",
       "group_name_placeholder": "组名称",
       "icon_terminal": "终端",

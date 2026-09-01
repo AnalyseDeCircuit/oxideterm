@@ -237,7 +237,7 @@ impl QuickCommandsState {
     }
 
     pub(super) fn delete_category(&mut self, id: &str) -> bool {
-        if !delete_quick_command_category(&mut self.categories, &self.commands, id) {
+        if !delete_quick_command_category(&mut self.categories, &mut self.commands, id) {
             return false;
         }
         self.ensure_active_category();
@@ -395,7 +395,7 @@ mod quick_command_tests {
     }
 
     #[test]
-    fn default_categories_cannot_be_deleted_while_custom_empty_categories_can() {
+    fn deleting_custom_category_moves_its_commands_to_the_default_group() {
         let settings_path = temp_settings_path("delete-category");
         let mut state = QuickCommandsState::load(&settings_path);
         assert!(!state.delete_category("system"));
@@ -404,12 +404,29 @@ mod quick_command_tests {
             name: "Ops".to_string(),
             icon: QuickCommandIcon::Zap,
         });
+        state.upsert_command(QuickCommandDraft {
+            id: None,
+            name: "Restart service".to_string(),
+            command: "systemctl restart example".to_string(),
+            category: Some(custom.clone()),
+            description: None,
+            parameters: None,
+            protocols: None,
+            host_patterns: None,
+            confirmation: None,
+        });
         assert!(state.delete_category(&custom));
+        let reloaded = QuickCommandsState::load(&settings_path);
         assert!(
-            !state
+            !reloaded
                 .categories
                 .iter()
                 .any(|category| category.id == custom)
+        );
+        assert!(
+            reloaded.commands.iter().any(|command| {
+                command.name == "Restart service" && command.category == "custom"
+            })
         );
         let _ = fs::remove_dir_all(settings_path.parent().unwrap());
     }
