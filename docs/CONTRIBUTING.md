@@ -5,6 +5,8 @@ OxideTerm is developed and maintained solely by a single engineer. The author cu
 ### Code Contributions
 Before starting a substantial change, open an issue to discuss the problem, intended behavior, and implementation direction. Small, focused fixes may be proposed directly. Changes are evaluated based on project direction, maintainability, cross-platform behavior, and the long-term cost of supporting them, so not every proposal will be merged.
 
+Read the [Development Guide](development/README.md) before preparing a change. It maps the workspace, local setup, verification, runtime ownership, native-platform maintenance, debugging, and release boundaries.
+
 Features that do not need changes to the core application may be a better fit for a plugin. OxideTerm supports sandboxed WASM plugins with capability-gated host APIs. If a required plugin API is missing, feel free to open an issue to discuss the interface.
 
 ### Issues & Feature Ideas

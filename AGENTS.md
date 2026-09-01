@@ -84,7 +84,7 @@
 - 不为迎合用户而默认同意，也不为反对而反对；目标是得到正确、可验证且有用的结果。
 - 中文说明中避免在一句话内无必要地混用中英文；确需保留的技术术语除外。
 
-## void instruction-to-output leakage（IMPORTANT）
+## Avoid instruction-to-output leakage（IMPORTANT）
 
 Distinguish instructions from deliverable content. Embody the requirements; never restate them unless explicitly requested.
 
