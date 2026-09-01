@@ -54,7 +54,7 @@ use objc2_app_kit::{
     NSBeep, NSButton as Objc2NSButton, NSView as Objc2NSView, NSWindow as Objc2NSWindow,
     NSWindowButton as Objc2NSWindowButton,
 };
-use objc2_foundation::{NSPoint as Objc2NSPoint, NSRect as Objc2NSRect};
+use objc2_foundation::{NSPoint as Objc2NSPoint, NSRect as Objc2NSRect, NSSize as Objc2NSSize};
 use parking_lot::Mutex;
 use raw_window_handle as rwh;
 use smallvec::SmallVec;
@@ -68,13 +68,21 @@ use std::{
     ptr::{self, NonNull},
     rc::Rc,
     sync::{
-        Arc, Weak,
+        Arc, OnceLock, Weak,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
 
 const WINDOW_STATE_IVAR: &str = "windowState";
+const MODERN_TRAFFIC_LIGHT_FRAME_SIZE: f64 = 14.0;
+const MODERN_TRAFFIC_LIGHT_FRAME_SPACING: f64 = 9.0;
+
+fn uses_modern_traffic_light_metrics() -> bool {
+    static USES_MODERN_METRICS: OnceLock<bool> = OnceLock::new();
+    *USES_MODERN_METRICS
+        .get_or_init(|| is_macos_version_at_least(NSOperatingSystemVersion::new(26, 0, 0)))
+}
 
 static mut WINDOW_CLASS: *const Class = ptr::null();
 static mut PANEL_CLASS: *const Class = ptr::null();
@@ -665,20 +673,39 @@ impl MacWindowState {
 
                 let close_frame = buttons.close.frame();
                 let minimize_frame = buttons.minimize.frame();
-                let button_width = Pixels::from(close_frame.size.width);
-                let button_height = Pixels::from(close_frame.size.height);
-                let button_padding = Pixels::from(
+                let native_button_height = Pixels::from(close_frame.size.height);
+                let native_button_width = Pixels::from(close_frame.size.width);
+                let native_button_spacing = Pixels::from(
                     minimize_frame.origin.x - close_frame.origin.x - close_frame.size.width,
                 );
+                let use_modern_metrics = uses_modern_traffic_light_metrics();
+                let (button_width, button_spacing) = if use_modern_metrics {
+                    // macOS 26 native apps use larger traffic lights than the legacy
+                    // standard button frame returned for transparent custom titlebars.
+                    let button_size = Objc2NSSize::new(
+                        MODERN_TRAFFIC_LIGHT_FRAME_SIZE,
+                        MODERN_TRAFFIC_LIGHT_FRAME_SIZE,
+                    );
+                    buttons.close.setFrameSize(button_size);
+                    buttons.minimize.setFrameSize(button_size);
+                    buttons.zoom.setFrameSize(button_size);
+                    (
+                        Pixels::from(MODERN_TRAFFIC_LIGHT_FRAME_SIZE),
+                        Pixels::from(MODERN_TRAFFIC_LIGHT_FRAME_SPACING),
+                    )
+                } else {
+                    (native_button_width, native_button_spacing)
+                };
+                // Keep the existing custom titlebar height; only the visible controls grow.
                 let container_height =
-                    button_height + traffic_light_position.y + traffic_light_position.y;
+                    native_button_height + traffic_light_position.y + traffic_light_position.y;
 
                 let mut titlebar_frame = titlebar_container.frame();
                 titlebar_frame.size.height = container_height.to_f64();
                 titlebar_frame.origin.y = (window_height - container_height).to_f64();
 
-                let minimize_x = traffic_light_position.x + button_width + button_padding;
-                let zoom_x = minimize_x + button_width + button_padding;
+                let minimize_x = traffic_light_position.x + button_width + button_spacing;
+                let zoom_x = minimize_x + button_width + button_spacing;
 
                 titlebar_container.setFrame(titlebar_frame);
                 buttons.close.setFrameOrigin(Objc2NSPoint::new(
