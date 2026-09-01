@@ -84,6 +84,7 @@ impl Default for SerialSendMode {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct SerialRuntimeOptions {
     pub line_ending: SerialLineEnding,
+    pub output_line_ending: SerialLineEnding,
     pub display_mode: SerialDisplayMode,
     pub send_mode: SerialSendMode,
     pub local_echo: bool,

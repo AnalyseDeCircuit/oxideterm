@@ -524,6 +524,7 @@ impl WorkspaceApp {
                     "runtime": {
                         "localEcho": status.runtime_options.local_echo,
                         "lineEnding": format!("{:?}", status.runtime_options.line_ending).to_lowercase(),
+                        "outputLineEnding": format!("{:?}", status.runtime_options.output_line_ending).to_lowercase(),
                         "displayMode": format!("{:?}", status.runtime_options.display_mode).to_lowercase(),
                         "sendMode": format!("{:?}", status.runtime_options.send_mode).to_lowercase(),
                     },
@@ -590,6 +591,16 @@ impl WorkspaceApp {
                     _ => return Err("A valid serial line ending is required.".to_string()),
                 };
                 oxideterm_gpui_terminal::TerminalSerialAction::SetLineEnding(line_ending)
+            }
+            "set_output_line_ending" => {
+                let line_ending = match value {
+                    Some("none") => oxideterm_terminal::SerialLineEnding::None,
+                    Some("lf") => oxideterm_terminal::SerialLineEnding::Lf,
+                    Some("crlf") => oxideterm_terminal::SerialLineEnding::CrLf,
+                    Some("cr") => oxideterm_terminal::SerialLineEnding::Cr,
+                    _ => return Err("A valid serial output line ending is required.".to_string()),
+                };
+                oxideterm_gpui_terminal::TerminalSerialAction::SetOutputLineEnding(line_ending)
             }
             "set_display_mode" => {
                 let display_mode = match value {

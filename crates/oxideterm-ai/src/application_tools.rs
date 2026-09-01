@@ -174,14 +174,14 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "manage_serial_session",
-            "Control an existing serial terminal without opening another port. Supports reconnect, port refresh, break, DTR/RTS, local echo, line endings, and display/send modes.",
+            "Control an existing serial terminal without opening another port. Supports reconnect, port refresh, break, DTR/RTS, local echo, input/output line endings, and display/send modes.",
             json!({
                 "type": "object",
                 "properties": {
                     "handle_id": { "type": "string", "maxLength": 64 },
                     "action": {
                         "type": "string",
-                        "enum": ["refresh_port", "reconnect", "send_break", "set_dtr", "set_rts", "set_local_echo", "set_line_ending", "set_display_mode", "set_send_mode"]
+                        "enum": ["refresh_port", "reconnect", "send_break", "set_dtr", "set_rts", "set_local_echo", "set_line_ending", "set_output_line_ending", "set_display_mode", "set_send_mode"]
                     },
                     "enabled": { "type": "boolean" },
                     "value": {
@@ -558,6 +558,7 @@ fn validate_manage_serial_session(
             "set_rts",
             "set_local_echo",
             "set_line_ending",
+            "set_output_line_ending",
             "set_display_mode",
             "set_send_mode",
         ],
@@ -569,7 +570,7 @@ fn validate_manage_serial_session(
                 return Err(OrchestratorArgumentError::InvalidArguments);
             }
         }
-        "set_line_ending" => {
+        "set_line_ending" | "set_output_line_ending" => {
             required_enum(object, "value", &["none", "lf", "crlf", "cr"])?;
             if object.contains_key("enabled") {
                 return Err(OrchestratorArgumentError::InvalidArguments);

@@ -1246,6 +1246,7 @@ impl WorkspaceApp {
                 send_mode: self.i18n.t("terminal.serial_control.send_mode"),
                 display_mode: self.i18n.t("terminal.serial_control.display_mode"),
                 line_ending: self.i18n.t("terminal.serial_control.line_ending"),
+                output_line_ending: self.i18n.t("terminal.serial_control.output_line_ending"),
                 local_echo: self.i18n.t("terminal.serial_control.local_echo"),
                 text_mode: self.i18n.t("terminal.serial_control.text_mode"),
                 hex_mode: self.i18n.t("terminal.serial_control.hex_mode"),

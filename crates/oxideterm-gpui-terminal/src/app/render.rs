@@ -1091,6 +1091,11 @@ impl TerminalPane {
             labels.line_ending,
             serial_line_ending_label(status.runtime_options.line_ending, labels)
         );
+        let output_line_ending_label = format!(
+            "{} {}",
+            labels.output_line_ending,
+            serial_line_ending_label(status.runtime_options.output_line_ending, labels)
+        );
         let local_echo_label = format!(
             "{} {}",
             labels.local_echo,
@@ -1170,6 +1175,24 @@ impl TerminalPane {
                         window.prevent_default();
                         cx.stop_propagation();
                         this.cycle_serial_line_ending(cx);
+                    }),
+                ),
+            )
+            .child(
+                self.render_serial_control_button(
+                    output_line_ending_label,
+                    true,
+                    !matches!(
+                        status.runtime_options.output_line_ending,
+                        SerialLineEnding::None
+                    ),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.cycle_serial_output_line_ending(cx);
                     }),
                 ),
             )

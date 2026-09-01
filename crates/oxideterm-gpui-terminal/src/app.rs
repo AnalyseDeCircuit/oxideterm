@@ -263,6 +263,7 @@ pub enum TerminalSerialAction {
     SetRequestToSend(bool),
     SetLocalEcho(bool),
     SetLineEnding(SerialLineEnding),
+    SetOutputLineEnding(SerialLineEnding),
     SetDisplayMode(SerialDisplayMode),
     SetSendMode(SerialSendMode),
 }
@@ -1844,6 +1845,19 @@ impl TerminalPane {
                     .map_err(|error| error.to_string())?;
                 cx.notify();
             }
+            TerminalSerialAction::SetOutputLineEnding(line_ending) => {
+                let mut options = self
+                    .terminal
+                    .lock()
+                    .serial_runtime_options()
+                    .ok_or_else(|| "Serial runtime options are unavailable.".to_string())?;
+                options.output_line_ending = line_ending;
+                self.terminal
+                    .lock()
+                    .set_serial_runtime_options(options)
+                    .map_err(|error| error.to_string())?;
+                cx.notify();
+            }
             TerminalSerialAction::SetDisplayMode(display_mode) => {
                 let mut options = self
                     .terminal
@@ -1973,6 +1987,19 @@ impl TerminalPane {
             return;
         };
         options.line_ending = match options.line_ending {
+            SerialLineEnding::None => SerialLineEnding::Lf,
+            SerialLineEnding::Lf => SerialLineEnding::CrLf,
+            SerialLineEnding::CrLf => SerialLineEnding::Cr,
+            SerialLineEnding::Cr => SerialLineEnding::None,
+        };
+        self.set_serial_runtime_options(options, cx);
+    }
+
+    fn cycle_serial_output_line_ending(&mut self, cx: &mut Context<Self>) {
+        let Some(mut options) = self.terminal.lock().serial_runtime_options() else {
+            return;
+        };
+        options.output_line_ending = match options.output_line_ending {
             SerialLineEnding::None => SerialLineEnding::Lf,
             SerialLineEnding::Lf => SerialLineEnding::CrLf,
             SerialLineEnding::CrLf => SerialLineEnding::Cr,
