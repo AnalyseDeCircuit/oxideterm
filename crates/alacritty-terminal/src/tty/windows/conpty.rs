@@ -1,12 +1,16 @@
 use log::{info, warn};
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io::{Error, Result};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::IntoRawHandle;
 use std::{mem, ptr};
 
 use windows_sys::Win32::Foundation::{HANDLE, S_OK};
+use windows_sys::Win32::Globalization::{
+    CSTR_EQUAL, CSTR_GREATER_THAN, CSTR_LESS_THAN, CompareStringOrdinal,
+};
 use windows_sys::Win32::System::Console::{
     COORD, ClosePseudoConsole, CreatePseudoConsole, HPCON, ResizePseudoConsole,
 };
@@ -247,43 +251,74 @@ pub fn new(config: &Options, window_size: WindowSize) -> Result<Pty> {
 // deduplicating environment variables, so do that here while converting.
 //
 // https://learn.microsoft.com/en-us/previous-versions/troubleshoot/windows/win32/createprocess-cannot-eliminate-duplicate-variables#environment-variables
-fn convert_custom_env(custom_env: &HashMap<String, String>) -> Option<Vec<u16>> {
+fn convert_custom_env(custom_env: &HashMap<String, String>) -> Option<WindowsEnvironmentBlock> {
     // Windows inherits parent's env when no `lpEnvironment` parameter is specified.
     if custom_env.is_empty() {
         return None;
     }
 
-    let mut converted_block = Vec::new();
+    let mut environment = Vec::new();
     let mut all_env_keys = HashSet::new();
     for (custom_key, custom_value) in custom_env {
         let custom_key_os = OsStr::new(custom_key);
         if all_env_keys.insert(custom_key_os.to_ascii_uppercase()) {
-            add_windows_env_key_value_to_block(
-                &mut converted_block,
-                custom_key_os,
-                OsStr::new(&custom_value),
-            );
+            environment.push((custom_key_os.to_os_string(), OsString::from(custom_value)));
         } else {
-            warn!(
-                "Omitting environment variable pair with duplicate key: \
-                 '{custom_key}={custom_value}'"
-            );
+            // Environment values can contain credentials and must never enter logs.
+            warn!("Omitting duplicate environment variable key: '{custom_key}'");
         }
     }
 
     // Pull the current process environment after, to avoid overwriting the user provided one.
     for (inherited_key, inherited_value) in std::env::vars_os() {
         if all_env_keys.insert(inherited_key.to_ascii_uppercase()) {
-            add_windows_env_key_value_to_block(
-                &mut converted_block,
-                &inherited_key,
-                &inherited_value,
-            );
+            environment.push((inherited_key, inherited_value));
         }
     }
 
+    // CreateProcessW requires a case-insensitively sorted Unicode environment block.
+    environment.sort_by(|left, right| compare_windows_environment_names(&left.0, &right.0));
+    let mut converted_block = Vec::new();
+    for (key, value) in environment {
+        add_windows_env_key_value_to_block(&mut converted_block, &key, &value);
+    }
     converted_block.push(0);
-    Some(converted_block)
+    Some(WindowsEnvironmentBlock(converted_block))
+}
+
+fn compare_windows_environment_names(left: &OsStr, right: &OsStr) -> Ordering {
+    let left = left.encode_wide().collect::<Vec<_>>();
+    let right = right.encode_wide().collect::<Vec<_>>();
+    let result = unsafe {
+        CompareStringOrdinal(
+            left.as_ptr(),
+            left.len() as i32,
+            right.as_ptr(),
+            right.len() as i32,
+            true as i32,
+        )
+    };
+    match result {
+        CSTR_LESS_THAN => Ordering::Less,
+        CSTR_EQUAL => Ordering::Equal,
+        CSTR_GREATER_THAN => Ordering::Greater,
+        _ => left.cmp(&right),
+    }
+}
+
+struct WindowsEnvironmentBlock(Vec<u16>);
+
+impl WindowsEnvironmentBlock {
+    fn as_ptr(&self) -> *const u16 {
+        self.0.as_ptr()
+    }
+}
+
+impl Drop for WindowsEnvironmentBlock {
+    fn drop(&mut self) {
+        // The block may contain credentials supplied through custom environment variables.
+        self.0.fill(0);
+    }
 }
 
 // According to the `lpEnvironment` parameter description:
@@ -312,5 +347,53 @@ impl From<WindowSize> for COORD {
         let lines = window_size.num_lines;
         let columns = window_size.num_cols;
         COORD { X: columns as i16, Y: lines as i16 }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::windows::ffi::OsStringExt;
+
+    use super::*;
+
+    #[test]
+    fn custom_environment_block_is_sorted_and_overrides_parent_path() {
+        let custom_env = HashMap::from([
+            ("ZZ_OXIDETERM_SORT_PROBE".to_string(), "last".to_string()),
+            ("AA_OXIDETERM_SORT_PROBE".to_string(), "first".to_string()),
+            ("PaTh".to_string(), "oxideterm-path-probe".to_string()),
+        ]);
+        let block = convert_custom_env(&custom_env).expect("custom environment block");
+        let entries = block
+            .0
+            .split(|unit| *unit == 0)
+            .take_while(|entry| !entry.is_empty())
+            .collect::<Vec<_>>();
+        let keys = entries
+            .iter()
+            .map(|entry| {
+                let delimiter_search_start = usize::from(entry.first() == Some(&('=' as u16)));
+                let delimiter = entry[delimiter_search_start..]
+                    .iter()
+                    .position(|unit| *unit == '=' as u16)
+                    .map(|index| index + delimiter_search_start)
+                    .expect("environment entry delimiter");
+                OsString::from_wide(&entry[..delimiter])
+            })
+            .collect::<Vec<_>>();
+
+        assert!(keys.windows(2).all(|pair| {
+            compare_windows_environment_names(&pair[0], &pair[1]) != Ordering::Greater
+        }));
+        let path_entries = keys
+            .iter()
+            .enumerate()
+            .filter_map(|(index, key)| {
+                key.to_string_lossy()
+                    .eq_ignore_ascii_case("PATH")
+                    .then(|| String::from_utf16_lossy(entries[index]))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(path_entries, ["PaTh=oxideterm-path-probe"]);
     }
 }
