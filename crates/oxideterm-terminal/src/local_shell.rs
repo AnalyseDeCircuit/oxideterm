@@ -1,7 +1,7 @@
 use std::{collections::HashMap, env, path::PathBuf, process::Command};
 
 #[cfg(unix)]
-use std::{fs, path::Path};
+use std::{collections::HashSet, fs, path::Path};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -239,6 +239,15 @@ fn scan_unix_shells() -> Vec<ShellInfo> {
             }
         }
     }
+
+    // Linux distributions commonly expose the same shell through both /bin and
+    // /usr/bin. Preserve distinct invocation names such as sh and dash while
+    // removing aliases that resolve to the same executable.
+    let mut discovered_targets = HashSet::new();
+    shells.retain(|shell| {
+        let target = fs::canonicalize(&shell.path).unwrap_or_else(|_| shell.path.clone());
+        discovered_targets.insert((shell.id.clone(), target))
+    });
 
     shells
 }
