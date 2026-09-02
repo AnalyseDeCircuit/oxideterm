@@ -7,7 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
     ParsedTerminalSessionLogTemplate, TerminalSessionLogTemplateError, model::*,
-    parse_terminal_session_log_content_template, parse_terminal_session_log_file_name_template,
+    parse_terminal_session_log_content_template, parse_terminal_session_log_directory_template,
+    parse_terminal_session_log_file_name_template,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -788,6 +789,17 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
             *value = json!(fallback);
             validation_warnings.push(format!("Reset invalid {path}"));
         }
+    }
+
+    if let Some(value) = get_path_mut(
+        &mut settings,
+        &["terminal", "sessionLog", "directoryTemplate"],
+    ) && value
+        .as_str()
+        .is_none_or(|template| parse_terminal_session_log_directory_template(template).is_err())
+    {
+        *value = json!("");
+        validation_warnings.push("Reset invalid terminal.sessionLog.directoryTemplate".to_string());
     }
 
     for (path, fallback, min, max) in [

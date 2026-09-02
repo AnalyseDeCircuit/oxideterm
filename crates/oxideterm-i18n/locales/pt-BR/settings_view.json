@@ -622,7 +622,10 @@
       "session_log_max_file_size": "Tamanho máximo do arquivo (MiB)",
       "session_log_max_file_size_hint": "Interrompe o registro quando o arquivo atinge esse tamanho.",
       "session_log_directory": "Pasta de registros",
-      "session_log_directory_hint": "Os registros são armazenados no diretório de dados ativo do OxideTerm.",
+      "session_log_directory_hint": "Escolha um caminho absoluto. Deixe em branco para usar o diretório de dados do OxideTerm.",
+      "session_log_select_directory": "Selecionar pasta de registros do terminal",
+      "session_log_directory_template": "Modelo de subpastas",
+      "session_log_directory_template_hint": "Estrutura relativa opcional na pasta de registros. Use / entre pastas. Disponíveis: {date}, {time}, {datetime}, {session}, {host}, {username} e {protocol}.",
       "page_local": "Local"
     },
     "appearance": {

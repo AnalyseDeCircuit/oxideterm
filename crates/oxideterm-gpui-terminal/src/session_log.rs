@@ -13,8 +13,9 @@ use std::{
 
 use chrono::{DateTime, Local};
 use oxideterm_settings::{
-    ParsedTerminalSessionLogTemplate, TerminalSessionLogFileMode, TerminalSessionLogTemplatePart,
-    TerminalSessionLogTemplateVariable, parse_terminal_session_log_content_template,
+    ParsedTerminalSessionLogDirectoryTemplate, ParsedTerminalSessionLogTemplate,
+    TerminalSessionLogFileMode, TerminalSessionLogTemplatePart, TerminalSessionLogTemplateVariable,
+    parse_terminal_session_log_content_template, parse_terminal_session_log_directory_template,
     parse_terminal_session_log_file_name_template,
 };
 
@@ -50,6 +51,7 @@ impl Default for TerminalSessionLogStatus {
 #[derive(Clone)]
 pub struct TerminalSessionLogOptions {
     pub directory: PathBuf,
+    pub directory_template: String,
     pub include_control_sequences: bool,
     pub retention_days: u64,
     pub max_file_bytes: u64,
@@ -94,14 +96,22 @@ impl TerminalSessionLog {
     pub fn start(options: TerminalSessionLogOptions) -> io::Result<Self> {
         fs::create_dir_all(&options.directory)?;
         remove_expired_logs(&options.directory, options.retention_days)?;
+        let directory_template =
+            parse_terminal_session_log_directory_template(&options.directory_template)
+                .map_err(|_| io::Error::other("invalid terminal session log directory template"))?;
         let file_name_template =
             parse_terminal_session_log_file_name_template(&options.file_name_template)
                 .map_err(|_| io::Error::other("invalid terminal session log file name template"))?;
         let content_template =
             parse_terminal_session_log_content_template(&options.content_template)
                 .map_err(|_| io::Error::other("invalid terminal session log content template"))?;
-        let (path, file, initial_bytes) = create_log_file(
+        let session_directory = create_session_log_directory(
             &options.directory,
+            &directory_template,
+            &options.context,
+        )?;
+        let (path, file, initial_bytes) = create_log_file(
+            &session_directory,
             &file_name_template,
             &options.context,
             options.file_mode,
@@ -561,6 +571,38 @@ fn create_log_file(
     }
 }
 
+fn create_session_log_directory(
+    root: &Path,
+    template: &ParsedTerminalSessionLogDirectoryTemplate,
+    context: &TerminalSessionLogContext,
+) -> io::Result<PathBuf> {
+    let now = Local::now();
+    let mut directory = root.to_path_buf();
+    for component_template in template.components() {
+        let component = render_log_path_component(component_template, context, &now)?;
+        directory.push(component);
+        match fs::symlink_metadata(&directory) {
+            Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
+            }
+            Ok(_) => {
+                return Err(io::Error::other(
+                    "terminal session log directory component is not a directory",
+                ));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                fs::create_dir(&directory)?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(directory)
+}
+
 fn open_log_file(path: &Path, mode: TerminalSessionLogFileMode) -> io::Result<File> {
     if mode != TerminalSessionLogFileMode::Unique
         && let Ok(metadata) = fs::symlink_metadata(path)
@@ -605,15 +647,7 @@ fn render_log_file_name(
     const MAX_LOG_FILE_NAME_CHARS: usize = 240;
 
     let now = Local::now();
-    let mut file_name = String::new();
-    for part in template.parts() {
-        match part {
-            TerminalSessionLogTemplatePart::Literal(literal) => file_name.push_str(literal),
-            TerminalSessionLogTemplatePart::Variable(variable) => file_name.push_str(
-                &sanitize_file_name_component(&template_variable_value(*variable, context, &now)),
-            ),
-        }
-    }
+    let mut file_name = render_log_path_component(template, context, &now)?;
     if file_name.is_empty()
         || matches!(file_name.as_str(), "." | "..")
         || file_name.ends_with(['.', ' '])
@@ -635,6 +669,35 @@ fn render_log_file_name(
         ));
     }
     Ok(file_name)
+}
+
+fn render_log_path_component(
+    template: &ParsedTerminalSessionLogTemplate,
+    context: &TerminalSessionLogContext,
+    now: &DateTime<Local>,
+) -> io::Result<String> {
+    const MAX_LOG_PATH_COMPONENT_CHARS: usize = 240;
+
+    let mut component = String::new();
+    for part in template.parts() {
+        match part {
+            TerminalSessionLogTemplatePart::Literal(literal) => component.push_str(literal),
+            TerminalSessionLogTemplatePart::Variable(variable) => component.push_str(
+                &sanitize_file_name_component(&template_variable_value(*variable, context, now)),
+            ),
+        }
+    }
+    if component.is_empty()
+        || matches!(component.as_str(), "." | "..")
+        || component.ends_with(['.', ' '])
+        || component.chars().count() > MAX_LOG_PATH_COMPONENT_CHARS
+        || is_windows_reserved_file_stem(&component)
+    {
+        return Err(io::Error::other(
+            "terminal session log template produced an invalid path component",
+        ));
+    }
+    Ok(component)
 }
 
 fn unique_file_name(file_name: &str, suffix: usize) -> String {
@@ -729,13 +792,27 @@ fn remove_expired_logs(directory: &Path, retention_days: u64) -> io::Result<()> 
             retention_days.saturating_mul(24 * 60 * 60),
         ))
         .unwrap_or(SystemTime::UNIX_EPOCH);
+    remove_expired_logs_before(directory, cutoff, 0)
+}
+
+fn remove_expired_logs_before(
+    directory: &Path,
+    cutoff: SystemTime,
+    depth: usize,
+) -> io::Result<()> {
+    const MAX_SESSION_LOG_DIRECTORY_DEPTH: usize = 8;
+
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
         let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_dir() && depth < MAX_SESSION_LOG_DIRECTORY_DEPTH {
+            remove_expired_logs_before(&path, cutoff, depth + 1)?;
+            continue;
+        }
         if path.extension().and_then(|extension| extension.to_str()) != Some("log") {
             continue;
         }
-        let metadata = fs::symlink_metadata(&path)?;
         if !metadata.file_type().is_file() {
             continue;
         }
@@ -753,6 +830,7 @@ mod tests {
     fn options(directory: &Path) -> TerminalSessionLogOptions {
         TerminalSessionLogOptions {
             directory: directory.to_path_buf(),
+            directory_template: String::new(),
             include_control_sequences: false,
             retention_days: 30,
             max_file_bytes: 1024,
@@ -815,13 +893,23 @@ mod tests {
     fn starting_log_removes_only_expired_log_files() {
         let directory = tempfile::tempdir().unwrap();
         let expired = directory.path().join("expired.log");
+        let nested_directory = directory.path().join("session");
+        let nested_expired = nested_directory.join("expired.log");
         let unrelated = directory.path().join("notes.txt");
+        fs::create_dir(&nested_directory).unwrap();
         fs::write(&expired, b"old").unwrap();
+        fs::write(&nested_expired, b"old").unwrap();
         fs::write(&unrelated, b"keep").unwrap();
         let old_time = SystemTime::now() - Duration::from_secs(2 * 24 * 60 * 60);
         File::options()
             .write(true)
             .open(&expired)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(old_time))
+            .unwrap();
+        File::options()
+            .write(true)
+            .open(&nested_expired)
             .unwrap()
             .set_times(std::fs::FileTimes::new().set_modified(old_time))
             .unwrap();
@@ -832,7 +920,31 @@ mod tests {
         log.finish().unwrap();
 
         assert!(!expired.exists());
+        assert!(!nested_expired.exists());
         assert!(unrelated.exists());
+    }
+
+    #[test]
+    fn directory_template_creates_nested_session_log_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut configured = options(directory.path());
+        configured.directory_template = "{session}/{date}".to_string();
+
+        let log = TerminalSessionLog::start(configured).unwrap();
+        let path = log.status().path.unwrap();
+        log.finish().unwrap();
+
+        assert_eq!(
+            path.parent().and_then(Path::parent).and_then(Path::parent),
+            Some(directory.path())
+        );
+        assert_eq!(
+            path.parent()
+                .and_then(Path::parent)
+                .and_then(Path::file_name)
+                .and_then(|name| name.to_str()),
+            Some("test")
+        );
     }
 
     #[cfg(unix)]
@@ -932,5 +1044,11 @@ mod tests {
 
         assert!(TerminalSessionLog::start(configured).is_err());
         assert_eq!(fs::read(&protected).unwrap(), b"keep");
+
+        let outside = tempfile::tempdir().unwrap();
+        symlink(outside.path(), directory.path().join("test")).unwrap();
+        let mut nested = options(directory.path());
+        nested.directory_template = "{session}".to_string();
+        assert!(TerminalSessionLog::start(nested).is_err());
     }
 }

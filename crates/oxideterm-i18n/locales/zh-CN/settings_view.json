@@ -622,7 +622,10 @@
       "session_log_max_file_size": "单文件上限（MiB）",
       "session_log_max_file_size_hint": "会话日志达到此大小时停止记录。",
       "session_log_directory": "日志文件夹",
-      "session_log_directory_hint": "会话日志保存在当前 OxideTerm 数据目录中。",
+      "session_log_directory_hint": "请选择绝对路径；留空则使用 OxideTerm 数据目录。",
+      "session_log_select_directory": "选择终端日志文件夹",
+      "session_log_directory_template": "子文件夹模板",
+      "session_log_directory_template_hint": "可选的日志文件夹内相对布局。使用 / 分隔文件夹。可用变量：{date}、{time}、{datetime}、{session}、{host}、{username} 和 {protocol}。",
       "page_local": "本地"
     },
     "appearance": {

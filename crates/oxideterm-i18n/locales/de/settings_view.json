@@ -622,7 +622,10 @@
       "session_log_max_file_size": "Maximale Dateigröße (MiB)",
       "session_log_max_file_size_hint": "Protokollierung beenden, wenn diese Größe erreicht ist.",
       "session_log_directory": "Protokollordner",
-      "session_log_directory_hint": "Sitzungsprotokolle werden im aktiven OxideTerm-Datenverzeichnis gespeichert.",
+      "session_log_directory_hint": "Wählen Sie einen absoluten Pfad. Leer lassen, um das OxideTerm-Datenverzeichnis zu verwenden.",
+      "session_log_select_directory": "Ordner für Terminalprotokolle auswählen",
+      "session_log_directory_template": "Unterordnervorlage",
+      "session_log_directory_template_hint": "Optionale relative Struktur im Protokollordner. Ordner mit / trennen. Verfügbar: {date}, {time}, {datetime}, {session}, {host}, {username} und {protocol}.",
       "page_local": "Lokal"
     },
     "appearance": {

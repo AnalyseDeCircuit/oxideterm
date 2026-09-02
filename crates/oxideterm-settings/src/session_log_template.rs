@@ -3,6 +3,8 @@
 
 const MAX_FILE_NAME_TEMPLATE_CHARS: usize = 256;
 const MAX_CONTENT_TEMPLATE_CHARS: usize = 1024;
+const MAX_DIRECTORY_TEMPLATE_CHARS: usize = 512;
+const MAX_DIRECTORY_TEMPLATE_COMPONENTS: usize = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalSessionLogTemplateVariable {
@@ -34,6 +36,17 @@ impl ParsedTerminalSessionLogTemplate {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ParsedTerminalSessionLogDirectoryTemplate {
+    components: Vec<ParsedTerminalSessionLogTemplate>,
+}
+
+impl ParsedTerminalSessionLogDirectoryTemplate {
+    pub fn components(&self) -> &[ParsedTerminalSessionLogTemplate] {
+        &self.components
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalSessionLogTemplateError {
     Empty,
@@ -56,6 +69,36 @@ pub fn parse_terminal_session_log_content_template(
     template: &str,
 ) -> Result<ParsedTerminalSessionLogTemplate, TerminalSessionLogTemplateError> {
     parse_template(template, TemplateKind::Content)
+}
+
+pub fn parse_terminal_session_log_directory_template(
+    template: &str,
+) -> Result<ParsedTerminalSessionLogDirectoryTemplate, TerminalSessionLogTemplateError> {
+    if template.is_empty() {
+        return Ok(ParsedTerminalSessionLogDirectoryTemplate {
+            components: Vec::new(),
+        });
+    }
+    if template.chars().count() > MAX_DIRECTORY_TEMPLATE_CHARS {
+        return Err(TerminalSessionLogTemplateError::TooLong);
+    }
+    if template.starts_with('/') || template.ends_with('/') || template.contains('\\') {
+        return Err(TerminalSessionLogTemplateError::InvalidFileNameCharacter);
+    }
+
+    let components = template
+        .split('/')
+        .map(|component| {
+            if matches!(component, "" | "." | "..") {
+                return Err(TerminalSessionLogTemplateError::InvalidFileNameCharacter);
+            }
+            parse_template(component, TemplateKind::FileName)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if components.len() > MAX_DIRECTORY_TEMPLATE_COMPONENTS {
+        return Err(TerminalSessionLogTemplateError::TooLong);
+    }
+    Ok(ParsedTerminalSessionLogDirectoryTemplate { components })
 }
 
 #[derive(Clone, Copy)]
@@ -225,5 +268,16 @@ mod tests {
             parse_terminal_session_log_content_template("{text}{text}"),
             Err(TerminalSessionLogTemplateError::RepeatedText)
         );
+    }
+
+    #[test]
+    fn directory_template_accepts_safe_relative_components() {
+        let parsed = parse_terminal_session_log_directory_template("{session}/{date}").unwrap();
+
+        assert_eq!(parsed.components().len(), 2);
+        assert!(parse_terminal_session_log_directory_template("").is_ok());
+        assert!(parse_terminal_session_log_directory_template("../outside").is_err());
+        assert!(parse_terminal_session_log_directory_template("/absolute").is_err());
+        assert!(parse_terminal_session_log_directory_template("nested\\outside").is_err());
     }
 }

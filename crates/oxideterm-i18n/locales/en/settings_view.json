@@ -622,7 +622,10 @@
       "session_log_max_file_size": "Maximum File Size (MiB)",
       "session_log_max_file_size_hint": "Stop logging when a session log reaches this size.",
       "session_log_directory": "Log Folder",
-      "session_log_directory_hint": "Session logs are stored under the active OxideTerm data directory.",
+      "session_log_directory_hint": "Choose an absolute folder. Leave blank to use the OxideTerm data directory.",
+      "session_log_select_directory": "Select Terminal Log Folder",
+      "session_log_directory_template": "Subfolder Template",
+      "session_log_directory_template_hint": "Optional relative layout under the log folder. Use / between folders. Available: {date}, {time}, {datetime}, {session}, {host}, {username}, and {protocol}.",
       "page_local": "Local"
     },
     "appearance": {

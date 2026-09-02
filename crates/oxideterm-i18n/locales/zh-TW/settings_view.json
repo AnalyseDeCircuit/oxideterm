@@ -622,7 +622,10 @@
       "session_log_max_file_size": "單一檔案上限（MiB）",
       "session_log_max_file_size_hint": "工作階段日誌達到此大小時停止記錄。",
       "session_log_directory": "日誌資料夾",
-      "session_log_directory_hint": "工作階段日誌儲存在目前的 OxideTerm 資料目錄中。",
+      "session_log_directory_hint": "請選擇絕對路徑；留空則使用 OxideTerm 資料目錄。",
+      "session_log_select_directory": "選擇終端日誌資料夾",
+      "session_log_directory_template": "子資料夾範本",
+      "session_log_directory_template_hint": "可選的日誌資料夾內相對配置。使用 / 分隔資料夾。可用變數：{date}、{time}、{datetime}、{session}、{host}、{username} 和 {protocol}。",
       "page_local": "本機"
     },
     "appearance": {

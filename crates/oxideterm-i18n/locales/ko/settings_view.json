@@ -622,7 +622,10 @@
       "session_log_max_file_size": "최대 파일 크기(MiB)",
       "session_log_max_file_size_hint": "로그가 이 크기에 도달하면 기록을 중지합니다.",
       "session_log_directory": "로그 폴더",
-      "session_log_directory_hint": "세션 로그는 현재 OxideTerm 데이터 디렉터리에 저장됩니다.",
+      "session_log_directory_hint": "절대 경로를 선택하세요. 비워 두면 OxideTerm 데이터 디렉터리를 사용합니다.",
+      "session_log_select_directory": "터미널 로그 폴더 선택",
+      "session_log_directory_template": "하위 폴더 템플릿",
+      "session_log_directory_template_hint": "로그 폴더 안의 선택적 상대 구조입니다. 폴더는 /로 구분합니다. 사용 가능: {date}, {time}, {datetime}, {session}, {host}, {username}, {protocol}.",
       "page_local": "로컬"
     },
     "appearance": {

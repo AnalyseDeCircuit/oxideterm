@@ -2082,12 +2082,15 @@ impl WorkspaceApp {
             .path
             .and_then(|path| path.parent().map(Path::to_path_buf))
             .unwrap_or_else(|| {
-                self.settings_store
-                    .path()
-                    .parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .join("logs")
-                    .join("terminal")
+                settings::terminal_session_log_root_directory(
+                    self.settings_store.path(),
+                    self.settings_store
+                        .settings()
+                        .terminal
+                        .session_log
+                        .directory
+                        .as_deref(),
+                )
             });
         let result =
             fs::create_dir_all(&directory).and_then(|()| settings::open_path_external(&directory));

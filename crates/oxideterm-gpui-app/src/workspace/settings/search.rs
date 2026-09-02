@@ -305,6 +305,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
                 "settings_view.terminal.session_log_retention_days",
                 "settings_view.terminal.session_log_max_file_size",
                 "settings_view.terminal.session_log_directory",
+                "settings_view.terminal.session_log_directory_template",
             ],
         ),
         terminal_search_entry(

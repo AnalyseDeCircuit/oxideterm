@@ -622,7 +622,10 @@
       "session_log_max_file_size": "最大ファイルサイズ（MiB）",
       "session_log_max_file_size_hint": "ログがこのサイズに達すると記録を停止します。",
       "session_log_directory": "ログフォルダー",
-      "session_log_directory_hint": "セッションログは現在の OxideTerm データディレクトリに保存されます。",
+      "session_log_directory_hint": "絶対パスを選択します。空欄の場合は OxideTerm データディレクトリを使用します。",
+      "session_log_select_directory": "ターミナルログフォルダーを選択",
+      "session_log_directory_template": "サブフォルダーテンプレート",
+      "session_log_directory_template_hint": "ログフォルダー内の任意の相対配置です。フォルダーは / で区切ります。使用可能: {date}、{time}、{datetime}、{session}、{host}、{username}、{protocol}。",
       "page_local": "ローカル"
     },
     "appearance": {

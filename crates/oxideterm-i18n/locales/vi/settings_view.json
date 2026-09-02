@@ -622,7 +622,10 @@
       "session_log_max_file_size": "Kích thước tệp tối đa (MiB)",
       "session_log_max_file_size_hint": "Dừng ghi khi nhật ký đạt kích thước này.",
       "session_log_directory": "Thư mục nhật ký",
-      "session_log_directory_hint": "Nhật ký được lưu trong thư mục dữ liệu OxideTerm đang hoạt động.",
+      "session_log_directory_hint": "Chọn đường dẫn tuyệt đối. Để trống để dùng thư mục dữ liệu OxideTerm.",
+      "session_log_select_directory": "Chọn thư mục nhật ký terminal",
+      "session_log_directory_template": "Mẫu thư mục con",
+      "session_log_directory_template_hint": "Bố cục tương đối tùy chọn trong thư mục nhật ký. Dùng / để phân cách thư mục. Có thể dùng: {date}, {time}, {datetime}, {session}, {host}, {username} và {protocol}.",
       "page_local": "Cục bộ"
     },
     "appearance": {

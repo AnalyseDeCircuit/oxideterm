@@ -1181,13 +1181,31 @@ impl WorkspaceApp {
                 ],
             ),
             (TerminalSettingsPage::Logging, 0) => {
-                let directory = self
-                    .settings_store
-                    .path()
-                    .parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .join("logs")
-                    .join("terminal");
+                let default_directory =
+                    settings::terminal_session_log_root_directory(self.settings_store.path(), None);
+                let configured_directory = settings
+                    .terminal
+                    .session_log
+                    .directory
+                    .as_deref()
+                    .unwrap_or_default();
+                let directory_control = div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(self.settings_text_input_control(
+                        SettingsInput::TerminalSessionLogDirectory,
+                        configured_directory,
+                        default_directory.to_string_lossy().to_string(),
+                        420.0,
+                        cx,
+                    ))
+                    .child(self.terminal_session_log_directory_change_button(cx))
+                    .when(settings.terminal.session_log.directory.is_some(), |row| {
+                        row.child(self.terminal_session_log_directory_reset_button(cx))
+                    })
+                    .into_any_element();
                 self.settings_card(
                     "settings_view.terminal.session_log_title",
                     "settings_view.terminal.session_log_description",
@@ -1197,6 +1215,26 @@ impl WorkspaceApp {
                             "settings_view.terminal.session_log_automatic_hint",
                             settings.terminal.session_log.automatic,
                             set_terminal_session_log_automatic,
+                            cx,
+                        ),
+                        self.card_separator(),
+                        self.setting_row(
+                            "settings_view.terminal.session_log_directory",
+                            "settings_view.terminal.session_log_directory_hint",
+                            directory_control,
+                            cx,
+                        ),
+                        self.card_separator(),
+                        self.setting_row(
+                            "settings_view.terminal.session_log_directory_template",
+                            "settings_view.terminal.session_log_directory_template_hint",
+                            self.settings_text_input_control(
+                                SettingsInput::TerminalSessionLogDirectoryTemplate,
+                                &settings.terminal.session_log.directory_template,
+                                "{session}/{date}".to_string(),
+                                420.0,
+                                cx,
+                            ),
                             cx,
                         ),
                         self.card_separator(),
@@ -1261,24 +1299,95 @@ impl WorkspaceApp {
                             settings.terminal.session_log.max_file_size_mib,
                             cx,
                         ),
-                        self.card_separator(),
-                        self.setting_row(
-                            "settings_view.terminal.session_log_directory",
-                            "settings_view.terminal.session_log_directory_hint",
-                            div()
-                                .max_w(px(420.0))
-                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                .text_color(rgb(self.tokens.ui.text_muted))
-                                .child(directory.to_string_lossy().to_string())
-                                .into_any_element(),
-                            cx,
-                        ),
                     ],
                 )
             }
             (TerminalSettingsPage::Highlight, 0) => self.highlight_rules_card(settings, cx),
             _ => div().into_any_element(),
         }
+    }
+
+    pub(in crate::workspace) fn terminal_session_log_directory_change_button(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.workspace_toolbar_action_button(
+            self.i18n.t("settings_view.general.change"),
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                ..ToolbarButtonOptions::default()
+            },
+            cx.listener(|this, _event, _window, cx| {
+                this.pick_terminal_session_log_directory(cx);
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
+    }
+
+    pub(in crate::workspace) fn terminal_session_log_directory_reset_button(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.workspace_toolbar_action_button(
+            self.i18n.t("settings_view.general.reset_to_default"),
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                ..ToolbarButtonOptions::default()
+            },
+            cx.listener(|this, _event, _window, cx| {
+                this.edit_settings(
+                    |settings| settings.terminal.session_log.directory = None,
+                    cx,
+                );
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
+    }
+
+    pub(in crate::workspace) fn pick_terminal_session_log_directory(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(SharedString::from(
+                self.i18n
+                    .t("settings_view.terminal.session_log_select_directory"),
+            )),
+        });
+        cx.spawn(async move |workspace, cx| {
+            let selected_directory = match receiver.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                _ => None,
+            };
+            let Some(selected_directory) = selected_directory else {
+                return;
+            };
+            let directory = selected_directory.to_string_lossy().to_string();
+            let _ = workspace.update(cx, |this, cx| {
+                this.edit_settings(
+                    |settings| settings.terminal.session_log.directory = Some(directory),
+                    cx,
+                );
+            });
+        })
+        .detach();
     }
 
     pub(in crate::workspace) fn focus_handoff_commands_row(

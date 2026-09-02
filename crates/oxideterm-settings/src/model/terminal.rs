@@ -333,6 +333,10 @@ pub enum TerminalSessionLogFileMode {
 pub struct TerminalSessionLogSettings {
     // Automatic logging remains opt-in because terminal output may contain sensitive data.
     pub automatic: bool,
+    // None keeps logs under the active OxideTerm data directory.
+    pub directory: Option<String>,
+    // This relative template is resolved safely below the configured log directory.
+    pub directory_template: String,
     pub include_control_sequences: bool,
     pub retention_days: i64,
     pub max_file_size_mib: i64,
@@ -345,6 +349,8 @@ impl Default for TerminalSessionLogSettings {
     fn default() -> Self {
         Self {
             automatic: false,
+            directory: None,
+            directory_template: String::new(),
             include_control_sequences: false,
             retention_days: 30,
             max_file_size_mib: 100,

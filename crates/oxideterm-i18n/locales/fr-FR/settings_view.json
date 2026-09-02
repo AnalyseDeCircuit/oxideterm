@@ -622,7 +622,10 @@
       "session_log_max_file_size": "Taille maximale du fichier (Mio)",
       "session_log_max_file_size_hint": "Arrête la journalisation lorsque le fichier atteint cette taille.",
       "session_log_directory": "Dossier des journaux",
-      "session_log_directory_hint": "Les journaux sont stockés dans le répertoire de données OxideTerm actif.",
+      "session_log_directory_hint": "Choisissez un chemin absolu. Laissez vide pour utiliser le répertoire de données OxideTerm.",
+      "session_log_select_directory": "Sélectionner le dossier des journaux du terminal",
+      "session_log_directory_template": "Modèle de sous-dossiers",
+      "session_log_directory_template_hint": "Structure relative facultative dans le dossier des journaux. Utilisez / entre les dossiers. Variables disponibles : {date}, {time}, {datetime}, {session}, {host}, {username} et {protocol}.",
       "page_local": "Local"
     },
     "appearance": {

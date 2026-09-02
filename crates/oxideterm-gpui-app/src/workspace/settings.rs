@@ -46,6 +46,28 @@ use oxideterm_theme::BUILT_IN_THEMES;
 
 pub(in crate::workspace) use pages::open_path_external;
 
+pub(in crate::workspace) fn terminal_session_log_root_directory(
+    settings_path: &Path,
+    configured_directory: Option<&str>,
+) -> PathBuf {
+    if let Some(directory) = configured_directory
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        let directory = PathBuf::from(directory);
+        if directory.is_absolute() {
+            return directory;
+        }
+    }
+
+    // A path synchronized from another operating system may not be absolute here.
+    settings_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("logs")
+        .join("terminal")
+}
+
 use super::*;
 use super::{ai_state::AiSettingsViewSection, ime::WorkspaceImeTarget};
 use oxideterm_ai::{

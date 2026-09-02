@@ -622,7 +622,10 @@
       "session_log_max_file_size": "Dimensione massima file (MiB)",
       "session_log_max_file_size_hint": "Interrompe la registrazione quando il file raggiunge questa dimensione.",
       "session_log_directory": "Cartella dei registri",
-      "session_log_directory_hint": "I registri sono salvati nella directory dati OxideTerm attiva.",
+      "session_log_directory_hint": "Scegli un percorso assoluto. Lascia vuoto per usare la directory dati di OxideTerm.",
+      "session_log_select_directory": "Seleziona la cartella dei registri del terminale",
+      "session_log_directory_template": "Modello sottocartelle",
+      "session_log_directory_template_hint": "Struttura relativa facoltativa nella cartella dei registri. Usa / tra le cartelle. Disponibili: {date}, {time}, {datetime}, {session}, {host}, {username} e {protocol}.",
       "page_local": "Locale"
     },
     "appearance": {
