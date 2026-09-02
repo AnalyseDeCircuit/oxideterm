@@ -966,7 +966,7 @@ impl TerminalPane {
             link.row == point.row
                 && point.col >= link.start_col
                 && point.col < link.end_col
-                && (cell.hyperlink().is_some() || is_link_stylable_cell(cell))
+                && (cell.hyperlink().is_some() || is_link_interactive_cell(cell))
         })
     }
 

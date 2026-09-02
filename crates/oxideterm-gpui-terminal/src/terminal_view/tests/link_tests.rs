@@ -203,6 +203,45 @@ fn terminal_element_underlines_detected_links() {
 }
 
 #[test]
+fn terminal_element_preserves_explicit_foreground_for_detected_urls() {
+    let suggestion = "https://example.com";
+    let mut snapshot = selection_snapshot(suggestion);
+    let suggestion_color = TerminalColor::rgb(0x68, 0x70, 0x78);
+    for cell in snapshot.lines[0]
+        .cells_mut()
+        .iter_mut()
+        .take(suggestion.chars().count())
+    {
+        cell.fg = suggestion_color;
+        cell.style_origin = oxideterm_terminal::TerminalStyleOrigin::new(true, false);
+    }
+    snapshot.lines[0].active_input = true;
+    snapshot.lines[0].refresh_signature();
+
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .layout();
+    let suggestion_run = layout
+        .text_runs
+        .iter()
+        .find(|run| run.text.contains("https"))
+        .expect("suggestion URL run");
+
+    assert_eq!(suggestion_run.style.color, rgb(0x687078).into_color());
+    assert!(suggestion_run.style.underline.is_none());
+}
+
+#[test]
 fn terminal_element_underlines_detected_paths_only_while_hovered() {
     let snapshot = selection_snapshot("open ./crates/oxideterm-gpui-app/src/main.rs");
     let hovered_link = display_link_ranges_with_path_detection(&snapshot, true)
