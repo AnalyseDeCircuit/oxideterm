@@ -405,6 +405,7 @@ pub(in crate::workspace) fn form_from_saved_connection(
         oxideterm_ssh::ssh_agent_available(identity_agent_selector(&form.identity_agent));
     // Preserve compatibility settings when an existing connection enters edit mode.
     form.legacy_ssh_compatibility = conn.options.legacy_ssh_compatibility;
+    form.ssh_algorithms = conn.options.ssh_algorithms.clone();
     form.connect_timeout_seconds = conn.options.effective_connect_timeout_seconds();
     form.connect_timeout_seconds_text = form.connect_timeout_seconds.to_string();
     form.dedicated_new_terminal_connection = conn.options.dedicated_new_terminal_connection;

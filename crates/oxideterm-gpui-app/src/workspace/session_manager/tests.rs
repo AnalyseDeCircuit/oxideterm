@@ -259,9 +259,10 @@ pub(super) fn edit_properties_can_remove_the_entire_proxy_chain() {
 }
 
 #[test]
-pub(super) fn edit_properties_preserves_legacy_ssh_compatibility() {
+pub(super) fn edit_properties_preserves_ssh_compatibility_policy() {
     let mut saved_connection = saved_connection_fixture(SavedAuth::Agent);
     saved_connection.options.legacy_ssh_compatibility = true;
+    saved_connection.options.ssh_algorithms.mac = vec!["hmac-sha1".to_string()];
     saved_connection.options.dedicated_new_terminal_connection = true;
 
     // Editing and saving an existing connection must round-trip its transport policy.
@@ -270,6 +271,8 @@ pub(super) fn edit_properties_preserves_legacy_ssh_compatibility() {
 
     assert!(form.legacy_ssh_compatibility);
     assert!(request.legacy_ssh_compatibility);
+    assert_eq!(form.ssh_algorithms.mac, ["hmac-sha1"]);
+    assert_eq!(request.ssh_algorithms.mac, ["hmac-sha1"]);
     assert!(form.dedicated_new_terminal_connection);
     assert!(request.dedicated_new_terminal_connection);
 }
