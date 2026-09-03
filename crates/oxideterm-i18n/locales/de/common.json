@@ -1184,6 +1184,8 @@
     "copy_title": "Titel kopieren",
     "detach_to_window": "In neues Fenster verschieben",
     "return_to_main_window": "Ins Hauptfenster zurückholen",
+    "split_into_active_horizontal": "In aktiven Tab einfügen (nebeneinander)",
+    "split_into_active_vertical": "In aktiven Tab einfügen (übereinander)",
     "detached_tab_closed": "Dieser Tab wurde geschlossen.",
     "confirm_close_terminal_title": "SSH-Sitzung schließen",
     "confirm_close_terminal_desc": "Diesen SSH-Terminal-Tab schließen? Nicht gespeicherte Arbeit in der Remote-Sitzung könnte verloren gehen.",

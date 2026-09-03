@@ -255,6 +255,22 @@ impl PaneNode {
         new_pane_id: PaneId,
         new_session_id: TerminalSessionId,
     ) -> bool {
+        self.split_active_with_node(
+            active_pane_id,
+            group_id,
+            direction,
+            Self::leaf(new_pane_id, new_session_id),
+        )
+    }
+
+    /// Inserts an already-owned pane subtree without recreating its terminal sessions.
+    pub fn split_active_with_node(
+        &mut self,
+        active_pane_id: PaneId,
+        group_id: PaneId,
+        direction: SplitDirection,
+        new_node: PaneNode,
+    ) -> bool {
         match self {
             Self::Leaf {
                 pane_id,
@@ -269,21 +285,23 @@ impl PaneNode {
                     direction,
                     children: vec![
                         PaneSplitChild::new(old, 50.0),
-                        PaneSplitChild::new(Self::leaf(new_pane_id, new_session_id), 50.0),
+                        PaneSplitChild::new(new_node, 50.0),
                     ],
                 };
                 true
             }
             Self::Leaf { .. } => false,
-            Self::Group { children, .. } => children.iter_mut().any(|child| {
-                child.node.split_active(
-                    active_pane_id,
-                    group_id,
-                    direction,
-                    new_pane_id,
-                    new_session_id,
-                )
-            }),
+            Self::Group { children, .. } => {
+                let Some(child) = children
+                    .iter_mut()
+                    .find(|child| child.node.contains_pane(active_pane_id))
+                else {
+                    return false;
+                };
+                child
+                    .node
+                    .split_active_with_node(active_pane_id, group_id, direction, new_node)
+            }
         }
     }
 
@@ -469,6 +487,29 @@ mod tests {
         assert_eq!(node.pane_count(), 2);
         assert!(node.contains_pane(pane_a));
         assert!(node.contains_pane(pane_b));
+    }
+
+    #[test]
+    fn split_active_accepts_an_existing_pane_subtree() {
+        let (pane_a, pane_b, group, session_a, session_b) = ids();
+        let pane_c = PaneId(4);
+        let session_c = TerminalSessionId(3);
+        let source_group = PaneNode::Group {
+            id: PaneId(5),
+            direction: SplitDirection::Vertical,
+            children: split_children(pane_b, pane_c, session_b, session_c, [50.0, 50.0]),
+        };
+        let mut node = PaneNode::leaf(pane_a, session_a);
+
+        assert!(node.split_active_with_node(
+            pane_a,
+            group,
+            SplitDirection::Horizontal,
+            source_group,
+        ));
+        assert_eq!(node.pane_count(), 3);
+        assert_eq!(node.pane_id_for_session(session_b), Some(pane_b));
+        assert_eq!(node.pane_id_for_session(session_c), Some(pane_c));
     }
 
     #[test]

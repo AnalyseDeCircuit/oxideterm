@@ -383,6 +383,92 @@ impl WorkspaceTabHostEntity {
         split
     }
 
+    /// Checks structural constraints before moving a live terminal subtree between tabs.
+    pub(in crate::workspace) fn can_merge_terminal_tab_as_split(
+        &self,
+        source_tab_id: TabId,
+        target_tab_id: TabId,
+    ) -> bool {
+        if source_tab_id == target_tab_id
+            || self.is_outside_main_window(source_tab_id)
+            || self.is_outside_main_window(target_tab_id)
+            || self.pending_detach_mounts.contains_key(&source_tab_id)
+            || self.pending_detach_mounts.contains_key(&target_tab_id)
+        {
+            return false;
+        }
+        let Some(source) = self.tab_by_id(source_tab_id) else {
+            return false;
+        };
+        let Some(target) = self.tab_by_id(target_tab_id) else {
+            return false;
+        };
+        let terminal_kind =
+            |tab: &Tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal);
+        terminal_kind(source)
+            && terminal_kind(target)
+            && source.kind == target.kind
+            && source.root_pane.is_some()
+            && target.root_pane.is_some()
+            && target.active_pane_id.is_some()
+            && source
+                .root_pane
+                .as_ref()
+                .zip(target.root_pane.as_ref())
+                .is_some_and(|(source_root, target_root)| {
+                    source_root.pane_count() + target_root.pane_count() <= MAX_PANES_PER_TAB
+                })
+    }
+
+    /// Moves panes into the target tab while their sessions and backend owners stay alive.
+    pub(in crate::workspace) fn merge_terminal_tab_as_split(
+        &mut self,
+        source_tab_id: TabId,
+        target_tab_id: TabId,
+        group_id: PaneId,
+        direction: SplitDirection,
+    ) -> Option<PaneId> {
+        if !self.can_merge_terminal_tab_as_split(source_tab_id, target_tab_id) {
+            return None;
+        }
+        let source = self.tab_by_id(source_tab_id)?;
+        let source_root = source.root_pane.clone()?;
+        let source_active_pane_id = source
+            .active_pane_id
+            .unwrap_or_else(|| source_root.first_pane_id());
+        let mut source_session_ids = Vec::new();
+        source_root.collect_session_ids(&mut source_session_ids);
+        let target = self.tab_by_id(target_tab_id)?;
+        let target_active_pane_id = target.active_pane_id?;
+        let mut merged_root = target.root_pane.clone()?;
+        if !merged_root.split_active_with_node(
+            target_active_pane_id,
+            group_id,
+            direction,
+            source_root,
+        ) {
+            return None;
+        }
+
+        let source_index = self.tab_index_by_id(source_tab_id)?;
+        self.tabs.remove(source_index);
+        let target = self.tab_mut_by_id(target_tab_id)?;
+        target.root_pane = Some(merged_root);
+        target.active_pane_id = Some(source_active_pane_id);
+        for session_id in source_session_ids {
+            if let Some(location) = self.terminal_locations.get_mut(&session_id) {
+                debug_assert_eq!(location.tab_id, source_tab_id);
+                location.tab_id = target_tab_id;
+            }
+        }
+        self.tabs_with_unread_terminal_output.remove(&source_tab_id);
+        if self.navigation_observed_tab == Some(source_tab_id) {
+            self.navigation_observed_tab = Some(target_tab_id);
+        }
+        self.active_tab_index_cache.set(None);
+        Some(source_active_pane_id)
+    }
+
     pub(in crate::workspace) fn close_pane(
         &mut self,
         tab_id: TabId,
@@ -1355,6 +1441,62 @@ mod tests {
         );
         assert_eq!(root.session_id_for_pane(second_pane), Some(second_session));
         assert_eq!(tab.active_pane_id, Some(replacement_pane));
+    }
+
+    #[test]
+    fn merging_terminal_tabs_preserves_sessions_and_rebinds_locations() {
+        let mut tab_host = WorkspaceTabHostEntity::new();
+        let target_tab_id = TabId(1);
+        let source_tab_id = TabId(2);
+        let target_pane_id = PaneId(1);
+        let source_pane_id = PaneId(2);
+        let target_session_id = TerminalSessionId(1);
+        let source_session_id = TerminalSessionId(2);
+        tab_host.insert_and_select_main_tab(test_tab(
+            target_tab_id,
+            Some(PaneNode::leaf(target_pane_id, target_session_id)),
+        ));
+        tab_host.insert_tab(test_tab(
+            source_tab_id,
+            Some(PaneNode::leaf(source_pane_id, source_session_id)),
+        ));
+        tab_host.bind_terminal_location(
+            target_session_id,
+            TerminalLocation {
+                tab_id: target_tab_id,
+                pane_id: target_pane_id,
+            },
+        );
+        tab_host.bind_terminal_location(
+            source_session_id,
+            TerminalLocation {
+                tab_id: source_tab_id,
+                pane_id: source_pane_id,
+            },
+        );
+
+        assert!(tab_host.can_merge_terminal_tab_as_split(source_tab_id, target_tab_id));
+        assert_eq!(
+            tab_host.merge_terminal_tab_as_split(
+                source_tab_id,
+                target_tab_id,
+                PaneId(3),
+                SplitDirection::Horizontal,
+            ),
+            Some(source_pane_id)
+        );
+
+        assert!(tab_host.tab_by_id(source_tab_id).is_none());
+        let target = tab_host.tab_by_id(target_tab_id).expect("target tab");
+        assert_eq!(target.active_pane_id, Some(source_pane_id));
+        assert_eq!(target.root_pane.as_ref().map(PaneNode::pane_count), Some(2));
+        assert_eq!(
+            tab_host.terminal_location(source_session_id),
+            Some(TerminalLocation {
+                tab_id: target_tab_id,
+                pane_id: source_pane_id,
+            })
+        );
     }
 
     #[test]

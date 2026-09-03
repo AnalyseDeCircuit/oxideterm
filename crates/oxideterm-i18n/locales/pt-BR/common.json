@@ -1184,6 +1184,8 @@
     "copy_title": "Copiar título",
     "detach_to_window": "Mover para nova janela",
     "return_to_main_window": "Voltar para a janela principal",
+    "split_into_active_horizontal": "Mesclar na aba ativa (lado a lado)",
+    "split_into_active_vertical": "Mesclar na aba ativa (empilhadas)",
     "detached_tab_closed": "Esta aba foi fechada.",
     "confirm_close_terminal_title": "Fechar sessão SSH",
     "confirm_close_terminal_desc": "Fechar esta guia de terminal SSH? O trabalho não salvo na sessão remota pode ser perdido.",

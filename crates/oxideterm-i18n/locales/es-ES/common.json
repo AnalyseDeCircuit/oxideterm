@@ -1184,6 +1184,8 @@
     "copy_title": "Copiar título",
     "detach_to_window": "Mover a una nueva ventana",
     "return_to_main_window": "Volver a la ventana principal",
+    "split_into_active_horizontal": "Combinar con la pestaña activa (lado a lado)",
+    "split_into_active_vertical": "Combinar con la pestaña activa (apiladas)",
     "detached_tab_closed": "Esta pestaña se cerró.",
     "confirm_close_terminal_title": "Cerrar sesión SSH",
     "confirm_close_terminal_desc": "¿Cerrar esta pestaña de terminal SSH? El trabajo no guardado en la sesión remota puede perderse.",

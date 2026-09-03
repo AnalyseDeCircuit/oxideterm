@@ -1184,6 +1184,8 @@
     "copy_title": "タイトルをコピー",
     "detach_to_window": "新しいウィンドウへ移動",
     "return_to_main_window": "メインウィンドウへ戻す",
+    "split_into_active_horizontal": "アクティブなタブに統合（左右分割）",
+    "split_into_active_vertical": "アクティブなタブに統合（上下分割）",
     "detached_tab_closed": "このタブは閉じられました。",
     "confirm_close_terminal_title": "SSH セッションを閉じる",
     "confirm_close_terminal_desc": "この SSH ターミナルタブを閉じますか？リモートセッションで未保存の作業内容が失われる可能性があります。",

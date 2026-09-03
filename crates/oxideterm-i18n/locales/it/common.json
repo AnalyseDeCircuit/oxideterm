@@ -1184,6 +1184,8 @@
     "copy_title": "Copia titolo",
     "detach_to_window": "Sposta in nuova finestra",
     "return_to_main_window": "Riporta alla finestra principale",
+    "split_into_active_horizontal": "Unisci alla scheda attiva (affiancate)",
+    "split_into_active_vertical": "Unisci alla scheda attiva (sovrapposte)",
     "detached_tab_closed": "Questa scheda è stata chiusa.",
     "confirm_close_terminal_title": "Chiudi sessione SSH",
     "confirm_close_terminal_desc": "Chiudere questa scheda del terminale SSH? Il lavoro non salvato nella sessione remota potrebbe andare perso.",

@@ -9,9 +9,21 @@ use oxideterm_gpui_ui::context_menu::{
 use oxideterm_gpui_ui::modal::overlay_content_boundary;
 
 const TAB_CONTEXT_MENU_WIDTH: f32 = 228.0;
+const TAB_CONTEXT_MENU_SPLIT_WIDTH: f32 = 320.0;
 const TAB_CONTEXT_MENU_HEIGHT: f32 = 136.0;
 const TAB_CONTEXT_MENU_RENAME_HEIGHT: f32 = 168.0;
+const TAB_CONTEXT_MENU_SPLIT_HEIGHT: f32 = 72.0;
 const TAB_CONTEXT_MENU_MARGIN: f32 = 8.0;
+
+fn terminal_session_kinds_can_merge(
+    source: Option<oxideterm_terminal::TerminalSessionKind>,
+    target: Option<oxideterm_terminal::TerminalSessionKind>,
+) -> bool {
+    // A tab has one transport contract, so a merge must not create mixed close or tool behavior.
+    source
+        .zip(target)
+        .is_some_and(|(source_kind, target_kind)| source_kind == target_kind)
+}
 const TAB_RENAME_DIALOG_WIDTH: f32 = 420.0;
 const TAB_HANDOFF_PREVIEW_WIDTH_EXTRA: f32 = 96.0;
 const TAB_HANDOFF_PREVIEW_MIN_WIDTH: f32 = 220.0;
@@ -163,6 +175,56 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn close_tab_context_menu(&mut self) -> bool {
         self.main_window_tabs.context_menu.take().is_some()
+    }
+
+    fn terminal_tab_active_session_kind(
+        &self,
+        tab_id: TabId,
+        cx: &App,
+    ) -> Option<oxideterm_terminal::TerminalSessionKind> {
+        let tab = self.tab_by_id(tab_id, cx)?;
+        let pane_id = tab.active_pane_id?;
+        self.tab_host
+            .read(cx)
+            .panes()
+            .get(&pane_id)
+            .map(|pane| pane.read(cx).session_kind())
+    }
+
+    pub(in crate::workspace) fn merge_terminal_tab_into_active_split(
+        &mut self,
+        source_tab_id: TabId,
+        direction: SplitDirection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(target_tab_id) = self.active_tab_id(cx) else {
+            return false;
+        };
+        let same_session_kind = terminal_session_kinds_can_merge(
+            self.terminal_tab_active_session_kind(source_tab_id, cx),
+            self.terminal_tab_active_session_kind(target_tab_id, cx),
+        );
+        if !same_session_kind {
+            return false;
+        }
+        let group_id = self.alloc_pane_id(cx);
+        let merged = self.tab_host.update(cx, |tab_host, _cx| {
+            tab_host.merge_terminal_tab_as_split(source_tab_id, target_tab_id, group_id, direction)
+        });
+        let Some(active_pane_id) = merged else {
+            return false;
+        };
+
+        self.close_tab_context_menu();
+        self.set_main_window_active_tab(Some(target_tab_id), cx);
+        self.sync_active_tab_surface(cx);
+        self.needs_active_pane_focus = true;
+        if let Some(pane) = self.tab_host.read(cx).panes().get(&active_pane_id).cloned() {
+            pane.update(cx, |pane, cx| pane.focus(window, cx));
+        }
+        cx.notify();
+        true
     }
 
     pub(in crate::workspace) fn begin_tab_rename(
@@ -1100,26 +1162,44 @@ impl WorkspaceApp {
                 TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
             )
         });
+        let active_tab_id = self.active_tab_id(cx);
+        let can_split_into_active = active_tab_id.is_some_and(|active_tab_id| {
+            terminal_session_kinds_can_merge(
+                self.terminal_tab_active_session_kind(menu.tab_id, cx),
+                self.terminal_tab_active_session_kind(active_tab_id, cx),
+            ) && self
+                .tab_host
+                .read(cx)
+                .can_merge_terminal_tab_as_split(menu.tab_id, active_tab_id)
+        });
         self.tab_by_id(menu.tab_id, cx)?;
         let viewport = window.viewport_size();
-        let menu_height = if renamable {
+        let mut menu_height = if renamable {
             TAB_CONTEXT_MENU_RENAME_HEIGHT
         } else {
             TAB_CONTEXT_MENU_HEIGHT
+        };
+        if can_split_into_active {
+            menu_height += TAB_CONTEXT_MENU_SPLIT_HEIGHT;
+        }
+        let menu_width = if can_split_into_active {
+            TAB_CONTEXT_MENU_SPLIT_WIDTH
+        } else {
+            TAB_CONTEXT_MENU_WIDTH
         };
         let placement = browser_behavior::clamp_context_menu_position(
             menu.x,
             menu.y,
             f32::from(viewport.width),
             f32::from(viewport.height),
-            TAB_CONTEXT_MENU_WIDTH,
+            menu_width,
             menu_height,
             TAB_CONTEXT_MENU_MARGIN,
         );
         let detached = self.tab_host.read(cx).is_detached(menu.tab_id);
         let menu_body = context_menu_event_boundary(
             context_menu_content(&self.tokens)
-                .w(px(TAB_CONTEXT_MENU_WIDTH))
+                .w(px(menu_width))
                 .when(renamable, |content| {
                     content.child(
                         context_menu_item(
@@ -1137,6 +1217,52 @@ impl WorkspaceApp {
                             }),
                         ),
                     )
+                })
+                .when(can_split_into_active, |content| {
+                    content
+                        .child(context_menu_separator(&self.tokens))
+                        .child(
+                            context_menu_item(
+                                &self.tokens,
+                                self.i18n.t("tabbar.split_into_active_horizontal"),
+                                ContextMenuItemKind::Plain,
+                                false,
+                                false,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, window, cx| {
+                                    this.merge_terminal_tab_into_active_split(
+                                        menu.tab_id,
+                                        SplitDirection::Horizontal,
+                                        window,
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                        )
+                        .child(
+                            context_menu_item(
+                                &self.tokens,
+                                self.i18n.t("tabbar.split_into_active_vertical"),
+                                ContextMenuItemKind::Plain,
+                                false,
+                                false,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, window, cx| {
+                                    this.merge_terminal_tab_into_active_split(
+                                        menu.tab_id,
+                                        SplitDirection::Vertical,
+                                        window,
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                        )
                 })
                 .child(
                     context_menu_item(
@@ -1557,5 +1683,27 @@ mod tests {
             detached_tab_surface_route(tab_id, &TabKind::Forwards),
             DetachedTabSurfaceRoute::Forwards(tab_id)
         );
+    }
+
+    #[test]
+    fn existing_terminal_merge_requires_matching_transport_kinds() {
+        use oxideterm_terminal::TerminalSessionKind;
+
+        assert!(terminal_session_kinds_can_merge(
+            Some(TerminalSessionKind::Serial),
+            Some(TerminalSessionKind::Serial),
+        ));
+        assert!(terminal_session_kinds_can_merge(
+            Some(TerminalSessionKind::SshPty),
+            Some(TerminalSessionKind::SshPty),
+        ));
+        assert!(!terminal_session_kinds_can_merge(
+            Some(TerminalSessionKind::Serial),
+            Some(TerminalSessionKind::LocalPty),
+        ));
+        assert!(!terminal_session_kinds_can_merge(
+            None,
+            Some(TerminalSessionKind::Serial),
+        ));
     }
 }

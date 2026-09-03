@@ -1184,6 +1184,8 @@
     "copy_title": "复制标题",
     "detach_to_window": "移到新窗口",
     "return_to_main_window": "移回主窗口",
+    "split_into_active_horizontal": "并入当前标签页（左右分屏）",
+    "split_into_active_vertical": "并入当前标签页（上下分屏）",
     "detached_tab_closed": "此标签页已关闭。",
     "confirm_close_terminal_title": "关闭 SSH 会话",
     "confirm_close_terminal_desc": "要关闭这个 SSH 终端标签页吗？远程会话中未保存的工作可能会丢失。",

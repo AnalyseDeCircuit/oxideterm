@@ -1184,6 +1184,8 @@
     "copy_title": "제목 복사",
     "detach_to_window": "새 창으로 이동",
     "return_to_main_window": "메인 창으로 되돌리기",
+    "split_into_active_horizontal": "활성 탭에 합치기(좌우 분할)",
+    "split_into_active_vertical": "활성 탭에 합치기(상하 분할)",
     "detached_tab_closed": "이 탭은 닫혔습니다.",
     "confirm_close_terminal_title": "SSH 세션 닫기",
     "confirm_close_terminal_desc": "이 SSH 터미널 탭을 닫으시겠습니까? 원격 세션에서 저장하지 않은 작업이 손실될 수 있습니다.",
