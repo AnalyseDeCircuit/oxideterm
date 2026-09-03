@@ -13,27 +13,6 @@ pub(in crate::workspace) struct PendingAiStreamText {
 }
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn schedule_ai_chat_stream_delivery_apply(
-        &mut self,
-        window_handle: AnyWindowHandle,
-        cx: &mut Context<Self>,
-    ) {
-        let deliveries = self
-            .ai_entity
-            .update(cx, |ai, _cx| ai.take_chat_stream_deliveries());
-        if deliveries.is_empty() {
-            return;
-        }
-        cx.spawn(async move |weak, cx| {
-            let _ = cx.update_window(window_handle, |_, window, cx| {
-                weak.update(cx, |workspace, cx| {
-                    workspace.apply_ai_chat_stream_deliveries(deliveries, window, cx);
-                })
-            });
-        })
-        .detach();
-    }
-
     pub(in crate::workspace) fn apply_ai_chat_stream_deliveries(
         &mut self,
         deliveries: VecDeque<AiStreamDelivery>,

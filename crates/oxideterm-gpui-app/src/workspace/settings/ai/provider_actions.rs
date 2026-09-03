@@ -16,7 +16,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn handle_ai_workspace_event(
         &mut self,
         event: &ai_state::AiWorkspaceEvent,
-        window_handle: AnyWindowHandle,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event {
@@ -61,7 +61,12 @@ impl WorkspaceApp {
                 cx.notify();
             }
             ai_state::AiWorkspaceEvent::ChatStreamDeliveryReady => {
-                self.schedule_ai_chat_stream_delivery_apply(window_handle, cx);
+                // The window registry has already acquired a live window here. Drain only now so
+                // a failed nested window update cannot discard terminal tool or completion events.
+                let deliveries = self
+                    .ai_entity
+                    .update(cx, |ai, _cx| ai.take_chat_stream_deliveries());
+                self.apply_ai_chat_stream_deliveries(deliveries, window, cx);
             }
             ai_state::AiWorkspaceEvent::CompactionDeliveryReady => {
                 let deliveries = self

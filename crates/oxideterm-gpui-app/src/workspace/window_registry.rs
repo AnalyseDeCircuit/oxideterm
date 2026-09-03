@@ -698,7 +698,7 @@ impl WorkspaceApp {
                 self.handle_cloud_sync_workspace_event(&event, window, cx);
             }
             WorkspaceWindowEffect::Ai(event) => {
-                self.handle_ai_workspace_event(&event.into_event(), window_handle, cx);
+                self.handle_ai_workspace_event(&event.into_event(), window, cx);
             }
             WorkspaceWindowEffect::Plugin(event) => {
                 self.handle_plugin_workspace_event(&event.into_event(), window_handle, cx);
