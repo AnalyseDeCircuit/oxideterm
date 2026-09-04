@@ -620,7 +620,7 @@
       "session_log_retention_days": "保留天數",
       "session_log_retention_days_hint": "開始新日誌時刪除較舊日誌。設為 0 表示永久保留。",
       "session_log_max_file_size": "單一檔案上限（MiB）",
-      "session_log_max_file_size_hint": "工作階段日誌達到此大小時停止記錄。",
+      "session_log_max_file_size_hint": "工作階段日誌達到此大小時停止記錄；設為 0 表示不限制，可能占滿磁碟。",
       "session_log_directory": "日誌資料夾",
       "session_log_directory_hint": "請選擇絕對路徑；留空則使用 OxideTerm 資料目錄。",
       "session_log_select_directory": "選擇終端日誌資料夾",

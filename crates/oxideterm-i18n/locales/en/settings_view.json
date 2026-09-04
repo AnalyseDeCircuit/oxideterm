@@ -620,7 +620,7 @@
       "session_log_retention_days": "Retention (Days)",
       "session_log_retention_days_hint": "Delete older session logs when a new log starts. Set to 0 to keep logs indefinitely.",
       "session_log_max_file_size": "Maximum File Size (MiB)",
-      "session_log_max_file_size_hint": "Stop logging when a session log reaches this size.",
+      "session_log_max_file_size_hint": "Stop logging when a session log reaches this size. Set to 0 for unlimited; this may fill the disk.",
       "session_log_directory": "Log Folder",
       "session_log_directory_hint": "Choose an absolute folder. Leave blank to use the OxideTerm data directory.",
       "session_log_select_directory": "Select Terminal Log Folder",

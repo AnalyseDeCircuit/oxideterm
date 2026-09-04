@@ -54,7 +54,7 @@ pub struct TerminalSessionLogOptions {
     pub directory_template: String,
     pub include_control_sequences: bool,
     pub retention_days: u64,
-    pub max_file_bytes: u64,
+    pub max_file_bytes: Option<u64>,
     pub file_name_template: String,
     pub content_template: String,
     pub file_mode: TerminalSessionLogFileMode,
@@ -116,7 +116,10 @@ impl TerminalSessionLog {
             &options.context,
             options.file_mode,
         )?;
-        if initial_bytes >= options.max_file_bytes.max(1) {
+        if options
+            .max_file_bytes
+            .is_some_and(|max_file_bytes| initial_bytes >= max_file_bytes)
+        {
             return Err(io::Error::other(
                 "terminal session log already reached its size limit",
             ));
@@ -290,7 +293,7 @@ fn run_session_log_writer(
     cancelled: Arc<AtomicBool>,
     bytes_written: Arc<AtomicU64>,
     include_control_sequences: bool,
-    max_file_bytes: u64,
+    max_file_bytes: Option<u64>,
     content_template: ParsedTerminalSessionLogTemplate,
     context: TerminalSessionLogContext,
 ) -> io::Result<()> {
@@ -460,15 +463,15 @@ fn write_template_parts(
 
 struct BoundedLogWriter {
     writer: BufWriter<File>,
-    max_bytes: u64,
+    max_bytes: Option<u64>,
     bytes_written: Arc<AtomicU64>,
 }
 
 impl BoundedLogWriter {
-    fn new(file: File, max_bytes: u64, bytes_written: Arc<AtomicU64>) -> Self {
+    fn new(file: File, max_bytes: Option<u64>, bytes_written: Arc<AtomicU64>) -> Self {
         Self {
             writer: BufWriter::new(file),
-            max_bytes: max_bytes.max(1),
+            max_bytes,
             bytes_written,
         }
     }
@@ -477,16 +480,18 @@ impl BoundedLogWriter {
 impl Write for BoundedLogWriter {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         let written = self.bytes_written.load(Ordering::Relaxed);
-        if written >= self.max_bytes {
-            return Err(io::Error::other(
-                "terminal session log reached its size limit",
-            ));
-        }
-        let remaining = (self.max_bytes - written).min(buffer.len() as u64) as usize;
-        if remaining < buffer.len() {
-            return Err(io::Error::other(
-                "terminal session log reached its size limit",
-            ));
+        if let Some(max_bytes) = self.max_bytes {
+            if written >= max_bytes {
+                return Err(io::Error::other(
+                    "terminal session log reached its size limit",
+                ));
+            }
+            let remaining = (max_bytes - written).min(buffer.len() as u64) as usize;
+            if remaining < buffer.len() {
+                return Err(io::Error::other(
+                    "terminal session log reached its size limit",
+                ));
+            }
         }
         self.writer.write_all(buffer)?;
         self.bytes_written
@@ -833,7 +838,7 @@ mod tests {
             directory_template: String::new(),
             include_control_sequences: false,
             retention_days: 30,
-            max_file_bytes: 1024,
+            max_file_bytes: Some(1024),
             file_name_template: "{date}_{time}_{session}.log".to_string(),
             content_template: "{text}".to_string(),
             file_mode: TerminalSessionLogFileMode::Unique,
@@ -879,7 +884,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mut bounded = options(directory.path());
         bounded.include_control_sequences = true;
-        bounded.max_file_bytes = 4;
+        bounded.max_file_bytes = Some(4);
         let mut log = TerminalSessionLog::start(bounded).unwrap();
         let path = log.status().path.unwrap();
 
@@ -887,6 +892,21 @@ mod tests {
         assert!(log.finish().is_err());
 
         assert!(fs::metadata(path).unwrap().len() <= 4);
+    }
+
+    #[test]
+    fn unlimited_log_writes_past_the_default_test_boundary() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut unlimited = options(directory.path());
+        unlimited.include_control_sequences = true;
+        unlimited.max_file_bytes = None;
+        let mut log = TerminalSessionLog::start(unlimited).unwrap();
+        let content = vec![b'x'; 2048];
+
+        log.write_output(content.clone()).unwrap();
+        let path = log.finish().unwrap();
+
+        assert_eq!(fs::read(path).unwrap(), content);
     }
 
     #[test]

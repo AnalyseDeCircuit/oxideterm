@@ -620,7 +620,7 @@
       "session_log_retention_days": "保存期間（日）",
       "session_log_retention_days_hint": "新しいログの開始時に古いログを削除します。0 にすると無期限に保存します。",
       "session_log_max_file_size": "最大ファイルサイズ（MiB）",
-      "session_log_max_file_size_hint": "ログがこのサイズに達すると記録を停止します。",
+      "session_log_max_file_size_hint": "ログがこのサイズに達すると記録を停止します。0 に設定すると無制限になり、ディスクを使い切る可能性があります。",
       "session_log_directory": "ログフォルダー",
       "session_log_directory_hint": "絶対パスを選択します。空欄の場合は OxideTerm データディレクトリを使用します。",
       "session_log_select_directory": "ターミナルログフォルダーを選択",

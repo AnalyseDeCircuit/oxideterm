@@ -620,7 +620,7 @@
       "session_log_retention_days": "Thời gian lưu (ngày)",
       "session_log_retention_days_hint": "Xóa nhật ký cũ khi bắt đầu nhật ký mới. Đặt 0 để giữ vô thời hạn.",
       "session_log_max_file_size": "Kích thước tệp tối đa (MiB)",
-      "session_log_max_file_size_hint": "Dừng ghi khi nhật ký đạt kích thước này.",
+      "session_log_max_file_size_hint": "Dừng ghi khi nhật ký đạt kích thước này. Đặt thành 0 để không giới hạn; tùy chọn này có thể làm đầy ổ đĩa.",
       "session_log_directory": "Thư mục nhật ký",
       "session_log_directory_hint": "Chọn đường dẫn tuyệt đối. Để trống để dùng thư mục dữ liệu OxideTerm.",
       "session_log_select_directory": "Chọn thư mục nhật ký terminal",

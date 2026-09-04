@@ -458,7 +458,7 @@ pub fn apply_persisted_settings_input_draft(
             .map(|value| settings.terminal.session_log.retention_days = value.clamp(0, 3650))
             .into(),
         SettingsInput::TerminalSessionLogMaxFileSizeMib => parse_i64(draft)
-            .map(|value| settings.terminal.session_log.max_file_size_mib = value.clamp(1, 4096))
+            .map(|value| settings.terminal.session_log.max_file_size_mib = value.clamp(0, 4096))
             .into(),
         SettingsInput::TerminalSessionLogDirectory => {
             let directory = draft.trim();
@@ -909,7 +909,7 @@ mod tests {
     }
 
     #[test]
-    fn session_log_limits_accept_forever_retention_and_bound_file_size() {
+    fn session_log_limits_accept_unlimited_retention_and_file_size() {
         let mut settings = PersistedSettings::default();
 
         assert_eq!(
@@ -931,6 +931,16 @@ mod tests {
             SettingsInputDraftApply::Applied
         );
         assert_eq!(settings.terminal.session_log.max_file_size_mib, 4096);
+
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::TerminalSessionLogMaxFileSizeMib,
+                "0",
+            ),
+            SettingsInputDraftApply::Applied
+        );
+        assert_eq!(settings.terminal.session_log.max_file_size_mib, 0);
     }
 
     #[test]

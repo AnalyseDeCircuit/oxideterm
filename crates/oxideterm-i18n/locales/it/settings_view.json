@@ -620,7 +620,7 @@
       "session_log_retention_days": "Conservazione (giorni)",
       "session_log_retention_days_hint": "Elimina i registri meno recenti all’avvio di uno nuovo. Imposta 0 per conservarli senza scadenza.",
       "session_log_max_file_size": "Dimensione massima file (MiB)",
-      "session_log_max_file_size_hint": "Interrompe la registrazione quando il file raggiunge questa dimensione.",
+      "session_log_max_file_size_hint": "Interrompe la registrazione quando il file raggiunge questa dimensione. Il valore 0 rimuove il limite e può riempire il disco.",
       "session_log_directory": "Cartella dei registri",
       "session_log_directory_hint": "Scegli un percorso assoluto. Lascia vuoto per usare la directory dati di OxideTerm.",
       "session_log_select_directory": "Seleziona la cartella dei registri del terminale",

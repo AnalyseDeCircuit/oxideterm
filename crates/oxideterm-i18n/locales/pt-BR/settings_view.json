@@ -620,7 +620,7 @@
       "session_log_retention_days": "Retenção (dias)",
       "session_log_retention_days_hint": "Exclui registros antigos ao iniciar um novo. Use 0 para mantê-los indefinidamente.",
       "session_log_max_file_size": "Tamanho máximo do arquivo (MiB)",
-      "session_log_max_file_size_hint": "Interrompe o registro quando o arquivo atinge esse tamanho.",
+      "session_log_max_file_size_hint": "Interrompe o registro quando o arquivo atinge esse tamanho. O valor 0 remove o limite e pode encher o disco.",
       "session_log_directory": "Pasta de registros",
       "session_log_directory_hint": "Escolha um caminho absoluto. Deixe em branco para usar o diretório de dados do OxideTerm.",
       "session_log_select_directory": "Selecionar pasta de registros do terminal",

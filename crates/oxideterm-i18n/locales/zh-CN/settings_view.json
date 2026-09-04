@@ -620,7 +620,7 @@
       "session_log_retention_days": "保留天数",
       "session_log_retention_days_hint": "开始新日志时删除更早的日志。设为 0 表示永久保留。",
       "session_log_max_file_size": "单文件上限（MiB）",
-      "session_log_max_file_size_hint": "会话日志达到此大小时停止记录。",
+      "session_log_max_file_size_hint": "会话日志达到此大小时停止记录；设为 0 表示无限制，可能占满磁盘。",
       "session_log_directory": "日志文件夹",
       "session_log_directory_hint": "请选择绝对路径；留空则使用 OxideTerm 数据目录。",
       "session_log_select_directory": "选择终端日志文件夹",

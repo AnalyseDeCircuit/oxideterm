@@ -748,7 +748,7 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
             100 * 1024 * 1024 * 1024,
         ),
         ("terminal.sessionLog.retentionDays", 30, 0, 3650),
-        ("terminal.sessionLog.maxFileSizeMib", 100, 1, 4096),
+        ("terminal.sessionLog.maxFileSizeMib", 100, 0, 4096),
     ] {
         let segments: Vec<_> = path.split('.').collect();
         if let Some(value) = get_path_mut(&mut settings, &segments) {

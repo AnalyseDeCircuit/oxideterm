@@ -1284,8 +1284,11 @@ impl WorkspaceApp {
                 directory_template: session_log_settings.directory_template.clone(),
                 include_control_sequences: session_log_settings.include_control_sequences,
                 retention_days: session_log_settings.retention_days.max(0) as u64,
-                max_file_bytes: (session_log_settings.max_file_size_mib.max(1) as u64)
-                    .saturating_mul(1024 * 1024),
+                // Zero is the explicit unlimited setting; positive values keep a byte boundary.
+                max_file_bytes: u64::try_from(session_log_settings.max_file_size_mib)
+                    .ok()
+                    .filter(|size_mib| *size_mib > 0)
+                    .map(|size_mib| size_mib.saturating_mul(1024 * 1024)),
                 file_name_template: session_log_settings.file_name_template.clone(),
                 content_template: session_log_settings.content_template.clone(),
                 file_mode: session_log_settings.file_mode,

@@ -620,7 +620,7 @@
       "session_log_retention_days": "Aufbewahrung (Tage)",
       "session_log_retention_days_hint": "Ältere Protokolle beim Start eines neuen Protokolls löschen. 0 bewahrt sie unbegrenzt auf.",
       "session_log_max_file_size": "Maximale Dateigröße (MiB)",
-      "session_log_max_file_size_hint": "Protokollierung beenden, wenn diese Größe erreicht ist.",
+      "session_log_max_file_size_hint": "Protokollierung beenden, wenn diese Größe erreicht ist. 0 bedeutet unbegrenzt und kann den Datenträger füllen.",
       "session_log_directory": "Protokollordner",
       "session_log_directory_hint": "Wählen Sie einen absoluten Pfad. Leer lassen, um das OxideTerm-Datenverzeichnis zu verwenden.",
       "session_log_select_directory": "Ordner für Terminalprotokolle auswählen",
