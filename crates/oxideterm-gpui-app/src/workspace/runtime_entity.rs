@@ -1819,8 +1819,25 @@ impl WorkspaceRuntimeEntity {
         mode: ConnectionTraceMode,
         node_ids: Vec<NodeId>,
     ) -> ConnectionTracePlan {
+        let reconnect_job_id = if mode == ConnectionTraceMode::Reconnect {
+            node_ids.iter().find_map(|node_id| {
+                if let Some(job_id) = self.reconnect_orchestrator.active_job_id(&node_id.0) {
+                    return Some(job_id);
+                }
+                let path = self.node_router.path_to_node(node_id).ok()?;
+                path.into_iter().find_map(|path_node_id| {
+                    self.reconnect_orchestrator.active_job_id(&path_node_id.0)
+                })
+            })
+        } else {
+            None
+        };
         ConnectionTracePlan {
-            attempt_id: self.connection_trace_state.next_attempt_id(),
+            // Physical retries share the reconnect job identity so dismissing progress
+            // remains a presentation choice for the workflow, not a transport action.
+            attempt_id: reconnect_job_id
+                .map(|job_id| format!("native-reconnect-{job_id}"))
+                .unwrap_or_else(|| self.connection_trace_state.next_attempt_id()),
             mode,
             node_ids,
         }
@@ -3355,6 +3372,15 @@ mod tests {
             assert!(entity.has_active_reconnect_job(&node_id));
             assert!(entity.reconnect_job_is_current(&node_id, &job.job_id));
             assert_eq!(entity.active_reconnect_node_ids(), vec![node_id.clone()]);
+            let first_trace = entity
+                .new_connection_trace_plan(ConnectionTraceMode::Reconnect, vec![node_id.clone()]);
+            let retry_trace = entity
+                .new_connection_trace_plan(ConnectionTraceMode::Reconnect, vec![node_id.clone()]);
+            assert_eq!(first_trace.attempt_id, retry_trace.attempt_id);
+            assert_eq!(
+                first_trace.attempt_id,
+                format!("native-reconnect-{}", job.job_id)
+            );
 
             entity.finish_reconnect_job_state(&node_id, Ok(0), None);
             assert!(!entity.has_active_reconnect_job(&node_id));
