@@ -331,7 +331,7 @@ fn open_main_workspace_window(
 ) -> anyhow::Result<()> {
     let window_bounds = initial_window_bounds(cx, &window_ui);
     cx.open_window(
-        platform::window_options_with_bounds(window_bounds),
+        platform::workspace_window_options_with_bounds(window_bounds),
         |window, cx| {
             let desktop_presence_rx = match oxideterm_desktop_presence::install_for_window(
                 window,

@@ -20,6 +20,19 @@ pub fn window_options(bounds: Bounds<Pixels>) -> WindowOptions {
     window_options_with_bounds(WindowBounds::Windowed(bounds))
 }
 
+pub fn workspace_window_options(bounds: Bounds<Pixels>) -> WindowOptions {
+    workspace_window_options_with_bounds(WindowBounds::Windowed(bounds))
+}
+
+/// Builds options for windows whose custom chrome owns titlebar interactions.
+pub fn workspace_window_options_with_bounds(window_bounds: WindowBounds) -> WindowOptions {
+    let mut options = window_options_with_bounds(window_bounds);
+    // AppKit otherwise reserves the fullscreen top edge for native window movement
+    // and can intercept clicks before they reach tabs rendered in that region.
+    options.app_owns_titlebar_drag = true;
+    options
+}
+
 /// Builds normal application window options while preserving a restored state.
 pub fn window_options_with_bounds(window_bounds: WindowBounds) -> WindowOptions {
     let metrics = UiMetrics::tauri_default();

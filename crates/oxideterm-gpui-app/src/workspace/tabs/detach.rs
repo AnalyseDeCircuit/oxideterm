@@ -467,7 +467,7 @@ impl WorkspaceApp {
         // this Workspace update is active, so bootstrap it from scalar values.
         let background_cache_byte_limit = self.render_policy.image_cache_bytes;
         let open_result = cx.open_window(
-            oxideterm_gpui_platform::window_options(bounds),
+            oxideterm_gpui_platform::workspace_window_options(bounds),
             move |detached_window, cx| {
                 cx.new(|cx| {
                     super::detached_tab_window::DetachedTabWindow::new(
