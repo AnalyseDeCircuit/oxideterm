@@ -140,6 +140,9 @@ pub trait TerminalSessionBackend: Send {
     }
     fn read_pending(&mut self) -> bool;
     fn read_pending_with_budget(&mut self, budget: TerminalDrainBudget) -> TerminalDrainReport;
+    fn pending_output_flush_delay(&self) -> Option<Duration> {
+        None
+    }
     fn activity_receiver(&self) -> TerminalActivityReceiver;
     fn take_events(&mut self) -> Vec<TerminalEvent>;
     fn write_input(&mut self, bytes: &[u8]) -> Result<()>;

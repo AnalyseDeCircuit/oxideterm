@@ -355,6 +355,37 @@ where
         (parsed_bytes, graphics_changed)
     }
 
+    fn flush_buffered_modem_output(&mut self, state: &mut LocalGraphicsState, force: bool) -> bool {
+        // The PTY reader owns both the detector and parser, so an expiring
+        // prefix is committed on this loop without a second background task.
+        let events = if force {
+            state.modem_consumer.flush_pending_plain_output()
+        } else {
+            state.modem_consumer.flush_expired_plain_output()
+        };
+        if events.is_empty() {
+            return false;
+        }
+
+        let terminal_lease = self.terminal.lease();
+        let mut terminal = self.terminal.lock_unfair();
+        let (parsed_bytes, graphics_changed) = Self::handle_modem_consumer_events(
+            state,
+            &mut terminal,
+            events,
+            self.size,
+            &self.magic_tx,
+            &self.event_tx,
+            &self.graphics_tx,
+        );
+        drop(terminal);
+        drop(terminal_lease);
+        if graphics_changed || parsed_bytes > 0 {
+            self.event_proxy.send_event(Event::Wakeup);
+        }
+        true
+    }
+
     pub(crate) fn channel(&self) -> LocalGraphicsEventLoopSender {
         LocalGraphicsEventLoopSender {
             sender: self.tx.clone(),
@@ -660,9 +691,16 @@ where
 
                 'event_loop: loop {
                     let handler = state.parser.sync_timeout();
-                    let timeout = handler
+                    let parser_timeout = handler
                         .sync_timeout()
                         .map(|deadline| deadline.saturating_duration_since(Instant::now()));
+                    let timeout = [
+                        parser_timeout,
+                        state.modem_consumer.pending_plain_output_delay(),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .min();
 
                     events.clear();
                     if let Err(error) = self.poll.wait(&mut events, timeout) {
@@ -676,7 +714,12 @@ where
                     }
 
                     let modem_writes_queued = self.flush_modem_server_writes(&mut state);
-                    if events.is_empty() && self.rx.peek().is_none() && !modem_writes_queued {
+                    let modem_output_flushed = self.flush_buffered_modem_output(&mut state, false);
+                    if events.is_empty()
+                        && self.rx.peek().is_none()
+                        && !modem_writes_queued
+                        && !modem_output_flushed
+                    {
                         state.parser.stop_sync(&mut *self.terminal.lock());
                         self.event_proxy.send_event(Event::Wakeup);
                         continue;
@@ -700,6 +743,7 @@ where
                                             self.send_read_report(report);
                                         }
                                     }
+                                    self.flush_buffered_modem_output(&mut state, true);
                                     if let Ok(report) = self.flush_utf8_residual(&mut state) {
                                         self.send_read_report(report);
                                     }

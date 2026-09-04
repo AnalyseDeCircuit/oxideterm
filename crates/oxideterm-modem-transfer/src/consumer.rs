@@ -5,9 +5,14 @@ use crate::detector::{DetectedModemProtocol, detect_modem_start};
 use crate::stream::{ModemTransfer, ModemWakeCallback};
 use crate::zmodem::ZFrameType;
 use crate::zmodem_transfer::parse_zmodem_header_prefix;
-use std::{borrow::Cow, fmt};
+use std::{
+    borrow::Cow,
+    fmt,
+    time::{Duration, Instant},
+};
 
 const PLAIN_HISTORY_LIMIT: usize = 512;
+const MODEM_PREFIX_IDLE_TIMEOUT: Duration = Duration::from_millis(50);
 const XYMODEM_CANCEL_BYTES: &[u8] = &[crate::xymodem::CAN; 8];
 const ZMODEM_CANCEL_BYTES: &[u8] = &[
     crate::zmodem::ZDLE,
@@ -52,6 +57,7 @@ pub enum ModemConsumerEvent {
 pub struct ModemConsumer {
     plain_tail: Vec<u8>,
     detection_tail: Vec<u8>,
+    plain_tail_deadline: Option<Instant>,
     plain_history: Vec<u8>,
     detection_scope: ModemDetectionScope,
     pending: Option<PendingTransfer>,
@@ -204,6 +210,7 @@ impl ModemConsumer {
         Self {
             plain_tail: Vec::new(),
             detection_tail: Vec::new(),
+            plain_tail_deadline: None,
             plain_history: Vec::new(),
             detection_scope: ModemDetectionScope::default(),
             pending: None,
@@ -251,6 +258,7 @@ impl ModemConsumer {
         self.pending = None;
         self.plain_tail.clear();
         self.detection_tail.clear();
+        self.plain_tail_deadline = None;
         self.plain_history.clear();
         self.detection_scope.reset();
         trailing_output
@@ -272,6 +280,20 @@ impl ModemConsumer {
     }
 
     pub fn process_server_output(&mut self, bytes: &[u8]) -> Vec<ModemConsumerEvent> {
+        self.process_server_output_at(bytes, Instant::now())
+    }
+
+    fn process_server_output_at(&mut self, bytes: &[u8], now: Instant) -> Vec<ModemConsumerEvent> {
+        let mut events = self.flush_expired_plain_output_at(now);
+        events.extend(self.process_server_output_inner(bytes, now));
+        events
+    }
+
+    fn process_server_output_inner(
+        &mut self,
+        bytes: &[u8],
+        now: Instant,
+    ) -> Vec<ModemConsumerEvent> {
         if bytes.is_empty() {
             return Vec::new();
         }
@@ -306,6 +328,7 @@ impl ModemConsumer {
             combined.extend_from_slice(&self.plain_tail);
             combined.extend_from_slice(bytes);
             self.plain_tail.clear();
+            self.plain_tail_deadline = None;
             Cow::Owned(combined)
         };
         let detection_bytes = if self.detection_tail.is_empty() {
@@ -321,15 +344,11 @@ impl ModemConsumer {
         let Some(start) = detect_modem_start(detection_bytes.as_ref()) else {
             let hold = possible_modem_prefix_suffix_len(detection_bytes.as_ref());
             if hold == scan_bytes.len() {
-                self.plain_tail.extend_from_slice(scan_bytes.as_ref());
-                self.detection_tail
-                    .extend_from_slice(detection_bytes.as_ref());
+                self.hold_plain_tail(scan_bytes.as_ref(), detection_bytes.as_ref(), now);
                 return Vec::new();
             }
             let split = scan_bytes.len() - hold;
-            self.plain_tail.extend_from_slice(&scan_bytes[split..]);
-            self.detection_tail
-                .extend_from_slice(&detection_bytes[split..]);
+            self.hold_plain_tail(&scan_bytes[split..], &detection_bytes[split..], now);
             self.remember_plain_output(&detection_bytes[..split]);
             let mut events = vec![ModemConsumerEvent::WriteTerminal(
                 scan_bytes[..split].to_vec(),
@@ -375,6 +394,50 @@ impl ModemConsumer {
         }
 
         events
+    }
+
+    pub fn pending_plain_output_delay(&self) -> Option<Duration> {
+        self.plain_tail_deadline
+            .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+    }
+
+    pub fn flush_expired_plain_output(&mut self) -> Vec<ModemConsumerEvent> {
+        self.flush_expired_plain_output_at(Instant::now())
+    }
+
+    pub fn flush_pending_plain_output(&mut self) -> Vec<ModemConsumerEvent> {
+        if self.plain_tail.is_empty() {
+            self.plain_tail_deadline = None;
+            return Vec::new();
+        }
+
+        let plain = std::mem::take(&mut self.plain_tail);
+        let detection = std::mem::take(&mut self.detection_tail);
+        self.plain_tail_deadline = None;
+        self.remember_plain_output(&detection);
+        vec![ModemConsumerEvent::WriteTerminal(plain)]
+    }
+
+    fn flush_expired_plain_output_at(&mut self, now: Instant) -> Vec<ModemConsumerEvent> {
+        if self
+            .plain_tail_deadline
+            .is_none_or(|deadline| now < deadline)
+        {
+            return Vec::new();
+        }
+        self.flush_pending_plain_output()
+    }
+
+    fn hold_plain_tail(&mut self, plain: &[u8], detection: &[u8], now: Instant) {
+        if plain.is_empty() {
+            self.plain_tail_deadline = None;
+            return;
+        }
+        self.plain_tail.extend_from_slice(plain);
+        self.detection_tail.extend_from_slice(detection);
+        // A short idle window joins transport fragments without hiding ordinary
+        // text indefinitely when it happens to share a modem header prefix.
+        self.plain_tail_deadline = Some(now + MODEM_PREFIX_IDLE_TIMEOUT);
     }
 
     fn process_pending_server_output(&mut self, bytes: &[u8]) -> Vec<ModemConsumerEvent> {
@@ -423,6 +486,7 @@ impl ModemConsumer {
         );
         self.transfer_input = Some(transfer.clone());
         self.transfer = Some(transfer.clone());
+        self.plain_tail_deadline = None;
         self.plain_history.clear();
         transfer
     }
@@ -648,6 +712,46 @@ mod tests {
         assert!(consumer.process_server_output(&[b'*', b'*']).is_empty());
         let events = consumer.process_server_output(&[0x18, b'B', b'0']);
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn incomplete_modem_prefix_is_released_after_idle_timeout() {
+        let mut consumer = ModemConsumer::new();
+        let started_at = Instant::now();
+
+        assert!(
+            consumer
+                .process_server_output_at(b"**", started_at)
+                .is_empty()
+        );
+        assert_eq!(
+            terminal_bytes(&consumer.flush_expired_plain_output_at(
+                started_at + MODEM_PREFIX_IDLE_TIMEOUT - Duration::from_nanos(1)
+            )),
+            b""
+        );
+        assert_eq!(
+            terminal_bytes(
+                &consumer.flush_expired_plain_output_at(started_at + MODEM_PREFIX_IDLE_TIMEOUT)
+            ),
+            b"**"
+        );
+    }
+
+    #[test]
+    fn delayed_suffix_does_not_reclassify_released_text_as_a_modem_header() {
+        let mut consumer = ModemConsumer::new();
+        let started_at = Instant::now();
+
+        assert!(
+            consumer
+                .process_server_output_at(b"*", started_at)
+                .is_empty()
+        );
+        let events =
+            consumer.process_server_output_at(b"X", started_at + MODEM_PREFIX_IDLE_TIMEOUT);
+
+        assert_eq!(terminal_bytes(&events), b"*X");
     }
 
     #[test]

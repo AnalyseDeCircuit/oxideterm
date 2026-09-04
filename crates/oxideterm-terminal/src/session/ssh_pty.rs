@@ -593,6 +593,19 @@ impl SshPtySession {
         }
     }
 
+    fn flush_buffered_modem_output(&mut self) -> bool {
+        // The session releases an incomplete prefix on its maintenance tick,
+        // or immediately when the transport has ended and no continuation can arrive.
+        let events = if self.lifecycle.is_running() {
+            self.modem_consumer.flush_expired_plain_output()
+        } else {
+            self.modem_consumer.flush_pending_plain_output()
+        };
+        let changed = !events.is_empty();
+        self.handle_modem_consumer_events(events);
+        changed
+    }
+
     fn feed_utf8_terminal_output(&mut self, bytes: &[u8]) {
         self.push_output_event(bytes);
         let mut term = self.term.lock();
@@ -811,6 +824,7 @@ impl TerminalSessionBackend for SshPtySession {
     fn read_pending(&mut self) -> bool {
         let mut changed = self.process_connect_result();
         changed |= self.drain_transport_output().changed;
+        changed |= self.flush_buffered_modem_output();
         changed |= self.flush_tmux_commands();
         changed |= self.flush_trzsz_server_writes();
         changed |= self.flush_modem_server_writes();
@@ -829,6 +843,9 @@ impl TerminalSessionBackend for SshPtySession {
             report.mark_changed();
         }
         report.combine(self.drain_transport_output_with_budget(budget));
+        if self.flush_buffered_modem_output() {
+            report.mark_changed();
+        }
         if self.flush_tmux_commands() {
             report.mark_changed();
         }
@@ -856,6 +873,10 @@ impl TerminalSessionBackend for SshPtySession {
         }
         report.drain_duration = started.elapsed();
         report
+    }
+
+    fn pending_output_flush_delay(&self) -> Option<Duration> {
+        self.modem_consumer.pending_plain_output_delay()
     }
 
     fn activity_receiver(&self) -> TerminalActivityReceiver {

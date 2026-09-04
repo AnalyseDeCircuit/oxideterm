@@ -305,6 +305,7 @@ fn terminal_maintenance_interval(
     process_refresh_remaining: Option<Duration>,
     pending_cwd_remaining: Option<Duration>,
     editor_expiry_remaining: Option<Duration>,
+    pending_output_flush_delay: Option<Duration>,
 ) -> Option<Duration> {
     if drain_budget_exhausted {
         return Some(drain_boost_interval);
@@ -316,6 +317,7 @@ fn terminal_maintenance_interval(
         process_refresh_remaining,
         pending_cwd_remaining,
         editor_expiry_remaining,
+        pending_output_flush_delay,
     ]
     .into_iter()
     .flatten()
@@ -2669,12 +2671,13 @@ impl TerminalPane {
             CURSOR_BLINK_INTERVAL
                 .saturating_sub(now.saturating_duration_since(self.last_cursor_blink))
         });
-        let (mode, ssh_still_connecting, process_refresh_supported) = {
+        let (mode, ssh_still_connecting, process_refresh_supported, pending_output_flush_delay) = {
             let terminal = self.terminal.lock();
             (
                 terminal.mode(),
                 terminal.kind() == TerminalSessionKind::SshPty && !terminal.is_interactive(),
                 terminal.process_info_probe().is_some(),
+                terminal.pending_output_flush_delay(),
             )
         };
         let needs_process_refresh = (self.settings.free_type_mode
@@ -2710,6 +2713,7 @@ impl TerminalPane {
             process_refresh_remaining,
             pending_cwd_remaining,
             editor_expiry_remaining,
+            pending_output_flush_delay,
         )
     }
 
@@ -3925,6 +3929,7 @@ mod tests {
                 false,
                 Duration::from_millis(8),
                 false,
+                None,
                 None,
                 None,
                 None,

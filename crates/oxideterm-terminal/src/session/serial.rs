@@ -617,6 +617,19 @@ impl SerialSession {
         }
     }
 
+    fn flush_buffered_modem_output(&mut self) -> bool {
+        // The serial session owns the undecided bytes and releases them at the
+        // maintenance deadline or when the device can no longer send a suffix.
+        let events = if self.lifecycle.is_running() {
+            self.modem_consumer.flush_expired_plain_output()
+        } else {
+            self.modem_consumer.flush_pending_plain_output()
+        };
+        let changed = !events.is_empty();
+        self.handle_modem_consumer_events(events);
+        changed
+    }
+
     fn prepare_display_output(&mut self, bytes: &[u8]) -> Vec<u8> {
         match self.runtime_options.display_mode {
             SerialDisplayMode::Text => {
@@ -733,6 +746,9 @@ impl TerminalSessionBackend for SerialSession {
     fn read_pending_with_budget(&mut self, budget: TerminalDrainBudget) -> TerminalDrainReport {
         let started = Instant::now();
         let mut report = self.drain_worker_events_with_budget(budget);
+        if self.flush_buffered_modem_output() {
+            report.mark_changed();
+        }
         if self.flush_modem_server_writes() {
             report.mark_changed();
         }
@@ -752,6 +768,10 @@ impl TerminalSessionBackend for SerialSession {
         }
         report.drain_duration = started.elapsed();
         report
+    }
+
+    fn pending_output_flush_delay(&self) -> Option<Duration> {
+        self.modem_consumer.pending_plain_output_delay()
     }
 
     fn activity_receiver(&self) -> TerminalActivityReceiver {

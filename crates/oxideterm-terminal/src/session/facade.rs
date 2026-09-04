@@ -281,6 +281,10 @@ impl TerminalSession {
         self.backend.read_pending_with_budget(budget)
     }
 
+    pub fn pending_output_flush_delay(&self) -> Option<Duration> {
+        self.backend.pending_output_flush_delay()
+    }
+
     pub fn activity_receiver(&self) -> TerminalActivityReceiver {
         self.backend.activity_receiver()
     }
