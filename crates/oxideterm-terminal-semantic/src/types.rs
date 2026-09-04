@@ -18,6 +18,8 @@ pub enum SemanticClass {
     Link,
     Path,
     Address,
+    Weekday,
+    Month,
     Timestamp,
     Number,
     Error,
@@ -37,6 +39,8 @@ pub const SEMANTIC_CLASSES: &[SemanticClass] = &[
     SemanticClass::Link,
     SemanticClass::Path,
     SemanticClass::Address,
+    SemanticClass::Weekday,
+    SemanticClass::Month,
     SemanticClass::Timestamp,
     SemanticClass::Number,
     SemanticClass::Error,
@@ -62,13 +66,32 @@ pub enum SemanticLineRole {
     Output,
     PsAuxOutput,
     PsFullOutput,
+    RustToolOutput,
+    CCompilerOutput,
+    GitStatusOutput,
+    GitDiffOutput,
+    SystemdOutput,
+    TestOutput,
+    ContainerOutput,
     #[default]
     Unknown,
 }
 
 impl SemanticLineRole {
     pub(crate) fn is_output(self) -> bool {
-        matches!(self, Self::Output | Self::PsAuxOutput | Self::PsFullOutput)
+        matches!(
+            self,
+            Self::Output
+                | Self::PsAuxOutput
+                | Self::PsFullOutput
+                | Self::RustToolOutput
+                | Self::CCompilerOutput
+                | Self::GitStatusOutput
+                | Self::GitDiffOutput
+                | Self::SystemdOutput
+                | Self::TestOutput
+                | Self::ContainerOutput
+        )
     }
 }
 

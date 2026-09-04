@@ -179,7 +179,8 @@ use oxideterm_gpui_terminal::{
     TerminalSessionLogStatus, TerminalTmuxLabels, TerminalTrzszLabels,
     TerminalUiPreferenceOverrides, TerminalUiPreferences, TerminalUiTheme,
     TerminalWorkingDirectorySource, detect_custom_privilege_prompt, prune_terminal_session_logs,
-    resolved_terminal_semantic_scheme,
+    resolved_terminal_semantic_scheme, terminal_semantic_line_band,
+    terminal_semantic_variant_color,
 };
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{

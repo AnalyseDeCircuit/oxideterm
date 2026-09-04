@@ -6,15 +6,19 @@ use std::ops::Range;
 use oxideterm_terminal::{TerminalAttrs, TerminalCommandMark, TerminalSnapshot};
 use oxideterm_terminal_semantic::{
     CompiledSemanticScheme, SemanticClass, SemanticLineRole, SemanticShellDialect,
-    classify_line_with_compiled_scheme_and_shell, semantic_output_role_for_command,
+    classify_line_with_compiled_scheme_and_shell, semantic_line_emphasis,
+    semantic_output_role_for_command,
 };
 #[cfg(test)]
 use oxideterm_terminal_semantic::{
     SemanticScheme, built_in_scheme_document, compile_scheme_document, compiled_builtin_scheme,
 };
 
-use crate::terminal_ui::{TerminalUiTheme, terminal_color_from_hex};
-use crate::terminal_view::element::to_hsla;
+use crate::terminal_ui::{
+    TerminalUiTheme, terminal_color_from_hex, terminal_semantic_color, terminal_semantic_line_band,
+    terminal_semantic_variant_color,
+};
+use crate::terminal_view::element::{TerminalRect, to_hsla};
 use crate::terminal_view::highlight::{
     TerminalHighlightLayout, build_logical_line, logical_line_range,
 };
@@ -37,13 +41,19 @@ pub(super) fn append_terminal_semantics_for_rows(
             continue;
         }
         let role = semantic_line_role_for_rows(snapshot, command_marks, line_range.clone());
-        let line = build_logical_line(snapshot, line_range);
-        for span in classify_line_with_compiled_scheme_and_shell(
+        let line = build_logical_line(snapshot, line_range.clone());
+        let spans = classify_line_with_compiled_scheme_and_shell(
             &line.text,
             role,
             semantic_scheme,
             semantic_shell,
-        ) {
+        );
+        if let Some(emphasis) = semantic_line_emphasis(&line.text, role)
+            && spans.iter().any(|span| span.class == emphasis)
+        {
+            append_semantic_line_band(snapshot, line_range, theme, emphasis, layout);
+        }
+        for span in spans {
             let start = line.text[..span.range.start].chars().count();
             let end = line.text[..span.range.end].chars().count();
             let Some(cells) = line.map.get(start..end) else {
@@ -96,6 +106,42 @@ pub(super) fn append_terminal_semantics_for_rows(
             }
         }
     }
+}
+
+fn append_semantic_line_band(
+    snapshot: &TerminalSnapshot,
+    rows: Range<usize>,
+    theme: &TerminalUiTheme,
+    class: SemanticClass,
+    layout: &mut TerminalHighlightLayout,
+) {
+    // Bands are intentionally quieter than token colors and remain behind selection/search paint.
+    let Some((color, opacity)) = terminal_semantic_line_band(theme, class) else {
+        return;
+    };
+    let existing_background_overlaps = layout
+        .backgrounds
+        .iter()
+        .any(|background| rows.contains(&background.row));
+    let has_explicit_background = snapshot.lines.get(rows.clone()).is_none_or(|rows| {
+        rows.iter().any(|row| {
+            row.cells
+                .iter()
+                .any(|cell| cell.style_origin.background_explicit())
+        })
+    });
+    if existing_background_overlaps || has_explicit_background {
+        return;
+    }
+
+    let mut color = to_hsla(terminal_color_from_hex(color));
+    color.alpha = opacity;
+    layout.backgrounds.extend(rows.map(|row| TerminalRect {
+        row,
+        col: 0,
+        cells: snapshot.cols,
+        color,
+    }));
 }
 
 fn semantic_component_class(class: SemanticClass, ch: char, option_prefix: bool) -> SemanticClass {
@@ -153,28 +199,7 @@ fn semantic_foreground(
     class: SemanticClass,
     semantic_scheme: &CompiledSemanticScheme,
 ) -> gpui::Hsla {
-    if let Some(color) = semantic_scheme.color(class).and_then(parse_scheme_color) {
-        return to_hsla(terminal_color_from_hex(color));
-    }
-    let terminal = theme.tokens.terminal;
-    // Frequently adjacent classes use separate ANSI slots so structured output
-    // remains readable without introducing colors outside the active theme.
-    let color = match class {
-        SemanticClass::Command => terminal.green,
-        SemanticClass::Keyword => terminal.bright_magenta,
-        SemanticClass::Option | SemanticClass::Info => terminal.cyan,
-        SemanticClass::Operator => terminal.bright_yellow,
-        SemanticClass::String => terminal.yellow,
-        SemanticClass::Variable => terminal.bright_blue,
-        SemanticClass::Link | SemanticClass::Timestamp => terminal.bright_cyan,
-        SemanticClass::Path => terminal.blue,
-        SemanticClass::Address => terminal.bright_green,
-        SemanticClass::Number => terminal.magenta,
-        SemanticClass::Comment => terminal.bright_black,
-        SemanticClass::Error => terminal.red,
-        SemanticClass::Warning => terminal.bright_red,
-        SemanticClass::Success => terminal.bright_green,
-    };
+    let color = terminal_semantic_color(theme, class, semantic_scheme);
     to_hsla(terminal_color_from_hex(color))
 }
 
@@ -184,25 +209,8 @@ fn semantic_foreground_for_variant(
     style_variant: Option<u8>,
     semantic_scheme: &CompiledSemanticScheme,
 ) -> gpui::Hsla {
-    let Some(depth) = style_variant.filter(|_| class == SemanticClass::Operator) else {
-        return semantic_foreground(theme, class, semantic_scheme);
-    };
-    let terminal = theme.tokens.terminal;
-    // Six terminal-theme colors provide stable nested contrast and repeat only
-    // after the available palette is exhausted.
-    let color = match depth % 6 {
-        0 => terminal.yellow,
-        1 => terminal.cyan,
-        2 => terminal.green,
-        3 => terminal.blue,
-        4 => terminal.red,
-        _ => terminal.magenta,
-    };
+    let color = terminal_semantic_variant_color(theme, class, style_variant, semantic_scheme);
     to_hsla(terminal_color_from_hex(color))
-}
-
-fn parse_scheme_color(color: &str) -> Option<u32> {
-    u32::from_str_radix(color.strip_prefix('#')?, 16).ok()
 }
 
 #[cfg(test)]
@@ -218,12 +226,16 @@ mod tests {
     use super::*;
 
     fn cell(ch: char, foreground_explicit: bool) -> TerminalCell {
+        styled_cell(ch, foreground_explicit, false)
+    }
+
+    fn styled_cell(ch: char, foreground_explicit: bool, background_explicit: bool) -> TerminalCell {
         TerminalCell {
             ch,
             wide: false,
             fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
             bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
-            style_origin: TerminalStyleOrigin::new(foreground_explicit, false),
+            style_origin: TerminalStyleOrigin::new(foreground_explicit, background_explicit),
             attrs: TerminalAttrs::default(),
             extra: None,
             cursor: false,
@@ -277,6 +289,102 @@ mod tests {
 
         assert!(!layout.foregrounds.contains_key(&(0, 0)));
         assert!(layout.foregrounds.contains_key(&(0, 4)));
+    }
+
+    #[test]
+    fn explicit_severity_adds_a_theme_band_without_covering_ansi_backgrounds() {
+        let theme = TerminalUiTheme::default();
+        let scheme = compiled_builtin_scheme(SemanticScheme::Balanced);
+        let mut error_snapshot = snapshot("ERROR connection refused", 0..0);
+        let mut error_layout = TerminalHighlightLayout::empty();
+
+        append_terminal_semantics_for_rows(
+            &error_snapshot,
+            &[],
+            0..1,
+            &theme,
+            scheme,
+            SemanticShellDialect::Auto,
+            &mut error_layout,
+        );
+
+        assert_eq!(error_layout.backgrounds.len(), 1);
+        assert_eq!(error_layout.backgrounds[0].cells, error_snapshot.cols);
+        assert_eq!(
+            error_layout.backgrounds[0].color.alpha,
+            terminal_semantic_line_band(&theme, SemanticClass::Error)
+                .expect("error band")
+                .1
+        );
+
+        let warning_snapshot = snapshot("WARNING disk space is low", 0..0);
+        let mut warning_layout = TerminalHighlightLayout::empty();
+        append_terminal_semantics_for_rows(
+            &warning_snapshot,
+            &[],
+            0..1,
+            &theme,
+            scheme,
+            SemanticShellDialect::Auto,
+            &mut warning_layout,
+        );
+
+        assert_eq!(warning_layout.backgrounds.len(), 1);
+        assert_eq!(warning_layout.backgrounds[0].cells, warning_snapshot.cols);
+        assert_eq!(
+            warning_layout.backgrounds[0].color.alpha,
+            terminal_semantic_line_band(&theme, SemanticClass::Warning)
+                .expect("warning band")
+                .1
+        );
+        assert_ne!(
+            warning_layout.backgrounds[0].color,
+            error_layout.backgrounds[0].color
+        );
+
+        error_snapshot.lines[0].cells_mut()[0] = styled_cell('E', false, true);
+        error_snapshot.lines[0].refresh_signature();
+        let mut ansi_layout = TerminalHighlightLayout::empty();
+        append_terminal_semantics_for_rows(
+            &error_snapshot,
+            &[],
+            0..1,
+            &theme,
+            scheme,
+            SemanticShellDialect::Auto,
+            &mut ansi_layout,
+        );
+
+        assert!(ansi_layout.backgrounds.is_empty());
+    }
+
+    #[test]
+    fn ordinary_mentions_and_active_commands_do_not_add_severity_bands() {
+        let theme = TerminalUiTheme::default();
+        let scheme = compiled_builtin_scheme(SemanticScheme::Balanced);
+        for (text, active_input) in [
+            ("the command reports an error when offline", false),
+            ("ERROR is still being typed", true),
+        ] {
+            let mut snapshot = snapshot(text, 0..0);
+            snapshot.lines[0].active_input = active_input;
+            let mut layout = TerminalHighlightLayout::empty();
+
+            append_terminal_semantics_for_rows(
+                &snapshot,
+                &[],
+                0..1,
+                &theme,
+                scheme,
+                SemanticShellDialect::Auto,
+                &mut layout,
+            );
+
+            assert!(
+                layout.backgrounds.is_empty(),
+                "unexpected band for {text:?}"
+            );
+        }
     }
 
     #[test]

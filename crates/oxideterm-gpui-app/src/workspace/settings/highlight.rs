@@ -1,4 +1,8 @@
 use super::*;
+use oxideterm_terminal_semantic::{
+    CompiledSemanticScheme, SemanticLineRole, classify_line_with_compiled_scheme,
+    semantic_line_emphasis,
+};
 
 pub(in crate::workspace) fn semantic_class_label(class: SemanticClass, i18n: &I18n) -> String {
     let key = match class {
@@ -12,6 +16,8 @@ pub(in crate::workspace) fn semantic_class_label(class: SemanticClass, i18n: &I1
         SemanticClass::Link => "link",
         SemanticClass::Path => "path",
         SemanticClass::Address => "address",
+        SemanticClass::Weekday => "weekday",
+        SemanticClass::Month => "month",
         SemanticClass::Timestamp => "timestamp",
         SemanticClass::Number => "number",
         SemanticClass::Error => "error",
@@ -56,6 +62,10 @@ impl WorkspaceApp {
         let semantic_scheme_label = active_custom_scheme.map_or_else(
             || terminal_semantic_scheme_label(settings.terminal.semantic_scheme, &self.i18n),
             |scheme| scheme.name.clone(),
+        );
+        let semantic_scheme = resolved_terminal_semantic_scheme(
+            settings.terminal.semantic_scheme,
+            active_custom_scheme,
         );
         let active_highlight_rule_set = settings
             .terminal
@@ -207,7 +217,9 @@ impl WorkspaceApp {
                 .when_some(active_custom_scheme, |body, scheme| {
                     body.child(self.card_separator())
                         .child(self.semantic_scheme_editor(scheme, cx))
-                });
+                })
+                .child(self.card_separator())
+                .child(self.semantic_scheme_preview(&semantic_scheme));
 
         let mut rules_card = div()
             .w_full()
@@ -1507,6 +1519,125 @@ impl WorkspaceApp {
                 }),
             )
             .into_any_element()
+    }
+
+    fn semantic_scheme_preview(&self, scheme: &CompiledSemanticScheme) -> AnyElement {
+        // Preview rendering uses the runtime classifier and theme mapping so edits have immediate fidelity.
+        let lines = [
+            self.i18n
+                .t("settings_view.terminal.highlight_rules.preview_line_error"),
+            self.i18n
+                .t("settings_view.terminal.highlight_rules.preview_line_warning"),
+            self.i18n
+                .t("settings_view.terminal.highlight_rules.preview_line_ok"),
+            self.i18n
+                .t("settings_view.terminal.highlight_rules.preview_line_trace"),
+            self.i18n
+                .t("settings_view.terminal.highlight_rules.preview_line_audit"),
+        ];
+        let mut sample = div()
+            .w_full()
+            .min_w(px(0.0))
+            .overflow_hidden()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(rgb(self.tokens.terminal.background))
+            .p(px(8.0))
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .font_family(settings_mono_font_family(self.settings_store.settings()))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .line_height(px(24.0))
+            .text_color(rgb(self.tokens.terminal.foreground));
+        let theme = TerminalUiTheme::from_tokens(self.tokens.clone());
+        for line in lines {
+            sample = sample.child(self.semantic_scheme_preview_line(&line, scheme, &theme));
+        }
+
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .w_full()
+                    .min_w(px(0.0))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(
+                                self.i18n
+                                    .t("settings_view.terminal.highlight_rules.semantic_preview"),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .truncate()
+                            .text_align(gpui::TextAlign::Right)
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(
+                                self.i18n.t(
+                                    "settings_view.terminal.highlight_rules.semantic_preview_hint",
+                                ),
+                            ),
+                    ),
+            )
+            .child(sample)
+            .into_any_element()
+    }
+
+    fn semantic_scheme_preview_line(
+        &self,
+        line: &str,
+        scheme: &CompiledSemanticScheme,
+        theme: &TerminalUiTheme,
+    ) -> AnyElement {
+        let role = SemanticLineRole::Output;
+        let spans = classify_line_with_compiled_scheme(line, role, scheme);
+        let band = semantic_line_emphasis(line, role)
+            .filter(|class| spans.iter().any(|span| span.class == *class))
+            .and_then(|class| terminal_semantic_line_band(theme, class));
+        let mut row = div()
+            .w_full()
+            .min_w(px(0.0))
+            .px(px(6.0))
+            .rounded(px(self.tokens.radii.xs))
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .overflow_hidden()
+            .when_some(band, |row, (color, opacity)| {
+                row.bg(rgba((color << 8) | alpha_byte(opacity)))
+            });
+        let mut cursor = 0;
+        for span in spans {
+            if span.range.start > cursor {
+                row = self.highlight_preview_plain_chunks(row, &line[cursor..span.range.start]);
+            }
+            let color =
+                terminal_semantic_variant_color(theme, span.class, span.style_variant, scheme);
+            for chunk in Self::highlight_preview_wrapping_chunks(&line[span.range.clone()]) {
+                row = row.child(div().text_color(rgb(color)).child(chunk));
+            }
+            cursor = span.range.end;
+        }
+        if cursor < line.len() {
+            row = self.highlight_preview_plain_chunks(row, &line[cursor..]);
+        }
+        row.into_any_element()
     }
 
     pub(in crate::workspace) fn highlight_preview(&self, rules: &[HighlightRule]) -> AnyElement {

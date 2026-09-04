@@ -7927,6 +7927,7 @@ dependencies = [
  "oxideterm-ssh-launch",
  "oxideterm-terminal",
  "oxideterm-terminal-recording",
+ "oxideterm-terminal-semantic",
  "oxideterm-terminal-triggers",
  "oxideterm-theme",
  "oxideterm-topology",

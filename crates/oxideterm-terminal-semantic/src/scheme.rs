@@ -36,6 +36,8 @@ const WINDOWS_PATH_PATTERN: &str = r#"(?ix)(?:^|[\s(])((?:
 
 const OPTION_ASSIGNMENT_PATTERN: &str = r"(?:^|\s)(--?[A-Za-z][A-Za-z0-9_-]*)(=)([^\s]+)";
 const VARIABLE_ASSIGNMENT_PATTERN: &str = r"(?:^|[\s,])([A-Za-z_][A-Za-z0-9_-]*)(=)([^,\s]+)";
+const ENGLISH_WEEKDAY_PATTERN: &str = r"(?i)\b(?:Mon(?:day)?|Tue(?:sday)?|Wed(?:nesday)?|Thu(?:rsday)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?)\b";
+const ENGLISH_MONTH_PATTERN: &str = r"(?i)\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\b";
 
 #[derive(Clone)]
 struct Rule {
@@ -210,6 +212,22 @@ static BUILT_IN_RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
             SemanticRuleContext::Any,
         ),
         Rule::new(
+            "weekday-name",
+            ENGLISH_WEEKDAY_PATTERN,
+            0,
+            SemanticClass::Weekday,
+            86,
+            SemanticRuleContext::Any,
+        ),
+        Rule::new(
+            "month-name",
+            ENGLISH_MONTH_PATTERN,
+            0,
+            SemanticClass::Month,
+            86,
+            SemanticRuleContext::Any,
+        ),
+        Rule::new(
             "localized-month-day",
             r"(?:^|[^\p{L}\p{N}])((?:0?[1-9]|1[0-2])(?:月|월)(?:[12]\d|3[01]|0?[1-9])(?:日|일)?)",
             1,
@@ -291,7 +309,7 @@ static BUILT_IN_RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
         ),
         Rule::new(
             "error-status",
-            r"(?i)\b(?:bad|cannot(?:\s+\w+){0,2}|denied|deprecated|disabled|errors?|failed?|failure|false|incorrect|invalid|no\s+(?:access|permission)|none|not\s+(?:available|configured|connected|enabled|found|installed|running|supported|valid)|(?:ca|could)n't|refused|unknown|unsupported|wrong)\b",
+            r"(?i)\b(?:bad|cannot(?:\s+\w+){0,2}|critical|denied|deprecated|disabled|errors?|failed?|failure|fatal|false|incorrect|invalid|no\s+(?:access|permission)|none|not\s+(?:available|configured|connected|enabled|found|installed|running|supported|valid)|panic|(?:ca|could)n't|refused|unknown|unsupported|wrong)\b",
             0,
             SemanticClass::Error,
             78,
@@ -307,7 +325,7 @@ static BUILT_IN_RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
         ),
         Rule::new(
             "warning-status",
-            r"(?i)\b(?:closed|debug|disconnected|exited|skipped|stopped|sudo|terminated|warnings?)\b",
+            r"(?i)\b(?:closed|debug|disconnected|exited|skipped|stopped|sudo|terminated|warn|warnings?)\b",
             0,
             SemanticClass::Warning,
             76,

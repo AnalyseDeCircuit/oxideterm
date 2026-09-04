@@ -1,29 +1,21 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{SemanticClass, SemanticLineRole, scheme::Candidate};
+use crate::{SemanticClass, SemanticLineRole, command::ParsedCommand, scheme::Candidate};
 
 const PS_COLUMN_PRIORITY: u8 = 92;
 const PS_COMMAND_PRIORITY: u8 = 110;
 
-pub(crate) fn output_role_for_command(command: &str) -> SemanticLineRole {
-    let mut tokens = command.split_whitespace();
-    let Some(mut executable) = tokens.next() else {
-        return SemanticLineRole::Output;
-    };
-    if executable == "sudo" {
-        let Some(next) = tokens.next() else {
-            return SemanticLineRole::Output;
-        };
-        executable = next;
-    }
-    let executable = executable.rsplit(['/', '\\']).next().unwrap_or(executable);
-    if !executable.eq_ignore_ascii_case("ps") {
+pub(crate) fn output_role_for_command(command: &ParsedCommand<'_>) -> SemanticLineRole {
+    if !command.executable().eq_ignore_ascii_case("ps") {
         return SemanticLineRole::Output;
     }
 
     let mut full_format = false;
-    for arg in tokens.take_while(|token| !matches!(*token, "|" | "||" | "&&" | ";")) {
+    for arg in command
+        .arguments()
+        .take_while(|token| !matches!(*token, "|" | "||" | "&&" | ";"))
+    {
         if matches!(arg, "aux" | "-aux") {
             return SemanticLineRole::PsAuxOutput;
         }

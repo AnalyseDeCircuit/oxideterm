@@ -12,8 +12,8 @@ use oxideterm_terminal::{
     TerminalColor, TerminalCursorShape, TerminalEncoding, TrzszTransferPolicy,
 };
 use oxideterm_terminal_semantic::{
-    CompiledSemanticScheme, SemanticScheme, SemanticSchemeDocument, SemanticShellDialect,
-    compile_scheme_document, compiled_builtin_scheme,
+    CompiledSemanticScheme, SemanticClass, SemanticScheme, SemanticSchemeDocument,
+    SemanticShellDialect, compile_scheme_document, compiled_builtin_scheme,
 };
 use oxideterm_theme::{ThemeTokens, default_tokens};
 
@@ -36,6 +36,9 @@ pub(crate) const TERMINAL_CONTENT_PADDING: f32 = 0.0;
 // Command marks no longer reserve a left gutter; column-zero terminal text must
 // start at the pane edge.
 pub(crate) const TERMINAL_COMMAND_MARK_GUTTER_WIDTH: f32 = 0.0;
+const NESTED_SEMANTIC_COLOR_COUNT: u8 = 6;
+const TERMINAL_SEMANTIC_ERROR_LINE_BAND_OPACITY: f32 = 0.11;
+const TERMINAL_SEMANTIC_WARNING_LINE_BAND_OPACITY: f32 = 0.08;
 pub(crate) const OXIDETERM_TERMINAL_BACKGROUND: u32 = 0x0d0f12;
 pub(crate) const OXIDETERM_TERMINAL_FOREGROUND: u32 = 0xe6e8eb;
 pub(crate) const SCROLLBAR_WIDTH: f32 = 10.0;
@@ -853,6 +856,82 @@ pub(crate) fn terminal_color_from_hex(hex: u32) -> TerminalColor {
         ((hex >> 8) & 0xff) as u8,
         (hex & 0xff) as u8,
     )
+}
+
+/// Resolves a semantic class through the custom scheme before falling back to terminal colors.
+pub fn terminal_semantic_color(
+    theme: &TerminalUiTheme,
+    class: SemanticClass,
+    semantic_scheme: &CompiledSemanticScheme,
+) -> u32 {
+    if let Some(color) = semantic_scheme
+        .color(class)
+        .and_then(|color| u32::from_str_radix(color.strip_prefix('#')?, 16).ok())
+    {
+        return color;
+    }
+    let terminal = theme.tokens.terminal;
+    match class {
+        SemanticClass::Command => terminal.green,
+        SemanticClass::Keyword => terminal.bright_magenta,
+        SemanticClass::Option => terminal.cyan,
+        SemanticClass::Operator => terminal.bright_yellow,
+        SemanticClass::String => terminal.yellow,
+        SemanticClass::Variable => terminal.bright_blue,
+        SemanticClass::Link => terminal.bright_cyan,
+        SemanticClass::Path => terminal.blue,
+        SemanticClass::Address => terminal.bright_green,
+        SemanticClass::Weekday => terminal.cyan,
+        SemanticClass::Month => terminal.yellow,
+        SemanticClass::Timestamp => terminal.green,
+        SemanticClass::Number => terminal.magenta,
+        SemanticClass::Comment => terminal.bright_black,
+        SemanticClass::Error => terminal.bright_red,
+        SemanticClass::Warning => terminal.bright_yellow,
+        SemanticClass::Success => terminal.bright_green,
+        SemanticClass::Info => terminal.bright_blue,
+    }
+}
+
+/// Resolves presentation variants while keeping the base semantic palette shared by every view.
+pub fn terminal_semantic_variant_color(
+    theme: &TerminalUiTheme,
+    class: SemanticClass,
+    style_variant: Option<u8>,
+    semantic_scheme: &CompiledSemanticScheme,
+) -> u32 {
+    let Some(depth) = style_variant.filter(|_| class == SemanticClass::Operator) else {
+        return terminal_semantic_color(theme, class, semantic_scheme);
+    };
+    let terminal = theme.tokens.terminal;
+    // Six terminal-theme colors keep nested delimiters distinct without creating a second palette.
+    match depth % NESTED_SEMANTIC_COLOR_COUNT {
+        0 => terminal.yellow,
+        1 => terminal.cyan,
+        2 => terminal.green,
+        3 => terminal.blue,
+        4 => terminal.red,
+        _ => terminal.magenta,
+    }
+}
+
+/// Returns the restrained line treatment used for explicit error and warning envelopes.
+pub fn terminal_semantic_line_band(
+    theme: &TerminalUiTheme,
+    class: SemanticClass,
+) -> Option<(u32, f32)> {
+    // Low-opacity bands retain the original terminal background and keep token text dominant.
+    match class {
+        SemanticClass::Error => Some((
+            theme.tokens.ui.error,
+            TERMINAL_SEMANTIC_ERROR_LINE_BAND_OPACITY,
+        )),
+        SemanticClass::Warning => Some((
+            theme.tokens.ui.warning,
+            TERMINAL_SEMANTIC_WARNING_LINE_BAND_OPACITY,
+        )),
+        _ => None,
+    }
 }
 
 impl TerminalUiTheme {

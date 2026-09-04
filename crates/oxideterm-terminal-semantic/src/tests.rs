@@ -3,7 +3,7 @@
 
 use crate::{
     SemanticClass, SemanticLineRole, SemanticScheme, classify_line, classify_line_with_scheme,
-    semantic_output_role_for_command,
+    semantic_line_emphasis, semantic_output_role_for_command,
 };
 #[cfg(feature = "shell-syntax")]
 use crate::{
@@ -80,6 +80,24 @@ fn process_table_time_formats_are_classified_as_complete_timestamps() {
         assert!(
             matches.contains(&(timestamp, SemanticClass::Timestamp)),
             "missing timestamp {timestamp:?} in {matches:?}"
+        );
+    }
+}
+
+#[test]
+fn weekday_and_month_names_use_distinct_classes_in_ordinary_text() {
+    let text = "Last login: Fri Sep 4; maintenance runs Friday through September";
+    let matches = matched_texts(text);
+
+    for expected in [
+        ("Fri", SemanticClass::Weekday),
+        ("Sep", SemanticClass::Month),
+        ("Friday", SemanticClass::Weekday),
+        ("September", SemanticClass::Month),
+    ] {
+        assert!(
+            matches.contains(&expected),
+            "missing {expected:?} in {matches:?}"
         );
     }
 }
@@ -164,6 +182,200 @@ fn ps_output_roles_classify_structured_columns_without_global_sentinels() {
             .iter()
             .all(|span| { !matches!(span.class, SemanticClass::Number | SemanticClass::Info) })
     );
+}
+
+#[test]
+fn compiler_output_roles_classify_diagnostics_and_source_locations() {
+    for (command, expected) in [
+        ("cargo check", SemanticLineRole::RustToolOutput),
+        (
+            "env RUSTFLAGS=-Dwarnings rustc src/main.rs",
+            SemanticLineRole::RustToolOutput,
+        ),
+        (
+            "RUSTFLAGS=-Dwarnings cargo check",
+            SemanticLineRole::RustToolOutput,
+        ),
+        ("clang++ src/main.cc", SemanticLineRole::CCompilerOutput),
+        (
+            "aarch64-linux-gnu-gcc src/main.c",
+            SemanticLineRole::CCompilerOutput,
+        ),
+    ] {
+        assert_eq!(
+            semantic_output_role_for_command(command),
+            expected,
+            "incorrect output role for {command:?}"
+        );
+    }
+
+    let rust_location = "  --> crates/app/src/main.rs:42:17";
+    let rust_matches = classify_line(rust_location, SemanticLineRole::RustToolOutput)
+        .into_iter()
+        .map(|span| (&rust_location[span.range], span.class))
+        .collect::<Vec<_>>();
+    for expected in [
+        ("-->", SemanticClass::Operator),
+        ("crates/app/src/main.rs", SemanticClass::Path),
+        ("42", SemanticClass::Number),
+        ("17", SemanticClass::Number),
+    ] {
+        assert!(
+            rust_matches.contains(&expected),
+            "missing {expected:?} in {rust_matches:?}"
+        );
+    }
+
+    let c_diagnostic = "/tmp/main.c:12:7: error: use of undeclared identifier 'value'";
+    let c_matches = classify_line(c_diagnostic, SemanticLineRole::CCompilerOutput)
+        .into_iter()
+        .map(|span| (&c_diagnostic[span.range], span.class))
+        .collect::<Vec<_>>();
+    for expected in [
+        ("/tmp/main.c", SemanticClass::Path),
+        ("12", SemanticClass::Number),
+        ("7", SemanticClass::Number),
+        ("error", SemanticClass::Error),
+    ] {
+        assert!(
+            c_matches.contains(&expected),
+            "missing {expected:?} in {c_matches:?}"
+        );
+    }
+    assert_eq!(
+        semantic_line_emphasis(c_diagnostic, SemanticLineRole::CCompilerOutput),
+        Some(SemanticClass::Error)
+    );
+
+    let cargo_phase = "   Finished `dev` profile in 0.42s";
+    assert!(
+        classify_line(cargo_phase, SemanticLineRole::RustToolOutput)
+            .iter()
+            .any(|span| {
+                &cargo_phase[span.range.clone()] == "Finished"
+                    && span.class == SemanticClass::Success
+            })
+    );
+}
+
+#[test]
+fn git_output_roles_keep_status_and_diff_meaning_local_to_git() {
+    assert_eq!(
+        semantic_output_role_for_command("git -C workspace status --short"),
+        SemanticLineRole::GitStatusOutput
+    );
+    assert_eq!(
+        semantic_output_role_for_command("git diff --cached"),
+        SemanticLineRole::GitDiffOutput
+    );
+
+    let status = " M src/main.rs";
+    let status_matches = classify_line(status, SemanticLineRole::GitStatusOutput)
+        .into_iter()
+        .map(|span| (&status[span.range], span.class))
+        .collect::<Vec<_>>();
+    assert!(status_matches.contains(&(" M", SemanticClass::Warning)));
+    assert!(status_matches.contains(&("src/main.rs", SemanticClass::Path)));
+
+    let addition = "+let connected = true;";
+    let addition_matches = classify_line(addition, SemanticLineRole::GitDiffOutput)
+        .into_iter()
+        .map(|span| (&addition[span.range], span.class))
+        .collect::<Vec<_>>();
+    assert_eq!(addition_matches, vec![(addition, SemanticClass::Success)]);
+}
+
+#[test]
+fn systemd_output_roles_classify_service_state_and_journal_time() {
+    assert_eq!(
+        semantic_output_role_for_command("sudo systemctl status sshd"),
+        SemanticLineRole::SystemdOutput
+    );
+    assert_eq!(
+        semantic_output_role_for_command("journalctl -u sshd"),
+        SemanticLineRole::SystemdOutput
+    );
+
+    let state = "     Active: failed (Result: exit-code)";
+    let state_matches = classify_line(state, SemanticLineRole::SystemdOutput)
+        .into_iter()
+        .map(|span| (&state[span.range], span.class))
+        .collect::<Vec<_>>();
+    assert!(state_matches.contains(&("Active", SemanticClass::Keyword)));
+    assert!(state_matches.contains(&("failed", SemanticClass::Error)));
+
+    let journal = "Sep  4 10:30:00 host sshd[42]: connection closed";
+    assert!(
+        classify_line(journal, SemanticLineRole::SystemdOutput)
+            .iter()
+            .any(|span| {
+                &journal[span.range.clone()] == "Sep  4 10:30:00"
+                    && span.class == SemanticClass::Timestamp
+            })
+    );
+}
+
+#[test]
+fn test_runner_output_roles_classify_common_result_markers() {
+    assert_eq!(
+        semantic_output_role_for_command("cargo test"),
+        SemanticLineRole::RustToolOutput
+    );
+    for command in ["pytest -q", "go test ./...", "npm test"] {
+        assert_eq!(
+            semantic_output_role_for_command(command),
+            SemanticLineRole::TestOutput,
+            "incorrect output role for {command:?}"
+        );
+    }
+
+    for (line, label, expected) in [
+        (
+            "test parser::accepts_input ... ok",
+            "ok",
+            SemanticClass::Success,
+        ),
+        (
+            "tests/test_api.py::test_login FAILED",
+            "FAILED",
+            SemanticClass::Error,
+        ),
+        (
+            "--- SKIP: TestNetwork (0.00s)",
+            "--- SKIP",
+            SemanticClass::Warning,
+        ),
+    ] {
+        assert!(
+            classify_line(line, SemanticLineRole::TestOutput)
+                .iter()
+                .any(|span| &line[span.range.clone()] == label && span.class == expected),
+            "missing {expected:?} marker in {line:?}"
+        );
+    }
+}
+
+#[test]
+fn container_output_roles_classify_health_and_readiness_states() {
+    for command in ["docker ps", "podman container ls", "kubectl get pods"] {
+        assert_eq!(
+            semantic_output_role_for_command(command),
+            SemanticLineRole::ContainerOutput,
+            "incorrect output role for {command:?}"
+        );
+    }
+    assert_eq!(
+        semantic_output_role_for_command("docker logs api"),
+        SemanticLineRole::Output
+    );
+
+    let line = "api-7df4 0/1 CrashLoopBackOff 5 2m";
+    let matches = classify_line(line, SemanticLineRole::ContainerOutput)
+        .into_iter()
+        .map(|span| (&line[span.range], span.class))
+        .collect::<Vec<_>>();
+    assert!(matches.contains(&("0/1", SemanticClass::Warning)));
+    assert!(matches.contains(&("CrashLoopBackOff", SemanticClass::Error)));
 }
 
 #[cfg(feature = "shell-syntax")]
@@ -314,6 +526,61 @@ fn warning_terms_use_the_warning_class() {
             ("Warning", SemanticClass::Warning),
             ("skipped", SemanticClass::Warning),
         ]
+    );
+}
+
+#[test]
+fn explicit_log_severity_controls_line_emphasis() {
+    for (text, expected) in [
+        ("ERROR connection refused", SemanticClass::Error),
+        ("[worker] [FATAL] service stopped", SemanticClass::Error),
+        (
+            "2026-09-04 10:30:00 warning: disk space is low",
+            SemanticClass::Warning,
+        ),
+        ("error[E0308]: mismatched types", SemanticClass::Error),
+        ("错误：连接已拒绝", SemanticClass::Error),
+        ("[警告] 磁盘空间不足", SemanticClass::Warning),
+        ("ÉCHEC: connexion refusée", SemanticClass::Error),
+        ("Cảnh báo: dung lượng thấp", SemanticClass::Warning),
+        ("level=error connection refused", SemanticClass::Error),
+        (
+            "severity: 'warning' disk space is low",
+            SemanticClass::Warning,
+        ),
+        (
+            r#"{"timestamp":"2026-09-04T10:30:00Z","level":"error","message":"offline"}"#,
+            SemanticClass::Error,
+        ),
+    ] {
+        assert_eq!(
+            semantic_line_emphasis(text, SemanticLineRole::Output),
+            Some(expected),
+            "incorrect emphasis for {text:?}"
+        );
+    }
+
+    assert_eq!(
+        semantic_line_emphasis(
+            "the command reports an error when offline",
+            SemanticLineRole::Output
+        ),
+        None
+    );
+    assert_eq!(
+        semantic_line_emphasis("ERROR is still being typed", SemanticLineRole::Command),
+        None
+    );
+    assert_eq!(
+        semantic_line_emphasis(
+            r#"{"message":"the text mentions \"level\": \"error\""}"#,
+            SemanticLineRole::Output
+        ),
+        None
+    );
+    assert_eq!(
+        semantic_line_emphasis("level=info connected", SemanticLineRole::Output),
+        None
     );
 }
 
