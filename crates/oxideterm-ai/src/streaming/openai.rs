@@ -17,11 +17,9 @@ pub(crate) async fn stream_openai_completion(
     messages: Vec<AiChatMessage>,
     events: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
 ) -> Result<()> {
-    let client = oxideterm_network_proxy::application_http_client_builder()
-        .context("failed to apply application proxy to AI chat client")?
-        .timeout(CHAT_STREAM_TIMEOUT)
-        .build()
-        .context("failed to create AI chat client")?;
+    // Reuse the application pool across tool rounds; provider keys remain request-scoped below.
+    let client = oxideterm_network_proxy::application_http_client()
+        .context("failed to acquire application AI chat client")?;
     let body = openai_chat_body(&config, &messages);
     let mut last_error = None;
     let urls = openai_compatible_candidates(&config.base_url, "/chat/completions");
@@ -164,11 +162,9 @@ pub(crate) async fn stream_ollama_completion(
 ) -> Result<()> {
     config.base_url = config.base_url.trim_end_matches('/').to_string();
     let url = format!("{}/v1/chat/completions", config.base_url);
-    let client = oxideterm_network_proxy::application_http_client_builder()
-        .context("failed to apply application proxy to AI chat client")?
-        .timeout(CHAT_STREAM_TIMEOUT)
-        .build()
-        .context("failed to create Ollama chat client")?;
+    // Reuse the same application pool for every model round in this conversation.
+    let client = oxideterm_network_proxy::application_http_client()
+        .context("failed to acquire application Ollama chat client")?;
     let body = openai_chat_body(&config, &messages);
     let mut response = openai_stream_request(&client, &url, &config, &body)
         .await
@@ -208,6 +204,7 @@ async fn openai_stream_request(
 ) -> Result<reqwest::Response> {
     let mut request = client
         .post(url)
+        .timeout(CHAT_STREAM_TIMEOUT)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .json(body);
     if let Some(api_key) = config.api_key.as_ref().filter(|key| !key.is_empty()) {

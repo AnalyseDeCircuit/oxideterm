@@ -25,14 +25,13 @@ pub(crate) async fn stream_gemini_completion(
         config.api_key.as_ref().map(|api_key| api_key.as_str()),
     )?;
     let url = gemini_stream_url(&config.base_url, &config.model)?;
-    let client = oxideterm_network_proxy::application_http_client_builder()
-        .context("failed to apply application proxy to AI chat client")?
-        .timeout(CHAT_STREAM_TIMEOUT)
-        .build()
-        .context("failed to create Gemini chat client")?;
+    // Reuse the application pool while keeping the query-string API key request-scoped.
+    let client = oxideterm_network_proxy::application_http_client()
+        .context("failed to acquire application Gemini chat client")?;
     let body = gemini_chat_body(&config, &messages);
     let response = client
         .post(&url)
+        .timeout(CHAT_STREAM_TIMEOUT)
         // Gemini requires the API key as a query parameter. Let reqwest attach
         // it to the request and strip URLs from transport errors below.
         .query(&[("alt", "sse"), ("key", api_key)])

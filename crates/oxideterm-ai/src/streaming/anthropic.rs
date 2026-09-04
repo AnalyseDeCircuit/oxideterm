@@ -23,14 +23,13 @@ pub(crate) async fn stream_anthropic_completion(
         "{}/v1/messages",
         config.base_url.trim().trim_end_matches('/')
     );
-    let client = oxideterm_network_proxy::application_http_client_builder()
-        .context("failed to apply application proxy to AI chat client")?
-        .timeout(CHAT_STREAM_TIMEOUT)
-        .build()
-        .context("failed to create Anthropic chat client")?;
+    // Reuse the application pool while keeping the API key on this request only.
+    let client = oxideterm_network_proxy::application_http_client()
+        .context("failed to acquire application Anthropic chat client")?;
     let body = anthropic_chat_body(&config, &messages);
     let response = client
         .post(&url)
+        .timeout(CHAT_STREAM_TIMEOUT)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .header("x-api-key", api_key)
         .header("anthropic-version", ANTHROPIC_VERSION)

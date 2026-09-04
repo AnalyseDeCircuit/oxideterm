@@ -4,7 +4,7 @@
 use crate::rag::error::RagError;
 use crate::rag::hnsw::{HnswLoadOutcome, PersistedHnswIndex, hnsw_index_path};
 use crate::rag::types::*;
-use redb::{Database, ReadableTable, TableDefinition};
+use redb::{Database, ReadableTable, ReadableTableMetadata, TableDefinition};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -114,6 +114,13 @@ impl Clone for RagStore {
 }
 
 impl RagStore {
+    /// Returns whether retrieval has any indexed content before callers pay for an embedding.
+    pub fn has_searchable_chunks(&self) -> Result<bool, RagError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(DOC_CHUNKS_TABLE)?;
+        Ok(!table.is_empty()?)
+    }
+
     fn hnsw_operation_lock(&self) -> Result<std::sync::MutexGuard<'_, ()>, RagError> {
         lock_with_diagnostics(&self.hnsw_index.operation, "hnsw.operation")
     }

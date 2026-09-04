@@ -292,6 +292,7 @@ async fn embed_openai_compatible(
     let url = format!("{}/embeddings", base_url.trim_end_matches('/'));
     let mut request = client
         .post(&url)
+        .timeout(EMBEDDING_TIMEOUT)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .json(&serde_json::json!({ "model": model, "input": texts }));
     if let Some(api_key) = api_key.as_ref().filter(|key| !key.is_empty()) {
@@ -325,6 +326,7 @@ async fn embed_ollama(
     let url = format!("{}/api/embed", base_url.trim_end_matches('/'));
     let mut request = client
         .post(&url)
+        .timeout(EMBEDDING_TIMEOUT)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .json(&serde_json::json!({ "model": model, "input": texts }));
     if let Some(api_key) = api_key.as_ref().filter(|key| !key.is_empty()) {
@@ -350,11 +352,9 @@ async fn embed_ollama(
 }
 
 fn embedding_client() -> Result<reqwest::Client> {
-    oxideterm_network_proxy::application_http_client_builder()
-        .context("failed to apply application proxy to embedding client")?
-        .timeout(EMBEDDING_TIMEOUT)
-        .build()
-        .context("failed to create embedding client")
+    // Embeddings share transport state, but their API keys remain scoped to each request.
+    oxideterm_network_proxy::application_http_client()
+        .context("failed to acquire application embedding client")
 }
 
 #[derive(Deserialize)]

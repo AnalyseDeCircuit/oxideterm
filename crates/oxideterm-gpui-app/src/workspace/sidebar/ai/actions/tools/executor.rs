@@ -28,6 +28,10 @@ impl AiModelBackendServices {
         if clean_query.chars().count() < 4 {
             return None;
         }
+        // Avoid an outbound embedding request when no local document can match it.
+        if !self.rag_store.has_searchable_chunks().ok()? {
+            return None;
+        }
 
         let query = clean_query.chars().take(500).collect::<String>();
         let query_vector = self.embedding_query_vector(&query, config).await;
