@@ -374,6 +374,7 @@ impl Render for TerminalPane {
         .viewport_rows(viewport_rows)
         .scrollbar_display_offset(scrollbar_display_offset)
         .scroll_y_offset(smooth_scroll_y_offset)
+        .scroll_x_offset(self.horizontal_scroll_offset_px)
         .performance_metrics_enabled(performance_metrics_enabled)
         .command_mark_gutter_width(if command_mark_ui_visible {
             self.command_mark_gutter_width()

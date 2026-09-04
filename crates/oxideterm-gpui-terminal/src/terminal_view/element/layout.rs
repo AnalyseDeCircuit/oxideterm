@@ -5,7 +5,7 @@ use oxideterm_terminal::{TerminalSearchMatch, TerminalSnapshot};
 use oxideterm_terminal_unicode::visual_line_for_row_if_bidi;
 
 use crate::terminal_ui::*;
-use crate::terminal_view::element::{TerminalRect, TerminalScrollbar};
+use crate::terminal_view::element::{TerminalHorizontalScrollbar, TerminalRect, TerminalScrollbar};
 
 pub(crate) fn terminal_scrollbar_for_viewport_display_offset(
     snapshot: &TerminalSnapshot,
@@ -31,6 +31,44 @@ pub(crate) fn terminal_scrollbar_for_viewport_display_offset(
         top,
         height: thumb_height,
     })
+}
+
+pub(crate) fn terminal_horizontal_scrollbar_for_viewport(
+    viewport_width: f32,
+    max_scroll: f32,
+    scroll_offset: f32,
+) -> Option<TerminalHorizontalScrollbar> {
+    // Only the timestamp overlay width is scrollable; the PTY grid remains
+    // fixed while this geometry exposes the otherwise clipped columns.
+    if viewport_width <= 0.0 || max_scroll <= 0.0 {
+        return None;
+    }
+    let content_width = viewport_width + max_scroll;
+    let width = (viewport_width / content_width * viewport_width)
+        .clamp(SCROLLBAR_MIN_THUMB.min(viewport_width), viewport_width);
+    let thumb_travel = (viewport_width - width).max(0.0);
+    let left = scroll_offset.clamp(0.0, max_scroll) / max_scroll * thumb_travel;
+    Some(TerminalHorizontalScrollbar {
+        left,
+        width,
+        max_scroll,
+    })
+}
+
+#[cfg(test)]
+mod horizontal_scrollbar_tests {
+    use super::*;
+
+    #[test]
+    fn horizontal_thumb_reaches_both_ends_of_the_overflow_range() {
+        let start = terminal_horizontal_scrollbar_for_viewport(800.0, 120.0, 0.0)
+            .expect("timestamp gutter overflow");
+        let end = terminal_horizontal_scrollbar_for_viewport(800.0, 120.0, 120.0)
+            .expect("timestamp gutter overflow");
+
+        assert_eq!(start.left, 0.0);
+        assert!((end.left - (800.0 - end.width)).abs() <= f32::EPSILON);
+    }
 }
 
 pub(crate) fn terminal_visible_rows_for_limit(

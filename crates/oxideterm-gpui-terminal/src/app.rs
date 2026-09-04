@@ -72,7 +72,9 @@ use crate::trzsz_worker::{
 use image_cache::ImageRenderCache;
 pub(crate) use image_cache::TerminalRenderedImage;
 pub(crate) use ime::TerminalInputHandler;
-use scrollbar::{ScrollbarDrag, ScrollbarGeometry};
+use scrollbar::{
+    HorizontalScrollbarDrag, HorizontalScrollbarGeometry, ScrollbarDrag, ScrollbarGeometry,
+};
 
 #[derive(Clone, Debug)]
 enum TmuxPromptKind {
@@ -489,6 +491,10 @@ pub struct TerminalPane {
     smooth_scroll_animation: Option<SmoothScrollAnimation>,
     smooth_scroll_snapshot_cache: Option<SmoothScrollSnapshotCache>,
     scrollbar_drag: Option<ScrollbarDrag>,
+    // Horizontal panning belongs to the visual timestamp overlay and never
+    // changes the backing PTY grid or remote window size.
+    horizontal_scroll_offset_px: Pixels,
+    horizontal_scrollbar_drag: Option<HorizontalScrollbarDrag>,
     tmux_separator_drag: Option<TmuxSeparatorDrag>,
     selection_autoscroll_position: Option<Point<Pixels>>,
     selection_autoscroll_scheduled: bool,
@@ -1137,6 +1143,8 @@ impl TerminalPane {
             smooth_scroll_animation: None,
             smooth_scroll_snapshot_cache: None,
             scrollbar_drag: None,
+            horizontal_scroll_offset_px: px(0.0),
+            horizontal_scrollbar_drag: None,
             tmux_separator_drag: None,
             selection_autoscroll_position: None,
             selection_autoscroll_scheduled: false,
@@ -1265,6 +1273,8 @@ impl TerminalPane {
 
     pub fn toggle_terminal_timestamps(&mut self, cx: &mut Context<Self>) {
         self.terminal_timestamps_enabled = !self.terminal_timestamps_enabled;
+        self.horizontal_scroll_offset_px = px(0.0);
+        self.horizontal_scrollbar_drag = None;
         // Timestamp visibility is paint-only. Do not restamp or resize here:
         // both would make old scrollback look like it was modified at toggle time.
         cx.notify();
@@ -3696,6 +3706,10 @@ impl TerminalPane {
         TERMINAL_CONTENT_PADDING + self.timestamp_gutter_width() + self.command_mark_gutter_width()
     }
 
+    fn terminal_horizontal_scroll_limit(&self) -> Pixels {
+        px(self.timestamp_gutter_width())
+    }
+
     fn command_mark_gutter_width(&self) -> f32 {
         if self.settings.command_marks_enabled {
             TERMINAL_COMMAND_MARK_GUTTER_WIDTH
@@ -3712,7 +3726,8 @@ impl TerminalPane {
         // cell metrics. Expose pane-local facts rather than making workspace
         // code duplicate terminal layout math.
         Some(TerminalCursorAnchor {
-            x: f32::from(cursor_bounds.origin.x) + self.terminal_content_padding_x(),
+            x: f32::from(cursor_bounds.origin.x) + self.terminal_content_padding_x()
+                - f32::from(self.horizontal_scroll_offset_px),
             y: f32::from(cursor_bounds.origin.y) + TERMINAL_CONTENT_PADDING,
             line_height: self.metrics.line_height_f32(),
             char_width: self.metrics.cell_width_f32(),
