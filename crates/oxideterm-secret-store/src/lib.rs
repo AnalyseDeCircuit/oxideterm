@@ -75,6 +75,21 @@ impl NativeSecretStore {
         }
     }
 
+    /// Loads text while recovering legacy macOS CLI representations when necessary.
+    ///
+    /// On macOS, an ambiguous legacy value can require one native Keychain read before it is
+    /// migrated to the versioned representation. Callers should use this only after completing
+    /// any operation-scoped authentication required by their domain.
+    pub fn get_preserving_text(&self, account: &str) -> Result<Option<Zeroizing<String>>> {
+        #[cfg(target_os = "macos")]
+        {
+            macos::get_preserving_text(&self.service, account)
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        self.get(account)
+    }
+
     /// Loads a secret through the macOS backend that preserves multiline content exactly.
     ///
     /// This mode can request application-specific Keychain authorization, so only domains

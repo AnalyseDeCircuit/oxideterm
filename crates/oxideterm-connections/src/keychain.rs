@@ -198,7 +198,11 @@ impl ConnectionKeychain {
 
         let secret_store = NativeSecretStore::new(&self.service);
         let secret = match read_mode {
-            ConnectionSecretReadMode::Standard => secret_store.get(&self.native_account(id)),
+            ConnectionSecretReadMode::Standard => {
+                // Connection secrets may contain arbitrary UTF-8 text. The macOS backend keeps
+                // ordinary legacy reads prompt-free and migrates only ambiguous CLI output.
+                secret_store.get_preserving_text(&self.native_account(id))
+            }
             ConnectionSecretReadMode::PreserveMultiline => {
                 // Managed private keys are the only connection secrets whose
                 // newline-preserving representation requires native macOS reads.
