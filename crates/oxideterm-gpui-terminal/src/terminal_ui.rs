@@ -9,7 +9,8 @@ use oxideterm_settings::{
     TerminalBackspaceSequence, TerminalDeleteSequence, TerminalSemanticScheme,
 };
 use oxideterm_terminal::{
-    TerminalColor, TerminalCursorShape, TerminalEncoding, TrzszTransferPolicy,
+    TerminalColor, TerminalCursorShape, TerminalEncoding, TerminalRow, TerminalSnapshot,
+    TrzszTransferPolicy,
 };
 use oxideterm_terminal_semantic::{
     CompiledSemanticScheme, SemanticClass, SemanticScheme, SemanticSchemeDocument,
@@ -1021,6 +1022,14 @@ pub(crate) fn terminal_timestamp_gutter_width(metrics: &TerminalMetrics, enabled
     } else {
         0.0
     }
+}
+
+/// Stable session line number for one snapshot row. `scrollback_lines +
+/// absolute_line + 1` stays constant for the same content across scrolling and
+/// new output, unlike `line_id`, which snapshots reassign while scrolling.
+pub(crate) fn terminal_line_number(snapshot: &TerminalSnapshot, row: &TerminalRow) -> Option<u64> {
+    let number = snapshot.scrollback_lines as i64 + row.absolute_line + 1;
+    (number >= 1).then_some(number as u64)
 }
 
 pub(crate) fn fallback_cell_width(window: &mut Window, font: &Font, font_size: Pixels) -> Pixels {
