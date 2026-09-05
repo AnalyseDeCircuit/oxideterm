@@ -1248,11 +1248,15 @@ impl TerminalPane {
     }
 
     fn trim_row_timestamps(&mut self, snapshot: &TerminalSnapshot) {
-        let Some(max_line) = snapshot.lines.iter().map(|row| row.line_id).max() else {
+        if snapshot.lines.is_empty() {
             Arc::make_mut(&mut self.row_timestamps).clear();
             self.row_timestamp_retained_min_line = None;
             return;
-        };
+        }
+        let max_line = snapshot
+            .scrollback_lines
+            .saturating_add(snapshot.rows)
+            .saturating_add(1) as u64;
         let retained_rows = self
             .preferences
             .scrollback_lines
@@ -3800,10 +3804,13 @@ fn record_timestampable_snapshot_rows(
     label: &str,
 ) {
     for row in &snapshot.lines {
+        let Some(line_number) = terminal_line_number(snapshot, row) else {
+            continue;
+        };
         // The snapshot signature is a cheap invalidation key. Cursor-only changes
         // still fall through to the content signature comparison below.
         if row_timestamps
-            .get(&row.line_id)
+            .get(&line_number)
             .is_some_and(|timestamp| timestamp.source_signature == row.signature)
         {
             continue;
@@ -3811,7 +3818,7 @@ fn record_timestampable_snapshot_rows(
 
         if terminal_row_has_timestamp_content(row) {
             let timestamp_signature = terminal_row_timestamp_signature(row);
-            if let Some(timestamp) = row_timestamps.get_mut(&row.line_id) {
+            if let Some(timestamp) = row_timestamps.get_mut(&line_number) {
                 if timestamp.signature != timestamp_signature {
                     timestamp.label = label.to_string();
                     timestamp.signature = timestamp_signature;
@@ -3819,7 +3826,7 @@ fn record_timestampable_snapshot_rows(
                 timestamp.source_signature = row.signature;
             } else {
                 row_timestamps.insert(
-                    row.line_id,
+                    line_number,
                     TerminalRowTimestamp {
                         label: label.to_string(),
                         signature: timestamp_signature,
@@ -3830,7 +3837,7 @@ fn record_timestampable_snapshot_rows(
         } else {
             // Blank viewport rows are recycled later. Removing their metadata
             // prevents new output from inheriting a stale line-modification time.
-            row_timestamps.remove(&row.line_id);
+            row_timestamps.remove(&line_number);
         }
     }
 }
@@ -4318,14 +4325,15 @@ mod tests {
         let blank_snapshot = timestamp_test_snapshot(timestamp_test_row(42, "   "));
         record_timestampable_snapshot_rows(&mut row_timestamps, &blank_snapshot, "10:00:00");
 
-        assert!(!row_timestamps.contains_key(&42));
+        // Stable key: scrollback(0) + absolute_line(42) + 1.
+        assert!(!row_timestamps.contains_key(&43));
 
         let content_snapshot = timestamp_test_snapshot(timestamp_test_row(42, "ls"));
         record_timestampable_snapshot_rows(&mut row_timestamps, &content_snapshot, "10:00:01");
 
         assert_eq!(
             row_timestamps
-                .get(&42)
+                .get(&43)
                 .map(|timestamp| timestamp.label.as_str()),
             Some("10:00:01")
         );
@@ -4333,7 +4341,7 @@ mod tests {
         let unchanged_snapshot =
             timestamp_test_snapshot(timestamp_test_row_with_cursor(42, "ls", Some(1), true));
         record_timestampable_snapshot_rows(&mut row_timestamps, &unchanged_snapshot, "10:00:02");
-        let unchanged_timestamp = row_timestamps.get(&42).expect("timestamped row");
+        let unchanged_timestamp = row_timestamps.get(&43).expect("timestamped row");
         assert_eq!(unchanged_timestamp.label, "10:00:01");
         assert_eq!(
             unchanged_timestamp.source_signature,
@@ -4344,7 +4352,7 @@ mod tests {
         record_timestampable_snapshot_rows(&mut row_timestamps, &changed_snapshot, "10:00:03");
         assert_eq!(
             row_timestamps
-                .get(&42)
+                .get(&43)
                 .map(|timestamp| timestamp.label.as_str()),
             Some("10:00:03")
         );
@@ -4356,7 +4364,38 @@ mod tests {
         let cleared_snapshot = timestamp_test_snapshot(timestamp_test_row(42, ""));
         record_timestampable_snapshot_rows(&mut row_timestamps, &cleared_snapshot, "10:00:04");
 
-        assert!(!row_timestamps.contains_key(&42));
+        assert!(!row_timestamps.contains_key(&43));
+    }
+
+    #[test]
+    fn row_timestamps_keep_the_same_key_across_scrollback_growth() {
+        let mut row_timestamps = HashMap::new();
+
+        // The content row sits on the screen with one scrollback line, so its
+        // stable key is scrollback(1) + absolute_line(0) + 1 = 2.
+        let mut first_snapshot = timestamp_test_snapshot(timestamp_test_row(0, "ls"));
+        first_snapshot.scrollback_lines = 1;
+        record_timestampable_snapshot_rows(&mut row_timestamps, &first_snapshot, "10:00:01");
+        assert_eq!(
+            row_timestamps
+                .get(&2)
+                .map(|timestamp| timestamp.label.as_str()),
+            Some("10:00:01")
+        );
+
+        // New output pushes the same content into scrollback: scrollback grows
+        // by one while absolute_line drops by one, so the key must stay 2 and
+        // the label must not be re-stamped.
+        let mut second_snapshot = timestamp_test_snapshot(timestamp_test_row(-1, "ls"));
+        second_snapshot.scrollback_lines = 2;
+        record_timestampable_snapshot_rows(&mut row_timestamps, &second_snapshot, "10:00:02");
+        assert_eq!(
+            row_timestamps
+                .get(&2)
+                .map(|timestamp| timestamp.label.as_str()),
+            Some("10:00:01"),
+            "scrolling must not re-stamp the same content line"
+        );
     }
 
     #[test]

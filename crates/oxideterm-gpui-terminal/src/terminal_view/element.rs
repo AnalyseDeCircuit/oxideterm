@@ -863,7 +863,9 @@ impl TerminalElement {
                     &mut cursor,
                 );
             }
-            if let Some(timestamp_run) = self.timestamp_run_for_row(row_index, row.line_id) {
+            if let Some(timestamp_run) = terminal_line_number(&self.snapshot, row)
+                .and_then(|line_number| self.timestamp_run_for_row(row_index, line_number))
+            {
                 timestamp_runs.push(timestamp_run);
             }
         }
@@ -917,8 +919,13 @@ impl TerminalElement {
         }
     }
 
-    fn timestamp_run_for_row(&self, row_index: usize, line_id: u64) -> Option<BatchedTextRun> {
-        let label = self.row_timestamps.as_ref()?.get(&line_id)?.label.clone();
+    fn timestamp_run_for_row(&self, row_index: usize, line_number: u64) -> Option<BatchedTextRun> {
+        let label = self
+            .row_timestamps
+            .as_ref()?
+            .get(&line_number)?
+            .label
+            .clone();
         Some(BatchedTextRun {
             row: row_index,
             col: 0,
