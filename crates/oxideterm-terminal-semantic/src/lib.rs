@@ -11,14 +11,19 @@ mod command;
 mod compiler;
 mod container;
 mod document;
+mod filesystem;
 mod git;
 mod import;
+mod network;
+mod permissions;
 mod ps;
+mod resources;
 mod scheme;
 #[cfg(feature = "shell-syntax")]
 mod syntax;
 mod systemd;
 mod test_runner;
+mod tokens;
 mod types;
 
 #[cfg(test)]

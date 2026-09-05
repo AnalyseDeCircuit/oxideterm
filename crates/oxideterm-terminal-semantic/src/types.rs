@@ -21,6 +21,10 @@ pub enum SemanticClass {
     Weekday,
     Month,
     Timestamp,
+    PermissionRead,
+    PermissionWrite,
+    PermissionExecute,
+    PermissionSpecial,
     Number,
     Error,
     Warning,
@@ -42,6 +46,10 @@ pub const SEMANTIC_CLASSES: &[SemanticClass] = &[
     SemanticClass::Weekday,
     SemanticClass::Month,
     SemanticClass::Timestamp,
+    SemanticClass::PermissionRead,
+    SemanticClass::PermissionWrite,
+    SemanticClass::PermissionExecute,
+    SemanticClass::PermissionSpecial,
     SemanticClass::Number,
     SemanticClass::Error,
     SemanticClass::Warning,
@@ -73,6 +81,17 @@ pub enum SemanticLineRole {
     SystemdOutput,
     TestOutput,
     ContainerOutput,
+    FileListingOutput,
+    FileListingOwnerOutput,
+    FileListingGroupOutput,
+    FileListingAnonymousOutput,
+    FileStatOutput,
+    FileAclOutput,
+    DiskUsageOutput,
+    MemoryUsageOutput,
+    IpOutput,
+    SocketOutput,
+    PingOutput,
     #[default]
     Unknown,
 }
@@ -91,6 +110,17 @@ impl SemanticLineRole {
                 | Self::SystemdOutput
                 | Self::TestOutput
                 | Self::ContainerOutput
+                | Self::FileListingOutput
+                | Self::FileListingOwnerOutput
+                | Self::FileListingGroupOutput
+                | Self::FileListingAnonymousOutput
+                | Self::FileStatOutput
+                | Self::FileAclOutput
+                | Self::DiskUsageOutput
+                | Self::MemoryUsageOutput
+                | Self::IpOutput
+                | Self::SocketOutput
+                | Self::PingOutput
         )
     }
 }

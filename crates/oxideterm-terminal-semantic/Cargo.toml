@@ -14,3 +14,10 @@ regex.workspace = true
 roxmltree = "0.20"
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "semantic_classifier"
+harness = false

@@ -8609,6 +8609,7 @@ dependencies = [
 name = "oxideterm-terminal-semantic"
 version = "2.0.26"
 dependencies = [
+ "criterion 0.5.1",
  "oxideterm-editor-syntax",
  "regex",
  "roxmltree 0.20.0",

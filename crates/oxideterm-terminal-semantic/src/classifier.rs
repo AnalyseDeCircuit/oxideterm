@@ -5,8 +5,8 @@
 use crate::syntax;
 use crate::{
     CompiledSemanticScheme, SemanticClass, SemanticLineRole, SemanticScheme, SemanticShellDialect,
-    SemanticSpan, command::ParsedCommand, compiler, container, git, ps, scheme, systemd,
-    test_runner,
+    SemanticSpan, command::ParsedCommand, compiler, container, filesystem, git, network,
+    permissions, ps, resources, scheme, systemd, test_runner,
 };
 
 // Severity metadata belongs in the log envelope; bounding it prevents payload text from promotion.
@@ -59,7 +59,21 @@ pub fn semantic_output_role_for_command(command: &str) -> SemanticLineRole {
         .or_else(|| git::output_role_for_command(&command))
         .or_else(|| systemd::output_role_for_command(&command))
         .or_else(|| container::output_role_for_command(&command))
-        .unwrap_or_else(|| ps::output_role_for_command(&command))
+        .unwrap_or_else(|| simple_output_role_for_command(&command))
+}
+
+fn simple_output_role_for_command(command: &ParsedCommand<'_>) -> SemanticLineRole {
+    match command.executable() {
+        "ls" => filesystem::listing_role(command),
+        "stat" => SemanticLineRole::FileStatOutput,
+        "getfacl" => SemanticLineRole::FileAclOutput,
+        "df" => SemanticLineRole::DiskUsageOutput,
+        "free" => SemanticLineRole::MemoryUsageOutput,
+        "ip" => SemanticLineRole::IpOutput,
+        "ss" => SemanticLineRole::SocketOutput,
+        "ping" => SemanticLineRole::PingOutput,
+        _ => ps::output_role_for_command(command),
+    }
 }
 
 /// Returns a line-level treatment only for an explicit leading severity label.
@@ -244,6 +258,16 @@ pub fn classify_line_with_scheme(
 ) -> Vec<SemanticSpan> {
     let mut candidates = scheme::candidates(text, role, semantic_scheme);
     let structural = structural_candidates(text);
+    permissions::push_line_candidates(&mut candidates, text, role);
+    candidates.extend(filesystem::line_candidates(text, role, |class| {
+        semantic_scheme.includes(class)
+    }));
+    candidates.extend(resources::line_candidates(text, role, |class| {
+        semantic_scheme.includes(class)
+    }));
+    candidates.extend(network::line_candidates(text, role, |class| {
+        semantic_scheme.includes(class)
+    }));
     candidates.extend(ps::line_candidates(text, role, |class| {
         semantic_scheme.includes(class)
     }));
@@ -286,6 +310,17 @@ pub fn classify_line_with_compiled_scheme_and_shell(
 ) -> Vec<SemanticSpan> {
     let mut candidates = scheme::candidates_for_compiled(text, role, semantic_scheme);
     let structural = structural_candidates(text);
+    permissions::push_line_candidates(&mut candidates, text, role);
+    candidates.extend(filesystem::line_candidates(text, role, |class| {
+        // Structured field labels have no global keyword regex in the built-in scheme.
+        class == SemanticClass::Keyword || semantic_scheme.contains_rule_class(class)
+    }));
+    candidates.extend(resources::line_candidates(text, role, |class| {
+        class == SemanticClass::Keyword || semantic_scheme.contains_rule_class(class)
+    }));
+    candidates.extend(network::line_candidates(text, role, |class| {
+        class == SemanticClass::Keyword || semantic_scheme.contains_rule_class(class)
+    }));
     candidates.extend(ps::line_candidates(text, role, |class| {
         semantic_scheme.contains_rule_class(class)
     }));
