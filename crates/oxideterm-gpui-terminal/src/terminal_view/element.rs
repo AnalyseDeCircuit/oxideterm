@@ -302,6 +302,12 @@ struct RecentCache<K, V> {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct TerminalLayoutPerformance {
+    #[cfg(feature = "bench")]
+    pub(crate) semantic_roles_micros: u64,
+    #[cfg(feature = "bench")]
+    pub(crate) highlights_micros: u64,
+    #[cfg(feature = "bench")]
+    pub(crate) semantic_command_lines: usize,
     pub(crate) layout_micros: u64,
     pub(crate) paint_micros: u64,
     pub(crate) cache_hit_percent: u8,
@@ -718,13 +724,29 @@ impl TerminalElement {
         mut cache: Option<&mut TerminalLayoutCache>,
     ) -> TerminalElementLayout {
         let mut backgrounds = Vec::new();
+        #[cfg(feature = "bench")]
+        let roles_started = Instant::now();
         let semantic_roles = self.semantic_roles_for_rows(visible_rows.clone());
+        #[cfg(feature = "bench")]
+        if let Some(cache) = cache.as_deref_mut() {
+            cache.performance.semantic_roles_micros = duration_micros(roles_started.elapsed());
+            cache.performance.semantic_command_lines = semantic_roles
+                .values()
+                .filter(|role| **role == SemanticLineRole::Command)
+                .count();
+        }
         let logical_lines = self.logical_lines_for_rows(visible_rows.clone());
+        #[cfg(feature = "bench")]
+        let highlights_started = Instant::now();
         let highlight_layout = if let Some(cache) = cache.as_deref_mut() {
             self.cached_highlight_layout_for_rows(&logical_lines, &semantic_roles, cache)
         } else {
             self.highlight_layout_for_logical_lines(&logical_lines)
         };
+        #[cfg(feature = "bench")]
+        if let Some(cache) = cache.as_deref_mut() {
+            cache.performance.highlights_micros = duration_micros(highlights_started.elapsed());
+        }
         let search_matches = map_rects_to_visual(
             &self.snapshot,
             self.bidi_enabled,

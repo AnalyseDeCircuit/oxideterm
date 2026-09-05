@@ -709,6 +709,67 @@ mod tests {
     }
 
     #[test]
+    fn shell_command_ranges_follow_history_eviction_including_chunked_output() {
+        for chunk_size in [1, 4096] {
+            let size = TerminalSize {
+                cols: 80,
+                rows: 4,
+                cell_width: 8,
+                cell_height: 17,
+            };
+            let config = Config {
+                scrolling_history: 3,
+                ..Config::default()
+            };
+            let mut term = Term::new(config, &size, VoidListener);
+            let mut parser = Processor::<StdSyncHandler>::new();
+            let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+            let mut projected = Vec::<TerminalCommandMark>::new();
+            let bytes = b"\x1b]133;A\x07$ old\r\n\x1b]133;C;cmdline_url=old\x07old\r\n\x1b]133;D;0\x07\x1b]133;A\x07$ ls\r\n\x1b]133;C;cmdline_url=ls\x07a\r\nb\r\nc\r\nd\r\ne\r\nf\r\ng\r\nh\r\ni\r\n";
+            for chunk in bytes.chunks(chunk_size) {
+                integration.advance(&mut parser, &mut term, chunk, |event| {
+                    if let TerminalEvent::CommandMark(event) = event {
+                        match event {
+                            TerminalCommandMarkEvent::Created(mark) => projected.push(mark),
+                            TerminalCommandMarkEvent::Closed(mark) => {
+                                let existing = projected
+                                    .iter_mut()
+                                    .find(|existing| existing.command_id == mark.command_id)
+                                    .unwrap();
+                                *existing = mark;
+                            }
+                            TerminalCommandMarkEvent::HistoryTrimmed { lines } => {
+                                projected.retain_mut(|mark| mark.trim_history(lines))
+                            }
+                            TerminalCommandMarkEvent::Reset => projected.clear(),
+                        }
+                    }
+                });
+            }
+            let marks = integration.command_marks();
+            assert_eq!(projected, marks);
+            assert_eq!(marks.len(), 1);
+            assert_eq!(marks[0].command.as_deref(), Some("ls"));
+            assert!(marks[0].command_line_clipped);
+            assert_eq!(marks[0].output_start_line(), 0);
+            assert!(!marks[0].is_closed);
+
+            integration.advance(
+                &mut parser,
+                &mut term,
+                b"\x1b[?1049h1\r\n2\r\n3\r\n4\r\n5\r\n\x1b[?1049l",
+                |_| {},
+            );
+            assert_eq!(integration.command_marks(), marks);
+            integration.advance(&mut parser, &mut term, b"\x1b]133;D;0\x07", |_| {});
+            let closed = integration.command_marks();
+            assert!(closed[0].is_closed);
+            assert_eq!(closed[0].exit_code, Some(0));
+            assert_eq!(closed[0].end_line, Some(5));
+        }
+    }
+
+    #[test]
     fn shell_integration_osc133_clear_saved_history_resets_command_mark_coordinates() {
         let size = TerminalSize {
             cols: 80,

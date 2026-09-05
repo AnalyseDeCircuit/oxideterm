@@ -135,6 +135,10 @@ pub struct Grid<T> {
 
     /// Maximum number of lines in history.
     max_scroll_limit: usize,
+
+    /// Rows evicted by scrolling, independent of the bounded history size.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    scrolled_out_lines: usize,
 }
 
 impl<T: GridCell + Default + PartialEq> Grid<T> {
@@ -142,6 +146,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         Grid {
             raw: Storage::with_capacity(lines, columns),
             max_scroll_limit,
+            scrolled_out_lines: 0,
             display_offset: 0,
             saved_cursor: Cursor::default(),
             cursor: Cursor::default(),
@@ -271,6 +276,10 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         // Only rotate the entire history if the active region starts at the top.
         if region.start == 0 {
             // Create scrollback for the new lines.
+            let history_available = self.max_scroll_limit - self.history_size();
+            self.scrolled_out_lines = self
+                .scrolled_out_lines
+                .wrapping_add(positions.saturating_sub(history_available));
             self.increase_scroll_limit(positions);
 
             // Swap the lines fixed at the top to their target positions after rotation.
@@ -353,6 +362,10 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
 }
 
 impl<T> Grid<T> {
+    pub fn scrolled_out_lines(&self) -> usize {
+        self.scrolled_out_lines
+    }
+
     /// Reset a visible region within the grid.
     pub fn reset_region<D, R: RangeBounds<Line>>(&mut self, bounds: R)
     where

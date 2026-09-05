@@ -87,6 +87,8 @@ pub struct TerminalCommandMark {
     pub command: Option<String>,
     pub start_line: usize,
     pub command_line: usize,
+    /// A clipped command still owns retained output, but no longer has an input row.
+    pub command_line_clipped: bool,
     pub end_line: Option<usize>,
     pub is_closed: bool,
     pub closed_by: Option<TerminalCommandMarkClosedBy>,
@@ -105,8 +107,33 @@ pub struct TerminalCommandMark {
 pub enum TerminalCommandMarkEvent {
     Created(TerminalCommandMark),
     Closed(TerminalCommandMark),
+    HistoryTrimmed {
+        lines: usize,
+    },
     /// The terminal cleared saved history, so existing visual line coordinates are invalid.
     Reset,
+}
+
+impl TerminalCommandMark {
+    /// Rebase retained visual ranges without discarding the running command's identity.
+    pub fn trim_history(&mut self, lines: usize) -> bool {
+        if self.end_line.is_some_and(|end| end < lines) {
+            return false;
+        }
+        self.command_line_clipped |= self.command_line < lines;
+        self.command_line = self.command_line.saturating_sub(lines);
+        self.start_line = self.start_line.saturating_sub(lines);
+        self.end_line = self.end_line.map(|end| end.saturating_sub(lines));
+        true
+    }
+
+    pub fn output_start_line(&self) -> usize {
+        if self.command_line_clipped {
+            0
+        } else {
+            self.command_line.saturating_add(1)
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -406,7 +433,30 @@ impl TerminalShellIntegration {
             recordable.extend_from_slice(bytes);
         }
         let saved_history_clear_count = self.saved_history_clear_detector.advance(bytes);
+        let scrolled_out_before = term.primary_scrolled_out_lines();
         parser.advance(term, bytes);
+        let trimmed = term
+            .primary_scrolled_out_lines()
+            .wrapping_sub(scrolled_out_before);
+        if trimmed != 0 {
+            self.marks.retain_mut(|mark| mark.trim_history(trimmed));
+            for position in [&mut self.state.prompt_start, &mut self.state.command_start] {
+                if let Some(cursor) = position {
+                    if let Some(line) = cursor.line.checked_sub(trimmed) {
+                        cursor.line = line;
+                    } else {
+                        *position = None;
+                    }
+                }
+            }
+            self.state.active_start_line = self
+                .state
+                .active_start_line
+                .map(|line| line.saturating_sub(trimmed));
+            emit(crate::TerminalEvent::CommandMark(
+                TerminalCommandMarkEvent::HistoryTrimmed { lines: trimmed },
+            ));
+        }
         for _ in 0..saved_history_clear_count {
             self.reset_command_marks_for_saved_history_clear(emit);
         }
@@ -798,6 +848,7 @@ impl TerminalShellIntegration {
             command,
             start_line,
             command_line: command_line.max(start_line),
+            command_line_clipped: false,
             end_line: None,
             is_closed: false,
             closed_by: None,

@@ -81,7 +81,7 @@ fn command_output_text_from_term<T: EventListener>(
     term: &Term<T>,
     mark: &TerminalCommandMark,
 ) -> String {
-    let start = mark.command_line.saturating_add(1);
+    let start = mark.output_start_line();
     let end = mark.end_line.unwrap_or_else(|| {
         let scrollback = term.total_lines().saturating_sub(term.screen_lines());
         let cursor_line = term.renderable_content().cursor.point.line.0.max(0) as usize;

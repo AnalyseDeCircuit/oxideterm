@@ -174,14 +174,13 @@ pub(super) fn semantic_line_role_for_rows(
         .saturating_sub(snapshot.display_offset);
     let start_line = viewport_start.saturating_add(rows.start);
     let end_line = viewport_start.saturating_add(rows.end.saturating_sub(1));
-    if command_marks
-        .iter()
-        .any(|mark| (start_line..=end_line).contains(&mark.command_line))
-    {
+    if command_marks.iter().any(|mark| {
+        !mark.command_line_clipped && (start_line..=end_line).contains(&mark.command_line)
+    }) {
         return SemanticLineRole::Command;
     }
     if let Some(mark) = command_marks.iter().rev().find(|mark| {
-        let output_start = mark.command_line.saturating_add(1);
+        let output_start = mark.output_start_line();
         let output_end = mark.end_line.unwrap_or(end_line);
         output_start <= end_line && output_end >= start_line
     }) {
@@ -430,11 +429,12 @@ mod tests {
         let mut snapshot = snapshot("root 1 0.0 0.0 1 1 ? Ss 6月22 0:00 node", 0..0);
         snapshot.scrollback_lines = 1;
         snapshot.lines[0].absolute_line = 1;
-        let mark = TerminalCommandMark {
+        let mut mark = TerminalCommandMark {
             command_id: "ps-1".to_string(),
             command: Some("ps aux | grep node".to_string()),
             start_line: 0,
             command_line: 0,
+            command_line_clipped: false,
             end_line: Some(1),
             is_closed: true,
             closed_by: Some(TerminalCommandMarkClosedBy::ShellIntegration),
@@ -449,6 +449,13 @@ mod tests {
             finished_at: Some(2),
         };
 
+        assert_eq!(
+            semantic_line_role_for_rows(&snapshot, &[mark.clone()], 0..1),
+            SemanticLineRole::PsAuxOutput
+        );
+        assert!(mark.trim_history(1));
+        snapshot.scrollback_lines = 0;
+        snapshot.lines[0].absolute_line = 0;
         assert_eq!(
             semantic_line_role_for_rows(&snapshot, &[mark], 0..1),
             SemanticLineRole::PsAuxOutput

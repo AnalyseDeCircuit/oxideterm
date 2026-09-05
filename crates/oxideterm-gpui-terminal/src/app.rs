@@ -3221,6 +3221,11 @@ impl TerminalPane {
                         TerminalCommandMarkEvent::Reset => {
                             self.clear_visual_command_marks();
                         }
+                        TerminalCommandMarkEvent::HistoryTrimmed { lines } => {
+                            self.command_marks
+                                .retain_mut(|mark| mark.trim_history(lines));
+                            self.command_fact_ledger.trim_history(lines);
+                        }
                     }
                     if let Some(selected_id) = &self.selected_command_mark_id
                         && !self

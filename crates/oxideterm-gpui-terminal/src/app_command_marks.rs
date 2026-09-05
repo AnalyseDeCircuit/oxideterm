@@ -86,6 +86,7 @@ impl TerminalPane {
             command: Some(command.to_string()),
             start_line,
             command_line,
+            command_line_clipped: false,
             end_line: None,
             is_closed: false,
             closed_by: None,

@@ -26,6 +26,28 @@ Use the same fixture size, warm-up count, measured-run count, terminal dimension
 
 ## In-App Performance Work
 
+### Command-Aware Output At The Scrollback Limit
+
+The headless GPUI renderer benchmark feeds real shell-integration events as well as text:
+
+```sh
+cargo bench -p oxideterm-gpui-terminal --features bench --bench terminal_render -- semantic_history --noplot --sample-size 10 --warm-up-time 1 --measurement-time 3
+```
+
+It compares small history, 2,000 previous commands at the scrollback limit, and the same command history without eviction. Warm redraw and coloring-disabled cases separate classification from rendering. The viewport is 120 × 40, with eight output lines per frame. History facts remain available after visual marks have left the grid; a full scrollback must not retain marks at reused line coordinates.
+
+On macOS ARM64 (Apple M5), the September 2026 regression investigation measured approximately 4.5–4.8 ms/frame with stale command coordinates, versus 0.58–0.66 ms/frame after rebasing. The baseline included the new structured-output classifiers on top of `315785e0f`; this is a comparison of the coordinate fix, not a comparison against a released version. Command-classified rows fell from 21 to one per frame, eliminating the 20 false classifications. This measures the synthetic renderer workload, not end-to-end PTY throughput or Windows/Linux presentation.
+
+For changes to grid scrolling, separately compare the same parser/grid fixtures:
+
+```sh
+cargo bench -p oxideterm-terminal --bench terminal_pipeline -- 'terminal_input_breakdown/grid/' --noplot --sample-size 20 --warm-up-time 1 --measurement-time 3 --save-baseline before-scroll-counter
+# Run on the changed source with the same settings:
+cargo bench -p oxideterm-terminal --bench terminal_pipeline -- 'terminal_input_breakdown/grid/' --noplot --sample-size 20 --warm-up-time 1 --measurement-time 3 --baseline before-scroll-counter
+```
+
+Criterion keeps the samples and estimates under `target/criterion/`. Do not run compilation or other CPU-heavy checks during measurement.
+
 For a UI or renderer change, capture the smallest reproducible interaction and identify whether cost is in:
 
 1. input or event delivery;

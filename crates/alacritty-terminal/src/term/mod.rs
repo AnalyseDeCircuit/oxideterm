@@ -686,6 +686,15 @@ impl<T> Term<T> {
         &self.grid
     }
 
+    /// Alternate-screen scrolling must not move primary-screen annotations.
+    pub fn primary_scrolled_out_lines(&self) -> usize {
+        if self.mode.contains(TermMode::ALT_SCREEN) {
+            self.inactive_grid.scrolled_out_lines()
+        } else {
+            self.grid.scrolled_out_lines()
+        }
+    }
+
     /// Mutable access to the raw grid data structure.
     pub fn grid_mut(&mut self) -> &mut Grid<Cell> {
         &mut self.grid
