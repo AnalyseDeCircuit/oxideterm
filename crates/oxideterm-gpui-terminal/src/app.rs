@@ -421,7 +421,7 @@ pub struct TerminalPane {
     terminal_timestamps_enabled: bool,
     // Visual-only metadata keyed by stable snapshot line identity; never write this
     // into the PTY buffer, copied text, or search/indexed terminal content.
-    row_timestamps: Arc<HashMap<u64, TerminalRowTimestamp>>,
+    row_timestamps: Arc<TerminalRowTimestampStore>,
     row_timestamp_retained_min_line: Option<u64>,
     metrics: TerminalMetrics,
     metrics_dirty: bool,
@@ -606,6 +606,22 @@ pub(crate) struct TerminalRowTimestamp {
     pub(crate) label: String,
     signature: u64,
     source_signature: u64,
+}
+
+/// Timestamp labels keyed by a window-relative line index plus an eviction
+/// base. The base advances whenever the scrollback cap evicts the oldest line,
+/// which shifts every retained line down one index; incrementing the base by
+/// the same amount keeps each absolute key stable across evictions.
+#[derive(Clone, Default)]
+pub(crate) struct TerminalRowTimestampStore {
+    pub(crate) base: u64,
+    pub(crate) entries: HashMap<u64, TerminalRowTimestamp>,
+}
+
+impl TerminalRowTimestampStore {
+    pub(crate) fn get(&self, index: u64) -> Option<&TerminalRowTimestamp> {
+        self.entries.get(&self.base.saturating_add(index))
+    }
 }
 
 #[derive(Clone)]
@@ -1071,7 +1087,7 @@ impl TerminalPane {
             snapshot_generation: 1,
             next_snapshot_line_id,
             terminal_timestamps_enabled: false,
-            row_timestamps: Arc::new(HashMap::new()),
+            row_timestamps: Arc::new(TerminalRowTimestampStore::default()),
             row_timestamp_retained_min_line: None,
             metrics,
             metrics_dirty: false,
@@ -1239,29 +1255,54 @@ impl TerminalPane {
         // Match iTerm-style semantics: a row label is the time that row was
         // last modified, not the time it first became visible in the viewport.
         let label = current_terminal_timestamp_label();
-        record_timestampable_snapshot_rows(
-            Arc::make_mut(&mut self.row_timestamps),
-            snapshot,
-            &label,
-        );
+        let store = Arc::make_mut(&mut self.row_timestamps);
+        if snapshot.scrollback_lines < self.snapshot.scrollback_lines {
+            // A shrunken history (clear, resize, or a lowered scrollback limit)
+            // re-anchors the window indices, so retained labels no longer map
+            // to their previous rows.
+            store.entries.clear();
+            store.base = 0;
+            self.row_timestamp_retained_min_line = None;
+        } else {
+            // The eviction count comes from surviving rows, not freshly assigned
+            // identities: viewport scrolling reveals rows that also take new
+            // line_ids without evicting anything.
+            store.base = store
+                .base
+                .saturating_add(timestamp_window_evictions(&self.snapshot, snapshot));
+        }
+        record_timestampable_snapshot_rows(store, snapshot, &label);
         self.trim_row_timestamps(snapshot);
     }
 
     fn trim_row_timestamps(&mut self, snapshot: &TerminalSnapshot) {
-        let Some(max_line) = snapshot.lines.iter().map(|row| row.line_id).max() else {
-            Arc::make_mut(&mut self.row_timestamps).clear();
+        let store = Arc::make_mut(&mut self.row_timestamps);
+        if snapshot.lines.is_empty() {
+            store.entries.clear();
+            store.base = 0;
             self.row_timestamp_retained_min_line = None;
             return;
-        };
+        }
+        let max_line = snapshot
+            .scrollback_lines
+            .saturating_add(snapshot.rows)
+            .saturating_add(1) as u64;
         let retained_rows = self
             .preferences
             .scrollback_lines
             .saturating_add(snapshot.rows)
             .saturating_add(1024)
             .max(2048) as u64;
-        let min_line = max_line.saturating_sub(retained_rows);
+        // Absolute keys live in [base, base + max_line); evicted lines and any
+        // history beyond the retention window sit below this shifted boundary.
+        let min_line = store.base.max(
+            store
+                .base
+                .saturating_add(max_line)
+                .saturating_sub(retained_rows),
+        );
         trim_row_timestamp_history(
-            Arc::make_mut(&mut self.row_timestamps),
+            &mut store.entries,
             &mut self.row_timestamp_retained_min_line,
             min_line,
         );
@@ -3794,16 +3835,51 @@ fn terminal_timestamp_label(hour: u32, minute: u32, second: u32, millis: u32) ->
     format!("[{hour:02}:{minute:02}:{second:02}.{millis:03}]")
 }
 
+/// Lines evicted by the scrollback cap in one snapshot step. Every surviving
+/// row keeps its line_id while eviction shifts its window-relative key down by
+/// the evicted count, so the largest key drop across surviving rows is the
+/// evicted count. Rows only revealed by viewport scrolling have no counterpart
+/// in the previous window and therefore contribute nothing.
+///
+/// When no row survives between the two snapshots (a single step that adds at
+/// least a full screen of lines while the cap is pinned), the evicted count is
+/// not observable from the viewport and the caller treats it as zero. Those
+/// history rows may be re-stamped once when scrolled into view, then recover.
+fn timestamp_window_evictions(previous: &TerminalSnapshot, next: &TerminalSnapshot) -> u64 {
+    let previous_indices = previous
+        .lines
+        .iter()
+        .filter(|row| row.line_id != 0)
+        .map(|row| (row.line_id, terminal_row_timestamp_index(previous, row)))
+        .collect::<HashMap<_, _>>();
+    let mut evictions = 0;
+    for row in &next.lines {
+        if row.line_id == 0 {
+            continue;
+        }
+        let Some(previous_index) = previous_indices.get(&row.line_id) else {
+            continue;
+        };
+        let next_index = terminal_row_timestamp_index(next, row);
+        evictions = evictions.max(previous_index.saturating_sub(next_index));
+    }
+    evictions
+}
+
 fn record_timestampable_snapshot_rows(
-    row_timestamps: &mut HashMap<u64, TerminalRowTimestamp>,
+    store: &mut TerminalRowTimestampStore,
     snapshot: &TerminalSnapshot,
     label: &str,
 ) {
     for row in &snapshot.lines {
+        let key = store
+            .base
+            .saturating_add(terminal_row_timestamp_index(snapshot, row));
         // The snapshot signature is a cheap invalidation key. Cursor-only changes
         // still fall through to the content signature comparison below.
-        if row_timestamps
-            .get(&row.line_id)
+        if store
+            .entries
+            .get(&key)
             .is_some_and(|timestamp| timestamp.source_signature == row.signature)
         {
             continue;
@@ -3811,15 +3887,15 @@ fn record_timestampable_snapshot_rows(
 
         if terminal_row_has_timestamp_content(row) {
             let timestamp_signature = terminal_row_timestamp_signature(row);
-            if let Some(timestamp) = row_timestamps.get_mut(&row.line_id) {
+            if let Some(timestamp) = store.entries.get_mut(&key) {
                 if timestamp.signature != timestamp_signature {
                     timestamp.label = label.to_string();
                     timestamp.signature = timestamp_signature;
                 }
                 timestamp.source_signature = row.signature;
             } else {
-                row_timestamps.insert(
-                    row.line_id,
+                store.entries.insert(
+                    key,
                     TerminalRowTimestamp {
                         label: label.to_string(),
                         signature: timestamp_signature,
@@ -3830,7 +3906,7 @@ fn record_timestampable_snapshot_rows(
         } else {
             // Blank viewport rows are recycled later. Removing their metadata
             // prevents new output from inheriting a stale line-modification time.
-            row_timestamps.remove(&row.line_id);
+            store.entries.remove(&key);
         }
     }
 }
@@ -4269,6 +4345,32 @@ mod tests {
         }
     }
 
+    fn timestamp_window_test_snapshot(
+        scrollback_lines: usize,
+        rows: &[(u64, i64)],
+    ) -> TerminalSnapshot {
+        let lines = rows
+            .iter()
+            .map(|&(line_id, absolute_line)| {
+                let mut row = timestamp_test_row(absolute_line, "x");
+                row.line_id = line_id;
+                row
+            })
+            .collect::<Vec<_>>();
+        TerminalSnapshot {
+            generation: 1,
+            cols: 1,
+            rows: rows.len(),
+            cursor_col: 0,
+            cursor_row: 0,
+            cursor_shape: TerminalCursorShape::Block,
+            display_offset: 0,
+            scrollback_lines,
+            lines,
+            images: Vec::new(),
+        }
+    }
+
     #[test]
     fn snapshot_line_ids_follow_scrolled_sources_without_reusing_recycled_rows() {
         let mut previous_lines = (0..3)
@@ -4314,26 +4416,25 @@ mod tests {
 
     #[test]
     fn row_timestamps_track_last_modified_nonblank_content() {
-        let mut row_timestamps = HashMap::new();
+        let mut store = TerminalRowTimestampStore::default();
         let blank_snapshot = timestamp_test_snapshot(timestamp_test_row(42, "   "));
-        record_timestampable_snapshot_rows(&mut row_timestamps, &blank_snapshot, "10:00:00");
+        record_timestampable_snapshot_rows(&mut store, &blank_snapshot, "10:00:00");
 
-        assert!(!row_timestamps.contains_key(&42));
+        // Stable key: base(0) + scrollback(0) + absolute_line(42) = 42.
+        assert!(!store.entries.contains_key(&42));
 
         let content_snapshot = timestamp_test_snapshot(timestamp_test_row(42, "ls"));
-        record_timestampable_snapshot_rows(&mut row_timestamps, &content_snapshot, "10:00:01");
+        record_timestampable_snapshot_rows(&mut store, &content_snapshot, "10:00:01");
 
         assert_eq!(
-            row_timestamps
-                .get(&42)
-                .map(|timestamp| timestamp.label.as_str()),
+            store.get(42).map(|timestamp| timestamp.label.as_str()),
             Some("10:00:01")
         );
 
         let unchanged_snapshot =
             timestamp_test_snapshot(timestamp_test_row_with_cursor(42, "ls", Some(1), true));
-        record_timestampable_snapshot_rows(&mut row_timestamps, &unchanged_snapshot, "10:00:02");
-        let unchanged_timestamp = row_timestamps.get(&42).expect("timestamped row");
+        record_timestampable_snapshot_rows(&mut store, &unchanged_snapshot, "10:00:02");
+        let unchanged_timestamp = store.get(42).expect("timestamped row");
         assert_eq!(unchanged_timestamp.label, "10:00:01");
         assert_eq!(
             unchanged_timestamp.source_signature,
@@ -4341,11 +4442,9 @@ mod tests {
         );
 
         let changed_snapshot = timestamp_test_snapshot(timestamp_test_row(42, "pwd"));
-        record_timestampable_snapshot_rows(&mut row_timestamps, &changed_snapshot, "10:00:03");
+        record_timestampable_snapshot_rows(&mut store, &changed_snapshot, "10:00:03");
         assert_eq!(
-            row_timestamps
-                .get(&42)
-                .map(|timestamp| timestamp.label.as_str()),
+            store.get(42).map(|timestamp| timestamp.label.as_str()),
             Some("10:00:03")
         );
 
@@ -4354,9 +4453,117 @@ mod tests {
         assert_eq!(label.chars().count(), TERMINAL_TIMESTAMP_LABEL_CELLS);
 
         let cleared_snapshot = timestamp_test_snapshot(timestamp_test_row(42, ""));
-        record_timestampable_snapshot_rows(&mut row_timestamps, &cleared_snapshot, "10:00:04");
+        record_timestampable_snapshot_rows(&mut store, &cleared_snapshot, "10:00:04");
 
-        assert!(!row_timestamps.contains_key(&42));
+        assert!(!store.entries.contains_key(&42));
+    }
+
+    #[test]
+    fn row_timestamps_keep_the_same_key_across_scrollback_growth() {
+        let mut store = TerminalRowTimestampStore::default();
+
+        // The content row sits on the screen with one scrollback line, so its
+        // stable key is base(0) + scrollback(1) + absolute_line(0) = 1.
+        let mut first_snapshot = timestamp_test_snapshot(timestamp_test_row(0, "ls"));
+        first_snapshot.scrollback_lines = 1;
+        record_timestampable_snapshot_rows(&mut store, &first_snapshot, "10:00:01");
+        assert_eq!(
+            store.get(1).map(|timestamp| timestamp.label.as_str()),
+            Some("10:00:01")
+        );
+
+        // New output pushes the same content into scrollback: scrollback grows
+        // by one while absolute_line drops by one, so the key must stay 1 and
+        // the label must not be re-stamped.
+        let mut second_snapshot = timestamp_test_snapshot(timestamp_test_row(-1, "ls"));
+        second_snapshot.scrollback_lines = 2;
+        record_timestampable_snapshot_rows(&mut store, &second_snapshot, "10:00:02");
+        assert_eq!(
+            store.get(1).map(|timestamp| timestamp.label.as_str()),
+            Some("10:00:01"),
+            "scrolling must not re-stamp the same content line"
+        );
+    }
+
+    #[test]
+    fn row_timestamps_survive_scrollback_cap_eviction_without_restamping() {
+        let mut store = TerminalRowTimestampStore::default();
+
+        // The buffer cap has been reached: scrollback is pinned at 2. The
+        // content row sits on the screen, so its key is base(0) +
+        // scrollback(2) + absolute_line(0) = 2.
+        let mut before_eviction = timestamp_test_snapshot(timestamp_test_row(0, "ls"));
+        before_eviction.scrollback_lines = 2;
+        record_timestampable_snapshot_rows(&mut store, &before_eviction, "10:00:01");
+
+        // The cap evicts the oldest history line while the same content moves
+        // up one row without scrollback growth. Advancing the base by the one
+        // evicted line keeps the same absolute key; the label must follow the
+        // content instead of being re-stamped.
+        store.base += 1;
+        let mut after_eviction = timestamp_test_snapshot(timestamp_test_row(-1, "ls"));
+        after_eviction.scrollback_lines = 2;
+        record_timestampable_snapshot_rows(&mut store, &after_eviction, "10:00:02");
+
+        assert_eq!(
+            store.get(1).map(|timestamp| timestamp.label.as_str()),
+            Some("10:00:01"),
+            "cap eviction must not re-stamp the same content line"
+        );
+    }
+
+    #[test]
+    fn timestamp_window_evictions_ignores_viewport_scroll_up() {
+        // Scrolling up reveals one history row at the top; the two surviving
+        // rows keep their line identities and their window-relative keys.
+        let previous = timestamp_window_test_snapshot(5, &[(10, 0), (11, 1), (12, 2)]);
+        let next = timestamp_window_test_snapshot(5, &[(0, -1), (10, 0), (11, 1)]);
+        assert_eq!(timestamp_window_evictions(&previous, &next), 0);
+    }
+
+    #[test]
+    fn timestamp_window_evictions_ignores_viewport_scroll_down() {
+        // Scrolling down reveals one screen row at the bottom without evicting
+        // history, so the base must not advance.
+        let previous = timestamp_window_test_snapshot(5, &[(10, -1), (11, 0), (12, 1)]);
+        let next = timestamp_window_test_snapshot(5, &[(10, 0), (11, 1), (0, 2)]);
+        assert_eq!(timestamp_window_evictions(&previous, &next), 0);
+    }
+
+    #[test]
+    fn timestamp_window_evictions_ignores_full_viewport_jumps() {
+        // Jumping Home rebuilds the whole window with fresh identities. No row
+        // survives the jump, so nothing was evicted.
+        let previous = timestamp_window_test_snapshot(10, &[(10, 0), (11, 1), (12, 2)]);
+        let next = timestamp_window_test_snapshot(10, &[(0, -10), (0, -9), (0, -8)]);
+        assert_eq!(timestamp_window_evictions(&previous, &next), 0);
+    }
+
+    #[test]
+    fn timestamp_window_evictions_ignores_scrollback_growth() {
+        // One new output line grows history by one, which exactly absorbs the
+        // key shift of every surviving row.
+        let previous = timestamp_window_test_snapshot(2, &[(10, 0), (11, 1), (12, 2), (13, 3)]);
+        let next = timestamp_window_test_snapshot(3, &[(11, 0), (12, 1), (13, 2), (14, 3)]);
+        assert_eq!(timestamp_window_evictions(&previous, &next), 0);
+    }
+
+    #[test]
+    fn timestamp_window_evictions_counts_cap_evictions() {
+        // Two new output lines while history is pinned at its cap evict the
+        // two oldest lines, shifting every surviving key down by two.
+        let previous = timestamp_window_test_snapshot(5, &[(10, 0), (11, 1), (12, 2), (13, 3)]);
+        let next = timestamp_window_test_snapshot(5, &[(12, 0), (13, 1), (14, 2), (15, 3)]);
+        assert_eq!(timestamp_window_evictions(&previous, &next), 2);
+    }
+
+    #[test]
+    fn timestamp_window_evictions_counts_cap_evictions_while_scrolled() {
+        // Output while the viewport is scrolled still shifts surviving rows by
+        // the evicted count, while rows revealed by the scroll contribute zero.
+        let previous = timestamp_window_test_snapshot(5, &[(10, -3), (11, -2), (12, -1), (13, 0)]);
+        let next = timestamp_window_test_snapshot(5, &[(11, -3), (12, -2), (13, -1), (0, 0)]);
+        assert_eq!(timestamp_window_evictions(&previous, &next), 1);
     }
 
     #[test]

@@ -9,7 +9,8 @@ use oxideterm_settings::{
     TerminalBackspaceSequence, TerminalDeleteSequence, TerminalSemanticScheme,
 };
 use oxideterm_terminal::{
-    TerminalColor, TerminalCursorShape, TerminalEncoding, TrzszTransferPolicy,
+    TerminalColor, TerminalCursorShape, TerminalEncoding, TerminalRow, TerminalSnapshot,
+    TrzszTransferPolicy,
 };
 use oxideterm_terminal_semantic::{
     CompiledSemanticScheme, SemanticClass, SemanticScheme, SemanticSchemeDocument,
@@ -1021,6 +1022,13 @@ pub(crate) fn terminal_timestamp_gutter_width(metrics: &TerminalMetrics, enabled
     } else {
         0.0
     }
+}
+
+/// Window-relative identity for a retained line. It starts at zero for the
+/// oldest history row, stays stable while scrolling, and the timestamp store's
+/// eviction base keeps the resulting absolute key stable across cap evictions.
+pub(crate) fn terminal_row_timestamp_index(snapshot: &TerminalSnapshot, row: &TerminalRow) -> u64 {
+    (snapshot.scrollback_lines as i64 + row.absolute_line).max(0) as u64
 }
 
 pub(crate) fn fallback_cell_width(window: &mut Window, font: &Font, font_size: Pixels) -> Pixels {
