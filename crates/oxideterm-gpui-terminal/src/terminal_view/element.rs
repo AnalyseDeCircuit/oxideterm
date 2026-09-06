@@ -865,8 +865,8 @@ impl TerminalElement {
                     &mut cursor,
                 );
             }
-            if let Some(timestamp_run) = self
-                .timestamp_run_for_row(row_index, terminal_row_timestamp_index(&self.snapshot, row))
+            if let Some(timestamp_run) =
+                self.timestamp_run_for_row(row_index, terminal_row_timestamp_identity(row))
             {
                 timestamp_runs.push(timestamp_run);
             }

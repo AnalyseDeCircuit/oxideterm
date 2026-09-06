@@ -3,6 +3,7 @@
 use std::cmp::{max, min};
 use std::ops::{Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 use std::{ptr, slice};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -12,9 +13,12 @@ use crate::index::Column;
 use crate::term::cell::ResetDiscriminant;
 
 /// A row in the grid.
-#[derive(Default, Clone, Debug)]
+#[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Row<T> {
+    // Identity follows row swaps but changes when storage is recycled for new content.
+    #[cfg_attr(feature = "serde", serde(skip, default = "next_row_identity"))]
+    identity: usize,
     inner: Vec<T>,
 
     /// Maximum number of occupied entries.
@@ -22,6 +26,23 @@ pub struct Row<T> {
     /// This is the upper bound on the number of elements in the row, which have been modified
     /// since the last reset. All cells after this point are guaranteed to be equal.
     pub(crate) occ: usize,
+}
+
+fn next_row_identity() -> usize {
+    static NEXT: AtomicUsize = AtomicUsize::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+impl<T> Default for Row<T> {
+    fn default() -> Self {
+        Self { identity: next_row_identity(), inner: Vec::new(), occ: 0 }
+    }
+}
+
+impl<T: Clone> Clone for Row<T> {
+    fn clone(&self) -> Self {
+        Self { identity: next_row_identity(), inner: self.inner.clone(), occ: self.occ }
+    }
 }
 
 impl<T: PartialEq> PartialEq for Row<T> {
@@ -52,7 +73,7 @@ impl<T: Default> Row<T> {
             inner.set_len(columns);
         }
 
-        Row { inner, occ: 0 }
+        Row { identity: next_row_identity(), inner, occ: 0 }
     }
 
     /// Increase the number of columns in the row.
@@ -94,6 +115,7 @@ impl<T: Default> Row<T> {
         D: PartialEq,
     {
         debug_assert!(!self.inner.is_empty());
+        self.identity = next_row_identity();
 
         // Mark all cells as dirty if template cell changed.
         let len = self.inner.len();
@@ -112,9 +134,13 @@ impl<T: Default> Row<T> {
 
 #[allow(clippy::len_without_is_empty)]
 impl<T> Row<T> {
+    /// Stable source identity across viewport changes and movement in the grid.
+    #[inline]
+    pub fn identity(&self) -> usize { self.identity }
+
     #[inline]
     pub fn from_vec(vec: Vec<T>, occ: usize) -> Row<T> {
-        Row { inner: vec, occ }
+        Row { identity: next_row_identity(), inner: vec, occ }
     }
 
     #[inline]
