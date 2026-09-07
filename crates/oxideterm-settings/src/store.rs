@@ -511,6 +511,45 @@ mod tests {
 
     use super::*;
     #[test]
+    fn terminal_padding_defaults_and_saved_axes_are_independent() {
+        let defaults = sanitize_settings_value(json!({})).unwrap().settings;
+        assert_eq!(
+            (
+                defaults.terminal.padding_horizontal,
+                defaults.terminal.padding_vertical
+            ),
+            (1, 1)
+        );
+        let configured = sanitize_settings_value(
+            json!({"terminal": {"paddingHorizontal": 0, "paddingVertical": 12}}),
+        )
+        .unwrap()
+        .settings;
+        let round_trip = sanitize_settings_value(serde_json::to_value(&configured).unwrap())
+            .unwrap()
+            .settings;
+        assert_eq!(
+            (
+                round_trip.terminal.padding_horizontal,
+                round_trip.terminal.padding_vertical
+            ),
+            (0, 12)
+        );
+        let invalid = sanitize_settings_value(
+            json!({"terminal": {"paddingHorizontal": -1, "paddingVertical": 999}}),
+        )
+        .unwrap()
+        .settings;
+        assert_eq!(
+            (
+                invalid.terminal.padding_horizontal,
+                invalid.terminal.padding_vertical
+            ),
+            (0, crate::MAX_TERMINAL_PADDING)
+        );
+    }
+
+    #[test]
     fn invalid_numeric_values_normalize_safely() {
         let raw = json!({
             "terminal": {

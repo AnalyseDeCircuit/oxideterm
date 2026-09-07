@@ -709,6 +709,18 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
             MIN_TERMINAL_FONT_WEIGHT,
             MAX_TERMINAL_FONT_WEIGHT,
         ),
+        (
+            "terminal.paddingHorizontal",
+            DEFAULT_TERMINAL_PADDING_HORIZONTAL,
+            0,
+            MAX_TERMINAL_PADDING,
+        ),
+        (
+            "terminal.paddingVertical",
+            DEFAULT_TERMINAL_PADDING_VERTICAL,
+            0,
+            MAX_TERMINAL_PADDING,
+        ),
         ("terminal.backgroundBlur", 0, 0, 20),
         ("appearance.borderRadius", 6, 0, 16),
         ("appearance.uiFontSize", DEFAULT_UI_FONT_SIZE, 11, 20),

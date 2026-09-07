@@ -143,6 +143,8 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
                 "settings_view.terminal.font_ligatures",
                 "settings_view.terminal.font_size",
                 "settings_view.terminal.line_height",
+                "settings_view.terminal.padding_horizontal",
+                "settings_view.terminal.padding_vertical",
                 "settings_view.terminal.smooth_scroll",
                 "settings_view.terminal.encoding",
                 "settings_view.terminal.show_performance_overlay",

@@ -486,10 +486,12 @@ impl Render for TerminalPane {
             .child(
                 div()
                     .absolute()
-                    .top(px(terminal_top))
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
+                    // The element's inset bounds are shared by painting, hit testing and PTY sizing.
+                    .top(px(terminal_top + self.preferences.padding_vertical))
+                    .left(px(self.preferences.padding_horizontal))
+                    .right(px(self.preferences.padding_horizontal))
+                    .bottom(px(self.preferences.padding_vertical))
+                    .overflow_hidden()
                     .child(terminal_element),
             )
             .when(self.is_serial_transport(), |pane| {
@@ -2372,7 +2374,8 @@ impl TerminalPane {
         } else {
             overlay_bottom + gap
         };
-        top.clamp(0.0, (viewport_height - actions_height).max(0.0))
+        self.preferences.padding_vertical
+            + top.clamp(0.0, (viewport_height - actions_height).max(0.0))
     }
 
     fn copy_command_mark_output_to_clipboard(

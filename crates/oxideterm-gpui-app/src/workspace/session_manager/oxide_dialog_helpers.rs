@@ -331,6 +331,8 @@ pub(super) fn oxide_settings_field_label(field: &str, i18n: &oxideterm_i18n::I18
         "fontSize" => i18n.t("settings_view.terminal.font_size"),
         "fontLigatures" => i18n.t("settings_view.terminal.font_ligatures"),
         "lineHeight" => i18n.t("settings_view.terminal.line_height"),
+        "paddingHorizontal" => i18n.t("settings_view.terminal.padding_horizontal"),
+        "paddingVertical" => i18n.t("settings_view.terminal.padding_vertical"),
         "cursorStyle" => i18n.t("settings_view.terminal.cursor_style"),
         "cursorBlink" => i18n.t("settings_view.terminal.cursor_blink"),
         "backgroundEnabled" => i18n.t("settings_view.terminal.bg_enabled"),

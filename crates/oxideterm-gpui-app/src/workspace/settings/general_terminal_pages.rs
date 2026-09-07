@@ -921,6 +921,22 @@ impl WorkspaceApp {
                         cx,
                     ),
                     self.card_separator(),
+                    self.decimal_row(
+                        "settings_view.terminal.padding_horizontal",
+                        "settings_view.terminal.padding_horizontal_hint",
+                        SettingsInput::TerminalPaddingHorizontal,
+                        settings.terminal.padding_horizontal.to_string(),
+                        cx,
+                    ),
+                    self.card_separator(),
+                    self.decimal_row(
+                        "settings_view.terminal.padding_vertical",
+                        "settings_view.terminal.padding_vertical_hint",
+                        SettingsInput::TerminalPaddingVertical,
+                        settings.terminal.padding_vertical.to_string(),
+                        cx,
+                    ),
+                    self.card_separator(),
                     self.checkbox_row(
                         "settings_view.terminal.smooth_scroll",
                         "settings_view.terminal.smooth_scroll_hint",

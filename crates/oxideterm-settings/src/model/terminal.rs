@@ -377,6 +377,10 @@ pub struct TerminalSettings {
     #[serde(default)]
     pub font_ligatures: bool,
     pub line_height: f64,
+    #[serde(default = "default_terminal_padding_horizontal")]
+    pub padding_horizontal: i64,
+    #[serde(default = "default_terminal_padding_vertical")]
+    pub padding_vertical: i64,
     pub cursor_style: CursorStyle,
     pub cursor_blink: bool,
     pub scrollback: i64,
@@ -466,10 +470,21 @@ pub const MAX_TERMINAL_BACKGROUND_OPACITY: f64 = 1.0;
 pub const DEFAULT_TERMINAL_FONT_WEIGHT: i64 = 400;
 pub const MIN_TERMINAL_FONT_WEIGHT: i64 = 100;
 pub const MAX_TERMINAL_FONT_WEIGHT: i64 = 900;
+pub const DEFAULT_TERMINAL_PADDING_HORIZONTAL: i64 = 1;
+pub const DEFAULT_TERMINAL_PADDING_VERTICAL: i64 = 1;
+pub const MAX_TERMINAL_PADDING: i64 = 64;
 pub const MAX_CUSTOM_SEMANTIC_SCHEMES: usize = 32;
 
 const fn default_terminal_font_weight() -> i64 {
     DEFAULT_TERMINAL_FONT_WEIGHT
+}
+
+const fn default_terminal_padding_horizontal() -> i64 {
+    DEFAULT_TERMINAL_PADDING_HORIZONTAL
+}
+
+const fn default_terminal_padding_vertical() -> i64 {
+    DEFAULT_TERMINAL_PADDING_VERTICAL
 }
 
 impl TerminalSettings {
@@ -526,6 +541,8 @@ impl Default for TerminalSettings {
             font_weight: DEFAULT_TERMINAL_FONT_WEIGHT,
             font_ligatures: false,
             line_height: 1.2,
+            padding_horizontal: DEFAULT_TERMINAL_PADDING_HORIZONTAL,
+            padding_vertical: DEFAULT_TERMINAL_PADDING_VERTICAL,
             cursor_style: CursorStyle::Block,
             cursor_blink: true,
             scrollback: DEFAULT_TERMINAL_SCROLLBACK,

@@ -1,9 +1,7 @@
 use super::*;
 
-pub(in crate::workspace) const SIDEBAR_RESIZE_HOTZONE_PADDING: f32 = 4.0;
 pub(in crate::workspace) const SIDEBAR_RESIZE_DIVIDER_WIDTH: f32 = 1.0;
-pub(in crate::workspace) const SIDEBAR_RESIZE_HOTZONE_WIDTH: f32 =
-    SIDEBAR_RESIZE_DIVIDER_WIDTH + SIDEBAR_RESIZE_HOTZONE_PADDING * 2.0;
+pub(in crate::workspace) const SIDEBAR_RESIZE_HOTZONE_WIDTH: f32 = 9.0;
 const EMBEDDED_SFTP_SPLIT_HANDLE_SIZE: f32 = 7.0;
 const EMBEDDED_SFTP_SPLIT_LINE_SIZE: f32 = 1.0;
 const EMBEDDED_SFTP_SPLIT_HOVER_ALPHA: u32 = 0x1f;
@@ -35,20 +33,22 @@ pub(in crate::workspace) fn context_sidebar_region_chrome() -> gpui::Div {
 pub(in crate::workspace) fn sidebar_resize_hotzone_chrome(
     element_id: &'static str,
     line_color: gpui::Rgba,
+    divider_at_right: bool,
 ) -> gpui::Stateful<gpui::Div> {
     div()
         .id(element_id)
         .absolute()
         .w(px(SIDEBAR_RESIZE_HOTZONE_WIDTH))
         .cursor_col_resize()
-        // Match browser split panes: the hit target straddles the seam while
-        // remaining fully transparent except for its centered divider.
+        // Keep the full drag target inside the sidebar so terminal column zero
+        // remains selectable even when the terminal has no padding.
         .occlude()
         .bg(rgba(0x00000000))
         .child(
             div()
                 .absolute()
-                .left(px(SIDEBAR_RESIZE_HOTZONE_PADDING))
+                .when(divider_at_right, |divider| divider.right_0())
+                .when(!divider_at_right, |divider| divider.left_0())
                 .top_0()
                 .bottom_0()
                 .w(px(SIDEBAR_RESIZE_DIVIDER_WIDTH))
@@ -59,7 +59,7 @@ pub(in crate::workspace) fn sidebar_resize_hotzone_chrome(
 }
 
 pub(in crate::workspace) fn sidebar_resize_hotzone_origin(seam: f32) -> f32 {
-    seam - SIDEBAR_RESIZE_HOTZONE_PADDING
+    seam - SIDEBAR_RESIZE_HOTZONE_WIDTH
 }
 
 impl WorkspaceApp {
@@ -263,6 +263,7 @@ impl WorkspaceApp {
             } else {
                 rgba(0x00000000)
             },
+            true,
         )
         .left(px(sidebar_resize_hotzone_origin(seam)))
         .top(px(top_offset))
@@ -297,6 +298,7 @@ impl WorkspaceApp {
             } else {
                 rgb(theme.border)
             },
+            false,
         )
         .right(px(sidebar_resize_hotzone_origin(
             self.ai_entity.read(cx).chat_ui().sidebar_width,
@@ -1612,7 +1614,7 @@ mod sidebar_resize_region_tests {
                         )),
                 )
                 .child(
-                    sidebar_resize_hotzone_chrome("left-hotzone-element", rgba(0x000000ff))
+                    sidebar_resize_hotzone_chrome("left-hotzone-element", rgba(0x000000ff), true)
                         .left(px(sidebar_resize_hotzone_origin(self.total_width)))
                         .top_0()
                         .bottom_0()
@@ -1701,19 +1703,23 @@ mod sidebar_resize_region_tests {
                         ),
                 )
                 .child(
-                    sidebar_resize_hotzone_chrome("context-hotzone-element", rgba(0x000000ff))
-                        .left(px(sidebar_resize_hotzone_origin(seam)))
-                        .top_0()
-                        .bottom_0()
-                        .debug_selector(|| "context-hotzone".to_string())
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.resizing = true;
-                                resize_started.set(true);
-                                cx.notify();
-                            }),
-                        ),
+                    sidebar_resize_hotzone_chrome(
+                        "context-hotzone-element",
+                        rgba(0x000000ff),
+                        false,
+                    )
+                    .left(px(seam))
+                    .top_0()
+                    .bottom_0()
+                    .debug_selector(|| "context-hotzone".to_string())
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.resizing = true;
+                            resize_started.set(true);
+                            cx.notify();
+                        }),
+                    ),
                 )
                 .when(self.resizing, |root| {
                     root.child(
@@ -1774,14 +1780,26 @@ mod sidebar_resize_region_tests {
             SIDEBAR_RESIZE_HOTZONE_WIDTH,
         );
         assert_close(
-            "left divider position",
-            f32::from(hotzone.origin.x) + SIDEBAR_RESIZE_HOTZONE_PADDING,
+            "left hotzone ends before terminal content",
+            right_edge(&hotzone),
             right_edge(&frame),
         );
 
+        cx.simulate_mouse_down(
+            Point::new(
+                frame.origin.x + frame.size.width + px(0.5),
+                frame.origin.y + px(20.0),
+            ),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        assert!(
+            !resize_started.get(),
+            "column zero must not start sidebar resize"
+        );
         cx.simulate_mouse_move(
             Point::new(
-                frame.origin.x + frame.size.width + px(3.0),
+                frame.origin.x + frame.size.width - px(3.0),
                 frame.origin.y + px(20.0),
             ),
             None,
@@ -1794,7 +1812,7 @@ mod sidebar_resize_region_tests {
         );
         cx.simulate_mouse_down(
             Point::new(
-                frame.origin.x + frame.size.width + px(3.0),
+                frame.origin.x + frame.size.width - px(3.0),
                 frame.origin.y + px(20.0),
             ),
             MouseButton::Left,
@@ -1857,7 +1875,7 @@ mod sidebar_resize_region_tests {
         assert_close(
             "hotzone origin",
             f32::from(hotzone.origin.x) - f32::from(frame.origin.x),
-            -SIDEBAR_RESIZE_HOTZONE_PADDING,
+            0.0,
         );
         assert_close(
             "hotzone width",
@@ -1865,8 +1883,17 @@ mod sidebar_resize_region_tests {
             SIDEBAR_RESIZE_HOTZONE_WIDTH,
         );
 
+        cx.simulate_mouse_down(
+            Point::new(frame.origin.x - px(0.5), frame.origin.y + px(20.0)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        assert!(
+            !resize_started.get(),
+            "terminal edge must not start sidebar resize"
+        );
         cx.simulate_mouse_move(
-            Point::new(frame.origin.x - px(3.0), frame.origin.y + px(20.0)),
+            Point::new(frame.origin.x + px(3.0), frame.origin.y + px(20.0)),
             None,
             Modifiers::default(),
         );
@@ -1876,7 +1903,7 @@ mod sidebar_resize_region_tests {
             "hovering the context-sidebar hotzone should apply the column-resize cursor"
         );
         cx.simulate_mouse_down(
-            Point::new(frame.origin.x - px(3.0), frame.origin.y + px(20.0)),
+            Point::new(frame.origin.x + px(3.0), frame.origin.y + px(20.0)),
             MouseButton::Left,
             Modifiers::default(),
         );

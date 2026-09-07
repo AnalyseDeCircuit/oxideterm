@@ -32,9 +32,9 @@ pub const TERMINAL_FONT: &str = oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY
 pub(crate) const TERMINAL_FONT_SIZE: f32 = 14.0;
 pub(crate) const TERMINAL_FONT_WEIGHT: f32 = 400.0;
 pub(crate) const TERMINAL_LINE_HEIGHT_RATIO: f32 = 1.2;
+// User padding is applied outside the element; these coordinates are grid-local.
 pub(crate) const TERMINAL_CONTENT_PADDING: f32 = 0.0;
-// Command marks no longer reserve a left gutter; column-zero terminal text must
-// start at the pane edge.
+// Command marks do not reserve additional space before column zero.
 pub(crate) const TERMINAL_COMMAND_MARK_GUTTER_WIDTH: f32 = 0.0;
 const NESTED_SEMANTIC_COLOR_COUNT: u8 = 6;
 const TERMINAL_SEMANTIC_ERROR_LINE_BAND_OPACITY: f32 = 0.11;
@@ -78,6 +78,8 @@ pub struct TerminalUiPreferences {
     pub font_size: f32,
     pub font_weight: f32,
     pub line_height: f32,
+    pub padding_horizontal: f32,
+    pub padding_vertical: f32,
     pub cursor_shape: TerminalCursorShape,
     pub cursor_blink: bool,
     pub scrollback_lines: usize,
@@ -191,6 +193,8 @@ impl Default for TerminalUiPreferences {
             font_size: TERMINAL_FONT_SIZE,
             font_weight: TERMINAL_FONT_WEIGHT,
             line_height: TERMINAL_LINE_HEIGHT_RATIO,
+            padding_horizontal: oxideterm_settings::DEFAULT_TERMINAL_PADDING_HORIZONTAL as f32,
+            padding_vertical: oxideterm_settings::DEFAULT_TERMINAL_PADDING_VERTICAL as f32,
             cursor_shape: TerminalCursorShape::Block,
             cursor_blink: true,
             scrollback_lines: DEFAULT_SCROLLBACK_LINES,

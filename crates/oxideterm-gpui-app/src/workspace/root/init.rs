@@ -1128,6 +1128,8 @@ impl WorkspaceApp {
             font_size: terminal.font_size as f32,
             font_weight: terminal.font_weight as f32,
             line_height: terminal.line_height as f32,
+            padding_horizontal: terminal.padding_horizontal as f32,
+            padding_vertical: terminal.padding_vertical as f32,
             cursor_shape: match terminal.cursor_style {
                 SettingsCursorStyle::Block => TerminalCursorShape::Block,
                 SettingsCursorStyle::Underline => TerminalCursorShape::Underline,

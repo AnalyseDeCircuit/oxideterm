@@ -3778,13 +3778,19 @@ impl TerminalPane {
         // cell metrics. Expose pane-local facts rather than making workspace
         // code duplicate terminal layout math.
         Some(TerminalCursorAnchor {
-            x: f32::from(cursor_bounds.origin.x) + self.terminal_content_padding_x()
+            x: self.preferences.padding_horizontal
+                + f32::from(cursor_bounds.origin.x)
+                + self.terminal_content_padding_x()
                 - f32::from(self.horizontal_scroll_offset_px),
-            y: f32::from(cursor_bounds.origin.y) + TERMINAL_CONTENT_PADDING,
+            y: self.preferences.padding_vertical
+                + f32::from(cursor_bounds.origin.y)
+                + TERMINAL_CONTENT_PADDING,
             line_height: self.metrics.line_height_f32(),
             char_width: self.metrics.cell_width_f32(),
-            container_width: f32::from(bounds.size.width),
-            container_height: f32::from(bounds.size.height),
+            container_width: f32::from(bounds.size.width)
+                + self.preferences.padding_horizontal * 2.0,
+            container_height: f32::from(bounds.size.height)
+                + self.preferences.padding_vertical * 2.0,
         })
     }
 }
@@ -4122,6 +4128,96 @@ mod tests {
                 viewport_needs_live_output_restore(display_offset, smooth_offset, animation_active),
                 expected
             );
+        }
+    }
+
+    #[gpui::test]
+    fn terminal_padding_updates_layout_grid_and_input_coordinates(cx: &mut TestAppContext) {
+        let (pane, cx) = cx.add_window_view(|window, cx| {
+            TerminalPane::new_recording_playback(
+                DEFAULT_COLS,
+                DEFAULT_ROWS,
+                TerminalUiPreferences::default(),
+                window,
+                cx,
+            )
+            .expect("test terminal pane")
+        });
+        cx.simulate_resize(gpui::size(px(640.0), px(320.0)));
+
+        for (horizontal, vertical) in [(1.0, 1.0), (24.0, 12.0), (0.0, 0.0)] {
+            pane.update(cx, |pane, cx| {
+                let mut preferences = pane.preferences.clone();
+                preferences.padding_horizontal = horizontal;
+                preferences.padding_vertical = vertical;
+                pane.set_preferences(preferences, cx);
+            });
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+            });
+            cx.update(|window, cx| {
+                window.simulate_next_frame(cx);
+            });
+            cx.run_until_parked();
+
+            pane.update(cx, |pane, cx| {
+                let bounds = pane.bounds.expect("rendered terminal viewport");
+                assert_eq!(bounds.origin, gpui::point(px(horizontal), px(vertical)));
+                assert_eq!(
+                    bounds.size,
+                    gpui::size(px(640.0 - horizontal * 2.0), px(320.0 - vertical * 2.0))
+                );
+                pane.flush_pending_pty_resize(pane.pty_resize_generation, cx);
+                let cell_width = pane.metrics.cell_width_f32();
+                let line_height = pane.metrics.line_height_f32();
+                // Font advances may round just below an integer cell count.
+                // The resized grid must fit, with less than one cell left over.
+                let available_width = 640.0 - horizontal * 2.0 - SCROLLBAR_RESERVED_WIDTH;
+                let available_height = 320.0 - vertical * 2.0;
+                let remaining_width = available_width - pane.snapshot.cols as f32 * cell_width;
+                let remaining_height = available_height - pane.snapshot.rows as f32 * line_height;
+                assert!(remaining_width >= -0.001 && remaining_width < cell_width - 0.001);
+                assert!(remaining_height >= -0.001 && remaining_height < line_height - 0.001);
+
+                let position =
+                    bounds.origin + gpui::point(px(cell_width * 3.5), px(line_height * 2.5));
+                assert_eq!(
+                    pane.terminal_point_for_position(position),
+                    TerminalPoint { row: 2, col: 3 }
+                );
+                // Selection beginning in the left padding must include column zero.
+                let padding_position = gpui::point(px(0.0), position.y);
+                pane.handle_mouse_down(
+                    &gpui::MouseDownEvent {
+                        position: padding_position,
+                        button: gpui::MouseButton::Left,
+                        modifiers: gpui::Modifiers {
+                            shift: true,
+                            ..Default::default()
+                        },
+                        click_count: 1,
+                        first_mouse: false,
+                    },
+                    cx,
+                );
+                assert_eq!(
+                    pane.selection.expect("padding starts selection").anchor.col,
+                    0
+                );
+                let anchor = pane.cursor_anchor().expect("cursor anchor");
+                assert_eq!(
+                    anchor.x,
+                    horizontal + pane.snapshot.cursor_col as f32 * cell_width
+                );
+                assert_eq!(
+                    anchor.y,
+                    vertical + pane.snapshot.cursor_row as f32 * line_height
+                );
+                assert_eq!(
+                    (anchor.container_width, anchor.container_height),
+                    (640.0, 320.0)
+                );
+            });
         }
     }
 

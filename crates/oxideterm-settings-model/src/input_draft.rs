@@ -15,9 +15,9 @@ use oxideterm_ai::{
 use oxideterm_settings::{
     DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND, DEFAULT_AI_TOOL_MAX_ROUNDS,
     MAX_AI_TOOL_MAX_CALLS_PER_ROUND, MAX_AI_TOOL_MAX_ROUNDS, MAX_TERMINAL_FONT_WEIGHT,
-    MIN_AI_TOOL_MAX_CALLS_PER_ROUND, MIN_AI_TOOL_MAX_ROUNDS, MIN_TERMINAL_FONT_WEIGHT,
-    PersistedSettings, RECOMMENDED_FOCUS_HANDOFF_COMMANDS, SettingsUpstreamProxyAuth,
-    UpdateProxyMode, parse_terminal_session_log_content_template,
+    MAX_TERMINAL_PADDING, MIN_AI_TOOL_MAX_CALLS_PER_ROUND, MIN_AI_TOOL_MAX_ROUNDS,
+    MIN_TERMINAL_FONT_WEIGHT, PersistedSettings, RECOMMENDED_FOCUS_HANDOFF_COMMANDS,
+    SettingsUpstreamProxyAuth, UpdateProxyMode, parse_terminal_session_log_content_template,
     parse_terminal_session_log_directory_template, parse_terminal_session_log_file_name_template,
     reindex_highlight_rules,
 };
@@ -45,6 +45,10 @@ pub fn persisted_settings_input_value(
         SettingsInput::TerminalFontWeight => settings.terminal.font_weight.to_string(),
         SettingsInput::TerminalScrollback => settings.terminal.scrollback.to_string(),
         SettingsInput::TerminalLineHeight => compact_decimal(settings.terminal.line_height),
+        SettingsInput::TerminalPaddingHorizontal => {
+            settings.terminal.padding_horizontal.to_string()
+        }
+        SettingsInput::TerminalPaddingVertical => settings.terminal.padding_vertical.to_string(),
         SettingsInput::IdeFontSize => settings
             .ide
             .font_size
@@ -357,6 +361,14 @@ pub fn apply_persisted_settings_input_draft(
             .into(),
         SettingsInput::TerminalLineHeight => parse_f64(draft)
             .map(|value| settings.terminal.line_height = value.clamp(0.8, 2.0))
+            .into(),
+        SettingsInput::TerminalPaddingHorizontal => parse_i64(draft)
+            .map(|value| {
+                settings.terminal.padding_horizontal = value.clamp(0, MAX_TERMINAL_PADDING)
+            })
+            .into(),
+        SettingsInput::TerminalPaddingVertical => parse_i64(draft)
+            .map(|value| settings.terminal.padding_vertical = value.clamp(0, MAX_TERMINAL_PADDING))
             .into(),
         SettingsInput::IdeFontSize => {
             let value = draft.trim();
@@ -871,6 +883,48 @@ pub fn settings_multiline_line_selection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_padding_inputs_preserve_the_other_axis_and_reject_invalid_text() {
+        let mut settings = PersistedSettings::default();
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::TerminalPaddingHorizontal,
+                "0"
+            ),
+            SettingsInputDraftApply::Applied
+        );
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::TerminalPaddingVertical,
+                "12"
+            ),
+            SettingsInputDraftApply::Applied
+        );
+        assert_eq!(
+            (
+                settings.terminal.padding_horizontal,
+                settings.terminal.padding_vertical
+            ),
+            (0, 12)
+        );
+        assert_eq!(
+            persisted_settings_input_value(&settings, SettingsInput::TerminalPaddingVertical)
+                .as_deref(),
+            Some("12")
+        );
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::TerminalPaddingVertical,
+                "abc"
+            ),
+            SettingsInputDraftApply::Invalid
+        );
+        assert_eq!(settings.terminal.padding_vertical, 12);
+    }
 
     #[test]
     fn persisted_number_drafts_clamp_in_model_layer() {

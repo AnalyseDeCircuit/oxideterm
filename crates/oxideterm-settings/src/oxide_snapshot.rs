@@ -43,6 +43,8 @@ const TERMINAL_APPEARANCE_KEYS: &[&str] = &[
     "customFontFamily",
     "fontSize",
     "lineHeight",
+    "paddingHorizontal",
+    "paddingVertical",
     "cursorStyle",
     "cursorBlink",
     "backgroundEnabled",
