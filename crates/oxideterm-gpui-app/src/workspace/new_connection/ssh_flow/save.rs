@@ -1353,8 +1353,8 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((config, terminal_options, mut save_request)) =
-            self.with_connection_form_mut(cx, |this, form, cx| {
+        let Some((config, name, terminal_options, mut save_request)) = self
+            .with_connection_form_mut(cx, |this, form, cx| {
                 let form = form?;
                 let port_path = form.serial_port_path.trim().to_string();
                 let baud_rate = form.serial_baud_rate.trim().parse::<u32>().ok();
@@ -1423,7 +1423,12 @@ impl WorkspaceApp {
                 });
                 form.pending = true;
                 form.error = None;
-                Some((config, form.terminal.clone(), save_request))
+                Some((
+                    config,
+                    form.serial_profile_name.clone(),
+                    form.terminal.clone(),
+                    save_request,
+                ))
             })
         else {
             return;
@@ -1475,7 +1480,7 @@ impl WorkspaceApp {
             }
         }
 
-        match self.create_serial_terminal_tab(config, terminal_options, window, cx) {
+        match self.create_serial_terminal_tab(config, &name, terminal_options, window, cx) {
             Ok(session_id) => {
                 if let Some(request) = save_request {
                     match self.connection_store.upsert_serial_profile(request) {

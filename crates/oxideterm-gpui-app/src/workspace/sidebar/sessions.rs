@@ -1515,6 +1515,16 @@ impl WorkspaceApp {
         let Some(session) = row.standalone_session else {
             return div().into_any_element();
         };
+        let serial_details = self
+            .standalone_connections
+            .record(&session.connection_id)
+            .and_then(|record| match &record.launch {
+                standalone_connections::StandaloneConnectionLaunch::Serial { config, .. }
+                | standalone_connections::StandaloneConnectionLaunch::SavedSerial {
+                    config, ..
+                } => Some(format!("{} · {}", config.port_path, config.baud_rate)),
+                _ => None,
+            });
         let theme = self.tokens.ui;
         let active = match session.target {
             Some(standalone_connections::StandaloneConnectionSurface::Terminal(session_id)) => {
@@ -1568,10 +1578,28 @@ impl WorkspaceApp {
                 div()
                     .min_w(px(0.0))
                     .flex_1()
-                    .truncate()
-                    .text_size(px(SESSION_TREE_TEXT_SIZE))
-                    .text_color(rgb(status.text_color))
-                    .child(row.title),
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(SESSION_TREE_TEXT_SIZE))
+                            .when(serial_details.is_some(), |title| {
+                                title.line_height(px(SESSION_TREE_NODE_HEIGHT / 2.0))
+                            })
+                            .text_color(rgb(status.text_color))
+                            .child(row.title),
+                    )
+                    .when_some(serial_details, |label, details| {
+                        label.child(
+                            div()
+                                .truncate()
+                                .text_size(px(SESSION_TREE_META_TEXT_SIZE))
+                                .line_height(px(SESSION_TREE_NODE_HEIGHT / 2.0))
+                                .text_color(rgb(theme.text_muted))
+                                .child(details),
+                        )
+                    }),
             )
             .child({
                 let connection_id = session.connection_id.clone();

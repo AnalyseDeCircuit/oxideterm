@@ -915,7 +915,13 @@ impl WorkspaceApp {
             flow_control: terminal_serial_flow_from_profile(&profile.flow_control),
             runtime_options: terminal_serial_runtime_options_from_profile(&profile),
         };
-        match self.create_serial_terminal_tab(config, profile.terminal.clone(), window, cx) {
+        match self.create_serial_terminal_tab(
+            config,
+            &profile.name,
+            profile.terminal.clone(),
+            window,
+            cx,
+        ) {
             Ok(session_id) => {
                 self.register_terminal_saved_connection(
                     session_id,

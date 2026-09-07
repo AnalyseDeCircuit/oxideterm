@@ -509,11 +509,16 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn create_serial_terminal_tab(
         &mut self,
         config: SerialSessionConfig,
+        name: &str,
         terminal_options: ConnectionTerminalOptions,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
-        let title = format!("Serial {}", config.port_path);
+        let title = if name.trim().is_empty() {
+            format!("Serial {}", config.port_path)
+        } else {
+            name.trim().to_owned()
+        };
         self.create_serial_terminal_tab_with_title(config, terminal_options, title, window, cx)
     }
 
