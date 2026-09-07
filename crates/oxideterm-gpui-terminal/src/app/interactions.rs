@@ -1371,6 +1371,17 @@ impl TerminalPane {
             return;
         }
 
+        if event.button == MouseButton::Left
+            && event.click_count <= 1
+            && event.modifiers.shift
+            && self.selection.is_some()
+        {
+            // Preserve the scrollback anchor before tmux hit testing can replace the selection.
+            self.selecting = true;
+            self.update_selection_with_autoscroll(event.position, cx);
+            return;
+        }
+
         if event.button == MouseButton::Left && event.click_count <= 1 {
             let point = self.terminal_point_for_position(event.position);
             if let Some(separator) = self.terminal.lock().tmux_separator_at(point.col, point.row) {
@@ -3039,6 +3050,110 @@ mod tests {
             assert!(!pane.handle_terminal_autosuggest_key("up", Modifiers::default(), cx));
             assert_eq!(pane.autosuggest_selected_index, None);
             assert_eq!(pane.autosuggest_dismissed_query.as_deref(), Some("ls"));
+        });
+    }
+
+    #[gpui::test]
+    fn shift_click_extends_selection_across_scrollback(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalScrollTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    16,
+                    4,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .expect("test terminal pane")
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            pane.settings.copy_on_select = false;
+            pane.bounds = Some(gpui::Bounds::new(
+                point(px(0.0), px(0.0)),
+                gpui::size(
+                    px(pane.terminal_content_padding_x()
+                        + 16.0 * pane.metrics.cell_width_f32()
+                        + SCROLLBAR_RESERVED_WIDTH),
+                    px(2.0 * TERMINAL_CONTENT_PADDING + 4.0 * pane.metrics.line_height_f32()),
+                ),
+            ));
+            let lines = (0..12).map(|i| format!("line-{i:02}")).collect::<Vec<_>>();
+            pane.terminal
+                .lock()
+                .feed_recording_output(lines.join("\r\n").as_bytes());
+            let position = |pane: &TerminalPane, row: usize, col: usize| {
+                let origin = pane.content_origin();
+                point(
+                    origin.x
+                        + px(pane.terminal_content_padding_x()
+                            + (col as f32 + 0.5) * pane.metrics.cell_width_f32()),
+                    origin.y
+                        + px(TERMINAL_CONTENT_PADDING
+                            + (row as f32 + 0.5) * pane.metrics.line_height_f32()),
+                )
+            };
+            let gesture = |pane: &mut TerminalPane,
+                           start: (usize, usize),
+                           end: (usize, usize),
+                           shift,
+                           cx: &mut Context<TerminalPane>| {
+                let start_position = position(pane, start.0, start.1);
+                let end_position = position(pane, end.0, end.1);
+                let modifiers = gpui::Modifiers {
+                    shift,
+                    ..Default::default()
+                };
+                pane.handle_mouse_down(
+                    &MouseDownEvent {
+                        button: MouseButton::Left,
+                        position: start_position,
+                        modifiers,
+                        click_count: 1,
+                        first_mouse: false,
+                    },
+                    cx,
+                );
+                pane.handle_mouse_up(
+                    &MouseUpEvent {
+                        button: MouseButton::Left,
+                        position: end_position,
+                        modifiers,
+                        click_count: 1,
+                    },
+                    cx,
+                );
+            };
+            for require_shift in [false, true] {
+                pane.settings.selection_requires_shift = require_shift;
+                pane.selection = None;
+                let snapshot = {
+                    let mut terminal = pane.terminal.lock();
+                    terminal.scroll_to_display_offset(usize::MAX);
+                    terminal.snapshot()
+                };
+                pane.snapshot = pane.stamp_snapshot(snapshot);
+                gesture(pane, (0, 0), (0, 3), true, cx);
+                assert_eq!(pane.selected_text_snapshot().as_deref(), Some("line"));
+                let snapshot = {
+                    let mut terminal = pane.terminal.lock();
+                    terminal.scroll_to_display_offset(0);
+                    terminal.snapshot()
+                };
+                pane.snapshot = pane.stamp_snapshot(snapshot);
+                gesture(pane, (2, 6), (2, 6), true, cx);
+                assert_eq!(pane.selected_text_snapshot(), Some(lines[..11].join("\n")));
+                gesture(pane, (1, 6), (1, 6), true, cx);
+                assert_eq!(pane.selected_text_snapshot(), Some(lines[..10].join("\n")));
+            }
+            pane.settings.selection_requires_shift = false;
+            gesture(pane, (3, 2), (3, 2), false, cx);
+            assert!(pane.selected_text_snapshot().is_none());
+            gesture(pane, (2, 6), (1, 0), false, cx);
+            assert_eq!(pane.selected_text_snapshot(), Some(lines[9..11].join("\n")));
+            gesture(pane, (0, 0), (0, 0), true, cx);
+            assert_eq!(pane.selected_text_snapshot(), Some(lines[8..11].join("\n")));
         });
     }
 
