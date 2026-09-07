@@ -693,6 +693,10 @@ impl ConnectionFlowEntity {
         response_tx: oneshot::Sender<Result<KeyboardInteractiveResponses, SshPromptError>>,
         cx: &mut Context<Self>,
     ) -> bool {
+        self.clear_inactive_keyboard_interactive_challenge(cx);
+        if response_tx.is_closed() {
+            return false;
+        }
         if let Some(existing) = self.keyboard_interactive_challenge.as_ref()
             && existing.request.flow_id != request.flow_id
         {
@@ -717,22 +721,44 @@ impl ConnectionFlowEntity {
         true
     }
 
+    fn clear_inactive_keyboard_interactive_challenge(&mut self, cx: &mut Context<Self>) {
+        let Some(challenge) = self.keyboard_interactive_challenge.as_ref() else {
+            return;
+        };
+        // An exiting dialog retains its payload only until its existing animation completes.
+        if challenge.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
+            return;
+        }
+        let timed_out = challenge.timed_out();
+        let waiter_closed = challenge
+            .response_tx
+            .as_ref()
+            .is_none_or(|tx| tx.is_closed());
+        if !timed_out && !waiter_closed {
+            return;
+        }
+        if let Some(mut challenge) = self.keyboard_interactive_challenge.take()
+            && timed_out
+            && let Some(response_tx) = challenge.response_tx.take()
+        {
+            let _ = response_tx.send(Err(SshPromptError::Timeout));
+        }
+        // The transport waiter and the UI answer buffer must end together, including retries.
+        cx.notify();
+    }
+
     fn schedule_keyboard_interactive_timer(&mut self, generation: u64, cx: &mut Context<Self>) {
         self.keyboard_interactive_timer_task = Some(cx.spawn(async move |connection_flow, cx| {
             loop {
                 Timer::after(Duration::from_secs(1)).await;
                 let keep_ticking = connection_flow
                     .update(cx, |connection_flow, cx| {
-                        let Some(challenge) =
-                            connection_flow.keyboard_interactive_challenge.as_ref()
-                        else {
-                            return false;
-                        };
                         if connection_flow.keyboard_interactive_timer_generation != generation {
                             return false;
                         }
+                        connection_flow.clear_inactive_keyboard_interactive_challenge(cx);
                         cx.notify();
-                        !challenge.timed_out()
+                        connection_flow.has_keyboard_interactive_challenge()
                     })
                     .unwrap_or(false);
                 if !keep_ticking {
@@ -1227,6 +1253,64 @@ mod tests {
         assert!(matches!(
             second_rx.try_recv(),
             Ok(Err(SshPromptError::Cancelled))
+        ));
+    }
+
+    #[gpui::test]
+    fn abandoned_keyboard_interactive_request_does_not_block_next_prompt(cx: &mut TestAppContext) {
+        let entity = cx.new(ConnectionFlowEntity::new);
+        let (first_tx, first_rx) = oneshot::channel();
+        let (next_tx, mut next_rx) = oneshot::channel();
+
+        entity.update(cx, |entity, cx| {
+            assert!(entity.open_keyboard_interactive_challenge(
+                keyboard_interactive_request("expired-flow"),
+                first_tx,
+                cx,
+            ));
+        });
+        // The transport drops its waiter when authentication times out or is cancelled.
+        drop(first_rx);
+        entity.update(cx, |entity, cx| {
+            assert!(entity.open_keyboard_interactive_challenge(
+                keyboard_interactive_request("next-flow"),
+                next_tx,
+                cx,
+            ));
+            assert!(entity.replace_keyboard_interactive_response(0, None, "123456", cx));
+            assert!(matches!(
+                entity.submit_keyboard_interactive_challenge(cx),
+                super::KeyboardInteractiveSubmitResult::Submitted
+            ));
+        });
+        assert_eq!(next_rx.try_recv().unwrap().unwrap().as_slice(), ["123456"]);
+    }
+
+    #[gpui::test]
+    fn expired_keyboard_interactive_prompt_rejects_waiter_and_releases_input(
+        cx: &mut TestAppContext,
+    ) {
+        let entity = cx.new(ConnectionFlowEntity::new);
+        let (response_tx, mut response_rx) = oneshot::channel();
+        entity.update(cx, |entity, cx| {
+            assert!(entity.open_keyboard_interactive_challenge(
+                keyboard_interactive_request("expired-flow"),
+                response_tx,
+                cx,
+            ));
+            assert!(entity.replace_keyboard_interactive_response(0, None, "123456", cx));
+            entity
+                .keyboard_interactive_challenge
+                .as_mut()
+                .unwrap()
+                .expires_at = std::time::Instant::now();
+            entity.clear_inactive_keyboard_interactive_challenge(cx);
+            assert!(!entity.has_keyboard_interactive_challenge());
+            assert!(entity.focused_keyboard_interactive_prompt().is_none());
+        });
+        assert!(matches!(
+            response_rx.try_recv(),
+            Ok(Err(SshPromptError::Timeout))
         ));
     }
 
