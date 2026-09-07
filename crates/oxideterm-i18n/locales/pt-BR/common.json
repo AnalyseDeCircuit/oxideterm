@@ -523,7 +523,7 @@
         "upload_failed_title": "Falha no envio",
         "pull_success_title": "Snapshot remoto importado",
         "pull_success_description": "Importados {{imported}} itens, mesclados {{merged}} itens.",
-        "sensitive_restore_description": "Restaurados {{passwords}} senha(s), {{keyPassphrases}} frase(s)-senha de chave, {{managedKeys}} chave(s) gerenciada(s), {{managedKeyPassphrases}} frase(s)-senha de chave gerenciada, {{privilegeCredentials}} credencial(is) de privilégio e {{aiKeys}} chave(s) de IA. Ignoradas {{skippedCredentials}} credencial(is) e {{skippedAiKeys}} chave(s) de IA.",
+        "sensitive_restore_description": "Restaurados {{passwords}} senha(s), {{keyPassphrases}} frase(s)-senha de chave, {{managedKeys}} chave(s) gerenciada(s), {{managedKeyPassphrases}} frase(s)-senha de chave gerenciada, {{privilegeCredentials}} credencial(is) de privilégio e {{aiKeys}} chave(s) de IA. Ignoradas {{skippedCredentials}} credencial(is) e {{skippedAiKeys}} chave(s) de IA. Credenciais de sessão e proxy: {{profileCredentials}} restauradas, {{clearedProfileCredentials}} removidas, {{skippedProfileCredentials}} ignoradas.",
         "pull_failed_title": "Falha no download",
         "secret_cleared_title": "Credenciais armazenadas removidas",
         "secret_cleared_description": "Valor armazenado para {{label}} removido.",
@@ -621,6 +621,7 @@
         "sensitive_credentials_label": "Credenciais sensíveis",
         "toggle_sensitive_credentials": "Importar credenciais sensíveis ({{count}})",
         "sensitive_summary_title": "Credenciais sensíveis",
+        "profile_credential_actions": "{{name}}: {{stored}} credenciais salvas, {{cleared}} solicitações de exclusão.",
         "sensitive_remote_summary": "As credenciais remotas criptografadas incluem {{connections}} registro(s) de conexão e {{portableSecrets}} segredo(s) portáteis. Os valores permanecem ocultos.",
         "sensitive_upload_summary": "Enviará {{passwords}} senha(s), {{keyPassphrases}} frase(s) secreta(s) de chave, {{managedKeys}} chave(s) gerenciada(s), {{managedKeyPassphrases}} frase(s) de chaves gerenciadas e {{portableSecrets}} segredo(s) portáteis."
       },

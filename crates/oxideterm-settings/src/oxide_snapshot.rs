@@ -181,6 +181,13 @@ pub fn export_oxide_settings_snapshot_json(
         );
     }
 
+    // Protected-store handles belong to one device; cloud secrets restore a new local handle.
+    if let Some(auth) = partial
+        .pointer_mut("/network/upstreamProxy/auth")
+        .and_then(Value::as_object_mut)
+    {
+        auth.remove("keychain_id");
+    }
     let envelope = json!({
         "format": OXIDE_SETTINGS_FORMAT,
         "version": OXIDE_SETTINGS_VERSION,

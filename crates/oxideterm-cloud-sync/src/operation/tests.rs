@@ -346,3 +346,91 @@ fn legacy_preview_clears_connection_names_when_connections_are_disabled() {
         legacy_preview_selected_names(false, Some(vec!["Prod".to_string()])).unwrap();
     assert!(selected_names.is_empty());
 }
+
+#[tokio::test]
+async fn profile_credentials_upload_obeys_resource_selection_without_ssh_sync() {
+    use oxideterm_connections::oxide_file::decrypt_oxide_file;
+    use oxideterm_connections::{CredentialOwner, CredentialTarget, MoshProfile, SavedAuth};
+    let directory = std::env::temp_dir().join(format!(
+        "cloud-profile-credentials-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&directory).unwrap();
+    let mut data = oxideterm_connections::ConnectionStoreData::default();
+    for id in ["selected-mosh", "excluded-mosh"] {
+        let mut profile = MoshProfile::new(id, "shell.test", 22, "user", SavedAuth::Agent);
+        profile.id = id.into();
+        data.mosh_profiles.push(profile);
+    }
+    let mut raw = serde_json::to_value(data).unwrap();
+    for profile in raw["mosh_profiles"].as_array_mut().unwrap() {
+        profile["auth"] = serde_json::json!({"type":"password", "password":"synthetic-password"});
+    }
+    let path = directory.join("connections.json");
+    std::fs::write(&path, serde_json::to_vec(&raw).unwrap()).unwrap();
+    // Read-only loading keeps the synthetic legacy value in memory without accessing OS storage.
+    let store = ConnectionStore::load_read_only(&path).unwrap();
+    let settings = SettingsStore::load_from_path(directory.join("settings.json")).unwrap();
+    let forwards = ForwardingRegistry::new();
+    let service = CloudSyncOperationService::new();
+    let filter = StructuredUploadItemFilter {
+        mosh_profile_ids: Some(BTreeSet::from(["selected-mosh".into()])),
+        ..Default::default()
+    };
+    for enabled in [true, false] {
+        let scope = RawSyncScope {
+            sync_connections: Some(false),
+            sync_sensitive_credentials: Some(enabled),
+            sync_mosh_profiles: Some(true),
+            sync_app_settings: Some(false),
+            sync_plugin_settings: Some(false),
+            ..Default::default()
+        };
+        let snapshot =
+            build_local_snapshot(&store, &forwards, &settings, None, Some(&scope)).unwrap();
+        let plan = service
+            .build_structured_upload_plan(
+                &store,
+                &forwards,
+                &settings,
+                &snapshot,
+                "test-revision",
+                "2026-09-07T00:00:00Z",
+                "test-device",
+                Some("test-sync-password"),
+                Vec::new(),
+                &filter,
+                &mut |_| {},
+                10,
+            )
+            .await
+            .unwrap();
+        if enabled {
+            let entry = plan
+                .manifest
+                .sections
+                .sensitive_credentials
+                .as_ref()
+                .unwrap();
+            assert_eq!(entry.record_count, Some(1));
+            let object = plan
+                .objects
+                .iter()
+                .find(|object| object.path == entry.path)
+                .unwrap();
+            let payload = decrypt_oxide_file(
+                &OxideFile::from_bytes(&object.bytes).unwrap(),
+                "test-sync-password",
+            )
+            .unwrap();
+            assert!(payload.connections.is_empty());
+            assert_eq!(payload.portable_secrets.len(), 1);
+            let target: CredentialTarget =
+                serde_json::from_str(&payload.portable_secrets[0].id).unwrap();
+            assert_eq!(target.owner, CredentialOwner::Mosh("selected-mosh".into()));
+        } else {
+            assert!(plan.manifest.sections.sensitive_credentials.is_none());
+        }
+    }
+    std::fs::remove_dir_all(directory).unwrap();
+}

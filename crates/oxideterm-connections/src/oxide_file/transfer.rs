@@ -200,6 +200,8 @@ pub struct ImportPreview {
     pub plugin_settings_count: usize,
     pub portable_secret_count: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profile_credentials: Vec<ProfileCredentialPreview>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub app_settings_section_ids: Vec<String>,
     pub app_settings_contains_local_terminal_env_vars: bool,
     pub plugin_settings_by_plugin: HashMap<String, usize>,
@@ -207,6 +209,13 @@ pub struct ImportPreview {
     pub forward_details: Vec<ForwardDetail>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub records: Vec<ImportPreviewRecord>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileCredentialPreview {
+    pub owner: crate::CredentialOwner,
+    pub cleared: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -258,6 +267,9 @@ pub struct ImportResultEnvelope {
     pub imported_portable_secrets: usize,
     pub skipped_portable_secrets: usize,
     pub restored_connection_passwords: usize,
+    pub restored_profile_credentials: usize,
+    pub cleared_profile_credentials: usize,
+    pub skipped_profile_credentials: usize,
     pub restored_key_passphrases: usize,
     pub restored_managed_keys: usize,
     pub restored_managed_key_passphrases: usize,

@@ -141,7 +141,26 @@ impl CloudSyncOperationService {
                         bytes,
                         decryption_context,
                         OxideImportOptions {
-                            selected_names: None,
+                            selected_names: Some(if selection.connections {
+                                preview
+                                    .connections_snapshot
+                                    .as_ref()
+                                    .map(|snapshot| {
+                                        snapshot
+                                            .records
+                                            .iter()
+                                            .filter_map(|record| {
+                                                record
+                                                    .payload
+                                                    .as_ref()
+                                                    .map(|payload| payload.name.clone())
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default()
+                            } else {
+                                Vec::new()
+                            }),
                             selected_forward_ids: None,
                             conflict_strategy: ImportConflictStrategy::Merge,
                             import_forwards: false,
@@ -261,6 +280,62 @@ impl CloudSyncOperationService {
             &conflict_strategy,
         )?;
 
+        let mut credential_selection = oxideterm_connections::CredentialSyncSelection::default();
+        if selection.connections {
+            credential_selection.connection_ids = preview
+                .connections_snapshot
+                .as_ref()
+                .into_iter()
+                .flat_map(|s| &s.records)
+                .map(|p| p.id.clone())
+                .collect();
+            credential_selection.sftp_ids = preview
+                .standalone_sftp_profiles_snapshot
+                .as_ref()
+                .into_iter()
+                .flat_map(|s| &s.records)
+                .map(|p| p.id.clone())
+                .collect();
+        }
+        if selection.mosh_profiles {
+            credential_selection.mosh_ids = preview
+                .mosh_profiles_snapshot
+                .as_ref()
+                .into_iter()
+                .flat_map(|s| &s.records)
+                .map(|p| p.id.clone())
+                .collect();
+        }
+        if selection.remote_desktop_profiles {
+            credential_selection.remote_desktop_ids = preview
+                .remote_desktop_profiles_snapshot
+                .as_ref()
+                .into_iter()
+                .flat_map(|s| &s.records)
+                .map(|p| p.id.clone())
+                .collect();
+        }
+        credential_selection.global_proxy = selection
+            .app_settings_sections
+            .iter()
+            .any(|section| section == "network");
+        let mut profile_credentials = crate::credentials::ProfileCredentialImport {
+            secrets: Vec::new(),
+            selection: credential_selection,
+            summary: Default::default(),
+        };
+        if let Some(envelope) = sensitive_credentials_envelope.as_mut() {
+            let mut other_secrets = Vec::new();
+            for secret in envelope.portable_secrets.drain(..) {
+                if oxideterm_connections::is_profile_credential(&secret) {
+                    profile_credentials.secrets.push(secret);
+                } else {
+                    other_secrets.push(secret);
+                }
+            }
+            envelope.portable_secrets = other_secrets;
+        }
+
         let connections_snapshot = if selection.connections {
             preview.connections_snapshot
         } else {
@@ -311,7 +386,7 @@ impl CloudSyncOperationService {
                 SavedConnectionsConflictStrategy::Merge
             }
         };
-        let applied = apply_structured_snapshots(
+        let applied = crate::service::apply_structured_snapshots_with_credentials(
             connection_store,
             forwarding_registry,
             settings_store,
@@ -326,7 +401,13 @@ impl CloudSyncOperationService {
             app_settings_snapshots,
             plugin_settings_snapshot,
             connection_conflict_strategy,
+            apply_sensitive_credentials.then_some(&mut profile_credentials),
         )?;
+        if let Some(envelope) = sensitive_credentials_envelope.as_mut() {
+            envelope.restored_profile_credentials = profile_credentials.summary.restored;
+            envelope.cleared_profile_credentials = profile_credentials.summary.cleared;
+            envelope.skipped_profile_credentials = profile_credentials.summary.skipped;
+        }
         completed += usize::from(applied.connections.is_some())
             + usize::from(applied.forwards.is_some())
             + usize::from(apply_quick_commands)

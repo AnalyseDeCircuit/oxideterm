@@ -515,7 +515,7 @@
         "upload_failed_title": "Upload failed",
         "pull_success_title": "Remote snapshot imported",
         "pull_success_description": "Imported {{imported}} items, merged {{merged}} items.",
-        "sensitive_restore_description": "Restored {{passwords}} password(s), {{keyPassphrases}} key passphrase(s), {{managedKeys}} managed key(s), {{managedKeyPassphrases}} managed-key passphrase(s), {{privilegeCredentials}} privilege credential(s), and {{aiKeys}} AI key(s). Skipped {{skippedCredentials}} credential(s) and {{skippedAiKeys}} AI key(s).",
+        "sensitive_restore_description": "Restored {{passwords}} password(s), {{keyPassphrases}} key passphrase(s), {{managedKeys}} managed key(s), {{managedKeyPassphrases}} managed-key passphrase(s), {{privilegeCredentials}} privilege credential(s), and {{aiKeys}} AI key(s). Skipped {{skippedCredentials}} credential(s) and {{skippedAiKeys}} AI key(s). Profile and proxy credentials: restored {{profileCredentials}}, cleared {{clearedProfileCredentials}}, skipped {{skippedProfileCredentials}}.",
         "pull_failed_title": "Pull failed",
         "secret_cleared_title": "Stored secret cleared",
         "secret_cleared_description": "Removed stored value for {{label}}.",
@@ -613,6 +613,7 @@
         "sensitive_credentials_label": "Sensitive Credentials",
         "toggle_sensitive_credentials": "Import sensitive credentials ({{count}})",
         "sensitive_summary_title": "Sensitive credentials",
+        "profile_credential_actions": "{{name}}: {{stored}} saved credential(s), {{cleared}} deletion request(s).",
         "sensitive_remote_summary": "Remote encrypted credentials include {{connections}} connection record(s) and {{portableSecrets}} portable secret(s). Values stay hidden.",
         "sensitive_upload_summary": "Will upload {{passwords}} password(s), {{keyPassphrases}} key passphrase(s), {{managedKeys}} managed key(s), {{managedKeyPassphrases}} managed-key passphrase(s), and {{portableSecrets}} portable secret(s)."
       },

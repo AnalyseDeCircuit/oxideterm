@@ -523,7 +523,7 @@
         "upload_failed_title": "Caricamento fallito",
         "pull_success_title": "Snapshot remoto importato",
         "pull_success_description": "Importati {{imported}} elementi, uniti {{merged}} elementi.",
-        "sensitive_restore_description": "Ripristinati {{passwords}} password, {{keyPassphrases}} passphrase di chiave, {{managedKeys}} chiavi gestite, {{managedKeyPassphrases}} passphrase di chiavi gestite, {{privilegeCredentials}} credenziali privilegiate e {{aiKeys}} chiavi AI. Saltate {{skippedCredentials}} credenziali e {{skippedAiKeys}} chiavi AI.",
+        "sensitive_restore_description": "Ripristinati {{passwords}} password, {{keyPassphrases}} passphrase di chiave, {{managedKeys}} chiavi gestite, {{managedKeyPassphrases}} passphrase di chiavi gestite, {{privilegeCredentials}} credenziali privilegiate e {{aiKeys}} chiavi AI. Saltate {{skippedCredentials}} credenziali e {{skippedAiKeys}} chiavi AI. Credenziali di sessione e proxy: {{profileCredentials}} ripristinate, {{clearedProfileCredentials}} eliminate, {{skippedProfileCredentials}} ignorate.",
         "pull_failed_title": "Scaricamento fallito",
         "secret_cleared_title": "Credenziali memorizzate cancellate",
         "secret_cleared_description": "Valore memorizzato per {{label}} rimosso.",
@@ -621,6 +621,7 @@
         "sensitive_credentials_label": "Credenziali sensibili",
         "toggle_sensitive_credentials": "Importa credenziali sensibili ({{count}})",
         "sensitive_summary_title": "Credenziali sensibili",
+        "profile_credential_actions": "{{name}}: {{stored}} credenziali salvate, {{cleared}} richieste di eliminazione.",
         "sensitive_remote_summary": "Le credenziali remote cifrate includono {{connections}} record di connessione e {{portableSecrets}} segreti portabili. I valori restano nascosti.",
         "sensitive_upload_summary": "Caricherà {{passwords}} password, {{keyPassphrases}} passphrase di chiavi, {{managedKeys}} chiavi gestite, {{managedKeyPassphrases}} passphrase di chiavi gestite e {{portableSecrets}} segreti portabili."
       },

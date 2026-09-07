@@ -92,12 +92,14 @@ pub fn build_local_snapshot(
         plugin_settings::plugin_settings_revision_map(settings_store.path())
             .map_err(anyhow::Error::msg)?;
     let syncable_settings_payload = build_syncable_settings_payload(settings_store);
-    let sensitive_credentials_revision =
-        tauri_simple_stable_hash(&build_sensitive_credentials_revision_payload(
+    let sensitive_credentials_revision = tauri_simple_stable_hash(&(
+        connection_store.profile_credentials_revision()?,
+        build_sensitive_credentials_revision_payload(
             &connections_snapshot,
             &settings_store.settings().ai.providers,
             &referenced_managed_key_revision_payload(connection_store, &connections_snapshot),
-        )?)?;
+        )?,
+    ))?;
 
     let saved_connections_revision = tauri_simple_stable_hash(&(
         connections_snapshot.revision.as_str(),
@@ -122,7 +124,7 @@ pub fn build_local_snapshot(
 
     Ok(CloudSyncLocalSnapshot {
         metadata,
-        scope,
+        scope: scope.clone(),
         dirty,
         upload_units,
         connections_record_count: connections_snapshot.records.len(),
@@ -132,7 +134,18 @@ pub fn build_local_snapshot(
         telnet_profiles_record_count: telnet_profiles_snapshot.records.len(),
         mosh_profiles_record_count: mosh_profiles_snapshot.records.len(),
         remote_desktop_profiles_record_count: remote_desktop_profiles_snapshot.records.len(),
-        sensitive_credentials_record_count: connections_snapshot.records.len(),
+        sensitive_credentials_record_count: if scope.sync_connections {
+            connections_snapshot.records.len()
+        } else {
+            0
+        } + connection_store.profile_credential_count(
+            &crate::credentials::credential_selection(
+                connection_store,
+                &scope,
+                &crate::operation::StructuredUploadItemFilter::default(),
+            ),
+            crate::credentials::global_proxy(settings_store.settings()).as_ref(),
+        ),
     })
 }
 
@@ -148,14 +161,50 @@ pub fn apply_structured_snapshots(
     telnet_profiles_snapshot: Option<TelnetProfilesSyncSnapshot>,
     mosh_profiles_snapshot: Option<MoshProfilesSyncSnapshot>,
     standalone_sftp_profiles_snapshot: Option<StandaloneSftpProfilesSyncSnapshot>,
-    mut remote_desktop_profiles_snapshot: Option<RemoteDesktopProfilesSyncSnapshot>,
+    remote_desktop_profiles_snapshot: Option<RemoteDesktopProfilesSyncSnapshot>,
     app_settings_snapshots: BTreeMap<String, String>,
     plugin_settings_snapshot: Vec<EncryptedPluginSetting>,
     conflict_strategy: SavedConnectionsConflictStrategy,
 ) -> Result<CloudSyncApplyOutcome> {
+    apply_structured_snapshots_with_credentials(
+        connection_store,
+        forwarding_registry,
+        settings_store,
+        connections_snapshot,
+        forwards_snapshot,
+        quick_commands_snapshot_json,
+        serial_profiles_snapshot,
+        telnet_profiles_snapshot,
+        mosh_profiles_snapshot,
+        standalone_sftp_profiles_snapshot,
+        remote_desktop_profiles_snapshot,
+        app_settings_snapshots,
+        plugin_settings_snapshot,
+        conflict_strategy,
+        None,
+    )
+}
+
+pub(crate) fn apply_structured_snapshots_with_credentials(
+    connection_store: &mut ConnectionStore,
+    forwarding_registry: &ForwardingRegistry,
+    settings_store: &mut SettingsStore,
+    connections_snapshot: Option<SavedConnectionsSyncSnapshot>,
+    forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
+    quick_commands_snapshot_json: Option<String>,
+    serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
+    telnet_profiles_snapshot: Option<TelnetProfilesSyncSnapshot>,
+    mosh_profiles_snapshot: Option<MoshProfilesSyncSnapshot>,
+    standalone_sftp_profiles_snapshot: Option<StandaloneSftpProfilesSyncSnapshot>,
+    mut remote_desktop_profiles_snapshot: Option<RemoteDesktopProfilesSyncSnapshot>,
+    app_settings_snapshots: BTreeMap<String, String>,
+    plugin_settings_snapshot: Vec<EncryptedPluginSetting>,
+    conflict_strategy: SavedConnectionsConflictStrategy,
+    mut credentials: Option<&mut crate::credentials::ProfileCredentialImport>,
+) -> Result<CloudSyncApplyOutcome> {
     // Validate every independently supplied resource before the coordinated
     // transaction captures owner checkpoints and performs its first write.
-    let staged_app_settings = preflight_structured_snapshots(
+    let mut staged_app_settings = preflight_structured_snapshots(
         settings_store,
         forwards_snapshot.as_ref(),
         quick_commands_snapshot_json.as_deref(),
@@ -167,6 +216,10 @@ pub fn apply_structured_snapshots(
         &app_settings_snapshots,
         &plugin_settings_snapshot,
     )?;
+
+    if let Some(next) = staged_app_settings.as_mut() {
+        crate::credentials::preserve_global_proxy_reference(settings_store.settings(), next);
+    }
 
     // Capture every owner before the first write. The connection checkpoint is
     // always required because profile-only sync still mutates ConnectionStore.
@@ -189,6 +242,7 @@ pub fn apply_structured_snapshots(
         .context("failed to checkpoint app settings before cloud sync apply")?;
 
     let mut prepared_connections = None;
+    let mut prepared_credentials = None;
     let mut forwards_attempted = false;
     let mut quick_commands_attempted = false;
     let mut settings_applied = false;
@@ -297,6 +351,25 @@ pub fn apply_structured_snapshots(
                 .map_err(anyhow::Error::msg)?;
         fail_structured_apply_after(StructuredApplyStage::PluginSettings)?;
 
+        if let Some(batch) = credentials.as_mut() {
+            let mut proxy = crate::credentials::global_proxy(settings_store.settings());
+            let prepared = connection_store.prepare_profile_credentials(
+                &batch.secrets,
+                &batch.selection,
+                &mut proxy,
+            )?;
+            batch.summary = prepared.summary;
+            prepared_credentials = Some(prepared);
+            let mut next = settings_store.settings().clone();
+            crate::credentials::apply_global_proxy_reference(&mut next, proxy.as_ref());
+            if &next != settings_store.settings() {
+                settings_store.replace_and_save(next)?;
+                settings_applied = true;
+            }
+            connection_store.save()?;
+            fail_structured_apply_after(StructuredApplyStage::Credentials)?;
+        }
+
         Ok(CloudSyncApplyOutcome {
             connections,
             forwards,
@@ -328,36 +401,49 @@ pub fn apply_structured_snapshots(
                 settings_applied,
                 plugin_settings_attempted,
             );
+            let mut rollback_errors = rollback_errors;
+            if let Some(prepared) = prepared_credentials.take() {
+                if let Err(cleanup) = connection_store.rollback_profile_credentials(prepared) {
+                    rollback_errors.push(cleanup.to_string());
+                }
+            }
             return Err(cloud_sync_transaction_error(error, rollback_errors));
         }
     };
 
     if let Some(prepared) = prepared_connections {
-        let mut cleanup =
-            match connection_store.commit_prepared_saved_connections_snapshot(prepared) {
-                Ok(cleanup) => cleanup,
-                Err(error) => {
-                    let rollback_errors = rollback_structured_apply(
-                        connection_store,
-                        forwarding_registry,
-                        settings_store,
-                        &settings_path,
-                        &connection_checkpoint,
-                        forwards_checkpoint.as_ref(),
-                        &quick_commands_checkpoint,
-                        &plugin_settings_checkpoint,
-                        &settings_checkpoint,
-                        forwards_attempted,
-                        quick_commands_attempted,
-                        settings_applied,
-                        plugin_settings_attempted,
-                    );
-                    return Err(cloud_sync_transaction_error(
-                        error.context("failed to commit prepared saved connections cloud sync"),
-                        rollback_errors,
-                    ));
+        let mut cleanup = match connection_store
+            .commit_prepared_saved_connections_snapshot(prepared)
+        {
+            Ok(cleanup) => cleanup,
+            Err(error) => {
+                let rollback_errors = rollback_structured_apply(
+                    connection_store,
+                    forwarding_registry,
+                    settings_store,
+                    &settings_path,
+                    &connection_checkpoint,
+                    forwards_checkpoint.as_ref(),
+                    &quick_commands_checkpoint,
+                    &plugin_settings_checkpoint,
+                    &settings_checkpoint,
+                    forwards_attempted,
+                    quick_commands_attempted,
+                    settings_applied,
+                    plugin_settings_attempted,
+                );
+                let mut rollback_errors = rollback_errors;
+                if let Some(prepared) = prepared_credentials.take() {
+                    if let Err(cleanup) = connection_store.rollback_profile_credentials(prepared) {
+                        rollback_errors.push(cleanup.to_string());
+                    }
                 }
-            };
+                return Err(cloud_sync_transaction_error(
+                    error.context("failed to commit prepared saved connections cloud sync"),
+                    rollback_errors,
+                ));
+            }
+        };
 
         // Cleanup is intentionally outside the rollback boundary: all data is
         // committed, and stale credentials are harmless if deletion fails.
@@ -378,11 +464,27 @@ pub fn apply_structured_snapshots(
         }
     }
 
+    if let Some(mut prepared) = prepared_credentials {
+        if connection_store
+            .commit_profile_credentials(&mut prepared)
+            .is_err()
+            && connection_store
+                .commit_profile_credentials(&mut prepared)
+                .is_err()
+        {
+            // Metadata is committed; cleanup can retry without replaying the import.
+            eprintln!(
+                "warning: cloud sync committed, but {} credential slots await cleanup",
+                prepared.pending_cleanup_count()
+            );
+        }
+    }
     Ok(outcome)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum StructuredApplyStage {
+    Credentials,
     Profiles,
     Settings,
     PluginSettings,
@@ -715,6 +817,87 @@ mod tests {
             app_settings_snapshot_revision(second).unwrap(),
             app_settings_snapshot_revision(changed).unwrap()
         );
+    }
+
+    #[test]
+    fn failed_credential_stage_rolls_back_profile_metadata() {
+        use oxideterm_connections::{
+            CLEARED_PROFILE_CREDENTIAL_KIND, CredentialOwner, CredentialSlot,
+            CredentialSyncSelection, CredentialTarget, RemoteDesktopProfile,
+        };
+        let directory = std::env::temp_dir().join(format!(
+            "cloud-credential-rollback-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut store = ConnectionStore::load(directory.join("connections.json")).unwrap();
+        store.save().unwrap();
+        let original = std::fs::read(store.path()).unwrap();
+        let mut settings = SettingsStore::load_from_path(directory.join("settings.json")).unwrap();
+        let profile = RemoteDesktopProfile::new(
+            "screen",
+            serde_json::from_str("\"vnc\"").unwrap(),
+            "screen.test",
+            5900,
+        );
+        let incoming = RemoteDesktopProfilesSyncSnapshot {
+            revision: "remote".into(),
+            exported_at: "2026-09-07T00:00:00Z".into(),
+            records: vec![profile.clone()],
+        };
+        // A valid clear on an empty slot exercises the transaction without accessing OS secrets.
+        let identity_value = (
+            &profile.protocol,
+            &profile.host,
+            profile.port,
+            &profile.username,
+            &profile.domain,
+        );
+        use sha2::Digest;
+        let identity = format!(
+            "{:x}",
+            sha2::Sha256::digest(serde_json::to_vec(&identity_value).unwrap())
+        );
+        let target = CredentialTarget {
+            owner: CredentialOwner::RemoteDesktop(profile.id.clone()),
+            slot: CredentialSlot::Primary,
+            identity,
+        };
+        let mut credentials = crate::credentials::ProfileCredentialImport {
+            secrets: vec![oxideterm_connections::oxide_file::EncryptedPortableSecret {
+                kind: CLEARED_PROFILE_CREDENTIAL_KIND.into(),
+                id: serde_json::to_string(&target).unwrap(),
+                secret: zeroize::Zeroizing::new(String::new()),
+            }],
+            selection: CredentialSyncSelection {
+                remote_desktop_ids: std::collections::BTreeSet::from([profile.id]),
+                ..Default::default()
+            },
+            summary: Default::default(),
+        };
+        set_failure_after(StructuredApplyStage::Credentials);
+        let result = apply_structured_snapshots_with_credentials(
+            &mut store,
+            &ForwardingRegistry::new(),
+            &mut settings,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(incoming),
+            BTreeMap::new(),
+            Vec::new(),
+            SavedConnectionsConflictStrategy::Merge,
+            Some(&mut credentials),
+        );
+        assert!(result.is_err());
+        assert_eq!(credentials.summary.cleared, 1);
+        assert!(store.remote_desktop_profiles().is_empty());
+        assert_eq!(std::fs::read(store.path()).unwrap(), original);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     fn empty_apply_arguments(

@@ -1823,6 +1823,14 @@ pub struct ConnectionStoreData {
     pub version: u32,
     #[serde(default)]
     pub connections: Vec<SavedConnection>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cleared_credentials: Vec<CredentialTarget>,
+    #[serde(default)]
+    pub global_proxy_credential_revision: String,
+    #[serde(default)]
+    pub global_proxy_credential_cleared: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub synced_global_proxy_reference: Option<String>,
     #[serde(default)]
     pub groups: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1854,6 +1862,10 @@ impl Default for ConnectionStoreData {
         Self {
             version: CONFIG_VERSION,
             connections: Vec::new(),
+            cleared_credentials: Vec::new(),
+            global_proxy_credential_revision: String::new(),
+            global_proxy_credential_cleared: false,
+            synced_global_proxy_reference: None,
             groups: Vec::new(),
             recent: Vec::new(),
             connection_tombstones: Vec::new(),

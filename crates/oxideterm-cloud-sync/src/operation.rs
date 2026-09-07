@@ -43,10 +43,7 @@ use crate::{
     quick_commands_object_path, remote_desktop_profiles_object_path, revision_id, secret_keys,
     secrets::{CloudSyncSecretProvider, SecretReadMode, get_action_secrets},
     sensitive_credentials_object_path, serial_profiles_object_path,
-    service::{
-        CloudSyncApplyOutcome, CloudSyncLocalSnapshot, apply_structured_snapshots,
-        build_local_snapshot,
-    },
+    service::{CloudSyncApplyOutcome, CloudSyncLocalSnapshot, build_local_snapshot},
     standalone_sftp_profiles_object_path,
     state::CloudSyncHistorySummary,
     telnet_profiles_object_path,

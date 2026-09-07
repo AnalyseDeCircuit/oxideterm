@@ -530,12 +530,9 @@ pub fn normalize_sync_scope(
         sync_remote_desktop_profiles: scope
             .and_then(|scope| scope.sync_remote_desktop_profiles)
             .unwrap_or(true),
-        // Sensitive credentials currently reuse the encrypted connection archive, so they must not
-        // be synced when connection sync is disabled.
-        sync_sensitive_credentials: sync_connections
-            && scope
-                .and_then(|scope| scope.sync_sensitive_credentials)
-                .unwrap_or(false),
+        sync_sensitive_credentials: scope
+            .and_then(|scope| scope.sync_sensitive_credentials)
+            .unwrap_or(false),
         sync_app_settings: scope
             .and_then(|scope| scope.sync_app_settings)
             .unwrap_or(true),
@@ -1057,6 +1054,9 @@ fn join_key(parts: &[Option<&str>]) -> String {
         .join("/")
 }
 
+mod credentials;
+pub use credentials::profile_credential_count_for_scope;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1089,7 +1089,7 @@ mod tests {
         let scope = normalize_sync_scope(Some(&raw), &[]);
 
         assert!(!scope.sync_connections);
-        assert!(!scope.sync_sensitive_credentials);
+        assert!(scope.sync_sensitive_credentials);
         assert!(scope.sync_forwards);
         assert_eq!(
             scope.app_settings_sections,

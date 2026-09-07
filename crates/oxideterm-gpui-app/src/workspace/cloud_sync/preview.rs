@@ -391,17 +391,88 @@ impl CloudSyncPageRenderer {
                 ("portableSecrets", portable_secrets.to_string()),
             ],
         );
-        Some(cloud_sync_status_list(
-            &self.tokens,
-            title,
-            [cloud_sync_meta_line(self.render_selectable_text_scoped(
-                "cloud-sync-sensitive-summary",
-                "summary",
-                summary,
+        let mut rows = vec![cloud_sync_meta_line(self.render_selectable_text_scoped(
+            "cloud-sync-sensitive-summary",
+            "summary",
+            summary,
+            self.tokens.ui.text,
+            cx,
+        ))];
+        let details = match preview {
+            CloudSyncPendingPreview::Structured(preview) => preview
+                .sensitive_credentials_preview
+                .as_ref()
+                .map(|p| &p.profile_credentials),
+            CloudSyncPendingPreview::Legacy { preview, .. } => {
+                Some(&preview.preview.profile_credentials)
+            }
+        };
+        let mut owners = std::collections::BTreeMap::new();
+        for detail in details.into_iter().flatten() {
+            let counts = owners
+                .entry(detail.owner.clone())
+                .or_insert((0usize, 0usize));
+            if detail.cleared {
+                counts.1 += 1;
+            } else {
+                counts.0 += 1;
+            }
+        }
+        for (index, (owner, (stored, cleared))) in owners.into_iter().enumerate() {
+            use oxideterm_connections::CredentialOwner;
+            let fallback = match &owner {
+                CredentialOwner::Connection(id)
+                | CredentialOwner::StandaloneSftp(id)
+                | CredentialOwner::Mosh(id)
+                | CredentialOwner::RemoteDesktop(id) => id.clone(),
+                CredentialOwner::GlobalProxy => self.i18n.t("modals.upstream_proxy.policy"),
+            };
+            let name = if let CloudSyncPendingPreview::Structured(preview) = preview {
+                match &owner {
+                    CredentialOwner::Connection(id) => preview
+                        .connections_snapshot
+                        .as_ref()
+                        .and_then(|s| s.records.iter().find(|p| &p.id == id))
+                        .and_then(|p| p.payload.as_ref())
+                        .map(|p| p.name.clone()),
+                    CredentialOwner::StandaloneSftp(id) => preview
+                        .standalone_sftp_profiles_snapshot
+                        .as_ref()
+                        .and_then(|s| s.records.iter().find(|p| &p.id == id))
+                        .map(|p| p.name.clone()),
+                    CredentialOwner::Mosh(id) => preview
+                        .mosh_profiles_snapshot
+                        .as_ref()
+                        .and_then(|s| s.records.iter().find(|p| &p.id == id))
+                        .map(|p| p.name.clone()),
+                    CredentialOwner::RemoteDesktop(id) => preview
+                        .remote_desktop_profiles_snapshot
+                        .as_ref()
+                        .and_then(|s| s.records.iter().find(|p| &p.id == id))
+                        .map(|p| p.name.clone()),
+                    CredentialOwner::GlobalProxy => None,
+                }
+                .unwrap_or(fallback)
+            } else {
+                fallback
+            };
+            let description = self.i18n_replace(
+                "plugin.cloud_sync.preview.profile_credential_actions",
+                &[
+                    ("name", name),
+                    ("stored", stored.to_string()),
+                    ("cleared", cleared.to_string()),
+                ],
+            );
+            rows.push(cloud_sync_meta_line(self.render_selectable_text_scoped(
+                "cloud-sync-sensitive-owner",
+                index,
+                description,
                 self.tokens.ui.text,
                 cx,
-            ))],
-        ))
+            )));
+        }
+        Some(cloud_sync_status_list(&self.tokens, title, rows))
     }
 
     pub(super) fn render_cloud_sync_upload_selection(
@@ -585,10 +656,11 @@ impl WorkspaceApp {
             .iter()
             .map(|connection| connection.id.clone())
             .filter(|connection_id| {
-                selection
-                    .selected_connection_ids
-                    .as_ref()
-                    .is_none_or(|ids| ids.contains(connection_id))
+                selection.sync_connections
+                    && selection
+                        .selected_connection_ids
+                        .as_ref()
+                        .is_none_or(|ids| ids.contains(connection_id))
             })
             .collect::<Vec<_>>();
         let portable_secret_count =
@@ -600,7 +672,16 @@ impl WorkspaceApp {
                         .key_store()
                         .has_provider_key(&provider.id)
                 })
-                .count();
+                .count()
+                + oxideterm_cloud_sync::profile_credential_count_for_scope(
+                    &self.connection_store,
+                    self.settings_store.settings(),
+                    &oxideterm_cloud_sync::normalize_sync_scope(
+                        Some(&selection.raw_scope(&Default::default())),
+                        &[],
+                    ),
+                    &selection.item_filter(),
+                );
         let preflight = oxideterm_connections::oxide_file::preflight_export(
             &self.connection_store,
             &connection_ids,

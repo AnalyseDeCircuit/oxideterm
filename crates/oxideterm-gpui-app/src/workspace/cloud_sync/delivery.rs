@@ -1389,8 +1389,15 @@ impl WorkspaceApp {
         ui_outcome: CloudSyncApplyUiOutcome,
         cx: &mut Context<Self>,
     ) {
+        let previous_network = self.settings_store.settings().network.clone();
         self.connection_store = ui_outcome.connection_store;
         self.settings_store = ui_outcome.settings_store;
+        if previous_network != self.settings_store.settings().network {
+            oxideterm_network_proxy::install_application_proxy_policy_from_settings(
+                self.settings_store.settings(),
+                &self.connection_store,
+            );
+        }
         match ui_outcome.outcome {
             CloudSyncApplyOutcome::Structured(outcome) => {
                 self.finish_structured_cloud_sync_apply(outcome, cx)
@@ -1564,7 +1571,10 @@ impl WorkspaceApp {
         &self,
         envelope: &oxideterm_connections::oxide_file::ImportResultEnvelope,
     ) -> Option<String> {
-        let total = envelope.restored_connection_passwords
+        let total = envelope.restored_profile_credentials
+            + envelope.cleared_profile_credentials
+            + envelope.skipped_profile_credentials
+            + envelope.restored_connection_passwords
             + envelope.restored_key_passphrases
             + envelope.restored_managed_keys
             + envelope.restored_managed_key_passphrases
@@ -1594,6 +1604,18 @@ impl WorkspaceApp {
                         envelope.restored_privilege_credentials.to_string(),
                     ),
                     ("aiKeys", envelope.imported_portable_secrets.to_string()),
+                    (
+                        "profileCredentials",
+                        envelope.restored_profile_credentials.to_string(),
+                    ),
+                    (
+                        "clearedProfileCredentials",
+                        envelope.cleared_profile_credentials.to_string(),
+                    ),
+                    (
+                        "skippedProfileCredentials",
+                        envelope.skipped_profile_credentials.to_string(),
+                    ),
                     (
                         "skippedCredentials",
                         envelope.skipped_sensitive_credentials.to_string(),

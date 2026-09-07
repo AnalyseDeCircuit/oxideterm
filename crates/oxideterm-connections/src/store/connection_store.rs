@@ -215,6 +215,7 @@ impl ConnectionStore {
         });
         let now = Utc::now();
         let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let previous_credentials = self.stored_credential_targets(&CredentialOwner::Connection(id.clone()));
         let old_keychain_ids = self
             .get(&id)
             .map(collect_connection_keychain_ids)
@@ -322,6 +323,7 @@ impl ConnectionStore {
         if let Some(group) = group {
             self.ensure_group(group)?;
         }
+        self.record_cleared_credentials(previous_credentials);
         self.normalize();
         self.save()?;
         for keychain_id in old_keychain_ids
@@ -446,6 +448,7 @@ impl ConnectionStore {
         id: &str,
         slot: ConnectionCredentialSlot,
     ) -> Result<bool> {
+        let previous_credentials = self.stored_credential_targets(&CredentialOwner::Connection(id.to_string()));
         let Some(connection) = self.get(id) else {
             return Ok(false);
         };
@@ -488,7 +491,8 @@ impl ConnectionStore {
                     plaintext_password: None,
                 };
                 connection.updated_at = Some(Utc::now());
-                self.save()?;
+                self.record_cleared_credentials(previous_credentials);
+        self.save()?;
                 self.delete_or_queue_connection_keychain_entry(reference)?;
                 return Ok(true);
             }
@@ -510,6 +514,7 @@ impl ConnectionStore {
             ConnectionCredentialSlot::UpstreamProxy => unreachable!("handled above"),
         }
         connection.updated_at = Some(Utc::now());
+        self.record_cleared_credentials(previous_credentials);
         self.save()?;
         self.delete_or_queue_connection_keychain_entry(reference)?;
         Ok(true)
@@ -1087,6 +1092,7 @@ impl ConnectionStore {
         let group = normalize_optional_group_name(request.group.as_deref())?;
         let now = Utc::now();
         let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let previous_credentials = self.stored_credential_targets(&CredentialOwner::Mosh(id.clone()));
         let existing = self.get_mosh_profile(&id).cloned();
         let old_keychain_ids = existing
             .as_ref()
@@ -1150,6 +1156,7 @@ impl ConnectionStore {
         if let Some(group) = group {
             self.ensure_group(group)?;
         }
+        self.record_cleared_credentials(previous_credentials);
         self.normalize();
         self.save()?;
         for stale_keychain_id in old_keychain_ids
@@ -1253,6 +1260,7 @@ impl ConnectionStore {
 
     /// Forgets a Mosh primary credential without changing its recent-use timestamp.
     pub fn forget_mosh_profile_credential(&mut self, id: &str) -> Result<bool> {
+        let previous_credentials = self.stored_credential_targets(&CredentialOwner::Mosh(id.to_string()));
         let Some(profile) = self.get_mosh_profile(id) else {
             return Ok(false);
         };
@@ -1268,6 +1276,7 @@ impl ConnectionStore {
             .expect("Mosh profile checked above");
         profile.auth = next_auth;
         profile.updated_at = Utc::now();
+        self.record_cleared_credentials(previous_credentials);
         self.save()?;
         self.delete_or_queue_connection_keychain_entry(reference)?;
         Ok(true)
@@ -1278,6 +1287,7 @@ impl ConnectionStore {
         id: &str,
         hop_index: usize,
     ) -> Result<bool> {
+        let previous_credentials = self.stored_credential_targets(&CredentialOwner::Mosh(id.to_string()));
         let Some(profile) = self.get_mosh_profile(id) else {
             return Ok(false);
         };
@@ -1298,6 +1308,7 @@ impl ConnectionStore {
             .expect("Mosh profile checked above");
         profile.proxy_chain[hop_index].auth = next_auth;
         profile.updated_at = Utc::now();
+        self.record_cleared_credentials(previous_credentials);
         self.save()?;
         self.delete_or_queue_connection_keychain_entry(reference)?;
         Ok(true)
@@ -1337,6 +1348,7 @@ impl ConnectionStore {
         let group = normalize_optional_group_name(request.group.as_deref())?;
         let now = Utc::now();
         let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let previous_credentials = self.stored_credential_targets(&CredentialOwner::StandaloneSftp(id.clone()));
         // Validate portable metadata before any temporary credential crosses into keychain.
         non_empty(id.trim(), "Standalone SFTP profile id")?;
         non_empty(request.name.trim(), "Standalone SFTP profile name")?;
@@ -1456,6 +1468,7 @@ impl ConnectionStore {
         if let Some(group) = group {
             self.ensure_group(group)?;
         }
+        self.record_cleared_credentials(previous_credentials);
         self.normalize();
         self.save()?;
         for stale_keychain_id in old_keychain_ids
@@ -1581,6 +1594,7 @@ impl ConnectionStore {
         let group = normalize_optional_group_name(request.group.as_deref())?;
         let now = Utc::now();
         let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let previous_credentials = self.stored_credential_targets(&CredentialOwner::RemoteDesktop(id.clone()));
         let existing = self.get_remote_desktop_profile(&id).cloned();
         let old_credential_ref = existing
             .as_ref()
@@ -1650,6 +1664,7 @@ impl ConnectionStore {
         if let Some(group) = group {
             self.ensure_group(group)?;
         }
+        self.record_cleared_credentials(previous_credentials);
         self.normalize();
         self.save()?;
 
@@ -1732,6 +1747,7 @@ impl ConnectionStore {
     }
 
     pub fn delete_remote_desktop_credential(&mut self, profile_id: &str) -> Result<bool> {
+        let previous_credentials = self.stored_credential_targets(&CredentialOwner::RemoteDesktop(profile_id.to_string()));
         let Some(profile) = self
             .data
             .remote_desktop_profiles
@@ -1744,6 +1760,7 @@ impl ConnectionStore {
             return Ok(false);
         };
         profile.updated_at = Utc::now();
+        self.record_cleared_credentials(previous_credentials);
         self.save()?;
         self.delete_or_queue_connection_keychain_entry(reference)?;
         Ok(true)
@@ -2362,22 +2379,30 @@ impl ConnectionStore {
             .context("failed to load ProxyCommand from protected storage")
     }
 
-    pub fn save_global_upstream_proxy_password(&self, password: &SecretString) -> Result<String> {
-        // The global proxy has one stable keychain slot, separate from
-        // connection-scoped oxide_conn_upstream_proxy_* entries.
-        self.keychain
-            .store(GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID, password)?;
-        Ok(GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID.to_string())
+    pub fn save_global_upstream_proxy_password(&mut self, password: &SecretString) -> Result<String> {
+        // Reuse this device's current slot, including one allocated by cloud restore.
+        let reference = self.data.synced_global_proxy_reference.clone()
+            .unwrap_or_else(|| GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID.to_string());
+        self.keychain.store(&reference, password)?;
+        self.data.global_proxy_credential_revision = Uuid::new_v4().to_string();
+        self.data.global_proxy_credential_cleared = false;
+        self.save()?;
+        Ok(reference)
     }
 
-    pub fn delete_global_upstream_proxy_password(&self) -> Result<()> {
-        self.keychain
-            .delete(GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID)
-            .map_err(Into::into)
+    pub fn delete_global_upstream_proxy_password(&mut self) -> Result<()> {
+        self.keychain.delete(GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID)?;
+        if let Some(reference) = self.data.synced_global_proxy_reference.take() {
+            self.keychain.delete(&reference)?;
+        }
+        self.data.global_proxy_credential_revision = Uuid::new_v4().to_string();
+        self.data.global_proxy_credential_cleared = true;
+        self.save()
     }
 
     pub fn get_global_upstream_proxy_password(&self, keychain_id: &str) -> Result<SecretString> {
-        if keychain_id != GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID {
+        if keychain_id != GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID
+            && keychain_id.strip_prefix("oxide_global_proxy_").and_then(|id| Uuid::parse_str(id).ok()).is_none() {
             bail!("Invalid global upstream proxy keychain id");
         }
         self.keychain.get(keychain_id)

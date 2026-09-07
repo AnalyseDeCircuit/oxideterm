@@ -14,7 +14,7 @@ impl CloudSyncOperationService {
         uploaded_at: &str,
         device_id: &str,
         sync_password: Option<&str>,
-        portable_secrets: Vec<EncryptedPortableSecret>,
+        mut portable_secrets: Vec<EncryptedPortableSecret>,
         item_filter: &StructuredUploadItemFilter,
         progress: &mut dyn CloudSyncProgressSink,
         total: usize,
@@ -272,15 +272,23 @@ impl CloudSyncOperationService {
                 .sensitive_credentials_revision
                 .as_ref()
             {
+                portable_secrets.extend(crate::credentials::export_profile_credentials(
+                    connection_store,
+                    settings_store.settings(),
+                    &local_snapshot.scope,
+                    item_filter,
+                )?);
+                let profile_secret_count = portable_secrets.len();
                 let connection_ids = connection_store
                     .connections()
                     .iter()
                     .map(|connection| connection.id.clone())
                     .filter(|connection_id| {
-                        item_filter
-                            .connection_ids
-                            .as_ref()
-                            .is_none_or(|ids| ids.contains(connection_id))
+                        local_snapshot.scope.sync_connections
+                            && item_filter
+                                .connection_ids
+                                .as_ref()
+                                .is_none_or(|ids| ids.contains(connection_id))
                     })
                     .collect::<Vec<_>>();
                 let bytes = export_connections_to_oxide_with_context_and_progress(
@@ -313,7 +321,7 @@ impl CloudSyncOperationService {
                 manifest.sections.sensitive_credentials = Some(crate::StructuredObjectEntry {
                     revision: revision.clone(),
                     path: path.clone(),
-                    record_count: Some(local_snapshot.sensitive_credentials_record_count),
+                    record_count: Some(connection_ids.len() + profile_secret_count),
                     content_type: crate::OXIDE_CONTENT_TYPE.to_string(),
                 });
                 objects.push(StructuredUploadObject {

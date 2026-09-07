@@ -515,7 +515,7 @@
         "upload_failed_title": "上传失败",
         "pull_success_title": "远端快照已导入",
         "pull_success_description": "导入 {{imported}} 项，合并 {{merged}} 项。",
-        "sensitive_restore_description": "已恢复 {{passwords}} 个密码、{{keyPassphrases}} 个密钥口令、{{managedKeys}} 个托管密钥、{{managedKeyPassphrases}} 个托管密钥口令、{{privilegeCredentials}} 个提权凭据和 {{aiKeys}} 个 AI 密钥。跳过 {{skippedCredentials}} 个凭据和 {{skippedAiKeys}} 个 AI 密钥。",
+        "sensitive_restore_description": "已恢复 {{passwords}} 个密码、{{keyPassphrases}} 个密钥口令、{{managedKeys}} 个托管密钥、{{managedKeyPassphrases}} 个托管密钥口令、{{privilegeCredentials}} 个提权凭据和 {{aiKeys}} 个 AI 密钥。跳过 {{skippedCredentials}} 个凭据和 {{skippedAiKeys}} 个 AI 密钥。 会话与代理凭据：恢复 {{profileCredentials}} 项、清除 {{clearedProfileCredentials}} 项、跳过 {{skippedProfileCredentials}} 项。",
         "pull_failed_title": "拉取失败",
         "secret_cleared_title": "已清除已存 secret",
         "secret_cleared_description": "已删除 {{label}} 的已存值。",
@@ -613,8 +613,9 @@
         "sensitive_credentials_label": "敏感凭据",
         "toggle_sensitive_credentials": "导入敏感凭据（{{count}}）",
         "sensitive_summary_title": "敏感凭据",
-        "sensitive_remote_summary": "远端加密凭据包含 {{connections}} 个连接记录和 {{portableSecrets}} 个可移植密钥。具体值始终隐藏。",
-        "sensitive_upload_summary": "将上传 {{passwords}} 个密码、{{keyPassphrases}} 个密钥口令、{{managedKeys}} 个托管密钥、{{managedKeyPassphrases}} 个托管密钥口令和 {{portableSecrets}} 个可移植密钥。"
+        "profile_credential_actions": "{{name}}：{{stored}} 项已保存凭据，{{cleared}} 项删除请求。",
+        "sensitive_remote_summary": "远端加密凭据包含 {{connections}} 个连接记录和 {{portableSecrets}} 个可移植凭据。具体值始终隐藏。",
+        "sensitive_upload_summary": "将上传 {{passwords}} 个密码、{{keyPassphrases}} 个密钥口令、{{managedKeys}} 个托管密钥、{{managedKeyPassphrases}} 个托管密钥口令和 {{portableSecrets}} 个可移植凭据。"
       },
       "confirm": {
         "import_title": "确认导入远端快照？",

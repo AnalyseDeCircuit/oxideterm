@@ -523,7 +523,7 @@
         "upload_failed_title": "Échec de l'envoi",
         "pull_success_title": "Snapshot distant importé",
         "pull_success_description": "{{imported}} éléments importés, {{merged}} éléments fusionnés.",
-        "sensitive_restore_description": "{{passwords}} mot(s) de passe, {{keyPassphrases}} phrase(s) secrète(s) de clé, {{managedKeys}} clé(s) gérée(s), {{managedKeyPassphrases}} phrase(s) secrète(s) de clé gérée, {{privilegeCredentials}} identifiant(s) privilégié(s) et {{aiKeys}} clé(s) IA restauré(s). {{skippedCredentials}} identifiant(s) et {{skippedAiKeys}} clé(s) IA ignoré(s).",
+        "sensitive_restore_description": "{{passwords}} mot(s) de passe, {{keyPassphrases}} phrase(s) secrète(s) de clé, {{managedKeys}} clé(s) gérée(s), {{managedKeyPassphrases}} phrase(s) secrète(s) de clé gérée, {{privilegeCredentials}} identifiant(s) privilégié(s) et {{aiKeys}} clé(s) IA restauré(s). {{skippedCredentials}} identifiant(s) et {{skippedAiKeys}} clé(s) IA ignoré(s). Identifiants de session et de proxy : {{profileCredentials}} restaurés, {{clearedProfileCredentials}} supprimés, {{skippedProfileCredentials}} ignorés.",
         "pull_failed_title": "Échec de la récupération",
         "secret_cleared_title": "Secret stocké effacé",
         "secret_cleared_description": "La valeur stockée pour {{label}} a été supprimée.",
@@ -621,6 +621,7 @@
         "sensitive_credentials_label": "Identifiants sensibles",
         "toggle_sensitive_credentials": "Importer les identifiants sensibles ({{count}})",
         "sensitive_summary_title": "Identifiants sensibles",
+        "profile_credential_actions": "{{name}} : {{stored}} identifiants enregistrés, {{cleared}} demandes de suppression.",
         "sensitive_remote_summary": "Les identifiants distants chiffrés contiennent {{connections}} enregistrement(s) de connexion et {{portableSecrets}} secret(s) portable(s). Les valeurs restent masquées.",
         "sensitive_upload_summary": "Enverra {{passwords}} mot(s) de passe, {{keyPassphrases}} phrase(s) secrète(s) de clé, {{managedKeys}} clé(s) gérée(s), {{managedKeyPassphrases}} phrase(s) de clé gérée et {{portableSecrets}} secret(s) portable(s)."
       },

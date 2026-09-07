@@ -26,3 +26,10 @@ include!("store/helpers.rs");
 include!("store/sync.rs");
 #[cfg(test)]
 include!("store/tests.rs");
+
+mod credential_sync;
+pub use credential_sync::{
+    CLEARED_PROFILE_CREDENTIAL_KIND, CredentialOwner, CredentialSlot, CredentialSyncSelection,
+    CredentialTarget, PROFILE_CREDENTIAL_KIND, PreparedProfileCredentials,
+    ProfileCredentialRestoreSummary, is_profile_credential,
+};

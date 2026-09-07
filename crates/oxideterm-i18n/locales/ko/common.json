@@ -523,7 +523,7 @@
         "upload_failed_title": "업로드 실패",
         "pull_success_title": "원격 스냅샷을 가져왔습니다",
         "pull_success_description": "{{imported}}개 항목 가져오기, {{merged}}개 항목 병합 완료.",
-        "sensitive_restore_description": "비밀번호 {{passwords}}개, 키 암호문 {{keyPassphrases}}개, 관리형 키 {{managedKeys}}개, 관리형 키 암호문 {{managedKeyPassphrases}}개, 권한 자격 증명 {{privilegeCredentials}}개, AI 키 {{aiKeys}}개를 복원했습니다. 자격 증명 {{skippedCredentials}}개와 AI 키 {{skippedAiKeys}}개는 건너뛰었습니다.",
+        "sensitive_restore_description": "비밀번호 {{passwords}}개, 키 암호문 {{keyPassphrases}}개, 관리형 키 {{managedKeys}}개, 관리형 키 암호문 {{managedKeyPassphrases}}개, 권한 자격 증명 {{privilegeCredentials}}개, AI 키 {{aiKeys}}개를 복원했습니다. 자격 증명 {{skippedCredentials}}개와 AI 키 {{skippedAiKeys}}개는 건너뛰었습니다. 세션 및 프록시 자격 증명: 복원 {{profileCredentials}}개, 삭제 {{clearedProfileCredentials}}개, 건너뜀 {{skippedProfileCredentials}}개.",
         "pull_failed_title": "가져오기 실패",
         "secret_cleared_title": "저장된 시크릿을 지웠습니다",
         "secret_cleared_description": "{{label}}의 저장된 값을 삭제했습니다.",
@@ -621,6 +621,7 @@
         "sensitive_credentials_label": "민감한 자격 증명",
         "toggle_sensitive_credentials": "민감한 자격 증명 가져오기({{count}})",
         "sensitive_summary_title": "민감한 자격 증명",
+        "profile_credential_actions": "{{name}}: 저장된 자격 증명 {{stored}}개, 삭제 요청 {{cleared}}개.",
         "sensitive_remote_summary": "원격 암호화 자격 증명에는 연결 레코드 {{connections}}개와 휴대용 비밀 {{portableSecrets}}개가 포함됩니다. 값은 항상 숨겨집니다.",
         "sensitive_upload_summary": "비밀번호 {{passwords}}개, 키 암호문 {{keyPassphrases}}개, 관리 키 {{managedKeys}}개, 관리 키 암호문 {{managedKeyPassphrases}}개, 휴대용 비밀 {{portableSecrets}}개를 업로드합니다."
       },

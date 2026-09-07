@@ -523,7 +523,7 @@
         "upload_failed_title": "上傳失敗",
         "pull_success_title": "遠端快照已匯入",
         "pull_success_description": "匯入 {{imported}} 項，合併 {{merged}} 項。",
-        "sensitive_restore_description": "已還原 {{passwords}} 個密碼、{{keyPassphrases}} 個金鑰密碼、{{managedKeys}} 個託管金鑰、{{managedKeyPassphrases}} 個託管金鑰密碼、{{privilegeCredentials}} 個提權憑證和 {{aiKeys}} 個 AI 金鑰。已略過 {{skippedCredentials}} 個憑證和 {{skippedAiKeys}} 個 AI 金鑰。",
+        "sensitive_restore_description": "已還原 {{passwords}} 個密碼、{{keyPassphrases}} 個金鑰密碼、{{managedKeys}} 個託管金鑰、{{managedKeyPassphrases}} 個託管金鑰密碼、{{privilegeCredentials}} 個提權憑證和 {{aiKeys}} 個 AI 金鑰。已略過 {{skippedCredentials}} 個憑證和 {{skippedAiKeys}} 個 AI 金鑰。 工作階段與代理憑證：還原 {{profileCredentials}} 項、清除 {{clearedProfileCredentials}} 項、略過 {{skippedProfileCredentials}} 項。",
         "pull_failed_title": "拉取失敗",
         "secret_cleared_title": "已清除已儲存的 secret",
         "secret_cleared_description": "已刪除 {{label}} 的已儲存值。",
@@ -621,6 +621,7 @@
         "sensitive_credentials_label": "敏感憑證",
         "toggle_sensitive_credentials": "匯入敏感憑證（{{count}}）",
         "sensitive_summary_title": "敏感憑證",
+        "profile_credential_actions": "{{name}}：{{stored}} 項已儲存憑證，{{cleared}} 項刪除請求。",
         "sensitive_remote_summary": "遠端加密憑證包含 {{connections}} 個連線記錄和 {{portableSecrets}} 個可攜密鑰。具體值一律隱藏。",
         "sensitive_upload_summary": "將上傳 {{passwords}} 個密碼、{{keyPassphrases}} 個密鑰口令、{{managedKeys}} 個託管密鑰、{{managedKeyPassphrases}} 個託管密鑰口令和 {{portableSecrets}} 個可攜密鑰。"
       },

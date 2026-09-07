@@ -523,7 +523,7 @@
         "upload_failed_title": "Hochladen fehlgeschlagen",
         "pull_success_title": "Remote-Snapshot importiert",
         "pull_success_description": "{{imported}} Einträge importiert, {{merged}} Einträge zusammengeführt.",
-        "sensitive_restore_description": "{{passwords}} Passwort/Passwörter, {{keyPassphrases}} Schlüssel-Passphrase(n), {{managedKeys}} verwaltete(n) Schlüssel, {{managedKeyPassphrases}} verwaltete Schlüssel-Passphrase(n), {{privilegeCredentials}} Berechtigungsnachweis(e) und {{aiKeys}} AI-Schlüssel wiederhergestellt. {{skippedCredentials}} Berechtigungsnachweis(e) und {{skippedAiKeys}} AI-Schlüssel übersprungen.",
+        "sensitive_restore_description": "{{passwords}} Passwort/Passwörter, {{keyPassphrases}} Schlüssel-Passphrase(n), {{managedKeys}} verwaltete(n) Schlüssel, {{managedKeyPassphrases}} verwaltete Schlüssel-Passphrase(n), {{privilegeCredentials}} Berechtigungsnachweis(e) und {{aiKeys}} AI-Schlüssel wiederhergestellt. {{skippedCredentials}} Berechtigungsnachweis(e) und {{skippedAiKeys}} AI-Schlüssel übersprungen. Sitzungs- und Proxy-Zugangsdaten: {{profileCredentials}} wiederhergestellt, {{clearedProfileCredentials}} gelöscht, {{skippedProfileCredentials}} übersprungen.",
         "pull_failed_title": "Abruf fehlgeschlagen",
         "secret_cleared_title": "Gespeichertes Geheimnis gelöscht",
         "secret_cleared_description": "Gespeicherter Wert für {{label}} wurde entfernt.",
@@ -621,6 +621,7 @@
         "sensitive_credentials_label": "Sensible Anmeldedaten",
         "toggle_sensitive_credentials": "Sensible Anmeldedaten importieren ({{count}})",
         "sensitive_summary_title": "Sensible Anmeldedaten",
+        "profile_credential_actions": "{{name}}: {{stored}} gespeicherte Zugangsdaten, {{cleared}} Löschanforderungen.",
         "sensitive_remote_summary": "Die verschlüsselten Remote-Anmeldedaten enthalten {{connections}} Verbindungsdatensatz/-sätze und {{portableSecrets}} portable Geheimnis(se). Werte bleiben verborgen.",
         "sensitive_upload_summary": "Es werden {{passwords}} Passwort/Passwörter, {{keyPassphrases}} Schlüssel-Passphrase(n), {{managedKeys}} verwaltete Schlüssel, {{managedKeyPassphrases}} Passphrase(n) für verwaltete Schlüssel und {{portableSecrets}} portable Geheimnis(se) hochgeladen."
       },

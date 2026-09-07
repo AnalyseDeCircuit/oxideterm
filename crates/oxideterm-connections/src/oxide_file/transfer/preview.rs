@@ -140,6 +140,10 @@ fn preview_oxide_import_inner(
         ),
         plugin_settings_count: plugin_settings.len(),
         portable_secret_count: portable_secrets.len(),
+        profile_credentials: portable_secrets.iter().filter(|secret| crate::is_profile_credential(secret)).map(|secret| {
+            let target: crate::CredentialTarget = serde_json::from_str(&secret.id).map_err(|_| OxideFileError::InvalidFormat("Invalid portable credential target".into()))?;
+            Ok(ProfileCredentialPreview { owner: target.owner, cleared: secret.kind == crate::CLEARED_PROFILE_CREDENTIAL_KIND })
+        }).collect::<Result<Vec<_>, OxideFileError>>()?,
         plugin_settings_by_plugin: plugin_settings_by_plugin(&plugin_settings),
         ..ImportPreview::default()
     };

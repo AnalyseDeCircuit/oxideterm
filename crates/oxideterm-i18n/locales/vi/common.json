@@ -523,7 +523,7 @@
         "upload_failed_title": "Tải lên thất bại",
         "pull_success_title": "Đã nhập ảnh chụp từ xa",
         "pull_success_description": "Đã nhập {{imported}} mục, gộp {{merged}} mục.",
-        "sensitive_restore_description": "Đã khôi phục {{passwords}} mật khẩu, {{keyPassphrases}} mật khẩu khóa, {{managedKeys}} khóa được quản lý, {{managedKeyPassphrases}} mật khẩu khóa được quản lý, {{privilegeCredentials}} thông tin đặc quyền và {{aiKeys}} khóa AI. Đã bỏ qua {{skippedCredentials}} thông tin xác thực và {{skippedAiKeys}} khóa AI.",
+        "sensitive_restore_description": "Đã khôi phục {{passwords}} mật khẩu, {{keyPassphrases}} mật khẩu khóa, {{managedKeys}} khóa được quản lý, {{managedKeyPassphrases}} mật khẩu khóa được quản lý, {{privilegeCredentials}} thông tin đặc quyền và {{aiKeys}} khóa AI. Đã bỏ qua {{skippedCredentials}} thông tin xác thực và {{skippedAiKeys}} khóa AI. Thông tin xác thực phiên và proxy: đã khôi phục {{profileCredentials}}, đã xóa {{clearedProfileCredentials}}, đã bỏ qua {{skippedProfileCredentials}}.",
         "pull_failed_title": "Tải xuống thất bại",
         "secret_cleared_title": "Đã xóa thông tin đã lưu",
         "secret_cleared_description": "Đã xóa giá trị đã lưu cho {{label}}.",
@@ -621,6 +621,7 @@
         "sensitive_credentials_label": "Thông tin xác thực nhạy cảm",
         "toggle_sensitive_credentials": "Nhập thông tin xác thực nhạy cảm ({{count}})",
         "sensitive_summary_title": "Thông tin xác thực nhạy cảm",
+        "profile_credential_actions": "{{name}}: {{stored}} thông tin xác thực đã lưu, {{cleared}} yêu cầu xóa.",
         "sensitive_remote_summary": "Thông tin xác thực từ xa đã mã hóa gồm {{connections}} bản ghi kết nối và {{portableSecrets}} bí mật di động. Giá trị luôn được ẩn.",
         "sensitive_upload_summary": "Sẽ tải lên {{passwords}} mật khẩu, {{keyPassphrases}} mật khẩu khóa, {{managedKeys}} khóa được quản lý, {{managedKeyPassphrases}} mật khẩu khóa được quản lý và {{portableSecrets}} bí mật di động."
       },

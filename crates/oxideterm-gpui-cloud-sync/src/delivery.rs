@@ -744,6 +744,13 @@ fn filter_structured_preview_for_selection(
             .records
             .retain(|profile| selection.selected_mosh_profile_ids.contains(&profile.id));
     }
+    if let Some(snapshot) = preview.remote_desktop_profiles_snapshot.as_mut() {
+        snapshot.records.retain(|profile| {
+            selection
+                .selected_remote_desktop_profile_ids
+                .contains(&profile.id)
+        });
+    }
 }
 
 fn read_apply_sync_password(
@@ -913,6 +920,77 @@ fn percent_decode_component(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partial_desktop_restore_filters_unselected_profiles_before_credentials_apply() {
+        use oxideterm_cloud_sync::{ConflictStrategy, SyncScope, create_manifest_base};
+        use oxideterm_connections::{RemoteDesktopProfile, SavedConnectionsSyncSnapshot};
+        let first = RemoteDesktopProfile::new(
+            "first",
+            serde_json::from_str("\"rdp\"").unwrap(),
+            "first.test",
+            3389,
+        );
+        let second = RemoteDesktopProfile::new(
+            "second",
+            serde_json::from_str("\"vnc\"").unwrap(),
+            "second.test",
+            5900,
+        );
+        let manifest = create_manifest_base(
+            "revision",
+            "2026-09-07T00:00:00Z",
+            "device",
+            SyncScope::default(),
+        );
+        let preview = CloudSyncPendingPreview::Structured(StructuredPreview {
+            remote_metadata: Default::default(),
+            manifest,
+            connections_snapshot: Some(SavedConnectionsSyncSnapshot {
+                revision: "empty-connections".to_string(),
+                exported_at: "2026-08-21T00:00:00Z".to_string(),
+                records: Vec::new(),
+            }),
+            forwards_snapshot: None,
+            quick_commands_snapshot_json: None,
+            serial_profiles_snapshot: None,
+            telnet_profiles_snapshot: None,
+            mosh_profiles_snapshot: None,
+            standalone_sftp_profiles_snapshot: None,
+            remote_desktop_profiles_snapshot: Some(
+                oxideterm_connections::RemoteDesktopProfilesSyncSnapshot {
+                    revision: "desktops".into(),
+                    exported_at: "2026-09-07T00:00:00Z".into(),
+                    records: vec![first.clone(), second],
+                },
+            ),
+            base_connections_snapshot: None,
+            base_forwards_snapshot: None,
+            base_quick_commands_snapshot_json: None,
+            base_serial_profiles_snapshot: None,
+            base_telnet_profiles_snapshot: None,
+            base_mosh_profiles_snapshot: None,
+            base_standalone_sftp_profiles_snapshot: None,
+            base_remote_desktop_profiles_snapshot: None,
+            sensitive_credentials_entry: None,
+            sensitive_credentials_preview: None,
+            app_settings_entries: Default::default(),
+            app_settings_sections: Default::default(),
+            plugin_settings_entries: Default::default(),
+            plugin_settings_counts: Default::default(),
+        });
+        let mut selection =
+            CloudSyncPreviewSelection::from_preview(&preview, ConflictStrategy::Merge);
+        selection.selected_remote_desktop_profile_ids =
+            std::collections::BTreeSet::from([first.id.clone()]);
+        let CloudSyncPendingPreview::Structured(mut preview) = preview else {
+            unreachable!()
+        };
+        filter_structured_preview_for_selection(&mut preview, &selection);
+        let records = preview.remote_desktop_profiles_snapshot.unwrap().records;
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, first.id);
+    }
 
     #[test]
     fn google_oauth_callback_code_debug_is_redacted() {

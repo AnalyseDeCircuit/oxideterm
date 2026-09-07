@@ -523,7 +523,7 @@
         "upload_failed_title": "アップロード失敗",
         "pull_success_title": "リモートスナップショットをインポートしました",
         "pull_success_description": "{{imported}} 件をインポート、{{merged}} 件をマージしました。",
-        "sensitive_restore_description": "{{passwords}} 件のパスワード、{{keyPassphrases}} 件の鍵パスフレーズ、{{managedKeys}} 件の管理鍵、{{managedKeyPassphrases}} 件の管理鍵パスフレーズ、{{privilegeCredentials}} 件の権限昇格認証情報、{{aiKeys}} 件の AI キーを復元しました。{{skippedCredentials}} 件の認証情報と {{skippedAiKeys}} 件の AI キーをスキップしました。",
+        "sensitive_restore_description": "{{passwords}} 件のパスワード、{{keyPassphrases}} 件の鍵パスフレーズ、{{managedKeys}} 件の管理鍵、{{managedKeyPassphrases}} 件の管理鍵パスフレーズ、{{privilegeCredentials}} 件の権限昇格認証情報、{{aiKeys}} 件の AI キーを復元しました。{{skippedCredentials}} 件の認証情報と {{skippedAiKeys}} 件の AI キーをスキップしました。 セッションとプロキシの認証情報：復元 {{profileCredentials}} 件、削除 {{clearedProfileCredentials}} 件、スキップ {{skippedProfileCredentials}} 件。",
         "pull_failed_title": "プル失敗",
         "secret_cleared_title": "保存済みシークレットを消去しました",
         "secret_cleared_description": "{{label}} の保存済みの値を削除しました。",
@@ -621,6 +621,7 @@
         "sensitive_credentials_label": "機密資格情報",
         "toggle_sensitive_credentials": "機密資格情報をインポート（{{count}}）",
         "sensitive_summary_title": "機密資格情報",
+        "profile_credential_actions": "{{name}}：保存済み認証情報 {{stored}} 件、削除要求 {{cleared}} 件。",
         "sensitive_remote_summary": "リモートの暗号化資格情報には {{connections}} 件の接続レコードと {{portableSecrets}} 件のポータブルシークレットが含まれます。値は常に非表示です。",
         "sensitive_upload_summary": "{{passwords}} 件のパスワード、{{keyPassphrases}} 件の鍵パスフレーズ、{{managedKeys}} 件の管理鍵、{{managedKeyPassphrases}} 件の管理鍵パスフレーズ、{{portableSecrets}} 件のポータブルシークレットをアップロードします。"
       },
