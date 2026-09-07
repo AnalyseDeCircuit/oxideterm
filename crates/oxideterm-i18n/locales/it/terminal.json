@@ -162,6 +162,9 @@
       "saved_to_connection": "Override salvato nella connessione",
       "reset_connection": "Ripristina ereditarietà per la connessione",
       "command_context": "Evidenzia i termini di ricerca grep/rg",
+      "selection_matches": "Evidenzia il testo identico alla selezione",
+      "selection_matches_hint": "Evidenzia stringhe identiche su una sola riga dopo la selezione. Distingue maiuscole e minuscole; si rimuove annullando la selezione.",
+      "selection_matches_default_hint": "Evidenzia il testo identico su una sola riga dopo la selezione. Il pannello del terminale può modificare questo valore globale per ogni sessione.",
       "manage_rule_sets": "Gestisci regole di base e set…"
     },
     "trzsz": {

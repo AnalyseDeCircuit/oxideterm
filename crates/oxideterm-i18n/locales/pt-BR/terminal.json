@@ -162,6 +162,9 @@
       "saved_to_connection": "Substituição salva na conexão",
       "reset_connection": "Redefinir conexão para herdar",
       "command_context": "Realçar termos de pesquisa do grep/rg",
+      "selection_matches": "Destacar texto igual à seleção",
+      "selection_matches_hint": "Destaca sequências idênticas de uma única linha após a seleção. Diferencia maiúsculas e minúsculas; desaparece ao desfazer a seleção.",
+      "selection_matches_default_hint": "Destaca texto idêntico de uma única linha após a seleção. O painel do terminal pode substituir este padrão global por sessão.",
       "manage_rule_sets": "Gerenciar regras base e conjuntos…"
     },
     "trzsz": {

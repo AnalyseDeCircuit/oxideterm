@@ -162,6 +162,9 @@
       "saved_to_connection": "강조 재정의를 연결에 저장했습니다",
       "reset_connection": "이 연결을 상속으로 재설정",
       "command_context": "grep/rg 검색어 강조 표시",
+      "selection_matches": "선택한 텍스트와 같은 내용 강조",
+      "selection_matches_hint": "선택 후 동일한 한 줄 문자열을 강조합니다. 대소문자를 구분하며 선택을 해제하면 지워집니다.",
+      "selection_matches_default_hint": "선택 후 동일한 한 줄 문자열을 강조합니다. 터미널 패널에서 세션별로 이 전역 기본값을 재정의할 수 있습니다.",
       "manage_rule_sets": "기본 규칙 및 규칙 세트 관리…"
     },
     "trzsz": {

@@ -623,3 +623,115 @@ fn terminal_element_maps_scrollback_search_matches_into_visible_rows() {
     assert_eq!(layout.search_matches[0].col, 8);
     assert_eq!(layout.search_matches[0].cells, 5);
 }
+
+#[test]
+fn selection_matches_use_literal_case_sensitive_text_without_changing_search() {
+    let snapshot = selection_snapshot("share SHARE shares [x] [x]");
+    let element = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        Some("SHARE".into()),
+        Vec::new(),
+        None,
+        None,
+        None,
+    );
+    assert!(element.layout().selection_matches.is_empty());
+    let layout = element
+        .selection_highlight_query(Some(Arc::new(zeroize::Zeroizing::new("share".into()))))
+        .layout();
+    assert_eq!(
+        layout
+            .selection_matches
+            .iter()
+            .map(|rect| (rect.row, rect.col, rect.cells))
+            .collect::<Vec<_>>(),
+        vec![(0, 0, 5), (0, 12, 5)]
+    );
+    assert_eq!(layout.search_matches.len(), 1);
+    assert_eq!(layout.search_matches[0].col, 6);
+    let literal = TerminalElement::new(
+        selection_snapshot("[x] x [x]"),
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .selection_highlight_query(Some(Arc::new(zeroize::Zeroizing::new("[x]".into()))))
+    .layout();
+    assert_eq!(
+        literal
+            .selection_matches
+            .iter()
+            .map(|rect| (rect.col, rect.cells))
+            .collect::<Vec<_>>(),
+        vec![(0, 3), (6, 3)]
+    );
+}
+
+#[test]
+fn selection_matches_preserve_wide_cells_and_soft_wraps() {
+    let mut snapshot = selection_snapshot("你好 你好");
+    snapshot.lines[0] = row_from_text_with_wide_spacers("你好 你好");
+    snapshot.cols = snapshot.lines[0].cells.len();
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .selection_highlight_query(Some(Arc::new(zeroize::Zeroizing::new("你好".into()))))
+    .layout();
+    assert_eq!(
+        layout
+            .selection_matches
+            .iter()
+            .map(|rect| (rect.col, rect.cells))
+            .collect::<Vec<_>>(),
+        vec![(0, 4), (5, 4)]
+    );
+
+    let mut snapshot = multirow_snapshot(&["sha", "res", "har", "e!!"]);
+    snapshot.cols = 3;
+    for row in &mut snapshot.lines[..3] {
+        row.wrapped = true;
+        row.refresh_signature();
+    }
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .selection_highlight_query(Some(Arc::new(zeroize::Zeroizing::new("share".into()))))
+    .viewport_rows(2)
+    .layout();
+    assert_eq!(
+        layout
+            .selection_matches
+            .iter()
+            .map(|rect| (rect.row, rect.col, rect.cells))
+            .collect::<Vec<_>>(),
+        vec![(0, 0, 3), (1, 0, 2), (1, 2, 1)]
+    );
+}

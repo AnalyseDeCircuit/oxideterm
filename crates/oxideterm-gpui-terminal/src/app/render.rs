@@ -273,6 +273,7 @@ impl Render for TerminalPane {
             .terminal_timestamps_enabled
             .then(|| self.row_timestamps.clone());
         let search_matches = self.current_search_matches();
+        let selection_highlight_query = self.selection_highlight_query();
 
         let background = self.preferences.background.clone().filter(|_background| {
             // Keep terminal repaint frames off the filesystem hot path; image
@@ -348,6 +349,7 @@ impl Render for TerminalPane {
         )
         .detect_file_paths_as_links(self.settings.detect_file_paths_as_links)
         .precomputed_search_matches()
+        .selection_highlight_query(selection_highlight_query)
         .command_marks(
             if command_mark_ui_visible {
                 self.command_marks_render_cache.clone()

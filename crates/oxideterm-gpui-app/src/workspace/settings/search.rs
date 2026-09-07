@@ -316,6 +316,8 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
                 "settings_view.terminal.highlight_rules.description",
                 "settings_view.terminal.highlight_rules.rule_set",
                 "settings_view.terminal.highlight_rules.rule_set_hint",
+                "terminal.highlight_override.selection_matches",
+                "terminal.highlight_override.selection_matches_default_hint",
                 "settings_view.terminal.highlight_rules.semantic_coloring",
                 "settings_view.terminal.highlight_rules.semantic_coloring_hint",
                 "settings_view.terminal.highlight_rules.semantic_scheme",

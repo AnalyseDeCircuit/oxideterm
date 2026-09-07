@@ -761,6 +761,7 @@ pub(crate) struct WorkspaceApp {
     terminal_semantic_highlight_section_expanded: bool,
     terminal_rule_highlight_section_expanded: bool,
     terminal_command_context_highlight_section_expanded: bool,
+    terminal_selection_highlight_section_expanded: bool,
     terminal_command_sender: Entity<terminal_command_sender::TerminalCommandSenderEntity>,
     _terminal_command_sender_observation: Subscription,
     local_terminal_command_history: SharedTerminalCommandHistory,

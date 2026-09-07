@@ -133,6 +133,48 @@ pub(crate) fn terminal_highlights_for_rows(
     layout
 }
 
+pub(crate) fn selection_match_rects(
+    snapshot: &TerminalSnapshot,
+    query: Option<&str>,
+    rows: Range<usize>,
+    color: Hsla,
+) -> Vec<TerminalRect> {
+    let Some(query) = query.filter(|query| !query.is_empty()) else {
+        return Vec::new();
+    };
+    let mut rects = Vec::new();
+    let mut row = rows.start.min(snapshot.lines.len());
+    while row < rows.end.min(snapshot.lines.len()) {
+        let mut start = row;
+        while start > 0 && snapshot.lines[start - 1].wrapped {
+            start -= 1;
+        }
+        let mut end = row + 1;
+        while end < snapshot.lines.len() && snapshot.lines[end - 1].wrapped {
+            end += 1;
+        }
+        let line = build_logical_line(snapshot, start..end);
+        let text = zeroize::Zeroizing::new(line.text);
+        let query_chars = query.chars().count();
+        let mut previous_byte = 0;
+        let mut start_cell = 0;
+        for (start_byte, _) in text.match_indices(query) {
+            // Count each prefix segment once even when a short query matches a long wrapped line.
+            start_cell += text[previous_byte..start_byte].chars().count();
+            previous_byte = start_byte;
+            if let Some(cells) = line.map.get(start_cell..start_cell + query_chars) {
+                rects.extend(
+                    rects_for_match(cells, color)
+                        .into_iter()
+                        .filter(|rect| rows.contains(&rect.row)),
+                );
+            }
+        }
+        row = end;
+    }
+    rects
+}
+
 fn logical_line_overlaps_transient_output(
     snapshot: &TerminalSnapshot,
     rows: Range<usize>,

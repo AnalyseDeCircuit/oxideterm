@@ -162,6 +162,9 @@
       "saved_to_connection": "Đã lưu ghi đè vào kết nối",
       "reset_connection": "Đặt kết nối về kế thừa",
       "command_context": "Làm nổi bật từ khóa tìm kiếm grep/rg",
+      "selection_matches": "Tô sáng nội dung giống văn bản đã chọn",
+      "selection_matches_hint": "Sau khi chọn, tô sáng các chuỗi một dòng giống hệt. Phân biệt chữ hoa/thường; xóa tô sáng khi bỏ chọn.",
+      "selection_matches_default_hint": "Tô sáng văn bản một dòng giống hệt sau khi chọn. Bảng điều khiển terminal có thể ghi đè mặc định chung này cho từng phiên.",
       "manage_rule_sets": "Quản lý quy tắc cơ sở và bộ quy tắc…"
     },
     "trzsz": {

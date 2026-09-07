@@ -625,6 +625,7 @@ impl WorkspaceApp {
             terminal_semantic_highlight_section_expanded: true,
             terminal_rule_highlight_section_expanded: true,
             terminal_command_context_highlight_section_expanded: true,
+            terminal_selection_highlight_section_expanded: true,
             terminal_command_sender,
             _terminal_command_sender_observation: terminal_command_sender_observation,
             local_terminal_command_history,
@@ -1145,6 +1146,7 @@ impl WorkspaceApp {
             open_links_with_modifier: terminal.open_links_with_modifier,
             detect_file_paths_as_links: terminal.detect_file_paths_as_links,
             semantic_coloring: terminal.semantic_coloring,
+            selection_highlighting: terminal.selection_highlighting,
             semantic_scheme: resolved_terminal_semantic_scheme(
                 terminal.semantic_scheme,
                 terminal.active_custom_semantic_scheme(),

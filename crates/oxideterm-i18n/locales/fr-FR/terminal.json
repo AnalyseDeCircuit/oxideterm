@@ -162,6 +162,9 @@
       "saved_to_connection": "Remplacement enregistré dans la connexion",
       "reset_connection": "Rétablir l’héritage pour cette connexion",
       "command_context": "Surligner les termes de recherche grep/rg",
+      "selection_matches": "Surligner le texte identique à la sélection",
+      "selection_matches_hint": "Surligne les chaînes identiques sur une seule ligne après sélection. Respecte la casse ; disparaît à la désélection.",
+      "selection_matches_default_hint": "Surligne le texte identique sur une seule ligne après sélection. Le panneau du terminal peut remplacer ce réglage global pour chaque session.",
       "manage_rule_sets": "Gérer les règles de base et les jeux…"
     },
     "trzsz": {

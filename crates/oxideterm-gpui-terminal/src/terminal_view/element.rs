@@ -22,6 +22,7 @@ use oxideterm_terminal_semantic::{
 use oxideterm_terminal_unicode::{TerminalVisualLine, visual_line_for_row_if_bidi};
 use parking_lot::Mutex;
 use unicode_width::UnicodeWidthChar;
+use zeroize::Zeroizing;
 
 use crate::app::{
     TerminalInputHandler, TerminalPane, TerminalRenderedImage, TerminalRowTimestampStore,
@@ -62,6 +63,7 @@ pub(crate) struct TerminalElement {
     search_query: Option<String>,
     search_matches: Arc<[TerminalSearchMatch]>,
     search_matches_precomputed: bool,
+    selection_highlight_query: Option<Arc<Zeroizing<String>>>,
     selected_search_match: Option<usize>,
     command_marks: Arc<[TerminalCommandMark]>,
     selected_command_mark_id: Option<String>,
@@ -105,6 +107,7 @@ pub(crate) struct TerminalElementLayout {
     pub(crate) highlight_underlines: Vec<TerminalRect>,
     pub(crate) highlight_outlines: Vec<TerminalRect>,
     pub(crate) search_matches: Vec<TerminalRect>,
+    pub(crate) selection_matches: Vec<TerminalRect>,
     pub(crate) command_mark_overlays: Vec<TerminalCommandMarkOverlay>,
     pub(crate) selections: Vec<TerminalRect>,
     pub(crate) images: Vec<TerminalImageLayout>,
@@ -530,6 +533,7 @@ impl TerminalElement {
             search_query,
             search_matches: search_matches.into(),
             search_matches_precomputed: false,
+            selection_highlight_query: None,
             selected_search_match,
             command_marks: Arc::from([]),
             selected_command_mark_id: None,
@@ -673,6 +677,14 @@ impl TerminalElement {
         self
     }
 
+    pub(crate) fn selection_highlight_query(
+        mut self,
+        query: Option<Arc<Zeroizing<String>>>,
+    ) -> Self {
+        self.selection_highlight_query = query;
+        self
+    }
+
     pub(crate) fn precomputed_search_matches(mut self) -> Self {
         // An empty result is still a computed result. This flag prevents the
         // visible-row fallback search from rescanning on every repaint.
@@ -766,6 +778,19 @@ impl TerminalElement {
                     self.selected_search_match,
                 )
             },
+        );
+        let selection_matches = map_rects_to_visual(
+            &self.snapshot,
+            self.bidi_enabled,
+            crate::terminal_view::highlight::selection_match_rects(
+                &self.snapshot,
+                self.selection_highlight_query
+                    .as_ref()
+                    .map(|query| query.as_str()),
+                visible_rows.clone(),
+                rgba((self.theme.tokens.ui.warning << 8) | TRANSIENT_COMMAND_HIGHLIGHT_ALPHA)
+                    .into_color(),
+            ),
         );
         let command_mark_overlays = command_mark_overlays_for_rows(
             &self.snapshot,
@@ -890,6 +915,7 @@ impl TerminalElement {
                 highlight_layout.outlines,
             ),
             search_matches,
+            selection_matches,
             command_mark_overlays,
             selections,
             images,
@@ -1981,11 +2007,18 @@ fn map_rects_to_visual(
     rects: Vec<TerminalRect>,
 ) -> Vec<TerminalRect> {
     let mut mapped = Vec::with_capacity(rects.len());
+    let mut mapped_row = None;
+    let mut visual_line = None;
     for rect in rects {
         let Some(row) = snapshot.lines.get(rect.row) else {
             continue;
         };
-        let Some(visual_line) = visual_line_for_row_with_bidi(row, bidi_enabled) else {
+        if mapped_row != Some(rect.row) {
+            // Dense matches share a row; bidi detection and mapping only need to run once for it.
+            visual_line = visual_line_for_row_with_bidi(row, bidi_enabled);
+            mapped_row = Some(rect.row);
+        }
+        let Some(visual_line) = &visual_line else {
             mapped.push(rect);
             continue;
         };
@@ -2182,6 +2215,9 @@ impl Element for TerminalElement {
                     .filter(|image| image.image.snapshot.z_index < 0)
                 {
                     paint_terminal_image(image, origin, &self.metrics, window);
+                }
+                for rect in &layout.selection_matches {
+                    paint_terminal_rect(rect, origin, &self.metrics, window);
                 }
                 for rect in &layout.search_matches {
                     paint_terminal_rect(rect, origin, &self.metrics, window);

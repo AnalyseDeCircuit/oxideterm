@@ -162,6 +162,9 @@
       "saved_to_connection": "醒目提示覆寫已儲存至連線",
       "reset_connection": "將此連線恢復為繼承",
       "command_context": "醒目顯示 grep/rg 查詢詞",
+      "selection_matches": "標示與選取文字相同的內容",
+      "selection_matches_hint": "選取文字後，標示相同的單行字串。區分大小寫，取消選取後清除。",
+      "selection_matches_default_hint": "選取文字後，標示相同的單行字串。終端高亮面板可為目前工作階段單獨覆寫此預設設定。",
       "manage_rule_sets": "管理基礎規則與規則集…"
     },
     "trzsz": {

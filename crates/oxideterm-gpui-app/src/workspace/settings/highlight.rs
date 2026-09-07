@@ -452,6 +452,13 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(24.0))
+            .child(self.plain_settings_card(vec![self.checkbox_row(
+                "terminal.highlight_override.selection_matches",
+                "terminal.highlight_override.selection_matches_default_hint",
+                settings.terminal.selection_highlighting,
+                |settings, enabled| settings.terminal.selection_highlighting = enabled,
+                cx,
+            )]))
             .child(semantic_card)
             .child(rules_card)
             .into_any_element()

@@ -411,6 +411,8 @@ pub struct TerminalPane {
     // Command-derived query highlighting is session-only and never becomes a
     // persisted keyword rule or shared backend state.
     command_context_highlighting_enabled: bool,
+    session_selection_highlighting_override: Option<bool>,
+    selection_highlight_cache: Option<SelectionHighlightCache>,
     preferences: TerminalUiPreferences,
     settings: TerminalUiSettings,
     theme: TerminalUiTheme,
@@ -624,6 +626,11 @@ struct TerminalSearchCache {
     query: String,
     content_revision: u64,
     matches: Arc<[oxideterm_terminal::TerminalSearchMatch]>,
+}
+
+struct SelectionHighlightCache {
+    selection: TerminalSelection,
+    query: Option<Arc<Zeroizing<String>>>,
 }
 
 struct SmoothScrollSnapshotCache {
@@ -1074,6 +1081,8 @@ impl TerminalPane {
             session_highlight_override: None,
             session_semantic_coloring_override: None,
             command_context_highlighting_enabled: true,
+            session_selection_highlighting_override: None,
+            selection_highlight_cache: None,
             preferences: preferences.clone(),
             settings: TerminalUiSettings::from_preferences(&preferences),
             theme: preferences.theme.clone(),
@@ -1631,6 +1640,9 @@ impl TerminalPane {
         if let Some(highlight_override) = &self.session_highlight_override {
             preferences.highlight_rules = highlight_override.rules.clone();
         }
+        if self.preferences.selection_highlighting != preferences.selection_highlighting {
+            self.selection_highlight_cache = None;
+        }
         if self.session_semantic_coloring_override == Some(preferences.semantic_coloring) {
             self.session_semantic_coloring_override = None;
         }
@@ -1744,6 +1756,28 @@ impl TerminalPane {
             return;
         }
         self.command_context_highlighting_enabled = enabled;
+        cx.notify();
+    }
+
+    pub fn selection_highlighting_enabled(&self) -> bool {
+        self.session_selection_highlighting_override
+            .unwrap_or(self.preferences.selection_highlighting)
+    }
+
+    pub fn selection_highlighting_overridden(&self) -> bool {
+        self.session_selection_highlighting_override.is_some()
+    }
+
+    pub fn set_selection_highlighting_override(
+        &mut self,
+        enabled: Option<bool>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.session_selection_highlighting_override == enabled {
+            return;
+        }
+        self.session_selection_highlighting_override = enabled;
+        self.selection_highlight_cache = None;
         cx.notify();
     }
 
@@ -2104,6 +2138,7 @@ impl TerminalPane {
     }
 
     fn mark_terminal_content_changed(&mut self, cx: &mut Context<Self>) {
+        self.selection_highlight_cache = None;
         self.terminal_content_revision = self.terminal_content_revision.wrapping_add(1).max(1);
         self.search_cache = None;
         self.schedule_search_refresh(cx);

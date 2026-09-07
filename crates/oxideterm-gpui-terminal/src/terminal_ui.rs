@@ -92,6 +92,7 @@ pub struct TerminalUiPreferences {
     pub open_links_with_modifier: bool,
     pub detect_file_paths_as_links: bool,
     pub semantic_coloring: bool,
+    pub selection_highlighting: bool,
     pub semantic_scheme: Arc<CompiledSemanticScheme>,
     pub semantic_shell: SemanticShellDialect,
     pub selection_requires_shift: bool,
@@ -205,6 +206,7 @@ impl Default for TerminalUiPreferences {
             detect_file_paths_as_links: TERMINAL_DETECT_FILE_PATHS_AS_LINKS,
             // Match persisted settings so standalone terminal views remain opt-in as well.
             semantic_coloring: false,
+            selection_highlighting: false,
             semantic_scheme: resolved_terminal_semantic_scheme(
                 TerminalSemanticScheme::default(),
                 None,

@@ -162,6 +162,9 @@
       "saved_to_connection": "Hervorhebung für Verbindung gespeichert",
       "reset_connection": "Verbindung auf Vererbung zurücksetzen",
       "command_context": "grep/rg-Suchbegriffe hervorheben",
+      "selection_matches": "Text hervorheben, der der Auswahl entspricht",
+      "selection_matches_hint": "Hebt nach der Auswahl identische einzeilige Zeichenfolgen hervor. Beachtet Groß-/Kleinschreibung; endet beim Aufheben der Auswahl.",
+      "selection_matches_default_hint": "Hebt nach der Auswahl identischen einzeiligen Text hervor. Im Terminalbereich lässt sich diese globale Vorgabe je Sitzung überschreiben.",
       "manage_rule_sets": "Basisregeln und Regelsätze verwalten…"
     },
     "trzsz": {

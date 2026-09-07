@@ -162,6 +162,9 @@
       "saved_to_connection": "ハイライト上書きを接続に保存しました",
       "reset_connection": "この接続を継承へ戻す",
       "command_context": "grep/rg の検索語を強調表示",
+      "selection_matches": "選択したテキストと同じ内容を強調表示",
+      "selection_matches_hint": "選択後、同一の単一行文字列を強調表示します。大文字と小文字を区別し、選択解除で消去します。",
+      "selection_matches_default_hint": "選択後、同一の単一行文字列を強調表示します。この全体の既定値は、端末パネルでセッションごとに変更できます。",
       "manage_rule_sets": "基本ルールとルールセットを管理…"
     },
     "trzsz": {

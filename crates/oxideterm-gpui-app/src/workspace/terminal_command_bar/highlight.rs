@@ -17,6 +17,7 @@ enum TerminalHighlightSection {
     Semantic,
     Rules,
     CommandContext,
+    Selection,
 }
 
 impl WorkspaceApp {
@@ -177,6 +178,9 @@ impl WorkspaceApp {
             TerminalHighlightSection::CommandContext => {
                 &mut self.terminal_command_context_highlight_section_expanded
             }
+            TerminalHighlightSection::Selection => {
+                &mut self.terminal_selection_highlight_section_expanded
+            }
         };
         *expanded = !*expanded;
         cx.notify();
@@ -219,6 +223,17 @@ impl WorkspaceApp {
         let preferences = self.terminal_preferences_for_pane(pane_id, cx);
         pane.update(cx, |pane, cx| {
             pane.set_session_highlight_override(None, preferences, cx);
+        });
+        cx.notify();
+    }
+
+    fn toggle_active_selection_highlighting(&mut self, cx: &mut Context<Self>) {
+        let Some(pane) = self.active_pane(cx) else {
+            return;
+        };
+        let enabled = pane.read(cx).selection_highlighting_enabled();
+        pane.update(cx, |pane, cx| {
+            pane.set_selection_highlighting_override(Some(!enabled), cx)
         });
         cx.notify();
     }
@@ -318,6 +333,12 @@ impl WorkspaceApp {
         let command_context_highlighting_enabled = active_pane
             .as_ref()
             .is_some_and(|pane| pane.read(cx).command_context_highlighting_enabled());
+        let selection_highlighting_enabled = active_pane
+            .as_ref()
+            .is_some_and(|pane| pane.read(cx).selection_highlighting_enabled());
+        let selection_highlighting_overridden = active_pane
+            .as_ref()
+            .is_some_and(|pane| pane.read(cx).selection_highlighting_overridden());
         let semantic_coloring_enabled = active_pane
             .as_ref()
             .is_some_and(|pane| pane.read(cx).semantic_coloring_enabled());
@@ -521,7 +542,7 @@ impl WorkspaceApp {
             .border_l_1()
             .border_color(rgb(theme.border))
             .child(self.terminal_highlight_choice_row(
-                enabled_label,
+                enabled_label.clone(),
                 command_context_highlighting_enabled,
                 cx.listener(|this, _event, _window, cx| {
                     this.toggle_active_command_context_highlighting(cx);
@@ -550,6 +571,71 @@ impl WorkspaceApp {
                 |section| section.child(command_context_section_body),
             );
 
+        let selection_section = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(self.terminal_highlight_section_header(
+                self.i18n.t("terminal.highlight_override.selection_matches"),
+                self.i18n.t(if selection_highlighting_enabled {
+                    "common.enabled"
+                } else {
+                    "common.disabled"
+                }),
+                self.terminal_selection_highlight_section_expanded,
+                cx.listener(|this, _event, _window, cx| {
+                    this.toggle_terminal_highlight_section(TerminalHighlightSection::Selection, cx);
+                    cx.stop_propagation();
+                }),
+            ))
+            .when(
+                self.terminal_selection_highlight_section_expanded,
+                |section| {
+                    section.child(
+                        div()
+                            .ml(px(20.0))
+                            .pl(px(4.0))
+                            .border_l_1()
+                            .border_color(rgb(theme.border))
+                            .child(self.terminal_highlight_choice_row(
+                                enabled_label,
+                                selection_highlighting_enabled,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.toggle_active_selection_highlighting(cx);
+                                    cx.stop_propagation();
+                                }),
+                            ))
+                            .when(selection_highlighting_overridden, |body| {
+                                body.child(self.terminal_highlight_action_row(
+                                    LucideIcon::RotateCcw,
+                                    self.i18n.t("terminal.highlight_override.use_inherited"),
+                                    cx.listener(|this, _event, _window, cx| {
+                                        if let Some(pane) = this.active_pane(cx) {
+                                            pane.update(cx, |pane, cx| {
+                                                pane.set_selection_highlighting_override(None, cx)
+                                            });
+                                        }
+                                        cx.stop_propagation();
+                                        cx.notify();
+                                    }),
+                                ))
+                            })
+                            .child(
+                                div()
+                                    .px(px(8.0))
+                                    .pb(px(6.0))
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(
+                                        self.i18n.t(
+                                            "terminal.highlight_override.selection_matches_hint",
+                                        ),
+                                    ),
+                            ),
+                    )
+                },
+            );
+
         let sections = div()
             .w_full()
             .max_h(px(TERMINAL_HIGHLIGHT_SECTIONS_MAX_HEIGHT))
@@ -560,7 +646,9 @@ impl WorkspaceApp {
             .child(self.card_separator())
             .child(rules_section)
             .child(self.card_separator())
-            .child(command_context_section);
+            .child(command_context_section)
+            .child(self.card_separator())
+            .child(selection_section);
 
         context_menu_event_boundary({
             let popover = div()

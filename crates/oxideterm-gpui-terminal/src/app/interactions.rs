@@ -1,5 +1,6 @@
 use std::{
     env,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -18,9 +19,9 @@ use zeroize::Zeroizing;
 
 use super::{
     FreeTypeDragAction, FreeTypeDragState, HorizontalScrollbarDrag, HorizontalScrollbarGeometry,
-    PendingTerminalEditorClipboard, ScrollbarDrag, ScrollbarGeometry, SmoothScrollAnimation,
-    TerminalContextMenu, TerminalPane, TerminalPaneEvent, TmuxSeparatorDirection,
-    TmuxSeparatorDrag, command_mark_ui_available,
+    PendingTerminalEditorClipboard, ScrollbarDrag, ScrollbarGeometry, SelectionHighlightCache,
+    SmoothScrollAnimation, TerminalContextMenu, TerminalPane, TerminalPaneEvent,
+    TmuxSeparatorDirection, TmuxSeparatorDrag, command_mark_ui_available,
 };
 use crate::command_facts::TerminalAutosuggestInputState;
 use crate::terminal_ui::*;
@@ -912,13 +913,50 @@ impl TerminalPane {
             return selected_text_for_selection(&self.snapshot, selection);
         };
 
-        // Cross-page selections outlive any individual viewport snapshot. Materialize only their
-        // grid range at copy time so normal rendering and in-view copies keep their current cost.
+        // Cross-page selections outlive a viewport snapshot. Materialize only the selected grid
+        // range when copying text or deriving a new selection-highlight query.
         let snapshot = self
             .terminal
             .lock()
             .snapshot_with_display_offset(request.display_offset, request.rows);
         selected_text_for_selection(&snapshot, selection)
+    }
+
+    pub(super) fn selection_highlight_query(&mut self) -> Option<Arc<Zeroizing<String>>> {
+        let selection = self.selection.filter(|selection| !selection.is_empty());
+        let Some(selection) =
+            selection.filter(|_| self.selection_highlighting_enabled() && !self.selecting)
+        else {
+            self.selection_highlight_cache = None;
+            return None;
+        };
+        if let Some(cache) = &self.selection_highlight_cache
+            && cache.selection == selection
+        {
+            return cache.query.clone();
+        }
+        let (start, end) = selection.normalized();
+        // Reject ordinary multiline selections before materializing potentially large scrollback.
+        let multiline = selection.mode == TerminalSelectionMode::Lines
+            || (selection.mode == TerminalSelectionMode::Block && start.line != end.line)
+            || self.snapshot.lines.iter().enumerate().any(|(row, line)| {
+                let grid_line = row as i32 - self.snapshot.display_offset as i32;
+                grid_line >= start.line && grid_line < end.line && !line.wrapped
+            });
+        let query = if multiline {
+            None
+        } else {
+            self.selected_text_snapshot()
+                .map(Zeroizing::new)
+                .filter(|text| !text.trim().is_empty() && !text.contains(['\n', '\r']))
+                .map(Arc::new)
+        };
+        // The pane owns this transient text; replacing or disabling it zeroizes the last copy.
+        self.selection_highlight_cache = Some(SelectionHighlightCache {
+            selection,
+            query: query.clone(),
+        });
+        query
     }
 
     pub fn selected_text_snapshot(&self) -> Option<String> {
@@ -3050,6 +3088,154 @@ mod tests {
             assert!(!pane.handle_terminal_autosuggest_key("up", Modifiers::default(), cx));
             assert_eq!(pane.autosuggest_selected_index, None);
             assert_eq!(pane.autosuggest_dismissed_query.as_deref(), Some("ls"));
+        });
+    }
+
+    #[gpui::test]
+    fn selection_highlighting_is_opt_in_and_independent_of_search(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalScrollTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    20,
+                    3,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .unwrap()
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            pane.terminal
+                .lock()
+                .feed_recording_output(b"share share\r\nother text");
+            let snapshot = pane.terminal.lock().snapshot();
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            pane.selection = Some(TerminalSelection {
+                anchor: TerminalGridPoint { line: 0, col: 0 },
+                head: TerminalGridPoint { line: 0, col: 4 },
+                mode: TerminalSelectionMode::Simple,
+            });
+            assert!(!pane.selection_highlighting_enabled());
+            assert!(pane.selection_highlight_query().is_none());
+            pane.set_search_query(Some("other".into()), None, cx);
+            pane.set_command_context_highlighting_enabled(false, cx);
+            pane.set_selection_highlighting_override(Some(true), cx);
+            assert_eq!(
+                pane.selection_highlight_query()
+                    .as_ref()
+                    .map(|query| query.as_str()),
+                Some("share")
+            );
+            assert_eq!(pane.search_status().query.as_deref(), Some("other"));
+            assert!(!pane.command_context_highlighting_enabled());
+            pane.selecting = true;
+            assert!(pane.selection_highlight_query().is_none());
+            pane.selecting = false;
+            pane.selection.as_mut().unwrap().head = TerminalGridPoint { line: 1, col: 4 };
+            assert!(pane.selection_highlight_query().is_none());
+            pane.selection = None;
+            assert!(pane.selection_highlight_query().is_none());
+            pane.selection = Some(TerminalSelection {
+                anchor: TerminalGridPoint { line: 0, col: 5 },
+                head: TerminalGridPoint { line: 0, col: 5 },
+                mode: TerminalSelectionMode::Semantic,
+            });
+            assert!(pane.selection_highlight_query().is_none());
+            pane.set_selection_highlighting_override(Some(false), cx);
+            assert!(pane.selection_highlight_query().is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn selection_highlighting_inherits_global_settings_until_overridden(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalScrollTestRoot);
+        let mut preferences = TerminalUiPreferences::default();
+        preferences.selection_highlighting = true;
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(20, 3, preferences.clone(), window, cx)
+                    .unwrap()
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            assert!(pane.selection_highlighting_enabled());
+            assert!(!pane.selection_highlighting_overridden());
+            pane.set_selection_highlighting_override(Some(false), cx);
+            assert!(!pane.selection_highlighting_enabled());
+            assert!(pane.selection_highlighting_overridden());
+            // Matching the global value must not silently erase an explicit session choice.
+            preferences.selection_highlighting = false;
+            pane.set_preferences(preferences.clone(), cx);
+            preferences.selection_highlighting = true;
+            pane.set_preferences(preferences.clone(), cx);
+            assert!(!pane.selection_highlighting_enabled());
+            pane.set_selection_highlighting_override(None, cx);
+            assert!(pane.selection_highlighting_enabled());
+            assert!(!pane.selection_highlighting_overridden());
+            preferences.selection_highlighting = false;
+            pane.set_preferences(preferences.clone(), cx);
+            assert!(!pane.selection_highlighting_enabled());
+        });
+    }
+
+    #[gpui::test]
+    fn selection_highlight_query_survives_scrolling_out_of_view(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalScrollTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    5,
+                    2,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .unwrap()
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            let snapshot = {
+                let mut terminal = pane.terminal.lock();
+                terminal.feed_recording_output(b"shareshare\r\nother\r\nlast");
+                terminal.scroll_to_display_offset(usize::MAX);
+                terminal.snapshot()
+            };
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            let first_line = -(pane.snapshot.display_offset as i32);
+            pane.selection = Some(TerminalSelection {
+                anchor: TerminalGridPoint {
+                    line: first_line,
+                    col: 0,
+                },
+                head: TerminalGridPoint {
+                    line: first_line + 1,
+                    col: 4,
+                },
+                mode: TerminalSelectionMode::Simple,
+            });
+            pane.set_selection_highlighting_override(Some(true), cx);
+            assert_eq!(
+                pane.selection_highlight_query()
+                    .as_ref()
+                    .map(|query| query.as_str()),
+                Some("shareshare")
+            );
+            let snapshot = {
+                let mut terminal = pane.terminal.lock();
+                terminal.scroll_to_display_offset(0);
+                terminal.snapshot()
+            };
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            assert_eq!(
+                pane.selection_highlight_query()
+                    .as_ref()
+                    .map(|query| query.as_str()),
+                Some("shareshare")
+            );
+            pane.set_selection_highlighting_override(Some(false), cx);
+            assert!(pane.selection_highlight_query().is_none());
         });
     }
 

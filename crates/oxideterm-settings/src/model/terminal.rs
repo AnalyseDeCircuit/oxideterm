@@ -441,6 +441,8 @@ pub struct TerminalSettings {
     #[serde(default = "default_terminal_semantic_coloring")]
     pub semantic_coloring: bool,
     #[serde(default)]
+    pub selection_highlighting: bool,
+    #[serde(default)]
     pub semantic_scheme: TerminalSemanticScheme,
     #[serde(default)]
     pub semantic_custom_scheme: Option<String>,
@@ -562,6 +564,7 @@ impl Default for TerminalSettings {
             background_scope: BackgroundScope::Content,
             background_enabled_tabs: vec!["terminal".to_string(), "local_terminal".to_string()],
             semantic_coloring: false,
+            selection_highlighting: false,
             semantic_scheme: TerminalSemanticScheme::default(),
             semantic_custom_scheme: None,
             custom_semantic_schemes: Vec::new(),
@@ -668,7 +671,7 @@ mod tests {
 
     #[test]
     fn terminal_settings_restore_legacy_presentation_defaults() {
-        let defaults: [(&str, bool, fn(&TerminalSettings) -> bool); 6] = [
+        let defaults: [(&str, bool, fn(&TerminalSettings) -> bool); 7] = [
             ("smoothScroll", true, |settings| settings.smooth_scroll),
             ("highlightTabOnNewOutput", true, |settings| {
                 settings.highlight_tab_on_new_output
@@ -683,6 +686,7 @@ mod tests {
             ("semanticColoring", false, |settings| {
                 settings.semantic_coloring
             }),
+            ("selectionHighlighting", false, |settings| settings.selection_highlighting),
         ];
 
         for (field, expected, read) in defaults {
@@ -692,6 +696,17 @@ mod tests {
             let settings: TerminalSettings = serde_json::from_value(value).unwrap();
             assert_eq!(read(&settings), expected, "legacy {field} default");
         }
+    }
+
+    #[test]
+    fn selection_highlighting_default_round_trips() {
+        let mut settings = TerminalSettings::default();
+        assert!(!settings.selection_highlighting);
+        settings.selection_highlighting = true;
+        let value = serde_json::to_value(&settings).unwrap();
+        assert_eq!(value["selectionHighlighting"], serde_json::json!(true));
+        let restored: TerminalSettings = serde_json::from_value(value).unwrap();
+        assert!(restored.selection_highlighting);
     }
 
     #[test]
