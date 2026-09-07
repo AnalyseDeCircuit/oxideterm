@@ -209,18 +209,13 @@ async fn open_pty_channel(
                 SshTransportError::Channel(error.to_string()),
             )
         })?;
-    channel
-        .request_pty(
-            false,
-            "xterm-256color",
-            cols,
-            rows,
-            0,
-            0,
-            pty_modes,
-        )
+    if let Err(error) = channel
+        .request_pty(false, "xterm-256color", cols, rows, 0, 0, pty_modes)
         .await
-        .map_err(|error| ("request-pty", SshTransportError::Channel(error.to_string())))?;
+    {
+        let _ = channel.close().await;
+        return Err(("request-pty", SshTransportError::Channel(error.to_string())));
+    }
     Ok(channel)
 }
 
@@ -334,10 +329,10 @@ async fn open_plain_shell(
     {
         tracing::debug!("optional SSH shell integration marker could not be requested");
     }
-    channel
-        .request_shell(false)
-        .await
-        .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+    if let Err(error) = channel.request_shell(false).await {
+        let _ = channel.close().await;
+        return Err(SshTransportError::Channel(error.to_string()));
+    }
     Ok((channel, x11_route_guard))
 }
 
@@ -1384,6 +1379,8 @@ impl SshTransportClient {
                 .await?,
             )
         };
+        let shell_started = Arc::new(AtomicBool::new(false));
+        let task_shell_started = shell_started.clone();
         let mut deferred_request_config = deferred_pty.then_some(request_config);
 
         tokio::spawn(async move {
@@ -1473,6 +1470,7 @@ impl SshTransportClient {
                     }
                 }
             };
+            task_shell_started.store(true, Ordering::Release);
             if let (Some(registry), Some(connection_id)) = (
                 visible_terminal_registry.as_ref(),
                 visible_terminal_connection_id.as_deref(),
@@ -1497,7 +1495,8 @@ impl SshTransportClient {
                             break;
                         }
                     }
-                    Some(command) = command_rx.recv() => {
+                    command = command_rx.recv() => {
+                        let Some(command) = command else { break };
                         match command {
                             SshTransportCommand::Data(data) => {
                                 output_batcher.note_interaction();
@@ -1522,7 +1521,8 @@ impl SshTransportClient {
                             }
                         }
                     }
-                    Some(message) = channel.wait() => {
+                    message = channel.wait() => {
+                        let Some(message) = message else { break };
                         match message {
                             ChannelMsg::Data { data } => {
                                 if output_batcher.push(&data)
@@ -1553,6 +1553,9 @@ impl SshTransportClient {
                     else => break,
                 }
             }
+            // EOF alone leaves the server session allocated. Close only this
+            // consumer channel; other consumers retain the shared transport.
+            let _ = channel.close().await;
             if let Some(bytes) = output_batcher.take_final_flush() {
                 let _ = output_tx.send(bytes).await;
             }
@@ -1566,6 +1569,7 @@ impl SshTransportClient {
             command_tx,
             output_rx,
             auth_banners,
+            shell_started,
             ssh_connection,
             registry_release,
         })

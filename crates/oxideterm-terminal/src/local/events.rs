@@ -88,6 +88,8 @@ pub enum TerminalEvent {
     Wakeup,
     BlinkChanged(bool),
     ChildExited(Option<i32>),
+    // Failed startup must remain visible instead of triggering normal exit auto-close.
+    StartupFailed,
     MagicDetected(TerminalMagicKind),
     TrzszTransferPrompt {
         direction: TrzszTransferDirection,

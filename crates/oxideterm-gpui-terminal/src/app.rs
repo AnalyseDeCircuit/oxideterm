@@ -3050,6 +3050,12 @@ impl TerminalPane {
                 self.reset_cursor_blink();
                 TerminalEventEffect::notify()
             }
+            TerminalEvent::StartupFailed => {
+                self.notify_trzsz_connection_lost_if_active();
+                self.notify_modem_connection_lost_if_active();
+                self.terminal_exited = true;
+                TerminalEventEffect::notify()
+            }
             TerminalEvent::ChildExited(code) => {
                 self.notify_trzsz_connection_lost_if_active();
                 self.notify_modem_connection_lost_if_active();

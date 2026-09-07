@@ -332,7 +332,7 @@ impl SshPtySession {
                 self.feed_utf8_terminal_output(
                     format!("\r\nSSH connection failed: {error}\r\n").as_bytes(),
                 );
-                self.pending_events.push(TerminalEvent::ChildExited(None));
+                self.pending_events.push(TerminalEvent::StartupFailed);
                 true
             }
         }
@@ -679,7 +679,12 @@ impl SshPtySession {
                     if self.lifecycle.is_running() {
                         self.lifecycle = TerminalLifecycle::Exited(None);
                         self.tmux_display.reset();
-                        self.pending_events.push(TerminalEvent::ChildExited(None));
+                        let event = if self.handle.as_ref().is_some_and(SshPtyHandle::shell_started) {
+                            TerminalEvent::ChildExited(None)
+                        } else {
+                            TerminalEvent::StartupFailed
+                        };
+                        self.pending_events.push(event);
                     }
                     report.mark_changed();
                     break;
@@ -1283,5 +1288,35 @@ impl TerminalSessionBackend for SshPtySession {
         self.handle
             .as_ref()
             .and_then(SshPtyHandle::ssh_connection_handle)
+    }
+}
+
+#[cfg(test)]
+mod ssh_startup_tests {
+    use super::*;
+
+    #[test]
+    fn failed_ssh_startup_does_not_emit_normal_child_exit() {
+        let mut session = SshPtySession::new_disconnected_for_test(
+            SshSessionConfig::new("localhost", 22, "test"),
+            80,
+            24,
+            GraphicsOptions::default(),
+            TerminalEncoding::Utf8,
+            1000,
+        );
+        let (tx, rx) = crossbeam_channel::unbounded();
+        session.connect_rx = rx;
+        tx.send(Err("session limit reached".into())).unwrap();
+
+        assert!(session.process_connect_result());
+        assert!(matches!(session.lifecycle(), TerminalLifecycle::Exited(None)));
+        let events = session.take_events();
+        assert!(
+            events.iter().any(|event| matches!(event, TerminalEvent::StartupFailed))
+        );
+        assert!(
+            !events.iter().any(|event| matches!(event, TerminalEvent::ChildExited(_)))
+        );
     }
 }

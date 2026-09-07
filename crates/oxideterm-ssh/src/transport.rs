@@ -447,6 +447,7 @@ pub struct SshPtyHandle {
     pub command_tx: mpsc::Sender<SshTransportCommand>,
     pub output_rx: SshOutputReceiver,
     auth_banners: AuthBannerSink,
+    shell_started: Arc<AtomicBool>,
     ssh_connection: Option<SshConnectionHandle>,
     registry_release: Option<(SshConnectionRegistry, String, ConnectionConsumer)>,
 }
@@ -680,6 +681,10 @@ impl SshShellChannel {
 }
 
 impl SshPtyHandle {
+    pub fn shell_started(&self) -> bool {
+        self.shell_started.load(Ordering::Acquire)
+    }
+
     pub fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {
         self.ssh_connection.clone()
     }

@@ -16,8 +16,8 @@ use oxideterm_sftp::{
 };
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ProxyHopConfig, SshConfig,
-    SshConnectionRegistry, SshTransportClient, UpstreamProxyAuth, UpstreamProxyConfig,
-    UpstreamProxyProtocol, upstream_proxy_from_env,
+    SshConnectionRegistry, SshTransportClient, SshTransportCommand, UpstreamProxyAuth,
+    UpstreamProxyConfig, UpstreamProxyProtocol, upstream_proxy_from_env,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -180,6 +180,130 @@ async fn local_sshd_legacy_scp_file_and_directory_round_trip() {
     );
 }
 
+#[tokio::test]
+#[ignore = "requires local sshd and ssh-keygen"]
+async fn local_sshd_terminal_close_releases_session_slot() {
+    let sshd = SshdFixture::with_max_sessions(2);
+    let registry = SshConnectionRegistry::default();
+    let mut first = SshTransportClient::new(target_config(&sshd))
+        .connect_shell_with_registry(
+            registry.clone(),
+            ConnectionConsumer::Terminal("first".into()),
+        )
+        .await
+        .expect("first shell");
+    let connection_id = first
+        .ssh_connection_handle()
+        .unwrap()
+        .connection_id()
+        .to_string();
+    let open = |name: &str| {
+        SshTransportClient::connect_shell_on_existing_connection(
+            registry.clone(),
+            connection_id.clone(),
+            ConnectionConsumer::Terminal(name.into()),
+            80,
+            24,
+        )
+    };
+    let second = open("second").await.expect("second shell");
+    assert!(
+        open("over-limit").await.is_err(),
+        "server must enforce MaxSessions"
+    );
+    let mut failed = SshTransportClient::connect_shell_on_existing_connection(
+        registry.clone(),
+        connection_id.clone(),
+        ConnectionConsumer::Terminal("deferred-over-limit".into()),
+        0,
+        0,
+    )
+    .await
+    .expect("deferred handle");
+    failed
+        .command_tx
+        .send(SshTransportCommand::Resize { cols: 80, rows: 24 })
+        .await
+        .unwrap();
+    let mut failure_output = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match failed.output_rx.try_recv() {
+                Ok(chunk) => failure_output.extend_from_slice(&chunk),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    tokio::time::sleep(Duration::from_millis(10)).await
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break,
+            }
+        }
+    })
+    .await
+    .expect("deferred failure must finish");
+    assert!(
+        !failed.shell_started(),
+        "startup failure must not look like normal shell exit"
+    );
+    assert!(String::from_utf8_lossy(&failure_output).contains("Failed to initialize shell"));
+    drop(failed);
+    second
+        .command_tx
+        .send(SshTransportCommand::Close)
+        .await
+        .unwrap();
+    drop(second);
+    let replacement = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(handle) = open("replacement").await {
+                break handle;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("closing a terminal must release its server session slot");
+    first
+        .command_tx
+        .send(SshTransportCommand::Data(
+            b"printf 'surviving-%s\\n' shell\n".to_vec(),
+        ))
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let mut output = Vec::new();
+        loop {
+            match first.output_rx.try_recv() {
+                Ok(chunk) => {
+                    output.extend_from_slice(&chunk);
+                    if output
+                        .windows(b"surviving-shell".len())
+                        .any(|w| w == b"surviving-shell")
+                    {
+                        break;
+                    }
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    tokio::time::sleep(Duration::from_millis(10)).await
+                }
+                Err(error) => panic!("shared shell disconnected: {error}"),
+            }
+        }
+    })
+    .await
+    .expect("other shell must remain usable");
+    assert!(first.shell_started());
+    drop(replacement);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(handle) = open("after-drop").await {
+                break handle;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("dropping the consumer must also close its channel");
+}
+
 async fn connect_shell(config: SshConfig) {
     let result = tokio::time::timeout(
         Duration::from_secs(10),
@@ -232,6 +356,10 @@ struct SshdFixture {
 
 impl SshdFixture {
     fn start() -> Self {
+        Self::with_max_sessions(10)
+    }
+
+    fn with_max_sessions(max_sessions: usize) -> Self {
         let sshd = "/usr/sbin/sshd";
         let ssh_keygen = "ssh-keygen";
         assert!(
@@ -284,6 +412,7 @@ KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 AllowTcpForwarding yes
 PermitTTY yes
+MaxSessions {max_sessions}
 PermitRootLogin no
 AllowUsers {username}
 LogLevel VERBOSE
