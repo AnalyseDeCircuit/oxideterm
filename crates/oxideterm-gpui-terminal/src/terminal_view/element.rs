@@ -23,7 +23,9 @@ use oxideterm_terminal_unicode::{TerminalVisualLine, visual_line_for_row_if_bidi
 use parking_lot::Mutex;
 use unicode_width::UnicodeWidthChar;
 
-use crate::app::{TerminalInputHandler, TerminalPane, TerminalRenderedImage, TerminalRowTimestamp};
+use crate::app::{
+    TerminalInputHandler, TerminalPane, TerminalRenderedImage, TerminalRowTimestampStore,
+};
 use crate::command_facts::TransientCommandHighlight;
 use crate::terminal_ui::*;
 use crate::terminal_view::highlight::{TerminalHighlightLayout, terminal_highlights_for_rows};
@@ -77,7 +79,7 @@ pub(crate) struct TerminalElement {
     bidi_enabled: bool,
     input: Option<TerminalElementInput>,
     transparent_background: bool,
-    row_timestamps: Option<Arc<HashMap<u64, TerminalRowTimestamp>>>,
+    row_timestamps: Option<Arc<TerminalRowTimestampStore>>,
     layout_cache: Option<Arc<Mutex<TerminalLayoutCache>>>,
     performance_metrics_enabled: bool,
     viewport_rows: usize,
@@ -665,7 +667,7 @@ impl TerminalElement {
 
     pub(crate) fn row_timestamps(
         mut self,
-        row_timestamps: Option<Arc<HashMap<u64, TerminalRowTimestamp>>>,
+        row_timestamps: Option<Arc<TerminalRowTimestampStore>>,
     ) -> Self {
         self.row_timestamps = row_timestamps;
         self
@@ -863,7 +865,9 @@ impl TerminalElement {
                     &mut cursor,
                 );
             }
-            if let Some(timestamp_run) = self.timestamp_run_for_row(row_index, row.line_id) {
+            if let Some(timestamp_run) =
+                self.timestamp_run_for_row(row_index, terminal_row_timestamp_identity(row))
+            {
                 timestamp_runs.push(timestamp_run);
             }
         }
@@ -917,8 +921,8 @@ impl TerminalElement {
         }
     }
 
-    fn timestamp_run_for_row(&self, row_index: usize, line_id: u64) -> Option<BatchedTextRun> {
-        let label = self.row_timestamps.as_ref()?.get(&line_id)?.label.clone();
+    fn timestamp_run_for_row(&self, row_index: usize, index: u64) -> Option<BatchedTextRun> {
+        let label = self.row_timestamps.as_ref()?.get(index)?.label.clone();
         Some(BatchedTextRun {
             row: row_index,
             col: 0,

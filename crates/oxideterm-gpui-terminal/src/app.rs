@@ -421,8 +421,7 @@ pub struct TerminalPane {
     terminal_timestamps_enabled: bool,
     // Visual-only metadata keyed by stable snapshot line identity; never write this
     // into the PTY buffer, copied text, or search/indexed terminal content.
-    row_timestamps: Arc<HashMap<u64, TerminalRowTimestamp>>,
-    row_timestamp_retained_min_line: Option<u64>,
+    row_timestamps: Arc<TerminalRowTimestampStore>,
     metrics: TerminalMetrics,
     metrics_dirty: bool,
     selection: Option<TerminalSelection>,
@@ -606,6 +605,18 @@ pub(crate) struct TerminalRowTimestamp {
     pub(crate) label: String,
     signature: u64,
     source_signature: u64,
+}
+
+/// Visual metadata follows the emulator row, independent of viewport coordinates.
+#[derive(Clone, Default)]
+pub(crate) struct TerminalRowTimestampStore {
+    pub(crate) entries: HashMap<u64, TerminalRowTimestamp>,
+}
+
+impl TerminalRowTimestampStore {
+    pub(crate) fn get(&self, identity: u64) -> Option<&TerminalRowTimestamp> {
+        self.entries.get(&identity)
+    }
 }
 
 #[derive(Clone)]
@@ -1071,8 +1082,7 @@ impl TerminalPane {
             snapshot_generation: 1,
             next_snapshot_line_id,
             terminal_timestamps_enabled: false,
-            row_timestamps: Arc::new(HashMap::new()),
-            row_timestamp_retained_min_line: None,
+            row_timestamps: Arc::new(TerminalRowTimestampStore::default()),
             metrics,
             metrics_dirty: false,
             selection: None,
@@ -1239,32 +1249,24 @@ impl TerminalPane {
         // Match iTerm-style semantics: a row label is the time that row was
         // last modified, not the time it first became visible in the viewport.
         let label = current_terminal_timestamp_label();
-        record_timestampable_snapshot_rows(
-            Arc::make_mut(&mut self.row_timestamps),
-            snapshot,
-            &label,
-        );
+        let store = Arc::make_mut(&mut self.row_timestamps);
+        record_timestampable_snapshot_rows(store, snapshot, &label);
         self.trim_row_timestamps(snapshot);
     }
 
     fn trim_row_timestamps(&mut self, snapshot: &TerminalSnapshot) {
-        let Some(max_line) = snapshot.lines.iter().map(|row| row.line_id).max() else {
-            Arc::make_mut(&mut self.row_timestamps).clear();
-            self.row_timestamp_retained_min_line = None;
+        let store = Arc::make_mut(&mut self.row_timestamps);
+        if snapshot.lines.is_empty() {
+            store.entries.clear();
             return;
-        };
+        }
         let retained_rows = self
             .preferences
             .scrollback_lines
             .saturating_add(snapshot.rows)
             .saturating_add(1024)
-            .max(2048) as u64;
-        let min_line = max_line.saturating_sub(retained_rows);
-        trim_row_timestamp_history(
-            Arc::make_mut(&mut self.row_timestamps),
-            &mut self.row_timestamp_retained_min_line,
-            min_line,
-        );
+            .max(2048);
+        trim_row_timestamp_history(&mut store.entries, retained_rows);
     }
 
     pub fn terminal_timestamps_enabled(&self) -> bool {
@@ -3799,15 +3801,20 @@ fn terminal_timestamp_label(hour: u32, minute: u32, second: u32, millis: u32) ->
 }
 
 fn record_timestampable_snapshot_rows(
-    row_timestamps: &mut HashMap<u64, TerminalRowTimestamp>,
+    store: &mut TerminalRowTimestampStore,
     snapshot: &TerminalSnapshot,
     label: &str,
 ) {
     for row in &snapshot.lines {
+        let key = terminal_row_timestamp_identity(row);
+        if key == 0 {
+            continue;
+        }
         // The snapshot signature is a cheap invalidation key. Cursor-only changes
         // still fall through to the content signature comparison below.
-        if row_timestamps
-            .get(&row.line_id)
+        if store
+            .entries
+            .get(&key)
             .is_some_and(|timestamp| timestamp.source_signature == row.signature)
         {
             continue;
@@ -3815,15 +3822,15 @@ fn record_timestampable_snapshot_rows(
 
         if terminal_row_has_timestamp_content(row) {
             let timestamp_signature = terminal_row_timestamp_signature(row);
-            if let Some(timestamp) = row_timestamps.get_mut(&row.line_id) {
+            if let Some(timestamp) = store.entries.get_mut(&key) {
                 if timestamp.signature != timestamp_signature {
                     timestamp.label = label.to_string();
                     timestamp.signature = timestamp_signature;
                 }
                 timestamp.source_signature = row.signature;
             } else {
-                row_timestamps.insert(
-                    row.line_id,
+                store.entries.insert(
+                    key,
                     TerminalRowTimestamp {
                         label: label.to_string(),
                         signature: timestamp_signature,
@@ -3834,41 +3841,25 @@ fn record_timestampable_snapshot_rows(
         } else {
             // Blank viewport rows are recycled later. Removing their metadata
             // prevents new output from inheriting a stale line-modification time.
-            row_timestamps.remove(&row.line_id);
+            store.entries.remove(&key);
         }
     }
 }
 
 fn trim_row_timestamp_history(
     row_timestamps: &mut HashMap<u64, TerminalRowTimestamp>,
-    retained_min_line: &mut Option<u64>,
-    min_line: u64,
+    retained_rows: usize,
 ) {
-    let Some(previous_min_line) = *retained_min_line else {
-        row_timestamps.retain(|line, _| *line >= min_line);
-        *retained_min_line = Some(min_line);
-        return;
-    };
-
-    if min_line <= previous_min_line {
-        // Snapshot identity can restart when a pane is rebuilt. New rows may then be inserted
-        // below the former boundary, so restart incremental trimming from this identity.
-        *retained_min_line = Some(min_line);
+    // IDs are process-wide; other terminals can make them arbitrarily sparse.
+    // Batch pruning bounds memory without scanning the cache on every frame.
+    if row_timestamps.len() <= retained_rows.saturating_add(1024) {
         return;
     }
-
-    let advanced_lines =
-        usize::try_from(min_line.saturating_sub(previous_min_line)).unwrap_or(usize::MAX);
-    if advanced_lines < row_timestamps.len() {
-        // Normal scrolling advances by only a few rows. Removing those keys is
-        // cheaper than scanning the entire retained timestamp history.
-        for line in previous_min_line..min_line {
-            row_timestamps.remove(&line);
-        }
-    } else {
-        row_timestamps.retain(|line, _| *line >= min_line);
-    }
-    *retained_min_line = Some(min_line);
+    let mut identities: Vec<_> = row_timestamps.keys().copied().collect();
+    let remove_count = identities.len() - retained_rows;
+    identities.select_nth_unstable(remove_count);
+    let min_identity = identities[remove_count];
+    row_timestamps.retain(|identity, _| *identity >= min_identity);
 }
 
 fn terminal_row_timestamp_signature(row: &TerminalRow) -> u64 {
@@ -4247,7 +4238,7 @@ mod tests {
         }
         let mut row = TerminalRow {
             line_id: absolute_line.max(0) as u64,
-            source_id: 0,
+            source_id: absolute_line.max(0) as usize,
             absolute_line,
             cells: Arc::new(cells),
             wrapped: false,
@@ -4318,26 +4309,25 @@ mod tests {
 
     #[test]
     fn row_timestamps_track_last_modified_nonblank_content() {
-        let mut row_timestamps = HashMap::new();
+        let mut store = TerminalRowTimestampStore::default();
         let blank_snapshot = timestamp_test_snapshot(timestamp_test_row(42, "   "));
-        record_timestampable_snapshot_rows(&mut row_timestamps, &blank_snapshot, "10:00:00");
+        record_timestampable_snapshot_rows(&mut store, &blank_snapshot, "10:00:00");
 
-        assert!(!row_timestamps.contains_key(&42));
+        // This fixture uses emulator source identity 42.
+        assert!(!store.entries.contains_key(&42));
 
         let content_snapshot = timestamp_test_snapshot(timestamp_test_row(42, "ls"));
-        record_timestampable_snapshot_rows(&mut row_timestamps, &content_snapshot, "10:00:01");
+        record_timestampable_snapshot_rows(&mut store, &content_snapshot, "10:00:01");
 
         assert_eq!(
-            row_timestamps
-                .get(&42)
-                .map(|timestamp| timestamp.label.as_str()),
+            store.get(42).map(|timestamp| timestamp.label.as_str()),
             Some("10:00:01")
         );
 
         let unchanged_snapshot =
             timestamp_test_snapshot(timestamp_test_row_with_cursor(42, "ls", Some(1), true));
-        record_timestampable_snapshot_rows(&mut row_timestamps, &unchanged_snapshot, "10:00:02");
-        let unchanged_timestamp = row_timestamps.get(&42).expect("timestamped row");
+        record_timestampable_snapshot_rows(&mut store, &unchanged_snapshot, "10:00:02");
+        let unchanged_timestamp = store.get(42).expect("timestamped row");
         assert_eq!(unchanged_timestamp.label, "10:00:01");
         assert_eq!(
             unchanged_timestamp.source_signature,
@@ -4345,11 +4335,9 @@ mod tests {
         );
 
         let changed_snapshot = timestamp_test_snapshot(timestamp_test_row(42, "pwd"));
-        record_timestampable_snapshot_rows(&mut row_timestamps, &changed_snapshot, "10:00:03");
+        record_timestampable_snapshot_rows(&mut store, &changed_snapshot, "10:00:03");
         assert_eq!(
-            row_timestamps
-                .get(&42)
-                .map(|timestamp| timestamp.label.as_str()),
+            store.get(42).map(|timestamp| timestamp.label.as_str()),
             Some("10:00:03")
         );
 
@@ -4358,38 +4346,100 @@ mod tests {
         assert_eq!(label.chars().count(), TERMINAL_TIMESTAMP_LABEL_CELLS);
 
         let cleared_snapshot = timestamp_test_snapshot(timestamp_test_row(42, ""));
-        record_timestampable_snapshot_rows(&mut row_timestamps, &cleared_snapshot, "10:00:04");
+        record_timestampable_snapshot_rows(&mut store, &cleared_snapshot, "10:00:04");
 
-        assert!(!row_timestamps.contains_key(&42));
+        assert!(!store.entries.contains_key(&42));
     }
 
     #[test]
-    fn row_timestamp_history_trims_incrementally_and_handles_rewind() {
-        let timestamp = |line: u64| TerminalRowTimestamp {
-            label: line.to_string(),
-            signature: line,
-            source_signature: line,
+    fn timestamp_identity_survives_burst_output_and_viewport_jumps() {
+        let mut terminal =
+            TerminalSession::recording_playback(20, 3, GraphicsOptions::default(), 10);
+        terminal.feed_recording_output(b"same\r\nsame\r\nsame\r\nsame\r\nsame\r\nsame\r\nsame\r\nsame\r\nsame\r\nsame\r\nkept\r\nsame");
+        let before = terminal.snapshot();
+        let kept = before
+            .lines
+            .iter()
+            .find(|row| row.text().trim() == "kept")
+            .unwrap();
+        let original_key = terminal_row_timestamp_identity(kept);
+        let mut store = TerminalRowTimestampStore::default();
+        record_timestampable_snapshot_rows(&mut store, &before, "old");
+        terminal.feed_recording_output(b"\r\nsame\r\nsame\r\nsame\r\nsame");
+        let after = terminal.snapshot();
+        record_timestampable_snapshot_rows(&mut store, &after, "new");
+        for row in after.lines.iter().filter(|row| row.text().trim() == "same") {
+            assert_eq!(
+                store
+                    .get(terminal_row_timestamp_identity(row))
+                    .unwrap()
+                    .label,
+                "new"
+            );
+        }
+        terminal.scroll_to_top();
+        let top = terminal.snapshot();
+        record_timestampable_snapshot_rows(&mut store, &top, "scroll");
+        terminal.scroll_to_display_offset(4);
+        let historical = terminal.snapshot();
+        let kept = historical
+            .lines
+            .iter()
+            .find(|row| row.text().trim() == "kept")
+            .unwrap();
+        record_timestampable_snapshot_rows(&mut store, &historical, "scroll");
+        assert_eq!(terminal_row_timestamp_identity(kept), original_key);
+        assert_eq!(store.get(original_key).unwrap().label, "old");
+    }
+
+    #[test]
+    fn timestamp_identity_follows_local_line_deletion_without_moving_other_rows() {
+        let mut terminal =
+            TerminalSession::recording_playback(20, 4, GraphicsOptions::default(), 10);
+        terminal.feed_recording_output(b"fixed\r\nremoved\r\nkept\r\nlast");
+        let before = terminal.snapshot();
+        let mut store = TerminalRowTimestampStore::default();
+        record_timestampable_snapshot_rows(&mut store, &before, "old");
+        terminal.feed_recording_output(b"\x1b[2;1H\x1b[M");
+        let after = terminal.snapshot();
+        assert_eq!(after.scrollback_lines, before.scrollback_lines);
+        record_timestampable_snapshot_rows(&mut store, &after, "new");
+        for text in ["fixed", "kept", "last"] {
+            let row = after
+                .lines
+                .iter()
+                .find(|row| row.text().trim() == text)
+                .unwrap();
+            assert_eq!(
+                store
+                    .get(terminal_row_timestamp_identity(row))
+                    .unwrap()
+                    .label,
+                "old",
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn timestamp_cache_bounds_sparse_identities_and_revisited_history() {
+        let timestamp = |id: u64| TerminalRowTimestamp {
+            label: id.to_string(),
+            signature: id,
+            source_signature: id,
         };
-        let mut row_timestamps = (0..6)
-            .map(|line| (line, timestamp(line)))
+        let mut entries = (0..1100)
+            .map(|id| (id * 1000, timestamp(id)))
             .collect::<HashMap<_, _>>();
-        let mut retained_min_line = None;
-
-        trim_row_timestamp_history(&mut row_timestamps, &mut retained_min_line, 2);
-        assert_eq!(retained_min_line, Some(2));
-        assert_eq!(row_timestamps.len(), 4);
-        assert!(row_timestamps.keys().all(|line| *line >= 2));
-
-        trim_row_timestamp_history(&mut row_timestamps, &mut retained_min_line, 4);
-        assert_eq!(retained_min_line, Some(4));
-        assert_eq!(row_timestamps.len(), 2);
-        assert!(row_timestamps.keys().all(|line| *line >= 4));
-
-        trim_row_timestamp_history(&mut row_timestamps, &mut retained_min_line, 1);
-        row_timestamps.insert(1, timestamp(1));
-        trim_row_timestamp_history(&mut row_timestamps, &mut retained_min_line, 3);
-        assert_eq!(retained_min_line, Some(3));
-        assert!(!row_timestamps.contains_key(&1));
+        trim_row_timestamp_history(&mut entries, 50);
+        assert_eq!(entries.len(), 50);
+        assert!(entries.contains_key(&1_099_000));
+        for id in 0..1100 {
+            entries.insert(id, timestamp(id));
+        }
+        trim_row_timestamp_history(&mut entries, 50);
+        assert_eq!(entries.len(), 50);
+        assert!(!entries.contains_key(&1));
     }
 
     #[gpui::test]

@@ -1068,8 +1068,8 @@ fn snapshot_row_source<T: EventListener>(
         .any(|cell| cell.flags.contains(Flags::WRAPLINE));
 
     Some(SnapshotRowSource {
-        // The cell allocation follows the row content when Alacritty rotates or swaps row values.
-        source_id: terminal_cells.as_ptr() as usize,
+        // Emulator-owned identity survives scrolling and cannot alias recycled cell storage.
+        source_id: terminal_row.identity(),
         populated_cols,
         wrapped,
     })
