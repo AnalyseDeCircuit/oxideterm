@@ -3038,17 +3038,26 @@ impl WorkspaceApp {
             }
             WorkspaceImeTarget::NewConnection(field) => {
                 let changed = self.update_connection_form_state(cx, |state| {
+                    let editing_saved = state.saved_connection_source_id().is_some()
+                        && state.saved_connection_prompt_action.is_none();
                     let Some(form) = state.form.as_mut() else {
                         return false;
                     };
                     if form.selected_field == Some(field) && replacement_range.is_none() {
-                        *connection_field_value_mut(form, field) = String::new();
+                        // A revealed password may own the old allocation; scrub before replacement.
+                        zeroize::Zeroize::zeroize(connection_field_value_mut(form, field));
                     }
                     replace_utf16(
                         connection_field_value_mut(form, field),
                         replacement_range,
                         text,
                     );
+                    if field == NewConnectionField::Password {
+                        super::new_connection::restore_saved_password_placeholder_if_empty(
+                            form,
+                            editing_saved,
+                        );
+                    }
                     form.selected_field = None;
                     form.error = None;
                     refresh_connection_timeout_seconds(form, field);
@@ -3200,7 +3209,7 @@ fn connection_field_value_mut(
         NewConnectionField::Host => &mut form.host,
         NewConnectionField::Port => &mut form.port,
         NewConnectionField::Username => &mut form.username,
-        NewConnectionField::Password => &mut form.password,
+        NewConnectionField::Password => super::new_connection::password_draft_mut(form),
         NewConnectionField::KeyPath => &mut form.key_path,
         NewConnectionField::ManagedKeyId => &mut form.managed_key_id,
         NewConnectionField::CertPath => &mut form.cert_path,

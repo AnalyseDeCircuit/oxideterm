@@ -574,3 +574,36 @@ pub(super) fn runtime_proxy_hops_are_prepended_without_cloning_the_connection_fo
     assert_eq!(request.proxy_chain[0].host, "runtime-hop.example.com");
     assert_eq!(request.proxy_chain[1].host, "form-hop.example.com");
 }
+
+#[test]
+fn viewing_saved_password_does_not_replace_stored_credential() {
+    let existing = SavedAuth::Password {
+        keychain_id: Some("stored-owner".into()),
+        plaintext_password: None,
+    };
+    let mut form = base_form();
+    form.saved_password_keychain_id = Some("stored-owner".into());
+    form.password = "revealed-test-value".into();
+    form.password_from_store = true;
+    form.password_loaded = true;
+    let request = save_request_from_form_with_existing_auth(
+        &mut form,
+        Some("connection".into()),
+        Some(&existing),
+    )
+    .unwrap();
+    assert!(
+        matches!(request.auth, SavedAuth::Password { keychain_id: Some(ref id), plaintext_password: None } if id == "stored-owner")
+    );
+    crate::workspace::new_connection::password_draft_mut(&mut form).push_str("-edited");
+    let edited = save_request_from_form_with_existing_auth(
+        &mut form,
+        Some("connection".into()),
+        Some(&existing),
+    )
+    .unwrap();
+    assert!(
+        matches!(edited.auth, SavedAuth::Password { plaintext_password: Some(ref password), .. } if password.expose_secret() == "revealed-test-value-edited")
+    );
+    assert!(form.password.is_empty());
+}

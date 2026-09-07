@@ -1,6 +1,6 @@
 use super::*;
 use gpui::{Animation, AnimationExt, App, CursorStyle};
-use oxideterm_connections::{ConnectionTerminalSessionLogPolicy, SshChannelStrategy};
+use oxideterm_connections::{ConnectionTerminalSessionLogPolicy, SavedAuth, SshChannelStrategy};
 use oxideterm_remote_desktop::RemoteDesktopRdpNetworkProfile;
 use oxideterm_settings_model::parse_rgb24_hex;
 
@@ -978,11 +978,103 @@ impl WorkspaceApp {
         ) else {
             return div().into_any_element();
         };
-        form_field(
-            &self.tokens,
-            self.i18n.t("sessionManager.edit_properties.saved_password"),
-            input,
-        )
+        let Some(form) = self.connection_form_state(cx).form.as_ref() else {
+            return div().into_any_element();
+        };
+        let loading = form.password_load_id.is_some();
+        let failed = form.password_load_failed;
+        let button = if loading {
+            oxideterm_gpui_ui::button::icon_button(
+                &self.tokens,
+                self.render_loading_icon(
+                    "saved-password-loading",
+                    SECRET_VISIBILITY_ICON_SIZE,
+                    rgb(self.tokens.ui.text_muted),
+                ),
+                IconButtonOptions {
+                    loading: true,
+                    ..IconButtonOptions::opaque_toolbar(
+                        SECRET_VISIBILITY_BUTTON_SIZE,
+                        ButtonRadius::Sm,
+                    )
+                },
+            )
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        } else {
+            self.workspace_icon_action_button(
+                LucideIcon::Eye,
+                SECRET_VISIBILITY_ICON_SIZE,
+                rgb(self.tokens.ui.text_muted),
+                IconButtonOptions {
+                    hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
+                    ..IconButtonOptions::opaque_toolbar(
+                        SECRET_VISIBILITY_BUTTON_SIZE,
+                        ButtonRadius::Sm,
+                    )
+                },
+                |this, _, _, cx| {
+                    this.reveal_edit_saved_password(cx);
+                    cx.stop_propagation();
+                },
+                cx,
+            )
+        };
+        let control = div().relative().child(input).child(
+            button
+                .absolute()
+                .right(px(SECRET_VISIBILITY_BUTTON_OFFSET))
+                .top(px(SECRET_VISIBILITY_BUTTON_OFFSET)),
+        );
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(form_field(
+                &self.tokens,
+                self.i18n.t("sessionManager.edit_properties.saved_password"),
+                control,
+            ))
+            .when(failed, |this| {
+                this.child(
+                    self.render_connection_hint_with_color(
+                        self.i18n
+                            .t("sessionManager.edit_properties.password_load_failed"),
+                        self.tokens.ui.error,
+                    ),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn reveal_edit_saved_password(&mut self, cx: &mut Context<Self>) {
+        let Some(keychain_id) = self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .and_then(|form| form.saved_password_keychain_id.clone())
+        else {
+            return;
+        };
+        let store = self.connection_store.clone();
+        self.connection_flow.update(cx, |flow, cx| {
+            let executor = cx.background_executor().clone();
+            flow.start_password_load(
+                async move {
+                    executor
+                        .spawn(async move {
+                            // Native credential access may prompt or block; never run it on the UI thread.
+                            store
+                                .get_saved_auth_password(&SavedAuth::Password {
+                                    keychain_id: Some(keychain_id),
+                                    plaintext_password: None,
+                                })
+                                .map_err(|_| ())
+                        })
+                        .await
+                },
+                cx,
+            );
+        });
     }
 
     pub(super) fn render_connection_field_with_browse(

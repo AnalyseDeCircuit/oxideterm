@@ -739,7 +739,7 @@ pub(in crate::workspace) fn save_request_from_form_with_existing_auth(
     existing_auth: Option<&SavedAuth>,
 ) -> anyhow::Result<SaveConnectionRequest> {
     validate_save_form_non_secret(form, &[])?;
-    let persist_password_draft = form.password_loaded;
+    let persist_password_draft = form.password_loaded && !form.password_from_store;
     let mut request = save_request_from_draft(
         connection_draft_from_form_with_proxy_hop_prefix(form, &mut [], persist_password_draft),
         id,
@@ -866,13 +866,16 @@ pub(super) fn auth_draft_from_form(
     ConnectionAuthDraft {
         kind: auth_draft_kind(form.auth_tab),
         gssapi_authentication: form.gssapi_enabled,
-        password: if form.auth_tab == SshAuthTab::Password && persist_password_draft {
+        password: if form.auth_tab == SshAuthTab::Password
+            && persist_password_draft
+            && !form.password_from_store
+        {
             take_secret_from_ui_draft(&mut form.password)
         } else {
             SecretString::default()
         },
         password_keychain_id: form.saved_password_keychain_id.clone(),
-        password_loaded: form.password_loaded,
+        password_loaded: form.password_loaded && !form.password_from_store,
         save_password: form.save_password,
         key_path: form.key_path.clone(),
         managed_key_id: form.managed_key_id.clone(),

@@ -415,7 +415,7 @@ impl WorkspaceApp {
     }
 }
 
-fn restore_saved_password_placeholder_if_empty(
+pub(in crate::workspace) fn restore_saved_password_placeholder_if_empty(
     form: &mut NewConnectionForm,
     editing_saved_connection: bool,
 ) {

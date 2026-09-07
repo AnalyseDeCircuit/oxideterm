@@ -787,6 +787,10 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) standalone_sftp_secondary: StandaloneSftpSecondaryForm,
     pub(in crate::workspace) saved_password_keychain_id: Option<String>,
     pub(in crate::workspace) password_loaded: bool,
+    // A revealed value is presentation state until the user edits it.
+    pub(in crate::workspace) password_from_store: bool,
+    pub(in crate::workspace) password_load_id: Option<u64>,
+    pub(in crate::workspace) password_load_failed: bool,
     pub(in crate::workspace) password_visible: bool,
     pub(in crate::workspace) key_path: String,
     pub(in crate::workspace) managed_key_id: String,
@@ -1080,6 +1084,9 @@ impl Default for NewConnectionForm {
             standalone_sftp_secondary: StandaloneSftpSecondaryForm::default(),
             saved_password_keychain_id: None,
             password_loaded: true,
+            password_from_store: false,
+            password_load_id: None,
+            password_load_failed: false,
             password_visible: false,
             key_path: String::new(),
             managed_key_id: String::new(),
@@ -1423,6 +1430,15 @@ pub(in crate::workspace) fn toggle_connection_secret_field_visibility(
 ) -> bool {
     match field {
         NewConnectionField::Password => {
+            if form.password_visible && form.password_from_store {
+                // Hiding a saved value releases the preview; replacement drafts stay editable.
+                zeroize::Zeroize::zeroize(&mut form.password);
+                form.password_from_store = false;
+                form.password_loaded = false;
+                if form.focused_field == NewConnectionField::Password {
+                    clear_connection_selection(form);
+                }
+            }
             form.password_visible = !form.password_visible;
             true
         }
@@ -1872,6 +1888,15 @@ pub(in crate::workspace) fn next_standalone_sftp_field(
     fields[next]
 }
 
+pub(in crate::workspace) fn password_draft_mut(form: &mut NewConnectionForm) -> &mut String {
+    // Typing supersedes any pending read, even if the replacement is later cleared.
+    form.password_loaded = true;
+    form.password_load_id = None;
+    form.password_load_failed = false;
+    form.password_from_store = false;
+    &mut form.password
+}
+
 pub(in crate::workspace) fn current_connection_field_mut(
     form: &mut NewConnectionForm,
 ) -> &mut String {
@@ -1880,7 +1905,7 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::Host => &mut form.host,
         NewConnectionField::Port => &mut form.port,
         NewConnectionField::Username => &mut form.username,
-        NewConnectionField::Password => &mut form.password,
+        NewConnectionField::Password => password_draft_mut(form),
         NewConnectionField::KeyPath => &mut form.key_path,
         NewConnectionField::ManagedKeyId => &mut form.managed_key_id,
         NewConnectionField::CertPath => &mut form.cert_path,
