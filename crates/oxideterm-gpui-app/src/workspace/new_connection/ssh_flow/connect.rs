@@ -744,10 +744,20 @@ impl WorkspaceApp {
         }
         let tx = self.ssh_worker_sender(cx);
         let router = self.node_router.clone();
-        let connect_timeout_seconds = router
+        let (connect_timeout_seconds, legacy_compatibility, algorithms) = router
             .node_runtime_snapshot(&step.node_id)
-            .map(|snapshot| snapshot.config.timeout_secs)
-            .unwrap_or(DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS);
+            .map(|snapshot| {
+                (
+                    snapshot.config.timeout_secs,
+                    snapshot.config.legacy_ssh_compatibility,
+                    snapshot.config.ssh_algorithms,
+                )
+            })
+            .unwrap_or((
+                DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
+                false,
+                Default::default(),
+            ));
         let Some(preflight_context) = self.connection_flow.update(cx, |connection_flow, cx| {
             connection_flow.take_proxy_connect_preflight_context(cx)
         }) else {
@@ -786,6 +796,8 @@ impl WorkspaceApp {
                                             &step.host,
                                             step.port,
                                             connect_timeout_seconds,
+                                            legacy_compatibility,
+                                            &algorithms,
                                         )
                                         .await;
                                     router.release_consumer(&connection_id, &consumer);
@@ -805,6 +817,8 @@ impl WorkspaceApp {
                                 step.port,
                                 connect_timeout_seconds,
                                 upstream_proxy.as_ref(),
+                                legacy_compatibility,
+                                &algorithms,
                             )
                             .await
                         }

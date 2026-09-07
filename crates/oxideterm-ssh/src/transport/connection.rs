@@ -213,6 +213,8 @@ impl SshConnectionHandle {
         host: &str,
         port: u16,
         timeout_secs: u64,
+        legacy_compatibility: bool,
+        algorithms: &oxideterm_connections::SshAlgorithmPreferences,
     ) -> HostKeyStatus {
         let Some(pooled) = self.physical::<PooledSshConnection>() else {
             return HostKeyStatus::Error {
@@ -233,7 +235,17 @@ impl SshConnectionHandle {
         // crate so GPUI can request node-scoped preflight without depending on
         // russh internals.
         match open_direct_tcpip_stream_with_origin(handle, host, port, "127.0.0.1", 0).await {
-            Ok(stream) => check_host_key_via_stream(host, port, stream, timeout_secs).await,
+            Ok(stream) => {
+                check_host_key_via_stream(
+                    host,
+                    port,
+                    stream,
+                    timeout_secs,
+                    legacy_compatibility,
+                    algorithms,
+                )
+                .await
+            }
             Err(error) => HostKeyStatus::Error {
                 message: error.to_string(),
             },

@@ -11,6 +11,7 @@ use std::{
 };
 
 use dashmap::DashMap;
+use oxideterm_connections::SshAlgorithmPreferences;
 use russh::{
     client,
     keys::{
@@ -568,8 +569,29 @@ impl client::Handler for PreflightHandler {
     }
 }
 
+fn preflight_client_config(
+    timeout_secs: u64,
+    legacy_compatibility: bool,
+    algorithms: &SshAlgorithmPreferences,
+) -> Result<client::Config, crate::SshAlgorithmPreferenceError> {
+    // Host-key capture happens after algorithm negotiation, so preflight must use the login policy.
+    Ok(client::Config {
+        inactivity_timeout: Some(Duration::from_secs(timeout_secs)),
+        preferred: crate::preferred_algorithms(legacy_compatibility, algorithms)?,
+        ..client::Config::default()
+    })
+}
+
 pub async fn check_host_key(host: &str, port: u16, timeout_secs: u64) -> HostKeyStatus {
-    check_host_key_with_upstream_proxy(host, port, timeout_secs, None).await
+    check_host_key_with_upstream_proxy(
+        host,
+        port,
+        timeout_secs,
+        None,
+        false,
+        &SshAlgorithmPreferences::default(),
+    )
+    .await
 }
 
 pub async fn check_host_key_with_upstream_proxy(
@@ -577,8 +599,19 @@ pub async fn check_host_key_with_upstream_proxy(
     port: u16,
     timeout_secs: u64,
     upstream_proxy: Option<&UpstreamProxyConfig>,
+    legacy_compatibility: bool,
+    algorithms: &SshAlgorithmPreferences,
 ) -> HostKeyStatus {
-    check_host_key_with_route(host, port, timeout_secs, upstream_proxy, None).await
+    check_host_key_with_route(
+        host,
+        port,
+        timeout_secs,
+        upstream_proxy,
+        None,
+        legacy_compatibility,
+        algorithms,
+    )
+    .await
 }
 
 pub async fn check_host_key_with_route(
@@ -587,6 +620,8 @@ pub async fn check_host_key_with_route(
     timeout_secs: u64,
     upstream_proxy: Option<&UpstreamProxyConfig>,
     proxy_command: Option<&ProxyCommandConfig>,
+    legacy_compatibility: bool,
+    algorithms: &SshAlgorithmPreferences,
 ) -> HostKeyStatus {
     if HOST_KEY_CACHE.get_verified(host, port).is_some() {
         return HostKeyStatus::Verified;
@@ -614,9 +649,13 @@ pub async fn check_host_key_with_route(
 
     let handler = PreflightHandler::new(host.to_string(), port);
     let status = Arc::clone(&handler.status);
-    let config = client::Config {
-        inactivity_timeout: Some(Duration::from_secs(timeout_secs)),
-        ..client::Config::default()
+    let config = match preflight_client_config(timeout_secs, legacy_compatibility, algorithms) {
+        Ok(config) => config,
+        Err(error) => {
+            return HostKeyStatus::Error {
+                message: error.to_string(),
+            };
+        }
     };
 
     let result = tokio::time::timeout(
@@ -650,6 +689,8 @@ pub async fn check_host_key_via_stream(
     port: u16,
     stream: russh::ChannelStream<client::Msg>,
     timeout_secs: u64,
+    legacy_compatibility: bool,
+    algorithms: &SshAlgorithmPreferences,
 ) -> HostKeyStatus {
     if HOST_KEY_CACHE.get_verified(host, port).is_some() {
         return HostKeyStatus::Verified;
@@ -657,9 +698,13 @@ pub async fn check_host_key_via_stream(
 
     let handler = PreflightHandler::new(host.to_string(), port);
     let status = Arc::clone(&handler.status);
-    let config = client::Config {
-        inactivity_timeout: Some(Duration::from_secs(timeout_secs)),
-        ..client::Config::default()
+    let config = match preflight_client_config(timeout_secs, legacy_compatibility, algorithms) {
+        Ok(config) => config,
+        Err(error) => {
+            return HostKeyStatus::Error {
+                message: error.to_string(),
+            };
+        }
     };
 
     let result = tokio::time::timeout(
@@ -815,6 +860,8 @@ mod tests {
             1,
             None,
             Some(&ProxyCommandConfig::AuthorizationRequired),
+            false,
+            &SshAlgorithmPreferences::default(),
         ));
 
         let HostKeyStatus::Error { message } = status else {

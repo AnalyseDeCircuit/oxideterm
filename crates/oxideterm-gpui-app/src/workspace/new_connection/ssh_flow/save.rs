@@ -3242,6 +3242,8 @@ impl WorkspaceApp {
                         connect_timeout_seconds,
                         upstream_proxy.as_ref(),
                         worker_config.proxy_command.as_ref(),
+                        worker_config.legacy_ssh_compatibility,
+                        &worker_config.ssh_algorithms,
                     )),
                 ),
                 Err(error) => (
