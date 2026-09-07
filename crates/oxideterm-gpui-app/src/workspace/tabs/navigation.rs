@@ -1446,7 +1446,7 @@ impl WorkspaceApp {
         tab_id: TabId,
         index: usize,
         event: &MouseDownEvent,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if index >= self.tabs(cx).len()
@@ -1471,6 +1471,9 @@ impl WorkspaceApp {
         else {
             return;
         };
+        // Select on press: native chrome can consume release or cancel capture with a
+        // buttonless move. Those events should cancel dragging, not tab navigation.
+        self.set_active_tab(tab_id, window, cx);
         let drop_target_index = self.tab_drop_target_index_for_x(start_x, window, &tab_widths, cx);
         self.main_window_tabs.drag = Some(TabDragState {
             tab_id,
@@ -1566,11 +1569,8 @@ impl WorkspaceApp {
                     cx.notify();
                 }
             }
-            TabDragMode::Pending | TabDragMode::Reorder => {
-                if self.tab_by_id(drag.tab_id, cx).is_some() {
-                    self.set_active_tab(drag.tab_id, window, cx);
-                }
-            }
+            // Selection already happened on press; release owns only drag completion.
+            TabDragMode::Pending | TabDragMode::Reorder => {}
         }
         cx.notify();
     }
