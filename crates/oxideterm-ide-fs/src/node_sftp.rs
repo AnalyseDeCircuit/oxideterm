@@ -1,6 +1,8 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::text::{check_size, decode_file, encode_file};
+use oxideterm_ide_core::{MAX_EDITABLE_FILE_SIZE, TextFileFormat};
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use futures_util::future::join_all;
@@ -18,8 +20,6 @@ use tokio::sync::Mutex;
 
 type SharedSftp = Arc<Mutex<SftpSession>>;
 type IdeOperationFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, IdeFileError>> + Send + 'a>>;
-
-const MAX_EDITABLE_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct NodeSftpIdeFileSystem {
@@ -103,20 +103,10 @@ impl NodeSftpIdeFileSystem {
                     });
                 }
 
-                match sftp.preview(&path).await.map_err(map_sftp_error)? {
-                    PreviewContent::Text { .. } => Ok(IdeFileCheck::Editable {
-                        size: info.size,
-                        mtime: info.modified.max(0) as u64,
-                    }),
-                    PreviewContent::TooLarge { size, max_size, .. } => Ok(IdeFileCheck::TooLarge {
-                        size,
-                        limit: max_size,
-                    }),
-                    PreviewContent::Hex { .. } => Ok(IdeFileCheck::Binary),
-                    _ => Ok(IdeFileCheck::NotEditable {
-                        reason: "Unsupported file type".to_string(),
-                    }),
-                }
+                Ok(IdeFileCheck::Editable {
+                    size: info.size,
+                    mtime: info.modified.max(0) as u64,
+                })
             })
         })
         .await
@@ -177,8 +167,14 @@ impl NodeSftpIdeFileSystem {
         path: impl Into<String>,
     ) -> Result<SavedFileVersion, IdeFileError> {
         let location = IdeLocation::remote(node_id.into(), path.into());
-        self.write_file(&location, "", None, WriteMode::CreateNew)
-            .await
+        self.write_file(
+            &location,
+            "",
+            &TextFileFormat::default(),
+            None,
+            WriteMode::CreateNew,
+        )
+        .await
     }
 
     pub async fn create_folder(
@@ -282,7 +278,7 @@ impl NodeSftpIdeFileSystem {
         &self,
         sftp: &SharedSftp,
         path: &str,
-        text: &str,
+        bytes: &[u8],
         expected_version: Option<&SavedFileVersion>,
         mode: WriteMode,
     ) -> Result<SavedFileVersion, IdeFileError> {
@@ -308,7 +304,7 @@ impl NodeSftpIdeFileSystem {
         // Mirrors Tauri SFTP save fallback: write_content first attempts an
         // atomic swap+rename and internally falls back to direct overwrite when
         // the server rejects the swap path.
-        sftp.write_content(path, text.as_bytes())
+        sftp.write_content(path, bytes)
             .await
             .map_err(map_sftp_error)?;
         let info = sftp.stat(path).await.map_err(map_sftp_error)?;
@@ -325,32 +321,27 @@ impl AsyncIdeFileSystem for NodeSftpIdeFileSystem {
         }
     }
 
-    fn read_file<'a>(&'a self, location: &'a IdeLocation) -> IdeFsFuture<'a, IdeFileData> {
+    fn read_file<'a>(
+        &'a self,
+        location: &'a IdeLocation,
+        encoding: Option<&'a str>,
+    ) -> IdeFsFuture<'a, IdeFileData> {
         Box::pin(async move {
             let (node_id, path) = remote_location(location)?;
+            let encoding = encoding.map(str::to_owned);
             self.with_sftp_retry(&node_id, |sftp| {
                 let path = path.clone();
+                let encoding = encoding.clone();
                 Box::pin(async move {
                     let sftp = sftp.lock().await;
                     let info = sftp.stat(&path).await.map_err(map_sftp_error)?;
-                    match sftp.preview(&path).await.map_err(map_sftp_error)? {
-                        PreviewContent::Text { data, .. } => Ok(IdeFileData {
-                            text: data,
-                            version: version_from_remote(&info),
-                        }),
-                        PreviewContent::TooLarge { size, max_size, .. } => Err(IdeFileError::new(
-                            IdeFileErrorKind::Unsupported,
-                            format!("File is too large to edit ({size} > {max_size})"),
-                        )),
-                        PreviewContent::Hex { .. } => Err(IdeFileError::new(
-                            IdeFileErrorKind::Unsupported,
-                            "File is binary",
-                        )),
-                        _ => Err(IdeFileError::new(
-                            IdeFileErrorKind::Unsupported,
-                            "Unsupported file type",
-                        )),
-                    }
+                    check_size(info.size)?;
+                    let (_, size, bytes) = sftp
+                        .read_file_range(&path, 0, (MAX_EDITABLE_FILE_SIZE + 1) as usize)
+                        .await
+                        .map_err(map_sftp_error)?;
+                    check_size(size)?;
+                    decode_file(&bytes, encoding.as_deref(), version_from_remote(&info))
                 })
             })
             .await
@@ -408,20 +399,22 @@ impl AsyncIdeFileSystem for NodeSftpIdeFileSystem {
         &'a self,
         location: &'a IdeLocation,
         text: &'a str,
+        format: &'a TextFileFormat,
         expected_version: Option<&'a SavedFileVersion>,
         mode: WriteMode,
     ) -> IdeFsFuture<'a, SavedFileVersion> {
         Box::pin(async move {
             let (node_id, path) = remote_location(location)?;
+            let bytes = encode_file(text, format)?;
             let sftp = self.acquire_sftp(&node_id).await?;
             match self
-                .write_file_once(&sftp, &path, text, expected_version, mode)
+                .write_file_once(&sftp, &path, &bytes, expected_version, mode)
                 .await
             {
                 Ok(version) => Ok(version),
                 Err(error) if error.kind == IdeFileErrorKind::Disconnected => {
                     let sftp = self.rebuild_sftp(&node_id).await?;
-                    self.write_file_once(&sftp, &path, text, expected_version, mode)
+                    self.write_file_once(&sftp, &path, &bytes, expected_version, mode)
                         .await
                 }
                 Err(error) => Err(error),

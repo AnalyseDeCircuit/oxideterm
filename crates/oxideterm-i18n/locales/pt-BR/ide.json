@@ -1,5 +1,14 @@
 {
   "ide": {
+    "file_too_large": "O arquivo excede o limite de edição de 100 MiB do IDE.",
+    "file_encoding": "Codificação do arquivo",
+    "file_line_ending": "Finais de linha",
+    "reopen_encoding": "Reabrir com codificação",
+    "save_encoding": "Salvar com codificação",
+    "reopen_dirty": "Salve ou descarte as alterações antes de reabrir com outra codificação.",
+    "invalid_encoding": "Não foi possível decodificar o arquivo com a codificação selecionada.",
+    "unrepresentable_text": "Esta codificação não representa todos os caracteres. Escolha UTF-8 para salvar sem perder texto.",
+    "large_file": "Arquivo grande: sintaxe e quebra automática desativadas",
     "no_project": "Nenhum projeto aberto",
     "open_folder": "Abrir pasta",
     "select_folder": "Selecionar pasta",

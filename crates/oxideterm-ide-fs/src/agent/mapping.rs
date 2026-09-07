@@ -8,17 +8,6 @@ fn remote_location(location: &IdeLocation) -> Result<(NodeId, String), IdeFileEr
     }
 }
 
-fn ide_file_data_from_agent(result: ReadFileResult) -> IdeFileData {
-    IdeFileData {
-        text: result.content,
-        version: SavedFileVersion {
-            size_bytes: Some(result.size),
-            modified_millis: Some(result.mtime as i64),
-            etag: Some(result.hash),
-        },
-    }
-}
-
 fn version_from_agent_write(result: &WriteFileResult) -> SavedFileVersion {
     SavedFileVersion {
         size_bytes: Some(result.size),

@@ -865,6 +865,16 @@ impl WorkspaceApp {
 
     fn ide_labels(&self) -> IdeLabels {
         IdeLabels {
+            file_too_large: self.i18n.t("ide.file_too_large"),
+            file_encoding: self.i18n.t("ide.file_encoding"),
+            file_line_ending: self.i18n.t("ide.file_line_ending"),
+            reopen_encoding: self.i18n.t("ide.reopen_encoding"),
+            save_encoding: self.i18n.t("ide.save_encoding"),
+            reopen_dirty: self.i18n.t("ide.reopen_dirty"),
+            invalid_encoding: self.i18n.t("ide.invalid_encoding"),
+            unrepresentable_text: self.i18n.t("ide.unrepresentable_text"),
+            large_file: self.i18n.t("ide.large_file"),
+
             open_folder: self.i18n.t("ide.open_folder"),
             search: self.i18n.t("ide.search"),
             refresh: self.i18n.t("ide.refresh"),

@@ -19,3 +19,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 zstd = "0.13"
+
+oxideterm-preview = { path = "../oxideterm-preview" }
+encoding_rs.workspace = true
+zeroize.workspace = true

@@ -1,5 +1,5 @@
 struct AgentTransport {
-    write_tx: mpsc::Sender<String>,
+    write_tx: mpsc::Sender<zeroize::Zeroizing<String>>,
     pending: PendingMap,
     watch_tx: broadcast::Sender<AgentWatchEvent>,
     shutdown_tx: mpsc::Sender<()>,
@@ -18,7 +18,7 @@ impl AgentTransport {
 
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
         let alive = Arc::new(AtomicBool::new(true));
-        let (write_tx, mut write_rx) = mpsc::channel::<String>(256);
+        let (write_tx, mut write_rx) = mpsc::channel::<zeroize::Zeroizing<String>>(256);
         let (watch_tx, _) = broadcast::channel::<AgentWatchEvent>(1024);
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
@@ -26,11 +26,12 @@ impl AgentTransport {
         let alive_for_task = alive.clone();
         let watch_tx_for_task = watch_tx.clone();
         tokio::spawn(async move {
-            let mut buffer = String::new();
-            loop {
+            let mut buffer = zeroize::Zeroizing::new(Vec::<u8>::new());
+            'receive: loop {
                 tokio::select! {
-                    Some(line) = write_rx.recv() => {
-                        let data = format!("{line}\n");
+                    Some(mut line) = write_rx.recv() => {
+                        line.push('\n');
+                        let data = line;
                         if channel.data(data.as_bytes()).await.is_err() {
                             warn!("[ide-agent] write failed; channel closed");
                             break;
@@ -39,15 +40,26 @@ impl AgentTransport {
                     message = channel.wait() => {
                         match message {
                             Some(ChannelMsg::Data { data }) => {
-                                buffer.push_str(&String::from_utf8_lossy(&data));
-                                while let Some(newline) = buffer.find('\n') {
-                                    let line = buffer[..newline].trim().to_string();
-                                    buffer = buffer[newline + 1..].to_string();
-                                    if line.is_empty() {
-                                        continue;
+                                let previous_len = buffer.len();
+                                buffer.extend_from_slice(&data);
+                                let mut consumed = 0;
+                                // Scan each SSH chunk once, and decode only complete UTF-8 frames.
+                                for index in previous_len..buffer.len() {
+                                    if buffer[index] != b'\n' { continue; }
+                                    let Ok(line) = std::str::from_utf8(&buffer[consumed..index]) else {
+                                        warn!("[ide-agent] invalid UTF-8 response; channel closed");
+                                        break 'receive;
+                                    };
+                                    if !line.trim().is_empty() {
+                                        handle_agent_line(&pending_for_task, &watch_tx_for_task, line).await;
                                     }
-                                    handle_agent_line(&pending_for_task, &watch_tx_for_task, &line).await;
+                                    consumed = index + 1;
                                 }
+                                if consumed > 0 {
+                                    zeroize::Zeroize::zeroize(&mut buffer[..consumed]);
+                                    buffer.drain(..consumed);
+                                }
+
                             }
                             Some(ChannelMsg::ExtendedData { data, ext: 1 }) => {
                                 debug!(
@@ -121,7 +133,7 @@ impl AgentTransport {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, tx);
         self.write_tx
-            .send(json)
+            .send(zeroize::Zeroizing::new(json))
             .await
             .map_err(|_| AgentError::ChannelClosed)?;
 

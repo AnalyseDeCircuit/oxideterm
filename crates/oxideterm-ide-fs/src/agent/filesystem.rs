@@ -1,3 +1,5 @@
+use crate::text::{decode_file, encode_file};
+use oxideterm_ide_core::TextFileFormat;
 impl NodeAgentIdeFileSystem {
     pub fn new(router: NodeRouter, mode: NodeAgentMode) -> Self {
         Self {
@@ -1057,13 +1059,17 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
         }
     }
 
-    fn read_file<'a>(&'a self, location: &'a IdeLocation) -> IdeFsFuture<'a, IdeFileData> {
+    fn read_file<'a>(
+        &'a self,
+        location: &'a IdeLocation,
+        encoding: Option<&'a str>,
+    ) -> IdeFsFuture<'a, IdeFileData> {
         Box::pin(async move {
             let (node_id, path) = remote_location(location)?;
             self.ensure_ide_session_for_node(&node_id).await?;
             if let Some(session) = self.agent_session(&node_id).await {
-                match session.read_file(&path).await {
-                    Ok(result) => return Ok(ide_file_data_from_agent(result)),
+                match session.read_file_bytes(&path).await {
+                    Ok((bytes, version)) => return decode_file(&bytes, encoding, version),
                     Err(error) => {
                         warn!(
                             "[ide-agent] read via agent failed ({}), falling back to SFTP",
@@ -1073,7 +1079,7 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
                     }
                 }
             }
-            self.sftp.read_file(location).await
+            self.sftp.read_file(location, encoding).await
         })
     }
 
@@ -1137,6 +1143,7 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
         &'a self,
         location: &'a IdeLocation,
         text: &'a str,
+        format: &'a TextFileFormat,
         expected_version: Option<&'a SavedFileVersion>,
         mode: WriteMode,
     ) -> IdeFsFuture<'a, SavedFileVersion> {
@@ -1146,7 +1153,7 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
             if mode == WriteMode::CreateNew {
                 return self
                     .sftp
-                    .write_file(location, text, expected_version, mode)
+                    .write_file(location, text, format, expected_version, mode)
                     .await;
             }
 
@@ -1154,7 +1161,8 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
             if should_write_via_agent(expected_version)
                 && let Some(session) = self.agent_session(&node_id).await
             {
-                match session.write_file(&path, text, expect_hash).await {
+                let bytes = encode_file(text, format)?;
+                match session.write_file_bytes(&path, &bytes, expect_hash).await {
                     Ok(result) => return Ok(version_from_agent_write(&result)),
                     Err(AgentError::Rpc { code, message })
                         if is_agent_conflict_parts(code, &message) =>
@@ -1172,7 +1180,7 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
             }
 
             self.sftp
-                .write_file(location, text, expected_version, mode)
+                .write_file(location, text, format, expected_version, mode)
                 .await
         })
     }

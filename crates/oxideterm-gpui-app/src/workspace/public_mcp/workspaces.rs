@@ -38,6 +38,7 @@ struct PublicWorkspaceTreeEntry {
 }
 
 struct PreparedWorkspaceWrite {
+    format: oxideterm_ide_core::TextFileFormat,
     path: String,
     original_text: String,
     updated_text: String,
@@ -45,6 +46,7 @@ struct PreparedWorkspaceWrite {
 }
 
 struct AppliedWorkspaceWrite {
+    format: oxideterm_ide_core::TextFileFormat,
     path: String,
     original_text: String,
     written_version: SavedFileVersion,
@@ -311,10 +313,10 @@ impl WorkspaceApp {
             require_editable_file(&record, &canonical).await?;
             let data = record
                 .owner
-                .read_file(&IdeLocation::remote(
-                    record.node_id.0.clone(),
-                    canonical.clone(),
-                ))
+                .read_file(
+                    &IdeLocation::remote(record.node_id.0.clone(), canonical.clone()),
+                    None,
+                )
                 .await
                 .map_err(|_| "The remote IDE file could not be read".to_owned())?;
             if data.text.len() as u64 > WORKSPACE_TEXT_LIMIT_BYTES {
@@ -528,7 +530,7 @@ async fn apply_public_mcp_workspace_edits(
         let location = IdeLocation::remote(record.node_id.0.clone(), canonical.clone());
         let current = record
             .owner
-            .read_file(&location)
+            .read_file(&location, None)
             .await
             .map_err(|_| "The remote IDE file could not be read before editing".to_owned())?;
         if observed.version != current.version
@@ -559,6 +561,7 @@ async fn apply_public_mcp_workspace_edits(
             return Err("The edited IDE file exceeds the supported text limit".to_owned());
         }
         prepared.push(PreparedWorkspaceWrite {
+            format: current.format,
             path: canonical,
             original_text: current.text,
             updated_text,
@@ -575,6 +578,7 @@ async fn apply_public_mcp_workspace_edits(
             .write_file(
                 &location,
                 &write.updated_text,
+                &write.format,
                 Some(&write.original_version),
                 WriteMode::AtomicReplace,
             )
@@ -594,6 +598,7 @@ async fn apply_public_mcp_workspace_edits(
             }
         };
         applied.push(AppliedWorkspaceWrite {
+            format: write.format,
             path: write.path,
             original_text: write.original_text,
             written_version,
@@ -664,6 +669,7 @@ async fn rollback_workspace_writes(
             .write_file(
                 &location,
                 &write.original_text,
+                &write.format,
                 Some(&write.written_version),
                 WriteMode::AtomicReplace,
             )

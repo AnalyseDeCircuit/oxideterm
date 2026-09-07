@@ -1,5 +1,14 @@
 {
   "ide": {
+    "file_too_large": "ファイルが IDE の編集上限 100 MiB を超えています。",
+    "file_encoding": "ファイルの文字コード",
+    "file_line_ending": "改行コード",
+    "reopen_encoding": "文字コードを指定して再度開く",
+    "save_encoding": "文字コードを指定して保存",
+    "reopen_dirty": "別の文字コードで開く前に変更を保存または破棄してください。",
+    "invalid_encoding": "選択した文字コードでファイルを読み取れません。",
+    "unrepresentable_text": "この文字コードでは一部の文字を表現できません。文字を失わずに保存するには UTF-8 を選択してください。",
+    "large_file": "大容量ファイル：構文解析と折り返しは無効",
     "no_project": "プロジェクトが開かれていません",
     "open_folder": "フォルダを開く",
     "select_folder": "フォルダを選択",

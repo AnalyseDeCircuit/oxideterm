@@ -156,6 +156,8 @@ pub enum SelectAnchorId {
     CloudSyncAuthMode,
     CloudSyncConflictStrategy,
     IdeAgentStatus,
+    IdeFileEncoding,
+    IdeFileLineEnding,
     TerminalBroadcastMenu,
     TerminalHighlightRuleSet,
     TerminalCommandBar,

@@ -1,12 +1,15 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::text::{check_size, decode_file, encode_file};
+use oxideterm_ide_core::{MAX_EDITABLE_FILE_SIZE, TextFileFormat};
 use std::{
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
 };
+use zeroize::Zeroizing;
 
 use oxideterm_ide_core::{
     AsyncIdeFileSystem, FileKind, FileStat, FileSystemCapabilities, FileTreeEntry, IdeFileCheck,
@@ -62,17 +65,11 @@ impl LocalIdeFileSystem {
             });
         }
 
-        const MAX_EDITABLE: u64 = 10 * 1024 * 1024;
-        if metadata.len() > MAX_EDITABLE {
+        if metadata.len() > MAX_EDITABLE_FILE_SIZE {
             return Ok(IdeFileCheck::TooLarge {
                 size: metadata.len(),
-                limit: MAX_EDITABLE,
+                limit: MAX_EDITABLE_FILE_SIZE,
             });
-        }
-
-        let sample = fs::read(path.as_ref()).map_err(map_io_error)?;
-        if sample.contains(&0) || std::str::from_utf8(&sample).is_err() {
-            return Ok(IdeFileCheck::Binary);
         }
 
         Ok(IdeFileCheck::Editable {
@@ -120,17 +117,21 @@ impl IdeFileSystem for LocalIdeFileSystem {
         }
     }
 
-    fn read_file(&self, location: &IdeLocation) -> Result<IdeFileData, IdeFileError> {
+    fn read_file(
+        &self,
+        location: &IdeLocation,
+        encoding: Option<&str>,
+    ) -> Result<IdeFileData, IdeFileError> {
         let path = self.local_path(location)?;
-        let bytes = fs::read(path).map_err(map_io_error)?;
-        let text = String::from_utf8(bytes).map_err(|_| {
-            IdeFileError::new(
-                IdeFileErrorKind::Unsupported,
-                "File is not valid UTF-8 text",
-            )
-        })?;
-        let version = version_from_metadata(&fs::metadata(path).map_err(map_io_error)?);
-        Ok(IdeFileData { text, version })
+        use std::io::Read;
+        let file = fs::File::open(path).map_err(map_io_error)?;
+        let metadata = file.metadata().map_err(map_io_error)?;
+        check_size(metadata.len())?;
+        let mut bytes = Zeroizing::new(Vec::new());
+        file.take(MAX_EDITABLE_FILE_SIZE + 1)
+            .read_to_end(&mut bytes)
+            .map_err(map_io_error)?;
+        decode_file(&bytes, encoding, version_from_metadata(&metadata))
     }
 
     fn stat(&self, location: &IdeLocation) -> Result<FileStat, IdeFileError> {
@@ -168,9 +169,11 @@ impl IdeFileSystem for LocalIdeFileSystem {
         &self,
         location: &IdeLocation,
         text: &str,
+        format: &TextFileFormat,
         expected_version: Option<&SavedFileVersion>,
         mode: WriteMode,
     ) -> Result<SavedFileVersion, IdeFileError> {
+        let bytes = encode_file(text, format)?;
         let path = self.local_path(location)?;
         if mode == WriteMode::CreateNew && path.exists() {
             return Err(IdeFileError::new(
@@ -191,17 +194,17 @@ impl IdeFileSystem for LocalIdeFileSystem {
         }
 
         match mode {
-            WriteMode::AtomicReplace => write_atomic(path, text.as_bytes())?,
+            WriteMode::AtomicReplace => write_atomic(path, &bytes)?,
             WriteMode::CreateNew => {
                 let mut file = fs::OpenOptions::new()
                     .write(true)
                     .create_new(true)
                     .open(path)
                     .map_err(map_io_error)?;
-                file.write_all(text.as_bytes()).map_err(map_io_error)?;
+                file.write_all(&bytes).map_err(map_io_error)?;
                 file.sync_all().map_err(map_io_error)?;
             }
-            WriteMode::CreateOrReplace => fs::write(path, text).map_err(map_io_error)?,
+            WriteMode::CreateOrReplace => fs::write(path, &bytes).map_err(map_io_error)?,
         }
 
         Ok(version_from_metadata(
@@ -215,8 +218,12 @@ impl AsyncIdeFileSystem for LocalIdeFileSystem {
         IdeFileSystem::capabilities(self)
     }
 
-    fn read_file<'a>(&'a self, location: &'a IdeLocation) -> IdeFsFuture<'a, IdeFileData> {
-        Box::pin(async move { IdeFileSystem::read_file(self, location) })
+    fn read_file<'a>(
+        &'a self,
+        location: &'a IdeLocation,
+        encoding: Option<&'a str>,
+    ) -> IdeFsFuture<'a, IdeFileData> {
+        Box::pin(async move { IdeFileSystem::read_file(self, location, encoding) })
     }
 
     fn stat<'a>(&'a self, location: &'a IdeLocation) -> IdeFsFuture<'a, FileStat> {
@@ -231,12 +238,13 @@ impl AsyncIdeFileSystem for LocalIdeFileSystem {
         &'a self,
         location: &'a IdeLocation,
         text: &'a str,
+        format: &'a TextFileFormat,
         expected_version: Option<&'a SavedFileVersion>,
         mode: WriteMode,
     ) -> IdeFsFuture<'a, SavedFileVersion> {
-        Box::pin(
-            async move { IdeFileSystem::write_file(self, location, text, expected_version, mode) },
-        )
+        Box::pin(async move {
+            IdeFileSystem::write_file(self, location, text, format, expected_version, mode)
+        })
     }
 }
 
@@ -346,6 +354,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn saves_the_original_encoding_and_refuses_unrepresentable_edits() {
+        let root = temp_dir();
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("legacy.txt");
+        let original = b"\xd6\xd0\xce\xc4\r\n";
+        fs::write(&path, original).unwrap();
+        let provider = LocalIdeFileSystem::new();
+        let location = IdeLocation::local(&path);
+        let data = IdeFileSystem::read_file(&provider, &location, Some("gb2312")).unwrap();
+        assert_eq!(data.text, "中文\n");
+        IdeFileSystem::write_file(
+            &provider,
+            &location,
+            &data.text,
+            &data.format,
+            Some(&data.version),
+            WriteMode::AtomicReplace,
+        )
+        .unwrap();
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert!(
+            IdeFileSystem::write_file(
+                &provider,
+                &location,
+                "😀",
+                &data.format,
+                None,
+                WriteMode::AtomicReplace
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read(&path).unwrap(), original);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn local_adapter_reads_lists_and_writes_atomically() {
         let root = temp_dir();
         fs::create_dir_all(&root).unwrap();
@@ -354,7 +398,7 @@ mod tests {
         let fs = LocalIdeFileSystem::new();
         let location = IdeLocation::local(&file_path);
 
-        let data = IdeFileSystem::read_file(&fs, &location).unwrap();
+        let data = IdeFileSystem::read_file(&fs, &location, None).unwrap();
         assert_eq!(data.text, "fn main() {}\n");
 
         let children = IdeFileSystem::list_dir(&fs, &IdeLocation::local(&root)).unwrap();
@@ -364,6 +408,7 @@ mod tests {
             &fs,
             &location,
             "fn main() { }\n",
+            &data.format,
             Some(&data.version),
             WriteMode::AtomicReplace,
         )
@@ -382,13 +427,14 @@ mod tests {
         fs::write(&file_path, "old").unwrap();
         let fs = LocalIdeFileSystem::new();
         let location = IdeLocation::local(&file_path);
-        let data = IdeFileSystem::read_file(&fs, &location).unwrap();
+        let data = IdeFileSystem::read_file(&fs, &location, None).unwrap();
         fs::write(&file_path, "changed").unwrap();
 
         let error = IdeFileSystem::write_file(
             &fs,
             &location,
             "new",
+            &data.format,
             Some(&data.version),
             WriteMode::AtomicReplace,
         )

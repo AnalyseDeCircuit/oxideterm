@@ -76,6 +76,14 @@ pub struct ReconnectSnapshot {
     pub snapshot_at: Option<SystemTime>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconnectIdeFileFormat {
+    pub encoding: String,
+    pub has_bom: bool,
+    pub line_ending: String,
+}
+
 #[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReconnectIdeSnapshot {
@@ -85,6 +93,8 @@ pub struct ReconnectIdeSnapshot {
     /// reconnect; keep the field name for parity with its restore phase.
     pub connection_id: String,
     pub dirty_contents: BTreeMap<String, String>,
+    #[serde(default)]
+    pub file_formats: BTreeMap<String, ReconnectIdeFileFormat>,
 }
 
 impl fmt::Debug for ReconnectIdeSnapshot {
@@ -705,6 +715,7 @@ mod tests {
                 tab_paths: vec!["/home/demo/main.rs".to_string()],
                 connection_id: "node-a".to_string(),
                 dirty_contents,
+                file_formats: BTreeMap::new(),
             }),
             ..ReconnectSnapshot::default()
         };

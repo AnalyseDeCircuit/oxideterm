@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use gpui::Pixels;
+use oxideterm_editor_core::TextRange;
 use unicode_segmentation::UnicodeSegmentation;
 
 #[cfg(test)]
@@ -19,7 +20,86 @@ pub(super) struct DisplayRow {
     pub is_folded_header: bool,
 }
 
+pub(super) struct UnwrappedRowEdit {
+    cache: DisplayRowsCache,
+    first_line: usize,
+    last_line: usize,
+    newlines: usize,
+}
+
 impl TextEditorView {
+    pub(super) fn unwrapped_row_edit(
+        &self,
+        range: TextRange,
+        replacement: &str,
+    ) -> Option<UnwrappedRowEdit> {
+        let first_line = self.buffer.offset_to_line_col(range.start).ok()?.line;
+        let last_line = self.buffer.offset_to_line_col(range.end).ok()?.line;
+        let mut cached = self.display_rows_cache.borrow_mut();
+        let cache = cached.as_ref()?;
+        if cache.wrap_column.is_some()
+            || !self.folded_ranges.is_empty()
+            || cache.buffer_version != self.buffer.version()
+        {
+            return None;
+        }
+        Some(UnwrappedRowEdit {
+            cache: cached.take()?,
+            first_line,
+            last_line,
+            newlines: replacement.bytes().filter(|b| *b == b'\n').count(),
+        })
+    }
+
+    pub(super) fn restore_unwrapped_rows_after_edit(&self, edit: Option<UnwrappedRowEdit>) {
+        let Some(mut edit) = edit else {
+            return;
+        };
+        if self.wrap_column().is_some() {
+            return;
+        }
+        let rows = Arc::make_mut(&mut edit.cache.rows);
+        let old_count = edit.last_line - edit.first_line + 1;
+        let new_count = edit.newlines + 1;
+        let new_rows = (edit.first_line..edit.first_line + new_count)
+            .map(|line| {
+                let width = self
+                    .buffer
+                    .with_line_text(line, unwrapped_line_width)
+                    .unwrap_or(0);
+                DisplayRow {
+                    line,
+                    start_col: 0,
+                    end_col: width,
+                    is_first: true,
+                    is_folded_header: false,
+                }
+            })
+            .collect::<Vec<_>>();
+        let removed_widest = rows[edit.first_line..=edit.last_line]
+            .iter()
+            .any(|r| r.end_col == edit.cache.max_width_columns);
+        let new_max = new_rows.iter().map(|r| r.end_col).max().unwrap_or(0);
+        rows.splice(edit.first_line..=edit.last_line, new_rows);
+        if old_count != new_count {
+            for (line, row) in rows
+                .iter_mut()
+                .enumerate()
+                .skip(edit.first_line + new_count)
+            {
+                row.line = line;
+            }
+        }
+        edit.cache.max_width_columns = if removed_widest && new_max < edit.cache.max_width_columns {
+            rows.iter().map(|r| r.end_col).max().unwrap_or(0)
+        } else {
+            edit.cache.max_width_columns.max(new_max)
+        };
+        edit.cache.buffer_version = self.buffer.version();
+        edit.cache.fold_revision = self.fold_revision;
+        *self.display_rows_cache.borrow_mut() = Some(edit.cache);
+    }
+
     pub(super) fn display_row_for_window_y(&self, y: Pixels) -> Option<DisplayRow> {
         let bounds = self.content_bounds?;
         let relative_y = f32::from(y - bounds.origin.y) + self.vertical_scroll_y_px();
@@ -80,13 +160,23 @@ impl TextEditorView {
             let line_wrap_column = if folded.is_some() { None } else { wrap_column };
             self.buffer
                 .with_line_text(line, |text| {
-                    append_display_rows_for_line(
-                        &mut rows,
-                        line,
-                        text.graphemes(true).map(grapheme_visual_width),
-                        line_wrap_column,
-                        folded.is_some(),
-                    );
+                    if line_wrap_column.is_none() {
+                        rows.push(DisplayRow {
+                            line,
+                            start_col: 0,
+                            end_col: unwrapped_line_width(text),
+                            is_first: true,
+                            is_folded_header: folded.is_some(),
+                        });
+                    } else {
+                        append_display_rows_for_line(
+                            &mut rows,
+                            line,
+                            text.graphemes(true).map(grapheme_visual_width),
+                            line_wrap_column,
+                            folded.is_some(),
+                        );
+                    }
                 })
                 .unwrap_or_else(|| {
                     append_display_rows_for_line(
@@ -105,7 +195,7 @@ impl TextEditorView {
     }
 
     fn wrap_column(&self) -> Option<usize> {
-        if !self.settings.soft_wrap {
+        if self.is_large_file() || !self.settings.soft_wrap {
             return None;
         }
         let bounds = self.content_bounds?;
@@ -114,6 +204,14 @@ impl TextEditorView {
             - self.visible_content_padding_x() * 2.0;
         let measured = (available_width / self.metrics.char_width).floor().max(8.0) as usize;
         Some(measured.min(self.settings.soft_wrap_column.max(8)))
+    }
+}
+
+fn unwrapped_line_width(text: &str) -> usize {
+    if text.is_ascii() {
+        text.len()
+    } else {
+        text.graphemes(true).map(grapheme_visual_width).sum()
     }
 }
 
@@ -273,5 +371,41 @@ mod tests {
                 },
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod edit_layout_tests {
+    use super::*;
+    use gpui::{AppContext, TestAppContext};
+    use oxideterm_editor_core::{BufferOffset, Selection};
+    use oxideterm_theme::default_tokens;
+
+    #[gpui::test]
+    fn unwrapped_edits_update_rows_without_changing_retained_layout(cx: &mut TestAppContext) {
+        let editor = cx.new(|cx| TextEditorView::new("a\n中🙂\nend", &default_tokens(), cx));
+        editor.update(cx, |editor, cx| {
+            editor.settings.soft_wrap = false;
+            let old_rows = editor.display_rows();
+            editor.insert_text("long\n", cx);
+            let widths = editor
+                .display_rows()
+                .iter()
+                .map(|r| (r.line, r.end_col))
+                .collect::<Vec<_>>();
+            assert_eq!(widths, vec![(0, 4), (1, 1), (2, 4), (3, 3)]);
+            assert_eq!(old_rows.len(), 3);
+            assert_eq!(old_rows[1].end_col, 4);
+            editor
+                .cursor
+                .set_selection(Selection::new(BufferOffset(0), BufferOffset(5)));
+            editor.insert_text("", cx);
+            assert_eq!(*editor.display_rows(), *old_rows);
+            editor
+                .cursor
+                .set_selection(Selection::new(BufferOffset(2), BufferOffset(9)));
+            editor.insert_text("x", cx);
+            assert_eq!(editor.document_width_columns(), 3);
+        });
     }
 }

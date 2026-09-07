@@ -1,5 +1,14 @@
 {
   "ide": {
+    "file_too_large": "The file exceeds the 100 MiB IDE editing limit.",
+    "file_encoding": "File encoding",
+    "file_line_ending": "Line endings",
+    "reopen_encoding": "Reopen with encoding",
+    "save_encoding": "Save with encoding",
+    "reopen_dirty": "Save or discard changes before reopening with another encoding.",
+    "invalid_encoding": "Cannot decode this file with the selected encoding.",
+    "unrepresentable_text": "This encoding cannot represent all characters. Choose UTF-8 to save without losing text.",
+    "large_file": "Large file: syntax and wrapping off",
     "no_project": "No project open",
     "open_folder": "Open Folder",
     "select_folder": "Select Folder",

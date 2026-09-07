@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::filesystem::IdeFileError;
+use crate::filesystem::{IdeFileError, TextFileFormat};
 use crate::tree::FileTreeSnapshot;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -144,6 +144,10 @@ pub struct ProjectSnapshot {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct EditorBuffer {
+    #[serde(default)]
+    pub format: TextFileFormat,
+    #[serde(default)]
+    pub saved_format: TextFileFormat,
     pub location: IdeLocation,
     pub text: String,
     pub saved_text: String,
@@ -157,6 +161,8 @@ impl EditorBuffer {
         let text = text.into();
         Self {
             location,
+            format: TextFileFormat::default(),
+            saved_format: TextFileFormat::default(),
             saved_text: text.clone(),
             text,
             version,
@@ -166,7 +172,9 @@ impl EditorBuffer {
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.revision != self.saved_revision || self.text != self.saved_text
+        self.revision != self.saved_revision
+            || self.text != self.saved_text
+            || self.format != self.saved_format
     }
 }
 
@@ -181,6 +189,10 @@ pub struct EditorTab {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BufferSnapshot {
+    #[serde(default)]
+    pub format: TextFileFormat,
+    #[serde(default)]
+    pub saved_format: TextFileFormat,
     pub tab_id: EditorTabId,
     pub location: IdeLocation,
     pub text: String,

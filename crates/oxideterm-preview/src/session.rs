@@ -312,7 +312,8 @@ async fn load_local_text(
     let encoding_hint = source_encoding_hint
         .as_deref()
         .or(options.encoding_hint.as_deref());
-    let (data, encoding, confidence, has_bom) = detect_and_decode_with_hint(&bytes, encoding_hint);
+    let (data, encoding, confidence, has_bom, _) =
+        detect_and_decode_with_hint(&bytes, encoding_hint);
     Ok(LoadedPreview {
         content: PreviewContent::Text {
             data,

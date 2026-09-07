@@ -1,6 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use base64::Engine;
 use std::{
     collections::HashMap,
     env,
@@ -11,6 +12,7 @@ use std::{
     sync::{LazyLock, Mutex},
     time::UNIX_EPOCH,
 };
+use zeroize::Zeroizing;
 
 use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
@@ -178,6 +180,8 @@ struct PathParams {
 #[derive(Debug, Deserialize)]
 struct ReadFileParams {
     path: String,
+    #[serde(default = "plain_encoding")]
+    encoding: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -344,23 +348,52 @@ fn sys_info() -> SysInfoResult {
         arch: env::consts::ARCH.to_string(),
         os: env::consts::OS.to_string(),
         pid: std::process::id(),
-        capabilities: Vec::new(),
+        capabilities: vec!["file-bytes".into()],
     }
 }
 
+const MAX_EDITABLE_FILE_SIZE: u64 = 100 * 1024 * 1024;
+
 fn read_file(params: ReadFileParams) -> Result<ReadFileResult, RpcError> {
+    use std::io::Read;
     let path = normalize_path(&params.path);
-    let bytes = fs::read(&path).map_err(|error| map_io_error(error, &path))?;
-    if looks_binary(&bytes) {
-        return Err(rpc_error(ERR_INVALID_PARAMS, "File is not a text file"));
+    let file = File::open(&path).map_err(|error| map_io_error(error, &path))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| map_io_error(error, &path))?;
+    if metadata.len() > MAX_EDITABLE_FILE_SIZE {
+        return Err(rpc_error(ERR_INVALID_PARAMS, "File exceeds IDE size limit"));
     }
-    let metadata = fs::metadata(&path).map_err(|error| map_io_error(error, &path))?;
+    let mut bytes = Zeroizing::new(Vec::new());
+    file.take(MAX_EDITABLE_FILE_SIZE + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| map_io_error(error, &path))?;
+    if bytes.len() as u64 > MAX_EDITABLE_FILE_SIZE {
+        return Err(rpc_error(ERR_INVALID_PARAMS, "File exceeds IDE size limit"));
+    }
     let hash = hash_bytes(&bytes);
-    let (content, encoding) = encode_content(&bytes)?;
+    let (content, encoding) = match params.encoding.as_str() {
+        "base64" => (
+            base64::engine::general_purpose::STANDARD.encode(&bytes),
+            "base64".into(),
+        ),
+        "plain" => {
+            if looks_binary(&bytes) {
+                return Err(rpc_error(ERR_INVALID_PARAMS, "File is not a text file"));
+            }
+            encode_content(&bytes)?
+        }
+        _ => {
+            return Err(rpc_error(
+                ERR_INVALID_PARAMS,
+                "Unsupported file transfer encoding",
+            ));
+        }
+    };
     Ok(ReadFileResult {
         content,
         hash,
-        size: metadata.len(),
+        size: bytes.len() as u64,
         mtime: mtime_secs(&metadata),
         encoding,
     })
@@ -381,7 +414,10 @@ fn write_file(params: WriteFileParams) -> Result<WriteFileResult, RpcError> {
         }
     }
 
-    let bytes = decode_content(&params.content, &params.encoding)?;
+    let bytes = Zeroizing::new(decode_content(&params.content, &params.encoding)?);
+    if bytes.len() as u64 > MAX_EDITABLE_FILE_SIZE {
+        return Err(rpc_error(ERR_INVALID_PARAMS, "File exceeds IDE size limit"));
+    }
     let atomic = atomic_write(&path, &bytes)?;
     let metadata = fs::metadata(&path).map_err(|error| map_io_error(error, &path))?;
     Ok(WriteFileResult {
@@ -954,6 +990,9 @@ fn encode_content(bytes: &[u8]) -> Result<(String, String), RpcError> {
 fn decode_content(content: &str, encoding: &str) -> Result<Vec<u8>, RpcError> {
     match encoding {
         "plain" => Ok(content.as_bytes().to_vec()),
+        "base64" => base64::engine::general_purpose::STANDARD
+            .decode(content)
+            .map_err(|_| rpc_error(ERR_INVALID_PARAMS, "Invalid base64 file content")),
         other => Err(rpc_error(
             ERR_INVALID_PARAMS,
             format!("Unsupported encoding: {other}"),
@@ -1171,6 +1210,46 @@ mod tests {
 
     fn symbol_names(symbols: &[SymbolInfo]) -> Vec<String> {
         symbols.iter().map(|symbol| symbol.name.clone()).collect()
+    }
+
+    #[test]
+    fn byte_file_protocol_preserves_legacy_encoding_and_conflicts() {
+        let root = test_root("file-bytes");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("legacy.txt");
+        let source = b"\xd6\xd0\xce\xc4\r\n".repeat(600_000);
+        fs::write(&path, &source).unwrap();
+        let result = read_file(ReadFileParams {
+            path: path.to_string_lossy().into_owned(),
+            encoding: "base64".into(),
+        })
+        .unwrap();
+        assert_eq!(result.size, source.len() as u64);
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(&result.content)
+                .unwrap(),
+            source
+        );
+        write_file(WriteFileParams {
+            path: path.to_string_lossy().into_owned(),
+            content: result.content,
+            encoding: "base64".into(),
+            expect_hash: Some(result.hash),
+        })
+        .unwrap();
+        assert_eq!(fs::read(&path).unwrap(), source);
+        assert!(
+            write_file(WriteFileParams {
+                path: path.to_string_lossy().into_owned(),
+                content: "eA==".into(),
+                encoding: "base64".into(),
+                expect_hash: Some("stale".into())
+            })
+            .is_err()
+        );
+        assert_eq!(fs::read(&path).unwrap(), source);
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn test_root(name: &str) -> PathBuf {

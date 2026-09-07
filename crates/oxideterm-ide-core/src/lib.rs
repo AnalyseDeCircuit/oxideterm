@@ -30,3 +30,5 @@ pub use model::{
 pub use plugin_snapshot::{IdePluginFileSnapshot, IdePluginProjectSnapshot, IdePluginSnapshot};
 pub use tree::{FileTreeDirectorySnapshot, FileTreeSnapshot, FileTreeState};
 pub use workspace::{IdeWorkspace, SaveError, WorkspaceError};
+
+pub use filesystem::{LineEnding, MAX_EDITABLE_FILE_SIZE, TextFileFormat};

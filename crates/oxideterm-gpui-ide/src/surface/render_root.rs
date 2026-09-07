@@ -22,8 +22,13 @@ impl Render for IdeSurface {
                     window.focus(&this.focus_handle, cx);
                     let closed_tab_menu = this.tab_context_menu.take().is_some();
                     let closed_tree_menu = this.tree_context_menu.take().is_some();
+                    let closed_format_menu = this.file_format_menu.take().is_some();
                     let closed_agent_menu = this.agent_status_menu.take().is_some();
-                    if closed_tab_menu || closed_tree_menu || closed_agent_menu {
+                    if closed_format_menu
+                        || closed_tab_menu
+                        || closed_tree_menu
+                        || closed_agent_menu
+                    {
                         cx.notify();
                     }
                 }),
@@ -35,12 +40,15 @@ impl Render for IdeSurface {
                     this.finish_folder_picker_path_selection_drag();
                 }),
             )
-            .on_mouse_move(
-                cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                    this.update_folder_picker_path_selection_drag(event, window, cx);
-                }),
-            )
-            .on_key_down(cx.listener(|this, event, window, cx| {
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                this.update_folder_picker_path_selection_drag(event, window, cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if event.keystroke.key == "escape" && this.file_format_menu.take().is_some() {
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
                 if this.search.open {
                     // Project search owns the IDE text-input channel while its
                     // overlay is open; editor find must not consume the same key.
@@ -90,6 +98,9 @@ impl Render for IdeSurface {
         }
         if let Some(menu) = self.tree_context_menu.clone() {
             root = root.child(self.render_tree_context_menu(menu, _window, cx));
+        }
+        if let Some(menu) = self.file_format_menu {
+            root = root.child(self.render_file_format_menu(menu, _window, cx));
         }
         if let Some(menu) = self.agent_status_menu {
             root = root.child(self.render_agent_status_menu(menu, _window, cx));

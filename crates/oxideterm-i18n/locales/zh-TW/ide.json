@@ -1,5 +1,14 @@
 {
   "ide": {
+    "file_too_large": "檔案超過 IDE 的 100 MiB 編輯上限。",
+    "file_encoding": "檔案編碼",
+    "file_line_ending": "換行格式",
+    "reopen_encoding": "以指定編碼重新開啟",
+    "save_encoding": "以指定編碼儲存",
+    "reopen_dirty": "請先儲存或放棄修改，再以其他編碼重新開啟。",
+    "invalid_encoding": "無法使用所選編碼解碼此檔案。",
+    "unrepresentable_text": "此編碼無法表示全部字元。請選擇 UTF-8，避免遺失文字。",
+    "large_file": "大型檔案：已關閉語法分析和自動折行",
     "no_project": "沒有開啟的專案",
     "open_folder": "開啟資料夾",
     "select_folder": "選擇資料夾",

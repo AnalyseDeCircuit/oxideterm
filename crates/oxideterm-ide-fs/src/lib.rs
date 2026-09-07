@@ -19,3 +19,5 @@ pub use agent::{
 };
 pub use local::LocalIdeFileSystem;
 pub use node_sftp::NodeSftpIdeFileSystem;
+
+mod text;

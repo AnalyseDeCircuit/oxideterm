@@ -54,7 +54,7 @@ mod tests {
     #[test]
     fn drops_agent_registry_without_tokio_reactor() {
         let registry = AgentRegistry::default();
-        let (write_tx, _write_rx) = mpsc::channel::<String>(1);
+        let (write_tx, _write_rx) = mpsc::channel::<zeroize::Zeroizing<String>>(1);
         let (shutdown_tx, _shutdown_rx) = mpsc::channel::<()>(1);
         let (watch_tx, _) = broadcast::channel::<AgentWatchEvent>(1);
         let transport = AgentTransport {
@@ -270,7 +270,7 @@ mod tests {
         let fs = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Ask);
         fs.ensure_ide_session_for_node(&node_id).await.unwrap();
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
-        let (write_tx, mut write_rx) = mpsc::channel::<String>(1);
+        let (write_tx, mut write_rx) = mpsc::channel::<zeroize::Zeroizing<String>>(1);
         let (watch_tx, _) = broadcast::channel::<AgentWatchEvent>(1);
         let (shutdown_tx, _shutdown_rx) = mpsc::channel::<()>(1);
         fs.registry.register(

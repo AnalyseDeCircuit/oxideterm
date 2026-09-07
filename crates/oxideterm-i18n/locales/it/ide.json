@@ -1,5 +1,14 @@
 {
   "ide": {
+    "file_too_large": "Il file supera il limite di modifica dell’IDE di 100 MiB.",
+    "file_encoding": "Codifica del file",
+    "file_line_ending": "Fine riga",
+    "reopen_encoding": "Riapri con codifica",
+    "save_encoding": "Salva con codifica",
+    "reopen_dirty": "Salva o annulla le modifiche prima di riaprire con un’altra codifica.",
+    "invalid_encoding": "Impossibile decodificare il file con la codifica selezionata.",
+    "unrepresentable_text": "Questa codifica non supporta tutti i caratteri. Scegli UTF-8 per non perdere testo.",
+    "large_file": "File grande: sintassi e ritorno automatico disattivati",
     "no_project": "Nessun progetto aperto",
     "open_folder": "Apri cartella",
     "select_folder": "Seleziona cartella",

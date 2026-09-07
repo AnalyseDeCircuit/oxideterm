@@ -39,6 +39,16 @@ pub type SaveCallback =
 pub type ModifiedWordClickCallback =
     Box<dyn FnMut(String, &mut Window, &mut Context<TextEditorView>) -> Result<(), String>>;
 
+pub const LARGE_FILE_THRESHOLD: usize = 10 * 1024 * 1024;
+
+fn normalize_editor_text(text: String) -> String {
+    if text.contains('\r') {
+        text.replace("\r\n", "\n").replace('\r', "\n")
+    } else {
+        text
+    }
+}
+
 const EDITOR_CARET_BLINK_INTERVAL: Duration = Duration::from_millis(530);
 
 /// Controls whether the editor owns a full document surface or sits inside an
@@ -278,6 +288,7 @@ pub struct TextEditorView {
     on_save: Option<SaveCallback>,
     on_modified_word_click: Option<ModifiedWordClickCallback>,
     save_status: EditorSaveStatus,
+    language: Option<LanguageId>,
     syntax: Option<SyntaxSession>,
     highlight_spans: Vec<HighlightSpan>,
     highlight_line_spans: Vec<Range<usize>>,
@@ -315,7 +326,7 @@ impl TextEditorView {
     pub fn new(text: impl Into<String>, tokens: &ThemeTokens, cx: &mut Context<Self>) -> Self {
         let metrics = EditorMetrics::from_theme(tokens);
         let settings = EditorSettings::default();
-        let buffer = TextBuffer::new(text);
+        let buffer = TextBuffer::new(normalize_editor_text(text.into()));
         Self {
             buffer,
             cursor: Cursor::new(BufferOffset::ZERO),
@@ -328,6 +339,7 @@ impl TextEditorView {
             on_modified_word_click: None,
             save_status: EditorSaveStatus::Clean,
             syntax: None,
+            language: None,
             highlight_spans: Vec::new(),
             highlight_line_spans: Vec::new(),
             bracket_pair_by_caret: HashMap::new(),
@@ -438,7 +450,7 @@ impl TextEditorView {
     }
 
     pub fn replace_text_external(&mut self, text: impl Into<String>, cx: &mut Context<Self>) {
-        let text = text.into();
+        let text = normalize_editor_text(text.into());
         if self.buffer.text() == text {
             return;
         }
@@ -591,20 +603,27 @@ impl TextEditorView {
     }
 
     pub fn set_language(&mut self, language: Option<LanguageId>, cx: &mut Context<Self>) {
-        self.syntax = language.and_then(|language| {
-            self.buffer
-                .with_text(|text| SyntaxSession::parse(language, text).ok())
-        });
+        self.language = language;
+        self.syntax = language
+            .filter(|_| !self.is_large_file())
+            .and_then(|language| {
+                self.buffer
+                    .with_text(|text| SyntaxSession::parse(language, text).ok())
+            });
         self.refresh_highlights();
         self.refresh_foldable_ranges();
         cx.notify();
+    }
+
+    pub fn is_large_file(&self) -> bool {
+        self.buffer.len() > LARGE_FILE_THRESHOLD
     }
 
     pub fn insert_text(&mut self, text: impl Into<String>, cx: &mut Context<Self>) {
         if self.read_only {
             return;
         }
-        self.replace_all_selections_with_caret(text, cx);
+        self.replace_all_selections_with_caret(normalize_editor_text(text.into()), cx);
     }
 
     pub fn delete_backward(&mut self, cx: &mut Context<Self>) {
@@ -721,6 +740,7 @@ impl TextEditorView {
         if range.is_empty() && replacement.is_empty() {
             return;
         }
+        let row_edit = self.unwrapped_row_edit(range, &replacement);
         let caret = BufferOffset(range.start.0 + replacement.len());
         let syntax_edit = self.syntax.as_ref().map(|_| {
             self.buffer
@@ -737,6 +757,7 @@ impl TextEditorView {
             self.marked_text = None;
             self.save_status = EditorSaveStatus::Dirty;
             self.clear_folds_after_buffer_change();
+            self.restore_unwrapped_rows_after_edit(row_edit);
             self.refresh_find_matches();
             self.viewport
                 .clamp(self.document_row_count(), self.metrics.line_height);
@@ -832,6 +853,16 @@ impl TextEditorView {
     }
 
     fn apply_syntax_edit(&mut self, edit: Option<SyntaxEdit>) {
+        if self.is_large_file() {
+            self.syntax = None;
+        } else if self.syntax.is_none() {
+            self.syntax = self.language.and_then(|language| {
+                self.buffer
+                    .with_text(|text| SyntaxSession::parse(language, text).ok())
+            });
+            self.refresh_highlights();
+            return;
+        }
         if let (Some(syntax), Some(edit)) = (self.syntax.as_mut(), edit)
             && self
                 .buffer
@@ -847,6 +878,14 @@ impl TextEditorView {
     }
 
     fn reparse_syntax(&mut self) {
+        if self.is_large_file() {
+            self.syntax = None;
+        } else if self.syntax.is_none() {
+            self.syntax = self.language.and_then(|language| {
+                self.buffer
+                    .with_text(|text| SyntaxSession::parse(language, text).ok())
+            });
+        }
         if let Some(syntax) = self.syntax.as_mut()
             && self.buffer.with_text(|text| syntax.reparse(text)).is_err()
         {
@@ -1374,6 +1413,18 @@ mod tests {
             cache
                 .get(&cache_key(HighlightChunkCache::MAX_ENTRIES))
                 .is_some()
+        );
+    }
+}
+
+#[cfg(test)]
+mod line_ending_tests {
+    use super::*;
+    #[test]
+    fn clipboard_crlf_and_cr_become_single_newlines() {
+        assert_eq!(
+            normalize_editor_text("first\r\nsecond\rthird\n".into()),
+            "first\nsecond\nthird\n"
         );
     }
 }

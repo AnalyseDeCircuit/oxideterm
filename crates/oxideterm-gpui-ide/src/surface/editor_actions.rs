@@ -89,7 +89,9 @@ impl IdeSurface {
                     name: tab.title.clone(),
                     language,
                     is_dirty: buffer.is_some_and(|buffer| {
-                        buffer.revision != buffer.saved_revision || buffer.text != buffer.saved_text
+                        buffer.revision != buffer.saved_revision
+                            || buffer.text != buffer.saved_text
+                            || buffer.format != buffer.saved_format
                     }),
                     is_active: snapshot.active_tab == Some(tab.id),
                     is_pinned: tab.is_pinned,
@@ -1112,10 +1114,13 @@ impl IdeSurface {
         let backend_runtime = self.backend_runtime.clone();
         cx.notify();
 
+        let encoding = remote_path(&location)
+            .and_then(|path| self.pending_restore_file_formats.get(path))
+            .map(|format| format.encoding.clone());
         cx.spawn(async move |weak, cx| {
             let result = await_ide_backend(backend_runtime.spawn({
                 let location = location.clone();
-                async move { open_text_file(fs, location).await }
+                async move { open_text_file(fs, location, encoding).await }
             }))
             .await;
             let _ = weak.update(cx, |this, cx| {
@@ -1139,6 +1144,7 @@ impl IdeSurface {
                         let _ = this
                             .workspace
                             .replace_buffer_text(tab_id, result.text.clone());
+                        let _ = this.workspace.set_file_format(tab_id, result.format);
                         let _ = this.workspace.mark_saved(tab_id, result.version);
                         this.create_editor(tab_id, &result.location, result.text, cx);
                         if let Some(dirty_text) = dirty_text {
@@ -1156,7 +1162,7 @@ impl IdeSurface {
                             let _ = this.workspace.request_close_tab(tab_id);
                             this.editors.remove(&tab_id);
                         }
-                        this.last_error = Some(error.message);
+                        this.last_error = Some(this.file_error_message(&error));
                     }
                 }
                 cx.notify();
@@ -1241,7 +1247,15 @@ impl IdeSurface {
         let Some(buffer) = self.workspace.buffer(tab_id).cloned() else {
             return;
         };
-        if buffer.is_dirty() || dirty_text == buffer.saved_text {
+        if buffer.is_dirty() {
+            return;
+        }
+        if let Some(format) = remote_path(&buffer.location)
+            .and_then(|path| self.pending_restore_file_formats.remove(path))
+        {
+            let _ = self.workspace.set_file_format(tab_id, format);
+        }
+        if dirty_text == buffer.saved_text {
             return;
         }
 
@@ -1451,7 +1465,7 @@ impl IdeSurface {
                         this.start_agent_watch_if_ready(cx);
                     }
                     Err(error) => {
-                        this.last_error = Some(error.message);
+                        this.last_error = Some(this.file_error_message(&error));
                     }
                 }
                 cx.notify();
@@ -1802,7 +1816,7 @@ impl IdeSurface {
                     }
                     Err(error) => {
                         this.delete_confirm = None;
-                        this.last_error = Some(error.message);
+                        this.last_error = Some(this.file_error_message(&error));
                     }
                 }
                 cx.notify();
@@ -1941,6 +1955,7 @@ impl IdeSurface {
         let saved_location = buffer.location.clone();
         let saved_text = buffer.text.clone();
         let saved_revision = buffer.revision;
+        let saved_format = buffer.format.clone();
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
@@ -1952,7 +1967,13 @@ impl IdeSurface {
             let result = backend_runtime
                 .spawn(async move {
                     match fs
-                        .write_file(&buffer.location, &buffer.text, Some(&buffer.version), mode)
+                        .write_file(
+                            &buffer.location,
+                            &buffer.text,
+                            &buffer.format,
+                            Some(&buffer.version),
+                            mode,
+                        )
                         .await
                     {
                         Ok(version) => Ok(version),
@@ -1998,6 +2019,7 @@ impl IdeSurface {
                                     request_id,
                                     saved_text,
                                     saved_revision,
+                                    saved_format,
                                     version,
                                 )
                                 .unwrap_or(false)
@@ -2007,6 +2029,7 @@ impl IdeSurface {
                                     tab_id,
                                     saved_text,
                                     saved_revision,
+                                    saved_format,
                                     version,
                                 )
                                 .unwrap_or(false)
@@ -2040,7 +2063,11 @@ impl IdeSurface {
                         }
                     }
                     Err((error, _)) => {
-                        let message = format!("{}: {}", this.labels.save_failed, error.message);
+                        let message = format!(
+                            "{}: {}",
+                            this.labels.save_failed,
+                            this.file_error_message(&error)
+                        );
                         this.last_error = Some(message.clone());
                         if let Some(editor) = this.editors.get(&tab_id) {
                             editor.update(cx, |editor, cx| {
@@ -2096,6 +2123,7 @@ impl IdeSurface {
         let conflict_location = buffer.location.clone();
         let saved_text = buffer.text.clone();
         let saved_revision = buffer.revision;
+        let saved_format = buffer.format.clone();
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
@@ -2105,7 +2133,8 @@ impl IdeSurface {
                 WriteMode::CreateOrReplace
             };
             let result = await_ide_backend(backend_runtime.spawn(async move {
-                force_write_conflict(&fs, &buffer.location, &buffer.text, mode).await
+                force_write_conflict(&fs, &buffer.location, &buffer.text, &buffer.format, mode)
+                    .await
             }))
             .await;
             let _ = weak.update(cx, |this, cx| {
@@ -2130,6 +2159,7 @@ impl IdeSurface {
                                     request_id,
                                     saved_text,
                                     saved_revision,
+                                    saved_format,
                                     version,
                                 )
                                 .unwrap_or(false)
@@ -2139,6 +2169,7 @@ impl IdeSurface {
                                     conflict.tab_id,
                                     saved_text,
                                     saved_revision,
+                                    saved_format,
                                     version,
                                 )
                                 .unwrap_or(false)
@@ -2152,7 +2183,11 @@ impl IdeSurface {
                         }
                     }
                     Err(error) => {
-                        let message = format!("{}: {}", this.labels.save_failed, error.message);
+                        let message = format!(
+                            "{}: {}",
+                            this.labels.save_failed,
+                            this.file_error_message(&error)
+                        );
                         this.last_error = Some(message.clone());
                         if let Some(current) = this
                             .conflict_state
@@ -2193,9 +2228,10 @@ impl IdeSurface {
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
-            let result = await_ide_backend(
-                backend_runtime.spawn(async move { fs.read_file(&buffer.location).await }),
-            )
+            let result = await_ide_backend(backend_runtime.spawn(async move {
+                fs.read_file(&buffer.location, Some(&buffer.format.encoding))
+                    .await
+            }))
             .await;
             let _ = weak.update(cx, |this, cx| {
                 if this.generation != generation
@@ -2211,6 +2247,7 @@ impl IdeSurface {
                         let _ = this
                             .workspace
                             .replace_buffer_text(conflict.tab_id, data.text.clone());
+                        let _ = this.workspace.set_file_format(conflict.tab_id, data.format);
                         let _ = this.workspace.mark_saved(conflict.tab_id, data.version);
                         if let Some(editor) = this.editors.get(&conflict.tab_id) {
                             editor.update(cx, |editor, cx| {
@@ -2261,8 +2298,18 @@ impl IdeSurface {
     fn is_tab_dirty(&self, tab_id: EditorTabId, cx: &mut Context<Self>) -> bool {
         self.editors
             .get(&tab_id)
-            .map(|editor| editor.read(cx).buffer().is_dirty())
-            .or_else(|| self.workspace.buffer(tab_id).map(|buffer| buffer.is_dirty()))
+            .map(|editor| {
+                editor.read(cx).buffer().is_dirty()
+                    || self
+                        .workspace
+                        .buffer(tab_id)
+                        .is_some_and(|buffer| buffer.format != buffer.saved_format)
+            })
+            .or_else(|| {
+                self.workspace
+                    .buffer(tab_id)
+                    .map(|buffer| buffer.is_dirty())
+            })
             .unwrap_or(false)
     }
 
@@ -2296,11 +2343,12 @@ async fn force_write_conflict(
     fs: &impl AsyncIdeFileSystem,
     location: &IdeLocation,
     text: &str,
+    format: &oxideterm_ide_core::TextFileFormat,
     mode: WriteMode,
 ) -> Result<SavedFileVersion, IdeFileError> {
     // The user explicitly accepted replacing the changed remote file, so the
     // force write must omit the stale version precondition.
-    fs.write_file(location, text, None, mode).await
+    fs.write_file(location, text, format, None, mode).await
 }
 
 fn tree_name_input_has_effect(input: &TreeNameInputState, normalized_name: &str) -> bool {
@@ -2663,7 +2711,11 @@ mod conflict_overwrite_tests {
             FileSystemCapabilities::default()
         }
 
-        fn read_file<'a>(&'a self, _location: &'a IdeLocation) -> IdeFsFuture<'a, IdeFileData> {
+        fn read_file<'a>(
+            &'a self,
+            _location: &'a IdeLocation,
+            _encoding: Option<&'a str>,
+        ) -> IdeFsFuture<'a, IdeFileData> {
             Box::pin(async { panic!("read_file is not used by this test") })
         }
 
@@ -2682,6 +2734,7 @@ mod conflict_overwrite_tests {
             &'a self,
             location: &'a IdeLocation,
             text: &'a str,
+            _format: &'a oxideterm_ide_core::TextFileFormat,
             expected_version: Option<&'a SavedFileVersion>,
             mode: WriteMode,
         ) -> IdeFsFuture<'a, SavedFileVersion> {
@@ -2705,6 +2758,7 @@ mod conflict_overwrite_tests {
             &fs,
             &location,
             "local contents",
+            &TextFileFormat::default(),
             WriteMode::AtomicReplace,
         )
         .await

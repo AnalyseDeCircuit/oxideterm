@@ -7,6 +7,16 @@
 /// the crate testable without depending on the app-level locale crate.
 #[derive(Clone, Debug)]
 pub struct IdeLabels {
+    pub file_too_large: String,
+    pub file_encoding: String,
+    pub file_line_ending: String,
+    pub reopen_encoding: String,
+    pub save_encoding: String,
+    pub reopen_dirty: String,
+    pub invalid_encoding: String,
+    pub unrepresentable_text: String,
+    pub large_file: String,
+
     pub open_folder: String,
     pub search: String,
     pub refresh: String,
@@ -116,6 +126,16 @@ pub struct IdeLabels {
 impl Default for IdeLabels {
     fn default() -> Self {
         Self {
+            file_too_large: "The file exceeds the 100 MiB IDE editing limit.".into(),
+            file_encoding: "File encoding".into(),
+            file_line_ending: "Line endings".into(),
+            reopen_encoding: "Reopen with encoding".into(),
+            save_encoding: "Save with encoding".into(),
+            reopen_dirty: "Save or discard changes before reopening with another encoding.".into(),
+            invalid_encoding: "Cannot decode this file with the selected encoding.".into(),
+            unrepresentable_text: "This encoding cannot represent all characters. Choose UTF-8 to save without losing text.".into(),
+            large_file: "Large file: syntax and wrapping off".into(),
+
             open_folder: "Open Folder".into(),
             search: "Search".into(),
             refresh: "Refresh".into(),

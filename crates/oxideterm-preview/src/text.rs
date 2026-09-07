@@ -103,7 +103,8 @@ pub fn extension_to_language(ext: &str) -> Option<String> {
 }
 
 pub fn detect_and_decode(bytes: &[u8]) -> (String, String, f32, bool) {
-    detect_and_decode_with_hint(bytes, None)
+    let (text, encoding, confidence, bom, _) = detect_and_decode_with_hint(bytes, None);
+    (text, encoding, confidence, bom)
 }
 
 /// Line-ending style retained while a decoded text file is edited with LF internally.
@@ -145,14 +146,21 @@ fn detect_text_line_ending(text: &str) -> TextLineEnding {
     TextLineEnding::Lf
 }
 
+/// Expose decoding errors so editors can refuse lossy text while previews remain tolerant.
 pub fn detect_and_decode_with_hint(
     bytes: &[u8],
     encoding_hint: Option<&str>,
-) -> (String, String, f32, bool) {
+) -> (String, String, f32, bool, bool) {
     let (has_bom, bom_encoding) = check_bom(bytes);
     if let Some(encoding) = bom_encoding {
-        let (text, _, _) = encoding.decode(bytes);
-        return (text.into_owned(), encoding.name().to_string(), 1.0, true);
+        let (text, _, had_errors) = encoding.decode(bytes);
+        return (
+            text.into_owned(),
+            encoding.name().to_string(),
+            1.0,
+            true,
+            had_errors,
+        );
     }
 
     if let Some(encoding) = encoding_hint.and_then(|hint| {
@@ -167,7 +175,12 @@ pub fn detect_and_decode_with_hint(
             encoding.name().to_string(),
             if had_errors { 0.76 } else { 0.95 },
             has_bom,
+            had_errors,
         );
+    }
+
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return (text.to_owned(), "UTF-8".into(), 1.0, false, false);
     }
 
     let mut detector = chardetng::EncodingDetector::new();
@@ -192,6 +205,7 @@ pub fn detect_and_decode_with_hint(
             confidence
         },
         has_bom,
+        had_errors,
     )
 }
 
@@ -225,13 +239,14 @@ mod tests {
     #[test]
     fn encoding_hint_takes_precedence_without_bom() {
         let (encoded, _, _) = encoding_rs::GBK.encode("中文");
-        let (decoded, encoding, confidence, has_bom) =
+        let (decoded, encoding, confidence, has_bom, had_errors) =
             detect_and_decode_with_hint(&encoded, Some("gbk"));
 
         assert_eq!(decoded, "中文");
         assert_eq!(encoding, "GBK");
         assert!(confidence > 0.9);
         assert!(!has_bom);
+        assert!(!had_errors);
     }
 
     #[test]

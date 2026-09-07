@@ -1,5 +1,14 @@
 {
   "ide": {
+    "file_too_large": "文件超过 IDE 的 100 MiB 编辑上限。",
+    "file_encoding": "文件编码",
+    "file_line_ending": "换行格式",
+    "reopen_encoding": "以指定编码重新打开",
+    "save_encoding": "以指定编码保存",
+    "reopen_dirty": "请先保存或放弃修改，再以其他编码重新打开。",
+    "invalid_encoding": "无法使用所选编码解码此文件。",
+    "unrepresentable_text": "此编码无法表示全部字符。请选择 UTF-8，避免丢失文本。",
+    "large_file": "大文件：已关闭语法分析和自动折行",
     "no_project": "未打开项目",
     "open_folder": "打开文件夹",
     "select_folder": "选择文件夹",

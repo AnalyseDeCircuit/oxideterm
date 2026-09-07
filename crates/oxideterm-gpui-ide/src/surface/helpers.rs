@@ -85,6 +85,7 @@ async fn open_project_with_root_listing(
 async fn open_text_file(
     fs: NodeAgentIdeFileSystem,
     location: IdeLocation,
+    encoding: Option<String>,
 ) -> Result<FileOpenResult, oxideterm_ide_core::IdeFileError> {
     let (node_id, path) = match &location {
         IdeLocation::Remote { node_id, path } => (node_id.clone(), path.clone()),
@@ -97,15 +98,16 @@ async fn open_text_file(
     };
     match fs.check_file(node_id, path).await? {
         IdeFileCheck::Editable { .. } => {
-            let data = fs.read_file(&location).await?;
+            let data = fs.read_file(&location, encoding.as_deref()).await?;
             Ok(FileOpenResult {
                 location,
                 text: data.text,
+                format: data.format,
                 version: data.version,
             })
         }
         IdeFileCheck::TooLarge { size, limit } => Err(oxideterm_ide_core::IdeFileError::new(
-            oxideterm_ide_core::IdeFileErrorKind::Unsupported,
+            oxideterm_ide_core::IdeFileErrorKind::TooLarge,
             format!("File is too large to edit ({size} > {limit})"),
         )),
         IdeFileCheck::Binary => Err(oxideterm_ide_core::IdeFileError::new(

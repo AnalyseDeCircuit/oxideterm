@@ -1,5 +1,14 @@
 {
   "ide": {
+    "file_too_large": "Tệp vượt quá giới hạn chỉnh sửa 100 MiB của IDE.",
+    "file_encoding": "Mã hóa tệp",
+    "file_line_ending": "Kiểu xuống dòng",
+    "reopen_encoding": "Mở lại với mã hóa",
+    "save_encoding": "Lưu với mã hóa",
+    "reopen_dirty": "Lưu hoặc bỏ các thay đổi trước khi mở lại với mã hóa khác.",
+    "invalid_encoding": "Không thể giải mã tệp bằng mã hóa đã chọn.",
+    "unrepresentable_text": "Mã hóa này không biểu diễn được mọi ký tự. Chọn UTF-8 để lưu mà không mất văn bản.",
+    "large_file": "Tệp lớn: tắt phân tích cú pháp và ngắt dòng tự động",
     "no_project": "Không có dự án nào được mở",
     "open_folder": "Mở thư mục",
     "select_folder": "Chọn thư mục",

@@ -46,7 +46,15 @@ impl IdeSurface {
                         this.child(format!("{dirty_count} unsaved"))
                     }),
             )
-            .child(div().truncate().child(active_path))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .min_w_0()
+                    .child(div().truncate().child(active_path))
+                    .child(self.render_file_format_triggers(cx)),
+            )
             .into_any_element()
     }
 

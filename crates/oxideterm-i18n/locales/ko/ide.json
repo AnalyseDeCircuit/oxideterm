@@ -1,5 +1,14 @@
 {
   "ide": {
+    "file_too_large": "파일이 IDE 편집 한도인 100 MiB를 초과합니다.",
+    "file_encoding": "파일 인코딩",
+    "file_line_ending": "줄바꿈 형식",
+    "reopen_encoding": "인코딩을 지정하여 다시 열기",
+    "save_encoding": "인코딩을 지정하여 저장",
+    "reopen_dirty": "다른 인코딩으로 다시 열기 전에 변경 사항을 저장하거나 취소하세요.",
+    "invalid_encoding": "선택한 인코딩으로 파일을 디코딩할 수 없습니다.",
+    "unrepresentable_text": "이 인코딩은 일부 문자를 표현할 수 없습니다. 텍스트 손실 없이 저장하려면 UTF-8을 선택하세요.",
+    "large_file": "대용량 파일: 구문 분석 및 줄바꿈 끄기",
     "no_project": "열린 프로젝트 없음",
     "open_folder": "폴더 열기",
     "select_folder": "폴더 선택",

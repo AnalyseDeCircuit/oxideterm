@@ -33,6 +33,7 @@ impl IdeSurface {
             conflict_state: None,
             pending_restore_files: Vec::new(),
             pending_restore_dirty_contents: BTreeMap::new(),
+            pending_restore_file_formats: BTreeMap::new(),
             pending_reconnect_restore_node_id: None,
             pending_reconnect_restore_files_remaining: 0,
             last_error: None,
@@ -56,6 +57,8 @@ impl IdeSurface {
             agent_opt_in_open: false,
             agent_opt_in_remember: false,
             agent_status_menu: None,
+            file_format_menu: None,
+            file_format_bounds: [None; 2],
             agent_status_trigger_bounds: None,
             agent_remove_confirm_open: false,
             agent_action: None,
@@ -160,7 +163,9 @@ impl IdeSurface {
             .buffers
             .iter()
             .filter(|buffer| {
-                buffer.revision != buffer.saved_revision || buffer.text != buffer.saved_text
+                buffer.revision != buffer.saved_revision
+                    || buffer.text != buffer.saved_text
+                    || buffer.format != buffer.saved_format
             })
             .filter_map(|buffer| match &buffer.location {
                 IdeLocation::Remote { path, .. } => Some((path.clone(), buffer.text.clone())),
@@ -173,6 +178,23 @@ impl IdeSurface {
             tab_paths,
             connection_id,
             dirty_contents,
+            file_formats: snapshot
+                .buffers
+                .iter()
+                .filter_map(|buffer| {
+                    let IdeLocation::Remote { path, .. } = &buffer.location else {
+                        return None;
+                    };
+                    Some((
+                        path.clone(),
+                        oxideterm_ssh::ReconnectIdeFileFormat {
+                            encoding: buffer.format.encoding.clone(),
+                            has_bom: buffer.format.has_bom,
+                            line_ending: buffer.format.line_ending.label().into(),
+                        },
+                    ))
+                })
+                .collect(),
         })
     }
 
@@ -195,6 +217,7 @@ impl IdeSurface {
         }
         if self.pending_restore_files.is_empty() {
             self.pending_restore_dirty_contents.clear();
+            self.pending_restore_file_formats.clear();
         }
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
@@ -256,6 +279,7 @@ impl IdeSurface {
     ) {
         self.pending_restore_files = file_paths;
         self.pending_restore_dirty_contents.clear();
+        self.pending_restore_file_formats.clear();
         self.open_remote_project(node_id, root_path, cx);
     }
 
@@ -320,6 +344,26 @@ impl IdeSurface {
         }
 
         self.pending_restore_dirty_contents = snapshot.dirty_contents;
+        self.pending_restore_file_formats = snapshot
+            .file_formats
+            .into_iter()
+            .filter_map(|(path, format)| {
+                let line_ending = match format.line_ending.as_str() {
+                    "LF" => LineEnding::Lf,
+                    "CRLF" => LineEnding::CrLf,
+                    "CR" => LineEnding::Cr,
+                    _ => return None,
+                };
+                Some((
+                    path,
+                    TextFileFormat {
+                        encoding: format.encoding,
+                        has_bom: format.has_bom,
+                        line_ending,
+                    },
+                ))
+            })
+            .collect();
         if same_project_open {
             self.load_state = IdeLoadState::Ready;
             self.last_error = None;

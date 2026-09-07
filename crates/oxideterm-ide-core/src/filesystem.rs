@@ -33,8 +33,47 @@ pub struct FileStat {
     pub is_read_only: bool,
 }
 
+/// The IDE limit is independent of file-manager preview limits.
+pub const MAX_EDITABLE_FILE_SIZE: u64 = 100 * 1024 * 1024;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum LineEnding {
+    #[default]
+    Lf,
+    CrLf,
+    Cr,
+}
+
+impl LineEnding {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Lf => "LF",
+            Self::CrLf => "CRLF",
+            Self::Cr => "CR",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TextFileFormat {
+    pub encoding: String,
+    pub has_bom: bool,
+    pub line_ending: LineEnding,
+}
+
+impl Default for TextFileFormat {
+    fn default() -> Self {
+        Self {
+            encoding: "UTF-8".into(),
+            has_bom: false,
+            line_ending: LineEnding::Lf,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IdeFileData {
+    pub format: TextFileFormat,
     pub text: String,
     pub version: SavedFileVersion,
 }
@@ -150,6 +189,9 @@ pub enum IdeFileCheck {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum IdeFileErrorKind {
+    TooLarge,
+    InvalidEncoding,
+    UnrepresentableText,
     Disconnected,
     Timeout,
     PermissionDenied,
@@ -183,7 +225,11 @@ impl IdeFileError {
 pub trait IdeFileSystem {
     fn capabilities(&self) -> FileSystemCapabilities;
 
-    fn read_file(&self, location: &IdeLocation) -> Result<IdeFileData, IdeFileError>;
+    fn read_file(
+        &self,
+        location: &IdeLocation,
+        encoding: Option<&str>,
+    ) -> Result<IdeFileData, IdeFileError>;
 
     fn stat(&self, location: &IdeLocation) -> Result<FileStat, IdeFileError>;
 
@@ -193,6 +239,7 @@ pub trait IdeFileSystem {
         &self,
         location: &IdeLocation,
         text: &str,
+        format: &TextFileFormat,
         expected_version: Option<&SavedFileVersion>,
         mode: WriteMode,
     ) -> Result<SavedFileVersion, IdeFileError>;
@@ -209,7 +256,11 @@ pub type IdeFsFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, IdeFileError
 pub trait AsyncIdeFileSystem {
     fn capabilities(&self) -> FileSystemCapabilities;
 
-    fn read_file<'a>(&'a self, location: &'a IdeLocation) -> IdeFsFuture<'a, IdeFileData>;
+    fn read_file<'a>(
+        &'a self,
+        location: &'a IdeLocation,
+        encoding: Option<&'a str>,
+    ) -> IdeFsFuture<'a, IdeFileData>;
 
     fn stat<'a>(&'a self, location: &'a IdeLocation) -> IdeFsFuture<'a, FileStat>;
 
@@ -219,6 +270,7 @@ pub trait AsyncIdeFileSystem {
         &'a self,
         location: &'a IdeLocation,
         text: &'a str,
+        format: &'a TextFileFormat,
         expected_version: Option<&'a SavedFileVersion>,
         mode: WriteMode,
     ) -> IdeFsFuture<'a, SavedFileVersion>;

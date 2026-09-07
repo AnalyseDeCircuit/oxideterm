@@ -8132,9 +8132,11 @@ version = "2.0.27"
 dependencies = [
  "base64 0.22.1",
  "dashmap",
+ "encoding_rs",
  "futures-util",
  "oxideterm-backend-classification",
  "oxideterm-ide-core",
+ "oxideterm-preview",
  "oxideterm-sftp",
  "oxideterm-ssh",
  "russh",
@@ -8143,6 +8145,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "zeroize",
  "zstd",
 ]
 

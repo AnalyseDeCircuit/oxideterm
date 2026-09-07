@@ -33,6 +33,59 @@ impl AgentSession {
             .any(|available| available == capability)
     }
 
+    async fn read_file_bytes(
+        &self,
+        path: &str,
+    ) -> Result<(zeroize::Zeroizing<Vec<u8>>, SavedFileVersion), AgentError> {
+        if !self.supports_capability("file-bytes") {
+            return Err(AgentError::Deserialize(
+                "Agent does not support byte-preserving file IO".into(),
+            ));
+        }
+        let value = self
+            .transport
+            .call_with_timeout(
+                "fs/readFile",
+                serde_json::json!({ "path": path, "encoding": "base64" }),
+                300,
+            )
+            .await?;
+        let result: ReadFileResult = serde_json::from_value(value)
+            .map_err(|error| AgentError::Deserialize(error.to_string()))?;
+        let content = zeroize::Zeroizing::new(result.content);
+        if result.encoding != "base64" || result.size > oxideterm_ide_core::MAX_EDITABLE_FILE_SIZE {
+            return Err(AgentError::Deserialize("Invalid file response".into()));
+        }
+        let bytes = zeroize::Zeroizing::new(
+            base64::engine::general_purpose::STANDARD
+                .decode(content.as_bytes())
+                .map_err(|_| AgentError::Deserialize("Invalid file bytes".into()))?,
+        );
+        let version = SavedFileVersion {
+            size_bytes: Some(result.size),
+            modified_millis: Some(result.mtime as i64),
+            etag: Some(result.hash),
+        };
+        Ok((bytes, version))
+    }
+
+    async fn write_file_bytes(
+        &self,
+        path: &str,
+        bytes: &[u8],
+        expect_hash: Option<&str>,
+    ) -> Result<WriteFileResult, AgentError> {
+        if !self.supports_capability("file-bytes") {
+            return Err(AgentError::Deserialize(
+                "Agent does not support byte-preserving file IO".into(),
+            ));
+        }
+        let content =
+            zeroize::Zeroizing::new(base64::engine::general_purpose::STANDARD.encode(bytes));
+        let value = self.transport.call_with_timeout("fs/writeFile", serde_json::json!({ "path": path, "content": &*content, "encoding": "base64", "expect_hash": expect_hash }), 300).await?;
+        serde_json::from_value(value).map_err(|error| AgentError::Deserialize(error.to_string()))
+    }
+
     async fn read_file(&self, path: &str) -> Result<ReadFileResult, AgentError> {
         let value = self
             .transport

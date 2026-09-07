@@ -1,5 +1,14 @@
 {
   "ide": {
+    "file_too_large": "Le fichier dépasse la limite d’édition de 100 MiB de l’IDE.",
+    "file_encoding": "Encodage du fichier",
+    "file_line_ending": "Fins de ligne",
+    "reopen_encoding": "Rouvrir avec un encodage",
+    "save_encoding": "Enregistrer avec un encodage",
+    "reopen_dirty": "Enregistrez ou abandonnez les modifications avant de rouvrir avec un autre encodage.",
+    "invalid_encoding": "Impossible de décoder le fichier avec cet encodage.",
+    "unrepresentable_text": "Cet encodage ne représente pas tous les caractères. Choisissez UTF-8 pour conserver le texte.",
+    "large_file": "Fichier volumineux : syntaxe et retour automatique désactivés",
     "no_project": "Aucun projet ouvert",
     "open_folder": "Ouvrir le dossier",
     "select_folder": "Sélectionner le dossier",

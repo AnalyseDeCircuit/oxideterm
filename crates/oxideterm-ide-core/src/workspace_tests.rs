@@ -21,6 +21,7 @@ impl MemoryFs {
     fn new(text: &str, version: SavedFileVersion) -> Self {
         Self {
             data: IdeFileData {
+                format: Default::default(),
                 text: text.into(),
                 version,
             },
@@ -44,7 +45,11 @@ impl IdeFileSystem for MemoryFs {
         }
     }
 
-    fn read_file(&self, _location: &IdeLocation) -> Result<IdeFileData, IdeFileError> {
+    fn read_file(
+        &self,
+        _location: &IdeLocation,
+        _encoding: Option<&str>,
+    ) -> Result<IdeFileData, IdeFileError> {
         Ok(self.data.clone())
     }
 
@@ -63,6 +68,7 @@ impl IdeFileSystem for MemoryFs {
         &self,
         _location: &IdeLocation,
         _text: &str,
+        _format: &crate::TextFileFormat,
         _expected_version: Option<&SavedFileVersion>,
         mode: WriteMode,
     ) -> Result<SavedFileVersion, IdeFileError> {
@@ -206,6 +212,7 @@ fn stale_save_completion_preserves_newer_dirty_text() {
             tab_id,
             save_text,
             save_revision,
+            crate::TextFileFormat::default(),
             SavedFileVersion {
                 size_bytes: Some(13),
                 modified_millis: Some(200),
@@ -247,6 +254,7 @@ fn close_after_save_keeps_tab_open_when_newer_edit_arrives() {
             request.id,
             save_text,
             save_revision,
+            crate::TextFileFormat::default(),
             SavedFileVersion {
                 size_bytes: Some(7),
                 modified_millis: Some(300),
@@ -689,4 +697,45 @@ fn reorders_tabs_to_dnd_target_index() {
         .map(|tab| tab.id)
         .collect::<Vec<_>>();
     assert_eq!(order, vec![second, third, first]);
+}
+
+#[test]
+fn format_changes_remain_dirty_when_an_earlier_save_completes() {
+    let mut workspace = IdeWorkspace::new();
+    let root = IdeLocation::local("/project");
+    workspace.open_project(root, "project");
+    let outcome = workspace
+        .open_file(
+            IdeLocation::local("/project/file.txt"),
+            "same text",
+            SavedFileVersion::unknown(),
+        )
+        .unwrap();
+    let tab = match outcome {
+        OpenFileOutcome::Opened(tab) | OpenFileOutcome::Reused(tab) => tab,
+    };
+    let version = workspace.buffer(tab).unwrap().revision;
+    let format = crate::TextFileFormat {
+        encoding: "GBK".into(),
+        line_ending: crate::LineEnding::CrLf,
+        has_bom: false,
+    };
+    workspace.set_file_format(tab, format.clone()).unwrap();
+    assert!(
+        !workspace
+            .complete_save_at_revision(
+                tab,
+                "same text",
+                version,
+                crate::TextFileFormat::default(),
+                SavedFileVersion::unknown()
+            )
+            .unwrap()
+    );
+    let snapshot = workspace.snapshot().unwrap();
+    assert_eq!(snapshot.buffers[0].format, format);
+    let mut restored = IdeWorkspace::new();
+    restored.restore_snapshot(snapshot);
+    assert_eq!(restored.buffer(tab).unwrap().format, format);
+    assert!(restored.buffer(tab).unwrap().is_dirty());
 }
