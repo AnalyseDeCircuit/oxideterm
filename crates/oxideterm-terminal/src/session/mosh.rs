@@ -625,6 +625,14 @@ impl TerminalSessionBackend for MoshTerminalSession {
         Some(crate::TerminalSearchSource::new(self.term.clone(), self.resize.cols))
     }
 
+    fn set_selection(&self, selection: Option<crate::TerminalSelectionRange>) {
+        crate::selection::set_term_selection(&mut self.term.lock(), selection);
+    }
+
+    fn selection(&self) -> Option<crate::TerminalSelectionRange> {
+        crate::selection::term_selection(&self.term.lock())
+    }
+
     fn clear_buffer(&mut self) {
         clear_terminal_buffer(&mut self.term.lock());
         self.graphics.clear();

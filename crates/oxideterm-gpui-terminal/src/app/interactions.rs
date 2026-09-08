@@ -652,7 +652,7 @@ impl TerminalPane {
             .is_some_and(|selection| !selection.is_empty());
         cx.write_to_clipboard(ClipboardItem::new_string(self.copy_text()));
         if had_selection && !self.settings.keep_selection_on_copy {
-            self.selection = None;
+            self.set_selection(None);
             cx.notify();
         }
     }
@@ -809,7 +809,7 @@ impl TerminalPane {
 
         cx.write_to_clipboard(ClipboardItem::new_string(text));
         if !self.settings.keep_selection_on_copy {
-            self.selection = None;
+            self.set_selection(None);
             cx.notify();
         }
         true
@@ -847,7 +847,7 @@ impl TerminalPane {
         // The clipboard receives the exact editable command slice, while the
         // remote line editor remains responsible for applying the deletion.
         cx.write_to_clipboard(ClipboardItem::new_string(text));
-        self.selection = None;
+        self.set_selection(None);
         self.selecting = false;
         self.selection_autoscroll_position = None;
         self.send_user_protocol_bytes(&bytes, cx);
@@ -899,7 +899,7 @@ impl TerminalPane {
                 };
                 cx.write_to_clipboard(ClipboardItem::new_string(current_text));
                 if !this.settings.keep_selection_on_copy {
-                    this.selection = None;
+                    this.set_selection(None);
                     cx.notify();
                 }
             });
@@ -972,7 +972,7 @@ impl TerminalPane {
         };
         cx.write_to_clipboard(ClipboardItem::new_string(text));
         if !self.settings.keep_selection_on_copy {
-            self.selection = None;
+            self.set_selection(None);
             cx.notify();
         }
         true
@@ -1141,11 +1141,11 @@ impl TerminalPane {
         let Some(point) = grid_point_for_viewport_point(&self.snapshot, point) else {
             return;
         };
-        self.selection = Some(TerminalSelection {
+        self.set_selection(Some(TerminalSelection {
             anchor: point,
             head: point,
             mode,
-        });
+        }));
         self.selecting = true;
         self.selection_autoscroll_position = Some(position);
         self.schedule_selection_autoscroll(cx);
@@ -1155,7 +1155,7 @@ impl TerminalPane {
     fn select_word(&mut self, position: gpui::Point<Pixels>, cx: &mut Context<Self>) {
         let point = self.terminal_point_for_position(position);
         if let Some(selection) = word_selection_at_point(&self.snapshot, point) {
-            self.selection = Some(selection);
+            self.set_selection(Some(selection));
             self.selecting = false;
             cx.notify();
         } else {
@@ -1173,7 +1173,7 @@ impl TerminalPane {
             return false;
         };
 
-        self.selection = Some(selection);
+        self.set_selection(Some(selection));
         self.selecting = false;
         cx.notify();
         true
@@ -1182,7 +1182,7 @@ impl TerminalPane {
     fn select_line(&mut self, position: gpui::Point<Pixels>, cx: &mut Context<Self>) {
         let point = self.terminal_point_for_position(position);
         if let Some(selection) = line_selection_at_point(&self.snapshot, point) {
-            self.selection = Some(selection);
+            self.set_selection(Some(selection));
             self.selecting = false;
             cx.notify();
         } else {
@@ -1201,6 +1201,7 @@ impl TerminalPane {
                 selection.head = point;
             }
         }
+        self.set_selection(self.selection);
         cx.notify();
     }
 
@@ -1422,12 +1423,13 @@ impl TerminalPane {
 
         if event.button == MouseButton::Left && event.click_count <= 1 {
             let point = self.terminal_point_for_position(event.position);
-            if let Some(separator) = self.terminal.lock().tmux_separator_at(point.col, point.row) {
+            let separator = self.terminal.lock().tmux_separator_at(point.col, point.row);
+            if let Some(separator) = separator {
                 self.tmux_separator_drag = Some(TmuxSeparatorDrag {
                     separator,
                     last_point: point,
                 });
-                self.selection = None;
+                self.set_selection(None);
                 self.selecting = false;
                 cx.notify();
                 return;
@@ -1445,7 +1447,7 @@ impl TerminalPane {
                     .then(|| terminal.snapshot())
             };
             if let Some(snapshot) = selected_snapshot {
-                self.selection = None;
+                self.set_selection(None);
                 self.snapshot = self.stamp_snapshot(snapshot);
                 selected_tmux_pane = true;
                 cx.notify();
@@ -1507,7 +1509,7 @@ impl TerminalPane {
         } else {
             self.selecting = false;
             self.selection_autoscroll_position = None;
-            self.selection = None;
+            self.set_selection(None);
         }
     }
 
@@ -1846,7 +1848,7 @@ impl TerminalPane {
 
         // The remote line editor applies the move. An empty payload means that
         // the drop stayed inside the source selection and is already complete.
-        self.selection = None;
+        self.set_selection(None);
         self.selecting = false;
         self.selection_autoscroll_position = None;
         if bytes.is_empty() {
@@ -1886,7 +1888,7 @@ impl TerminalPane {
             else {
                 return false;
             };
-            self.selection = None;
+            self.set_selection(None);
             self.selecting = false;
             self.selection_autoscroll_position = None;
             self.send_user_protocol_bytes(&bytes, cx);
@@ -1912,7 +1914,7 @@ impl TerminalPane {
         // The remote shell is still the source of truth. Send regular cursor
         // keys so readline, zsh, and other line editors can apply their own
         // boundaries instead of letting the client mutate terminal state.
-        self.selection = None;
+        self.set_selection(None);
         self.selecting = false;
         self.selection_autoscroll_position = None;
         log_free_type_terminal(format_args!(
@@ -1959,7 +1961,7 @@ impl TerminalPane {
             return false;
         };
 
-        self.selection = None;
+        self.set_selection(None);
         self.selecting = false;
         self.selection_autoscroll_position = None;
         log_free_type_terminal(format_args!(
@@ -2040,7 +2042,7 @@ impl TerminalPane {
 
         // This is a terminal editing intent, not a local buffer mutation. Clear
         // the visual selection and let the remote shell echo the final command.
-        self.selection = None;
+        self.set_selection(None);
         self.selecting = false;
         self.selection_autoscroll_position = None;
         self.send_user_protocol_bytes(&bytes, cx);
@@ -3212,6 +3214,86 @@ mod tests {
     }
 
     #[gpui::test]
+    fn selection_follows_output_into_scrollback(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalScrollTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    20,
+                    3,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .unwrap()
+            })
+        });
+        pane.update(cx, |pane, _cx| {
+            pane.terminal
+                .lock()
+                .feed_recording_output(b"selected\r\nsecond\r\nthird");
+            let snapshot = pane.terminal.lock().snapshot();
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            pane.set_selection(Some(TerminalSelection {
+                anchor: TerminalGridPoint { line: 0, col: 0 },
+                head: TerminalGridPoint { line: 0, col: 7 },
+                mode: TerminalSelectionMode::Simple,
+            }));
+            pane.terminal.lock().feed_recording_output(b"\r\nfourth");
+            let snapshot = pane.terminal.lock().snapshot();
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            assert_eq!(pane.selected_text_snapshot().as_deref(), Some("selected"));
+            assert_eq!(pane.selection.unwrap().anchor.line, -1);
+        });
+    }
+
+    #[gpui::test]
+    fn reversed_selections_keep_their_corners_while_output_scrolls(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalScrollTestRoot);
+        for (mode, expected) in [
+            (TerminalSelectionMode::Simple, "bcde\nfghi"),
+            (TerminalSelectionMode::Block, "bcd\nghi"),
+        ] {
+            let pane = cx.update(|window, cx| {
+                cx.new(|cx| {
+                    TerminalPane::new_recording_playback(
+                        20,
+                        3,
+                        TerminalUiPreferences::default(),
+                        window,
+                        cx,
+                    )
+                    .unwrap()
+                })
+            });
+            pane.update(cx, |pane, _cx| {
+                pane.terminal
+                    .lock()
+                    .feed_recording_output(b"abcde\r\nfghij\r\nklmno");
+                let snapshot = pane.terminal.lock().snapshot();
+                pane.snapshot = pane.stamp_snapshot(snapshot);
+                pane.set_selection(Some(TerminalSelection {
+                    anchor: TerminalGridPoint { line: 1, col: 3 },
+                    head: TerminalGridPoint { line: 0, col: 1 },
+                    mode,
+                }));
+                pane.terminal.lock().feed_recording_output(b"\r\npqrst");
+                let snapshot = pane.terminal.lock().snapshot();
+                pane.snapshot = pane.stamp_snapshot(snapshot);
+                assert_eq!(
+                    pane.selection.unwrap().anchor,
+                    TerminalGridPoint { line: 0, col: 3 }
+                );
+                assert_eq!(
+                    pane.selection.unwrap().head,
+                    TerminalGridPoint { line: -1, col: 1 }
+                );
+                assert_eq!(pane.selected_text_snapshot().as_deref(), Some(expected));
+            });
+        }
+    }
+
+    #[gpui::test]
     fn selection_highlighting_is_opt_in_and_independent_of_search(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_window, _cx| TerminalScrollTestRoot);
         let pane = cx.update(|window, cx| {
@@ -3232,11 +3314,11 @@ mod tests {
                 .feed_recording_output(b"share share\r\nother text");
             let snapshot = pane.terminal.lock().snapshot();
             pane.snapshot = pane.stamp_snapshot(snapshot);
-            pane.selection = Some(TerminalSelection {
+            pane.set_selection(Some(TerminalSelection {
                 anchor: TerminalGridPoint { line: 0, col: 0 },
                 head: TerminalGridPoint { line: 0, col: 4 },
                 mode: TerminalSelectionMode::Simple,
-            });
+            }));
             assert!(!pane.selection_highlighting_enabled());
             assert!(pane.selection_highlight_query().is_none());
             pane.set_search_query(Some("other".into()), None, cx);
@@ -3255,13 +3337,13 @@ mod tests {
             pane.selecting = false;
             pane.selection.as_mut().unwrap().head = TerminalGridPoint { line: 1, col: 4 };
             assert!(pane.selection_highlight_query().is_none());
-            pane.selection = None;
+            pane.set_selection(None);
             assert!(pane.selection_highlight_query().is_none());
-            pane.selection = Some(TerminalSelection {
+            pane.set_selection(Some(TerminalSelection {
                 anchor: TerminalGridPoint { line: 0, col: 5 },
                 head: TerminalGridPoint { line: 0, col: 5 },
                 mode: TerminalSelectionMode::Semantic,
-            });
+            }));
             assert!(pane.selection_highlight_query().is_none());
             pane.set_selection_highlighting_override(Some(false), cx);
             assert!(pane.selection_highlight_query().is_none());
@@ -3324,7 +3406,7 @@ mod tests {
             };
             pane.snapshot = pane.stamp_snapshot(snapshot);
             let first_line = -(pane.snapshot.display_offset as i32);
-            pane.selection = Some(TerminalSelection {
+            pane.set_selection(Some(TerminalSelection {
                 anchor: TerminalGridPoint {
                     line: first_line,
                     col: 0,
@@ -3334,7 +3416,7 @@ mod tests {
                     col: 4,
                 },
                 mode: TerminalSelectionMode::Simple,
-            });
+            }));
             pane.set_selection_highlighting_override(Some(true), cx);
             assert_eq!(
                 pane.selection_highlight_query()
@@ -3433,7 +3515,7 @@ mod tests {
             };
             for require_shift in [false, true] {
                 pane.settings.selection_requires_shift = require_shift;
-                pane.selection = None;
+                pane.set_selection(None);
                 let snapshot = {
                     let mut terminal = pane.terminal.lock();
                     terminal.scroll_to_display_offset(usize::MAX);

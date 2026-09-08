@@ -242,6 +242,8 @@ pub trait TerminalSessionBackend: Send {
     fn search_source(&self) -> Option<crate::TerminalSearchSource> {
         None
     }
+    fn set_selection(&self, selection: Option<crate::TerminalSelectionRange>);
+    fn selection(&self) -> Option<crate::TerminalSelectionRange>;
     fn clear_buffer(&mut self);
     fn buffer_text(&self) -> String {
         String::new()

@@ -38,6 +38,7 @@ mod process;
 mod process_lifecycle;
 mod remote_shell_integration;
 mod search;
+mod selection;
 mod session;
 mod shell_completion;
 mod shell_integration;
@@ -86,6 +87,7 @@ pub use remote_shell_integration::{
     remove_remote_shell_integration,
 };
 pub use search::TerminalSearchSource;
+pub use selection::TerminalSelectionRange;
 pub use session::{
     MoshConnectionStatus, MoshPredictionDisplay, MoshTerminalConfig, SerialControlLine,
     SerialControlState, SerialDisplayMode, SerialError, SerialErrorCode, SerialFlowControl,

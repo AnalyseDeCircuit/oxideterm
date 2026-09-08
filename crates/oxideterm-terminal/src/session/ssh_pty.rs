@@ -1188,6 +1188,14 @@ impl TerminalSessionBackend for SshPtySession {
         ))
     }
 
+    fn set_selection(&self, selection: Option<crate::TerminalSelectionRange>) {
+        crate::selection::set_term_selection(&mut self.display_term().lock(), selection);
+    }
+
+    fn selection(&self) -> Option<crate::TerminalSelectionRange> {
+        crate::selection::term_selection(&self.display_term().lock())
+    }
+
     fn clear_buffer(&mut self) {
         let term = self.display_term();
         let mut term = term.lock();

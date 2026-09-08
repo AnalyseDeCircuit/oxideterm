@@ -531,6 +531,14 @@ impl TerminalSession {
         self.backend.search_source()
     }
 
+    pub fn set_selection(&self, selection: Option<crate::TerminalSelectionRange>) {
+        self.backend.set_selection(selection);
+    }
+
+    pub fn selection(&self) -> Option<crate::TerminalSelectionRange> {
+        self.backend.selection()
+    }
+
     pub fn clear_buffer(&mut self) {
         self.backend.clear_buffer();
     }

@@ -836,6 +836,14 @@ impl TerminalSessionBackend for TelnetSession {
         ))
     }
 
+    fn set_selection(&self, selection: Option<crate::TerminalSelectionRange>) {
+        crate::selection::set_term_selection(&mut self.term.lock(), selection);
+    }
+
+    fn selection(&self) -> Option<crate::TerminalSelectionRange> {
+        crate::selection::term_selection(&self.term.lock())
+    }
+
     fn clear_buffer(&mut self) {
         let mut term = self.term.lock();
         clear_terminal_buffer(&mut term);

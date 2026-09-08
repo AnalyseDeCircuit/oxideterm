@@ -725,6 +725,14 @@ impl LocalPtySession {
         search_matches_from_term(&term, self.size.cols, query)
     }
 
+    pub fn set_selection(&self, selection: Option<crate::TerminalSelectionRange>) {
+        crate::selection::set_term_selection(&mut self.display_term().lock(), selection);
+    }
+
+    pub fn selection(&self) -> Option<crate::TerminalSelectionRange> {
+        crate::selection::term_selection(&self.display_term().lock())
+    }
+
     pub fn search_source(&self) -> TerminalSearchSource {
         TerminalSearchSource::new(self.display_term(), self.size.cols)
     }

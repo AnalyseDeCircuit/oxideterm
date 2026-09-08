@@ -1232,7 +1232,72 @@ impl TerminalPane {
         self.title.clone()
     }
 
+    fn set_selection(&mut self, selection: Option<TerminalSelection>) {
+        let range = selection.map(|selection| {
+            let (start, end) = selection.normalized();
+            let is_block = selection.mode == TerminalSelectionMode::Block;
+            oxideterm_terminal::TerminalSelectionRange {
+                start_line: start.line,
+                end_line: end.line,
+                start_col: if is_block {
+                    start.col.min(end.col)
+                } else {
+                    start.col
+                },
+                end_col: if is_block {
+                    start.col.max(end.col)
+                } else {
+                    end.col
+                },
+                is_block,
+            }
+        });
+        self.terminal.lock().set_selection(range);
+        self.selection = selection;
+        self.selection_highlight_cache = None;
+    }
+
+    fn sync_selection_from_terminal(&mut self) {
+        let Some(previous) = self.selection else {
+            return;
+        };
+        let range = self.terminal.lock().selection();
+        self.selection = range.map(|range| {
+            let mut start = TerminalGridPoint {
+                line: range.start_line,
+                col: range.start_col,
+            };
+            let mut end = TerminalGridPoint {
+                line: range.end_line,
+                col: range.end_col,
+            };
+            let reversed = (previous.anchor.line, previous.anchor.col)
+                > (previous.head.line, previous.head.col);
+            if previous.mode == TerminalSelectionMode::Block
+                && ((previous.anchor.col > previous.head.col) != reversed)
+            {
+                std::mem::swap(&mut start.col, &mut end.col);
+            }
+            TerminalSelection {
+                anchor: if reversed { end } else { start },
+                head: if reversed { start } else { end },
+                mode: previous.mode,
+            }
+        });
+        if self.selection != Some(previous) {
+            self.selection_highlight_cache = None;
+            // A drag payload refers to its original range; do not apply it after
+            // output changes that range while the pointer gesture is in flight.
+            self.free_type_drag = None;
+        }
+        if self.selection.is_none() {
+            self.selecting = false;
+            self.selection_autoscroll_position = None;
+        }
+    }
+
     fn stamp_snapshot(&mut self, mut snapshot: TerminalSnapshot) -> TerminalSnapshot {
+        self.sync_selection_from_terminal();
         let backend_reused_rows = snapshot.lines.iter().any(|row| row.line_id != 0);
         reconcile_snapshot_line_ids(
             &mut snapshot,
@@ -2532,7 +2597,7 @@ impl TerminalPane {
         self.clear_smooth_scroll_remainder();
         self.snapshot = self.stamp_snapshot(snapshot);
         self.mark_terminal_content_changed(cx);
-        self.selection = None;
+        self.set_selection(None);
         self.search_query = None;
         self.selected_search_match = None;
         self.reset_command_marks_for_terminal_reset();
