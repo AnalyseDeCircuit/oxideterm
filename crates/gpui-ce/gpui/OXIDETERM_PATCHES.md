@@ -184,9 +184,10 @@ implementation informed by `zed-industries/zed#61274`.
 ### Windows nested message-pump exit
 
 `gpui_windows::WindowsPlatformInner::run_foreground_task` yields to paint and input after its
-execution budget. `PeekMessageW` can also remove `WM_QUIT` in these filtered passes. The nested
-pump reposts that message with its exit code and returns immediately so the main `GetMessageW`
-loop can terminate. Native Windows regression tests cover frame-message coalescing, suppression
+execution budget. If its message dispatcher receives `WM_QUIT`, it reposts that message with
+its exit code and returns immediately so the main `GetMessageW` loop can terminate.
+Queue-category filters such as `PM_QS_INPUT` are distinct from message-number ranges and need
+not retrieve a pending quit; the forwarding regression test uses an unfiltered read. Native Windows regression tests cover frame-message coalescing, suppression
 of in-draw animation wakeups, and propagation of the quit code to the main loop.
 
 ### Native Windows thread-pool dispatch

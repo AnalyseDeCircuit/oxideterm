@@ -384,8 +384,8 @@ impl WindowsPlatform {
 
 fn dispatch_pending_message(msg: &MSG) -> bool {
     if msg.message == WM_QUIT {
-        // PeekMessage removes WM_QUIT even when filtering for paint or input.
-        // Leave it for the outer GetMessage loop and stop this nested pump.
+        // A quit retrieved by a nested pump belongs to the outer GetMessage
+        // loop; preserve its exit code and stop dispatching here.
         unsafe { PostQuitMessage(msg.wParam.0 as i32) };
         return false;
     }
@@ -1620,17 +1620,18 @@ mod tests {
     #[test]
     fn windows_message_nested_pump_preserves_quit_code() {
         use super::{
-            GetMessageW, MSG, PM_QS_INPUT, PM_REMOVE, PeekMessageW, PostQuitMessage, WM_QUIT,
+            GetMessageW, MSG, PM_NOREMOVE, PM_REMOVE, PeekMessageW, PostQuitMessage, WM_QUIT,
             dispatch_pending_message,
         };
         let mut message = MSG::default();
+        let _ = unsafe { PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE) };
         unsafe { PostQuitMessage(37) };
-        assert!(
-            unsafe { PeekMessageW(&mut message, None, 0, 0, PM_REMOVE | PM_QS_INPUT) }.as_bool()
-        );
+        // PM_QS_INPUT filters queue categories, so it need not retrieve a quit.
+        // An unfiltered read exercises forwarding of an actually consumed quit.
+        assert!(unsafe { PeekMessageW(&mut message, None, 0, 0, PM_REMOVE) }.as_bool());
         assert_eq!(message.message, WM_QUIT);
         assert!(!dispatch_pending_message(&message));
-        assert!(unsafe { PeekMessageW(&mut message, None, 0, 0, super::PM_NOREMOVE) }.as_bool());
+        assert!(unsafe { PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE) }.as_bool());
         // The main loop must still observe the quit and its original exit code.
         assert_eq!(unsafe { GetMessageW(&mut message, None, 0, 0) }.0, 0);
         assert_eq!(message.wParam.0, 37);
