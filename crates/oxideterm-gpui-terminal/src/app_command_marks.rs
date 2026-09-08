@@ -549,9 +549,14 @@ fn has_clock_like_text(text: &str) -> bool {
 struct TerminalInputTracker {
     value: String,
     cursor_index: usize,
+    untracked: bool,
 }
 
 impl TerminalInputTracker {
+    fn tracked_state(&self) -> Option<TerminalAutosuggestInputState> {
+        (!self.untracked).then(|| self.state())
+    }
+
     fn state(&self) -> TerminalAutosuggestInputState {
         TerminalAutosuggestInputState {
             value: self.value.clone(),
@@ -563,7 +568,7 @@ impl TerminalInputTracker {
     fn apply_bytes(&mut self, bytes: &[u8]) -> Option<String> {
         let data = String::from_utf8_lossy(bytes);
         if data.contains("\u{1b}[200~") || data.contains("\u{1b}[201~") {
-            self.reset();
+            self.invalidate();
             return None;
         }
 
@@ -572,6 +577,12 @@ impl TerminalInputTracker {
         let mut index = 0;
         while index < chars.len() {
             let ch = chars[index];
+            // History/completion is rendered by the shell, not echoed from these
+            // bytes. Do not record search terms or subsequent edits as a command.
+            if self.untracked && !matches!(ch, '\r' | '\n' | '\u{3}') {
+                index += 1;
+                continue;
+            }
             match ch {
                 '\r' | '\n' => {
                     if !self.value.trim().is_empty() {
@@ -582,6 +593,10 @@ impl TerminalInputTracker {
                 }
                 '\u{3}' => {
                     self.reset();
+                    index += 1;
+                }
+                '\u{12}' | '\u{13}' | '\u{10}' | '\u{e}' | '\t' => {
+                    self.invalidate();
                     index += 1;
                 }
                 '\u{15}' => {
@@ -610,7 +625,7 @@ impl TerminalInputTracker {
                     if consumed > 0 {
                         index += consumed;
                     } else {
-                        self.reset();
+                        self.invalidate();
                         index += 1;
                     }
                 }
@@ -625,8 +640,14 @@ impl TerminalInputTracker {
     }
 
     fn reset(&mut self) {
-        self.value.clear();
+        zeroize::Zeroize::zeroize(&mut self.value);
         self.cursor_index = 0;
+        self.untracked = false;
+    }
+
+    fn invalidate(&mut self) {
+        self.reset();
+        self.untracked = true;
     }
 
     fn insert(&mut self, ch: char) {
@@ -977,6 +998,15 @@ fn input_tracker_handles_submission_editing_state_and_reset_sequences() {
         assert_eq!(tracker.apply_bytes(b"echo before"), None);
         assert_eq!(tracker.apply_bytes(b"\x1b[200~pasted\x1b[201~"), None);
         assert_eq!(tracker.apply_bytes(b"\r"), None);
+    }
+
+    #[test]
+    fn history_search_does_not_record_the_query_as_a_command() {
+        let mut tracker = TerminalInputTracker::default();
+        tracker.apply_bytes(b"old\x12bravo\x05");
+        assert!(tracker.state().value.is_empty());
+        assert_eq!(tracker.apply_bytes(b" edited\r"), None);
+        assert_eq!(tracker.apply_bytes(b"pwd\r"), Some("pwd".into()));
     }
 
     #[test]

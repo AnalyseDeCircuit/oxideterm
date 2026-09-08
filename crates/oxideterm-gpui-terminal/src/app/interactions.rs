@@ -1878,9 +1878,22 @@ impl TerminalPane {
         }
 
         let target = self.terminal_point_for_position(position);
-        let input_state = self.input_tracker.state();
+        let input_state = self.input_tracker.tracked_state();
+        if input_state.is_none()
+            && let Some(range) = history_search_command_range(&self.snapshot)
+        {
+            let Some(bytes) = history_search_click_bytes(&self.snapshot, target, range, mode)
+            else {
+                return false;
+            };
+            self.selection = None;
+            self.selecting = false;
+            self.selection_autoscroll_position = None;
+            self.send_user_protocol_bytes(&bytes, cx);
+            return true;
+        }
         let Some(cursor_move) =
-            active_input_cursor_move(&self.snapshot, target, Some(&input_state))
+            active_input_cursor_move(&self.snapshot, target, input_state.as_ref())
         else {
             log_free_type_terminal(format_args!(
                 "click rejected: target outside active input row={} col={}",
@@ -2424,9 +2437,116 @@ fn active_input_cursor_move(
     }
 
     Some(FreeTypeCursorMove::new(
-        raw_target_offset as isize - cursor_offset as isize,
+        visible_input_cursor_delta(
+            snapshot,
+            cursor_offset + start * width,
+            raw_target_offset + start * width,
+        ),
         FreeTypeCursorBoundary::None,
     ))
+}
+
+fn visible_input_cursor_delta(snapshot: &TerminalSnapshot, from: usize, to: usize) -> isize {
+    let width = snapshot.cols.max(1);
+    let steps = (from.min(to)..from.max(to))
+        .filter(|offset| {
+            let col = offset % width;
+            let row = &snapshot.lines[offset / width];
+            // Readline can paint a margin space before wrapping a wide glyph;
+            // neither that padding nor a wide glyph's second cell is a key step.
+            let wide_wrap_padding = col + 1 == width
+                && row.wrapped
+                && row.cells.get(col).is_some_and(|cell| cell.ch == ' ')
+                && snapshot
+                    .lines
+                    .get(offset / width + 1)
+                    .and_then(|next| next.cells.first())
+                    .is_some_and(|cell| cell.wide);
+            !wide_wrap_padding
+                && (col == 0 || !row.cells.get(col - 1).is_some_and(|cell| cell.wide))
+        })
+        .count() as isize;
+    if to < from { -steps } else { steps }
+}
+
+fn visible_input_end(snapshot: &TerminalSnapshot, start: usize, end: usize) -> usize {
+    let width = snapshot.cols.max(1);
+    (start..end)
+        .rev()
+        .find_map(|offset| {
+            let cell = snapshot
+                .lines
+                .get(offset / width)?
+                .cells
+                .get(offset % width)?;
+            (cell.ch != ' ' || !cell.zerowidth().is_empty())
+                .then_some((offset + if cell.wide { 2 } else { 1 }).min(end))
+        })
+        .unwrap_or(start)
+}
+
+fn history_search_command_range(snapshot: &TerminalSnapshot) -> Option<std::ops::Range<usize>> {
+    let (start_row, end_row) = active_input_block_bounds(snapshot)?;
+    let width = snapshot.cols.max(1);
+    let first = Zeroizing::new(snapshot.lines[start_row].text());
+    // Readline replaces PS1 with a search prompt; ZLE keeps the command above
+    // a separate status line. Recognize those layouts only in the live input.
+    for prefix in [
+        "(reverse-i-search)",
+        "(failed reverse-i-search)",
+        "(i-search)",
+        "(failed i-search)",
+    ] {
+        if let Some(search) = first.strip_prefix(prefix) {
+            let delimiter = search.find("': ")?;
+            let prefix_end = prefix.len() + delimiter + "': ".len();
+            let mut byte_offset = 0;
+            let start_col = snapshot.lines[start_row].cells.iter().position(|cell| {
+                byte_offset += cell.ch.len_utf8() + cell.zerowidth().len();
+                byte_offset >= prefix_end
+            })? + 1;
+            let start = start_row * width + start_col;
+            let end = visible_input_end(snapshot, start, (end_row + 1) * width);
+            return Some(start..end);
+        }
+    }
+    let status = Zeroizing::new(snapshot.lines.get(end_row + 1)?.text());
+    let status = status
+        .trim_start()
+        .strip_prefix("failing ")
+        .unwrap_or(status.trim_start());
+    if status.starts_with("bck-i-search:") || status.starts_with("fwd-i-search:") {
+        let start = start_row * width;
+        return Some(start..visible_input_end(snapshot, start, (end_row + 1) * width));
+    }
+    None
+}
+
+fn history_search_click_bytes(
+    snapshot: &TerminalSnapshot,
+    target: TerminalPoint,
+    range: std::ops::Range<usize>,
+    mode: TermMode,
+) -> Option<Vec<u8>> {
+    let width = snapshot.cols.max(1);
+    let target_offset = target
+        .row
+        .checked_mul(width)?
+        .checked_add(target.col.min(width - 1))?;
+    if range.is_empty() || target_offset < range.start || target.row > (range.end - 1) / width {
+        return None;
+    }
+    let delta = visible_input_cursor_delta(snapshot, range.end, target_offset.min(range.end));
+    if delta.unsigned_abs() > TERMINAL_FREE_TYPE_MAX_CURSOR_STEPS {
+        return None;
+    }
+    // End-of-line accepts incremental search in Readline and ZLE without
+    // executing the result. Its stable endpoint avoids the search-prompt cursor.
+    let mut bytes = vec![0x05];
+    if let Some(motion) = cursor_motion_bytes(delta, mode) {
+        bytes.extend_from_slice(&motion);
+    }
+    Some(bytes)
 }
 
 fn active_input_command_target_index(
@@ -3942,7 +4062,103 @@ mod tests {
         .ok_or_else(|| "Free Type move bytes were not generated".to_string())?;
         submit_real_pty_command(session, move_command, &move_bytes)?;
         wait_for_real_pty_text(session, "OT_MOVE:efabcd")?;
+        if case.mode_name == "emacs" && matches!(case.shell_id, "bash" | "zsh") {
+            validate_history_search_click_in_real_pty(session)?;
+        }
         Ok(())
+    }
+
+    #[cfg(unix)]
+    fn validate_history_search_click_in_real_pty(
+        session: &mut TerminalSession,
+    ) -> Result<(), String> {
+        for cols in [160, 40] {
+            session
+                .resize_with_cell_size(cols, 24, 0, 0)
+                .map_err(|e| e.to_string())?;
+            for (argument, query, target_char, result) in [
+                ("alpha_bravo_charlie", "bravo", 'c', "alpha_bravo_Xcharlie"),
+                ("alpha_你好世界_tail", "tail", '你', "alpha_X你好世界_tail"),
+            ] {
+                for accept_first in [false, true] {
+                    let prefix = format!("OT_S{cols}_{}:", u8::from(accept_first));
+                    let command = format!("printf '{prefix}%s\\n' {argument}");
+                    submit_real_pty_command(session, &command, &[])?;
+                    wait_for_real_pty_text(session, &format!("{prefix}{argument}"))?;
+                    session
+                        .write_protocol_bytes(b"\x12")
+                        .map_err(|e| e.to_string())?;
+                    session.write_text(query).map_err(|e| e.to_string())?;
+                    let mut snapshot = wait_for_real_pty_search_state(session, true)?;
+                    if accept_first {
+                        session
+                            .write_protocol_bytes(b"\x05")
+                            .map_err(|e| e.to_string())?;
+                        snapshot = wait_for_real_pty_search_state(session, false)?;
+                    }
+                    let (start, end) =
+                        active_input_block_bounds(&snapshot).ok_or("missing active input")?;
+                    let search_range = history_search_command_range(&snapshot);
+                    let target = (start..=end)
+                        .find_map(|row| {
+                            snapshot.lines[row]
+                                .cells
+                                .iter()
+                                .enumerate()
+                                .position(|(col, cell)| {
+                                    cell.ch == target_char
+                                        && search_range.as_ref().is_none_or(|range| {
+                                            range.contains(&(row * snapshot.cols + col))
+                                        })
+                                })
+                                .map(|col| TerminalPoint { row, col })
+                        })
+                        .ok_or("history result target is not visible")?;
+                    let bytes = if accept_first {
+                        free_type_cursor_move_bytes(
+                            active_input_cursor_move(&snapshot, target, None)
+                                .ok_or("accepted history result is not editable")?,
+                            session.mode(),
+                        )
+                        .unwrap_or_default()
+                    } else {
+                        history_search_click_bytes(
+                            &snapshot,
+                            target,
+                            history_search_command_range(&snapshot)
+                                .ok_or("missing history search range")?,
+                            session.mode(),
+                        )
+                        .ok_or("search click rejected")?
+                    };
+                    session
+                        .write_protocol_bytes(&bytes)
+                        .map_err(|e| e.to_string())?;
+                    session
+                        .write_protocol_bytes(b"X\r")
+                        .map_err(|e| e.to_string())?;
+                    wait_for_real_pty_text(session, &format!("{prefix}{result}"))?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn wait_for_real_pty_search_state(
+        session: &mut TerminalSession,
+        searching: bool,
+    ) -> Result<TerminalSnapshot, String> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            session.read_pending();
+            let snapshot = session.snapshot();
+            if history_search_command_range(&snapshot).is_some() == searching {
+                return Ok(snapshot);
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Err("timed out waiting for history search redraw".into())
     }
 
     #[cfg(unix)]
@@ -4263,6 +4479,103 @@ mod tests {
         assert!(!free_type_selected_text_can_be_command_input(
             "echo one\recho two"
         ));
+    }
+
+    #[test]
+    fn free_type_click_after_history_search_uses_the_displayed_command() {
+        let mut tracker = super::super::TerminalInputTracker::default();
+        tracker.apply_bytes(b"\x12bravo\x05");
+        let snapshot = test_snapshot_with_cursor(
+            vec![test_row("$ echo alpha bravo charlie", true)],
+            0,
+            25,
+            80,
+        );
+        assert_eq!(
+            active_input_cursor_delta(
+                &snapshot,
+                TerminalPoint { row: 0, col: 7 },
+                tracker.tracked_state().as_ref()
+            ),
+            Some(-18)
+        );
+        tracker.apply_bytes(b"\x03");
+        assert!(tracker.tracked_state().is_some());
+    }
+
+    #[test]
+    fn free_type_history_search_click_accepts_without_executing() {
+        for (rows, cursor_col, target, expected_steps) in [
+            (
+                vec![test_row(
+                    "(reverse-i-search)`bravo': echo alpha bravo charlie",
+                    true,
+                )],
+                37,
+                TerminalPoint { row: 0, col: 44 },
+                7,
+            ),
+            (
+                vec![
+                    test_row("$ echo alpha bravo charlie", true),
+                    test_row("bck-i-search: bravo_", false),
+                ],
+                12,
+                TerminalPoint { row: 0, col: 19 },
+                7,
+            ),
+        ] {
+            let snapshot = test_snapshot_with_cursor(rows, 0, cursor_col, 80);
+            let range = history_search_command_range(&snapshot).unwrap();
+            for mode in [TermMode::default(), TermMode::APP_CURSOR] {
+                let bytes =
+                    history_search_click_bytes(&snapshot, target, range.clone(), mode).unwrap();
+                let mut expected = vec![0x05];
+                expected.extend(cursor_motion_bytes(-expected_steps, mode).unwrap());
+                assert_eq!(bytes, expected);
+            }
+            assert!(
+                history_search_click_bytes(
+                    &snapshot,
+                    TerminalPoint { row: 2, col: 0 },
+                    range,
+                    TermMode::default()
+                )
+                .is_none()
+            );
+        }
+        let snapshot = test_snapshot_with_cursor(
+            vec![test_row("(reverse-i-search)`missing': ", true)],
+            0,
+            27,
+            80,
+        );
+        assert!(
+            history_search_click_bytes(
+                &snapshot,
+                TerminalPoint { row: 0, col: 30 },
+                history_search_command_range(&snapshot).unwrap(),
+                TermMode::default()
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn free_type_untracked_click_counts_wide_characters_across_wrapped_rows() {
+        let mut terminal =
+            oxideterm_terminal::TerminalSession::recording_playback(10, 4, Default::default(), 0);
+        // Leave the cursor beyond the wrap, not in the emulator's pending-wrap cell.
+        terminal.feed_recording_output("$ echo 你好世界 abcd".as_bytes());
+        let snapshot = terminal.snapshot();
+        assert_eq!(
+            active_input_cursor_delta(&snapshot, TerminalPoint { row: 0, col: 7 }, None),
+            Some(-9)
+        );
+        assert_eq!(
+            active_input_cursor_delta(&snapshot, TerminalPoint { row: 1, col: 6 }, None),
+            Some(-5)
+        );
     }
 
     #[test]
