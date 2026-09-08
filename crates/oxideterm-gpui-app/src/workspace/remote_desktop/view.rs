@@ -44,6 +44,8 @@ impl WorkspaceApp {
             );
             return;
         };
+        // Gateway transport has one route owner; never proxy the loopback tunnel again.
+        profile.socks_proxy = None;
         if connection_attempt_id.is_none() {
             let saved_profile_id = self
                 .connection_store

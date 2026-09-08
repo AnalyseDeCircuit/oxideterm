@@ -1596,6 +1596,19 @@ impl ConnectionStore {
         let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
         let previous_credentials = self.stored_credential_targets(&CredentialOwner::RemoteDesktop(id.clone()));
         let existing = self.get_remote_desktop_profile(&id).cloned();
+        let old_proxy_ids = existing
+            .as_ref()
+            .map(|profile| collect_keychain_ids_for_upstream_proxy(&profile.upstream_proxy))
+            .unwrap_or_default();
+        let policy = request.upstream_proxy.unwrap_or_else(|| {
+            existing
+                .as_ref()
+                .map(|profile| profile.upstream_proxy.clone())
+                .unwrap_or(SavedUpstreamProxyPolicy::Direct)
+        });
+        let existing_proxy = existing
+            .as_ref()
+            .map(|profile| profile.upstream_proxy.clone());
         let old_credential_ref = existing
             .as_ref()
             .and_then(|profile| profile.credential_ref.clone());
@@ -1638,10 +1651,14 @@ impl ConnectionStore {
         profile.ssh_gateway_connection_id =
             normalize_optional_text(request.ssh_gateway_connection_id);
         profile.credential_ref = credential_ref.clone();
+        profile.upstream_proxy = policy;
         profile.read_only = request.read_only;
         profile.session_options = request.session_options;
         profile.updated_at = now;
         profile.validate()?;
+        profile.upstream_proxy = self
+            .materialize_upstream_proxy_policy(profile.upstream_proxy, existing_proxy.as_ref())?;
+        let next_proxy_ids = collect_keychain_ids_for_upstream_proxy(&profile.upstream_proxy);
 
         if let (Some(credential), Some(reference)) =
             (request.credential.as_ref(), credential_ref.as_deref())
@@ -1673,10 +1690,20 @@ impl ConnectionStore {
         {
             self.delete_or_queue_connection_keychain_entry(stale_reference)?;
         }
+        for id in old_proxy_ids
+            .into_iter()
+            .filter(|id| !next_proxy_ids.contains(id))
+        {
+            self.delete_or_queue_connection_keychain_entry(id)?;
+        }
         Ok(profile)
     }
 
     pub fn delete_remote_desktop_profile(&mut self, id: &str) -> Result<bool> {
+        let proxy_ids = self
+            .get_remote_desktop_profile(id)
+            .map(|profile| collect_keychain_ids_for_upstream_proxy(&profile.upstream_proxy))
+            .unwrap_or_default();
         let credential_ref = self
             .get_remote_desktop_profile(id)
             .and_then(|profile| profile.credential_ref.clone());
@@ -1687,6 +1714,9 @@ impl ConnectionStore {
         let deleted = self.data.remote_desktop_profiles.len() != before;
         if deleted {
             self.save()?;
+            for reference in proxy_ids {
+                self.delete_or_queue_connection_keychain_entry(reference)?;
+            }
             if let Some(reference) = credential_ref {
                 self.delete_or_queue_connection_keychain_entry(reference)?;
             }

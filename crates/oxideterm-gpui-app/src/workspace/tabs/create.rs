@@ -293,6 +293,7 @@ impl WorkspaceApp {
             protocol,
             endpoint,
             transport_endpoint: None,
+            socks_proxy: None,
             username: launch.username,
             domain: launch.domain,
             credential_ref: None,

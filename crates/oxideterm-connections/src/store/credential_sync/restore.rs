@@ -176,11 +176,18 @@ fn update_reference(
             }
         }
         CredentialOwner::RemoteDesktop(id) => {
-            data.remote_desktop_profiles
+            let profile = data
+                .remote_desktop_profiles
                 .iter_mut()
                 .find(|p| &p.id == id)
-                .context("Remote desktop profile is unavailable")?
-                .credential_ref = reference;
+                .context("Remote desktop profile is unavailable")?;
+            match target.slot {
+                CredentialSlot::Primary => profile.credential_ref = reference,
+                CredentialSlot::UpstreamProxy => {
+                    set_policy_reference(&mut profile.upstream_proxy, reference)?
+                }
+                _ => bail!("Invalid remote desktop credential slot"),
+            }
         }
         CredentialOwner::GlobalProxy => {
             data.synced_global_proxy_reference = reference.clone();

@@ -373,6 +373,15 @@ impl WorkspaceApp {
                         "settings_view.network.protocol_http_connect",
                     ),
                 ] {
+                    if protocol == SavedUpstreamProxyProtocol::HttpConnect
+                        && self
+                            .connection_form_state(cx)
+                            .form
+                            .as_ref()
+                            .is_some_and(|form| form.transport == NewConnectionTransport::Rdp)
+                    {
+                        continue;
+                    }
                     popup = popup.child(select_option_action(
                         select_option(&self.tokens, self.i18n.t(label_key), protocol == selected),
                         false,

@@ -189,6 +189,7 @@ fn run_real_rdp_stdio(reader: &mut impl BufRead) -> Result<(), String> {
         protocol,
         endpoint,
         transport_endpoint,
+        socks_proxy,
         password_available: _,
         username_available: _,
         size,
@@ -224,6 +225,7 @@ fn run_real_rdp_stdio(reader: &mut impl BufRead) -> Result<(), String> {
         RdpWorkerConfig {
             endpoint,
             transport_endpoint,
+            socks_proxy: socks_proxy.map(std::sync::Arc::new),
             size,
             scale_factor: rdp_connector_scale_factor(scale_factor),
             graphics_epoch: 0,
@@ -253,6 +255,7 @@ fn run_real_rdp_stdio(reader: &mut impl BufRead) -> Result<(), String> {
 struct RdpWorkerConfig {
     endpoint: RemoteDesktopEndpoint,
     transport_endpoint: Option<RemoteDesktopEndpoint>,
+    socks_proxy: Option<Arc<oxideterm_remote_desktop::RemoteDesktopSocksProxy>>,
     size: RemoteDesktopSize,
     scale_factor: u32,
     graphics_epoch: u64,
@@ -473,6 +476,7 @@ type UpgradedRdpFramed = ironrdp_tokio::TokioFramed<Box<dyn AsyncReadWrite + Unp
 struct ClientRdpConfig {
     destination: ClientRdpDestination,
     transport_destination: ClientRdpDestination,
+    socks_proxy: Option<Arc<oxideterm_remote_desktop::RemoteDesktopSocksProxy>>,
     connector: connector::Config,
     graphics_epoch: u64,
     session_options: RemoteDesktopSessionOptions,

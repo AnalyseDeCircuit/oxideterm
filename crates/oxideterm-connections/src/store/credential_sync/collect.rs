@@ -159,6 +159,13 @@ impl ConnectionStore {
             }
         }
         for profile in &self.data.remote_desktop_profiles {
+            if let SavedUpstreamProxyPolicy::Custom { proxy } = &profile.upstream_proxy {
+                bindings.extend(proxy_binding(
+                    CredentialOwner::RemoteDesktop(profile.id.clone()),
+                    CredentialSlot::UpstreamProxy,
+                    proxy,
+                ));
+            }
             bindings.push(CredentialBinding {
                 target: CredentialTarget {
                     owner: CredentialOwner::RemoteDesktop(profile.id.clone()),

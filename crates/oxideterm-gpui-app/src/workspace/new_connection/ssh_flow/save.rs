@@ -76,6 +76,54 @@ fn mosh_password_draft_is_persistent(form: &NewConnectionForm) -> bool {
     form.save_password || (form.mosh_profile_id.is_some() && !form.password.is_empty())
 }
 
+fn rdp_proxy_policy_from_form(
+    form: &mut NewConnectionForm,
+) -> Result<SavedUpstreamProxyPolicy, &'static str> {
+    Ok(match form.upstream_proxy_policy {
+        NewConnectionUpstreamProxyPolicy::UseGlobal => SavedUpstreamProxyPolicy::UseGlobal,
+        NewConnectionUpstreamProxyPolicy::Direct => SavedUpstreamProxyPolicy::Direct,
+        NewConnectionUpstreamProxyPolicy::Custom => {
+            let host = form.upstream_proxy_host.trim().to_string();
+            if host.is_empty() {
+                return Err("modals.new_connection.remote_desktop_proxy_host_required");
+            }
+            let port = form
+                .upstream_proxy_port
+                .trim()
+                .parse::<u16>()
+                .ok()
+                .filter(|port| *port > 0)
+                .ok_or("modals.new_connection.remote_desktop_proxy_port_invalid")?;
+            let auth = match form.upstream_proxy_auth {
+                NewConnectionUpstreamProxyAuth::None => SavedUpstreamProxyAuth::None,
+                NewConnectionUpstreamProxyAuth::Password => {
+                    let username = form.upstream_proxy_username.trim().to_string();
+                    if username.is_empty() {
+                        return Err("modals.new_connection.remote_desktop_proxy_username_required");
+                    }
+                    SavedUpstreamProxyAuth::Password {
+                        username,
+                        keychain_id: form.upstream_proxy_password_keychain_id.clone(),
+                        plaintext_password: (!form.upstream_proxy_password.is_empty()).then(|| {
+                            SecretString::from(std::mem::take(&mut form.upstream_proxy_password))
+                        }),
+                    }
+                }
+            };
+            SavedUpstreamProxyPolicy::Custom {
+                proxy: SavedUpstreamProxyConfig {
+                    protocol: oxideterm_connections::SavedUpstreamProxyProtocol::Socks5,
+                    host,
+                    port,
+                    auth,
+                    remote_dns: form.upstream_proxy_remote_dns,
+                    no_proxy: form.upstream_proxy_no_proxy.trim().to_string(),
+                },
+            }
+        }
+    })
+}
+
 fn saved_profile_notes(notes: &str) -> Option<String> {
     let notes = notes.trim();
     (!notes.is_empty()).then(|| notes.to_string())
@@ -2231,6 +2279,41 @@ impl WorkspaceApp {
                     cx.notify();
                     return None;
                 }
+                let proxy_policy = if protocol == RemoteDesktopProtocol::Rdp {
+                    match rdp_proxy_policy_from_form(form) {
+                        Ok(policy) => policy,
+                        Err(key) => {
+                            form.error = Some(this.i18n.t(key));
+                            cx.notify();
+                            return None;
+                        }
+                    }
+                } else {
+                    SavedUpstreamProxyPolicy::Direct
+                };
+                let socks_proxy = if protocol == RemoteDesktopProtocol::Rdp
+                    && action != NewConnectionSubmitAction::Save
+                {
+                    match oxideterm_session_adapter::rdp_socks_proxy_from_saved_policy(
+                        &this.connection_store,
+                        this.settings_store.settings(),
+                        &proxy_policy,
+                        form.remote_desktop_ssh_gateway_connection_id.is_some(),
+                    ) {
+                        Ok(proxy) => proxy,
+                        Err(error) => {
+                            form.error = Some(format!(
+                                "{}: {error}",
+                                this.i18n
+                                    .t("modals.new_connection.remote_desktop_proxy_failed")
+                            ));
+                            cx.notify();
+                            return None;
+                        }
+                    }
+                } else {
+                    None
+                };
                 let label = remote_desktop_profile_label(&form.name, protocol, &host, port);
                 let username =
                     Some(form.username.trim().to_string()).filter(|username| !username.is_empty());
@@ -2275,6 +2358,7 @@ impl WorkspaceApp {
                     ssh_gateway_connection_id: form
                         .remote_desktop_ssh_gateway_connection_id
                         .clone(),
+                    upstream_proxy: Some(proxy_policy),
                     credential_ref: None,
                     credential: credential_to_save,
                     clear_credential,
@@ -2287,6 +2371,7 @@ impl WorkspaceApp {
                     protocol,
                     endpoint: RemoteDesktopEndpoint::new(host, port),
                     transport_endpoint: None,
+                    socks_proxy,
                     username,
                     domain,
                     credential_ref: None,

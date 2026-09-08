@@ -265,6 +265,7 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
         protocol,
         endpoint,
         transport_endpoint,
+        socks_proxy,
         password_available,
         username_available,
         size,
@@ -284,6 +285,9 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
         return Ok(());
     };
 
+    if socks_proxy.is_some() {
+        return Err("SOCKS5 proxy is supported only for RDP connections".into());
+    }
     if protocol != RemoteDesktopProtocol::Vnc {
         send_event(
             &writer,

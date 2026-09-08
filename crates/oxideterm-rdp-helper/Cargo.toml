@@ -8,6 +8,7 @@ version.workspace = true
 default = []
 
 [dependencies]
+oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 cpal = "0.16"
 ironrdp = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5", features = ["cliprdr", "connector", "displaycontrol", "dvc", "graphics", "input", "pdu", "rdpsnd", "session", "svc"] }
 ironrdp-cliprdr-format = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5" }

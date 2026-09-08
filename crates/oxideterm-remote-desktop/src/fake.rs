@@ -49,6 +49,7 @@ impl RemoteDesktopFakeBackend {
                 protocol,
                 endpoint,
                 transport_endpoint: _,
+                socks_proxy: _,
                 size,
                 scale_factor: _,
                 read_only,

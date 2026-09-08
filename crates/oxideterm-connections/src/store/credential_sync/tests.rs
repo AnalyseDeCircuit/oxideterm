@@ -479,3 +479,146 @@ fn http_proxy_password_and_explicit_forget_are_exported_for_selected_ssh_owner()
             .is_empty()
     );
 }
+
+#[test]
+fn rdp_proxy_save_edit_and_cloud_credentials_round_trip() {
+    let legacy =
+        RemoteDesktopProfile::new("desktop", RemoteDesktopProtocol::Rdp, "desktop.test", 3389);
+    let mut metadata = serde_json::to_value(legacy).unwrap();
+    metadata.as_object_mut().unwrap().remove("upstreamProxy");
+    let restored: RemoteDesktopProfile = serde_json::from_value(metadata).unwrap();
+    assert_eq!(restored.upstream_proxy, SavedUpstreamProxyPolicy::Direct);
+    let mut source = store();
+    let policy = SavedUpstreamProxyPolicy::Custom {
+        proxy: SavedUpstreamProxyConfig {
+            protocol: SavedUpstreamProxyProtocol::Socks5,
+            host: "rdp-proxy.test".into(),
+            port: 1080,
+            auth: SavedUpstreamProxyAuth::Password {
+                username: "proxy-user".into(),
+                keychain_id: None,
+                plaintext_password: Some(SecretString::from("rdp-proxy-secret")),
+            },
+            remote_dns: true,
+            no_proxy: "*.internal".into(),
+        },
+    };
+    let mut request = SaveRemoteDesktopProfileRequest {
+        name: "desktop".into(),
+        protocol: RemoteDesktopProtocol::Rdp,
+        host: "desktop.test".into(),
+        port: 3389,
+        upstream_proxy: Some(policy),
+        ..Default::default()
+    };
+    let saved = source
+        .upsert_remote_desktop_profile(request.clone())
+        .unwrap();
+    let SavedUpstreamProxyPolicy::Custom { proxy } = &saved.upstream_proxy else {
+        panic!("saved proxy")
+    };
+    assert_eq!(
+        source
+            .get_saved_upstream_proxy_password(&proxy.auth)
+            .unwrap(),
+        "rdp-proxy-secret"
+    );
+    assert!(
+        !fs::read_to_string(source.path())
+            .unwrap()
+            .contains("rdp-proxy-secret")
+    );
+    request.id = Some(saved.id.clone());
+    request.upstream_proxy = None;
+    request.name = "renamed".into();
+    let edited = source
+        .upsert_remote_desktop_profile(request.clone())
+        .unwrap();
+    assert_eq!(edited.upstream_proxy, saved.upstream_proxy);
+    let selection = CredentialSyncSelection {
+        remote_desktop_ids: BTreeSet::from([saved.id.clone()]),
+        ..Default::default()
+    };
+    let metadata = source.export_remote_desktop_profiles_snapshot().unwrap();
+    let metadata_json = serde_json::to_string(&metadata).unwrap();
+    let SavedUpstreamProxyAuth::Password {
+        keychain_id: Some(reference),
+        ..
+    } = &proxy.auth
+    else {
+        panic!("protected reference")
+    };
+    assert!(!metadata_json.contains(reference));
+    assert!(!metadata_json.contains("rdp-proxy-secret"));
+    let secrets = source.export_profile_credentials(&selection, None).unwrap();
+    assert_eq!(secrets.len(), 1);
+    let mut target = store();
+    target
+        .apply_remote_desktop_profiles_snapshot(metadata)
+        .unwrap();
+    assert!(
+        target
+            .export_profile_credentials(&selection, None)
+            .unwrap()
+            .is_empty()
+    );
+    let mut prepared = target
+        .prepare_profile_credentials(&secrets, &selection, &mut None)
+        .unwrap();
+    target.save().unwrap();
+    target.commit_profile_credentials(&mut prepared).unwrap();
+    copy_metadata(&source, &mut target);
+    let restored = target.get_remote_desktop_profile(&saved.id).unwrap();
+    let SavedUpstreamProxyPolicy::Custom {
+        proxy: restored_proxy,
+    } = &restored.upstream_proxy
+    else {
+        panic!("restored proxy")
+    };
+    assert_eq!(restored_proxy.host, proxy.host);
+    assert_eq!(restored_proxy.no_proxy, proxy.no_proxy);
+    assert_ne!(restored_proxy.auth, proxy.auth);
+    assert_eq!(
+        target
+            .get_saved_upstream_proxy_password(&restored_proxy.auth)
+            .unwrap(),
+        "rdp-proxy-secret"
+    );
+    request.upstream_proxy = Some(SavedUpstreamProxyPolicy::Custom {
+        proxy: SavedUpstreamProxyConfig {
+            auth: SavedUpstreamProxyAuth::Password {
+                username: "proxy-user".into(),
+                keychain_id: None,
+                plaintext_password: None,
+            },
+            ..proxy.clone()
+        },
+    });
+    source.upsert_remote_desktop_profile(request).unwrap();
+    assert!(
+        source
+            .get_saved_upstream_proxy_password(&proxy.auth)
+            .is_err()
+    );
+    copy_metadata(&source, &mut target);
+    let cleared = source.export_profile_credentials(&selection, None).unwrap();
+    assert_eq!(cleared[0].kind, CLEARED_PROFILE_CREDENTIAL_KIND);
+    let mut prepared = target
+        .prepare_profile_credentials(&cleared, &selection, &mut None)
+        .unwrap();
+    target.save().unwrap();
+    target.commit_profile_credentials(&mut prepared).unwrap();
+    assert_eq!(prepared.summary.cleared, 1);
+    let SavedUpstreamProxyPolicy::Custom { proxy } = &target
+        .get_remote_desktop_profile(&saved.id)
+        .unwrap()
+        .upstream_proxy
+    else {
+        panic!("proxy metadata")
+    };
+    assert!(
+        target
+            .get_saved_upstream_proxy_password(&proxy.auth)
+            .is_err()
+    );
+}

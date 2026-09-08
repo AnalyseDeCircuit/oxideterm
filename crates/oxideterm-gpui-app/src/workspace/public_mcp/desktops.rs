@@ -654,6 +654,7 @@ impl WorkspaceApp {
             protocol: saved.protocol,
             endpoint: RemoteDesktopEndpoint::new(saved.host, saved.port),
             transport_endpoint: None,
+            socks_proxy: None,
             username: saved.username,
             domain: saved.domain,
             credential_ref: saved.credential_ref,

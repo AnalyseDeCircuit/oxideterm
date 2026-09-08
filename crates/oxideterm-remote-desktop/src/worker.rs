@@ -247,6 +247,10 @@ pub fn initial_connect_request(
         protocol: profile.protocol,
         endpoint: profile.endpoint.clone(),
         transport_endpoint: profile.transport_endpoint.clone(),
+        socks_proxy: profile
+            .socks_proxy
+            .as_ref()
+            .map(|proxy| proxy.duplicate_for_connect()),
         password_available,
         username_available: profile
             .username
@@ -442,6 +446,7 @@ mod tests {
                 RemoteDesktopProtocol::Rdp,
             ),
             transport_endpoint: None,
+            socks_proxy: None,
             username: None,
             domain: None,
             credential_ref: None,

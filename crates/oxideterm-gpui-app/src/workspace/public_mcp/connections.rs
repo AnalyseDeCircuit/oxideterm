@@ -539,6 +539,7 @@ fn save_remote_desktop_profile(
             port: profile.port,
             username: profile.username.clone(),
             domain: profile.domain.clone(),
+            upstream_proxy: None,
             credential_ref: existing.and_then(|profile| profile.credential_ref.clone()),
             credential: None,
             clear_credential: false,

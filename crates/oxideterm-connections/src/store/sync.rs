@@ -522,6 +522,7 @@ impl ConnectionStore {
         for mut profile in snapshot.records {
             // Protected-store references are device-local and cannot be imported as credentials.
             profile.credential_ref = None;
+            profile.upstream_proxy = portable_upstream_proxy(&profile.upstream_proxy);
             if let Some(existing) = self
                 .data
                 .remote_desktop_profiles
@@ -531,6 +532,10 @@ impl ConnectionStore {
                 if profile.updated_at >= existing.updated_at {
                     // Updating portable metadata must not disconnect a valid local credential.
                     profile.credential_ref = existing.credential_ref.clone();
+                    preserve_standalone_sftp_upstream_proxy_secret(
+                        &mut profile.upstream_proxy,
+                        &existing.upstream_proxy,
+                    );
                     *existing = profile;
                     applied += 1;
                 }
@@ -1102,6 +1107,7 @@ fn build_remote_desktop_profiles_sync_snapshot(
     for profile in &mut records {
         // Snapshots are portable asset metadata, never a transport for local credential handles.
         profile.credential_ref = None;
+        profile.upstream_proxy = portable_upstream_proxy(&profile.upstream_proxy);
     }
     records.sort_by(|left, right| left.id.cmp(&right.id));
     let revision = sha256_hex(

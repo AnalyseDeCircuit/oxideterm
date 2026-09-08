@@ -1229,6 +1229,36 @@ pub(in crate::workspace) fn form_from_remote_desktop_profile(
     form.remote_desktop_session_options = profile.session_options;
     form.remote_desktop_profile_id = Some(profile.id.clone());
     form.remote_desktop_ssh_gateway_connection_id = profile.ssh_gateway_connection_id.clone();
+    match &profile.upstream_proxy {
+        oxideterm_connections::SavedUpstreamProxyPolicy::Direct => {
+            form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::Direct
+        }
+        oxideterm_connections::SavedUpstreamProxyPolicy::UseGlobal => {
+            form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::UseGlobal
+        }
+        oxideterm_connections::SavedUpstreamProxyPolicy::Custom { proxy } => {
+            form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::Custom;
+            form.upstream_proxy_protocol = proxy.protocol;
+            form.upstream_proxy_host = proxy.host.clone();
+            form.upstream_proxy_port = proxy.port.to_string();
+            form.upstream_proxy_remote_dns = proxy.remote_dns;
+            form.upstream_proxy_no_proxy = proxy.no_proxy.clone();
+            match &proxy.auth {
+                oxideterm_connections::SavedUpstreamProxyAuth::None => {
+                    form.upstream_proxy_auth = NewConnectionUpstreamProxyAuth::None
+                }
+                oxideterm_connections::SavedUpstreamProxyAuth::Password {
+                    username,
+                    keychain_id,
+                    ..
+                } => {
+                    form.upstream_proxy_auth = NewConnectionUpstreamProxyAuth::Password;
+                    form.upstream_proxy_username = username.clone();
+                    form.upstream_proxy_password_keychain_id = keychain_id.clone();
+                }
+            }
+        }
+    }
     form.saved_password_keychain_id = profile.credential_ref.clone();
     form.save_password = profile.credential_ref.is_some();
     form.group = profile.group.clone().unwrap_or(ungrouped_label);
@@ -1691,7 +1721,9 @@ pub(in crate::workspace) fn next_connection_field(
     if upstream_proxy_policy == NewConnectionUpstreamProxyPolicy::Custom
         && matches!(
             transport,
-            NewConnectionTransport::Ssh | NewConnectionTransport::StandaloneSftp
+            NewConnectionTransport::Ssh
+                | NewConnectionTransport::StandaloneSftp
+                | NewConnectionTransport::Rdp
         )
     {
         fields.extend([
@@ -2497,6 +2529,20 @@ mod tests {
             domain: Some("EXAMPLE".to_string()),
             credential_ref: Some("remote-desktop:remote-1".to_string()),
             ssh_gateway_connection_id: Some("gateway-1".to_string()),
+            upstream_proxy: SavedUpstreamProxyPolicy::Custom {
+                proxy: oxideterm_connections::SavedUpstreamProxyConfig {
+                    protocol: oxideterm_connections::SavedUpstreamProxyProtocol::Socks5,
+                    host: "proxy.test".into(),
+                    port: 1080,
+                    remote_dns: false,
+                    no_proxy: "*.internal".into(),
+                    auth: oxideterm_connections::SavedUpstreamProxyAuth::Password {
+                        username: "proxy-user".into(),
+                        keychain_id: Some("proxy-reference".into()),
+                        plaintext_password: None,
+                    },
+                },
+            },
             read_only: true,
             session_options,
             created_at: now,
@@ -2528,6 +2574,20 @@ mod tests {
         );
         assert!(form.save_password);
         assert!(form.password.is_empty());
+        assert_eq!(
+            form.upstream_proxy_policy,
+            super::NewConnectionUpstreamProxyPolicy::Custom
+        );
+        assert_eq!(form.upstream_proxy_host, "proxy.test");
+        assert_eq!(form.upstream_proxy_port, "1080");
+        assert_eq!(form.upstream_proxy_username, "proxy-user");
+        assert_eq!(
+            form.upstream_proxy_password_keychain_id.as_deref(),
+            Some("proxy-reference")
+        );
+        assert!(form.upstream_proxy_password.is_empty());
+        assert!(!form.upstream_proxy_remote_dns);
+        assert_eq!(form.upstream_proxy_no_proxy, "*.internal");
     }
 
     #[test]

@@ -5,6 +5,8 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+tokio.workspace = true
+base64.workspace = true
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 parking_lot.workspace = true

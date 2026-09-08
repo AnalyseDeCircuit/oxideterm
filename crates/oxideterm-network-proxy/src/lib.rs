@@ -1,13 +1,14 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Application-wide HTTP proxy policy, credential hydration, and client adapters.
+//! HTTP client proxy policy and shared TCP dialing through SOCKS5 or HTTP CONNECT.
 
 mod credentials;
 mod http;
 mod policy;
 mod runtime;
 mod settings;
+pub mod tcp;
 
 pub use credentials::ApplicationProxyCredentialProvider;
 pub use policy::{

@@ -1,7 +1,7 @@
 use super::*;
 use crate::workspace::new_connection::{
-    NewConnectionTransport, form_from_mosh_profile, form_from_remote_desktop_profile,
-    form_from_serial_profile, form_from_telnet_profile, terminal_serial_flow_from_profile,
+    form_from_mosh_profile, form_from_remote_desktop_profile, form_from_serial_profile,
+    form_from_telnet_profile, terminal_serial_flow_from_profile,
     terminal_serial_parity_from_profile, terminal_serial_runtime_options_from_profile,
 };
 use oxideterm_remote_desktop::{
@@ -1093,26 +1093,46 @@ impl WorkspaceApp {
                 .t("modals.new_connection.remote_desktop_password_required");
             self.update_connection_form_state(cx, |state| {
                 if let Some(form) = state.form.as_mut() {
-                    form.transport = NewConnectionTransport::Rdp;
-                    form.name = saved.name;
-                    form.host = saved.host;
-                    form.port = saved.port.to_string();
-                    form.username = saved.username.unwrap_or_default();
-                    form.group = saved.group.unwrap_or_default();
-                    form.remote_desktop_session_options = saved.session_options;
-                    form.remote_desktop_ssh_gateway_connection_id = saved.ssh_gateway_connection_id;
+                    *form = form_from_remote_desktop_profile(&saved, String::new());
                     form.error = Some(password_required);
                     form.focused_field = NewConnectionField::Password;
                 }
             });
             return;
         }
+        let socks_proxy = if saved.protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp
+        {
+            match oxideterm_session_adapter::rdp_socks_proxy_from_saved_policy(
+                &self.connection_store,
+                self.settings_store.settings(),
+                &saved.upstream_proxy,
+                saved.ssh_gateway_connection_id.is_some(),
+            ) {
+                Ok(proxy) => proxy,
+                Err(error) => {
+                    if let Some(attempt) = runtime_connection_attempt_id.as_deref() {
+                        self.standalone_connections.mark_attempt_error(attempt);
+                    }
+                    let status = format!(
+                        "{}: {error}",
+                        self.i18n
+                            .t("modals.new_connection.remote_desktop_proxy_failed")
+                    );
+                    self.session_manager
+                        .update(cx, |manager, cx| manager.set_status(Some(status), cx));
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         let profile = RemoteDesktopConnectionProfile {
             id: saved.id.clone(),
             label: saved.name,
             protocol: saved.protocol,
             endpoint: RemoteDesktopEndpoint::new(saved.host, saved.port),
             transport_endpoint: None,
+            socks_proxy,
             username: saved.username,
             domain: saved.domain,
             credential_ref: saved.credential_ref,

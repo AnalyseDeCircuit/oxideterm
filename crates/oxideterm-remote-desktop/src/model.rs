@@ -379,6 +379,37 @@ impl RemoteDesktopEndpoint {
     }
 }
 
+#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopSocksProxy {
+    pub host: String,
+    pub port: u16,
+    pub remote_dns: bool,
+    pub no_proxy: String,
+    pub auth: Option<RemoteDesktopProxyAuth>,
+}
+
+#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteDesktopProxyAuth {
+    pub username: String,
+    pub password: crate::RemoteDesktopSecret,
+}
+
+impl RemoteDesktopSocksProxy {
+    pub fn duplicate_for_connect(&self) -> Self {
+        Self {
+            host: self.host.clone(),
+            port: self.port,
+            remote_dns: self.remote_dns,
+            no_proxy: self.no_proxy.clone(),
+            auth: self.auth.as_ref().map(|auth| RemoteDesktopProxyAuth {
+                username: auth.username.clone(),
+                password: auth.password.duplicate_for_reauthentication(),
+            }),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteDesktopConnectionProfile {
@@ -389,6 +420,9 @@ pub struct RemoteDesktopConnectionProfile {
     /// Optional loopback tunnel endpoint; the public endpoint remains the server identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport_endpoint: Option<RemoteDesktopEndpoint>,
+    /// Runtime-only proxy credentials belong to the session, never to profile exports.
+    #[serde(skip)]
+    pub socks_proxy: Option<std::sync::Arc<RemoteDesktopSocksProxy>>,
     pub username: Option<String>,
     pub domain: Option<String>,
     pub credential_ref: Option<String>,
@@ -420,6 +454,7 @@ impl RemoteDesktopConnectionProfile {
             protocol,
             endpoint,
             transport_endpoint: None,
+            socks_proxy: None,
             username: None,
             domain: None,
             credential_ref: None,
@@ -485,6 +520,29 @@ impl Default for RemoteDesktopSessionId {
 #[cfg(test)]
 mod quick_connect_tests {
     use super::*;
+
+    #[test]
+    fn runtime_proxy_secret_is_redacted_and_excluded_from_profile_exports() {
+        let mut profile =
+            RemoteDesktopConnectionProfile::parse_quick_connect("rdp://desktop.test").unwrap();
+        profile.socks_proxy = Some(std::sync::Arc::new(RemoteDesktopSocksProxy {
+            host: "proxy.test".into(),
+            port: 1080,
+            remote_dns: true,
+            no_proxy: String::new(),
+            auth: Some(RemoteDesktopProxyAuth {
+                username: "proxy-user".into(),
+                password: "proxy-secret".into(),
+            }),
+        }));
+        assert!(!format!("{profile:?}").contains("proxy-secret"));
+        let encoded = serde_json::to_string(&profile).unwrap();
+        assert!(!encoded.contains("proxy-secret"));
+        assert!(!encoded.contains("socksProxy"));
+        let restored: RemoteDesktopConnectionProfile = serde_json::from_str(&encoded).unwrap();
+        assert!(restored.socks_proxy.is_none());
+        assert_eq!(restored.endpoint, profile.endpoint);
+    }
 
     #[test]
     fn quick_connect_uses_protocol_default_ports() {

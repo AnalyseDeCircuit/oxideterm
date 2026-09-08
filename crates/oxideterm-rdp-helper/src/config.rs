@@ -68,6 +68,7 @@ pub(super) fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<Client
     Ok(ClientRdpConfig {
         destination,
         transport_destination,
+        socks_proxy: config.socks_proxy.clone(),
         connector,
         graphics_epoch: config.graphics_epoch,
         session_options: config.session_options,

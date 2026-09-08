@@ -431,3 +431,83 @@ impl Drop for EnvVarGuard {
         }
     }
 }
+
+#[test]
+fn rdp_proxy_policy_respects_gateway_and_rejects_http() {
+    use crate::rdp_socks_proxy_from_saved_policy;
+    let (store, path) = temp_connection_store("rdp-proxy");
+    let mut settings = PersistedSettings::default();
+    settings.network.upstream_proxy = Some(SettingsUpstreamProxyConfig {
+        protocol: SettingsUpstreamProxyProtocol::HttpConnect,
+        host: "global.test".into(),
+        port: 8080,
+        auth: SettingsUpstreamProxyAuth::None,
+        remote_dns: true,
+        no_proxy: String::new(),
+    });
+    assert!(
+        rdp_socks_proxy_from_saved_policy(
+            &store,
+            &settings,
+            &SavedUpstreamProxyPolicy::Direct,
+            false
+        )
+        .unwrap()
+        .is_none()
+    );
+    assert!(
+        rdp_socks_proxy_from_saved_policy(
+            &store,
+            &settings,
+            &SavedUpstreamProxyPolicy::UseGlobal,
+            false
+        )
+        .is_err()
+    );
+    let mut proxy = SavedUpstreamProxyConfig {
+        protocol: SavedUpstreamProxyProtocol::Socks5,
+        host: "proxy.test".into(),
+        port: 1080,
+        remote_dns: true,
+        no_proxy: "*.internal".into(),
+        auth: SavedUpstreamProxyAuth::Password {
+            username: "proxy-user".into(),
+            keychain_id: None,
+            plaintext_password: None,
+        },
+    };
+    let missing_password = SavedUpstreamProxyPolicy::Custom {
+        proxy: proxy.clone(),
+    };
+    assert!(
+        rdp_socks_proxy_from_saved_policy(&store, &settings, &missing_password, true)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        rdp_socks_proxy_from_saved_policy(&store, &settings, &missing_password, false).is_err()
+    );
+    proxy.auth = SavedUpstreamProxyAuth::Password {
+        username: "proxy-user".into(),
+        keychain_id: None,
+        plaintext_password: Some(SecretString::from("proxy-secret")),
+    };
+    let runtime = rdp_socks_proxy_from_saved_policy(
+        &store,
+        &settings,
+        &SavedUpstreamProxyPolicy::Custom { proxy },
+        false,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(runtime.host, "proxy.test");
+    assert_eq!(runtime.port, 1080);
+    assert_eq!(runtime.no_proxy, "*.internal");
+    assert!(runtime.remote_dns);
+    assert_eq!(
+        runtime.auth.as_ref().unwrap().password.expose_secret(),
+        "proxy-secret"
+    );
+    assert!(!format!("{runtime:?}").contains("proxy-secret"));
+    let _ = std::fs::remove_file(path);
+}

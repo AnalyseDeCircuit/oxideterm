@@ -8187,11 +8187,13 @@ dependencies = [
 name = "oxideterm-network-proxy"
 version = "2.0.27"
 dependencies = [
+ "base64 0.22.1",
  "oxideterm-connections",
  "oxideterm-settings",
  "parking_lot",
  "reqwest",
  "thiserror 2.0.18",
+ "tokio",
  "zeroize",
 ]
 
@@ -8374,6 +8376,7 @@ dependencies = [
  "ironrdp-tls",
  "ironrdp-tokio",
  "native-tls",
+ "oxideterm-network-proxy",
  "oxideterm-pcm-audio",
  "oxideterm-remote-desktop",
  "semver",
@@ -8427,6 +8430,7 @@ version = "2.0.27"
 dependencies = [
  "chrono",
  "oxideterm-connections",
+ "oxideterm-remote-desktop",
  "oxideterm-settings",
  "oxideterm-sftp",
  "oxideterm-ssh",
@@ -8515,6 +8519,7 @@ dependencies = [
  "oxideterm-backend-classification",
  "oxideterm-connection-monitor",
  "oxideterm-connections",
+ "oxideterm-network-proxy",
  "oxideterm-portable-runtime",
  "oxideterm-sftp",
  "oxideterm-topology",

@@ -99,3 +99,39 @@ fn upstream_proxy_config_from_saved_proxy(
         no_proxy: proxy.no_proxy.clone(),
     })
 }
+
+/// An SSH gateway owns its upstream route; only direct RDP transports use this policy.
+pub fn rdp_socks_proxy_from_saved_policy(
+    store: &ConnectionStore,
+    settings: &PersistedSettings,
+    policy: &SavedUpstreamProxyPolicy,
+    through_ssh_gateway: bool,
+) -> Result<Option<std::sync::Arc<oxideterm_remote_desktop::RemoteDesktopSocksProxy>>, String> {
+    if through_ssh_gateway {
+        return Ok(None);
+    }
+    let Some(proxy) = upstream_proxy_config_from_saved_policy(store, settings, policy)? else {
+        return Ok(None);
+    };
+    if proxy.protocol != UpstreamProxyProtocol::Socks5 {
+        return Err("RDP supports SOCKS5 upstream proxies only".into());
+    }
+    let auth = match proxy.auth {
+        UpstreamProxyAuth::None => None,
+        UpstreamProxyAuth::Password { username, password } => {
+            Some(oxideterm_remote_desktop::RemoteDesktopProxyAuth {
+                username,
+                password: password.into(),
+            })
+        }
+    };
+    Ok(Some(std::sync::Arc::new(
+        oxideterm_remote_desktop::RemoteDesktopSocksProxy {
+            host: proxy.host,
+            port: proxy.port,
+            auth,
+            remote_dns: proxy.remote_dns,
+            no_proxy: proxy.no_proxy,
+        },
+    )))
+}

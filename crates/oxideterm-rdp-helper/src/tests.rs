@@ -351,6 +351,7 @@ fn client_loop_prioritizes_queued_close_over_pending_output_error() {
     let mut config = RdpWorkerConfig {
         endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
         transport_endpoint: None,
+        socks_proxy: None,
         size: RemoteDesktopSize {
             width: 1280,
             height: 720,
@@ -632,6 +633,7 @@ fn client_config_withholds_credentials_until_certificate_acceptance() {
     let mut config = RdpWorkerConfig {
         endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
         transport_endpoint: Some(RemoteDesktopEndpoint::new("127.0.0.1", 43891)),
+        socks_proxy: None,
         size: RemoteDesktopSize {
             width: 1280,
             height: 720,
@@ -1208,4 +1210,112 @@ fn test_frame() -> RemoteDesktopFrame {
         RemoteDesktopFrameFormat::Bgra8,
         vec![0, 0, 0, 0xff],
     )
+}
+
+fn proxy_client_config(port: u16) -> ClientRdpConfig {
+    build_client_rdp_config(&RdpWorkerConfig {
+        endpoint: RemoteDesktopEndpoint::new("desktop.test", 3390),
+        transport_endpoint: None,
+        socks_proxy: Some(std::sync::Arc::new(
+            oxideterm_remote_desktop::RemoteDesktopSocksProxy {
+                host: "127.0.0.1".into(),
+                port,
+                remote_dns: true,
+                no_proxy: String::new(),
+                auth: Some(oxideterm_remote_desktop::RemoteDesktopProxyAuth {
+                    username: "proxy-user".into(),
+                    password: "proxy-secret".into(),
+                }),
+            },
+        )),
+        size: RemoteDesktopSize {
+            width: 1280,
+            height: 720,
+        },
+        scale_factor: RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT,
+        graphics_epoch: 0,
+        read_only: false,
+        session_options: RemoteDesktopSessionOptions::default(),
+        monitor_layout: RemoteDesktopMonitorLayout::default(),
+    })
+    .unwrap()
+}
+
+#[tokio::test]
+async fn rdp_transport_dials_socks_target_and_preserves_server_identity() {
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let config = proxy_client_config(listener.local_addr().unwrap().port());
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut greeting = [0; 4];
+        stream.read_exact(&mut greeting).await.unwrap();
+        assert_eq!(greeting, [5, 2, 0, 2]);
+        stream.write_all(&[5, 2]).await.unwrap();
+        let mut auth = [0; 25];
+        stream.read_exact(&mut auth).await.unwrap();
+        assert_eq!(&auth, b"\x01\x0aproxy-user\x0cproxy-secret");
+        stream.write_all(&[1, 0]).await.unwrap();
+        let mut request = [0; 19];
+        stream.read_exact(&mut request).await.unwrap();
+        assert_eq!(&request[..5], &[5, 1, 0, 3, 12]);
+        assert_eq!(&request[5..17], b"desktop.test");
+        assert_eq!(u16::from_be_bytes([request[17], request[18]]), 3390);
+        stream
+            .write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0])
+            .await
+            .unwrap();
+        let mut payload = [0; 4];
+        stream.read_exact(&mut payload).await.unwrap();
+        assert_eq!(&payload, b"ping");
+        stream.write_all(b"pong").await.unwrap();
+    });
+    let mut stream = tokio::time::timeout(Duration::from_secs(2), connect_rdp_transport(&config))
+        .await
+        .unwrap()
+        .unwrap();
+    stream.write_all(b"ping").await.unwrap();
+    let mut response = [0; 4];
+    stream.read_exact(&mut response).await.unwrap();
+    assert_eq!(&response, b"pong");
+    assert_eq!(config.destination.host(), "desktop.test");
+    assert_eq!(config.destination.port(), 3390);
+    assert!(config.connector.enable_tls && config.connector.enable_credssp);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn closing_rdp_during_socks_handshake_releases_transport() {
+    use tokio::{io::AsyncReadExt, net::TcpListener};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let config = proxy_client_config(listener.local_addr().unwrap().port());
+    let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
+    let close_tx = input_tx.clone();
+    let (output_tx, _output_rx) = client_rdp_output_channel(1);
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut greeting = [0; 4];
+        stream.read_exact(&mut greeting).await.unwrap();
+        close_tx.send(RdpInputEvent::Close).unwrap();
+        let mut byte = [0];
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), stream.read(&mut byte))
+                .await
+                .unwrap()
+                .unwrap(),
+            0
+        );
+    });
+    let result = tokio::time::timeout(
+        Duration::from_secs(2),
+        connect_native_rdp(&config, &mut input_rx, input_tx, output_tx),
+    )
+    .await
+    .unwrap();
+    assert!(result.is_err());
+    assert!(result.err().unwrap().to_string().contains("canceled"));
+    server.await.unwrap();
 }

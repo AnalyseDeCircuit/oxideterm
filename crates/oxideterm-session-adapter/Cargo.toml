@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }

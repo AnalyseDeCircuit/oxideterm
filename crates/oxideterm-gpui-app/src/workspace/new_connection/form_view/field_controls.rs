@@ -2801,6 +2801,10 @@ impl WorkspaceApp {
                             }
                             apply_transport_default_port(form, previous_transport, transport);
                             apply_transport_default_username(form, previous_transport, transport);
+                            if transport == NewConnectionTransport::Rdp && previous_transport != transport {
+                                form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::Direct;
+                                form.upstream_proxy_protocol = SavedUpstreamProxyProtocol::Socks5;
+                            }
                             form.transport = transport;
                             form.focused_field = focus_field;
                             form.field_focused = false;
@@ -3204,10 +3208,22 @@ impl WorkspaceApp {
                 cx,
             ))
             .child({
-                let gateway = self.render_remote_desktop_ssh_gateway_select(
-                    ssh_gateway_connection_id.as_deref(),
-                    cx,
+                let mut gateway = div().flex().flex_col().gap_4().child(
+                    self.render_remote_desktop_ssh_gateway_select(
+                        ssh_gateway_connection_id.as_deref(),
+                        cx,
+                    ),
                 );
+                if protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp {
+                    gateway = gateway.child(
+                        self.render_connection_hint(
+                            self.i18n
+                                .t("modals.new_connection.remote_desktop_proxy_route_hint"),
+                        ),
+                    );
+                    gateway = gateway.child(self.render_upstream_proxy_policy_section(false, cx));
+                }
+                let gateway = gateway.into_any_element();
                 self.render_connection_form_section(
                     ConnectionFormSection::RemoteGateway,
                     gateway,

@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 base64.workspace = true
 dashmap.workspace = true
 dirs.workspace = true
