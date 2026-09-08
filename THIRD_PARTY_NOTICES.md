@@ -482,25 +482,25 @@ This section is a review prompt for binary distribution; it does not replace leg
 | io-lifetimes | 2.0.4 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/io-lifetimes |
 | io-surface | 0.16.1 | MIT, Apache-2.0 | https://crates.io/crates/io-surface |
 | ipnet | 2.12.0 | MIT, Apache-2.0 | https://crates.io/crates/ipnet |
-| ironrdp | 0.17.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-async | 0.10.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-bulk | 0.1.1 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-cliprdr | 0.7.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-cliprdr-format | 0.2.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-connector | 0.10.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-core | 0.2.1 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-displaycontrol | 0.8.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-dvc | 0.8.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-egfx | 0.3.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-error | 0.2.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-graphics | 0.9.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-input | 0.7.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-pdu | 0.9.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-rdpsnd | 0.9.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-session | 0.11.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-svc | 0.8.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-tls | 0.2.2 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
-| ironrdp-tokio | 0.10.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=5c6bd6dc41175ac3a34d17dac9f0a918d4a8f5e5 |
+| ironrdp | 0.17.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-async | 0.10.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-bulk | 0.1.1 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-cliprdr | 0.7.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-cliprdr-format | 0.2.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-connector | 0.10.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-core | 0.2.1 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-displaycontrol | 0.8.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-dvc | 0.8.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-egfx | 0.3.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-error | 0.2.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-graphics | 0.9.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-input | 0.7.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-pdu | 0.9.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-rdpsnd | 0.9.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-session | 0.11.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-svc | 0.8.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-tls | 0.2.2 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
+| ironrdp-tokio | 0.10.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
 | is-docker | 0.2.0 | MIT | https://crates.io/crates/is-docker |
 | is-wsl | 0.4.0 | MIT | https://crates.io/crates/is-wsl |
 | is_terminal_polyfill | 1.70.2 | MIT, Apache-2.0 | https://crates.io/crates/is_terminal_polyfill |
