@@ -181,6 +181,14 @@ while excluding that interior reduces GPU overdraw without changing layout or bo
 The behavior is covered by tests for transparent and opaque quads and is an independent
 implementation informed by `zed-industries/zed#61274`.
 
+### Windows nested message-pump exit
+
+`gpui_windows::WindowsPlatformInner::run_foreground_task` yields to paint and input after its
+execution budget. `PeekMessageW` can also remove `WM_QUIT` in these filtered passes. The nested
+pump reposts that message with its exit code and returns immediately so the main `GetMessageW`
+loop can terminate. Native Windows regression tests cover frame-message coalescing, suppression
+of in-draw animation wakeups, and propagation of the quit code to the main loop.
+
 ### Native Windows thread-pool dispatch
 
 `crates/gpui-ce/gpui_windows/src/dispatcher.rs` schedules background work with the native
@@ -222,11 +230,12 @@ Windows platform layers:
   `crates/gpui-ce/gpui_windows/src/platform.rs`, and
   `crates/gpui-ce/gpui_windows/src/window.rs` share one platform-owned draw coordinator across all
   windows. A nested Windows paint validates the update region to prevent a `WM_PAINT` busy loop;
-  the existing vsync thread invalidates all windows again on the next tick. Demand-driven redraws
-  also use one coalesced posted window message per window, because sustained keyboard input can
-  starve low-priority `WM_PAINT`; a request deferred by draw re-entry posts itself again after the
-  active draw unwinds. Forced device-recovery renders remain pending until a draw acquires the
-  coordinator.
+  the existing vsync thread invalidates all windows again on the next tick. External redraw wakeups
+  use one coalesced posted message per window so input-triggered redraws do not depend on
+  low-priority `WM_PAINT`. Requests made during a coordinated draw do not post another message:
+  the existing vsync provider invalidates windows for the next frame. Reposting from an animation
+  callback would keep the posted-message queue nonempty and starve Win32 hardware input.
+  Forced device-recovery renders remain pending until a draw acquires the coordinator.
 - Synchronous draw helpers in `crates/gpui-ce/gpui/src/app.rs`,
   `crates/gpui-ce/gpui/src/app/test_app.rs`,
   `crates/gpui-ce/gpui/src/app/test_context.rs`, and

@@ -1,3 +1,4 @@
+// OxideTerm modification: preserve quit messages consumed by the foreground task pump.
 use std::{
     cell::{Cell, RefCell},
     ffi::{OsStr, OsString},
@@ -379,6 +380,20 @@ impl WindowsPlatform {
             })
             .unwrap();
     }
+}
+
+fn dispatch_pending_message(msg: &MSG) -> bool {
+    if msg.message == WM_QUIT {
+        // PeekMessage removes WM_QUIT even when filtering for paint or input.
+        // Leave it for the outer GetMessage loop and stop this nested pump.
+        unsafe { PostQuitMessage(msg.wParam.0 as i32) };
+        return false;
+    }
+    if translate_accelerator(msg).is_none() {
+        _ = unsafe { TranslateMessage(msg) };
+        unsafe { DispatchMessageW(msg) };
+    }
+    true
 }
 
 fn translate_accelerator(msg: &MSG) -> Option<()> {
@@ -1111,22 +1126,18 @@ impl WindowsPlatformInner {
                     // then quit out of foreground work to allow us to process other gpui events first before returning back to foreground task work
                     // if we don't we might not for example process window quit events
                     let mut msg = MSG::default();
-                    let process_message = |msg: &_| {
-                        if translate_accelerator(msg).is_none() {
-                            _ = unsafe { TranslateMessage(msg) };
-                            unsafe { DispatchMessageW(msg) };
-                        }
-                    };
                     let peek_msg = |msg: &mut _, msg_kind| unsafe {
                         PeekMessageW(msg, None, 0, 0, PM_REMOVE | msg_kind).as_bool()
                     };
                     // We need to process a paint message here as otherwise we will re-enter `run_foreground_task` before painting if we have work remaining.
                     // The reason for this is that windows prefers custom application message processing over system messages.
-                    if peek_msg(&mut msg, PM_QS_PAINT) {
-                        process_message(&msg);
+                    if peek_msg(&mut msg, PM_QS_PAINT) && !dispatch_pending_message(&msg) {
+                        return Some(0);
                     }
                     while peek_msg(&mut msg, PM_QS_INPUT) {
-                        process_message(&msg);
+                        if !dispatch_pending_message(&msg) {
+                            return Some(0);
+                        }
                     }
                     // Allow the main loop to process other gpui events before going back into `run_foreground_task`
                     unsafe {
@@ -1605,6 +1616,25 @@ mod tests {
     use gpui::ClipboardItem;
 
     use super::encode_restart_arguments;
+
+    #[test]
+    fn windows_message_nested_pump_preserves_quit_code() {
+        use super::{
+            GetMessageW, MSG, PM_QS_INPUT, PM_REMOVE, PeekMessageW, PostQuitMessage, WM_QUIT,
+            dispatch_pending_message,
+        };
+        let mut message = MSG::default();
+        unsafe { PostQuitMessage(37) };
+        assert!(
+            unsafe { PeekMessageW(&mut message, None, 0, 0, PM_REMOVE | PM_QS_INPUT) }.as_bool()
+        );
+        assert_eq!(message.message, WM_QUIT);
+        assert!(!dispatch_pending_message(&message));
+        assert!(unsafe { PeekMessageW(&mut message, None, 0, 0, super::PM_NOREMOVE) }.as_bool());
+        // The main loop must still observe the quit and its original exit code.
+        assert_eq!(unsafe { GetMessageW(&mut message, None, 0, 0) }.0, 0);
+        assert_eq!(message.wParam.0, 37);
+    }
 
     #[test]
     fn test_encode_restart_arguments() {

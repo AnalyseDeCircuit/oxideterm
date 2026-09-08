@@ -48,6 +48,9 @@ jobs:
       - name: Check Windows GPUI backend
         run: cargo check -p gpui_windows
 
+      - name: Test Windows frame and quit message handling
+        run: cargo test -p gpui_windows --lib windows_message_
+
       - name: Check Windows application
         run: cargo check -p oxideterm-gpui-app
 

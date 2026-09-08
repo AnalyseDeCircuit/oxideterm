@@ -283,19 +283,11 @@ impl WindowsWindowState {
 
 impl WindowsWindowInner {
     pub(crate) fn request_frame(&self) {
-        if self.state.frame_request_pending.replace(true) {
-            return;
-        }
-
-        if let Err(error) = unsafe {
-            PostMessageW(
-                Some(self.hwnd),
-                WM_GPUI_REQUEST_FRAME,
-                WPARAM::default(),
-                LPARAM::default(),
-            )
-        } {
-            self.state.frame_request_pending.set(false);
+        if let Err(error) = self
+            .state
+            .draw_coordinator
+            .request_frame(self.hwnd, &self.state.frame_request_pending)
+        {
             log::warn!("failed to schedule Windows frame: {error}");
         }
     }

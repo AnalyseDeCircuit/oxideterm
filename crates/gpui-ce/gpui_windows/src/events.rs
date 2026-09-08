@@ -1,4 +1,4 @@
-// OxideTerm modification: recover cursor/caption state promptly and provide complete client-frame hit testing.
+// OxideTerm modification: recover pointer state, complete hit testing, and pace draw wakeups.
 #[cfg(feature = "wgpu")]
 use crate::window::RawWindow;
 use std::{cell::Cell, rc::Rc, sync::atomic::Ordering};
@@ -82,6 +82,21 @@ impl DrawCoordinator {
         Self {
             drawing: Cell::new(false),
         }
+    }
+
+    pub(crate) fn request_frame(
+        &self,
+        hwnd: HWND,
+        pending: &Cell<bool>,
+    ) -> windows::core::Result<()> {
+        // Animation callbacks run inside draw_window. Posting from that span would
+        // keep posted messages ahead of Win32 input forever. The existing vsync
+        // provider invalidates the windows for the next frame after this draw ends.
+        if self.drawing.get() || pending.replace(true) {
+            return Ok(());
+        }
+        unsafe { PostMessageW(Some(hwnd), WM_GPUI_REQUEST_FRAME, WPARAM(0), LPARAM(0)) }
+            .inspect_err(|_| pending.set(false))
     }
 
     fn try_begin_draw(&self) -> Option<DrawWindowGuard<'_>> {
@@ -1964,6 +1979,53 @@ mod tests {
         right: 900,
         bottom: 800,
     };
+
+    #[test]
+    fn windows_message_frame_requests_yield_during_draw() {
+        use super::{
+            Cell, DrawCoordinator, HWND, MSG, PM_NOREMOVE, PM_REMOVE, PeekMessageW,
+            WM_GPUI_REQUEST_FRAME,
+        };
+        let coordinator = DrawCoordinator::new();
+        let pending = Cell::new(false);
+        let mut message = MSG::default();
+        // A null HWND posts to this test thread's private message queue.
+        let _ = unsafe { PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE) };
+        let mut take_frame = || unsafe {
+            PeekMessageW(
+                &mut message,
+                None,
+                WM_GPUI_REQUEST_FRAME,
+                WM_GPUI_REQUEST_FRAME,
+                PM_REMOVE,
+            )
+            .as_bool()
+        };
+        coordinator
+            .request_frame(HWND::default(), &pending)
+            .unwrap();
+        coordinator
+            .request_frame(HWND::default(), &pending)
+            .unwrap();
+        assert!(take_frame());
+        assert!(!take_frame());
+
+        pending.set(false);
+        let draw = coordinator.try_begin_draw().unwrap();
+        for _ in 0..1000 {
+            coordinator
+                .request_frame(HWND::default(), &pending)
+                .unwrap();
+        }
+        assert!(!take_frame());
+        drop(draw);
+
+        // A later external wakeup must still work; only in-draw continuation is deferred.
+        coordinator
+            .request_frame(HWND::default(), &pending)
+            .unwrap();
+        assert!(take_frame());
+    }
 
     #[test]
     fn resize_hit_test_covers_edges_and_corners() {
