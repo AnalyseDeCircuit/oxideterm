@@ -702,35 +702,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn github_device_code_debug_redacts_device_code() {
-        let code = GithubDeviceCode {
-            device_code: "secret-device-code".to_string(),
-            user_code: "ABCD-EFGH".to_string(),
-            verification_uri: "https://github.com/login/device".to_string(),
+    fn device_authorization_debug_redacts_device_codes_but_keeps_user_codes() {
+        let github = GithubDeviceCode {
+            device_code: "secret-device-code".into(),
+            user_code: "ABCD-EFGH".into(),
+            verification_uri: "https://github.com/login/device".into(),
             expires_in: 900,
             interval: 5,
         };
-        let debug = format!("{code:?}");
-
-        assert!(debug.contains("redacted"));
-        assert!(!debug.contains("secret-device-code"));
-        assert!(debug.contains("ABCD-EFGH"));
-    }
-
-    #[test]
-    fn microsoft_device_code_debug_redacts_device_code() {
-        let code = MicrosoftDeviceCode {
-            device_code: "secret-microsoft-device-code".to_string(),
-            user_code: "WXYZ-1234".to_string(),
-            verification_uri: "https://microsoft.com/devicelogin".to_string(),
+        let microsoft = MicrosoftDeviceCode {
+            device_code: "secret-microsoft-device-code".into(),
+            user_code: "WXYZ-1234".into(),
+            verification_uri: "https://microsoft.com/devicelogin".into(),
             expires_in: 900,
             interval: 5,
         };
-        let debug = format!("{code:?}");
-
-        assert!(debug.contains("redacted"));
-        assert!(!debug.contains("secret-microsoft-device-code"));
-        assert!(debug.contains("WXYZ-1234"));
+        for (debug, secret, user_code) in [
+            (format!("{github:?}"), "secret-device-code", "ABCD-EFGH"),
+            (
+                format!("{microsoft:?}"),
+                "secret-microsoft-device-code",
+                "WXYZ-1234",
+            ),
+        ] {
+            assert!(debug.contains("redacted"));
+            assert!(!debug.contains(secret));
+            assert!(debug.contains(user_code));
+        }
     }
 
     #[test]

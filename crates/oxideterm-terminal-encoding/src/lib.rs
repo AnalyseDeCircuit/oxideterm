@@ -341,56 +341,71 @@ mod tests {
     use super::*;
 
     #[test]
-    fn utf8_and_ascii_fast_paths_do_not_allocate() {
-        let mut decoder = TerminalOutputDecoder::new(TerminalEncoding::Utf8);
-        assert!(matches!(
-            decoder.decode_to_utf8_bytes(b"\x1b[Ahello"),
-            Cow::Borrowed(_)
-        ));
-        assert!(matches!(
-            TerminalInputEncoder::new(TerminalEncoding::Gbk).encode_text("ascii"),
-            Cow::Borrowed(_)
-        ));
-    }
-
-    #[test]
-    fn legacy_encodings_round_trip_sample_text() {
-        let samples = [
-            (TerminalEncoding::Gbk, "你好"),
-            (TerminalEncoding::Gb18030, "你好𠀀"),
-            (TerminalEncoding::Big5, "繁體中文"),
-            (TerminalEncoding::ShiftJis, "こんにちは"),
-            (TerminalEncoding::EucJp, "こんにちは"),
-            (TerminalEncoding::EucKr, "한국어"),
-            (TerminalEncoding::Windows1252, "café"),
-        ];
-
-        for (encoding, text) in samples {
-            let encoded = TerminalInputEncoder::new(encoding)
-                .encode_text(text)
-                .into_owned();
-            let mut decoder = TerminalOutputDecoder::new(encoding);
-            let decoded = decoder.decode_to_utf8_bytes(&encoded).into_owned();
-            assert_eq!(String::from_utf8(decoded).unwrap(), text, "{encoding}");
-        }
-    }
-
-    #[test]
-    fn streaming_decoder_preserves_split_multibyte_legacy_character() {
-        let encoded = TerminalInputEncoder::new(TerminalEncoding::Gbk)
-            .encode_text("你好")
-            .into_owned();
-        let mut decoder = TerminalOutputDecoder::new(TerminalEncoding::Gbk);
-        let first = decoder.decode_to_utf8_bytes(&encoded[..1]).into_owned();
-        let second = decoder.decode_to_utf8_bytes(&encoded[1..]).into_owned();
-        assert_eq!(String::from_utf8([first, second].concat()).unwrap(), "你好");
-    }
-
-    #[test]
-    fn ascii_control_bytes_survive_legacy_decode() {
+    fn ascii_controls_and_fast_path_borrowing_are_preserved() {
         let raw = b"\x1b[31mred\x07\x1b[0m\r\n";
-        let mut decoder = TerminalOutputDecoder::new(TerminalEncoding::ShiftJis);
-        assert_eq!(decoder.decode_to_utf8_bytes(raw).as_ref(), raw);
+        for encoding in [
+            TerminalEncoding::Utf8,
+            TerminalEncoding::Gbk,
+            TerminalEncoding::ShiftJis,
+        ] {
+            let mut decoder = TerminalOutputDecoder::new(encoding);
+            let decoded = decoder.decode_to_utf8_bytes(raw);
+            if encoding == TerminalEncoding::Utf8 {
+                assert!(matches!(decoded, Cow::Borrowed(_)));
+            }
+            assert_eq!(decoded.as_ref(), raw);
+        }
+        let encoded = TerminalInputEncoder::new(TerminalEncoding::Gbk).encode_text("ascii");
+        assert!(matches!(encoded, Cow::Borrowed(_)));
+        assert_eq!(encoded.as_ref(), b"ascii");
+    }
+
+    #[test]
+    fn legacy_encodings_match_wire_bytes_and_decode_every_chunk_split() {
+        let samples: &[(TerminalEncoding, &str, &[u8])] = &[
+            (TerminalEncoding::Gbk, "你好", b"\xc4\xe3\xba\xc3"),
+            (
+                TerminalEncoding::Gb18030,
+                "你好𠀀",
+                b"\xc4\xe3\xba\xc3\x95\x32\x82\x36",
+            ),
+            (
+                TerminalEncoding::Big5,
+                "繁體中文",
+                b"\xc1\x63\xc5\xe9\xa4\xa4\xa4\xe5",
+            ),
+            (
+                TerminalEncoding::ShiftJis,
+                "こんにちは",
+                b"\x82\xb1\x82\xf1\x82\xc9\x82\xbf\x82\xcd",
+            ),
+            (
+                TerminalEncoding::EucJp,
+                "こんにちは",
+                b"\xa4\xb3\xa4\xf3\xa4\xcb\xa4\xc1\xa4\xcf",
+            ),
+            (
+                TerminalEncoding::EucKr,
+                "한국어",
+                b"\xc7\xd1\xb1\xb9\xbe\xee",
+            ),
+            (TerminalEncoding::Windows1252, "café", b"caf\xe9"),
+        ];
+        for &(encoding, text, wire) in samples {
+            assert_eq!(
+                TerminalInputEncoder::new(encoding)
+                    .encode_text(text)
+                    .as_ref(),
+                wire,
+                "{encoding}"
+            );
+            for split in 0..=wire.len() {
+                let mut decoder = TerminalOutputDecoder::new(encoding);
+                let mut decoded = decoder.decode_to_utf8_bytes(&wire[..split]).into_owned();
+                decoded.extend_from_slice(&decoder.decode_to_utf8_bytes(&wire[split..]));
+                assert_eq!(decoded, text.as_bytes(), "{encoding}, split {split}");
+            }
+        }
     }
 
     #[test]

@@ -553,21 +553,27 @@ mod tests {
     }
 
     #[test]
-    fn matches_literal_across_every_chunk_split_exactly_once() {
-        let input = "prefix READY suffix";
-        for split in 0..=input.len() {
-            let mut stream = make_stream(vec![rule(
-                "literal",
-                "READY",
-                TerminalTriggerMatchMode::Literal,
-            )]);
-            let now = Instant::now();
-            let mut events = observe_at(&mut stream, &input[..split], now);
-            events.extend(observe_at(&mut stream, &input[split..], now));
-            events.extend(observe_at(&mut stream, "", now));
-
-            assert_eq!(events.len(), 1, "split {split}");
-            assert_eq!(events[0].capture("match"), Some("READY"));
+    fn literal_matches_survive_every_ascii_and_utf8_chunk_split_exactly_once() {
+        for (input, pattern) in [
+            ("prefix READY suffix", "READY"),
+            ("prefix 密码 suffix", "密码"),
+        ] {
+            for split in 0..=input.len() {
+                let mut stream = make_stream(vec![rule(
+                    "literal",
+                    pattern,
+                    TerminalTriggerMatchMode::Literal,
+                )]);
+                let now = Instant::now();
+                let mut events = Vec::new();
+                stream
+                    .observe_bytes_at(&input.as_bytes()[..split], now, |event| events.push(event));
+                stream
+                    .observe_bytes_at(&input.as_bytes()[split..], now, |event| events.push(event));
+                events.extend(observe_at(&mut stream, "", now));
+                assert_eq!(events.len(), 1, "{pattern}, split {split}");
+                assert_eq!(events[0].capture("match"), Some(pattern));
+            }
         }
     }
 
@@ -581,7 +587,13 @@ mod tests {
 
         assert!(observe_at(&mut stream, "ERROR", now).is_empty());
         let events = observe_at(&mut stream, " ", now);
-        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.capture("match"))
+                .collect::<Vec<_>>(),
+            vec![Some("ERROR")]
+        );
 
         let mut stream = make_stream(vec![{
             let mut rule = rule("word", "error", TerminalTriggerMatchMode::Literal);
@@ -613,25 +625,6 @@ mod tests {
     }
 
     #[test]
-    fn retains_utf8_code_points_split_at_every_byte_boundary() {
-        let input = "prefix 密码 suffix";
-        for split in 0..=input.len() {
-            let mut stream = make_stream(vec![rule(
-                "utf8",
-                "密码",
-                TerminalTriggerMatchMode::Literal,
-            )]);
-            let now = Instant::now();
-            let mut events = Vec::new();
-            stream.observe_bytes_at(&input.as_bytes()[..split], now, |event| events.push(event));
-            stream.observe_bytes_at(&input.as_bytes()[split..], now, |event| events.push(event));
-
-            assert_eq!(events.len(), 1, "byte split {split}");
-            assert_eq!(events[0].capture("match"), Some("密码"));
-        }
-    }
-
-    #[test]
     fn strips_split_ansi_osc_and_string_controls() {
         let mut stream = make_stream(vec![rule(
             "control",
@@ -660,14 +653,26 @@ mod tests {
         let now = Instant::now();
 
         let events = observe_at(&mut stream, "ERX\u{8}ROR\n", now);
-        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.capture("match"))
+                .collect::<Vec<_>>(),
+            vec![Some("ERROR")]
+        );
 
         let events = observe_at(
             &mut stream,
             "stale\roverwrite ERROR\n",
             now + Duration::from_millis(100),
         );
-        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.capture("match"))
+                .collect::<Vec<_>>(),
+            vec![Some("ERROR")]
+        );
     }
 
     #[test]
@@ -715,6 +720,7 @@ mod tests {
 
         let events = observe_at(&mut stream, &input, Instant::now());
         assert_eq!(events.len(), 1);
+        assert_eq!(events[0].capture("match"), Some("TAIL-MATCH"));
         assert!(stream.current_line.len() <= MAX_LOGICAL_LINE_BYTES);
     }
 

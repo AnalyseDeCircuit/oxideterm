@@ -83,58 +83,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn identifies_supported_archive_suffixes_case_insensitively() {
-        let cases = [
-            ("backup.ZIP", ArchiveKind::Zip),
-            ("backup.tar", ArchiveKind::Tar),
-            ("backup.tar.gz", ArchiveKind::TarGzip),
-            ("backup.tgz", ArchiveKind::TarGzip),
-            ("backup.tar.bz2", ArchiveKind::TarBzip2),
-            ("backup.tbz", ArchiveKind::TarBzip2),
-            ("backup.tbz2", ArchiveKind::TarBzip2),
-            ("backup.tar.xz", ArchiveKind::TarXz),
-            ("backup.txz", ArchiveKind::TarXz),
-            ("backup.tar.zst", ArchiveKind::TarZstd),
-            ("backup.tzst", ArchiveKind::TarZstd),
-        ];
-
-        for (file_name, expected) in cases {
-            assert_eq!(archive_kind(file_name), Some(expected), "{file_name}");
+    fn archive_suffixes_select_non_destructive_commands_with_quoted_paths() {
+        for (suffix, kind, command) in [
+            ("ZIP", ArchiveKind::Zip, "unzip -nq"),
+            ("tar", ArchiveKind::Tar, "tar -k -xf"),
+            ("tar.gz", ArchiveKind::TarGzip, "tar -k -xzf"),
+            ("tgz", ArchiveKind::TarGzip, "tar -k -xzf"),
+            ("tar.bz2", ArchiveKind::TarBzip2, "tar -k -xjf"),
+            ("tbz", ArchiveKind::TarBzip2, "tar -k -xjf"),
+            ("tbz2", ArchiveKind::TarBzip2, "tar -k -xjf"),
+            ("tar.xz", ArchiveKind::TarXz, "tar -k -xJf"),
+            ("txz", ArchiveKind::TarXz, "tar -k -xJf"),
+            ("tar.zst", ArchiveKind::TarZstd, "tar -k --zstd -xf"),
+            ("tzst", ArchiveKind::TarZstd, "tar -k --zstd -xf"),
+        ] {
+            let file_name = format!("backup.{suffix}");
+            let plan = plan_archive_extraction(
+                &file_name,
+                &format!("/srv/it's files/{file_name}"),
+                "/srv/it's files",
+            )
+            .unwrap();
+            assert_eq!(plan.kind, kind, "{suffix}");
+            let destination_flag = if kind == ArchiveKind::Zip { "-d" } else { "-C" };
+            assert_eq!(
+                plan.command,
+                format!(
+                    "{command} '/srv/it'\\''s files/{file_name}' {destination_flag} '/srv/it'\\''s files'"
+                ),
+                "{suffix}"
+            );
         }
-    }
-
-    #[test]
-    fn builds_commands_for_every_archive_kind() {
-        let cases = [
-            ("app.zip", "unzip -nq '/tmp/app.zip' -d '/tmp'"),
-            ("app.tar", "tar -k -xf '/tmp/app.tar' -C '/tmp'"),
-            ("app.tgz", "tar -k -xzf '/tmp/app.tgz' -C '/tmp'"),
-            ("app.tbz2", "tar -k -xjf '/tmp/app.tbz2' -C '/tmp'"),
-            ("app.txz", "tar -k -xJf '/tmp/app.txz' -C '/tmp'"),
-            ("app.tzst", "tar -k --zstd -xf '/tmp/app.tzst' -C '/tmp'"),
-        ];
-
-        for (file_name, expected) in cases {
-            let archive_path = format!("/tmp/{file_name}");
-            let plan = plan_archive_extraction(file_name, &archive_path, "/tmp")
-                .expect("archive should be supported");
-            assert_eq!(plan.command, expected, "{file_name}");
-        }
-    }
-
-    #[test]
-    fn quotes_spaces_and_single_quotes_in_paths() {
-        let plan = plan_archive_extraction(
-            "backup.zip",
-            "/srv/it's files/backup.zip",
-            "/srv/it's files",
-        )
-        .expect("zip archives should be supported");
-
-        assert_eq!(
-            plan.command,
-            "unzip -nq '/srv/it'\\''s files/backup.zip' -d '/srv/it'\\''s files'"
-        );
     }
 
     #[test]

@@ -1065,8 +1065,15 @@ mod tests {
                 .list_incomplete("connection-generation-b")
                 .await
                 .expect("list new generation")
-                .len(),
-            1
+                .into_iter()
+                .map(|row| (row.transfer_id, row.session_id, row.source_path, row.status))
+                .collect::<Vec<_>>(),
+            vec![(
+                progress.transfer_id.clone(),
+                "connection-generation-b".to_string(),
+                progress.source_path.clone(),
+                TransferStatus::Failed
+            )]
         );
 
         drop(store);

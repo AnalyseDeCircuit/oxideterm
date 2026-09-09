@@ -964,8 +964,27 @@ mod tests {
             description: "OpenSSH server daemon".to_string(),
         }];
 
-        assert_eq!(visible_service_rows(&rows, "openssh").len(), 1);
-        assert_eq!(visible_service_rows(&rows, "42").len(), 1);
-        assert_eq!(visible_service_rows(&rows, "postgres").len(), 0);
+        let mut rows = rows;
+        rows.push(ResourceService {
+            id: "postgres.service".to_string(),
+            description: "PostgreSQL database".to_string(),
+            main_pid: Some("99".to_string()),
+            ..rows[0].clone()
+        });
+        for (query, expected) in [
+            ("openssh", vec!["sshd.service"]),
+            ("42", vec!["sshd.service"]),
+            ("postgres", vec!["postgres.service"]),
+            ("missing", vec![]),
+        ] {
+            assert_eq!(
+                visible_service_rows(&rows, query)
+                    .iter()
+                    .map(|row| row.id.as_str())
+                    .collect::<Vec<_>>(),
+                expected,
+                "{query}"
+            );
+        }
     }
 }

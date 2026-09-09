@@ -3505,30 +3505,21 @@ mod persistence_safety_tests {
     }
 
     #[test]
-    fn corrupt_connections_file_is_preserved() {
-        let path = persistence_test_path("corrupt");
-        let corrupt = b"{ not valid connections";
-        fs::write(&path, corrupt).unwrap();
-
-        assert!(ConnectionStore::load(&path).is_err());
-        assert_eq!(fs::read(&path).unwrap(), corrupt);
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn future_connections_file_is_preserved() {
-        let path = persistence_test_path("future");
-        let future = serde_json::to_vec_pretty(&serde_json::json!({
-            "version": CONFIG_VERSION + 1,
-            "connections": [],
-            "groups": []
-        }))
+    fn rejected_store_documents_are_preserved_byte_for_byte() {
+        let future = serde_json::to_vec(
+            &serde_json::json!({"version": CONFIG_VERSION + 1, "connections":[],"groups":[]}),
+        )
         .unwrap();
-        fs::write(&path, &future).unwrap();
-
-        assert!(ConnectionStore::load(&path).is_err());
-        assert_eq!(fs::read(&path).unwrap(), future);
-        let _ = fs::remove_file(path);
+        for bytes in [b"{ not valid json".to_vec(), future] {
+            let path =
+                std::env::temp_dir().join(format!("oxideterm-rejected-{}.json", uuid::Uuid::new_v4()));
+            fs::write(&path, &bytes).unwrap();
+            let result = ConnectionStore::load(&path);
+            let preserved = fs::read(&path).unwrap();
+            fs::remove_file(&path).unwrap();
+            assert!(result.is_err());
+            assert_eq!(preserved, bytes);
+        }
     }
 
     #[test]

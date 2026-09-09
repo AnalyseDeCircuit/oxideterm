@@ -1529,23 +1529,24 @@ mod transfer_safety_tests {
     }
 
     #[test]
-    fn upload_buffer_matches_small_remaining_payloads() {
-        assert_eq!(upload_buffer_len(4 * 1024, 0), 4 * 1024);
-        assert_eq!(upload_buffer_len(8 * 1024, 6 * 1024), 2 * 1024);
-    }
-
-    #[test]
-    fn upload_buffer_keeps_empty_and_completed_uploads_readable() {
-        assert_eq!(upload_buffer_len(0, 0), 1);
-        assert_eq!(upload_buffer_len(4 * 1024, 4 * 1024), 1);
-        assert_eq!(upload_buffer_len(4 * 1024, 8 * 1024), 1);
-    }
-
-    #[test]
-    fn upload_buffer_caps_large_payloads_at_the_adaptive_maximum() {
-        assert_eq!(
-            upload_buffer_len(AdaptiveChunkSizer::MAX_CHUNK as u64 + 1, 0),
-            AdaptiveChunkSizer::MAX_CHUNK
-        );
+    fn upload_buffer_respects_remaining_bytes_and_allocation_bounds() {
+        for (total, completed, expected) in [
+            (4 * 1024, 0, 4 * 1024),
+            (8 * 1024, 6 * 1024, 2 * 1024),
+            (0, 0, 1),
+            (4 * 1024, 4 * 1024, 1),
+            (4 * 1024, 8 * 1024, 1),
+            (
+                AdaptiveChunkSizer::MAX_CHUNK as u64 + 1,
+                0,
+                AdaptiveChunkSizer::MAX_CHUNK,
+            ),
+        ] {
+            assert_eq!(
+                upload_buffer_len(total, completed),
+                expected,
+                "{total}/{completed}"
+            );
+        }
     }
 }

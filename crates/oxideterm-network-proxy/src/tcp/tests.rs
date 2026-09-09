@@ -226,53 +226,49 @@ async fn http_connect_header_timeout_uses_transport_timeout_error() {
 }
 
 #[tokio::test]
-async fn socks5_no_auth_connects_to_domain_target() {
-    let proxy_addr = spawn_socks5_server(MockSocks5Mode::NoAuthSuccess).await;
-    let proxy = UpstreamProxyConfig {
-        protocol: UpstreamProxyProtocol::Socks5,
-        host: proxy_addr.ip().to_string(),
-        port: proxy_addr.port(),
-        auth: UpstreamProxyAuth::None,
-        remote_dns: true,
-        no_proxy: String::new(),
-    };
-
-    let mut stream = dial_initial_tcp("target.example.com", 22, 5, Some(&proxy))
-        .await
-        .unwrap();
-
-    stream.write_all(b"ping").await.unwrap();
-}
-
-#[tokio::test]
-async fn socks5_username_password_connects() {
-    let proxy_addr = spawn_socks5_server(MockSocks5Mode::PasswordSuccess {
+async fn socks5_connect_preserves_target_authentication_and_tunnel_data() {
+    let password_mode = MockSocks5Mode::PasswordSuccess {
         username: "user",
         password: "secret",
-    })
-    .await;
-    let proxy = UpstreamProxyConfig {
-        protocol: UpstreamProxyProtocol::Socks5,
-        host: proxy_addr.ip().to_string(),
-        port: proxy_addr.port(),
-        auth: UpstreamProxyAuth::Password {
-            username: "user".to_string(),
-            password: Zeroizing::new("secret".to_string()),
-        },
-        remote_dns: true,
-        no_proxy: String::new(),
     };
-
-    let mut stream = dial_initial_tcp("target.example.com", 22, 5, Some(&proxy))
-        .await
-        .unwrap();
-
-    stream.write_all(b"ping").await.unwrap();
+    for (target, mode) in [
+        ("target.example.com", MockSocks5Mode::NoAuthSuccess),
+        ("target.example.com", password_mode),
+        ("127.0.0.1", MockSocks5Mode::NoAuthSuccess),
+        ("::1", MockSocks5Mode::NoAuthSuccess),
+    ] {
+        let (proxy_addr, server) = spawn_socks5_server(mode, target).await;
+        let auth = match mode {
+            MockSocks5Mode::PasswordSuccess { username, password } => UpstreamProxyAuth::Password {
+                username: username.into(),
+                password: Zeroizing::new(password.into()),
+            },
+            _ => UpstreamProxyAuth::None,
+        };
+        let proxy = UpstreamProxyConfig {
+            protocol: UpstreamProxyProtocol::Socks5,
+            host: proxy_addr.ip().to_string(),
+            port: proxy_addr.port(),
+            auth,
+            remote_dns: true,
+            no_proxy: String::new(),
+        };
+        let mut stream = dial_initial_tcp(target, 22, 5, Some(&proxy)).await.unwrap();
+        stream.write_all(b"ping").await.unwrap();
+        let mut reply = [0; 4];
+        tokio::time::timeout(Duration::from_secs(5), stream.read_exact(&mut reply))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&reply, b"pong", "{target}");
+        server.await.unwrap();
+    }
 }
 
 #[tokio::test]
 async fn socks5_rejected_method_is_redacted_error() {
-    let proxy_addr = spawn_socks5_server(MockSocks5Mode::RejectMethods).await;
+    let (proxy_addr, server) =
+        spawn_socks5_server(MockSocks5Mode::RejectMethods, "target.example.com").await;
     let proxy = UpstreamProxyConfig {
         protocol: UpstreamProxyProtocol::Socks5,
         host: proxy_addr.ip().to_string(),
@@ -288,11 +284,13 @@ async fn socks5_rejected_method_is_redacted_error() {
         .to_string();
 
     assert!(error.contains("rejected all auth methods"));
+    server.await.unwrap();
 }
 
 #[tokio::test]
 async fn socks5_bad_reply_code_is_reported_without_credentials() {
-    let proxy_addr = spawn_socks5_server(MockSocks5Mode::BadReplyCode).await;
+    let (proxy_addr, server) =
+        spawn_socks5_server(MockSocks5Mode::BadReplyCode, "target.example.com").await;
     let proxy = UpstreamProxyConfig {
         protocol: UpstreamProxyProtocol::Socks5,
         host: proxy_addr.ip().to_string(),
@@ -311,31 +309,8 @@ async fn socks5_bad_reply_code_is_reported_without_credentials() {
         .to_string();
 
     assert!(error.contains("reply code 0x05"));
+    server.await.unwrap();
     assert!(!error.contains("secret"));
-}
-
-#[tokio::test]
-async fn socks5_supports_ipv4_and_ipv6_targets() {
-    let proxy_addr = spawn_socks5_server(MockSocks5Mode::NoAuthSuccess).await;
-    let proxy = UpstreamProxyConfig {
-        protocol: UpstreamProxyProtocol::Socks5,
-        host: proxy_addr.ip().to_string(),
-        port: proxy_addr.port(),
-        auth: UpstreamProxyAuth::None,
-        remote_dns: true,
-        no_proxy: String::new(),
-    };
-
-    let _ipv4 = dial_initial_tcp("127.0.0.1", 22, 5, Some(&proxy))
-        .await
-        .unwrap();
-
-    let proxy_addr = spawn_socks5_server(MockSocks5Mode::NoAuthSuccess).await;
-    let proxy = UpstreamProxyConfig {
-        port: proxy_addr.port(),
-        ..proxy
-    };
-    let _ipv6 = dial_initial_tcp("::1", 22, 5, Some(&proxy)).await.unwrap();
 }
 
 #[tokio::test]
@@ -456,10 +431,13 @@ async fn read_http_request_header(stream: &mut TcpStream) -> String {
     String::from_utf8(request).unwrap()
 }
 
-async fn spawn_socks5_server(mode: MockSocks5Mode) -> SocketAddr {
+async fn spawn_socks5_server(
+    mode: MockSocks5Mode,
+    target: &'static str,
+) -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
+    let server = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
         let mut greeting = [0_u8; 2];
         stream.read_exact(&mut greeting).await.unwrap();
@@ -491,14 +469,20 @@ async fn spawn_socks5_server(mode: MockSocks5Mode) -> SocketAddr {
             }
         }
 
-        let atyp = read_connect_request(&mut stream).await;
+        let atyp = read_connect_request(&mut stream, target).await;
         let reply_code = match mode {
             MockSocks5Mode::BadReplyCode => 0x05,
             _ => 0x00,
         };
         write_success_reply(&mut stream, atyp, reply_code).await;
+        if reply_code == 0 {
+            let mut payload = [0; 4];
+            stream.read_exact(&mut payload).await.unwrap();
+            assert_eq!(&payload, b"ping");
+            stream.write_all(b"pong").await.unwrap();
+        }
     });
-    addr
+    (addr, server)
 }
 
 async fn assert_password_auth(stream: &mut TcpStream, username: &str, password: &str) {
@@ -516,7 +500,7 @@ async fn assert_password_auth(stream: &mut TcpStream, username: &str, password: 
     stream.write_all(&[SOCKS_AUTH_VERSION, 0x00]).await.unwrap();
 }
 
-async fn read_connect_request(stream: &mut TcpStream) -> u8 {
+async fn read_connect_request(stream: &mut TcpStream, expected_target: &str) -> u8 {
     let mut header = [0_u8; 4];
     stream.read_exact(&mut header).await.unwrap();
     assert_eq!(header[0], SOCKS_VERSION);
@@ -525,16 +509,34 @@ async fn read_connect_request(stream: &mut TcpStream) -> u8 {
         SOCKS_ATYP_IPV4 => {
             let mut target = [0_u8; 6];
             stream.read_exact(&mut target).await.unwrap();
+            assert_eq!(
+                &target[..4],
+                &expected_target
+                    .parse::<std::net::Ipv4Addr>()
+                    .unwrap()
+                    .octets()
+            );
+            assert_eq!(&target[4..], &22_u16.to_be_bytes());
         }
         SOCKS_ATYP_IPV6 => {
             let mut target = [0_u8; 18];
             stream.read_exact(&mut target).await.unwrap();
+            assert_eq!(
+                &target[..16],
+                &expected_target
+                    .parse::<std::net::Ipv6Addr>()
+                    .unwrap()
+                    .octets()
+            );
+            assert_eq!(&target[16..], &22_u16.to_be_bytes());
         }
         SOCKS_ATYP_DOMAIN => {
             let mut len = [0_u8; 1];
             stream.read_exact(&mut len).await.unwrap();
             let mut target = vec![0_u8; len[0] as usize + 2];
             stream.read_exact(&mut target).await.unwrap();
+            assert_eq!(&target[..len[0] as usize], expected_target.as_bytes());
+            assert_eq!(&target[len[0] as usize..], &22_u16.to_be_bytes());
         }
         other => panic!("unexpected address type {other}"),
     }

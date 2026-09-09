@@ -599,8 +599,19 @@ mod tests {
             "===DOCKER===\nabc123def456\tweb\tnginx:alpine\trunning\tUp\t80/tcp\nfff111eee222\tdb\tpostgres:16\texited\tExited\t\n===DOCKER_END===",
         );
 
-        assert_eq!(visible_docker_rows(&snapshot.containers, "nginx").len(), 1);
-        assert_eq!(visible_docker_rows(&snapshot.containers, "exited").len(), 1);
+        for (query, expected) in [
+            ("nginx", vec!["web"]),
+            ("exited", vec!["db"]),
+            ("missing", vec![]),
+            ("", vec!["web", "db"]),
+        ] {
+            let rows = visible_docker_rows(&snapshot.containers, query);
+            assert_eq!(
+                rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
+                expected,
+                "{query}"
+            );
+        }
     }
 
     #[test]

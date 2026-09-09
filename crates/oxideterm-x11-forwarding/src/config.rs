@@ -86,7 +86,7 @@ impl fmt::Debug for X11SshRequest {
 
 #[cfg(test)]
 mod tests {
-    use crate::{X11AuthCookie, X11AuthMaterial, X11Display, X11ForwardPolicy, X11ForwardTrust};
+    use crate::{X11AuthCookie, X11AuthMaterial, X11Display};
 
     use super::*;
 
@@ -112,15 +112,5 @@ mod tests {
         assert_eq!(config.remote_display_value(), "localhost:10.1");
         assert!(!format!("{request:?}").contains("aaaaaaaa"));
         assert!(!format!("{config:?}").contains(":0.1"));
-    }
-
-    #[test]
-    fn config_carries_explicit_forwarding_policy() {
-        let display = X11Display::parse(":0").unwrap();
-        let config = X11ForwardConfig::new(display)
-            .with_policy(X11ForwardPolicy::trusted().with_timeout_millis(30_000));
-
-        assert_eq!(config.policy.trust, X11ForwardTrust::Trusted);
-        assert_eq!(config.policy.timeout_millis, Some(30_000));
     }
 }

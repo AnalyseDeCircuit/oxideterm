@@ -159,16 +159,15 @@ mod tests {
     }
 
     #[test]
-    fn ignores_ymodem_data_block_without_negotiation() {
+    fn ignores_xy_data_blocks_without_negotiation() {
         let mut detector = ModemDetector::new();
-        assert!(detector.scan(&[SOH, 0, 0xff, b'f']).is_empty());
-    }
-
-    #[test]
-    fn ignores_xmodem_data_block_without_negotiation() {
-        let mut detector = ModemDetector::new();
-        assert!(detector.scan(&[SOH, 1, 0xfe, b'f']).is_empty());
-        assert!(detector.scan(&[STX, 1, 0xfe, b'f']).is_empty());
+        for block in [
+            [SOH, 0, 0xff, b'f'],
+            [SOH, 1, 0xfe, b'f'],
+            [STX, 1, 0xfe, b'f'],
+        ] {
+            assert!(detector.scan(&block).is_empty());
+        }
     }
 
     #[test]

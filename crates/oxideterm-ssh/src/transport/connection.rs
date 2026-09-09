@@ -659,22 +659,18 @@ mod remote_forward_port_tests {
     use super::*;
 
     #[test]
-    fn explicit_remote_forward_keeps_requested_port_for_empty_success_response() {
-        assert_eq!(resolve_remote_forward_port(58_627, 0).unwrap(), 58_627);
-    }
-
-    #[test]
-    fn allocated_remote_forward_uses_server_port() {
-        assert_eq!(resolve_remote_forward_port(0, 42_000).unwrap(), 42_000);
-    }
-
-    #[test]
-    fn allocated_remote_forward_rejects_missing_server_port() {
-        assert!(resolve_remote_forward_port(0, 0).is_err());
-    }
-
-    #[test]
-    fn remote_forward_rejects_out_of_range_server_port() {
-        assert!(resolve_remote_forward_port(0, u16::MAX as u32 + 1).is_err());
+    fn remote_forward_port_resolution_handles_explicit_and_allocated_responses() {
+        for (requested, returned, expected) in [
+            (58_627, 0, Some(58_627)),
+            (0, 42_000, Some(42_000)),
+            (0, 0, None),
+            (0, u16::MAX as u32 + 1, None),
+        ] {
+            assert_eq!(
+                resolve_remote_forward_port(requested, returned).ok(),
+                expected,
+                "{requested}/{returned}"
+            );
+        }
     }
 }

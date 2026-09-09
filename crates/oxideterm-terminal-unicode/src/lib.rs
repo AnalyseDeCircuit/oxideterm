@@ -416,23 +416,22 @@ mod tests {
     }
 
     #[test]
-    fn mixed_hebrew_text_has_visual_mapping() {
+    fn mixed_hebrew_mapping_splits_selections_at_direction_boundaries() {
         let line = visual_line_for_row(&row("abc שלום 123 def"));
         assert!(line.has_bidi);
         assert_eq!(line.visual_col_for_logical_col(0), 0);
         assert_ne!(line.visual_col_for_logical_col(4), 4);
         let visual_col = line.visual_col_for_logical_col(4);
         assert_eq!(line.logical_col_for_visual_col(visual_col), 4);
-    }
 
-    #[test]
-    fn logical_ranges_split_into_visual_rects() {
         let line = visual_line_for_row(&row("abc שלום def"));
-        let rects = line
-            .visual_rects_for_logical_range(4..8)
-            .collect::<Vec<_>>();
-        assert!(!rects.is_empty());
-        assert_eq!(rects.iter().map(|range| range.len()).sum::<usize>(), 4);
+        for (selection, expected) in [(4..8, vec![4..8]), (2..6, vec![2..4, 6..8])] {
+            assert_eq!(
+                line.visual_rects_for_logical_range(selection)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
     }
 
     #[test]

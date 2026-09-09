@@ -463,35 +463,21 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_cloud_sync_state_is_preserved() {
-        let path = std::env::temp_dir().join(format!(
-            "oxideterm-cloud-state-corrupt-{}.json",
-            uuid::Uuid::new_v4()
-        ));
-        let corrupt = b"{ not valid state";
-        fs::write(&path, corrupt).unwrap();
-
-        assert!(CloudSyncStateStore::load(&path).is_err());
-        assert_eq!(fs::read(&path).unwrap(), corrupt);
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn future_cloud_sync_state_is_preserved() {
-        let path = std::env::temp_dir().join(format!(
-            "oxideterm-cloud-state-future-{}.json",
-            uuid::Uuid::new_v4()
-        ));
-        let future = serde_json::to_vec_pretty(&serde_json::json!({
-            "version": CLOUD_SYNC_STATE_VERSION + 1,
-            "revisionSeq": 99
-        }))
+    fn rejected_store_documents_are_preserved_byte_for_byte() {
+        let future = serde_json::to_vec(
+            &serde_json::json!({"version": CLOUD_SYNC_STATE_VERSION + 1, "revisionSeq":99}),
+        )
         .unwrap();
-        fs::write(&path, &future).unwrap();
-
-        assert!(CloudSyncStateStore::load(&path).is_err());
-        assert_eq!(fs::read(&path).unwrap(), future);
-        let _ = fs::remove_file(path);
+        for bytes in [b"{ not valid json".to_vec(), future] {
+            let path = std::env::temp_dir()
+                .join(format!("oxideterm-rejected-{}.json", uuid::Uuid::new_v4()));
+            fs::write(&path, &bytes).unwrap();
+            let result = CloudSyncStateStore::load(&path);
+            let preserved = fs::read(&path).unwrap();
+            fs::remove_file(&path).unwrap();
+            assert!(result.is_err());
+            assert_eq!(preserved, bytes);
+        }
     }
 
     #[test]

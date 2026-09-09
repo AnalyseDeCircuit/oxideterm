@@ -196,7 +196,7 @@ mod tests {
     }
     #[test]
     fn ide_limit_accepts_100_mib() {
-        assert!(check_size(MAX_EDITABLE_FILE_SIZE).is_ok());
-        assert!(check_size(MAX_EDITABLE_FILE_SIZE + 1).is_err());
+        assert!(check_size(100 * 1024 * 1024).is_ok());
+        assert!(check_size(100 * 1024 * 1024 + 1).is_err());
     }
 }

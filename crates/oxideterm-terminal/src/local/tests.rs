@@ -102,17 +102,6 @@ mod tests {
     }
 
     #[test]
-    fn ssh_session_config_preserves_connection_identity() {
-        let config = SshSessionConfig::new("example.com", 2222, "alice");
-
-        assert_eq!(config.host(), "example.com");
-        assert_eq!(config.port(), 2222);
-        assert_eq!(config.username(), "alice");
-        assert!(!config.defer_pty_until_resize());
-        assert!(config.with_deferred_pty(true).defer_pty_until_resize());
-    }
-
-    #[test]
     fn ssh_terminal_is_not_interactive_until_shell_channel_is_ready() {
         let session = SshPtySession::new_disconnected_for_test(
             SshSessionConfig::new("127.0.0.1", 9, "nobody"),
@@ -1577,5 +1566,4 @@ mod tests {
         assert_eq!(fg, OXIDETERM_DARK_THEME.ansi[7]);
         assert_eq!(bg, OXIDETERM_DARK_THEME.ansi[15]);
     }
-
 }

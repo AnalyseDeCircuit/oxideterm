@@ -225,9 +225,14 @@ mod tests {
     }
 
     #[test]
-    fn stop_unblocks_waiters() {
+    fn stopped_buffer_rejects_further_line_and_binary_reads() {
         let buffer = TrzszBuffer::default();
         buffer.stop_buffer();
-        assert!(buffer.read_line().is_err());
+        assert!(
+            matches!(buffer.read_line(), Err(TrzszError::InvalidState(reason)) if reason == "Stopped")
+        );
+        assert!(
+            matches!(buffer.read_binary(1), Err(TrzszError::InvalidState(reason)) if reason == "Stopped")
+        );
     }
 }

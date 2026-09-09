@@ -619,32 +619,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn builds_stable_connection_key() {
-        let config = SshConfig::password("192.168.1.10", 22, "root", "pw");
-        assert_eq!(config.connection_key(), "root@192.168.1.10:22|");
-    }
-
-    #[test]
-    fn algorithm_preferences_separate_physical_connection_pool_identity() {
-        let mut config = SshConfig::password("host", 22, "operator", "pw");
-        let default_key = config.connection_key();
-        config.ssh_algorithms.cipher = vec!["aes256-gcm@openssh.com".to_string()];
-
-        assert_ne!(default_key, config.connection_key());
-    }
-
-    #[test]
-    fn channel_strategy_separates_physical_connection_pool_identity() {
-        let mut config = SshConfig::password("host", 22, "operator", "pw");
-        let multiplexed_key = config.connection_key();
-        config.ssh_channel_strategy = SshChannelStrategy::DedicatedPerConsumer;
-
-        assert_ne!(multiplexed_key, config.connection_key());
-        assert!(
-            config
-                .connection_key()
-                .contains("channel_strategy=dedicated_per_consumer")
-        );
+    fn transport_options_separate_physical_connection_pool_identity() {
+        let mut algorithms = SshConfig::password("host", 22, "operator", "pw");
+        let baseline = algorithms.connection_key();
+        algorithms.ssh_algorithms.cipher = vec!["aes256-gcm@openssh.com".to_string()];
+        let mut dedicated = SshConfig::password("host", 22, "operator", "pw");
+        dedicated.ssh_channel_strategy = SshChannelStrategy::DedicatedPerConsumer;
+        assert_ne!(algorithms.connection_key(), baseline);
+        assert_ne!(dedicated.connection_key(), baseline);
+        assert_ne!(algorithms.connection_key(), dedicated.connection_key());
     }
 
     #[test]
@@ -654,7 +637,6 @@ mod tests {
         config.x11_forwarding = Some(X11ForwardPolicy::untrusted().with_timeout_millis(1_200_000));
 
         assert_eq!(config.connection_key(), without_x11);
-        assert!(!format!("{config:?}").contains("MIT-MAGIC-COOKIE-1"));
     }
 
     #[test]

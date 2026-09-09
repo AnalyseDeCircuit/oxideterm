@@ -326,25 +326,18 @@ fn upload_conflict_check_rejects_changed_sensitive_credentials_section() {
 }
 
 #[test]
-fn legacy_preview_uses_selected_connection_names_when_importing() {
-    let selected_names =
-        legacy_preview_selected_names(true, Some(vec!["Prod".to_string(), "Staging".to_string()]))
-            .unwrap();
-
-    assert_eq!(
-        selected_names,
-        vec!["Prod".to_string(), "Staging".to_string()]
-    );
-}
-
-#[test]
-fn legacy_preview_clears_connection_names_when_connections_are_disabled() {
-    let selected_names = legacy_preview_selected_names(true, None);
-    assert!(selected_names.is_none());
-
-    let selected_names =
-        legacy_preview_selected_names(false, Some(vec!["Prod".to_string()])).unwrap();
-    assert!(selected_names.is_empty());
+fn legacy_preview_selection_respects_connection_scope() {
+    for (enabled, selected, expected) in [
+        (
+            true,
+            Some(vec!["Prod".into(), "Staging".into()]),
+            Some(vec!["Prod".into(), "Staging".into()]),
+        ),
+        (true, None, None),
+        (false, Some(vec!["Prod".into()]), Some(Vec::new())),
+    ] {
+        assert_eq!(legacy_preview_selected_names(enabled, selected), expected);
+    }
 }
 
 #[tokio::test]

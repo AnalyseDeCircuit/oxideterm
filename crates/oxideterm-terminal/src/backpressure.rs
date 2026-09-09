@@ -549,10 +549,17 @@ mod tests {
     };
 
     #[test]
-    fn utf8_guard_keeps_incomplete_tail() {
-        let mut guard = Utf8ResidualGuard::default();
-        assert_eq!(guard.push(&[0xe4, 0xbd]), None);
-        assert_eq!(guard.push(&[0xa0]).as_deref(), Some("你".as_bytes()));
+    fn utf8_guard_reassembles_split_multibyte_characters() {
+        for text in ["你", "😀"] {
+            for split in 1..text.len() {
+                let mut guard = Utf8ResidualGuard::default();
+                assert_eq!(guard.push(&text.as_bytes()[..split]), None);
+                assert_eq!(
+                    guard.push(&text.as_bytes()[split..]).as_deref(),
+                    Some(text.as_bytes())
+                );
+            }
+        }
     }
 
     #[test]
@@ -562,13 +569,6 @@ mod tests {
             guard.push(&[0xff, b'a']).as_deref(),
             Some(&[0xff, b'a'][..])
         );
-    }
-
-    #[test]
-    fn utf8_guard_does_not_split_emoji_tail() {
-        let mut guard = Utf8ResidualGuard::default();
-        assert_eq!(guard.push(&[0xf0, 0x9f, 0x98]), None);
-        assert_eq!(guard.push(&[0x80]).as_deref(), Some("😀".as_bytes()));
     }
 
     #[test]
@@ -588,20 +588,17 @@ mod tests {
     }
 
     #[test]
-    fn magic_scan_detects_split_pattern_once() {
-        let mut scan = MagicScanWindow::default();
-        assert!(scan.scan(b"abc::TRZSZ:").is_empty());
-        assert_eq!(scan.scan(b"TRANSFER:R:1").len(), 1);
-        assert!(scan.scan(b"ordinary output").is_empty());
-    }
-
-    #[test]
     fn magic_scan_detects_every_cross_chunk_split() {
         let marker = TerminalMagicKind::TrzszTransfer.marker();
         for split in 1..marker.len() {
             let mut scan = MagicScanWindow::default();
             assert!(scan.scan(&marker[..split]).is_empty(), "split {split}");
-            assert_eq!(scan.scan(&marker[split..]).len(), 1, "split {split}");
+            assert_eq!(
+                scan.scan(&marker[split..]),
+                [TerminalMagicKind::TrzszTransfer],
+                "split {split}"
+            );
+            assert!(scan.scan(b"ordinary output").is_empty());
         }
     }
 
