@@ -236,10 +236,11 @@ impl TrzszFilter {
         buffer.extend_from_slice(&self.detect_tail);
         buffer.extend_from_slice(output);
 
-        if let Some(magic) = find_trzsz_magic_key_bytes(&buffer) {
-            // Tauri waits 10ms before handling a detected magic key so the
-            // terminal can flush surrounding bytes. Scheduling that timer is a
-            // UI/runtime concern; the crate preserves it as an explicit drain.
+        if let Some(magic) = find_trzsz_magic_key_bytes(&buffer)
+            && magic.contains('\n')
+        {
+            // Version, ID and optional port can all end at a packet boundary.
+            // Wait for the wire line terminator before routing subsequent bytes to the transfer.
             self.pending_detect_buffers.push(magic);
         }
 
@@ -387,6 +388,24 @@ mod tests {
         assert_eq!(handshake.direction, TrzszTransferDirection::Download);
         assert_eq!(handshake.selection, TrzszTransferSelection::File);
         assert_eq!(handshake.unique_id, ":123");
+    }
+
+    #[test]
+    fn handshake_waits_for_line_end_when_version_id_port_and_crlf_are_split() {
+        for mode in ["S", "R", "D"] {
+            let line = format!("::TRZSZ:TRANSFER:{mode}:1.1.6:1234567890120:65535\r\n");
+            let mut filter = TrzszFilter::default();
+            for byte in &line.as_bytes()[..line.len() - 1] {
+                filter.process_server_output(&[*byte]);
+                assert!(filter.drain_detected_handshakes(false).is_empty());
+            }
+            filter.process_server_output(b"\n");
+            let events = filter.drain_detected_handshakes(false);
+            let [TrzszFilterOutput::StartTransfer(handshake)] = &events[..] else {
+                panic!("one completed handshake expected");
+            };
+            assert_eq!(handshake.unique_id, ":1234567890120");
+        }
     }
 
     #[test]

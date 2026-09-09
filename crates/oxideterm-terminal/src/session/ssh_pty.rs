@@ -1328,3 +1328,138 @@ mod ssh_startup_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod ssh_output_protocol_tests {
+    use super::*;
+    use oxideterm_modem_transfer::{
+        DetectedModemProtocol, ModemIo,
+        zmodem::{ZFrameType, encode_hex_header, position_header},
+    };
+
+    fn session() -> SshPtySession {
+        let config = SshSessionConfig::new("localhost", 22, "test")
+            .with_trzsz_policy(Some(TrzszTransferPolicy::default()));
+        let mut session = SshPtySession::new_disconnected_for_test(
+            config,
+            80,
+            24,
+            Default::default(),
+            Default::default(),
+            100,
+        );
+        // Display transforms must never touch a transfer's byte stream.
+        session.set_output_processor(Some(Arc::new(|bytes| bytes.to_ascii_uppercase())));
+        session.set_output_events_enabled(true);
+        session
+    }
+
+    #[test]
+    fn trzsz_split_handshake_routes_config_to_taken_worker_before_display_processing() {
+        let handshake = b"::TRZSZ:TRANSFER:R:1.1.6:9\n";
+        // zlib/base64 encoding of {"binary":false,"directory":false}.
+        let config = b"#CFG:eJyrVkrKzEssqlSySkvMKU7VUUrJLEpNLsmHi9QCANctDJE=\n";
+        for split in 0..=handshake.len() {
+            let mut session = session();
+            session.feed_transport_output(&handshake[..split]);
+            session.feed_transport_output(&handshake[split..]);
+            let events = session.take_events();
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(event, TerminalEvent::TrzszTransferPrompt { .. }))
+                    .count(),
+                1
+            );
+            let mut transfer = session.take_trzsz_transfer().expect("transfer worker");
+            for chunk in config.chunks(7) {
+                session.feed_transport_output(chunk);
+            }
+            assert!(
+                !session
+                    .take_events()
+                    .iter()
+                    .any(|event| matches!(event, TerminalEvent::Output(_))),
+                "protocol data entered recording"
+            );
+            let config = transfer.recv_config().expect("unmodified protocol config");
+            assert_eq!(config["binary"].as_bool(), Some(false));
+            assert_eq!(config["directory"].as_bool(), Some(false));
+            session.interrupt_trzsz_transfer();
+            assert!(
+                matches!(transfer.recv_config(), Err(oxideterm_trzsz::TrzszError::InvalidState(reason)) if reason == "Stopped"),
+                "subsequent protocol reads must report cancellation"
+            );
+            session.feed_transport_output(b"\r\nafter\r\n");
+            session.flush_buffered_modem_output();
+            assert!(session.buffer_text().contains("AFTER"));
+        }
+    }
+
+    #[test]
+    fn zmodem_split_handshake_preserves_binary_data_and_returns_trailing_prompt() {
+        let header = encode_hex_header(ZFrameType::ZrqInit, position_header(0), true);
+        let binary: Vec<u8> = (0..=255).collect();
+        for split in 0..=header.len() {
+            let mut session = session();
+            session.feed_transport_output(b"before\r\n");
+            session.feed_transport_output(&header[..split]);
+            session.feed_transport_output(&header[split..]);
+            assert_eq!(
+                session
+                    .take_events()
+                    .iter()
+                    .filter(|event| matches!(event, TerminalEvent::ModemTransferPrompt { .. }))
+                    .count(),
+                1
+            );
+            let mut transfer = session.modem_consumer.active_transfer().unwrap().clone();
+            assert_eq!(transfer.drain_remote_output(), header);
+            for chunk in binary.chunks(13) {
+                session.feed_transport_output(chunk);
+            }
+            assert_eq!(transfer.drain_remote_output(), binary);
+            assert!(
+                !session
+                    .take_events()
+                    .iter()
+                    .any(|event| matches!(event, TerminalEvent::Output(_))),
+                "binary data entered recording"
+            );
+            session.feed_transport_output(b"OO\r\n$ after ");
+            assert_eq!(transfer.read_byte(Duration::from_millis(10)).unwrap(), b'O');
+            assert_eq!(transfer.read_byte(Duration::from_millis(10)).unwrap(), b'O');
+            session.finish_modem_transfer();
+            assert!(session.buffer_text().contains("$ AFTER"));
+        }
+    }
+
+    #[test]
+    fn lrzsz_xy_negotiation_survives_bytewise_input_with_trzsz_enabled() {
+        let cases: &[(&[u8], DetectedModemProtocol)] = &[
+            (b"\r\n$ lrx upload.bin\r\nC", DetectedModemProtocol::Xmodem),
+            (b"\r\n$ lrb\r\nC", DetectedModemProtocol::Ymodem),
+        ];
+        for (input, protocol) in cases {
+            let mut session = session();
+            for byte in *input {
+                session.feed_transport_output(&[*byte]);
+            }
+            assert!(session.take_events().iter().any(|event| matches!(event,
+                TerminalEvent::ModemTransferPrompt { request, .. } if request.protocol == *protocol
+            )));
+            let transfer = session.modem_consumer.active_transfer().unwrap().clone();
+            assert_eq!(transfer.drain_remote_output(), b"C");
+            session.interrupt_modem_transfer();
+            assert_eq!(
+                transfer.take_server_write().as_deref(),
+                Some([oxideterm_modem_transfer::xymodem::CAN; 8].as_slice()),
+                "the transport must receive the X/YMODEM cancellation sequence"
+            );
+            session.finish_modem_transfer();
+            session.feed_transport_output(b"\r\nafter\r\n");
+            session.flush_buffered_modem_output();
+            assert!(session.buffer_text().contains("AFTER"));
+        }
+    }
+}
