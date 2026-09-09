@@ -321,74 +321,38 @@ mod tests {
     }
 
     #[test]
-    fn test_build_and_search() {
+    fn persisted_index_preserves_ranked_results_and_collection_filters() {
         let embeddings = vec![
             make_embedding("a", vec![1.0, 0.0, 0.0]),
             make_embedding("b", vec![0.0, 1.0, 0.0]),
             make_embedding("c", vec![0.0, 0.0, 1.0]),
             make_embedding("d", vec![0.7, 0.7, 0.0]),
         ];
-
         let index = PersistedHnswIndex::build(&embeddings).unwrap();
-        assert_eq!(index.meta.point_count, 4);
-        assert_eq!(index.meta.dimensions, 3);
-
-        // Search for something close to "a" ([1, 0, 0])
-        let results = index.search(&[0.9, 0.1, 0.0], 2, None);
-        assert_eq!(results.len(), 2);
-        // "a" should be the top result
-        assert_eq!(results[0].chunk_id, "a");
-        assert!(results[0].score > 0.9);
-    }
-
-    #[test]
-    fn test_search_with_filter() {
-        let embeddings = vec![
-            make_embedding("a", vec![1.0, 0.0, 0.0]),
-            make_embedding("b", vec![0.9, 0.1, 0.0]),
-            make_embedding("c", vec![0.0, 0.0, 1.0]),
-        ];
-
-        let index = PersistedHnswIndex::build(&embeddings).unwrap();
-
-        // Search for [1, 0, 0] but only allow "b" and "c"
-        let allowed: HashSet<String> = ["b", "c"].iter().map(|s| s.to_string()).collect();
-        let results = index.search(&[1.0, 0.0, 0.0], 2, Some(&allowed));
-
-        // "a" is closest but filtered out; "b" should be top
-        assert!(!results.iter().any(|r| r.chunk_id == "a"));
-        assert!(results.iter().any(|r| r.chunk_id == "b"));
-    }
-
-    #[test]
-    fn test_serialize_round_trip() {
-        let embeddings = vec![
-            make_embedding("x", vec![1.0, 0.0]),
-            make_embedding("y", vec![0.0, 1.0]),
-        ];
-
-        let index = PersistedHnswIndex::build(&embeddings).unwrap();
-
-        let dir = std::env::temp_dir().join(format!("oxideterm_hnsw_test_{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("test_hnsw.bin");
-
-        // Save
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.bin");
         index.save(&path).unwrap();
-        assert!(path.exists());
-
-        // Load
         let loaded = PersistedHnswIndex::load(&path).unwrap();
-        assert_eq!(loaded.meta.point_count, 2);
-        assert_eq!(loaded.meta.dimensions, 2);
-
-        // Search should produce same results
-        let orig_results = index.search(&[0.9, 0.1], 1, None);
-        let loaded_results = loaded.search(&[0.9, 0.1], 1, None);
-        assert_eq!(orig_results[0].chunk_id, loaded_results[0].chunk_id);
-
-        // Cleanup
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_dir(&dir);
+        let allowed = HashSet::from(["c".to_string(), "d".to_string()]);
+        for index in [&index, &loaded] {
+            assert_eq!(index.meta.point_count, 4);
+            assert_eq!(index.meta.dimensions, 3);
+            let hits = index.search(&[0.9, 0.1, 0.0], 2, None);
+            assert_eq!(
+                hits.iter()
+                    .map(|hit| hit.chunk_id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["a", "d"]
+            );
+            assert!(hits[0].score > 0.9);
+            let filtered = index.search(&[0.9, 0.1, 0.0], 2, Some(&allowed));
+            assert_eq!(
+                filtered
+                    .iter()
+                    .map(|hit| hit.chunk_id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["d", "c"]
+            );
+        }
     }
 }

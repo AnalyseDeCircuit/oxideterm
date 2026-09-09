@@ -324,25 +324,37 @@ mod tests {
     use crate::rag::types::DocFormat;
 
     #[test]
-    fn test_chunk_simple_markdown() {
+    fn markdown_chunks_preserve_content_and_heading_hierarchy() {
         let md = "# Introduction\n\nThis is the intro.\n\n## Setup\n\nSetup instructions here.\n\n### Docker\n\nDocker stuff.\n";
         let chunks = chunk_document("doc1", md, &DocFormat::Markdown);
-        assert!(!chunks.is_empty());
-        // Should have sections
-        let paths: Vec<_> = chunks.iter().map(|c| c.section_path.clone()).collect();
-        assert!(paths.iter().any(|p| p.as_deref() == Some("Introduction")));
-        assert!(
-            paths
-                .iter()
-                .any(|p| p.as_deref() == Some("Introduction > Setup > Docker"))
+        let sections: Vec<_> = chunks
+            .iter()
+            .map(|chunk| (chunk.section_path.as_deref(), chunk.content.as_str()))
+            .collect();
+        assert_eq!(
+            sections,
+            [
+                (Some("Introduction"), "This is the intro."),
+                (Some("Introduction > Setup"), "Setup instructions here."),
+                (Some("Introduction > Setup > Docker"), "Docker stuff."),
+            ]
         );
     }
 
     #[test]
-    fn test_chunk_plaintext() {
+    fn plaintext_chunks_preserve_content_and_source_metadata() {
         let text = "First paragraph about deployment.\n\nSecond paragraph about monitoring.\n\nThird about cleanup.\n";
         let chunks = chunk_document("doc2", text, &DocFormat::PlainText);
-        assert!(!chunks.is_empty());
-        assert!(chunks.iter().all(|c| c.section_path.is_none()));
+        let restored = chunks
+            .iter()
+            .map(|chunk| chunk.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        assert_eq!(restored, text.trim());
+        assert!(
+            chunks
+                .iter()
+                .all(|chunk| chunk.doc_id == "doc2" && chunk.section_path.is_none())
+        );
     }
 }

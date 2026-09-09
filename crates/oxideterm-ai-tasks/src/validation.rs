@@ -121,36 +121,35 @@ mod tests {
     }
 
     #[test]
-    fn recurring_tasks_reject_live_handles() {
-        let task = spec(
-            r#"{"handle_id":"turn-scoped"}"#,
+    fn recurring_tasks_accept_stable_references_but_reject_live_handles() {
+        for mode in [
             BackgroundTaskMode::Interval {
                 interval_seconds: 30,
                 max_runs: 10,
             },
-        );
-
-        assert_eq!(
-            validate_background_task_spec(&task, BackgroundTaskLimits::default()),
-            Err(BackgroundTaskValidationError::LiveHandleNotAllowed)
-        );
-    }
-
-    #[test]
-    fn condition_tasks_accept_stable_resource_references() {
-        let task = spec(
-            r#"{"resource_ref":{"kind":"saved_connection","id":"stable"}}"#,
             BackgroundTaskMode::Condition {
                 interval_seconds: 30,
                 max_runs: 10,
                 condition: BackgroundTaskCondition::ResultChanged,
             },
-        );
-
-        assert_eq!(
-            validate_background_task_spec(&task, BackgroundTaskLimits::default()),
-            Ok(())
-        );
+        ] {
+            for (arguments, expected) in [
+                (
+                    r#"{"handle_id":"turn-scoped"}"#,
+                    Err(BackgroundTaskValidationError::LiveHandleNotAllowed),
+                ),
+                (
+                    r#"{"resource_ref":{"kind":"saved_connection","id":"stable"}}"#,
+                    Ok(()),
+                ),
+            ] {
+                let task = spec(arguments, mode.clone());
+                assert_eq!(
+                    validate_background_task_spec(&task, BackgroundTaskLimits::default()),
+                    expected
+                );
+            }
+        }
     }
 
     #[test]

@@ -858,7 +858,6 @@ fn shared_provider_key_debug_is_redacted() {
     let debug = format!("{key:?}");
 
     assert_eq!(debug, "SharedAiProviderKey(<redacted>)");
-    assert!(!debug.contains("provider-secret-value"));
 }
 
 #[test]
@@ -931,22 +930,8 @@ fn parses_and_sanitizes_follow_up_suggestions() {
 #[test]
 fn chat_request_overrides_inject_current_context_as_system_message() {
     let mut history = vec![AiChatMessage {
-        id: "u1".into(),
-        role: AiChatRole::User,
-        content: "#buffer explain".into(),
-        timestamp_ms: 1,
-        model: None,
         context: Some("--- #buffer ---\nerror output".into()),
-        is_streaming: false,
-        thinking_content: None,
-        metadata: None,
-        tool_call_id: None,
-        tool_calls: Vec::new(),
-        turn: None,
-        transcript_ref: None,
-        summary_ref: None,
-        branches: None,
-        suggestions: Vec::new(),
+        ..chat_message("u1", AiChatRole::User, "#buffer explain")
     }];
 
     apply_chat_request_overrides(&mut history, Some("explain".into()), None);
@@ -958,35 +943,18 @@ fn chat_request_overrides_inject_current_context_as_system_message() {
 }
 
 #[test]
-fn chat_persistence_missing_file_defaults() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = AiChatPersistenceStore::new(dir.path().join("missing.redb"));
-
-    assert_eq!(store.load_state().unwrap(), AiChatState::default());
-}
-
-#[test]
 fn chat_persistence_save_state_rejects_stale_projection_snapshots() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("chat_history.redb");
     let store = AiChatPersistenceStore::new(&path);
+    assert_eq!(store.load_state().unwrap(), AiChatState::default());
     let mut state = AiChatState::default();
     let conversation_id =
         state.create_conversation("conversation-stale".into(), Some("Stale".into()), 42, None);
     state.add_message(
         &conversation_id,
         AiChatMessage {
-            id: "assistant-1".into(),
-            role: AiChatRole::Assistant,
-            content: "fresh projection".into(),
             timestamp_ms: 43,
-            model: None,
-            context: None,
-            is_streaming: false,
-            thinking_content: None,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
             turn: Some(serde_json::json!({
                 "id": "assistant-1",
                 "status": "complete",
@@ -994,10 +962,7 @@ fn chat_persistence_save_state_rejects_stale_projection_snapshots() {
                 "toolRounds": [],
                 "plainTextSummary": "fresh projection",
             })),
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
+            ..chat_message("assistant-1", AiChatRole::Assistant, "fresh projection")
         },
     );
 
@@ -1063,16 +1028,10 @@ fn chat_persistence_hydrates_interrupted_stream_as_closed_turn() {
     state.add_message(
         &conversation_id,
         AiChatMessage {
-            id: "assistant-1".into(),
-            role: AiChatRole::Assistant,
-            content: "Partial answer".into(),
             timestamp_ms: 2,
             model: Some("deepseek-v4-pro".into()),
-            context: None,
             is_streaming: true,
             thinking_content: Some("working".into()),
-            metadata: None,
-            tool_call_id: None,
             tool_calls: vec![serde_json::json!({
                 "id": "call-1",
                 "name": "get_state",
@@ -1100,10 +1059,7 @@ fn chat_persistence_hydrates_interrupted_stream_as_closed_turn() {
                 }],
                 "plainTextSummary": "Partial answer",
             })),
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
+            ..chat_message("assistant-1", AiChatRole::Assistant, "Partial answer")
         },
     );
 
@@ -1146,38 +1102,16 @@ fn chat_persistence_replays_completed_stream_turn_and_transcript_order() {
     state.add_message(
         &conversation_id,
         AiChatMessage {
-            id: "user-1".into(),
-            role: AiChatRole::User,
-            content: "open terminal".into(),
             timestamp_ms: 2,
-            model: None,
-            context: None,
-            is_streaming: false,
-            thinking_content: None,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
+            ..chat_message("user-1", AiChatRole::User, "open terminal")
         },
     );
     state.add_message(
         &conversation_id,
         AiChatMessage {
-            id: "assistant-1".into(),
-            role: AiChatRole::Assistant,
-            content: "Opened.".into(),
             timestamp_ms: 3,
             model: Some("deepseek-v4-pro".into()),
-            context: None,
-            is_streaming: false,
             thinking_content: Some("Need a terminal".into()),
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
             turn: Some(serde_json::json!({
                 "id": "assistant-1",
                 "status": "complete",
@@ -1204,9 +1138,7 @@ fn chat_persistence_replays_completed_stream_turn_and_transcript_order() {
                 "startEntryId": "transcript-user-user-1",
                 "endEntryId": "assistant-1",
             })),
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
+            ..chat_message("assistant-1", AiChatRole::Assistant, "Opened.")
         },
     );
 

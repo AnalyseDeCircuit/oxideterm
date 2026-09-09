@@ -29,20 +29,14 @@ fn message(id: &str, role: AiChatRole, content: &str) -> AiChatMessage {
 }
 
 #[test]
-fn conversation_turn_count_tracks_user_submissions_not_physical_rows() {
-    let messages = vec![
+fn conversation_turn_count_preserves_submissions_across_live_compacted_and_summarized_history() {
+    let live = vec![
         message("user-1", AiChatRole::User, "question"),
         message("assistant-tool", AiChatRole::Assistant, "working"),
         message("tool-1", AiChatRole::Tool, "result"),
         message("assistant-1", AiChatRole::Assistant, "answer"),
         message("user-2", AiChatRole::User, "follow-up"),
     ];
-
-    assert_eq!(crate::ai_conversation_turn_count(&messages), 2);
-}
-
-#[test]
-fn conversation_turn_count_preserves_compacted_user_submissions() {
     let mut anchor = message("anchor", AiChatRole::System, "summary");
     anchor.metadata = Some(AiChatMessageMetadata {
         kind: "compaction-anchor".to_string(),
@@ -51,77 +45,122 @@ fn conversation_turn_count_preserves_compacted_user_submissions() {
         original_messages: None,
         original_user_count: Some(7),
     });
-    let messages = vec![
+    let compacted = vec![
         anchor,
         message("user-8", AiChatRole::User, "continue"),
         message("assistant-8", AiChatRole::Assistant, "done"),
     ];
-
-    assert_eq!(crate::ai_conversation_turn_count(&messages), 8);
-}
-
-#[test]
-fn conversation_turn_count_preserves_manual_summary_history() {
     let mut summary = message("summary", AiChatRole::Assistant, "summary");
-    summary.summary_ref = Some(serde_json::json!({
-        "kind": "conversation",
-        "originalUserCount": 9,
-    }));
-
-    assert_eq!(crate::ai_conversation_turn_count(&[summary]), 9);
+    summary.summary_ref =
+        Some(serde_json::json!({ "kind": "conversation", "originalUserCount": 9 }));
+    for (messages, expected) in [(live, 2), (compacted, 8), (vec![summary], 9)] {
+        assert_eq!(crate::ai_conversation_turn_count(&messages), expected);
+    }
 }
 
 #[test]
-fn provider_history_keeps_runtime_system_messages_and_plain_assistant_text() {
-    let runtime = message("task-mode", AiChatRole::System, "Task mode");
-    let mut assistant = message("assistant", AiChatRole::Assistant, "Done");
-    assistant
-        .tool_calls
-        .push(serde_json::json!({"id": "call-1"}));
-    let mut history = vec![
-        message("other-system", AiChatRole::System, "drop"),
-        runtime,
-        assistant,
-        message("tool", AiChatRole::Tool, "drop"),
-    ];
-
-    normalize_ai_stream_history_for_provider(&mut history);
-
-    assert_eq!(history.len(), 2);
-    assert_eq!(history[0].id, "task-mode");
-    assert!(history[1].tool_calls.is_empty());
-}
-
-#[test]
-fn cancellation_rejects_pending_calls_and_retains_meaningful_turn() {
-    let mut assistant = message("assistant", AiChatRole::Assistant, "partial");
-    assistant.is_streaming = true;
+fn provider_history_preserves_text_and_summary_order_without_replaying_old_tool_state() {
+    let mut assistant = message("assistant", AiChatRole::Assistant, "本地终端已重新打开。");
+    assistant.thinking_content = Some("need a terminal".to_string());
     assistant.tool_calls.push(serde_json::json!({
-        "id": "call-1",
-        "name": "run_command",
-        "arguments": "{}",
-        "status": "pending"
+        "id": "call-1", "name": "open_app_surface",
+        "arguments": "{\"surface\":\"local_terminal\"}", "status": "completed",
+        "result": { "ok": true, "output": "opened" },
     }));
-    let mut conversation = AiConversation {
-        id: "conversation".to_string(),
-        title: "Conversation".to_string(),
-        messages: vec![assistant],
-        created_at_ms: 0,
-        updated_at_ms: 0,
-        origin: "test".to_string(),
-        profile_id: None,
-        message_count: 1,
-        session_id: None,
-        session_metadata: None,
-        messages_loaded: true,
-        turn_count: 0,
-    };
+    let mut tool_only = assistant.clone();
+    tool_only.id = "tool-only".to_string();
+    tool_only.content.clear();
+    let mut anchor = message("anchor", AiChatRole::System, " 用户之前打开过本地终端。 ");
+    anchor.metadata = Some(AiChatMessageMetadata {
+        kind: "compaction-anchor".to_string(),
+        original_count: Some(4),
+        compacted_at_ms: Some(1),
+        original_messages: None,
+        original_user_count: None,
+    });
+    let mut history = vec![
+        message("task-mode", AiChatRole::System, "Task instructions"),
+        message("stale-system", AiChatRole::System, "drop"),
+        anchor,
+        message("user", AiChatRole::User, "打开终端"),
+        assistant,
+        message("tool", AiChatRole::Tool, "{\"ok\":true}"),
+        tool_only,
+    ];
+    normalize_ai_stream_history_for_provider(&mut history);
+    assert_eq!(
+        history
+            .iter()
+            .map(|row| (row.id.as_str(), row.role, row.content.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("task-mode", AiChatRole::System, "Task instructions"),
+            (
+                "anchor",
+                AiChatRole::System,
+                "Previous conversation summary:\n 用户之前打开过本地终端。 "
+            ),
+            ("user", AiChatRole::User, "打开终端"),
+            ("assistant", AiChatRole::Assistant, "本地终端已重新打开。"),
+        ]
+    );
+    assert!(history[1].metadata.is_none());
+    assert!(history[3].tool_calls.is_empty());
+    assert!(history[3].thinking_content.is_none());
+}
 
-    let stopped = finalize_streaming_ai_messages_on_cancel(&mut conversation);
-
-    assert_eq!(stopped.len(), 1);
-    assert!(stopped[0].retained);
-    assert_eq!(conversation.messages[0].tool_calls[0]["status"], "rejected");
+#[test]
+fn cancellation_retains_partial_text_and_completes_rejected_tool_results() {
+    for (content, status) in [("partial", "pending"), ("", "pending_user_approval")] {
+        let mut assistant = message("assistant", AiChatRole::Assistant, content);
+        assistant.is_streaming = true;
+        assistant.tool_calls.push(serde_json::json!({
+            "id": "call-1", "name": "open_app_surface", "arguments": "{}",
+            "status": status, "result": null,
+        }));
+        let mut conversation = AiConversation {
+            id: "conversation".to_string(),
+            title: "Conversation".to_string(),
+            messages: vec![assistant],
+            created_at_ms: 0,
+            updated_at_ms: 0,
+            origin: "test".to_string(),
+            profile_id: None,
+            message_count: 1,
+            session_id: None,
+            session_metadata: None,
+            messages_loaded: true,
+            turn_count: 0,
+        };
+        let stopped = finalize_streaming_ai_messages_on_cancel(&mut conversation);
+        assert_eq!(
+            stopped,
+            vec![AiStoppedAssistantTurn {
+                message_id: "assistant".to_string(),
+                status: "complete",
+                retained: true,
+            }]
+        );
+        let message = &conversation.messages[0];
+        assert_eq!(message.content, content);
+        assert!(!message.is_streaming);
+        let call = &message.tool_calls[0];
+        assert_eq!(call["status"], "rejected");
+        assert_eq!(call["result"]["ok"], false);
+        assert_eq!(
+            call["result"]["error"]["message"],
+            "Generation was stopped."
+        );
+        let turn = message.turn.as_ref().unwrap();
+        assert_eq!(turn["status"], "complete");
+        assert!(
+            turn["parts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|part| part["type"] == "tool_result" && part["toolCallId"] == "call-1")
+        );
+    }
 }
 
 #[test]
@@ -265,6 +304,14 @@ fn compaction_plan_preserves_recent_messages() {
 
     assert!(plan.compact_messages.len() >= 2);
     assert_eq!(plan.keep_messages.last(), messages.last());
+    assert_eq!(
+        [plan.compact_messages, plan.keep_messages].concat(),
+        messages
+    );
+    let short = (0..4)
+        .map(|index| message(&format!("short-{index}"), AiChatRole::User, "short"))
+        .collect::<Vec<_>>();
+    assert!(ai_compaction_plan(&short, 100_000, true).is_none());
 }
 
 #[test]
@@ -280,27 +327,6 @@ fn compaction_snapshot_removes_runtime_only_message_state() {
     assert_eq!(snapshot[0].model, None);
     assert!(!snapshot[0].is_streaming);
     assert!(snapshot[0].tool_calls.is_empty());
-}
-
-#[test]
-fn compaction_anchor_normalizes_to_provider_summary() {
-    let mut anchor = message("anchor", AiChatRole::System, "summary");
-    anchor.metadata = Some(AiChatMessageMetadata {
-        kind: "compaction-anchor".to_string(),
-        original_count: Some(2),
-        compacted_at_ms: Some(1),
-        original_messages: None,
-        original_user_count: None,
-    });
-    let mut history = vec![anchor];
-
-    normalize_ai_stream_history_for_provider(&mut history);
-
-    assert_eq!(
-        history[0].content,
-        "Previous conversation summary:\nsummary"
-    );
-    assert_eq!(history[0].metadata, None);
 }
 
 #[test]

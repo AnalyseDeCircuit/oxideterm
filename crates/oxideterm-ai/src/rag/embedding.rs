@@ -169,17 +169,6 @@ mod tests {
     use crate::rag::types::{DocCollection, DocFormat, DocMetadata, DocScope};
     use tempfile::tempdir;
 
-    fn temp_store(test_name: &str) -> RagStore {
-        let dir = std::env::temp_dir().join(format!(
-            "oxideterm_rag_embedding_{}_{}_{}",
-            test_name,
-            std::process::id(),
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        RagStore::new(&dir).unwrap()
-    }
-
     fn add_chunk_with_embedding(
         store: &RagStore,
         collection_id: &str,
@@ -234,58 +223,65 @@ mod tests {
     }
 
     #[test]
-    fn test_search_vector_empty_collection_filter_searches_all_collections() {
-        let store = temp_store("all_collections");
-        add_chunk_with_embedding(&store, "col-a", "doc-a", "chunk-a", "alpha", vec![1.0, 0.0]);
-        add_chunk_with_embedding(&store, "col-b", "doc-b", "chunk-b", "beta", vec![0.0, 1.0]);
-
-        let results = search_vector(&store, &[0.9, 0.1], &[], 2).unwrap();
-
-        assert_eq!(results.len(), 2);
-        assert_eq!(results[0].chunk_id, "chunk-a");
-        assert!(results.iter().any(|hit| hit.chunk_id == "chunk-b"));
-    }
-
-    #[test]
-    fn test_search_vector_lazy_loads_hnsw_on_first_use() {
-        let dir = tempdir().unwrap();
-        {
-            let store = RagStore::new(dir.path()).unwrap();
-            add_chunk_with_embedding(&store, "col-a", "doc-a", "chunk-a", "alpha", vec![1.0, 0.0]);
-            add_chunk_with_embedding(&store, "col-b", "doc-b", "chunk-b", "beta", vec![0.0, 1.0]);
-            store.rebuild_hnsw_index().unwrap();
-        }
-
-        let reopened = RagStore::new(dir.path()).unwrap();
-        assert_eq!(reopened.hnsw_status(), HnswIndexStatus::Unloaded);
-
-        let results = search_vector(&reopened, &[0.9, 0.1], &[], 2).unwrap();
-
-        assert_eq!(results[0].chunk_id, "chunk-a");
-        assert!(matches!(
-            reopened.hnsw_status(),
-            HnswIndexStatus::Ready { .. }
-        ));
-    }
-
-    #[test]
-    fn test_invalidate_hnsw_keeps_search_on_bruteforce_path() {
+    fn vector_search_preserves_filtering_and_ranking_across_index_lifecycle() {
         let dir = tempdir().unwrap();
         let store = RagStore::new(dir.path()).unwrap();
         add_chunk_with_embedding(&store, "col-a", "doc-a", "chunk-a", "alpha", vec![1.0, 0.0]);
         add_chunk_with_embedding(&store, "col-b", "doc-b", "chunk-b", "beta", vec![0.0, 1.0]);
-        store.rebuild_hnsw_index().unwrap();
-
-        let hnsw_path = hnsw_index_path(dir.path());
-        assert!(hnsw_path.exists());
-
-        store.invalidate_hnsw_index().unwrap();
-
-        assert_eq!(store.hnsw_status(), HnswIndexStatus::Stale);
-        assert!(!hnsw_path.exists());
-
         let results = search_vector(&store, &[0.9, 0.1], &[], 2).unwrap();
-        assert_eq!(results[0].chunk_id, "chunk-a");
-        assert_eq!(store.hnsw_status(), HnswIndexStatus::Stale);
+        assert_eq!(
+            results
+                .iter()
+                .map(|hit| hit.chunk_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["chunk-a", "chunk-b"]
+        );
+        store.rebuild_hnsw_index().unwrap();
+        drop(store);
+
+        let reopened = RagStore::new(dir.path()).unwrap();
+        assert_eq!(reopened.hnsw_status(), HnswIndexStatus::Unloaded);
+        let results = search_vector(&reopened, &[0.9, 0.1], &[], 2).unwrap();
+        assert_eq!(
+            results
+                .iter()
+                .map(|hit| hit.chunk_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["chunk-a", "chunk-b"]
+        );
+        assert!(matches!(
+            reopened.hnsw_status(),
+            HnswIndexStatus::Ready { .. }
+        ));
+        let filtered = search_vector(&reopened, &[0.9, 0.1], &["col-b".to_string()], 2).unwrap();
+        assert_eq!(
+            filtered
+                .iter()
+                .map(|hit| hit.chunk_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["chunk-b"]
+        );
+
+        store_embeddings(
+            &reopened,
+            vec![EmbeddingRecord {
+                chunk_id: "chunk-a".to_string(),
+                dimensions: 2,
+                model_name: "test-model".to_string(),
+                vector: vec![-1.0, 0.0],
+            }],
+        )
+        .unwrap();
+        assert_eq!(reopened.hnsw_status(), HnswIndexStatus::Stale);
+        assert!(!hnsw_index_path(dir.path()).exists());
+        let results = search_vector(&reopened, &[0.9, 0.1], &[], 2).unwrap();
+        assert_eq!(
+            results
+                .iter()
+                .map(|hit| hit.chunk_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["chunk-b", "chunk-a"]
+        );
+        assert_eq!(reopened.hnsw_status(), HnswIndexStatus::Stale);
     }
 }

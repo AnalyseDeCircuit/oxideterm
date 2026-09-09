@@ -654,30 +654,27 @@ mod tests {
     }
 
     #[test]
-    fn command_fact_ledger_closes_fact_and_records_ai_command() {
-        let mut ledger = CommandFactLedger::default();
-        ledger.create_from_mark(&mark("cmd-1", Some("ls"), false));
-        ledger.close_from_mark(&mark("cmd-1", Some("ls"), true));
-
-        let facts = ledger.facts();
-        assert_eq!(facts.len(), 1);
-        assert_eq!(facts[0].status, TerminalCommandFactStatus::Closed);
-        assert_eq!(facts[0].end_global_line, Some(12));
-
-        let records = ledger.ai_records();
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].command, "ls");
-        assert_eq!(records[0].status, TerminalCommandFactStatus::Closed);
-    }
-
-    #[test]
-    fn command_fact_ledger_skips_empty_commands_for_ai_records() {
-        let mut ledger = CommandFactLedger::default();
-        ledger.create_from_mark(&mark("cmd-1", Some("  "), false));
-        ledger.close_from_mark(&mark("cmd-1", Some("  "), true));
-
-        assert_eq!(ledger.facts().len(), 1);
-        assert!(ledger.ai_records().is_empty());
+    fn closed_facts_keep_boundaries_but_only_nonblank_commands_enter_ai_history() {
+        for (command, expected) in [("ls", vec!["ls"]), ("  ", vec![])] {
+            let mut ledger = CommandFactLedger::default();
+            ledger.create_from_mark(&mark("cmd-1", Some(command), false));
+            ledger.close_from_mark(&mark("cmd-1", Some(command), true));
+            let facts = ledger.facts();
+            assert_eq!(facts.len(), 1);
+            assert_eq!(facts[0].status, TerminalCommandFactStatus::Closed);
+            assert_eq!(facts[0].end_global_line, Some(12));
+            let records = ledger.ai_records();
+            assert_eq!(
+                records
+                    .iter()
+                    .map(|record| record.command.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            for record in records {
+                assert_eq!(record.status, TerminalCommandFactStatus::Closed);
+            }
+        }
     }
 
     #[test]
