@@ -139,6 +139,11 @@ impl WorkspaceApp {
         let prompt_mode = mode == NewConnectionFormMode::SavedConnectionPrompt;
         let duplicate_mode = mode == NewConnectionFormMode::DuplicateTemplate;
         let edit_properties_mode = mode.submits_saved_connection_properties();
+        let reauthentication_mode = self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .is_some_and(|form| form.standalone_connection_id.is_some());
         let remote_desktop_edit_mode = form.remote_desktop_profile_id.is_some();
         let mosh_edit_mode = form.mosh_profile_id.is_some();
         let serial_edit_mode = form.serial_profile_id.is_some();
@@ -1246,6 +1251,15 @@ impl WorkspaceApp {
                             false,
                             cx,
                         ))
+                        .when(reauthentication_mode, |footer| {
+                            footer.child(self.render_connection_button(
+                                self.i18n.t("ssh.form.connect"),
+                                true,
+                                ConnectionButtonAction::Connect,
+                                primary_disabled,
+                                cx,
+                            ))
+                        })
                         .when(
                             local_terminal_mode,
                             |footer| {
@@ -1259,7 +1273,8 @@ impl WorkspaceApp {
                             },
                         )
                         .when(
-                            !edit_properties_mode
+                            !reauthentication_mode
+                                && !edit_properties_mode
                                 && self.connection_form_state(cx).saved_connection_prompt_action.is_none()
                                 && !drill_down_mode
                                 && (ssh_submission_mode || standalone_sftp_mode),
@@ -1274,7 +1289,8 @@ impl WorkspaceApp {
                             },
                         )
                         .when(
-                            !edit_properties_mode
+                            !reauthentication_mode
+                                && !edit_properties_mode
                                 && !saved_profile_edit_mode
                                 && self.connection_form_state(cx).saved_connection_prompt_action.is_none()
                                 && !remote_desktop_mode
@@ -1322,9 +1338,10 @@ impl WorkspaceApp {
                             },
                         )
                         .when(
-                            edit_properties_mode
-                                || saved_profile_edit_mode
-                                || self.connection_form_state(cx).saved_connection_prompt_action.is_some(),
+                            !reauthentication_mode
+                                && (edit_properties_mode
+                                    || saved_profile_edit_mode
+                                    || self.connection_form_state(cx).saved_connection_prompt_action.is_some()),
                             |footer| {
                                 footer.child(self.render_connection_button(
                                     if self.connection_form_state(cx).saved_connection_prompt_action
@@ -1362,6 +1379,7 @@ impl WorkspaceApp {
                         )
                         .when(
                             remote_desktop_mode
+                                && !reauthentication_mode
                                 && !edit_properties_mode
                                 && !remote_desktop_edit_mode
                                 && self.connection_form_state(cx).saved_connection_prompt_action.is_none(),

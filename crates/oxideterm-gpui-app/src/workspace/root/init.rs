@@ -879,6 +879,11 @@ impl WorkspaceApp {
         workspace.start_public_mcp_delivery(cx);
         workspace.sync_ssh_config_sync_service();
         workspace.restore_session_tree_snapshot();
+        workspace.standalone_connections =
+            standalone_connections::StandaloneConnectionRegistry::restore(
+                default_session_tree_path().with_file_name("standalone_sessions.json"),
+                &workspace.connection_store,
+            );
         workspace.sync_terminal_command_sender_appearance(cx);
         workspace.sync_active_terminal_metadata_context(cx);
         workspace.sync_active_terminal_recording_elapsed_tick(cx);

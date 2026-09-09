@@ -1,4 +1,5 @@
 use super::*;
+mod persistence;
 use crate::workspace::new_connection::MoshConnectionOptions;
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopProviderManifest, RemoteDesktopSecret,
@@ -6,7 +7,7 @@ use oxideterm_remote_desktop::{
 
 pub(super) type StandaloneConnectionId = String;
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(super) enum StandaloneConnectionKind {
     Mosh,
     Telnet,
@@ -58,6 +59,12 @@ pub(super) enum StandaloneConnectionLaunch {
     SavedRemoteDesktop {
         profile_id: String,
     },
+    RestoredMosh {
+        profile: oxideterm_connections::MoshProfile,
+    },
+    RestoredRemoteDesktop {
+        profile: oxideterm_connections::RemoteDesktopProfile,
+    },
 }
 
 pub(super) struct StandaloneConnectionRecord {
@@ -102,6 +109,7 @@ enum StandaloneReconnectPlan {
 #[derive(Default)]
 pub(super) struct StandaloneConnectionRegistry {
     records: Vec<StandaloneConnectionRecord>,
+    snapshot_path: Option<PathBuf>,
 }
 
 impl WorkspaceApp {
@@ -131,6 +139,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.open_restored_standalone_form(connection_id, window, cx) {
+            return;
+        }
         let Some((title, surface, plan)) = self.standalone_reconnect_plan(connection_id) else {
             return;
         };
@@ -301,6 +312,8 @@ impl WorkspaceApp {
     )> {
         let record = self.standalone_connections.record(connection_id)?;
         let plan = match &record.launch {
+            StandaloneConnectionLaunch::RestoredMosh { .. }
+            | StandaloneConnectionLaunch::RestoredRemoteDesktop { .. } => return None,
             StandaloneConnectionLaunch::Serial {
                 config,
                 terminal_options,
@@ -544,6 +557,7 @@ impl StandaloneConnectionRegistry {
             surface: Some(surface),
             readiness: ActiveSessionReadiness::Ready,
         });
+        self.persist();
         id
     }
 
@@ -563,6 +577,7 @@ impl StandaloneConnectionRegistry {
             surface: None,
             readiness: ActiveSessionReadiness::Connecting,
         });
+        self.persist();
         id
     }
 
@@ -641,12 +656,15 @@ impl StandaloneConnectionRegistry {
             .position(|record| record.attempt_id == attempt_id)
         {
             self.records.remove(index);
+            self.persist();
         }
     }
 
     pub(super) fn remove(&mut self, id: &str) -> Option<StandaloneConnectionRecord> {
         let index = self.records.iter().position(|record| record.id == id)?;
-        Some(self.records.remove(index))
+        let record = self.records.remove(index);
+        self.persist();
+        Some(record)
     }
 
     pub(super) fn replace_with_saved_profile(
@@ -696,5 +714,6 @@ impl StandaloneConnectionRegistry {
                 record.launch = StandaloneConnectionLaunch::SavedRemoteDesktop { profile_id };
             }
         }
+        self.persist();
     }
 }

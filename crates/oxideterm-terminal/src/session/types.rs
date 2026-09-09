@@ -42,7 +42,7 @@ pub enum SerialControlLine {
     RequestToSend,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SerialLineEnding {
     Lf,
     CrLf,
@@ -56,7 +56,7 @@ impl Default for SerialLineEnding {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SerialDisplayMode {
     Text,
     Hex,
@@ -69,7 +69,7 @@ impl Default for SerialDisplayMode {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SerialSendMode {
     Text,
     Hex,
@@ -81,7 +81,7 @@ impl Default for SerialSendMode {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SerialRuntimeOptions {
     pub line_ending: SerialLineEnding,
     pub output_line_ending: SerialLineEnding,

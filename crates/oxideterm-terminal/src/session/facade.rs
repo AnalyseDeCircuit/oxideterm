@@ -5,7 +5,7 @@ pub struct TerminalSession {
     kitty_file_transmission: Option<KittyFileTransmissionControl>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TelnetSessionConfig {
     pub host: String,
     pub port: u16,

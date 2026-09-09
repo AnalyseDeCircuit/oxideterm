@@ -754,6 +754,8 @@ impl Drop for StandaloneSftpSecondaryForm {
 }
 
 pub(in crate::workspace) struct NewConnectionForm {
+    // Reauthentication submits into the existing logical session, never a second sidebar row.
+    pub(in crate::workspace) standalone_connection_id: Option<String>,
     pub(in crate::workspace) transport: NewConnectionTransport,
     /// Selects one discovered shell for this one-shot local terminal launch.
     pub(in crate::workspace) local_shell_id: Option<String>,
@@ -1060,6 +1062,7 @@ impl fmt::Debug for NewConnectionForm {
 impl Default for NewConnectionForm {
     fn default() -> Self {
         Self {
+            standalone_connection_id: None,
             transport: NewConnectionTransport::Ssh,
             local_shell_id: None,
             name: String::new(),

@@ -2805,6 +2805,9 @@ impl WorkspaceApp {
                                 form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::Direct;
                                 form.upstream_proxy_protocol = SavedUpstreamProxyProtocol::Socks5;
                             }
+                            if form.transport != transport {
+                                form.standalone_connection_id = None;
+                            }
                             form.transport = transport;
                             form.focused_field = focus_field;
                             form.field_focused = false;

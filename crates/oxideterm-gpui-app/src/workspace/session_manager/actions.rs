@@ -1091,9 +1091,16 @@ impl WorkspaceApp {
             let password_required = self
                 .i18n
                 .t("modals.new_connection.remote_desktop_password_required");
+            let reconnect_id = runtime_connection_attempt_id
+                .as_deref()
+                .and_then(|attempt| {
+                    self.standalone_connections
+                        .connection_id_for_attempt(attempt)
+                });
             self.update_connection_form_state(cx, |state| {
                 if let Some(form) = state.form.as_mut() {
                     *form = form_from_remote_desktop_profile(&saved, String::new());
+                    form.standalone_connection_id = reconnect_id;
                     form.error = Some(password_required);
                     form.focused_field = NewConnectionField::Password;
                 }

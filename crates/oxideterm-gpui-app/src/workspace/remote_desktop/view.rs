@@ -5,24 +5,6 @@ use super::*;
 use oxideterm_session_adapter::ssh_config_from_saved_connection;
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn open_remote_desktop_connection_with_gateway(
-        &mut self,
-        profile: RemoteDesktopConnectionProfile,
-        password: Option<RemoteDesktopSecret>,
-        ssh_gateway_connection_id: Option<String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.open_remote_desktop_connection_for_connection(
-            profile,
-            password,
-            ssh_gateway_connection_id,
-            None,
-            window,
-            cx,
-        );
-    }
-
     pub(in crate::workspace) fn open_remote_desktop_connection_for_connection(
         &mut self,
         mut profile: RemoteDesktopConnectionProfile,
@@ -32,6 +14,43 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(attempt) = connection_attempt_id.as_deref() {
+            let launch = if self
+                .connection_store
+                .get_remote_desktop_profile(&profile.id)
+                .is_some()
+            {
+                standalone_connections::StandaloneConnectionLaunch::SavedRemoteDesktop {
+                    profile_id: profile.id.clone(),
+                }
+            } else if let Some(provider) = builtin_provider_registry()
+                .ok()
+                .and_then(|registry| registry.get_for_protocol(profile.protocol).cloned())
+            {
+                standalone_connections::StandaloneConnectionLaunch::RemoteDesktop {
+                    profile: profile.clone(),
+                    provider,
+                    password: password
+                        .as_ref()
+                        .map(RemoteDesktopSecret::duplicate_for_reauthentication),
+                    ssh_gateway_connection_id: ssh_gateway_connection_id.clone(),
+                }
+            } else {
+                self.standalone_connections.mark_attempt_error(attempt);
+                self.push_command_palette_toast(
+                    self.i18n.t("remote_desktop.provider_missing"),
+                    None,
+                    TerminalNoticeVariant::Error,
+                    cx,
+                );
+                return;
+            };
+            self.standalone_connections.replace_launch_for_attempt(
+                attempt,
+                profile.label.clone(),
+                launch,
+            );
+        }
         let Some(ssh_gateway_connection_id) = ssh_gateway_connection_id else {
             self.open_remote_desktop_connection_tab_for_connection(
                 profile,

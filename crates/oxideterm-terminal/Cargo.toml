@@ -22,6 +22,7 @@ oxideterm-tmux = { path = "../oxideterm-tmux" }
 oxideterm-trzsz = { path = "../oxideterm-trzsz" }
 polling.workspace = true
 serialport.workspace = true
+serde.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tempfile = "3.23"
