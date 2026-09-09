@@ -18,6 +18,65 @@ mod tests {
         process::{parse_lsof_cwd, parse_process_table_for_group},
     };
 
+    #[cfg(unix)]
+    #[test]
+    fn busy_render_snapshot_preserves_damage_and_selection_for_retry() {
+        let config = crate::LocalPtyConfig {
+            shell: Some(
+                crate::ShellInfo::new("test-sh", "Test", "/bin/sh")
+                    .with_args(vec!["-c".into(), "read line".into()]),
+            ),
+            load_profile: false,
+            ..Default::default()
+        };
+        let session = LocalPtySession::spawn_with_config_graphics_and_encoding(
+            20,
+            4,
+            config,
+            Default::default(),
+            Default::default(),
+            100,
+        )
+        .unwrap();
+        let previous = session.snapshot();
+        let term = session.term.clone();
+        let mut guard = term.lock_unfair();
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(&mut *guard, b"\x1b[?2004hupdated");
+        let range = crate::TerminalSelectionRange {
+            start_line: 0,
+            end_line: 0,
+            start_col: 0,
+            end_col: 2,
+            is_block: false,
+        };
+        crate::selection::set_term_selection(&mut guard, Some(range));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            tx.send(session.try_render_snapshot(&previous, true)).unwrap();
+            (session, previous)
+        });
+        let attempt = rx.recv_timeout(std::time::Duration::from_millis(100));
+        drop(guard);
+        let (mut session, previous) = worker.join().unwrap();
+        let next = session.try_render_snapshot(&previous, true);
+        session.shutdown();
+        assert!(
+            matches!(attempt, Ok(None)),
+            "render waited for the busy parser"
+        );
+        let (snapshot, selection, mode) = next.unwrap();
+        assert!(mode.contains(TermMode::BRACKETED_PASTE));
+        assert_eq!(selection, Some(range));
+        let text: String = snapshot.lines[0]
+            .cells
+            .iter()
+            .take(7)
+            .map(|cell| cell.ch)
+            .collect();
+        assert_eq!(text, "updated");
+    }
+
     #[test]
     fn focus_reports_are_gated_by_terminal_mode() {
         assert_eq!(focus_report_sequence(false, true), None);

@@ -417,7 +417,9 @@ pub struct TerminalPane {
     settings: TerminalUiSettings,
     theme: TerminalUiTheme,
     snapshot: TerminalSnapshot,
+    render_mode: TermMode,
     snapshot_dirty: bool,
+    snapshot_deferred_since: Option<Instant>,
     snapshot_generation: u64,
     next_snapshot_line_id: u64,
     terminal_timestamps_enabled: bool,
@@ -944,12 +946,13 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Self> {
-        let (mut snapshot, session_kind, cwd_integration_launch_state) = {
+        let (mut snapshot, session_kind, cwd_integration_launch_state, render_mode) = {
             let terminal = terminal.lock();
             (
                 terminal.snapshot().with_generation(1),
                 terminal.kind(),
                 terminal.cwd_integration_launch_state(),
+                terminal.mode(),
             )
         };
         let kitty_file_transmission = terminal.lock().kitty_file_transmission_control();
@@ -1087,7 +1090,9 @@ impl TerminalPane {
             settings: TerminalUiSettings::from_preferences(&preferences),
             theme: preferences.theme.clone(),
             snapshot,
+            render_mode,
             snapshot_dirty: false,
+            snapshot_deferred_since: None,
             snapshot_generation: 1,
             next_snapshot_line_id,
             terminal_timestamps_enabled: false,
@@ -1257,11 +1262,13 @@ impl TerminalPane {
         self.selection_highlight_cache = None;
     }
 
-    fn sync_selection_from_terminal(&mut self) {
+    fn sync_selection_from_range(
+        &mut self,
+        range: Option<oxideterm_terminal::TerminalSelectionRange>,
+    ) {
         let Some(previous) = self.selection else {
             return;
         };
-        let range = self.terminal.lock().selection();
         self.selection = range.map(|range| {
             let mut start = TerminalGridPoint {
                 line: range.start_line,
@@ -1296,8 +1303,22 @@ impl TerminalPane {
         }
     }
 
-    fn stamp_snapshot(&mut self, mut snapshot: TerminalSnapshot) -> TerminalSnapshot {
-        self.sync_selection_from_terminal();
+    fn stamp_snapshot(&mut self, snapshot: TerminalSnapshot) -> TerminalSnapshot {
+        let selection = {
+            let terminal = self.terminal.lock();
+            self.render_mode = terminal.mode();
+            self.selection.and_then(|_| terminal.selection())
+        };
+        self.stamp_snapshot_with_selection(snapshot, selection)
+    }
+
+    fn stamp_snapshot_with_selection(
+        &mut self,
+        mut snapshot: TerminalSnapshot,
+        selection: Option<oxideterm_terminal::TerminalSelectionRange>,
+    ) -> TerminalSnapshot {
+        self.snapshot_deferred_since = None;
+        self.sync_selection_from_range(selection);
         let backend_reused_rows = snapshot.lines.iter().any(|row| row.line_id != 0);
         reconcile_snapshot_line_ids(
             &mut snapshot,

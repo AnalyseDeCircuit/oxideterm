@@ -34,6 +34,9 @@ use super::{
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
 
+// Bound stale frames under continuous output when the parser repeatedly wins the lock.
+const MAX_SNAPSHOT_DEFER_DURATION: std::time::Duration = std::time::Duration::from_millis(32);
+
 const PASTE_PREVIEW_TEXT_RADIUS: f32 = 4.0;
 const PASTE_CONFIRM_DIALOG_RADIUS: f32 = 8.0;
 const PASTE_CONFIRM_BUTTON_RADIUS: f32 = 4.0;
@@ -172,7 +175,13 @@ impl Render for TerminalPane {
             let snapshot_started = Instant::now();
             #[cfg(feature = "bench")]
             let backend_snapshot_started = Instant::now();
-            let snapshot = self.terminal.lock().snapshot_incremental(&self.snapshot);
+            let allow_defer = self.snapshot_deferred_since.is_none_or(|since| {
+                snapshot_started.duration_since(since) < MAX_SNAPSHOT_DEFER_DURATION
+            });
+            let next = self
+                .terminal
+                .lock()
+                .try_render_snapshot(&self.snapshot, allow_defer);
             #[cfg(feature = "bench")]
             {
                 self.benchmark_backend_snapshot_micros = backend_snapshot_started
@@ -181,25 +190,34 @@ impl Render for TerminalPane {
                     .min(u128::from(u64::MAX))
                     as u64;
             }
-            if snapshot.display_offset == 0 {
-                self.clear_smooth_scroll_remainder();
-            }
-            #[cfg(feature = "bench")]
-            let snapshot_state_started = Instant::now();
-            self.snapshot = self.stamp_snapshot(snapshot);
-            #[cfg(feature = "bench")]
-            {
-                self.benchmark_snapshot_state_micros = snapshot_state_started
+            if let Some((snapshot, selection, mode)) = next {
+                self.render_mode = mode;
+                if snapshot.display_offset == 0 {
+                    self.clear_smooth_scroll_remainder();
+                }
+                #[cfg(feature = "bench")]
+                let snapshot_state_started = Instant::now();
+                self.snapshot = self.stamp_snapshot_with_selection(snapshot, selection);
+                #[cfg(feature = "bench")]
+                {
+                    self.benchmark_snapshot_state_micros = snapshot_state_started
+                        .elapsed()
+                        .as_micros()
+                        .min(u128::from(u64::MAX))
+                        as u64;
+                }
+                self.snapshot_dirty = false;
+                self.render_stats.snapshot_micros = snapshot_started
                     .elapsed()
                     .as_micros()
                     .min(u128::from(u64::MAX))
                     as u64;
+            } else {
+                // The final wakeup may already have been drained. Keep damage pending and
+                // retry next frame even if the producer stops before releasing the lock.
+                self.snapshot_deferred_since.get_or_insert(snapshot_started);
+                window.request_animation_frame();
             }
-            self.snapshot_dirty = false;
-            self.render_stats.snapshot_micros = snapshot_started
-                .elapsed()
-                .as_micros()
-                .min(u128::from(u64::MAX)) as u64;
         }
         if self.preferences.show_performance_overlay {
             // Element timings are published after prepaint and paint, so the pane displays the
@@ -214,10 +232,9 @@ impl Render for TerminalPane {
             self.render_snapshot_for_smooth_scroll();
         snapshot.cursor_shape =
             terminal_cursor_shape_for_render(snapshot.cursor_shape, self.preferences.cursor_shape);
-        let (terminal_mode, tmux_state) = {
-            let terminal = self.terminal.lock();
-            (terminal.mode(), terminal.tmux_state())
-        };
+        // Mode belongs to the displayed grid; re-reading it would wait for the parser again.
+        let terminal_mode = self.render_mode;
+        let tmux_state = self.terminal.lock().tmux_state();
         let tmux_message = tmux_state.as_ref().and_then(|state| {
             (state.message_generation > self.dismissed_tmux_message_generation)
                 .then(|| {

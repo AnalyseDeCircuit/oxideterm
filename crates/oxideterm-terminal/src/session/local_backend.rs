@@ -213,6 +213,14 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::snapshot_incremental(self, previous)
     }
 
+    fn try_render_snapshot(
+        &self,
+        previous: &TerminalSnapshot,
+        allow_defer: bool,
+    ) -> Option<(TerminalSnapshot, Option<crate::TerminalSelectionRange>, TermMode)> {
+        LocalPtySession::try_render_snapshot(self, previous, allow_defer)
+    }
+
     fn snapshot_with_display_offset(
         &self,
         display_offset: usize,

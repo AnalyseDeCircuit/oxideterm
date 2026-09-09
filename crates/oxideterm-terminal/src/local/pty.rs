@@ -762,6 +762,27 @@ impl LocalPtySession {
         incremental_snapshot_from_term(&mut term, self.size, &self.graphics, previous)
     }
 
+    pub fn try_render_snapshot(
+        &self,
+        previous: &TerminalSnapshot,
+        allow_defer: bool,
+    ) -> Option<(TerminalSnapshot, Option<crate::TerminalSelectionRange>, TermMode)> {
+        // The tmux compositor owns multiple grids and retains its existing snapshot contract.
+        if self.tmux_display.is_active() {
+            return Some((self.snapshot_incremental(previous), self.selection(), self.mode()));
+        }
+        let mut term = if allow_defer {
+            self.term.try_lock_unfair()?
+        } else {
+            self.term.lock()
+        };
+        let snapshot =
+            incremental_snapshot_from_term(&mut term, self.size, &self.graphics, previous);
+        // Selection coordinates must describe this grid revision, without a second blocking lock.
+        let selection = crate::selection::term_selection(&term);
+        Some((snapshot, selection, *term.mode()))
+    }
+
     pub fn snapshot_with_display_offset(
         &self,
         display_offset: usize,

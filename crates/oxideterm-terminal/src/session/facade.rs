@@ -559,6 +559,14 @@ impl TerminalSession {
         self.backend.snapshot_incremental(previous)
     }
 
+    pub fn try_render_snapshot(
+        &self,
+        previous: &TerminalSnapshot,
+        allow_defer: bool,
+    ) -> Option<(TerminalSnapshot, Option<crate::TerminalSelectionRange>, TermMode)> {
+        self.backend.try_render_snapshot(previous, allow_defer)
+    }
+
     pub fn snapshot_with_display_offset(
         &self,
         display_offset: usize,

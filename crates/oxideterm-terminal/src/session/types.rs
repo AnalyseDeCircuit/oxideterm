@@ -256,6 +256,16 @@ pub trait TerminalSessionBackend: Send {
         let _ = previous;
         self.snapshot()
     }
+    /// Background parsers may defer a render without consuming pending grid damage.
+    /// Disable deferral after a bounded interval to request a fair turn under continuous output.
+    fn try_render_snapshot(
+        &self,
+        previous: &TerminalSnapshot,
+        allow_defer: bool,
+    ) -> Option<(TerminalSnapshot, Option<crate::TerminalSelectionRange>, TermMode)> {
+        let _ = allow_defer;
+        Some((self.snapshot_incremental(previous), self.selection(), self.mode()))
+    }
     fn snapshot_with_display_offset(
         &self,
         display_offset: usize,
