@@ -16,11 +16,27 @@ mod tests {
     }
 
     #[test]
-    fn plain_text_passes_through() {
+    fn plain_output_is_borrowed_but_split_protocol_payload_is_consumed() {
         let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
-        let result = ingress.advance(b"hello", cursor());
-        assert_eq!(result.terminal_bytes, b"hello");
-        assert!(result.events.is_empty());
+        let plain = "ordinary 中文 output\r\n".as_bytes();
+        let owned = ingress.advance(plain, cursor());
+        assert_eq!(owned.terminal_bytes, plain);
+        assert!(owned.events.is_empty());
+        let segments = ingress.advance_segments(plain, cursor);
+        assert!(
+            matches!(&segments[..], [TerminalGraphicsSegment::Terminal(std::borrow::Cow::Borrowed(bytes))] if *bytes == plain)
+        );
+
+        assert!(
+            ingress
+                .advance_segments(b"\x1b_Ga=q,i=7;", cursor)
+                .is_empty()
+        );
+        assert!(ingress.advance_segments(b"payload", cursor).is_empty());
+        let segments = ingress.advance_segments(b"\x1b\\tail", cursor);
+        assert!(
+            matches!(&segments[..], [TerminalGraphicsSegment::Event(TerminalGraphicsEvent::Respond(_)), TerminalGraphicsSegment::Terminal(bytes)] if bytes.as_ref() == b"tail")
+        );
     }
 
     #[test]
@@ -34,7 +50,10 @@ mod tests {
             sequence.as_bytes(),
             |segment| match segment {
                 TerminalGraphicsSegment::Terminal(bytes) => {
-                    seen.push(format!("terminal:{}", String::from_utf8(bytes).unwrap()));
+                    seen.push(format!(
+                        "terminal:{}",
+                        String::from_utf8(bytes.into_owned()).unwrap()
+                    ));
                 }
                 TerminalGraphicsSegment::Event(TerminalGraphicsEvent::ImageReady(_)) => {
                     seen.push("image".to_string());

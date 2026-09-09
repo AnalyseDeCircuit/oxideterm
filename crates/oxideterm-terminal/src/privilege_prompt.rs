@@ -103,8 +103,37 @@ impl TerminalPrivilegePromptStream {
     pub(crate) fn observe(&mut self, output: &[u8]) -> Vec<TerminalPrivilegePromptEvent> {
         let mut events = Vec::new();
         let decoded = String::from_utf8_lossy(output);
-        for character in decoded.chars() {
+        let mut remaining = decoded.as_ref();
+        while !remaining.is_empty() {
+            if self.control_state == ControlSequenceState::Ground {
+                let printable = remaining
+                    .as_bytes()
+                    .iter()
+                    .position(|byte| !matches!(byte, b' '..=b'9' | b';'..=b'~'))
+                    .unwrap_or(remaining.len());
+                if printable > 0 {
+                    if self.pending_carriage_return {
+                        self.current_line.clear();
+                        self.emitted_line = None;
+                        self.pending_carriage_return = false;
+                    }
+                    let mut text = &remaining[..printable];
+                    while !text.is_empty() {
+                        // Match scalar truncation boundaries without retaining a whole output chunk.
+                        let take = text
+                            .len()
+                            .min(MAX_PROMPT_LINE_BYTES + 1 - self.current_line.len());
+                        self.current_line.push_str(&text[..take]);
+                        self.bound_current_line();
+                        text = &text[take..];
+                    }
+                    remaining = &remaining[printable..];
+                    continue;
+                }
+            }
+            let character = remaining.chars().next().unwrap();
             self.observe_character(character, &mut events);
+            remaining = &remaining[character.len_utf8()..];
         }
         events
     }
@@ -503,6 +532,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn batched_text_preserves_prompt_transitions_across_chunks() {
+        let output = format!(
+            "{}\r\x1b]0;Password:\x07\x1b[31mPassworz\x08d:\x1b[0m\nSorry, try again.\nPassword:\nfinished\n",
+            "x".repeat(MAX_PROMPT_LINE_BYTES * 3)
+        );
+        let visible = |retry| TerminalPrivilegePromptEvent::Visible {
+            prompt: TerminalPrivilegePrompt::GenericPassword {
+                prompt_text: "Password:".into(),
+            },
+            retry,
+        };
+        for chunk_size in [1, 7, 1024, output.len()] {
+            let mut stream = TerminalPrivilegePromptStream::default();
+            let events: Vec<_> = output
+                .as_bytes()
+                .chunks(chunk_size)
+                .flat_map(|chunk| stream.observe(chunk))
+                .collect();
+            assert_eq!(
+                events,
+                [
+                    visible(false),
+                    visible(true),
+                    TerminalPrivilegePromptEvent::Dismissed
+                ]
+            );
+        }
+    }
+
+    #[test]
     fn stream_detects_first_prompt_split_across_output_chunks() {
         let mut stream = TerminalPrivilegePromptStream::default();
         assert!(stream.observe(b"\x1b]633;C\x07Pass").is_empty());
@@ -614,14 +673,14 @@ mod tests {
     }
 
     #[test]
-    fn classifier_rejects_password_result_after_candidate_matching() {
-        assert!(detect_terminal_privilege_prompt("[sudo] password for failed:").is_none());
-    }
-
-    #[test]
-    fn classifier_rejects_non_password_colon_before_full_classification() {
-        assert!(detect_terminal_privilege_prompt("OxideTerm Unicode workload:").is_none());
-        assert!(detect_terminal_privilege_prompt("time:12:34:56:").is_none());
+    fn classifier_rejects_result_lines_and_non_password_colons() {
+        for line in [
+            "[sudo] password for failed:",
+            "OxideTerm Unicode workload:",
+            "time:12:34:56:",
+        ] {
+            assert!(detect_terminal_privilege_prompt(line).is_none(), "{line}");
+        }
     }
 
     #[test]

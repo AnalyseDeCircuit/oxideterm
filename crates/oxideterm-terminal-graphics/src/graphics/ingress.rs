@@ -86,8 +86,8 @@ impl GraphicsIngress {
         self.advance_ordered(
             bytes,
             |segment| match segment {
-                TerminalGraphicsSegment::Terminal(mut terminal_bytes) => {
-                    result.terminal_bytes.append(&mut terminal_bytes);
+                TerminalGraphicsSegment::Terminal(terminal_bytes) => {
+                    result.terminal_bytes.extend_from_slice(&terminal_bytes);
                 }
                 TerminalGraphicsSegment::Event(event) => result.events.push(event),
             },
@@ -96,11 +96,11 @@ impl GraphicsIngress {
         result
     }
 
-    pub fn advance_segments<F>(
+    pub fn advance_segments<'a, F>(
         &mut self,
-        bytes: &[u8],
+        bytes: &'a [u8],
         mut cursor: F,
-    ) -> Vec<TerminalGraphicsSegment>
+    ) -> Vec<TerminalGraphicsSegment<'a>>
     where
         F: FnMut() -> GraphicsCursor,
     {
@@ -132,13 +132,18 @@ impl GraphicsIngress {
         events
     }
 
-    pub fn advance_ordered<F, C>(&mut self, bytes: &[u8], mut emit: F, mut cursor: C)
+    pub fn advance_ordered<'a, F, C>(&mut self, bytes: &'a [u8], mut emit: F, mut cursor: C)
     where
-        F: FnMut(TerminalGraphicsSegment),
+        F: FnMut(TerminalGraphicsSegment<'a>),
         C: FnMut() -> GraphicsCursor,
     {
-        if !self.options.enabled {
-            emit(TerminalGraphicsSegment::Terminal(bytes.to_vec()));
+        if !self.options.enabled
+            || (!bytes.is_empty()
+                && matches!(self.state, ParserState::Ground)
+                && memchr::memchr(0x1b, bytes).is_none())
+        {
+            // Borrow only in Ground: a previous chunk may still own an incomplete protocol.
+            emit(TerminalGraphicsSegment::Terminal(bytes.into()));
             return;
         }
 
@@ -148,7 +153,7 @@ impl GraphicsIngress {
         while index < bytes.len() {
             if matches!(self.state, ParserState::Ground) {
                 let remaining = &bytes[index..];
-                let Some(escape_offset) = remaining.iter().position(|byte| *byte == 0x1b) else {
+                let Some(escape_offset) = memchr::memchr(0x1b, remaining) else {
                     // Ordinary terminal output does not need graphics state-machine work.
                     terminal_bytes.extend_from_slice(remaining);
                     break;
@@ -162,9 +167,9 @@ impl GraphicsIngress {
             terminal_bytes.append(&mut result.terminal_bytes);
             if !result.events.is_empty() {
                 if !terminal_bytes.is_empty() {
-                    emit(TerminalGraphicsSegment::Terminal(std::mem::take(
-                        &mut terminal_bytes,
-                    )));
+                    emit(TerminalGraphicsSegment::Terminal(
+                        std::mem::take(&mut terminal_bytes).into(),
+                    ));
                 }
                 // Preserve protocol ordering for callers that must synchronize
                 // graphics state with terminal side effects such as screen swaps.
@@ -175,15 +180,15 @@ impl GraphicsIngress {
                 && !matches!(self.state, ParserState::Ground | ParserState::Esc)
                 && !terminal_bytes.is_empty()
             {
-                emit(TerminalGraphicsSegment::Terminal(std::mem::take(
-                    &mut terminal_bytes,
-                )));
+                emit(TerminalGraphicsSegment::Terminal(
+                    std::mem::take(&mut terminal_bytes).into(),
+                ));
             }
             index += 1;
         }
 
         if !terminal_bytes.is_empty() {
-            emit(TerminalGraphicsSegment::Terminal(terminal_bytes));
+            emit(TerminalGraphicsSegment::Terminal(terminal_bytes.into()));
         }
     }
 

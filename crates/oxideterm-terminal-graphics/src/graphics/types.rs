@@ -278,8 +278,8 @@ pub struct GraphicsAdvance {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum TerminalGraphicsSegment {
-    Terminal(Vec<u8>),
+pub enum TerminalGraphicsSegment<'a> {
+    Terminal(std::borrow::Cow<'a, [u8]>),
     Event(TerminalGraphicsEvent),
 }
 

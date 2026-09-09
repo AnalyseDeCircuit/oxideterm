@@ -243,7 +243,16 @@ struct SavedHistoryClearDetector {
 impl SavedHistoryClearDetector {
     fn advance(&mut self, bytes: &[u8]) -> usize {
         let mut clear_count = 0;
-        for &byte in bytes {
+        let mut remaining = bytes;
+        while !remaining.is_empty() {
+            if matches!(self.state, CsiScanState::Ground) {
+                let Some(offset) = memchr::memchr2(0x1b, 0x9b, remaining) else {
+                    break;
+                };
+                remaining = &remaining[offset..];
+            }
+            let byte = remaining[0];
+            remaining = &remaining[1..];
             match self.state {
                 CsiScanState::Ground => match byte {
                     0x1b => self.state = CsiScanState::Escape,
@@ -368,6 +377,10 @@ impl TerminalShellIntegration {
                 continue;
             }
 
+            let Some(offset) = memchr::memchr(0x1b, &bytes[index..]) else {
+                break;
+            };
+            index += offset;
             if bytes[index] == 0x1b {
                 if bytes.get(index + 1) == Some(&b']') {
                     if normal_start < index {
