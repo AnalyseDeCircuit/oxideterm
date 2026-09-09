@@ -310,11 +310,30 @@ impl ModemConsumer {
             return self.process_pending_server_output(bytes);
         }
 
-        let masked_bytes = self.detection_scope.mask_control_strings(bytes);
-        if self.plain_tail.is_empty()
-            && self.detection_tail.is_empty()
-            && !contains_modem_candidate(masked_bytes.as_ref())
-        {
+        let unbuffered = self.plain_tail.is_empty() && self.detection_tail.is_empty();
+        // Ordinary output needs one scan for both control strings and modem
+        // markers. Buffered prefixes still require the stateful detector.
+        let ordinary_output = unbuffered
+            && matches!(self.detection_scope, ModemDetectionScope::Ground)
+            && !bytes.iter().any(|byte| {
+                matches!(
+                    *byte,
+                    0x1b | 0x90
+                        | 0x9d
+                        | 0x9f
+                        | crate::zmodem::ZPAD
+                        | crate::xymodem::WANT_CRC
+                        | crate::xymodem::NAK
+                        | crate::xymodem::SOH
+                        | crate::xymodem::STX
+                )
+            });
+        let masked_bytes = if ordinary_output {
+            Cow::Borrowed(bytes)
+        } else {
+            self.detection_scope.mask_control_strings(bytes)
+        };
+        if unbuffered && (ordinary_output || !contains_modem_candidate(masked_bytes.as_ref())) {
             self.remember_plain_output(masked_bytes.as_ref());
             let mut events = vec![ModemConsumerEvent::WriteTerminal(bytes.to_vec())];
             if let Some(request) = self.xymodem_download_request() {
