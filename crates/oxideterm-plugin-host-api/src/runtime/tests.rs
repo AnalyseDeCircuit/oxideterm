@@ -49,22 +49,6 @@ fn sample_manifest() -> NativePluginManifest {
 }
 
 #[test]
-fn protocol_envelope_rejects_unknown_version() {
-    let envelope = PluginProtocolEnvelope {
-        protocol_version: NATIVE_PLUGIN_PROTOCOL_VERSION + 1,
-        request_id: Some("req-1".to_string()),
-        payload: PluginEvent {
-            name: "demo".to_string(),
-            payload: Value::Null,
-        },
-    };
-
-    let error = envelope.validate_version().unwrap_err();
-    assert_eq!(error.code, "unsupported_protocol_version");
-    assert!(!error.recoverable);
-}
-
-#[test]
 fn process_decoder_classifies_sync_password_frames_before_typed_queues() {
     let frame = decode_process_output_frame(
         r#"{"protocolVersion":1,"payload":{"type":"callHostApi","requestId":"sync-1","namespace":"sync","method":"importOxide","args":{"password":"sensitive-value"}}}"#,
@@ -97,6 +81,7 @@ fn process_decoder_rejects_sensitive_frames_with_unknown_version() {
     .unwrap_err();
 
     assert_eq!(error.code, "unsupported_protocol_version");
+    assert!(!error.recoverable);
     assert!(!error.message.contains("sensitive-value"));
 }
 

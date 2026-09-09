@@ -508,7 +508,7 @@ impl PersistedSettings {
 
 #[cfg(test)]
 mod misc_tests {
-    use super::{HostToolsSettings, PersistedSettings, SettingsApplicationProxyMode};
+    use super::{PersistedSettings, SettingsApplicationProxyMode};
     use crate::DEFAULT_WINDOW_OPACITY;
 
     #[test]
@@ -612,36 +612,32 @@ mod misc_tests {
     }
 
     #[test]
-    fn legacy_settings_enable_every_host_tool_when_section_is_missing() {
-        let mut serialized = PersistedSettings::default().to_value();
-        serialized
-            .as_object_mut()
-            .expect("settings should be an object")
-            .remove("hostTools");
-
-        let restored: PersistedSettings =
-            serde_json::from_value(serialized).expect("legacy settings should deserialize");
-
-        assert_eq!(restored.host_tools, HostToolsSettings::default());
-    }
-
-    #[test]
-    fn missing_host_tool_flags_default_to_enabled() {
-        let restored: HostToolsSettings =
-            serde_json::from_value(serde_json::json!({"monitorEnabled": false}))
-                .expect("host tool settings should deserialize");
-
-        assert!(!restored.monitor_enabled);
-        assert!(restored.gpu_enabled);
-        assert!(restored.processes_enabled);
-        assert!(restored.services_enabled);
-        assert!(restored.logs_enabled);
-        assert!(restored.tmux_enabled);
-        assert!(restored.docker_enabled);
-        assert!(restored.ports_enabled);
-        assert!(restored.schedules_enabled);
-        assert!(restored.filesystems_enabled);
-        assert!(restored.packages_enabled);
+    fn absent_host_tool_settings_enable_tools_without_overriding_explicit_flags() {
+        for monitor_enabled in [None, Some(false)] {
+            let mut value = PersistedSettings::default().to_value();
+            value.as_object_mut().unwrap().remove("hostTools");
+            if let Some(enabled) = monitor_enabled {
+                value["hostTools"] = serde_json::json!({"monitorEnabled": enabled});
+            }
+            let restored: PersistedSettings = serde_json::from_value(value).unwrap();
+            let tools = restored.host_tools;
+            assert_eq!(tools.monitor_enabled, monitor_enabled.unwrap_or(true));
+            assert_eq!(
+                [
+                    tools.gpu_enabled,
+                    tools.processes_enabled,
+                    tools.services_enabled,
+                    tools.logs_enabled,
+                    tools.tmux_enabled,
+                    tools.docker_enabled,
+                    tools.ports_enabled,
+                    tools.schedules_enabled,
+                    tools.filesystems_enabled,
+                    tools.packages_enabled,
+                ],
+                [true; 10]
+            );
+        }
     }
 
     #[test]

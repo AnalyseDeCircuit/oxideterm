@@ -217,30 +217,29 @@ mod tests {
     }
 
     #[test]
-    fn secret_host_call_message_debug_redacts_arguments() {
-        let message = PluginOutboundMessage::CallHostApi {
-            request_id: "secret-1".to_string(),
-            namespace: "secrets".to_string(),
-            method: "set".to_string(),
-            args: serde_json::json!({ "key": "token", "value": "sensitive-value" }),
-        };
-
-        let rendered = format!("{message:?}");
-
-        assert!(rendered.contains("<redacted>"));
-        assert!(!rendered.contains("sensitive-value"));
-    }
-
-    #[test]
-    fn sync_password_host_call_cannot_use_public_clone_path() {
-        let message = PluginOutboundMessage::CallHostApi {
-            request_id: "sync-1".to_string(),
-            namespace: "sync".to_string(),
-            method: "exportOxide".to_string(),
-            args: serde_json::json!({ "password": "sensitive-value" }),
-        };
-
-        assert!(message.clone_public().is_none());
-        assert!(!format!("{message:?}").contains("sensitive-value"));
+    fn credential_messages_redact_debug_and_reject_public_cloning() {
+        for (namespace, method, args) in [
+            (
+                "secrets",
+                "set",
+                serde_json::json!({ "key": "token", "value": "sensitive-value" }),
+            ),
+            (
+                "sync",
+                "exportOxide",
+                serde_json::json!({ "password": "sensitive-value" }),
+            ),
+        ] {
+            let message = PluginOutboundMessage::CallHostApi {
+                request_id: "secret-1".to_string(),
+                namespace: namespace.to_string(),
+                method: method.to_string(),
+                args,
+            };
+            let rendered = format!("{message:?}");
+            assert!(rendered.contains("<redacted>"));
+            assert!(!rendered.contains("sensitive-value"));
+            assert!(message.clone_public().is_none());
+        }
     }
 }

@@ -101,42 +101,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn successful_response_debug_never_prints_payload() {
-        let response =
-            PluginResponse::sensitive_ok("secret-1", serde_json::json!("sensitive-value"));
-
-        let rendered = format!("{response:?}");
-
-        assert!(rendered.contains("<redacted>"));
-        assert!(!rendered.contains("sensitive-value"));
-    }
-
-    #[test]
-    fn sensitive_response_payload_can_be_zeroized_after_transport() {
+    fn sensitive_response_preserves_wire_contract_redacts_debug_and_clears_payload() {
         let mut response = PluginResponse::sensitive_ok(
-            "secret-2",
+            "secret-1",
             serde_json::json!({ "token": "sensitive-value" }),
         );
-
+        let debug = format!("{response:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("sensitive-value"));
+        let mut encoded = serde_json::to_value(&response).unwrap();
+        assert_eq!(
+            encoded,
+            serde_json::json!({
+                "requestId": "secret-1", "result": { "status": "ok", "value": { "token": "sensitive-value" } },
+            })
+        );
         response.zeroize_sensitive_payload();
-
         assert_eq!(
             response.result,
             PluginResponseResult::Ok { value: Value::Null }
         );
-    }
-
-    #[test]
-    fn sensitive_response_preserves_public_wire_shape() {
-        let mut response =
-            PluginResponse::sensitive_ok("secret-3", serde_json::json!("sensitive-value"));
-
-        let mut encoded = serde_json::to_value(&response).unwrap();
-
-        assert_eq!(encoded["requestId"], "secret-3");
-        assert_eq!(encoded["result"]["status"], "ok");
-        assert_eq!(encoded["result"]["value"], "sensitive-value");
-        response.zeroize_sensitive_payload();
         zeroize_json_value(&mut encoded);
     }
 }

@@ -190,18 +190,23 @@ fn activity_bar_manifest_rejects_duplicate_ids_and_invalid_positions() {
 }
 
 #[test]
-fn permission_capabilities_normalize_order_and_whitespace() {
-    let capabilities = vec![
-        " terminal.input.send ".to_string(),
-        "terminal.content.read".to_string(),
+fn permission_sets_normalize_order_but_distinguish_changed_capabilities() {
+    let declared = vec![
+        " terminal.input.send ".into(),
+        "terminal.content.read".into(),
     ];
-
+    let normalized = normalize_native_plugin_capabilities(&declared).unwrap();
+    assert_eq!(normalized, ["terminal.content.read", "terminal.input.send"]);
+    let mut reversed = normalized.clone();
+    reversed.reverse();
+    let fingerprint = native_plugin_capabilities_fingerprint(&normalized).unwrap();
     assert_eq!(
-        normalize_native_plugin_capabilities(&capabilities).unwrap(),
-        vec![
-            "terminal.content.read".to_string(),
-            "terminal.input.send".to_string()
-        ]
+        fingerprint,
+        native_plugin_capabilities_fingerprint(&reversed).unwrap()
+    );
+    assert_ne!(
+        fingerprint,
+        native_plugin_capabilities_fingerprint(&normalized[..1]).unwrap()
     );
 }
 
@@ -215,17 +220,6 @@ fn permission_capabilities_reject_empty_wildcard_and_duplicate_values() {
             " terminal.input.send ".to_string()
         ])
         .is_err()
-    );
-}
-
-#[test]
-fn capability_fingerprint_is_independent_of_declaration_order() {
-    let left = vec!["terminal.input.send".to_string(), "file.read".to_string()];
-    let right = vec!["file.read".to_string(), "terminal.input.send".to_string()];
-
-    assert_eq!(
-        native_plugin_capabilities_fingerprint(&left).unwrap(),
-        native_plugin_capabilities_fingerprint(&right).unwrap()
     );
 }
 
@@ -588,7 +582,7 @@ fn corrupt_plugin_config_is_quarantined_and_recreated() {
 
     assert_eq!(registry.configured_plugin_count(), 0);
     assert!(config_path.exists());
-    let backup_count = fs::read_dir(&temp_dir)
+    let backups: Vec<_> = fs::read_dir(&temp_dir)
         .unwrap()
         .filter_map(Result::ok)
         .filter(|entry| {
@@ -596,8 +590,9 @@ fn corrupt_plugin_config_is_quarantined_and_recreated() {
                 "{PLUGIN_CONFIG_FILENAME}.{PLUGIN_CONFIG_CORRUPT_MARKER}-"
             ))
         })
-        .count();
-    assert_eq!(backup_count, 1);
+        .collect();
+    assert_eq!(backups.len(), 1);
+    assert_eq!(fs::read(backups[0].path()).unwrap(), b"{ not valid json");
     let loaded = load_native_plugin_config(&config_path);
     assert_eq!(loaded.version, PLUGIN_CONFIG_SCHEMA_VERSION);
     let _ = fs::remove_dir_all(temp_dir);

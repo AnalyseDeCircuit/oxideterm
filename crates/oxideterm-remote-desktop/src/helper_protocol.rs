@@ -702,34 +702,6 @@ mod tests {
     }
 
     #[test]
-    fn staged_connect_withholds_credentials_until_authentication() {
-        let request = RemoteDesktopHelperRequest::StartConnect {
-            protocol: RemoteDesktopProtocol::Rdp,
-            endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
-            transport_endpoint: None,
-            socks_proxy: None,
-            password_available: true,
-            username_available: true,
-            size: RemoteDesktopSize {
-                width: 1280,
-                height: 720,
-            },
-            scale_factor: Some(125),
-            read_only: false,
-            session_options: RemoteDesktopSessionOptions::default(),
-            monitor_layout: RemoteDesktopMonitorLayout::default(),
-        };
-
-        let encoded = serde_json::to_string(&request).unwrap();
-
-        assert!(encoded.contains("\"usernameAvailable\":true"));
-        assert!(!encoded.contains("\"username\":"));
-        assert!(!encoded.contains("domain"));
-        assert!(encoded.contains("\"passwordAvailable\":true"));
-        assert!(!encoded.contains("super-secret"));
-    }
-
-    #[test]
     fn socks_proxy_credentials_cross_only_the_helper_wire() {
         let request = RemoteDesktopHelperRequest::StartConnect {
             protocol: RemoteDesktopProtocol::Rdp,

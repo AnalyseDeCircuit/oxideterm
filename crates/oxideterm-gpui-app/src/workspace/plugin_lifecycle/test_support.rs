@@ -3,13 +3,9 @@
 
 //! Shared native plugin lifecycle test fixtures.
 
-use std::{collections::HashMap, time::Duration};
+use std::collections::HashMap;
 
 use oxideterm_i18n::I18n;
-use oxideterm_ssh::{
-    ConnectionConsumer, ConnectionInfo, ConnectionState, NodeMetadataSnapshot, NodeOrigin,
-    NodeReadiness,
-};
 use serde_json::Value;
 
 use super::*;
@@ -107,40 +103,6 @@ pub(super) fn test_host_api_snapshot() -> NativePluginHostApiSnapshot {
     }
 }
 
-pub(super) fn test_host_api_snapshot_with_connections() -> NativePluginHostApiSnapshot {
-    let connection = ConnectionInfo {
-        connection_id: "conn-1".to_string(),
-        key: "redacted-key".to_string(),
-        host: "example.test".to_string(),
-        port: 22,
-        username: "deploy".to_string(),
-        parent_connection_id: None,
-        state: ConnectionState::Active,
-        ref_count: 2,
-        keep_alive: true,
-        consumers: vec![
-            ConnectionConsumer::Sftp("sftp-1".to_string()),
-            ConnectionConsumer::Terminal("term-1".to_string()),
-        ],
-        created_at: std::time::UNIX_EPOCH + Duration::from_secs(1),
-        last_active_at: std::time::UNIX_EPOCH + Duration::from_secs(2),
-        idle_timeout_secs: Some(1800),
-        remote_env: None,
-    };
-    let connections = vec![native_plugin_connection_snapshot(&connection)];
-    let connection_states = HashMap::from([(
-        connection.connection_id.clone(),
-        native_plugin_connection_state(&connection.state),
-    )]);
-    let node_connection_ids = HashMap::from([("node-1".to_string(), connection.connection_id)]);
-    NativePluginHostApiSnapshot {
-        connections,
-        connection_states,
-        node_connection_ids,
-        ..test_host_api_snapshot()
-    }
-}
-
 pub(super) fn test_host_api_snapshot_with_terminal() -> NativePluginHostApiSnapshot {
     NativePluginHostApiSnapshot {
         active_terminal_target: serde_json::json!({
@@ -159,54 +121,6 @@ pub(super) fn test_host_api_snapshot_with_terminal() -> NativePluginHostApiSnaps
                 current_lines: 3,
             },
         )]),
-        ..test_host_api_snapshot()
-    }
-}
-
-pub(super) fn test_host_api_snapshot_with_sessions() -> NativePluginHostApiSnapshot {
-    let root_id = oxideterm_ssh::NodeId::new("node-1");
-    let child_id = oxideterm_ssh::NodeId::new("node-2");
-    let nodes = vec![
-        NodeMetadataSnapshot {
-            id: root_id.clone(),
-            parent_id: None,
-            children_ids: vec![child_id.clone()],
-            depth: 0,
-            origin: NodeOrigin::Direct,
-            host: "example.test".to_string(),
-            port: 22,
-            username: "deploy".to_string(),
-            readiness: NodeReadiness::Ready,
-            error: None,
-            connection_id: Some("conn-1".to_string()),
-            terminal_session_id: Some("term-legacy".to_string()),
-            sftp_session_id: None,
-            created_at_ms: 1,
-        },
-        NodeMetadataSnapshot {
-            id: child_id,
-            parent_id: Some(root_id),
-            children_ids: Vec::new(),
-            depth: 1,
-            origin: NodeOrigin::Direct,
-            host: "child.test".to_string(),
-            port: 2222,
-            username: "root".to_string(),
-            readiness: NodeReadiness::Connecting,
-            error: None,
-            connection_id: None,
-            terminal_session_id: None,
-            sftp_session_id: Some("sftp-2".to_string()),
-            created_at_ms: 2,
-        },
-    ];
-    let titles = HashMap::from([("node-1".to_string(), "Production".to_string())]);
-    let terminal_ids = HashMap::from([("node-1".to_string(), vec!["term-1".to_string()])]);
-    let session_tree = native_plugin_session_tree_from_nodes(nodes, &titles, &terminal_ids);
-    let session_node_states = native_plugin_session_state_map_from_nodes(&session_tree);
-    NativePluginHostApiSnapshot {
-        session_tree,
-        session_node_states,
         ..test_host_api_snapshot()
     }
 }

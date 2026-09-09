@@ -57,79 +57,53 @@ fn disabling_path_detection_preserves_urls_and_osc8_links() {
 }
 
 #[test]
-fn display_links_skip_path_like_text_on_active_input_row() {
-    let mut snapshot = selection_snapshot("cd ../");
-    snapshot.lines[0].active_input = true;
-    snapshot.lines[0].refresh_signature();
-
-    let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
-        &snapshot,
-        0..snapshot.lines.len(),
-        true,
-    );
-    let display_links = display_link_ranges_with_path_detection(&snapshot, true);
-
-    assert_eq!(links.len(), 1);
-    assert_eq!(links[0].target, "../");
-    assert!(display_links.is_empty());
-}
-
-#[test]
-fn display_links_skip_path_like_text_on_wrapped_active_input_rows() {
-    let mut snapshot = multirow_snapshot(&["echo ./src/", "main.rs"]);
-    snapshot.lines[0].active_input = true;
-    snapshot.lines[1].active_input = true;
-    snapshot.lines[0].refresh_signature();
-    snapshot.lines[1].refresh_signature();
-
-    let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
-        &snapshot,
-        0..snapshot.lines.len(),
-        true,
-    );
-    let display_links = display_link_ranges_with_path_detection(&snapshot, true);
-
-    assert_eq!(links.len(), 1);
-    assert!(display_links.is_empty());
-}
-
-#[test]
-fn link_detection_prefers_osc8_hyperlink_ranges() {
-    let mut snapshot = selection_snapshot("click");
-    for cell in &mut snapshot.lines[0].cells_mut()[..5] {
-        cell.set_hyperlink(Some("https://example.com/osc8".to_string()));
+fn active_input_paths_are_hidden_while_completed_output_paths_remain_visible() {
+    let mut snapshot = multirow_snapshot(&["cd ../", "echo ./src/", "main.rs", "./completed.log"]);
+    for row in &mut snapshot.lines[..3] {
+        row.active_input = true;
+        row.refresh_signature();
     }
-    snapshot.lines[0].refresh_signature();
-
     let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
         &snapshot,
         0..snapshot.lines.len(),
         true,
     );
-
-    assert_eq!(links.len(), 1);
-    assert_eq!(links[0].kind, TerminalLinkKind::Url);
-    assert_eq!(links[0].start_col, 0);
-    assert_eq!(links[0].end_col, 5);
-    assert_eq!(links[0].target, "https://example.com/osc8");
+    assert_eq!(
+        links
+            .iter()
+            .map(|link| (link.row, link.target.as_ref()))
+            .collect::<Vec<_>>(),
+        vec![(0, "../"), (1, "./src/"), (3, "./completed.log")]
+    );
+    let displayed = display_link_ranges_with_path_detection(&snapshot, true);
+    assert_eq!(
+        displayed
+            .iter()
+            .map(|link| (link.row, link.target.as_ref()))
+            .collect::<Vec<_>>(),
+        vec![(3, "./completed.log")]
+    );
 }
 
 #[test]
-fn link_detection_does_not_duplicate_url_inside_osc8_range() {
-    let mut snapshot = selection_snapshot("https://example.com");
-    for cell in &mut snapshot.lines[0].cells_mut()[..19] {
-        cell.set_hyperlink(Some("https://example.com/osc8".to_string()));
+fn osc8_targets_take_precedence_over_visible_labels_and_detected_urls() {
+    for label in ["click", "https://example.com"] {
+        let mut snapshot = selection_snapshot(label);
+        for cell in &mut snapshot.lines[0].cells_mut()[..label.len()] {
+            cell.set_hyperlink(Some("https://example.com/osc8".to_string()));
+        }
+        snapshot.lines[0].refresh_signature();
+        let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
+            &snapshot,
+            0..snapshot.lines.len(),
+            true,
+        );
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].kind, TerminalLinkKind::Url);
+        assert_eq!(links[0].start_col, 0);
+        assert_eq!(links[0].end_col, label.len());
+        assert_eq!(links[0].target, "https://example.com/osc8");
     }
-    snapshot.lines[0].refresh_signature();
-
-    let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
-        &snapshot,
-        0..snapshot.lines.len(),
-        true,
-    );
-
-    assert_eq!(links.len(), 1);
-    assert_eq!(links[0].target, "https://example.com/osc8");
 }
 
 #[test]
@@ -164,17 +138,19 @@ fn terminal_element_underlines_osc8_links_even_on_colored_cells() {
 }
 
 #[test]
-fn path_links_resolve_relative_paths_to_file_urls() {
-    let url = path_link_to_file_url("./src/main.rs", Path::new("/tmp/Oxide Term")).expect("url");
-
-    assert_eq!(url, "file:///tmp/Oxide%20Term/./src/main.rs");
-}
-
-#[test]
-fn path_links_percent_encode_non_url_safe_characters() {
-    let encoded = percent_encode_path(Path::new("/tmp/a b/中文.rs"));
-
-    assert_eq!(encoded, "/tmp/a%20b/%E4%B8%AD%E6%96%87.rs");
+fn path_links_resolve_and_percent_encode_file_urls() {
+    for (path, expected) in [
+        ("./src/main.rs", "file:///tmp/Oxide%20Term/./src/main.rs"),
+        (
+            "/tmp/a b/中文.rs",
+            "file:///tmp/a%20b/%E4%B8%AD%E6%96%87.rs",
+        ),
+    ] {
+        assert_eq!(
+            path_link_to_file_url(path, Path::new("/tmp/Oxide Term")).unwrap(),
+            expected
+        );
+    }
 }
 
 #[test]

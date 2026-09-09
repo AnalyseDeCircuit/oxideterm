@@ -137,40 +137,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sensitive_host_call_request_debug_redacts_arguments() {
-        let request = PluginRequest {
-            request_id: "sync-1".to_string(),
-            kind: PluginRequestKind::CallHostApi {
-                namespace: "sync".to_string(),
-                method: "exportOxide".to_string(),
-                args: serde_json::json!({ "password": "sensitive-value" }),
-            },
-            timeout_ms: Some(1_000),
-        };
-
-        let rendered = format!("{request:?}");
-
-        assert!(rendered.contains("<redacted>"));
-        assert!(!rendered.contains("sensitive-value"));
-    }
-
-    #[test]
-    fn sensitive_host_call_request_can_clear_owned_arguments() {
-        let mut request = PluginRequest {
-            request_id: "sync-2".to_string(),
-            kind: PluginRequestKind::CallHostApi {
-                namespace: "sync".to_string(),
-                method: "previewImport".to_string(),
-                args: serde_json::json!({ "password": "sensitive-value" }),
-            },
-            timeout_ms: Some(1_000),
-        };
-
-        request.zeroize_sensitive_host_call_args();
-
-        let PluginRequestKind::CallHostApi { args, .. } = request.kind else {
-            panic!("request kind should remain a host call");
-        };
-        assert!(args.is_null());
+    fn sensitive_host_calls_redact_debug_and_clear_owned_arguments() {
+        for method in ["exportOxide", "previewImport"] {
+            let mut request = PluginRequest {
+                request_id: "sync-1".to_string(),
+                kind: PluginRequestKind::CallHostApi {
+                    namespace: "sync".to_string(),
+                    method: method.to_string(),
+                    args: serde_json::json!({ "password": "sensitive-value" }),
+                },
+                timeout_ms: Some(1_000),
+            };
+            let rendered = format!("{request:?}");
+            assert!(rendered.contains("<redacted>"));
+            assert!(!rendered.contains("sensitive-value"));
+            request.zeroize_sensitive_host_call_args();
+            let PluginRequestKind::CallHostApi { args, .. } = request.kind else {
+                panic!("request kind should remain a host call");
+            };
+            assert!(args.is_null());
+        }
     }
 }

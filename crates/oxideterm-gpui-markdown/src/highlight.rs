@@ -189,17 +189,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn highlights_rust_code() {
+    fn highlighting_preserves_source_and_style_through_text_run_conversion() {
         let opts = MarkdownOptions::default();
-        let runs = highlight_code("rust", "fn main() {}\n", &opts);
-        assert!(runs.is_some());
-        let runs = runs.unwrap();
-        assert!(!runs.is_empty());
-
-        // Concatenated text should contain the original code
-        let text: String = runs.iter().map(|r| r.text.as_str()).collect();
-        assert!(text.contains("fn"));
-        assert!(text.contains("main"));
+        for (language, code) in [
+            ("rust", "fn main() {\n    println!(\"你好🚀\");\n}\n"),
+            ("python", "# greeting\r\nprint('你好🚀')\r\n"),
+        ] {
+            let runs = highlight_code(language, code, &opts).unwrap();
+            let (text, text_runs) = highlighted_runs_to_text_runs(&runs);
+            assert_eq!(text.as_ref(), code, "{language}");
+            assert!(runs.windows(2).any(|pair| pair[0].color != pair[1].color));
+            let mut offset = 0;
+            assert_eq!(text_runs.len(), runs.len());
+            for (rendered, highlighted) in text_runs.iter().zip(&runs) {
+                assert_eq!(&text[offset..offset + rendered.len], highlighted.text);
+                assert_eq!(rendered.color, highlighted.color);
+                assert_eq!(rendered.font, highlighted.font);
+                offset += rendered.len;
+            }
+            assert_eq!(offset, code.len());
+        }
     }
 
     #[test]
@@ -207,15 +216,5 @@ mod tests {
         let opts = MarkdownOptions::default();
         let runs = highlight_code("not_a_real_language_xyz", "hello", &opts);
         assert!(runs.is_none());
-    }
-
-    #[test]
-    fn text_runs_preserve_length() {
-        let opts = MarkdownOptions::default();
-        let runs = highlight_code("python", "print('hello')\n", &opts).unwrap();
-        let (text, text_runs) = highlighted_runs_to_text_runs(&runs);
-
-        let total_len: usize = text_runs.iter().map(|r| r.len).sum();
-        assert_eq!(total_len, text.len());
     }
 }

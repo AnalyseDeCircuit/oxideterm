@@ -277,8 +277,10 @@ mod tests {
     #[test]
     fn navigation_preserves_utf16_surrogate_boundaries() {
         let value = "a😄b";
+        assert_eq!(next_utf16_boundary(value, 0), 1);
         assert_eq!(next_utf16_boundary(value, 1), 3);
         assert_eq!(previous_utf16_boundary(value, 3), 1);
+        assert_eq!(previous_utf16_boundary(value, 4), 3);
         assert_eq!(utf16_slice(value, 1..3), "😄");
     }
 
@@ -287,13 +289,55 @@ mod tests {
         let value = "abc\nde\nfghi";
         assert_eq!(vertical_line_navigation_destination(value, 2, true), 6);
         assert_eq!(vertical_line_navigation_destination(value, 6, true), 9);
+        assert_eq!(vertical_line_navigation_destination(value, 9, false), 6);
     }
 
     #[test]
     fn transpose_uses_utf16_caret_offsets() {
+        for (text, caret, expected, next_caret) in [
+            ("abcd", 2, "acbd", 3),
+            ("a😄b", 3, "ab😄", 4),
+            ("abcd", 4, "abdc", 4),
+        ] {
+            assert_eq!(
+                transpose_text_at_utf16_offset(text, caret),
+                Some((expected.into(), next_caret))
+            );
+        }
+    }
+
+    #[test]
+    fn word_navigation_matches_browser_style_runs() {
+        let value = "alpha beta  gamma";
+        assert_eq!(previous_word_boundary(value, 12), 6);
         assert_eq!(
-            transpose_text_at_utf16_offset("a😄b", 3),
-            Some(("ab😄".to_string(), 4))
+            previous_word_boundary(value, value.encode_utf16().count()),
+            12
         );
+        assert_eq!(next_word_boundary(value, 0), 5);
+        assert_eq!(next_word_boundary(value, 6), 10);
+    }
+
+    #[test]
+    fn double_click_word_range_handles_edges() {
+        assert_eq!(word_range_for_utf16_offset("root", 1), 0..4);
+        assert_eq!(word_range_for_utf16_offset("alpha beta", 7), 6..10);
+        assert_eq!(word_range_for_utf16_offset("alpha beta", 5), 0..5);
+    }
+
+    #[test]
+    fn multiline_line_ranges_match_textarea_navigation() {
+        let value = "one\ntwo\nthree";
+        assert_eq!(line_range_for_utf16_offset(value, 1), 0..3);
+        assert_eq!(line_range_for_utf16_offset(value, 5), 4..7);
+        assert_eq!(line_start_for_utf16_offset(value, 10), 8);
+        assert_eq!(line_end_for_utf16_offset(value, 10), 13);
+    }
+
+    #[test]
+    fn control_k_matches_textarea_line_delete() {
+        let value = "one\ntwo\nthree";
+        assert_eq!(control_k_delete_end(value, 5), 7);
+        assert_eq!(control_k_delete_end(value, 7), 8);
     }
 }

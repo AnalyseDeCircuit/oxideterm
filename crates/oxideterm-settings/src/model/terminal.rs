@@ -601,53 +601,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn background_scope_defaults_to_content_for_legacy_settings() {
+    fn missing_terminal_fields_preserve_legacy_and_safe_defaults() {
         let mut value = serde_json::to_value(TerminalSettings::default()).expect("settings value");
-        value
-            .as_object_mut()
-            .expect("terminal settings object")
-            .remove("backgroundScope");
-        let settings: TerminalSettings = serde_json::from_value(value).expect("legacy settings");
-
-        assert_eq!(settings.background_scope, BackgroundScope::Content);
-    }
-
-    #[test]
-    fn terminal_trigger_shell_execution_defaults_to_denied() {
-        let mut value = serde_json::to_value(TerminalSettings::default()).expect("settings value");
-        value
-            .as_object_mut()
-            .expect("terminal settings object")
-            .remove("triggers");
-
-        let settings: TerminalSettings = serde_json::from_value(value).expect("legacy settings");
-
-        assert!(!settings.triggers.explicit_shell_enabled);
-    }
-
-    #[test]
-    fn terminal_broadcast_groups_default_empty_for_legacy_settings() {
-        let mut value = serde_json::to_value(TerminalSettings::default()).expect("settings value");
-        value
-            .as_object_mut()
-            .expect("terminal settings object")
-            .remove("broadcastGroups");
-
-        let settings: TerminalSettings = serde_json::from_value(value).expect("legacy settings");
-
-        assert!(settings.broadcast_groups.is_empty());
-    }
-
-    #[test]
-    fn terminal_session_log_uses_safe_defaults_when_section_is_absent() {
-        let mut value = serde_json::to_value(TerminalSettings::default()).expect("settings value");
-        value
-            .as_object_mut()
-            .expect("terminal settings object")
-            .remove("sessionLog");
+        for field in [
+            "sessionLog",
+            "triggers",
+            "broadcastGroups",
+            "backgroundScope",
+            "backspaceSequence",
+            "deleteSequence",
+            "remoteShellIntegrationMode",
+        ] {
+            value.as_object_mut().unwrap().remove(field);
+        }
 
         let settings: TerminalSettings = serde_json::from_value(value).expect("terminal settings");
 
+        assert_eq!(settings.background_scope, BackgroundScope::Content);
+        assert_eq!(
+            settings.backspace_sequence,
+            TerminalBackspaceSequence::Delete
+        );
+        assert_eq!(settings.delete_sequence, TerminalDeleteSequence::Csi3Tilde);
+        assert_eq!(
+            settings.remote_shell_integration_mode,
+            RemoteShellIntegrationMode::Ask
+        );
+        assert!(!settings.triggers.explicit_shell_enabled);
+        assert!(settings.broadcast_groups.is_empty());
         assert!(!settings.session_log.automatic);
         assert!(!settings.session_log.include_control_sequences);
         assert_eq!(settings.session_log.retention_days, 30);
@@ -687,23 +668,37 @@ mod tests {
     }
 
     #[test]
-    fn terminal_settings_restore_legacy_presentation_defaults() {
-        let defaults: [(&str, bool, fn(&TerminalSettings) -> bool); 7] = [
+    fn terminal_settings_restore_legacy_boolean_defaults() {
+        let defaults: [(&str, bool, fn(&TerminalSettings) -> bool); 11] = [
             ("smoothScroll", true, |settings| settings.smooth_scroll),
+            ("osc52ClipboardRead", false, |settings| {
+                settings.osc52_clipboard_read
+            }),
+            ("confirmBeforeClosingSsh", true, |settings| {
+                settings.confirm_before_closing_ssh
+            }),
+            ("openLinksWithModifier", true, |settings| {
+                settings.open_links_with_modifier
+            }),
+            ("detectFilePathsAsLinks", true, |settings| {
+                settings.detect_file_paths_as_links
+            }),
             ("highlightTabOnNewOutput", true, |settings| {
                 settings.highlight_tab_on_new_output
             }),
-            (
-                "freeTypeCursorPositioning",
-                false,
-                |settings| settings.free_type_mode,
-            ),
+            ("freeTypeCursorPositioning", false, |settings| {
+                settings.free_type_mode
+            }),
             ("fontLigatures", false, |settings| settings.font_ligatures),
-            ("rightClickPaste", false, |settings| settings.right_click_paste),
+            ("rightClickPaste", false, |settings| {
+                settings.right_click_paste
+            }),
             ("semanticColoring", false, |settings| {
                 settings.semantic_coloring
             }),
-            ("selectionHighlighting", false, |settings| settings.selection_highlighting),
+            ("selectionHighlighting", false, |settings| {
+                settings.selection_highlighting
+            }),
         ];
 
         for (field, expected, read) in defaults {
@@ -713,17 +708,6 @@ mod tests {
             let settings: TerminalSettings = serde_json::from_value(value).unwrap();
             assert_eq!(read(&settings), expected, "legacy {field} default");
         }
-    }
-
-    #[test]
-    fn selection_highlighting_default_round_trips() {
-        let mut settings = TerminalSettings::default();
-        assert!(!settings.selection_highlighting);
-        settings.selection_highlighting = true;
-        let value = serde_json::to_value(&settings).unwrap();
-        assert_eq!(value["selectionHighlighting"], serde_json::json!(true));
-        let restored: TerminalSettings = serde_json::from_value(value).unwrap();
-        assert!(restored.selection_highlighting);
     }
 
     #[test]
@@ -784,24 +768,10 @@ mod tests {
     }
 
     #[test]
-    fn terminal_settings_default_legacy_key_sequences_when_missing() {
-        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
-        let object = value.as_object_mut().unwrap();
-        object.remove("backspaceSequence");
-        object.remove("deleteSequence");
-
-        let settings: TerminalSettings = serde_json::from_value(value).unwrap();
-
-        assert_eq!(
-            settings.backspace_sequence,
-            TerminalBackspaceSequence::Delete
-        );
-        assert_eq!(settings.delete_sequence, TerminalDeleteSequence::Csi3Tilde);
-    }
-
-    #[test]
-    fn terminal_settings_serialize_legacy_key_sequences() {
+    fn terminal_settings_preserve_explicit_values_and_legacy_wire_names() {
         let mut settings = TerminalSettings::default();
+        settings.selection_highlighting = true;
+        settings.free_type_mode = true;
         settings.backspace_sequence = TerminalBackspaceSequence::ControlH;
         settings.delete_sequence = TerminalDeleteSequence::Delete;
 
@@ -809,90 +779,17 @@ mod tests {
 
         assert_eq!(value["backspaceSequence"], serde_json::json!("controlH"));
         assert_eq!(value["deleteSequence"], serde_json::json!("delete"));
-    }
-
-    #[test]
-    fn terminal_settings_keep_legacy_free_type_mode_json_key() {
-        let mut settings = TerminalSettings::default();
-        settings.free_type_mode = true;
-
-        let value = serde_json::to_value(settings).expect("serialize terminal settings");
-
-        assert_eq!(
-            value["freeTypeCursorPositioning"],
-            serde_json::Value::Bool(true)
-        );
+        assert_eq!(value["selectionHighlighting"], serde_json::json!(true));
+        assert_eq!(value["freeTypeCursorPositioning"], serde_json::json!(true));
         assert!(value.get("freeTypeMode").is_none());
-    }
-
-    #[test]
-    fn terminal_settings_default_osc52_clipboard_read_when_missing() {
-        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("osc52ClipboardRead");
-
-        let settings: TerminalSettings = serde_json::from_value(value).unwrap();
-
-        assert!(!settings.osc52_clipboard_read);
-    }
-
-    #[test]
-    fn terminal_settings_confirm_ssh_close_for_legacy_settings() {
-        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("confirmBeforeClosingSsh");
-
-        let settings: TerminalSettings = serde_json::from_value(value).unwrap();
-
-        assert!(settings.confirm_before_closing_ssh);
-    }
-
-    #[test]
-    fn terminal_settings_require_modifier_for_links_when_setting_is_missing() {
-        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("openLinksWithModifier");
-
-        let settings: TerminalSettings = serde_json::from_value(value).unwrap();
-
-        // Missing settings retain the safer native behavior that avoids accidental link opens.
-        assert!(settings.open_links_with_modifier);
-    }
-
-    #[test]
-    fn terminal_settings_detect_file_paths_when_setting_is_missing() {
-        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("detectFilePathsAsLinks");
-
-        let settings: TerminalSettings = serde_json::from_value(value).unwrap();
-
-        // Existing installations retain file path recognition until the user disables it.
-        assert!(settings.detect_file_paths_as_links);
-    }
-
-    #[test]
-    fn terminal_settings_ask_before_remote_shell_integration_when_missing() {
-        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("remoteShellIntegrationMode");
-
-        let settings: TerminalSettings = serde_json::from_value(value).unwrap();
-
+        let restored: TerminalSettings = serde_json::from_value(value).unwrap();
+        assert!(restored.selection_highlighting);
+        assert!(restored.free_type_mode);
         assert_eq!(
-            settings.remote_shell_integration_mode,
-            RemoteShellIntegrationMode::Ask
+            restored.backspace_sequence,
+            TerminalBackspaceSequence::ControlH
         );
+        assert_eq!(restored.delete_sequence, TerminalDeleteSequence::Delete);
     }
 
     #[test]

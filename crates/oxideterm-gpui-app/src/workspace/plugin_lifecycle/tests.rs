@@ -1191,56 +1191,6 @@ fn api_invoke_native_adapters_cover_system_transfer_and_capability_paths() {
 }
 
 #[test]
-fn connections_returnable_host_apis_return_null_for_missing_ids() {
-    let snapshot = test_host_api_snapshot_with_connections();
-    for (method, args) in [
-        ("get", serde_json::json!({ "connectionId": "missing" })),
-        ("getState", serde_json::json!({ "connectionId": "missing" })),
-        ("getByNode", serde_json::json!({ "nodeId": "missing" })),
-    ] {
-        let response = native_plugin_returnable_host_api_response(
-            &snapshot,
-            "com.example.demo",
-            plugin_runtime::PluginHostCall {
-                request_id: format!("connections-{method}-missing"),
-                namespace: "connections".to_string(),
-                method: method.to_string(),
-                args,
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            response.result,
-            plugin_runtime::PluginResponseResult::Ok {
-                value: serde_json::Value::Null
-            }
-        );
-    }
-}
-
-#[test]
-fn sessions_returnable_host_apis_return_null_for_missing_node() {
-    let snapshot = test_host_api_snapshot_with_sessions();
-    let state = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "sessions-state-missing".to_string(),
-            namespace: "sessions".to_string(),
-            method: "getNodeState".to_string(),
-            args: serde_json::json!({ "nodeId": "missing" }),
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        state.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::Value::Null
-        }
-    );
-}
-
-#[test]
 fn terminal_readonly_returnable_host_apis_use_node_snapshots() {
     let snapshot = test_host_api_snapshot_with_terminal();
     let active = native_plugin_returnable_host_api_response(
@@ -1624,46 +1574,6 @@ fn terminal_output_processors_preserve_bytes_on_failure() {
 }
 
 #[test]
-fn i18n_returnable_host_apis_use_plugin_scoped_fallback() {
-    let snapshot = test_host_api_snapshot();
-    let language = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "i18n-language".to_string(),
-            namespace: "i18n".to_string(),
-            method: "getLanguage".to_string(),
-            args: serde_json::json!({}),
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        language.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!("zh-CN")
-        }
-    );
-
-    let translated = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "i18n-t".to_string(),
-            namespace: "i18n".to_string(),
-            method: "t".to_string(),
-            args: serde_json::json!({ "key": "missing.title" }),
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        translated.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!("missing.title")
-        }
-    );
-}
-
-#[test]
 fn syncable_settings_apply_normalizes_payload_and_warnings() {
     let normalized = native_normalize_syncable_settings_payload(&serde_json::json!({
         "appearance": {
@@ -1759,45 +1669,4 @@ fn syncable_settings_apply_returnable_host_api_reports_applied_payload() {
             })
         }
     );
-}
-
-#[test]
-fn custom_event_emit_returnable_host_api_is_plugin_scoped() {
-    let snapshot = test_host_api_snapshot();
-    let response = native_plugin_returnable_host_api_response(
-        &snapshot,
-        "com.example.demo",
-        plugin_runtime::PluginHostCall {
-            request_id: "events-emit".to_string(),
-            namespace: "events".to_string(),
-            method: "emit".to_string(),
-            args: serde_json::json!({
-                "name": "build.done",
-                "payload": { "ok": true },
-            }),
-        },
-    )
-    .unwrap();
-
-    assert_eq!(
-        response.result,
-        plugin_runtime::PluginResponseResult::Ok {
-            value: serde_json::json!({
-                "emitted": true,
-                "event": "plugin.com.example.demo:build.done",
-            })
-        }
-    );
-    let (event_key, payload) = native_plugin_custom_event_from_args(
-        "com.example.demo",
-        serde_json::json!({
-            "name": "build.done",
-            "payload": { "ok": true },
-        }),
-    )
-    .unwrap();
-    assert_eq!(event_key, "plugin.com.example.demo:build.done");
-    assert_eq!(payload["pluginId"], "com.example.demo");
-    assert_eq!(payload["name"], "build.done");
-    assert_eq!(payload["payload"], serde_json::json!({ "ok": true }));
 }

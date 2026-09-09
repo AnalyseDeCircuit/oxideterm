@@ -397,15 +397,10 @@ mod tests {
     fn translates_active_locale() {
         let mut i18n = I18n::default();
         assert_eq!(i18n.t("menu.new_terminal"), "新建终端");
+        assert_eq!(i18n.t("missing.key"), "missing.key");
 
         i18n.set_locale(Locale::En);
         assert_eq!(i18n.t("menu.new_terminal"), "New Terminal");
-    }
-
-    #[test]
-    fn falls_back_to_english_then_key() {
-        let i18n = I18n::new(Locale::ZhCn);
-        assert_eq!(i18n.t("missing.key"), "missing.key");
     }
 
     #[test]

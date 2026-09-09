@@ -64,15 +64,15 @@ mod tests {
     use super::terminal_selection_command_bar_text;
 
     #[test]
-    fn command_bar_text_trims_terminal_line_edges_only() {
-        assert_eq!(
-            terminal_selection_command_bar_text("\n  printf 'ok'  \r\n").as_deref(),
-            Some("  printf 'ok'  ")
-        );
-    }
-
-    #[test]
-    fn command_bar_text_rejects_blank_selection() {
-        assert_eq!(terminal_selection_command_bar_text("\n \t\r\n"), None);
+    fn command_bar_selection_preserves_command_spaces_and_rejects_blank_text() {
+        for (input, expected) in [
+            ("\n  printf 'ok'  \r\n", Some("  printf 'ok'  ")),
+            ("\n \t\r\n", None),
+        ] {
+            assert_eq!(
+                terminal_selection_command_bar_text(input).as_deref(),
+                expected
+            );
+        }
     }
 }

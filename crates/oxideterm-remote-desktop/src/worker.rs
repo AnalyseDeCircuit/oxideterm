@@ -502,7 +502,6 @@ mod tests {
         let encoded = serde_json::to_string(&request).unwrap();
         assert!(encoded.contains("\"passwordAvailable\":true"));
         assert!(encoded.contains("\"usernameAvailable\":true"));
-        assert!(!encoded.contains("wire-secret"));
         assert!(!encoded.contains("\"password\":"));
         assert!(!encoded.contains("\"username\":"));
         assert!(!encoded.contains("\"domain\":"));

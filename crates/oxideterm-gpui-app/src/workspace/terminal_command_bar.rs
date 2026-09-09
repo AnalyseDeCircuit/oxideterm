@@ -491,19 +491,16 @@ mod terminal_project_git_root_tests {
     use super::*;
 
     #[test]
-    fn project_git_root_disagreement_ignores_trailing_separators() {
-        assert_eq!(
-            terminal_project_git_root_disagreement("/repo/app/", "/repo/app").as_deref(),
-            None
-        );
-    }
-
-    #[test]
-    fn project_git_root_disagreement_reports_distinct_git_root() {
-        assert_eq!(
-            terminal_project_git_root_disagreement("/repo/app", "/repo").as_deref(),
-            Some("/repo")
-        );
+    fn project_git_root_disagreement_compares_normalized_roots() {
+        for (project, git, expected) in [
+            ("/repo/app/", "/repo/app", None),
+            ("/repo/app", "/repo", Some("/repo")),
+        ] {
+            assert_eq!(
+                terminal_project_git_root_disagreement(project, git).as_deref(),
+                expected
+            );
+        }
     }
 }
 
@@ -551,17 +548,15 @@ mod privilege_prompt_helper_tests {
     }
 
     #[test]
-    fn local_terminal_prompt_helper_is_enabled() {
-        assert!(tab_kind_allows_privilege_prompt_helper(
-            &TabKind::LocalTerminal
-        ));
-    }
-
-    #[test]
-    fn ssh_terminal_prompt_helper_is_tab_eligible() {
-        assert!(tab_kind_allows_privilege_prompt_helper(
-            &TabKind::SshTerminal
-        ));
+    fn privilege_prompt_helper_is_limited_to_supported_terminal_tabs() {
+        for (kind, allowed) in [
+            (TabKind::LocalTerminal, true),
+            (TabKind::SshTerminal, true),
+            (TabKind::MoshTerminal, false),
+            (TabKind::Sftp, false),
+        ] {
+            assert_eq!(tab_kind_allows_privilege_prompt_helper(&kind), allowed);
+        }
     }
 
     #[test]

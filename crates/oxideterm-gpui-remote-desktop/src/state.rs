@@ -1319,51 +1319,26 @@ mod tests {
     }
 
     #[test]
-    fn frame_event_keeps_latest_frame_for_rendering() {
-        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Vnc);
-        let size = RemoteDesktopSize {
-            width: 2,
-            height: 2,
-        };
-
-        state.apply_event(RemoteDesktopHelperEvent::Frame {
-            frame: RemoteDesktopFrame::new(size, RemoteDesktopFrameFormat::Rgba8, vec![0; 16]),
-        });
-
-        assert!(state.snapshot().has_frame);
-        assert_eq!(state.frame_size(), Some(size));
-        assert!(state.frame_surface().is_some());
-        assert_eq!(state.texture_generation(), 1);
-        assert_eq!(frame_generation(&state), 1);
-    }
-
-    #[test]
-    fn base_frame_replacement_advances_texture_generation() {
+    fn base_frame_replacement_displays_new_pixels_and_advances_generation() {
         let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
         let size = RemoteDesktopSize {
             width: 1,
             height: 1,
         };
-
-        state.apply_event(RemoteDesktopHelperEvent::Frame {
-            frame: RemoteDesktopFrame::new(
-                size,
-                RemoteDesktopFrameFormat::Rgba8,
-                vec![0, 0, 0, 0xff],
-            ),
-        });
-        state.apply_event(RemoteDesktopHelperEvent::Frame {
-            frame: RemoteDesktopFrame::new(
-                size,
-                RemoteDesktopFrameFormat::Rgba8,
-                vec![1, 1, 1, 0xff],
-            ),
-        });
-
-        let surface = state.frame_surface().expect("frame should be cached");
-        assert_eq!(state.texture_generation(), 2);
-        assert_eq!(frame_generation(&state), 2);
-        assert_eq!(surface.generation, 2);
+        for (generation, pixels) in [(1, vec![0, 0, 0, 255]), (2, vec![1, 2, 3, 255])] {
+            state.apply_event(RemoteDesktopHelperEvent::Frame {
+                frame: RemoteDesktopFrame::new(
+                    size,
+                    RemoteDesktopFrameFormat::Bgra8,
+                    pixels.clone(),
+                ),
+            });
+            assert!(state.snapshot().has_frame);
+            assert_eq!(state.frame_size(), Some(size));
+            assert_eq!(frame_bgra_bytes(&state), pixels);
+            assert_eq!(state.texture_generation(), generation);
+            assert_eq!(state.frame_surface().unwrap().generation, generation);
+        }
     }
 
     #[test]
@@ -2143,63 +2118,30 @@ mod tests {
     }
 
     #[test]
-    fn bgra_frame_padding_is_cached_as_opaque_alpha() {
-        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
-
-        state.apply_event(RemoteDesktopHelperEvent::Frame {
-            frame: RemoteDesktopFrame::new(
-                RemoteDesktopSize {
-                    width: 1,
-                    height: 1,
-                },
+    fn input_pixel_formats_produce_opaque_bgra_textures() {
+        for (format, pixels) in [
+            (
                 RemoteDesktopFrameFormat::Bgra8,
                 vec![0x10, 0x20, 0x30, 0x00],
             ),
-        });
-
-        assert_eq!(
-            frame_bgra_bytes(&state),
-            [0x10, 0x20, 0x30, 0xff].as_slice()
-        );
-    }
-
-    #[test]
-    fn rgba_frame_is_cached_in_gpui_bgra_order() {
-        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
-
-        state.apply_event(RemoteDesktopHelperEvent::Frame {
-            frame: RemoteDesktopFrame::new(
-                RemoteDesktopSize {
-                    width: 1,
-                    height: 1,
-                },
+            (
                 RemoteDesktopFrameFormat::Rgba8,
                 vec![0x30, 0x20, 0x10, 0xff],
             ),
-        });
-
-        assert_eq!(
-            frame_bgra_bytes(&state),
-            [0x10, 0x20, 0x30, 0xff].as_slice()
-        );
-    }
-
-    #[test]
-    fn failure_event_exposes_user_safe_message() {
-        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
-
-        state.apply_event(RemoteDesktopHelperEvent::ConnectionFailure {
-            message: "authentication failed".to_string(),
-            category: Some(RemoteDesktopErrorCategory::Authentication),
-        });
-
-        let snapshot = state.snapshot();
-        assert_eq!(snapshot.status, RemoteDesktopSessionStatus::Failed);
-        assert_eq!(snapshot.message.as_deref(), Some("authentication failed"));
-        assert_eq!(
-            snapshot.error_category,
-            Some(RemoteDesktopErrorCategory::Authentication)
-        );
+        ] {
+            let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
+            state.apply_event(RemoteDesktopHelperEvent::Frame {
+                frame: RemoteDesktopFrame::new(
+                    RemoteDesktopSize {
+                        width: 1,
+                        height: 1,
+                    },
+                    format,
+                    pixels,
+                ),
+            });
+            assert_eq!(frame_bgra_bytes(&state), [0x10, 0x20, 0x30, 0xff]);
+        }
     }
 
     #[test]
@@ -2219,13 +2161,20 @@ mod tests {
 
         state.apply_event(RemoteDesktopHelperEvent::ConnectionFailure {
             message: "transport failed".to_string(),
-            category: Some(RemoteDesktopErrorCategory::Unknown),
+            category: Some(RemoteDesktopErrorCategory::Authentication),
         });
 
         let retired = state.take_retired_textures();
         assert_eq!(retired.len(), 1);
         assert!(Arc::ptr_eq(&retired[0], &frame_texture));
-        assert!(!state.snapshot().has_frame);
+        let snapshot = state.snapshot();
+        assert!(!snapshot.has_frame);
+        assert_eq!(snapshot.status, RemoteDesktopSessionStatus::Failed);
+        assert_eq!(snapshot.message.as_deref(), Some("transport failed"));
+        assert_eq!(
+            snapshot.error_category,
+            Some(RemoteDesktopErrorCategory::Authentication)
+        );
     }
 
     #[test]

@@ -1160,67 +1160,119 @@ mod tests {
     }
 
     #[test]
-    fn readonly_dispatcher_filters_sessions_events_and_terminal_search() {
-        let snapshot = sample_snapshot();
+    fn readonly_dispatcher_filters_sessions_and_events_by_requested_state() {
+        let mut snapshot = sample_snapshot();
+        snapshot.session_tree.insert(
+            0,
+            json!({
+                "id": "idle-node", "connectionState": "idle", "terminalIds": ["idle-terminal"],
+            }),
+        );
+        snapshot.event_log_entries.insert(
+            0,
+            json!({
+                "id": 2, "severity": "error", "category": "connection",
+            }),
+        );
         let active_nodes = native_plugin_returnable_host_api_response(
             &snapshot,
             "com.example.demo",
             host_call("sessions", "getActiveNodes", Value::Null),
         )
         .unwrap();
-        assert!(matches!(
+        assert_eq!(
             active_nodes.result,
-            plugin_runtime::PluginResponseResult::Ok { value }
-                if value.as_array().map(Vec::len) == Some(1)
-        ));
-
-        let filtered_log = native_plugin_returnable_host_api_response(
-            &snapshot,
-            "com.example.demo",
-            host_call(
-                "eventLog",
-                "getEntries",
-                json!({ "filter": { "severity": "info" } }),
-            ),
-        )
-        .unwrap();
-        assert!(matches!(
-            filtered_log.result,
-            plugin_runtime::PluginResponseResult::Ok { value }
-                if value.as_array().map(Vec::len) == Some(1)
-        ));
-
-        let search = native_plugin_returnable_host_api_response(
-            &snapshot,
-            "com.example.demo",
-            host_call(
-                "terminal",
-                "search",
-                json!({ "nodeId": "node-1", "query": "beta" }),
-            ),
-        )
-        .unwrap();
-        assert!(matches!(
-            search.result,
-            plugin_runtime::PluginResponseResult::Ok { value }
-                if value.get("total_matches").and_then(Value::as_u64) == Some(1)
-        ));
+            plugin_runtime::PluginResponseResult::Ok {
+                value: json!([{ "nodeId": "node-1", "sessionId": "term-1", "connectionState": "active" }]),
+            }
+        );
+        for (severity, expected) in [
+            ("info", json!([snapshot.event_log_entries[1]])),
+            ("error", json!([snapshot.event_log_entries[0]])),
+            ("warning", json!([])),
+        ] {
+            let filtered = native_plugin_returnable_host_api_response(
+                &snapshot,
+                "com.example.demo",
+                host_call(
+                    "eventLog",
+                    "getEntries",
+                    json!({ "filter": { "severity": severity } }),
+                ),
+            )
+            .unwrap();
+            assert_eq!(
+                filtered.result,
+                plugin_runtime::PluginResponseResult::Ok { value: expected },
+                "{severity}"
+            );
+        }
     }
 
     #[test]
-    fn readonly_dispatcher_scopes_custom_events_to_plugin() {
+    fn readonly_dispatcher_returns_locale_fallback_and_scoped_event_result() {
         let snapshot = sample_snapshot();
-        let response = native_plugin_returnable_host_api_response(
-            &snapshot,
-            "com.example.demo",
-            host_call("events", "emit", json!({ "name": "ready" })),
-        )
-        .unwrap();
-        assert!(matches!(
-            response.result,
-            plugin_runtime::PluginResponseResult::Ok { value }
-                if value.get("event").and_then(Value::as_str) == Some("plugin.com.example.demo:ready")
-        ));
+        for (namespace, method, args, expected) in [
+            ("i18n", "getLanguage", json!({}), json!("zh-CN")),
+            (
+                "i18n",
+                "t",
+                json!({ "key": "missing.title" }),
+                json!("missing.title"),
+            ),
+            (
+                "events",
+                "emit",
+                json!({ "name": "ready", "payload": { "ok": true } }),
+                json!({ "emitted": true, "event": "plugin.com.example.demo:ready" }),
+            ),
+        ] {
+            let response = native_plugin_returnable_host_api_response(
+                &snapshot,
+                "com.example.demo",
+                host_call(namespace, method, args),
+            )
+            .unwrap();
+            assert_eq!(
+                response.result,
+                plugin_runtime::PluginResponseResult::Ok { value: expected },
+                "{namespace}.{method}"
+            );
+        }
+    }
+
+    #[test]
+    fn readonly_dispatcher_returns_null_for_missing_connection_and_node_ids() {
+        let mut snapshot = sample_snapshot();
+        snapshot.connections = vec![json!({ "id": "conn-1" })];
+        snapshot
+            .connection_states
+            .insert("conn-1".to_string(), json!("active"));
+        snapshot
+            .node_connection_ids
+            .insert("node-1".to_string(), "conn-1".to_string());
+        for (namespace, method, args) in [
+            ("connections", "get", json!({ "connectionId": "missing" })),
+            (
+                "connections",
+                "getState",
+                json!({ "connectionId": "missing" }),
+            ),
+            ("connections", "getByNode", json!({ "nodeId": "missing" })),
+            ("sessions", "getNodeState", json!({ "nodeId": "missing" })),
+        ] {
+            let response = native_plugin_returnable_host_api_response(
+                &snapshot,
+                "com.example.demo",
+                host_call(namespace, method, args),
+            )
+            .unwrap();
+            assert_eq!(
+                response.result,
+                plugin_runtime::PluginResponseResult::Ok { value: Value::Null },
+                "{namespace}.{method}"
+            );
+        }
     }
 
     #[test]

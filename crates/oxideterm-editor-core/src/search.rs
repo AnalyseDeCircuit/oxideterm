@@ -102,75 +102,52 @@ mod tests {
     use super::*;
 
     #[test]
-    fn finds_case_insensitive_matches_on_utf8_boundaries() {
-        let hits = find_all(
-            "Alpha alpha alp",
-            "ALPHA",
-            FindOptions {
-                case_sensitive: false,
-                whole_word: false,
-            },
-        );
-
-        assert_eq!(hits.len(), 2);
-        assert_eq!(
-            hits[0].range,
-            TextRange::new(BufferOffset(0), BufferOffset(5))
-        );
-        assert_eq!(
-            hits[1].range,
-            TextRange::new(BufferOffset(6), BufferOffset(11))
-        );
+    fn search_returns_exact_original_ranges_for_case_and_word_options() {
+        for (source, query, case_sensitive, whole_word, ranges) in [
+            ("Alpha alpha alp", "ALPHA", false, false, vec![0..5, 6..11]),
+            (
+                "one stone one_two one",
+                "one",
+                true,
+                true,
+                vec![0..3, 18..21],
+            ),
+            ("İstanbul alpha", "ALPHA", false, true, vec![10..15]),
+        ] {
+            let hits = find_all(
+                source,
+                query,
+                FindOptions {
+                    case_sensitive,
+                    whole_word,
+                },
+            );
+            assert_eq!(
+                hits.into_iter()
+                    .map(|hit| hit.range.as_range())
+                    .collect::<Vec<_>>(),
+                ranges,
+                "{source}"
+            );
+        }
     }
 
     #[test]
-    fn whole_word_ignores_embedded_matches() {
-        let hits = find_all(
-            "one stone one_two one",
-            "one",
-            FindOptions {
-                case_sensitive: true,
-                whole_word: true,
-            },
-        );
-
-        assert_eq!(
-            hits.into_iter()
-                .map(|hit| hit.range.start.0)
-                .collect::<Vec<_>>(),
-            vec![0, 18]
-        );
-    }
-
-    #[test]
-    fn builds_replace_all_transaction() {
+    fn replace_all_changes_only_matches_and_undo_restores_the_source() {
+        let source = "你好 foo bar food foo";
+        let mut buffer = crate::TextBuffer::new(source);
         let transaction = replace_all_transaction(
-            "foo bar foo",
+            source,
             "foo",
-            "baz",
+            "🚀🚀",
             FindOptions {
                 case_sensitive: true,
                 whole_word: true,
             },
         );
-
-        assert_eq!(transaction.edits().len(), 2);
-    }
-
-    #[test]
-    fn insensitive_search_keeps_original_byte_ranges() {
-        let hits = find_all(
-            "İstanbul alpha",
-            "ALPHA",
-            FindOptions {
-                case_sensitive: false,
-                whole_word: true,
-            },
-        );
-
-        assert_eq!(
-            hits[0].range,
-            TextRange::new(BufferOffset(10), BufferOffset(15))
-        );
+        buffer.apply_transaction(transaction).unwrap();
+        assert_eq!(buffer.text(), "你好 🚀🚀 bar food 🚀🚀");
+        buffer.undo().unwrap();
+        assert_eq!(buffer.text(), source);
     }
 }

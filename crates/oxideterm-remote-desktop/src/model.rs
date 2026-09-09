@@ -545,28 +545,43 @@ mod quick_connect_tests {
     }
 
     #[test]
-    fn quick_connect_uses_protocol_default_ports() {
-        let vnc = RemoteDesktopConnectionProfile::parse_quick_connect("vnc://example.com").unwrap();
-        let rdp = RemoteDesktopConnectionProfile::parse_quick_connect("rdp://example.com").unwrap();
-
-        assert_eq!(vnc.protocol, RemoteDesktopProtocol::Vnc);
-        assert_eq!(
-            vnc.endpoint,
-            RemoteDesktopEndpoint::new("example.com", 5900)
-        );
-        assert_eq!(vnc.label, "vnc://example.com:5900");
-        assert_eq!(rdp.endpoint.port, 3389);
-    }
-
-    #[test]
-    fn quick_connect_accepts_explicit_port_and_ipv6() {
-        let explicit =
-            RemoteDesktopConnectionProfile::parse_quick_connect("vnc://example.com:5901").unwrap();
-        let ipv6 = RemoteDesktopConnectionProfile::parse_quick_connect("vnc://[::1]:5902").unwrap();
-
-        assert_eq!(explicit.endpoint.port, 5901);
-        assert_eq!(ipv6.endpoint, RemoteDesktopEndpoint::new("::1", 5902));
-        assert_eq!(ipv6.quick_connect_target(), "vnc://[::1]:5902");
+    fn quick_connect_resolves_protocol_ports_and_ipv6_authorities() {
+        for (query, protocol, host, port, target) in [
+            (
+                "vnc://example.com",
+                RemoteDesktopProtocol::Vnc,
+                "example.com",
+                5900,
+                "vnc://example.com:5900",
+            ),
+            (
+                "rdp://example.com",
+                RemoteDesktopProtocol::Rdp,
+                "example.com",
+                3389,
+                "rdp://example.com:3389",
+            ),
+            (
+                "vnc://example.com:5901",
+                RemoteDesktopProtocol::Vnc,
+                "example.com",
+                5901,
+                "vnc://example.com:5901",
+            ),
+            (
+                "vnc://[::1]:5902",
+                RemoteDesktopProtocol::Vnc,
+                "::1",
+                5902,
+                "vnc://[::1]:5902",
+            ),
+        ] {
+            let profile = RemoteDesktopConnectionProfile::parse_quick_connect(query).unwrap();
+            assert_eq!(profile.protocol, protocol);
+            assert_eq!(profile.endpoint, RemoteDesktopEndpoint::new(host, port));
+            assert_eq!(profile.label, target);
+            assert_eq!(profile.quick_connect_target(), target);
+        }
     }
 
     #[test]
