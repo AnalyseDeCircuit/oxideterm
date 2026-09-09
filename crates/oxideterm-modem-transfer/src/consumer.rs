@@ -59,6 +59,7 @@ pub struct ModemConsumer {
     detection_tail: Vec<u8>,
     plain_tail_deadline: Option<Instant>,
     plain_history: Vec<u8>,
+    plain_history_starts_mid_line: bool,
     detection_scope: ModemDetectionScope,
     pending: Option<PendingTransfer>,
     transfer: Option<ModemTransfer>,
@@ -212,6 +213,7 @@ impl ModemConsumer {
             detection_tail: Vec::new(),
             plain_tail_deadline: None,
             plain_history: Vec::new(),
+            plain_history_starts_mid_line: false,
             detection_scope: ModemDetectionScope::default(),
             pending: None,
             transfer: None,
@@ -260,6 +262,7 @@ impl ModemConsumer {
         self.detection_tail.clear();
         self.plain_tail_deadline = None;
         self.plain_history.clear();
+        self.plain_history_starts_mid_line = false;
         self.detection_scope.reset();
         trailing_output
     }
@@ -314,7 +317,7 @@ impl ModemConsumer {
         {
             self.remember_plain_output(masked_bytes.as_ref());
             let mut events = vec![ModemConsumerEvent::WriteTerminal(bytes.to_vec())];
-            if let Some(request) = xymodem_download_request(&self.plain_history) {
+            if let Some(request) = self.xymodem_download_request() {
                 self.start_transfer(&[], request.clone());
                 events.push(ModemConsumerEvent::TransferStarted(request));
             }
@@ -353,7 +356,7 @@ impl ModemConsumer {
             let mut events = vec![ModemConsumerEvent::WriteTerminal(
                 scan_bytes[..split].to_vec(),
             )];
-            if let Some(request) = xymodem_download_request(&self.plain_history) {
+            if let Some(request) = self.xymodem_download_request() {
                 self.start_transfer(&[], request.clone());
                 events.push(ModemConsumerEvent::TransferStarted(request));
             }
@@ -370,7 +373,7 @@ impl ModemConsumer {
 
         let protocol_bytes = &scan_bytes[start.offset..];
         if let Some(request) =
-            request_for_protocol(start.protocol, protocol_bytes, &self.plain_history)
+            request_for_protocol(start.protocol, protocol_bytes, self.command_history())
         {
             self.start_transfer(protocol_bytes, request.clone());
             events.push(ModemConsumerEvent::TransferStarted(request));
@@ -444,7 +447,7 @@ impl ModemConsumer {
         let mut pending = self.pending.take().expect("pending transfer");
         pending.bytes.extend_from_slice(bytes);
         if let Some(request) =
-            request_for_protocol(pending.protocol, &pending.bytes, &self.plain_history)
+            request_for_protocol(pending.protocol, &pending.bytes, self.command_history())
         {
             let initial = pending.bytes;
             self.start_transfer(&initial, request.clone());
@@ -488,6 +491,7 @@ impl ModemConsumer {
         self.transfer = Some(transfer.clone());
         self.plain_tail_deadline = None;
         self.plain_history.clear();
+        self.plain_history_starts_mid_line = false;
         transfer
     }
 
@@ -496,6 +500,15 @@ impl ModemConsumer {
             return;
         }
         if bytes.len() >= PLAIN_HISTORY_LIMIT {
+            let discard = bytes.len() - PLAIN_HISTORY_LIMIT;
+            let previous_byte = if discard == 0 {
+                self.plain_history.last().copied()
+            } else {
+                Some(bytes[discard - 1])
+            };
+            if let Some(previous_byte) = previous_byte {
+                self.plain_history_starts_mid_line = !matches!(previous_byte, b'\r' | b'\n');
+            }
             self.plain_history.clear();
             self.plain_history
                 .extend_from_slice(&bytes[bytes.len() - PLAIN_HISTORY_LIMIT..]);
@@ -505,9 +518,38 @@ impl ModemConsumer {
         let retained_bytes = PLAIN_HISTORY_LIMIT - bytes.len();
         if self.plain_history.len() > retained_bytes {
             let discard = self.plain_history.len() - retained_bytes;
+            self.plain_history_starts_mid_line =
+                !matches!(self.plain_history[discard - 1], b'\r' | b'\n');
             self.plain_history.drain(..discard);
         }
         self.plain_history.extend_from_slice(bytes);
+    }
+
+    fn xymodem_download_request(&self) -> Option<ModemTransferRequest> {
+        // PTYs echo characters while the user is still typing. Wait for the
+        // command line terminator so entering "sx" cannot open a prompt early.
+        if !self.plain_history.ends_with(b"\r") && !self.plain_history.ends_with(b"\n") {
+            return None;
+        }
+        let text = String::from_utf8_lossy(self.command_history());
+        let (protocol, direction) = xymodem_command_hint(text.lines().next_back()?)?;
+        (direction == ModemTransferDirection::Download).then_some(ModemTransferRequest {
+            protocol,
+            direction,
+        })
+    }
+
+    fn command_history(&self) -> &[u8] {
+        // Trimming can leave a word suffix such as "ry" from "history".
+        // Only a real line boundary may make the retained suffix a command.
+        if self.plain_history_starts_mid_line {
+            self.plain_history
+                .iter()
+                .position(|byte| matches!(*byte, b'\r' | b'\n'))
+                .map_or(&[], |end| &self.plain_history[end + 1..])
+        } else {
+            &self.plain_history
+        }
     }
 }
 
@@ -582,20 +624,6 @@ fn xymodem_negotiation_protocol_hint(plain_history: &[u8]) -> Option<DetectedMod
             Some((protocol, ModemTransferDirection::Upload)) => Some(protocol),
             _ => None,
         })
-}
-
-fn xymodem_download_request(plain_history: &[u8]) -> Option<ModemTransferRequest> {
-    // PTYs echo characters while the user is still typing. Wait for the
-    // command line terminator so entering "sx" cannot open a prompt early.
-    if !plain_history.ends_with(b"\r") && !plain_history.ends_with(b"\n") {
-        return None;
-    }
-    let text = String::from_utf8_lossy(plain_history);
-    let (protocol, direction) = xymodem_command_hint(text.lines().next_back()?)?;
-    (direction == ModemTransferDirection::Download).then_some(ModemTransferRequest {
-        protocol,
-        direction,
-    })
 }
 
 fn xymodem_command_hint(line: &str) -> Option<(DetectedModemProtocol, ModemTransferDirection)> {
@@ -963,6 +991,94 @@ mod tests {
                 .any(|event| matches!(event, ModemConsumerEvent::TransferStarted(_)))
         );
         assert!(consumer.active_transfer().is_none());
+    }
+
+    #[test]
+    fn truncated_grep_lines_never_start_transfers_at_any_chunk_boundary() {
+        let outputs = [
+            format!(
+                "bundle.js: execute history {}C\r\n",
+                "a".repeat(PLAIN_HISTORY_LIMIT - 3)
+            ),
+            format!(
+                "bundle.js: execute busy {}\r\n",
+                "a".repeat(PLAIN_HISTORY_LIMIT - 5)
+            ),
+        ];
+        for output in outputs {
+            for split in 0..=output.len() {
+                let mut consumer = ModemConsumer::new();
+                let mut events = consumer.process_server_output(&output.as_bytes()[..split]);
+                events.extend(consumer.process_server_output(&output.as_bytes()[split..]));
+                events.extend(consumer.flush_pending_plain_output());
+                assert!(
+                    events
+                        .iter()
+                        .all(|event| matches!(event, ModemConsumerEvent::WriteTerminal(_))),
+                    "ordinary grep output started a transfer at split {split}"
+                );
+                assert_eq!(terminal_bytes(&events), output.as_bytes(), "split {split}");
+            }
+        }
+    }
+
+    #[test]
+    fn complete_commands_after_truncated_output_still_start_xymodem() {
+        for (command, protocol, direction) in [
+            (
+                b"$ rx file.bin\r\nC".as_slice(),
+                DetectedModemProtocol::Xmodem,
+                ModemTransferDirection::Upload,
+            ),
+            (
+                b"$ rb\r\nC".as_slice(),
+                DetectedModemProtocol::Ymodem,
+                ModemTransferDirection::Upload,
+            ),
+            (
+                b"$ sx file.bin\r\n".as_slice(),
+                DetectedModemProtocol::Xmodem,
+                ModemTransferDirection::Download,
+            ),
+            (
+                b"$ sb file.bin\r\n".as_slice(),
+                DetectedModemProtocol::Ymodem,
+                ModemTransferDirection::Download,
+            ),
+        ] {
+            let argument_end = command.iter().position(|byte| *byte == b'\r').unwrap();
+            let mut full_history_command = command[..argument_end].to_vec();
+            full_history_command.extend(std::iter::repeat_n(
+                b' ',
+                PLAIN_HISTORY_LIMIT - argument_end - 2,
+            ));
+            full_history_command.extend_from_slice(&command[argument_end..]);
+            for command in [command, full_history_command.as_slice()] {
+                for split in 0..=command.len() {
+                    let mut consumer = ModemConsumer::new();
+                    let mut prefix = vec![b'a'; PLAIN_HISTORY_LIMIT * 2];
+                    prefix.extend_from_slice(b"\r\n");
+                    let mut events = consumer.process_server_output(&prefix);
+                    events.extend(consumer.process_server_output(&command[..split]));
+                    events.extend(consumer.process_server_output(&command[split..]));
+                    let requests = events
+                        .into_iter()
+                        .filter_map(|event| match event {
+                            ModemConsumerEvent::TransferStarted(request) => Some(request),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(
+                        requests,
+                        vec![ModemTransferRequest {
+                            protocol,
+                            direction
+                        }],
+                        "split {split}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
