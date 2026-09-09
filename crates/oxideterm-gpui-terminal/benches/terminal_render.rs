@@ -269,6 +269,17 @@ fn playback_output_chunks() -> Vec<Vec<u8>> {
 }
 
 #[gpui::bench(fps = 120)]
+fn terminal_box_drawing_redraw_frame(cx: &mut BenchAppContext<'_, '_>) {
+    let terminal = benchmark_terminal(cx, false);
+    terminal.update(cx, |terminal, cx| {
+        let rows = "┌────┬────┐ ╔════╦════╗ ░▒▓█▁▂▃▄▅▆▇\r\n│    │    │ ║    ║    ║ ▖▗▘▙▚▛▜▝▞▟\r\n├────┼────┤ ╠════╬════╣ ┄┅┆┇┈┉┊┋\r\n└────┴────┘ ╚════╩════╝ ╭─╮ ╲╱\r\n".repeat(10);
+        terminal.feed_recording_output(rows.as_bytes(), cx);
+    });
+    cx.run_until_idle();
+    cx.bench_renderer(terminal, |_terminal, _window, cx| cx.notify());
+}
+
+#[gpui::bench(fps = 120)]
 fn terminal_warm_cache_redraw_frame(cx: &mut BenchAppContext<'_, '_>) {
     let terminal = benchmark_terminal(cx, false);
     cx.bench_renderer(terminal, |_terminal, _window, cx| {
@@ -367,6 +378,7 @@ gpui::bench_group!(
     terminal_semantic_output_disabled,
     terminal_semantic_output_enabled,
     terminal_warm_cache_redraw_frame,
+    terminal_box_drawing_redraw_frame,
     terminal_playback_output_frame,
     terminal_playback_output_pipeline,
     terminal_idle_no_frames

@@ -139,6 +139,16 @@ or pressed caption control from surviving native pointer ownership loss or a dro
 removal. Client-decorated close buttons must use this request path so future unsaved-work or
 close-to-background policies cannot be bypassed.
 
+### DirectWrite shaped-face identity
+
+`gpui_windows::TextRenderer::DrawGlyphRun` retains the font face supplied by
+DirectWrite when registering a previously unseen fallback run. Glyph indices
+must be rasterized against that same face, and each COM-identity cache key must
+remain backed by an owned face reference. Family-name lookup is reserved for
+requested fonts; it must not reconstruct a face for already-shaped glyphs.
+The `windows_text_` regression checks retained face identity using
+DirectWrite alone, without requiring a GPU or optional language font packs.
+
 ### Windows DirectX blur state restoration
 
 `crates/gpui-ce/gpui_windows/src/directx_renderer.rs` restores the scene batch constant buffer

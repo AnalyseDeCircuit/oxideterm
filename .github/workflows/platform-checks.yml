@@ -51,6 +51,9 @@ jobs:
       - name: Test Windows frame and quit message handling
         run: cargo test -p gpui_windows --lib windows_message_
 
+      - name: Test Windows text fallback identity
+        run: cargo test -p gpui_windows --lib windows_text_
+
       - name: Check Windows application
         run: cargo check -p oxideterm-gpui-app
 

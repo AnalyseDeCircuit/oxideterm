@@ -36,6 +36,7 @@ use crate::terminal_view::semantic::{
     append_terminal_semantics_for_rows, semantic_line_role_for_rows,
 };
 
+mod cell_drawing;
 mod layout;
 mod paint;
 mod style;
@@ -1089,6 +1090,7 @@ impl TerminalElement {
         let mut current_background: Option<TerminalRowRect> = None;
         let mut current_selection: Option<TerminalRowRect> = None;
         let mut current_run: Option<PendingTerminalRowTextRun> = None;
+        let mut current_run_is_drawing = false;
         let visual_line = visual_line_for_row_with_bidi(row, self.bidi_enabled);
 
         for (col_index, cell) in row.cells.iter().enumerate() {
@@ -1168,6 +1170,8 @@ impl TerminalElement {
                         col_index,
                     );
                 let style = text_run_for_cell(cell, fg, link, &self.metrics);
+                let is_drawing =
+                    cell.zerowidth().is_empty() && cell_drawing::is_cell_drawing(cell.ch);
                 if cell.zerowidth().is_empty() && powerline_separator(cell.ch).is_some() {
                     if let Some(run) = current_run.take() {
                         text_runs.push(run);
@@ -1183,6 +1187,7 @@ impl TerminalElement {
                 if let Some(run) = &mut current_run
                     && run.col + run.cells == col_index
                     && text_run_style_matches(&run.style, &style)
+                    && current_run_is_drawing == is_drawing
                 {
                     // Append directly to the existing run so ordinary rows do not
                     // allocate a temporary String for every visible cell.
@@ -1195,6 +1200,7 @@ impl TerminalElement {
                 if let Some(run) = current_run.take() {
                     text_runs.push(run);
                 }
+                current_run_is_drawing = is_drawing;
                 current_run = Some(PendingTerminalRowTextRun {
                     col: col_index,
                     text: cell_text(cell),
@@ -1930,6 +1936,7 @@ fn push_visual_text_runs(
     text_runs: &mut Vec<PendingTerminalRowTextRun>,
 ) {
     let mut current_run: Option<PendingTerminalRowTextRun> = None;
+    let mut current_run_is_drawing = false;
     for cluster in &visual_line.clusters {
         let Some(cell) = row.cells.get(cluster.logical_col) else {
             continue;
@@ -1961,6 +1968,7 @@ fn push_visual_text_runs(
                 cluster.logical_col,
             );
         let style = text_run_for_cell(cell, fg, link, metrics);
+        let is_drawing = cell.zerowidth().is_empty() && cell_drawing::is_cell_drawing(cell.ch);
         if cell.zerowidth().is_empty() && powerline_separator(cell.ch).is_some() {
             if let Some(run) = current_run.take() {
                 text_runs.push(run);
@@ -1974,20 +1982,21 @@ fn push_visual_text_runs(
             continue;
         }
 
-        if let Some(run) = &mut current_run {
-            if run.col + run.cells == cluster.visual_col
-                && text_run_style_matches(&run.style, &style)
-            {
-                run.text.push_str(&cluster.text);
-                run.cells += cluster.cells;
-                run.style.len += cluster.text.len();
-                continue;
-            }
+        if let Some(run) = &mut current_run
+            && run.col + run.cells == cluster.visual_col
+            && text_run_style_matches(&run.style, &style)
+            && current_run_is_drawing == is_drawing
+        {
+            run.text.push_str(&cluster.text);
+            run.cells += cluster.cells;
+            run.style.len += cluster.text.len();
+            continue;
         }
 
         if let Some(run) = current_run.take() {
             text_runs.push(run);
         }
+        current_run_is_drawing = is_drawing;
         current_run = Some(PendingTerminalRowTextRun {
             col: cluster.visual_col,
             text: cluster.text.clone(),
@@ -2468,6 +2477,39 @@ mod cache_tests {
             moved.logical_highlight_cache_key_with_logical_line(moved_line, None)
         );
         assert_eq!(original.row_link_cache_key(0), moved.row_link_cache_key(0));
+    }
+
+    #[test]
+    fn cell_drawings_are_batched_separately_from_text_and_combining_marks() {
+        let row = row_with_text_and_cursor(0, "a┌──┐b", 5);
+        let mut input = snapshot(0, vec![row]);
+        input.cols = 6;
+        input.cursor_shape = TerminalCursorShape::Bar;
+        let layout = element(input).layout();
+        assert_eq!(
+            layout
+                .text_runs
+                .iter()
+                .map(|run| run.text.as_ref())
+                .collect::<Vec<_>>(),
+            ["a", "┌──┐", "b"]
+        );
+
+        let mut row = row_with_text_and_cursor(0, "a─b", 2);
+        row.cells_mut()[1].set_extra("\u{301}".into(), None);
+        row.refresh_signature();
+        let mut input = snapshot(0, vec![row]);
+        input.cols = 3;
+        input.cursor_shape = TerminalCursorShape::Bar;
+        let layout = element(input).layout();
+        assert_eq!(
+            layout
+                .text_runs
+                .iter()
+                .map(|run| run.text.as_ref())
+                .collect::<Vec<_>>(),
+            ["a─\u{301}b"]
+        );
     }
 
     #[test]

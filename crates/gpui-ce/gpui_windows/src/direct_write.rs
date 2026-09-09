@@ -35,6 +35,26 @@ struct FontInfo {
     font_collection: IDWriteFontCollection1,
 }
 
+impl FontInfo {
+    fn from_shaping_face(
+        font_face: IDWriteFontFace3,
+        features: IDWriteTypography,
+        font_collection: IDWriteFontCollection1,
+        locale: &HSTRING,
+    ) -> Result<Self> {
+        let names = unsafe { font_face.GetFamilyNames()? };
+        Ok(Self {
+            font_family_h: HSTRING::from(get_name(names, locale)?),
+            // Glyph indices and the COM cache key both belong to this object.
+            // Retaining it prevents a name lookup from substituting another face.
+            font_face,
+            features,
+            fallbacks: None,
+            font_collection,
+        })
+    }
+}
+
 pub(crate) struct DirectWriteTextSystem {
     components: DirectWriteComponents,
     state: RwLock<DirectWriteState>,
@@ -1496,33 +1516,29 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
             ));
         };
 
-        let font_face_key = font_face.cast::<IUnknown>().unwrap().as_raw().addr();
-        let font_id = context
-            .text_system
-            .font_info_cache
-            .get(&font_face_key)
-            .copied()
-            // in some circumstances, we might be getting served a FontFace that we did not create ourselves
-            // so create a new font from it and cache it accordingly. The usual culprit here seems to be Segoe UI Symbol
-            .map_or_else(
-                || {
-                    let font = font_face_to_font(font_face, &self.locale)
-                        .ok_or_else(|| Error::new(DWRITE_E_NOFONT, "Failed to create font"))?;
-                    let font_id = match context.text_system.font_to_font_id.get(&font) {
-                        Some(&font_id) => font_id,
-                        None => context
-                            .text_system
-                            .select_and_cache_font(context.components, &font)
-                            .ok_or_else(|| Error::new(DWRITE_E_NOFONT, "Failed to create font"))?,
-                    };
-                    context
-                        .text_system
-                        .font_info_cache
-                        .insert(font_face_key, font_id);
-                    windows::core::Result::Ok(font_id)
-                },
-                Ok,
-            )?;
+        let font_face_key = font_face.cast::<IUnknown>()?.as_raw().addr();
+        let font_id = if let Some(id) = context.text_system.font_info_cache.get(&font_face_key) {
+            *id
+        } else {
+            let state = &mut context.text_system;
+            let collection =
+                if unsafe { state.custom_font_collection.GetFontFromFontFace(font_face) }.is_ok() {
+                    state.custom_font_collection.clone()
+                } else {
+                    state.system_font_collection.clone()
+                };
+            let info = FontInfo::from_shaping_face(
+                font_face.clone(),
+                unsafe { context.components.factory.CreateTypography()? },
+                collection,
+                &self.locale,
+            )
+            .map_err(|error| Error::new(DWRITE_E_NOFONT, error.to_string()))?;
+            let id = FontId(state.fonts.len());
+            state.fonts.push(info);
+            state.font_info_cache.insert(font_face_key, id);
+            id
+        };
 
         let color_font = unsafe { font_face.IsColorFont().as_bool() };
 
@@ -1703,21 +1719,8 @@ fn font_style_to_dwrite(style: FontStyle) -> DWRITE_FONT_STYLE {
     }
 }
 
-fn font_style_from_dwrite(value: DWRITE_FONT_STYLE) -> FontStyle {
-    match value.0 {
-        0 => FontStyle::Normal,
-        1 => FontStyle::Italic,
-        2 => FontStyle::Oblique,
-        _ => unreachable!(),
-    }
-}
-
 fn font_weight_to_dwrite(weight: FontWeight) -> DWRITE_FONT_WEIGHT {
     DWRITE_FONT_WEIGHT(weight.0 as i32)
-}
-
-fn font_weight_from_dwrite(value: DWRITE_FONT_WEIGHT) -> FontWeight {
-    FontWeight(value.0 as f32)
 }
 
 fn get_font_names_from_collection(
@@ -1742,20 +1745,6 @@ fn get_font_names_from_collection(
 
         result
     }
-}
-
-fn font_face_to_font(font_face: &IDWriteFontFace3, locale: &HSTRING) -> Option<Font> {
-    let localized_family_name = unsafe { font_face.GetFamilyNames().log_err() }?;
-    let family_name = get_name(localized_family_name, locale).log_err()?;
-    let weight = unsafe { font_face.GetWeight() };
-    let style = unsafe { font_face.GetStyle() };
-    Some(Font {
-        family: family_name.into(),
-        features: FontFeatures::default(),
-        weight: font_weight_from_dwrite(weight),
-        style: font_style_from_dwrite(style),
-        fallbacks: None,
-    })
 }
 
 // https://learn.microsoft.com/en-us/windows/win32/api/dwrite/ne-dwrite-dwrite_font_feature_tag
@@ -1931,6 +1920,47 @@ const DEFAULT_LOCALE_NAME: PCWSTR = windows::core::w!("en-US");
 #[cfg(test)]
 mod tests {
     use crate::direct_write::ClusterAnalyzer;
+
+    #[test]
+    fn windows_text_shaping_face_retains_identity() {
+        use super::*;
+
+        // DirectWrite alone is sufficient; this regression does not require
+        // a graphics adapter, a visible window, or optional CJK font packs.
+        let factory: IDWriteFactory5 =
+            unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }.unwrap();
+        let mut collection = None;
+        unsafe { factory.GetSystemFontCollection(false, &mut collection, false) }.unwrap();
+        let collection = collection.unwrap();
+        let family = unsafe { collection.GetFontFamily(0) }.unwrap();
+        for style in [
+            DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STYLE_ITALIC,
+            DWRITE_FONT_STYLE_OBLIQUE,
+        ] {
+            let font = unsafe {
+                family.GetFirstMatchingFont(
+                    DWRITE_FONT_WEIGHT_NORMAL,
+                    DWRITE_FONT_STRETCH_NORMAL,
+                    style,
+                )
+            }
+            .unwrap();
+            let face: IDWriteFontFace3 = unsafe { font.CreateFontFace() }.unwrap().cast().unwrap();
+            let identity = face.cast::<IUnknown>().unwrap().as_raw().addr();
+            let info = FontInfo::from_shaping_face(
+                face,
+                unsafe { factory.CreateTypography() }.unwrap(),
+                collection.clone(),
+                &HSTRING::from("en-US"),
+            )
+            .unwrap();
+            assert_eq!(
+                info.font_face.cast::<IUnknown>().unwrap().as_raw().addr(),
+                identity
+            );
+        }
+    }
 
     #[test]
     fn test_cluster_map() {

@@ -7,6 +7,7 @@ use gpui::{
 use oxideterm_terminal::{TerminalCursorShape, TerminalImageData};
 use unicode_width::UnicodeWidthChar;
 
+use super::cell_drawing::{cell_drawing_svg, is_cell_drawing};
 use crate::terminal_ui::*;
 use crate::terminal_view::element::{
     BatchedTextRun, TerminalCommandMarkOverlay, TerminalCursor, TerminalHorizontalScrollbar,
@@ -449,6 +450,31 @@ fn paint_text_run_parts(
     window: &mut Window,
     cx: &mut App,
 ) {
+    if paint_cell_drawing_run(&run, origin, metrics, window, cx) {
+        if run.style.underline.is_some() || run.style.strikethrough.is_some() {
+            // Let the font's metrics position decorations, without drawing a
+            // second copy of the cell graphic through the font fallback path.
+            let spaces = SharedString::from(" ".repeat(run.cells));
+            let mut style = run.style.clone();
+            style.len = spaces.len();
+            paint_text_run_parts(
+                TerminalPaintRun {
+                    row: run.row,
+                    col: run.col,
+                    text: &spaces,
+                    cells: run.cells,
+                    style: &style,
+                    cache: run.cache,
+                },
+                origin,
+                metrics,
+                establish_layer,
+                window,
+                cx,
+            );
+        }
+        return;
+    }
     if paint_powerline_separators(&run, origin, metrics, window) {
         return;
     }
@@ -513,6 +539,81 @@ fn paint_text_run_parts(
         window,
         cx,
     );
+}
+
+struct CachedCellDrawing {
+    name: SharedString,
+    svg: String,
+}
+
+type CellDrawingCache =
+    super::RecentCache<(char, u32, u32, u32), std::sync::Arc<CachedCellDrawing>>;
+
+thread_local! {
+    // Four recent physical sizes for all 160 characters, shared by same-thread panes.
+    static CELL_DRAWINGS: std::cell::RefCell<CellDrawingCache> =
+        std::cell::RefCell::new(CellDrawingCache::new(640));
+}
+
+fn paint_cell_drawing_run(
+    run: &TerminalPaintRun<'_>,
+    origin: Point<Pixels>,
+    metrics: &TerminalMetrics,
+    window: &mut Window,
+    cx: &App,
+) -> bool {
+    if !run.text.starts_with(is_cell_drawing)
+        || run.text.chars().count() != run.cells
+        || !run.text.chars().all(is_cell_drawing)
+    {
+        return false;
+    }
+    let scale = window.scale_factor();
+    // Stroke weight is based on the nominal cell width so neighboring cells
+    // with differently rounded edges still join with the same line thickness.
+    let stroke = (metrics.cell_width.as_f32() * scale / 8.0).round().max(1.0) as u32;
+    for (column, ch) in run.text.chars().enumerate() {
+        let raw = Bounds::new(
+            origin
+                + point(
+                    metrics.cell_width * (run.col + column) as f32,
+                    metrics.line_height * run.row as f32,
+                ),
+            size(metrics.cell_width, metrics.line_height),
+        );
+        let bounds = Bounds::from_corners(
+            window.pixel_snap_point(raw.origin),
+            window.pixel_snap_point(point(raw.right(), raw.bottom())),
+        );
+        let width = (bounds.size.width.as_f32() * scale).round() as u32;
+        let height = (bounds.size.height.as_f32() * scale).round() as u32;
+        if width == 0 || height == 0 {
+            continue;
+        }
+        let drawing = CELL_DRAWINGS.with(|cache| {
+            cache
+                .borrow_mut()
+                .get_or_insert_with((ch, width, height, stroke), || {
+                    std::sync::Arc::new(CachedCellDrawing {
+                        name: format!("oxideterm-cell-{:x}-{width}-{height}-{stroke}", ch as u32)
+                            .into(),
+                        svg: cell_drawing_svg(ch, width, height, stroke),
+                    })
+                })
+                .0
+        });
+        if let Err(error) = window.paint_svg(
+            bounds,
+            drawing.name.clone(),
+            Some(drawing.svg.as_bytes()),
+            gpui::TransformationMatrix::default(),
+            run.style.color,
+            cx,
+        ) {
+            eprintln!("Failed to paint terminal cell drawing: {error}");
+        }
+    }
+    true
 }
 
 pub(crate) fn paint_text_runs_by_row(

@@ -1131,13 +1131,34 @@ pub(crate) fn terminal_font_features(font_ligatures: bool) -> FontFeatures {
         // GPUI enables the font's default OpenType features when no override is supplied.
         FontFeatures::default()
     } else {
-        FontFeatures::disable_ligatures()
+        // Standard Latin ligatures must follow the same switch as contextual
+        // programming ligatures; required script shaping remains enabled.
+        FontFeatures(Arc::new(
+            ["liga", "clig", "calt"]
+                .map(|tag| (tag.to_owned(), 0))
+                .into(),
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disabling_terminal_ligatures_covers_standard_and_contextual_features() {
+        let features = terminal_font_features(false);
+        for tag in ["calt", "liga", "clig"] {
+            assert!(
+                features
+                    .tag_value_list()
+                    .iter()
+                    .any(|(name, value)| name == tag && *value == 0),
+                "{tag} must be disabled"
+            );
+        }
+        assert!(terminal_font_features(true).tag_value_list().is_empty());
+    }
 
     #[test]
     fn custom_font_stack_uses_first_family_and_preserves_fallback_order() {
