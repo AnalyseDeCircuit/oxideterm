@@ -1319,3 +1319,137 @@ async fn closing_rdp_during_socks_handshake_releases_transport() {
     assert!(result.err().unwrap().to_string().contains("canceled"));
     server.await.unwrap();
 }
+
+#[test]
+fn clipboard_text_preserves_code_whitespace_and_unicode_in_windows_format() {
+    let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
+    let (output_tx, _output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+    let mut backend = ClientClipboardBackend::new(
+        input_tx,
+        output_tx,
+        RemoteDesktopSessionOptions::default().clipboard,
+    );
+    backend.set_local_text("one\n\t中文🦀\r\ntwo\rthree\n".repeat(512));
+    backend.on_format_data_request(FormatDataRequest {
+        format: ClipboardFormatId::CF_UNICODETEXT,
+    });
+    let expected = "one\r\n\t中文🦀\r\ntwo\r\nthree\r\n".repeat(512);
+    match input_rx.try_recv().unwrap() {
+        RdpInputEvent::Clipboard(ClipboardMessage::SendFormatData(response)) => {
+            assert_eq!(response.to_unicode_string().unwrap(), expected);
+        }
+        _ => panic!("expected one Unicode clipboard response"),
+    }
+    assert!(input_rx.try_recv().is_err());
+}
+
+#[test]
+fn paste_dispatch_preserves_large_text_without_generating_per_character_events() {
+    let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
+    let mut database = RdpInputDatabase::new();
+    let mut mapper = RdpKeyboardInputMapper::default();
+    let text = "fn main() {\n\tprintln!(\"中文🦀\");\n}\n".repeat(512);
+    let request = RemoteDesktopHelperRequest::PasteText {
+        text: text.clone().into(),
+    };
+    assert!(!format!("{request:?}").contains("println"));
+    forward_client_rdp_request(&input_tx, &mut database, &mut mapper, request, false).unwrap();
+    match input_rx.try_recv().unwrap() {
+        RdpInputEvent::SetClipboardText {
+            text: received,
+            paste: true,
+        } => assert_eq!(received.expose_secret(), text),
+        _ => panic!("expected one clipboard paste event"),
+    }
+    assert!(input_rx.try_recv().is_err());
+    forward_client_rdp_request(
+        &input_tx,
+        &mut database,
+        &mut mapper,
+        RemoteDesktopHelperRequest::PasteText {
+            text: "read-only".into(),
+        },
+        true,
+    )
+    .unwrap();
+    assert!(input_rx.try_recv().is_err());
+}
+
+#[test]
+fn clipboard_paste_waits_for_its_ack_and_does_not_replay_rejected_or_replaced_content() {
+    let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
+    let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+    let mut backend = ClientClipboardBackend::new(
+        input_tx,
+        output_tx,
+        RemoteDesktopSessionOptions::default().clipboard,
+    );
+    backend.set_local_text("earlier clipboard synchronization".to_string());
+    backend.record_format_list_sent();
+    backend.request_text_paste("new paste\n\t中文".into());
+    backend.record_format_list_sent();
+    backend.on_ready();
+    assert!(
+        input_rx.try_recv().is_err(),
+        "initialization must not re-advertise accepted content"
+    );
+    backend.on_format_list_response(true);
+    assert!(
+        input_rx.try_recv().is_err(),
+        "an old synchronization acknowledgement must not paste"
+    );
+    backend.on_format_list_response(true);
+    let RdpInputEvent::PasteClipboard(generation) = input_rx.try_recv().unwrap() else {
+        panic!("expected one paste shortcut request");
+    };
+    assert!(backend.take_ready_paste(generation));
+    assert!(!backend.take_ready_paste(generation));
+    backend.on_format_list_response(true);
+    assert!(
+        input_rx.try_recv().is_err(),
+        "duplicate acknowledgement must not paste twice"
+    );
+
+    backend.request_text_paste("rejected".into());
+    backend.record_format_list_sent();
+    backend.on_format_list_response(false);
+    assert!(input_rx.try_recv().is_err());
+    assert!(matches!(
+        output_rx.control_rx.try_recv().unwrap(),
+        ClientRdpOutput::Event(RemoteDesktopHelperEvent::ClipboardTransferFailed { .. })
+    ));
+
+    backend.request_text_paste("superseded".into());
+    backend.record_format_list_sent();
+    backend.set_local_text("clipboard only".to_string());
+    backend.record_format_list_sent();
+    backend.on_format_list_response(true);
+    backend.on_format_list_response(true);
+    assert!(
+        input_rx.try_recv().is_err(),
+        "clipboard synchronization must not revive a cancelled paste"
+    );
+
+    backend.request_text_paste("waiting shortcut".into());
+    backend.record_format_list_sent();
+    backend.on_format_list_response(true);
+    let RdpInputEvent::PasteClipboard(generation) = input_rx.try_recv().unwrap() else {
+        panic!("expected paste");
+    };
+    backend.set_local_text("changed before shortcut delivery".to_string());
+    assert!(!backend.take_ready_paste(generation));
+}
+
+#[test]
+fn clipboard_paste_shortcut_is_one_complete_control_v_sequence() {
+    use ironrdp::pdu::input::fast_path::KeyboardFlags;
+    assert_eq!(
+        rdp_paste_input_events().as_slice(),
+        &[
+            FastPathInputEvent::KeyboardEvent(KeyboardFlags::empty(), 0x1d),
+            FastPathInputEvent::KeyboardEvent(KeyboardFlags::empty(), 0x2f),
+            FastPathInputEvent::KeyboardEvent(KeyboardFlags::RELEASE, 0x2f),
+            FastPathInputEvent::KeyboardEvent(KeyboardFlags::RELEASE, 0x1d),
+        ]
+    );
+}

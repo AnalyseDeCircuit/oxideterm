@@ -741,8 +741,18 @@ pub(super) async fn run_native_rdp_active_session(
                     RdpInputEvent::Clipboard(message) => {
                         process_clipboard_message(&mut active_stage, message)?
                     }
-                    RdpInputEvent::SetClipboardText(text) => {
-                        advertise_local_clipboard_text(&mut active_stage, text)?
+                    RdpInputEvent::SetClipboardText { text, paste } => {
+                        advertise_local_clipboard_text(&mut active_stage, text, paste, output_tx)?
+                    }
+                    RdpInputEvent::PasteClipboard(generation) => {
+                        let ready = active_stage.get_svc_processor_mut::<CliprdrClient>()
+                            .and_then(|cliprdr| cliprdr.downcast_backend_mut::<ClientClipboardBackend>())
+                            .is_some_and(|backend| backend.take_ready_paste(generation));
+                        if ready {
+                            active_stage.process_fastpath_input(&mut image, &rdp_paste_input_events())?
+                        } else {
+                            Vec::new()
+                        }
                     }
                     RdpInputEvent::SetClipboardData(data) => {
                         advertise_local_clipboard_data(&mut active_stage, data)?

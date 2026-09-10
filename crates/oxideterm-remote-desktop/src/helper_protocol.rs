@@ -213,6 +213,9 @@ pub enum RemoteDesktopHelperRequest {
     ClipboardText {
         text: String,
     },
+    PasteText {
+        text: RemoteDesktopSecret,
+    },
     ClipboardData {
         data: RemoteDesktopClipboardData,
     },
@@ -361,6 +364,10 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
             Self::ClipboardText { text } => formatter
                 .debug_struct("ClipboardText")
                 .field("text", &format_args!("<redacted:{}>", text.chars().count()))
+                .finish(),
+            Self::PasteText { .. } => formatter
+                .debug_struct("PasteText")
+                .field("text", &"<redacted>")
                 .finish(),
             Self::ClipboardData { data } => formatter
                 .debug_struct("ClipboardData")

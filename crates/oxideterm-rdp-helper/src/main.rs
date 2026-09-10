@@ -522,7 +522,11 @@ enum RdpInputEvent {
     },
     FastPath(SmallVec<[FastPathInputEvent; 2]>),
     Clipboard(ClipboardMessage),
-    SetClipboardText(String),
+    SetClipboardText {
+        text: RemoteDesktopSecret,
+        paste: bool,
+    },
+    PasteClipboard(u64),
     SetClipboardData(RemoteDesktopClipboardData),
     SetClipboardFiles {
         transfer_id: String,

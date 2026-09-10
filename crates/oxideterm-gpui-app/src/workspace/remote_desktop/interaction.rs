@@ -259,10 +259,12 @@ impl RemoteDesktopSessionEntity {
         if text.is_empty() {
             return;
         }
-        // Some pre-login fields do not honor CLIPRDR, so retain the explicit
-        // text injection fallback after updating the remote clipboard.
-        self.send_request(RemoteDesktopHelperRequest::ClipboardText { text: text.clone() });
-        self.send_request(RemoteDesktopHelperRequest::Text { text });
+        if self.profile.protocol == RemoteDesktopProtocol::Rdp {
+            self.send_request(RemoteDesktopHelperRequest::PasteText { text: text.into() });
+        } else {
+            self.send_request(RemoteDesktopHelperRequest::ClipboardText { text: text.clone() });
+            self.send_request(RemoteDesktopHelperRequest::Text { text });
+        }
     }
 }
 
@@ -525,5 +527,62 @@ impl WorkspaceApp {
             RemoteDesktopProtocol::Rdp => self.i18n.t("remote_desktop.rdp_preview_title"),
             RemoteDesktopProtocol::Vnc => self.i18n.t("remote_desktop.vnc_preview_title"),
         }
+    }
+}
+
+#[cfg(test)]
+mod clipboard_tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    struct ClipboardTestWindow;
+    impl Render for ClipboardTestWindow {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    #[gpui::test]
+    fn rdp_paste_sends_one_clipboard_transaction_and_respects_text_permission(
+        cx: &mut TestAppContext,
+    ) {
+        let window = cx.add_window(|_window, _cx| ClipboardTestWindow);
+        let provider = builtin_preview_provider_registry()
+            .unwrap()
+            .get_for_protocol(RemoteDesktopProtocol::Rdp)
+            .cloned()
+            .unwrap();
+        let mut session = RemoteDesktopSessionEntity::new(
+            TabId(71),
+            preview_remote_desktop_profile(RemoteDesktopProtocol::Rdp),
+            provider,
+            None,
+            std::path::PathBuf::new(),
+            RemoteDesktopFrameDeliverySlot::new(),
+            window.into(),
+        );
+        let (tx, rx) = mpsc::channel();
+        session.worker = Some(RemoteDesktopWorkerOwner {
+            request_tx: Some(tx),
+            worker_thread: None,
+        });
+        let text = "code\n\t中文🦀\r\n".repeat(512);
+        session.paste_clipboard(ClipboardItem::new_string(text.clone()));
+        match rx.try_recv().unwrap() {
+            RemoteDesktopHelperRequest::PasteText { text: received } => {
+                assert_eq!(received.expose_secret(), text)
+            }
+            _ => panic!("RDP paste must use a single clipboard transaction"),
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "paste must not also inject keyboard text"
+        );
+        session.profile.session_options.clipboard.text = false;
+        session.paste_clipboard(ClipboardItem::new_string("blocked".to_string()));
+        assert!(
+            rx.try_recv().is_err(),
+            "disabled clipboard text must not be sent"
+        );
     }
 }

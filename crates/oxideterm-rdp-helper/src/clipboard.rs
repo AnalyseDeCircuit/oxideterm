@@ -69,7 +69,13 @@ pub(super) struct ClientClipboardBackend {
     input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
     output_tx: ClientRdpOutputSender,
     options: oxideterm_remote_desktop::RemoteDesktopClipboardOptions,
-    local_text: Option<String>,
+    local_text: Option<RemoteDesktopSecret>,
+    format_lists_sent: u64,
+    format_lists_acknowledged: u64,
+    formats_dirty: bool,
+    paste_requested: bool,
+    pending_paste: Option<u64>,
+    ready_paste: Option<u64>,
     local_data: Option<RemoteDesktopClipboardData>,
     remote_text_format: Option<ClipboardFormatId>,
     remote_data_format: Option<RdpClipboardDataFormat>,
@@ -115,6 +121,12 @@ impl ClientClipboardBackend {
             output_tx,
             options,
             local_text: None,
+            format_lists_sent: 0,
+            format_lists_acknowledged: 0,
+            formats_dirty: false,
+            paste_requested: false,
+            pending_paste: None,
+            ready_paste: None,
             local_data: None,
             remote_text_format: None,
             remote_data_format: None,
@@ -126,20 +138,57 @@ impl ClientClipboardBackend {
         }
     }
 
-    pub(super) fn set_local_text(&mut self, text: String) {
+    pub(super) fn set_local_text(&mut self, text: impl Into<RemoteDesktopSecret>) {
+        let text = text.into();
         if !self.options.text {
             return;
         }
-        self.local_text = Some(text);
+        self.cancel_pending_paste();
+        self.formats_dirty = true;
+        self.local_text = Some(windows_clipboard_text(text.expose_secret()).into());
         self.local_data = None;
         self.local_files = None;
         self.local_file_transfer_id = None;
+    }
+
+    pub(super) fn request_text_paste(&mut self, text: RemoteDesktopSecret) -> bool {
+        if !self.options.text || text.is_empty() {
+            return false;
+        }
+        self.set_local_text(text);
+        self.paste_requested = true;
+        true
+    }
+
+    fn cancel_pending_paste(&mut self) {
+        self.paste_requested = false;
+        self.pending_paste = None;
+        self.ready_paste = None;
+    }
+
+    pub(super) fn record_format_list_sent(&mut self) {
+        self.format_lists_sent += 1;
+        self.formats_dirty = false;
+        if self.paste_requested {
+            self.pending_paste = Some(self.format_lists_sent);
+            self.paste_requested = false;
+        }
+    }
+
+    pub(super) fn take_ready_paste(&mut self, generation: u64) -> bool {
+        if self.ready_paste != Some(generation) {
+            return false;
+        }
+        self.ready_paste = None;
+        true
     }
 
     pub(super) fn set_local_data(&mut self, data: RemoteDesktopClipboardData) {
         if !self.options.images {
             return;
         }
+        self.cancel_pending_paste();
+        self.formats_dirty = true;
         self.local_text = None;
         self.local_data = Some(data);
         self.local_files = None;
@@ -173,6 +222,8 @@ impl ClientClipboardBackend {
                 descriptor
             })
             .collect();
+        self.cancel_pending_paste();
+        self.formats_dirty = true;
         self.local_text = None;
         self.local_data = None;
         self.local_files = Some(Arc::new(files));
@@ -193,15 +244,18 @@ impl ClientClipboardBackend {
         let _ = self.input_tx.send(RdpInputEvent::Clipboard(message));
     }
 
-    fn send_local_format_list(&self) {
-        let formats = if let Some(data) = self.local_data.as_ref() {
+    fn local_formats(&self) -> Vec<ClipboardFormat> {
+        if let Some(data) = self.local_data.as_ref() {
             image_clipboard_formats(data.format)
         } else if self.local_text.is_some() {
             text_clipboard_formats()
         } else {
             Vec::new()
-        };
-        self.send_clipboard_message(ClipboardMessage::SendInitiateCopy(formats));
+        }
+    }
+
+    fn send_local_format_list(&self) {
+        self.send_clipboard_message(ClipboardMessage::SendInitiateCopy(self.local_formats()));
     }
 }
 
@@ -224,7 +278,29 @@ impl CliprdrBackend for ClientClipboardBackend {
         // CLIPRDR may become ready after the UI has already supplied local
         // clipboard text. Advertise the cached formats once the channel is
         // usable so the server can request that text immediately.
-        self.send_local_format_list();
+        if self.formats_dirty || self.format_lists_sent == 0 {
+            self.send_local_format_list();
+        }
+    }
+
+    fn on_format_list_response(&mut self, ok: bool) {
+        // CLIPRDR replies carry no request id; account for every outbound list
+        // in channel order so an older synchronization reply cannot trigger a paste.
+        if self.format_lists_acknowledged == self.format_lists_sent {
+            return;
+        }
+        self.format_lists_acknowledged += 1;
+        if self.pending_paste == Some(self.format_lists_acknowledged) {
+            let generation = self.pending_paste.take().unwrap();
+            if ok {
+                self.ready_paste = Some(generation);
+                let _ = self
+                    .input_tx
+                    .send(RdpInputEvent::PasteClipboard(generation));
+            } else {
+                report_text_paste_failure(&self.output_tx);
+            }
+        }
     }
 
     fn on_request_format_list(&mut self) {
@@ -240,6 +316,7 @@ impl CliprdrBackend for ClientClipboardBackend {
     }
 
     fn on_remote_copy(&mut self, available_formats: &[ClipboardFormat]) {
+        self.cancel_pending_paste();
         self.remote_text_format = None;
         self.remote_data_format = None;
 
@@ -278,7 +355,12 @@ impl CliprdrBackend for ClientClipboardBackend {
                 FormatDataResponse::new_error().into_owned()
             }
         } else {
-            match (request.format, self.local_text.as_deref()) {
+            match (
+                request.format,
+                self.local_text
+                    .as_ref()
+                    .map(RemoteDesktopSecret::expose_secret),
+            ) {
                 (ClipboardFormatId::CF_UNICODETEXT, Some(text)) => {
                     FormatDataResponse::new_unicode_string(text).into_owned()
                 }
@@ -1099,12 +1181,24 @@ pub(super) fn process_clipboard_message(
         let Some(cliprdr) = active_stage.get_svc_processor_mut::<CliprdrClient>() else {
             return Ok(Vec::new());
         };
-        match message {
-            ClipboardMessage::SendInitiateCopy(formats) => Some(
-                cliprdr
-                    .initiate_copy(&formats)
-                    .map_err(|error| session::custom_err!("CLIPRDR initiate copy", error))?,
-            ),
+        let sends_format_list = matches!(
+            &message,
+            ClipboardMessage::SendInitiateCopy(_) | ClipboardMessage::SendInitiateFileCopy(_)
+        );
+        let messages = match message {
+            ClipboardMessage::SendInitiateCopy(mut formats) => {
+                if let Some(backend) = cliprdr.downcast_backend_mut::<ClientClipboardBackend>() {
+                    if !backend.formats_dirty && backend.format_lists_sent > 0 {
+                        return Ok(Vec::new());
+                    }
+                    formats = backend.local_formats();
+                }
+                Some(
+                    cliprdr
+                        .initiate_copy(&formats)
+                        .map_err(|error| session::custom_err!("CLIPRDR initiate copy", error))?,
+                )
+            }
             ClipboardMessage::SendFormatData(response) => Some(
                 cliprdr
                     .submit_format_data(response)
@@ -1131,7 +1225,13 @@ pub(super) fn process_clipboard_message(
                     .map_err(|error| session::custom_err!("CLIPRDR initiate file copy", error))?,
             ),
             ClipboardMessage::Error(_) => None,
+        };
+        if sends_format_list {
+            if let Some(backend) = cliprdr.downcast_backend_mut::<ClientClipboardBackend>() {
+                backend.record_format_list_sent();
+            }
         }
+        messages
     }) else {
         return Ok(Vec::new());
     };
@@ -1142,22 +1242,62 @@ pub(super) fn process_clipboard_message(
 
 pub(super) fn advertise_local_clipboard_text(
     active_stage: &mut ActiveStage,
-    text: String,
+    text: RemoteDesktopSecret,
+    paste: bool,
+    output_tx: &ClientRdpOutputSender,
 ) -> SessionResult<Vec<ActiveStageOutput>> {
     let Some(cliprdr) = active_stage.get_svc_processor_mut::<CliprdrClient>() else {
+        if paste {
+            report_text_paste_failure(output_tx);
+        }
         return Ok(Vec::new());
     };
     if let Some(backend) = cliprdr.downcast_backend_mut::<ClientClipboardBackend>() {
-        backend.set_local_text(text);
+        if paste {
+            if !backend.request_text_paste(text) {
+                report_text_paste_failure(output_tx);
+                return Ok(Vec::new());
+            }
+        } else {
+            backend.set_local_text(text);
+        }
     }
-
-    // If CLIPRDR is not fully ready yet, the backend keeps the text and the
-    // initialization callback will advertise it later.
-    let Ok(svc_messages) = cliprdr.initiate_copy(&text_clipboard_formats()) else {
-        return Ok(Vec::new());
-    };
+    let svc_messages = cliprdr
+        .initiate_copy(&text_clipboard_formats())
+        .map_err(|error| session::custom_err!("CLIPRDR initiate text copy", error))?;
+    if let Some(backend) = cliprdr.downcast_backend_mut::<ClientClipboardBackend>() {
+        backend.record_format_list_sent();
+    }
     let frame = active_stage.process_svc_processor_messages(svc_messages)?;
     response_frame_output(frame)
+}
+
+fn report_text_paste_failure(output_tx: &ClientRdpOutputSender) {
+    let _ = send_client_rdp_event(
+        output_tx,
+        RemoteDesktopHelperEvent::ClipboardTransferFailed {
+            transfer_id: "text-paste".to_string(),
+            message: "RDP clipboard paste was not accepted.".to_string(),
+        },
+    );
+}
+
+fn windows_clipboard_text(text: &str) -> zeroize::Zeroizing<String> {
+    let mut normalized = zeroize::Zeroizing::new(String::with_capacity(text.len()));
+    let mut chars = text.chars().peekable();
+    while let Some(character) = chars.next() {
+        match character {
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                normalized.push_str("\r\n");
+            }
+            '\n' => normalized.push_str("\r\n"),
+            _ => normalized.push(character),
+        }
+    }
+    normalized
 }
 
 pub(super) fn advertise_local_clipboard_data(
@@ -1177,6 +1317,9 @@ pub(super) fn advertise_local_clipboard_data(
     let Ok(svc_messages) = cliprdr.initiate_copy(&formats) else {
         return Ok(Vec::new());
     };
+    if let Some(backend) = cliprdr.downcast_backend_mut::<ClientClipboardBackend>() {
+        backend.record_format_list_sent();
+    }
     let frame = active_stage.process_svc_processor_messages(svc_messages)?;
     response_frame_output(frame)
 }
@@ -1211,6 +1354,9 @@ pub(super) fn advertise_local_clipboard_files(
             return Ok(Vec::new());
         }
     };
+    if let Some(backend) = cliprdr.downcast_backend_mut::<ClientClipboardBackend>() {
+        backend.record_format_list_sent();
+    }
     let frame = active_stage.process_svc_processor_messages(svc_messages)?;
     response_frame_output(frame)
 }

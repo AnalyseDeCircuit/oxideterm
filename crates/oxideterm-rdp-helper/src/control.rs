@@ -100,7 +100,15 @@ pub(super) fn forward_client_rdp_request(
         }
         RemoteDesktopHelperRequest::ClipboardText { text } if !read_only => {
             input_tx
-                .send(RdpInputEvent::SetClipboardText(text))
+                .send(RdpInputEvent::SetClipboardText {
+                    text: text.into(),
+                    paste: false,
+                })
+                .map_err(|_| "RDP input channel is closed.".to_string())?;
+        }
+        RemoteDesktopHelperRequest::PasteText { text } if !read_only => {
+            input_tx
+                .send(RdpInputEvent::SetClipboardText { text, paste: true })
                 .map_err(|_| "RDP input channel is closed.".to_string())?;
         }
         RemoteDesktopHelperRequest::ClipboardData { data } if !read_only => {
@@ -156,6 +164,7 @@ pub(super) fn forward_client_rdp_request(
         | RemoteDesktopHelperRequest::Key { .. }
         | RemoteDesktopHelperRequest::Text { .. }
         | RemoteDesktopHelperRequest::ClipboardText { .. }
+        | RemoteDesktopHelperRequest::PasteText { .. }
         | RemoteDesktopHelperRequest::ClipboardData { .. }
         | RemoteDesktopHelperRequest::ClipboardFiles { .. }
         | RemoteDesktopHelperRequest::VncListRemoteFiles { .. }

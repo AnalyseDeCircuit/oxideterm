@@ -120,6 +120,7 @@ impl RemoteDesktopFakeBackend {
             | RemoteDesktopHelperRequest::Key { .. }
             | RemoteDesktopHelperRequest::Text { .. }
             | RemoteDesktopHelperRequest::ClipboardText { .. }
+            | RemoteDesktopHelperRequest::PasteText { .. }
             | RemoteDesktopHelperRequest::ClipboardData { .. }
             | RemoteDesktopHelperRequest::ClipboardFiles { .. }
             | RemoteDesktopHelperRequest::VncListRemoteFiles { .. }

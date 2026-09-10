@@ -653,3 +653,15 @@ mod tests {
         assert!(mapper.release_all_operations().is_empty());
     }
 }
+
+pub(crate) fn rdp_paste_input_events()
+-> smallvec::SmallVec<[ironrdp::pdu::input::fast_path::FastPathInputEvent; 2]> {
+    let control = Scancode::from_u8(false, 0x1d);
+    let v = Scancode::from_u8(false, 0x2f);
+    ironrdp::input::Database::new().apply([
+        RdpInputOperation::KeyPressed(control),
+        RdpInputOperation::KeyPressed(v),
+        RdpInputOperation::KeyReleased(v),
+        RdpInputOperation::KeyReleased(control),
+    ])
+}
