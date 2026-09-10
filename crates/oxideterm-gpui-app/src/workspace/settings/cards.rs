@@ -302,11 +302,21 @@ impl WorkspaceApp {
                     .bg(rgba((self.tokens.ui.border << 8) | 0x80)),
             )
             .child(self.checkbox_row(
-                "settings_view.terminal.autosuggest_local_history",
-                "settings_view.terminal.autosuggest_local_history_hint",
-                settings.terminal.autosuggest.local_shell_history,
-                set_autosuggest_local_history,
+                "settings_view.terminal.autosuggest_enabled",
+                "settings_view.terminal.autosuggest_enabled_hint",
+                settings.terminal.autosuggest.enabled,
+                set_terminal_autosuggest_enabled,
                 cx,
+            ))
+            .child(self.settings_row_with_margin(
+                self.checkbox_row(
+                    "settings_view.terminal.autosuggest_local_history",
+                    "settings_view.terminal.autosuggest_local_history_hint",
+                    settings.terminal.autosuggest.local_shell_history,
+                    set_autosuggest_local_history,
+                    cx,
+                ),
+                16.0,
             ));
         self.settings_card_surface(rows, self.tokens.ui.bg_card)
             .into_any_element()

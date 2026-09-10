@@ -505,6 +505,8 @@
           "empty-match": "正则不能匹配空文本。"
         }
       },
+      "autosuggest_enabled": "终端命令提示",
+      "autosuggest_enabled_hint": "在终端输入时弹出历史命令建议。",
       "autosuggest_local_history": "命令栏：本地 Shell 历史",
       "autosuggest_local_history_hint": "将本地 zsh/bash/fish 历史作为命令栏历史面板的来源。不会启用终端内 ghost text。",
       "command_bar": "底部命令栏",

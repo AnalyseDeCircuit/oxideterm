@@ -505,6 +505,8 @@
       },
       "encoding": "Terminal Encoding",
       "encoding_hint": "Valore predefinito per terminali locali e host senza override. Ogni host salvato può scegliere la propria codifica.",
+      "autosuggest_enabled": "Suggerimenti dei comandi nel terminale",
+      "autosuggest_enabled_hint": "Mostra suggerimenti dalla cronologia durante la digitazione nel terminale.",
       "autosuggest_local_history": "Barra comandi: cronologia shell locale",
       "autosuggest_local_history_hint": "Usa la cronologia locale zsh/bash/fish come sorgente del pannello cronologia della barra comandi. Non abilita ghost text nel terminale.",
       "command_bar": "Command Bar",

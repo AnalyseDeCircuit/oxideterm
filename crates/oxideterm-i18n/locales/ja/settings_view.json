@@ -505,6 +505,8 @@
       },
       "encoding": "Terminal Encoding",
       "encoding_hint": "ローカル端末と上書きのないホスト向けのアプリ既定値です。保存済みホストごとに文字コードを選べます。",
+      "autosuggest_enabled": "端末のコマンド候補",
+      "autosuggest_enabled_hint": "端末での入力中に履歴に基づくコマンド候補を表示します。",
       "autosuggest_local_history": "Command Bar: ローカル Shell 履歴",
       "autosuggest_local_history_hint": "ローカル zsh/bash/fish 履歴を Command Bar の履歴パネルの候補元として使います。端末内 ghost text は有効にしません。",
       "command_bar": "Command Bar",

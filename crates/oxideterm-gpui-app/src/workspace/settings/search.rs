@@ -195,6 +195,8 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
                 "settings_view.terminal.selection_requires_shift",
                 "settings_view.terminal.backspace_sequence",
                 "settings_view.terminal.delete_sequence",
+                "settings_view.terminal.autosuggest_enabled",
+                "settings_view.terminal.autosuggest_enabled_hint",
             ],
         ),
         terminal_search_entry(

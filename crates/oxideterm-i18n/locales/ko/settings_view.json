@@ -505,6 +505,8 @@
       },
       "encoding": "Terminal Encoding",
       "encoding_hint": "로컬 터미널과 별도 설정이 없는 호스트의 앱 기본값입니다. 저장된 호스트마다 인코딩을 선택할 수 있습니다.",
+      "autosuggest_enabled": "터미널 명령 제안",
+      "autosuggest_enabled_hint": "터미널에 입력하는 동안 기록을 기반으로 명령을 제안합니다.",
       "autosuggest_local_history": "Command Bar: 로컬 Shell 기록",
       "autosuggest_local_history_hint": "로컬 zsh/bash/fish 기록을 Command Bar 기록 패널의 소스로 사용합니다. 터미널 내부 ghost text를 켜지는 않습니다.",
       "command_bar": "Command Bar",

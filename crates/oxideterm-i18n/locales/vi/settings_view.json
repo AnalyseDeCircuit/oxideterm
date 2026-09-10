@@ -505,6 +505,8 @@
       },
       "encoding": "Terminal Encoding",
       "encoding_hint": "Mặc định cho terminal cục bộ và máy chủ không có ghi đè. Mỗi máy chủ đã lưu có thể chọn mã hóa riêng.",
+      "autosuggest_enabled": "Gợi ý lệnh terminal",
+      "autosuggest_enabled_hint": "Hiển thị gợi ý lệnh từ lịch sử khi nhập trong terminal.",
       "autosuggest_local_history": "Thanh lệnh: lịch sử Shell cục bộ",
       "autosuggest_local_history_hint": "Dùng lịch sử zsh/bash/fish cục bộ làm nguồn cho bảng lịch sử của thanh lệnh. Không bật ghost text trong terminal.",
       "command_bar": "Command Bar",

@@ -43,6 +43,8 @@ fn default_external_connection_uris_enabled() -> bool {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalAutosuggestSettings {
+    #[serde(default = "default_terminal_autosuggest_enabled")]
+    pub enabled: bool,
     pub local_shell_history: bool,
     #[serde(flatten)]
     pub extra: ExtraFields,
@@ -51,10 +53,15 @@ pub struct TerminalAutosuggestSettings {
 impl Default for TerminalAutosuggestSettings {
     fn default() -> Self {
         Self {
+            enabled: default_terminal_autosuggest_enabled(),
             local_shell_history: true,
             extra: ExtraFields::new(),
         }
     }
+}
+
+fn default_terminal_autosuggest_enabled() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -615,8 +622,15 @@ mod tests {
             value.as_object_mut().unwrap().remove(field);
         }
 
+        value["autosuggest"].as_object_mut().unwrap().remove("enabled");
         let settings: TerminalSettings = serde_json::from_value(value).expect("terminal settings");
 
+        assert!(settings.autosuggest.enabled);
+        let disabled: TerminalAutosuggestSettings = serde_json::from_str(
+            r#"{"enabled":false,"localShellHistory":true}"#,
+        )
+        .unwrap();
+        assert!(!disabled.enabled);
         assert_eq!(settings.background_scope, BackgroundScope::Content);
         assert_eq!(
             settings.backspace_sequence,

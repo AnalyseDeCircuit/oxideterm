@@ -505,6 +505,8 @@
           "empty-match": "Regex cannot match empty text."
         }
       },
+      "autosuggest_enabled": "Terminal Command Suggestions",
+      "autosuggest_enabled_hint": "Show history-based command suggestions while typing in the terminal.",
       "autosuggest_local_history": "Command Bar: Local Shell History",
       "autosuggest_local_history_hint": "Use local zsh/bash/fish history as a source for the Command Bar history panel. It does not enable terminal ghost text.",
       "command_bar": "Command Bar",

@@ -505,6 +505,8 @@
       },
       "encoding": "Terminal Encoding",
       "encoding_hint": "本機終端與未個別覆寫主機所用的應用程式預設值；已儲存的主機可選擇自己的編碼。",
+      "autosuggest_enabled": "終端命令提示",
+      "autosuggest_enabled_hint": "在終端輸入時顯示歷史命令建議。",
       "autosuggest_local_history": "命令列：本機 Shell 歷史",
       "autosuggest_local_history_hint": "將本機 zsh/bash/fish 歷史作為命令列歷史面板來源。不會啟用終端內 ghost text。",
       "command_bar": "底部命令列",

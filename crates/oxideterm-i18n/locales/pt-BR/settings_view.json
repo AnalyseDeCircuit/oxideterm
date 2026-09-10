@@ -505,6 +505,8 @@
       },
       "encoding": "Terminal Encoding",
       "encoding_hint": "Padrão para terminais locais e hosts sem substituição. Cada host salvo pode escolher sua codificação.",
+      "autosuggest_enabled": "Sugestões de comandos no terminal",
+      "autosuggest_enabled_hint": "Mostrar sugestões do histórico ao digitar no terminal.",
       "autosuggest_local_history": "Barra de comandos: histórico do shell local",
       "autosuggest_local_history_hint": "Usa o histórico local zsh/bash/fish como fonte do painel de histórico da barra de comandos. Não ativa ghost text dentro do terminal.",
       "command_bar": "Command Bar",

@@ -516,6 +516,10 @@ pub fn set_diagnostics_debug_logging(settings: &mut PersistedSettings, value: bo
     settings.diagnostics.debug_logging = value;
 }
 
+pub fn set_terminal_autosuggest_enabled(settings: &mut PersistedSettings, value: bool) {
+    settings.terminal.autosuggest.enabled = value;
+}
+
 pub fn set_autosuggest_local_history(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.autosuggest.local_shell_history = value;
 }

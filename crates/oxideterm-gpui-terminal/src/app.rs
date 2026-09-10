@@ -1559,7 +1559,8 @@ impl TerminalPane {
             .lines
             .get(self.snapshot.cursor_row)
             .is_some_and(|row| row.active_input);
-        if !self.autosuggest_prompt_active
+        if !self.preferences.autosuggest_enabled
+            || !self.autosuggest_prompt_active
             || self.marked_text.is_some()
             || self.tmux_prompt.is_some()
             || self.pending_paste.is_some()
@@ -1719,6 +1720,10 @@ impl TerminalPane {
     pub fn set_preferences(&mut self, preferences: TerminalUiPreferences, cx: &mut Context<Self>) {
         let mut preferences = preferences;
         self.preference_overrides.apply_to(&mut preferences);
+        if self.preferences.autosuggest_enabled != preferences.autosuggest_enabled {
+            self.autosuggest_selected_index = None;
+            self.autosuggest_dismissed_query = None;
+        }
         if preferences.session_log_options.is_none() && self.session_log.is_some() {
             // An explicit connection-level disable takes effect immediately for an active pane.
             let _ = self.stop_session_log(cx);
@@ -4394,6 +4399,24 @@ mod tests {
                     .map(|candidate| candidate.command)
                     .collect::<Vec<_>>(),
                 ["docker ps"]
+            );
+
+            let mut preferences = pane.preferences.clone();
+            preferences.autosuggest_enabled = false;
+            pane.set_preferences(preferences.clone(), cx);
+            assert!(
+                pane.terminal_autosuggest_candidates().is_empty(),
+                "disabled suggestions remained visible"
+            );
+            preferences.autosuggest_enabled = true;
+            pane.set_preferences(preferences, cx);
+            assert_eq!(
+                pane.terminal_autosuggest_candidates()
+                    .into_iter()
+                    .map(|candidate| candidate.command)
+                    .collect::<Vec<_>>(),
+                ["docker ps"],
+                "toggling suggestions must preserve the draft and history"
             );
 
             pane.observe_autosuggest_input_bytes(b"\r", cx);

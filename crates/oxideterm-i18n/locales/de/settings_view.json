@@ -505,6 +505,8 @@
       },
       "encoding": "Terminal Encoding",
       "encoding_hint": "Anwendungsstandard für lokale Terminals und Hosts ohne Überschreibung. Gespeicherte Hosts können eine eigene Kodierung wählen.",
+      "autosuggest_enabled": "Befehlsvorschläge im Terminal",
+      "autosuggest_enabled_hint": "Beim Tippen im Terminal Befehle aus dem Verlauf vorschlagen.",
       "autosuggest_local_history": "Befehlsleiste: lokale Shell-Historie",
       "autosuggest_local_history_hint": "Verwendet lokale zsh/bash/fish-Historie als Quelle für das Verlaufspanel der Befehlsleiste. Aktiviert keinen Ghost Text im Terminal.",
       "command_bar": "Command Bar",
