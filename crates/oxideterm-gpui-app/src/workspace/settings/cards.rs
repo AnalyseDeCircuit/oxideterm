@@ -89,7 +89,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn settings_card(
         &self,
         title_key: &str,
-        _description_key: &str,
+        description_key: &str,
         rows: Vec<AnyElement>,
     ) -> AnyElement {
         let card = div()
@@ -110,6 +110,14 @@ impl WorkspaceApp {
                     .text_color(rgb(self.tokens.ui.text))
                     .child(self.i18n.t(title_key).to_uppercase()),
             )
+            .when(!description_key.is_empty(), |card| {
+                card.child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(self.i18n.t(description_key)),
+                )
+            })
             .children(rows);
         self.settings_card_surface(card, self.tokens.ui.bg_card)
             .into_any_element()
@@ -133,144 +141,108 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn terminal_input_settings_card(
         &self,
+        section_index: usize,
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut rows = div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .p(px(self.tokens.metrics.settings_card_padding))
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .mb(px(16.0))
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(
-                        self.i18n
-                            .t("settings_view.terminal.input_safety")
-                            .to_uppercase(),
-                    ),
-            )
-            .child(self.checkbox_row(
-                "settings_view.terminal.paste_protection",
-                "settings_view.terminal.paste_protection_hint",
-                settings.terminal.paste_protection,
-                set_paste_protection,
-                cx,
-            ))
-            .child(self.settings_row_with_margin(
-                self.checkbox_row(
+        match section_index {
+            0 => {
+                let mut rows = Vec::new();
+                rows.push(self.checkbox_row(
+                    "settings_view.terminal.paste_protection",
+                    "settings_view.terminal.paste_protection_hint",
+                    settings.terminal.paste_protection,
+                    set_paste_protection,
+                    cx,
+                ));
+                rows.push(self.checkbox_row(
                     "settings_view.terminal.osc52_clipboard",
                     "settings_view.terminal.osc52_clipboard_hint",
                     settings.terminal.osc52_clipboard,
                     set_osc52_clipboard,
                     cx,
-                ),
-                16.0,
-            ))
-            .child(self.settings_row_with_margin(
-                self.checkbox_row(
+                ));
+                rows.push(self.checkbox_row(
                     "settings_view.terminal.osc52_clipboard_read",
                     "settings_view.terminal.osc52_clipboard_read_hint",
                     settings.terminal.osc52_clipboard_read,
                     set_osc52_clipboard_read,
                     cx,
-                ),
-                16.0,
-            ));
-
-        if !cfg!(target_os = "macos") {
-            rows = rows.child(self.settings_row_with_margin(
-                self.checkbox_row(
-                    "settings_view.terminal.smart_copy",
-                    "settings_view.terminal.smart_copy_hint",
-                    settings.terminal.smart_copy,
-                    set_smart_copy,
-                    cx,
-                ),
-                16.0,
-            ));
-        }
-
-        let rows = rows
-            .child(self.settings_row_with_margin(
-                self.checkbox_row(
+                ));
+                if !cfg!(target_os = "macos") {
+                    rows.push(self.checkbox_row(
+                        "settings_view.terminal.smart_copy",
+                        "settings_view.terminal.smart_copy_hint",
+                        settings.terminal.smart_copy,
+                        set_smart_copy,
+                        cx,
+                    ));
+                }
+                rows.push(self.checkbox_row(
                     "settings_view.terminal.copy_on_select",
                     "settings_view.terminal.copy_on_select_hint",
                     settings.terminal.copy_on_select,
                     set_copy_on_select,
                     cx,
-                ),
-                16.0,
-            ))
-            .child(self.settings_row_with_margin(
-                self.checkbox_row(
+                ));
+                rows.push(self.checkbox_row(
                     "settings_view.terminal.middle_click_paste",
                     "settings_view.terminal.middle_click_paste_hint",
                     settings.terminal.middle_click_paste,
                     set_middle_click_paste,
                     cx,
-                ),
-                16.0,
-            ))
-            .child(self.settings_row_with_margin(
-                self.checkbox_row(
+                ));
+                rows.push(self.checkbox_row(
                     "settings_view.terminal.right_click_paste",
                     "settings_view.terminal.right_click_paste_hint",
                     settings.terminal.right_click_paste,
                     set_right_click_paste,
                     cx,
-                ),
-                16.0,
-            ))
-            .child(self.settings_row_with_margin(
-                self.checkbox_row(
-                    "settings_view.terminal.open_links_with_modifier",
-                    "settings_view.terminal.open_links_with_modifier_hint",
-                    settings.terminal.open_links_with_modifier,
-                    set_open_links_with_modifier,
-                    cx,
-                ),
-                16.0,
-            ))
-            .child(self.settings_row_with_margin(
-                self.checkbox_row(
-                    "settings_view.terminal.detect_file_paths_as_links",
-                    "settings_view.terminal.detect_file_paths_as_links_hint",
-                    settings.terminal.detect_file_paths_as_links,
-                    set_detect_file_paths_as_links,
-                    cx,
-                ),
-                16.0,
-            ))
-            .child(self.settings_row_with_margin(
-                self.checkbox_row(
-                    "settings_view.terminal.selection_requires_shift",
-                    "settings_view.terminal.selection_requires_shift_hint",
-                    settings.terminal.selection_requires_shift,
-                    set_selection_requires_shift,
-                    cx,
-                ),
-                16.0,
-            ))
-            .child(self.settings_row_with_margin(
-                self.checkbox_row(
-                    "settings_view.terminal.free_type_mode",
-                    "settings_view.terminal.free_type_mode_hint",
-                    settings.terminal.free_type_mode,
-                    set_free_type_mode,
-                    cx,
-                ),
-                16.0,
-            ))
-            .child(
-                self.settings_row_with_margin(
+                ));
+                self.settings_card("settings_view.terminal.input_clipboard", "", rows)
+            }
+            1 => {
+                let rows = vec![
+                    self.checkbox_row(
+                        "settings_view.terminal.selection_requires_shift",
+                        "settings_view.terminal.selection_requires_shift_hint",
+                        settings.terminal.selection_requires_shift,
+                        set_selection_requires_shift,
+                        cx,
+                    ),
+                    self.checkbox_row(
+                        "settings_view.terminal.open_links_with_modifier",
+                        "settings_view.terminal.open_links_with_modifier_hint",
+                        settings.terminal.open_links_with_modifier,
+                        set_open_links_with_modifier,
+                        cx,
+                    ),
+                    self.checkbox_row(
+                        "settings_view.terminal.detect_file_paths_as_links",
+                        "settings_view.terminal.detect_file_paths_as_links_hint",
+                        settings.terminal.detect_file_paths_as_links,
+                        set_detect_file_paths_as_links,
+                        cx,
+                    ),
+                ];
+                self.settings_card("settings_view.terminal.input_mouse_links", "", rows)
+            }
+            2 => {
+                let rows = vec![
+                    self.checkbox_row(
+                        "settings_view.terminal.free_type_mode",
+                        "settings_view.terminal.free_type_mode_hint",
+                        settings.terminal.free_type_mode,
+                        set_free_type_mode,
+                        cx,
+                    ),
+                    self.checkbox_row(
+                        "settings_view.terminal.autosuggest_enabled",
+                        "settings_view.terminal.autosuggest_enabled_hint",
+                        settings.terminal.autosuggest.enabled,
+                        set_terminal_autosuggest_enabled,
+                        cx,
+                    ),
                     self.select_setting_row(
                         "settings_view.terminal.backspace_sequence",
                         "settings_view.terminal.backspace_sequence_hint",
@@ -280,54 +252,20 @@ impl WorkspaceApp {
                         self.tokens.metrics.settings_select_width,
                         cx,
                     ),
-                    16.0,
-                ),
-            )
-            .child(self.settings_row_with_margin(
-                self.select_setting_row(
-                    "settings_view.terminal.delete_sequence",
-                    "settings_view.terminal.delete_sequence_hint",
-                    SettingsSelect::TerminalDeleteSequence,
-                    terminal_delete_sequence_label(settings.terminal.delete_sequence).to_string(),
-                    self.tokens.metrics.settings_select_width,
-                    cx,
-                ),
-                16.0,
-            ))
-            .child(
-                div()
-                    .my(px(20.0))
-                    .h(px(1.0))
-                    .w_full()
-                    .bg(rgba((self.tokens.ui.border << 8) | 0x80)),
-            )
-            .child(self.checkbox_row(
-                "settings_view.terminal.autosuggest_enabled",
-                "settings_view.terminal.autosuggest_enabled_hint",
-                settings.terminal.autosuggest.enabled,
-                set_terminal_autosuggest_enabled,
-                cx,
-            ))
-            .child(self.settings_row_with_margin(
-                self.checkbox_row(
-                    "settings_view.terminal.autosuggest_local_history",
-                    "settings_view.terminal.autosuggest_local_history_hint",
-                    settings.terminal.autosuggest.local_shell_history,
-                    set_autosuggest_local_history,
-                    cx,
-                ),
-                16.0,
-            ));
-        self.settings_card_surface(rows, self.tokens.ui.bg_card)
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn settings_row_with_margin(
-        &self,
-        row: AnyElement,
-        margin_top: f32,
-    ) -> AnyElement {
-        div().mt(px(margin_top)).child(row).into_any_element()
+                    self.select_setting_row(
+                        "settings_view.terminal.delete_sequence",
+                        "settings_view.terminal.delete_sequence_hint",
+                        SettingsSelect::TerminalDeleteSequence,
+                        terminal_delete_sequence_label(settings.terminal.delete_sequence)
+                            .to_string(),
+                        self.tokens.metrics.settings_select_width,
+                        cx,
+                    ),
+                ];
+                self.settings_card("settings_view.terminal.input_keyboard", "", rows)
+            }
+            _ => div().into_any_element(),
+        }
     }
 
     pub(in crate::workspace) fn card_title(&self, title_key: &str) -> AnyElement {

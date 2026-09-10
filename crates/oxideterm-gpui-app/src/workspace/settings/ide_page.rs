@@ -2,7 +2,6 @@ use super::*;
 
 pub(in crate::workspace) const IDE_SETTINGS_CARD_PADDING: f32 = 20.0; // Tauri p-5.
 pub(in crate::workspace) const IDE_SETTINGS_CARD_GAP: f32 = 16.0; // Tauri space-y-4.
-pub(in crate::workspace) const IDE_SETTINGS_TOGGLE_CARD_GAP: f32 = 16.0; // Tauri flex gap between copy and control.
 pub(in crate::workspace) const IDE_SETTINGS_INPUT_WIDTH: f32 = 80.0; // Tauri w-20.
 pub(in crate::workspace) const IDE_SETTINGS_AGENT_SELECT_WIDTH: f32 = 160.0; // Tauri w-40.
 pub(in crate::workspace) const IDE_SETTINGS_AGENT_DOT_SIZE: f32 = 4.0; // Tauri w-1 h-1.
@@ -22,23 +21,30 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let settings = self.settings_store.settings();
         match section_index {
-            0 => self.ide_toggle_card(
-                "settings_view.ide.auto_save",
-                "settings_view.ide.auto_save_hint",
-                settings.ide.auto_save,
-                set_ide_auto_save,
-                cx,
+            0 => self.settings_card(
+                "settings_view.ide.editing",
+                "settings_view.ide.editing_hint",
+                vec![
+                    self.bool_row(
+                        "settings_view.ide.auto_save",
+                        "settings_view.ide.auto_save_hint",
+                        settings.ide.auto_save,
+                        set_ide_auto_save,
+                        cx,
+                    ),
+                    self.card_separator(),
+                    self.bool_row(
+                        "settings_view.ide.word_wrap",
+                        "settings_view.ide.word_wrap_hint",
+                        settings.ide.word_wrap,
+                        set_ide_word_wrap,
+                        cx,
+                    ),
+                ],
             ),
-            1 => self.ide_toggle_card(
-                "settings_view.ide.word_wrap",
-                "settings_view.ide.word_wrap_hint",
-                settings.ide.word_wrap,
-                set_ide_word_wrap,
-                cx,
-            ),
-            2 => self.ide_typography_card(settings, cx),
-            3 => self.ide_agent_card(settings, cx),
-            4 => self.ide_agent_privacy_card(),
+            1 => self.ide_typography_card(settings, cx),
+            2 => self.ide_agent_card(settings, cx),
+            3 => self.ide_agent_privacy_card(),
             _ => div().into_any_element(),
         }
     }
@@ -52,31 +58,6 @@ impl WorkspaceApp {
             .border_color(rgb(self.tokens.ui.border))
             .p(px(IDE_SETTINGS_CARD_PADDING));
         self.settings_card_surface(card, self.tokens.ui.bg_card)
-    }
-
-    pub(in crate::workspace) fn ide_toggle_card(
-        &self,
-        label_key: &str,
-        hint_key: &str,
-        checked: bool,
-        setter: fn(&mut PersistedSettings, bool),
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.ide_card()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(IDE_SETTINGS_TOGGLE_CARD_GAP))
-            .child(self.ide_label_block(label_key, hint_key))
-            .child(div().flex_none().child(
-                checkbox(&self.tokens, String::new(), checked).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.edit_settings(|settings| setter(settings, !checked), cx);
-                    }),
-                ),
-            ))
-            .into_any_element()
     }
 
     pub(in crate::workspace) fn ide_typography_card(
@@ -140,6 +121,17 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(IDE_SETTINGS_CARD_GAP))
             .child(self.ide_card_title(self.i18n.t("settings_view.ide.agent_title")))
+            .child(self.card_separator())
+            .child(self.ide_setting_row(
+                "settings_view.ide.agent_mode_label",
+                "settings_view.ide.agent_mode_hint",
+                self.ide_select_control(
+                    SettingsSelect::IdeAgentMode,
+                    ide_agent_label(settings.ide.agent_mode, &self.i18n),
+                    IDE_SETTINGS_AGENT_SELECT_WIDTH,
+                    cx,
+                ),
+            ))
             .child(self.ide_card_description(self.i18n.t("settings_view.ide.agent_description")))
             .child(
                 div()
@@ -208,17 +200,6 @@ impl WorkspaceApp {
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(self.i18n.t("settings_view.ide.agent_auto_hint")),
             )
-            .child(self.card_separator())
-            .child(self.ide_setting_row(
-                "settings_view.ide.agent_mode_label",
-                "settings_view.ide.agent_mode_hint",
-                self.ide_select_control(
-                    SettingsSelect::IdeAgentMode,
-                    ide_agent_label(settings.ide.agent_mode, &self.i18n),
-                    IDE_SETTINGS_AGENT_SELECT_WIDTH,
-                    cx,
-                ),
-            ))
             .into_any_element()
     }
 

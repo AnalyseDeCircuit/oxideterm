@@ -14,26 +14,28 @@ impl WorkspaceApp {
                 if let Some(path_hint) = self.local_shell_path_hint(settings) {
                     shell_rows.push(path_hint);
                 }
-                shell_rows.push(self.card_separator());
-                shell_rows.push(
-                    self.setting_row(
-                        "settings_view.local_terminal.git_bash_path",
-                        "settings_view.local_terminal.git_bash_path_hint",
-                        self.settings_text_input_control(
-                            SettingsInput::LocalGitBashPath,
-                            settings
-                                .local_terminal
-                                .git_bash_path
-                                .clone()
-                                .unwrap_or_default(),
-                            self.i18n
-                                .t("settings_view.local_terminal.git_bash_path_placeholder"),
-                            300.0,
+                if cfg!(target_os = "windows") {
+                    shell_rows.push(self.card_separator());
+                    shell_rows.push(
+                        self.setting_row(
+                            "settings_view.local_terminal.git_bash_path",
+                            "settings_view.local_terminal.git_bash_path_hint",
+                            self.settings_text_input_control(
+                                SettingsInput::LocalGitBashPath,
+                                settings
+                                    .local_terminal
+                                    .git_bash_path
+                                    .clone()
+                                    .unwrap_or_default(),
+                                self.i18n
+                                    .t("settings_view.local_terminal.git_bash_path_placeholder"),
+                                300.0,
+                                cx,
+                            ),
                             cx,
                         ),
-                        cx,
-                    ),
-                );
+                    );
+                }
                 shell_rows.push(self.card_separator());
                 shell_rows.push(
                     self.setting_row(
@@ -61,15 +63,11 @@ impl WorkspaceApp {
                     shell_rows.push(self.card_separator());
                     shell_rows.extend(self.local_oh_my_posh_rows(settings, cx));
                 }
-                self.settings_card(
-                    "settings_view.local_terminal.shell",
-                    "settings_view.local_terminal.default_shell_hint",
-                    shell_rows,
-                )
+                self.settings_card("settings_view.local_terminal.shell", "", shell_rows)
             }
             1 => self.settings_card(
                 "settings_view.local_terminal.shell_profile",
-                "settings_view.local_terminal.load_shell_profile_hint",
+                "",
                 vec![self.checkbox_row(
                     "settings_view.local_terminal.load_shell_profile",
                     "settings_view.local_terminal.load_shell_profile_hint",

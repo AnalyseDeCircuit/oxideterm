@@ -78,9 +78,13 @@
       "help": "도움말 및 정보",
       "keybindings": "키 바인딩",
       "graphics": "그래픽",
-      "network": "네트워크 및 프록시"
+      "network": "네트워크 및 외부 접근"
     },
     "general": {
+      "portable_status_unlocked": "잠금 해제됨",
+      "portable_status_locked": "잠김",
+      "portable_status_needs_setup": "초기 설정 필요",
+      "portable_status_disabled": "비활성화됨",
       "title": "일반",
       "description": "일반 애플리케이션 설정.",
       "startup": "시작",
@@ -219,9 +223,12 @@
       "keep_running_on_close_hint": "창을 닫아도 OxideTerm은 백그라운드에서 계속 실행됩니다."
     },
     "terminal": {
+      "input_keyboard": "키보드 및 입력 제안",
+      "input_mouse_links": "마우스 및 링크",
+      "input_clipboard": "복사 및 붙여넣기",
       "title": "터미널 설정",
       "description": "터미널 에뮬레이터의 외관과 동작을 구성합니다.",
-      "font": "글꼴",
+      "font": "글꼴 및 조판",
       "font_family": "글꼴 패밀리",
       "font_family_hint": "프리셋 글꼴 (✓ = 번들 폴백)",
       "select_font": "글꼴 선택",
@@ -266,7 +273,7 @@
       "cursor_bar": "바 |",
       "cursor_blink": "커서 깜박임",
       "cursor_blink_hint": "커서 깜박임 애니메이션",
-      "input_safety": "입력 안전",
+      "input_safety": "입력 및 상호작용",
       "paste_protection": "붙여넣기 보호",
       "paste_protection_hint": "여러 줄 내용을 붙여넣기 전에 확인하여 실수로 명령이 실행되는 것을 방지",
       "osc52_clipboard": "OSC 52 클립보드",
@@ -612,7 +619,7 @@
       "page_display": "표시",
       "page_input": "입력",
       "page_commandBar": "명령 막대",
-      "page_awareness": "인식 및 통합",
+      "page_awareness": "Shell 통합 및 트리거",
       "page_transfer": "전송",
       "page_highlight": "강조",
       "page_logging": "로그",
@@ -640,11 +647,15 @@
       "session_log_select_directory": "터미널 로그 폴더 선택",
       "session_log_directory_template": "하위 폴더 템플릿",
       "session_log_directory_template_hint": "로그 폴더 안의 선택적 상대 구조입니다. 폴더는 /로 구분합니다. 사용 가능: {date}, {time}, {datetime}, {session}, {host}, {username}, {protocol}.",
-      "page_local": "로컬"
+      "page_local": "로컬",
+      "font_hint": "터미널 글꼴, 크기, 굵기, 합자 및 줄 높이를 설정합니다.",
+      "display_behavior": "표시 동작",
+      "display_behavior_hint": "터미널 여백, 스크롤 및 문자 인코딩을 설정합니다."
     },
     "appearance": {
+      "effects": "시각 효과 및 렌더링",
       "title": "외관",
-      "description": "애플리케이션 테마를 사용자 지정합니다.",
+      "description": "테마, 인터페이스 밀도, 애니메이션, 배경 및 렌더링 정책을 설정합니다.",
       "app_icon": "앱 아이콘",
       "app_icon_variant": "아이콘 색상",
       "app_icon_variant_hint": "Dock 또는 작업 표시줄 아이콘 색상을 선택합니다. 런타임 전환을 지원하는 플랫폼에서는 즉시 적용됩니다.",
@@ -652,7 +663,7 @@
       "color_theme": "색상 테마",
       "color_theme_hint": "터미널 색상 구성표",
       "select_theme": "테마 선택",
-      "layout": "레이아웃",
+      "layout": "인터페이스 배치",
       "layout_hint": "사이드바는 오른쪽 가장자리를 드래그하여 크기를 조정할 수 있습니다. 접기 버튼 (◧)을 사용하여 숨길 수 있습니다.",
       "theme_group_oxide": "Oxide 시리즈",
       "theme_group_classic": "클래식 / 기타",
@@ -780,8 +791,8 @@
     "connections": {
       "title": "연결 기본값",
       "description": "새 연결의 기본 설정.",
-      "keys_and_connections_title": "키 및 연결",
-      "keys_and_connections_description": "저장된 연결, 가져오기, 연결 풀, SSH 키를 한곳에서 관리합니다.",
+      "keys_and_connections_title": "연결",
+      "keys_and_connections_description": "SSH 키, 연결 기본값, 백그라운드 연결, 재연결 및 설정 가져오기를 관리합니다.",
       "default_username": "기본 사용자명",
       "default_port": "기본 포트",
       "groups": {
@@ -929,8 +940,11 @@
       "action_failed": "관리 키 작업 실패: {{error}}"
     },
     "ai": {
+      "automatic_placeholder": "자동",
+      "conversation_agents_hint": "이 옵션은 현재 AI 대화에만 적용됩니다. 하위 에이전트 동시 실행 한도는 전역 도구 정책에서 설정합니다.",
+      "conversation_agents": "현재 대화의 하위 에이전트",
       "title": "OxideSens",
-      "description": "OpenAI 호환 API 및 컨텍스트 제한을 구성합니다.",
+      "description": "AI 제공자, Agent, 컨텍스트, 메모리, 도구 및 확장 기능을 설정합니다.",
       "general": "일반",
       "page_general": "일반",
       "page_providers": "공급자",
@@ -1184,6 +1198,9 @@
       "acp_agent_error_unknown": "알 수 없는 오류"
     },
     "sftp": {
+      "unlimited_placeholder": "0 = 무제한",
+      "performance": "전송 성능",
+      "opening": "열기 및 전송 방식",
       "title": "파일 전송",
       "description": "파일 전송 동작 및 성능을 구성합니다.",
       "presentation": "SFTP 열기 위치",
@@ -1213,6 +1230,8 @@
       "transfer_count_other": "{{count}}개 전송"
     },
     "ide": {
+      "editing_hint": "자동 저장과 긴 줄의 표시 방식을 설정합니다.",
+      "editing": "편집 동작",
       "title": "IDE 모드 (Mini)",
       "description": "내장 코드 편집기의 동작을 설정합니다.",
       "auto_save": "자동 저장",
@@ -1227,7 +1246,7 @@
       "agent_feature_search": "서버 측 grep 및 깊은 디렉토리 트리 로딩",
       "agent_supported": "기본 제공: x86_64, aarch64 (Linux)",
       "agent_binary_size": "약 2 MB",
-      "agent_auto_hint": "지원되는 Linux x86_64/aarch64 호스트에서 IDE 모드를 열면 아래 배포 정책에 따라 에이전트를 배포합니다. 기본값은 첫 사용 시 확인을 요청합니다.",
+      "agent_auto_hint": "지원되는 Linux x86_64/aarch64 호스트에서는 선택한 정책에 따라 IDE 에이전트를 배포합니다. 기본적으로 첫 배포 전에 확인합니다.",
       "agent_extra_hint": "다른 아키텍처용 사전 빌드 바이너리는 더 이상 제공되지 않습니다. 사용자가 직접 소스에서 agent를 빌드한 뒤 원격 호스트의 ~/.oxideterm/oxideterm-agent로 수동 업로드해야 합니다.",
       "agent_transparency_title": "투명성 및 개인정보 보호",
       "agent_path_label": "배포 경로",
@@ -1434,8 +1453,8 @@
       "import_failed": "호스트 가져오기 실패: {{error}}"
     },
     "mcp": {
-      "title": "MCP 서버",
-      "description": "Model Context Protocol 서버에 연결하여 외부 도구로 AI 기능을 확장합니다.",
+      "title": "MCP 도구 서버",
+      "description": "OxideSens를 외부 MCP 도구 서버에 연결합니다. 외부 클라이언트의 OxideTerm 접근 권한은 「네트워크 및 외부 접근」에서 설정합니다.",
       "add_server": "서버 추가",
       "no_servers": "구성된 MCP 서버가 없습니다. 서버를 추가하여 시작하세요.",
       "status_disconnected": "연결 끊김",
@@ -1491,6 +1510,9 @@
       "formula_hint": "재시도는 지터가 있는 지수 백오프를 사용합니다: 각 후속 시도는 더 오래 대기하며(최대 지연까지), 썸더링 허드 효과를 피하기 위해 소량의 랜덤 변동이 추가됩니다."
     },
     "knowledge": {
+      "page_summary": "{{page}} / {{pages}} 페이지 · 문서 {{total}}개",
+      "next_page": "다음",
+      "previous_page": "이전",
       "title": "지식 베이스",
       "description": "AI 기반 검색을 위한 운영 문서를 가져오고 관리합니다. 문서가 인덱싱되며 OxideSens 채팅 중 자동으로 참조할 수 있습니다.",
       "collections": "컨렉션",
@@ -1630,8 +1652,10 @@
       }
     },
     "network": {
+      "hide_permissions": "권한 접기",
+      "show_permissions": "권한 펼치기",
       "public_mcp": "External MCP Control",
-      "public_mcp_hint": "Let authorized external MCP clients inspect connections and run approved SSH workflows.",
+      "public_mcp_hint": "외부 클라이언트가 OxideTerm 도구를 사용하도록 허용하고 권한과 작업 승인을 관리합니다. OxideSens가 사용하는 외부 도구 서버는 해당 도구 페이지에서 설정하세요.",
       "public_mcp_security_hint": "The endpoint is loopback-only. Client credentials are shown once, stored only as digests, and never included in settings, .oxide exports, or cloud sync.",
       "copy_endpoint": "Copy Endpoint",
       "public_mcp_port": "Listening port",
@@ -1702,8 +1726,8 @@
       "approval_notice_description": "{{client}} requested {{tool}}. Review it under Network & Proxy → External MCP Control.",
       "approve_action": "Approve",
       "reject_action": "Reject",
-      "title": "네트워크 및 프록시",
-      "description": "SSH 연결과 애플리케이션 네트워크 요청에 사용할 프록시 경로를 구성합니다.",
+      "title": "네트워크 및 외부 접근",
+      "description": "프록시 경로, 외부 연결 링크, MCP 클라이언트 접근 및 작업 승인을 설정합니다.",
       "shared_proxy": "공유 프록시",
       "shared_proxy_hint": "SSH 연결과 애플리케이션 트래픽에서 재사용하는 프록시 설정입니다.",
       "shared_proxy_empty_hint": "먼저 공유 프록시를 추가한 다음 사용할 트래픽을 선택하세요.",

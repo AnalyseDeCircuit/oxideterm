@@ -38,8 +38,9 @@ impl WorkspaceApp {
         match section_index {
             0 => self.appearance_theme_card(settings, cx),
             1 => self.appearance_layout_card(settings, cx),
-            2 => self.appearance_app_icon_card(settings, cx),
+            2 => self.appearance_effects_card(settings, cx),
             3 => self.appearance_background_card(settings, cx),
+            4 => self.appearance_app_icon_card(settings, cx),
             _ => div().into_any_element(),
         }
     }
@@ -151,6 +152,24 @@ impl WorkspaceApp {
                         cx,
                     ),
                 ),
+            ]
+            .into_iter()
+            .chain(cfg!(target_os = "linux").then(|| {
+                self.appearance_window_titlebar_row(settings.appearance.show_window_titlebar, cx)
+            }))
+            .collect(),
+        )
+    }
+
+    pub(in crate::workspace) fn appearance_effects_card(
+        &self,
+        settings: &PersistedSettings,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.appearance_card(
+            self.i18n.t("settings_view.appearance.effects"),
+            None,
+            vec![
                 self.appearance_row(
                     "settings_view.appearance.window_opacity",
                     "settings_view.appearance.window_opacity_hint",
@@ -197,9 +216,6 @@ impl WorkspaceApp {
                 ),
             ]
             .into_iter()
-            .chain(cfg!(target_os = "linux").then(|| {
-                self.appearance_window_titlebar_row(settings.appearance.show_window_titlebar, cx)
-            }))
             .chain(std::iter::once(self.appearance_vibrancy_status(settings)))
             .collect(),
         )

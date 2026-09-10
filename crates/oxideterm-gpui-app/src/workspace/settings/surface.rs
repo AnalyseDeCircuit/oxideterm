@@ -285,14 +285,18 @@ impl WorkspaceApp {
                     settings.ai.enabled,
                 )
             }
-            (AiSettingsPage::Tools, 1) => {
+            (AiSettingsPage::Tools, 1) => self.ai_disabled_settings_card(
+                self.render_ai_agent_settings(cx),
+                self.settings_store.settings().ai.enabled,
+            ),
+            (AiSettingsPage::Tools, 2) => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_skills_section(settings, cx),
                     settings.ai.enabled,
                 )
             }
-            (AiSettingsPage::Tools, 2) => {
+            (AiSettingsPage::Tools, 3) => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_mcp_servers_section(settings, cx),
@@ -426,20 +430,12 @@ impl WorkspaceApp {
                 launch_at_login.pending.hash(&mut hasher);
                 launch_at_login.error.hash(&mut hasher);
                 settings.general.minimize_to_tray_on_close.hash(&mut hasher);
-                settings
-                    .general
-                    .external_connection_uris_enabled
-                    .hash(&mut hasher);
                 let cli = self.settings_workspace.read(cx).cli_companion_snapshot();
                 cli.loading.hash(&mut hasher);
                 cli.error.is_some().hash(&mut hasher);
                 cli.status.hash(&mut hasher);
                 let app_lock_section_index =
-                    if cfg!(any(target_os = "windows", target_os = "macos")) {
-                        6
-                    } else {
-                        5
-                    };
+                    2 + usize::from(cfg!(any(target_os = "windows", target_os = "macos")));
                 if index
                     == oxideterm_settings_model::SETTINGS_SECTION_HEADER_ITEM_COUNT
                         + app_lock_section_index
@@ -476,6 +472,10 @@ impl WorkspaceApp {
                 // jumping when the icon picker updates its selected badge.
             }
             SettingsTab::Network => {
+                self.settings_workspace
+                    .read(cx)
+                    .expanded_mcp_client
+                    .hash(&mut hasher);
                 settings.network.upstream_proxy.is_some().hash(&mut hasher);
                 settings
                     .network
@@ -587,6 +587,12 @@ impl WorkspaceApp {
                             .hash_settings_context_layout(&mut hasher);
                     }
                     (AiSettingsPage::Tools, 2) => {
+                        self.ai_entity
+                            .read(cx)
+                            .settings_section_expanded(AiSettingsViewSection::ToolUse)
+                            .hash(&mut hasher);
+                    }
+                    (AiSettingsPage::Tools, 3) => {
                         let ai = self.ai_entity.read(cx);
                         ai.agents.settings_model_picker_open.hash(&mut hasher);
                         ai.conversation_state()
@@ -607,12 +613,8 @@ impl WorkspaceApp {
                             provider.enabled.hash(&mut hasher);
                             provider.models.hash(&mut hasher);
                         }
-                        self.ai_entity
-                            .read(cx)
-                            .settings_section_expanded(AiSettingsViewSection::ToolUse)
-                            .hash(&mut hasher);
                     }
-                    (AiSettingsPage::Tools, 3) => {
+                    (AiSettingsPage::Tools, 4) => {
                         let registry = self.skill_registry.read();
                         for skill in registry.records() {
                             skill.id.hash(&mut hasher);
@@ -627,6 +629,8 @@ impl WorkspaceApp {
             SettingsTab::Knowledge => {
                 let ai = self.ai_entity.read(cx);
                 ai.knowledge_selected_collection_id().hash(&mut hasher);
+                ai.knowledge_document_page_index().hash(&mut hasher);
+                ai.knowledge_embedding_config_expanded().hash(&mut hasher);
                 ai.knowledge_error().is_some().hash(&mut hasher);
                 ai.knowledge_import_progress().hash(&mut hasher);
                 ai.knowledge_embedding_progress().hash(&mut hasher);

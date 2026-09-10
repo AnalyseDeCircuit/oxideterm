@@ -352,7 +352,18 @@ impl WorkspaceApp {
         match section_index {
             0 => self.settings_network_shared_proxy_section(proxy, cx),
             1 => self.settings_network_routing_section(cx),
-            2 => self.settings_public_mcp_section(cx),
+            2 => self.settings_card(
+                "settings_view.general.connection_uri_integration",
+                "settings_view.general.connection_uri_integration_hint",
+                vec![self.general_checkbox_row(
+                    "settings_view.general.external_connection_uris",
+                    "settings_view.general.external_connection_uris_hint",
+                    settings.general.external_connection_uris_enabled,
+                    |settings, enabled| settings.general.external_connection_uris_enabled = enabled,
+                    cx,
+                )],
+            ),
+            3 => self.settings_public_mcp_section(cx),
             _ => div().into_any_element(),
         }
     }
@@ -563,6 +574,146 @@ impl WorkspaceApp {
         content = content
             .child(self.card_separator())
             .child(self.network_subsection_heading(
+                "settings_view.network.pending_approvals",
+                "settings_view.network.pending_approvals_hint",
+            ));
+        let pending = approvals
+            .into_iter()
+            .filter(|approval| approval.status == oxideterm_public_mcp::ApprovalStatus::Pending)
+            .collect::<Vec<_>>();
+        if pending.is_empty() {
+            content = content.child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("settings_view.network.no_pending_approvals")),
+            );
+        } else {
+            for approval in pending {
+                let approval_ref_for_accept = approval.approval_ref.clone();
+                let approval_ref_for_reject = approval.approval_ref.clone();
+                let client_label = client_labels
+                    .get(&approval.client_ref)
+                    .cloned()
+                    .unwrap_or_else(|| approval.client_ref.to_string());
+                let client_summary = self
+                    .i18n
+                    .t("settings_view.network.approval_client")
+                    .replace("{{client}}", &client_label);
+                let target_label =
+                    self.public_mcp_target_label(&approval.client_ref, &approval.target, cx);
+                let mut approval_details = div()
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap(px(SETTINGS_PUBLIC_MCP_DETAIL_GAP))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(approval.tool_name),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(client_summary),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(target_label),
+                    );
+                if let Some(command) = approval.review.command() {
+                    let command_summary = self
+                        .i18n
+                        .t("settings_view.network.approval_command")
+                        .replace("{{command}}", command);
+                    approval_details = approval_details.child(
+                        div()
+                            .w_full()
+                            .min_w(px(0.0))
+                            .rounded(px(self.tokens.radii.sm))
+                            .bg(rgb(self.tokens.ui.bg_hover))
+                            .px(px(SETTINGS_PUBLIC_MCP_COMMAND_PADDING_X))
+                            .py(px(SETTINGS_PUBLIC_MCP_COMMAND_PADDING_Y))
+                            .font_family(settings_mono_font_family(self.settings_store.settings()))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text))
+                            .whitespace_normal()
+                            .child(command_summary),
+                    );
+                }
+                if let Some(working_directory) = approval.review.working_directory() {
+                    approval_details = approval_details.child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(
+                                self.i18n
+                                    .t("settings_view.network.approval_working_directory")
+                                    .replace("{{directory}}", working_directory),
+                            ),
+                    );
+                }
+                content = content.child(
+                    div()
+                        .w_full()
+                        .min_w(px(0.0))
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap(px(SETTINGS_PUBLIC_MCP_ROW_GAP))
+                        .child(approval_details)
+                        .child(self.workspace_toolbar_action_button(
+                            self.i18n.t("settings_view.network.approve_action"),
+                            Some(Self::render_lucide_icon(
+                                LucideIcon::Check,
+                                SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
+                                rgb(self.tokens.ui.bg),
+                            )),
+                            ToolbarButtonOptions {
+                                button: ButtonOptions {
+                                    variant: ButtonVariant::Default,
+                                    ..ButtonOptions::default()
+                                },
+                                ..ToolbarButtonOptions::default()
+                            },
+                            cx.listener(move |this, _event, _window, cx| {
+                                if let Err(error) = this.public_mcp.set_approval_status(
+                                    &approval_ref_for_accept,
+                                    oxideterm_public_mcp::ApprovalStatus::Approved,
+                                ) {
+                                    this.public_mcp.record_action_error(error);
+                                }
+                                cx.notify();
+                                cx.stop_propagation();
+                            }),
+                        ))
+                        .child(self.workspace_toolbar_action_button(
+                            self.i18n.t("settings_view.network.reject_action"),
+                            None,
+                            ToolbarButtonOptions::default(),
+                            cx.listener(move |this, _event, _window, cx| {
+                                if let Err(error) = this.public_mcp.set_approval_status(
+                                    &approval_ref_for_reject,
+                                    oxideterm_public_mcp::ApprovalStatus::Rejected,
+                                ) {
+                                    this.public_mcp.record_action_error(error);
+                                }
+                                cx.notify();
+                                cx.stop_propagation();
+                            }),
+                        )),
+                );
+            }
+        }
+
+        content = content
+            .child(self.card_separator())
+            .child(self.network_subsection_heading(
                 "settings_view.network.external_clients",
                 "settings_view.network.external_clients_hint",
             ));
@@ -576,6 +727,13 @@ impl WorkspaceApp {
             );
         } else {
             for client in clients {
+                let client_ref_for_expand = client.client_ref.as_str().to_string();
+                let permissions_expanded = self
+                    .settings_workspace
+                    .read(cx)
+                    .expanded_mcp_client
+                    .as_deref()
+                    == Some(client.client_ref.as_str());
                 let client_ref_for_toggle = client.client_ref.clone();
                 let client_ref_for_remove = client.client_ref.clone();
                 let client_ref_for_mode = client.client_ref.clone();
@@ -715,6 +873,32 @@ impl WorkspaceApp {
                                         ),
                                 )
                                 .child(self.workspace_toolbar_action_button(
+                                    self.i18n.t(if permissions_expanded {
+                                        "settings_view.network.hide_permissions"
+                                    } else {
+                                        "settings_view.network.show_permissions"
+                                    }),
+                                    Some(Self::render_lucide_icon(
+                                        if permissions_expanded {
+                                            LucideIcon::ChevronDown
+                                        } else {
+                                            LucideIcon::ChevronRight
+                                        },
+                                        SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
+                                        rgb(self.tokens.ui.text),
+                                    )),
+                                    ToolbarButtonOptions::default(),
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.settings_workspace.update(cx, |settings, cx| {
+                                            settings.expanded_mcp_client = (!permissions_expanded)
+                                                .then(|| client_ref_for_expand.clone());
+                                            cx.notify();
+                                        });
+                                        cx.notify();
+                                        cx.stop_propagation();
+                                    }),
+                                ))
+                                .child(self.workspace_toolbar_action_button(
                                     self.i18n.t(mode_toggle_key),
                                     None,
                                     ToolbarButtonOptions::default(),
@@ -767,7 +951,7 @@ impl WorkspaceApp {
                                     }),
                                 )),
                         )
-                        .child(group_controls),
+                        .when(permissions_expanded, |card| card.child(group_controls)),
                 );
             }
         }
@@ -829,146 +1013,6 @@ impl WorkspaceApp {
                     }),
                 )),
         );
-
-        content = content
-            .child(self.card_separator())
-            .child(self.network_subsection_heading(
-                "settings_view.network.pending_approvals",
-                "settings_view.network.pending_approvals_hint",
-            ));
-        let pending = approvals
-            .into_iter()
-            .filter(|approval| approval.status == oxideterm_public_mcp::ApprovalStatus::Pending)
-            .collect::<Vec<_>>();
-        if pending.is_empty() {
-            content = content.child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.network.no_pending_approvals")),
-            );
-        } else {
-            for approval in pending {
-                let approval_ref_for_accept = approval.approval_ref.clone();
-                let approval_ref_for_reject = approval.approval_ref.clone();
-                let client_label = client_labels
-                    .get(&approval.client_ref)
-                    .cloned()
-                    .unwrap_or_else(|| approval.client_ref.to_string());
-                let client_summary = self
-                    .i18n
-                    .t("settings_view.network.approval_client")
-                    .replace("{{client}}", &client_label);
-                let target_label =
-                    self.public_mcp_target_label(&approval.client_ref, &approval.target, cx);
-                let mut approval_details = div()
-                    .min_w(px(0.0))
-                    .flex_1()
-                    .flex()
-                    .flex_col()
-                    .gap(px(SETTINGS_PUBLIC_MCP_DETAIL_GAP))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(approval.tool_name),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(client_summary),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(target_label),
-                    );
-                if let Some(command) = approval.review.command() {
-                    let command_summary = self
-                        .i18n
-                        .t("settings_view.network.approval_command")
-                        .replace("{{command}}", command);
-                    approval_details = approval_details.child(
-                        div()
-                            .w_full()
-                            .min_w(px(0.0))
-                            .rounded(px(self.tokens.radii.sm))
-                            .bg(rgb(self.tokens.ui.bg_hover))
-                            .px(px(SETTINGS_PUBLIC_MCP_COMMAND_PADDING_X))
-                            .py(px(SETTINGS_PUBLIC_MCP_COMMAND_PADDING_Y))
-                            .font_family(settings_mono_font_family(self.settings_store.settings()))
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text))
-                            .whitespace_normal()
-                            .child(command_summary),
-                    );
-                }
-                if let Some(working_directory) = approval.review.working_directory() {
-                    approval_details = approval_details.child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(
-                                self.i18n
-                                    .t("settings_view.network.approval_working_directory")
-                                    .replace("{{directory}}", working_directory),
-                            ),
-                    );
-                }
-                content = content.child(
-                    div()
-                        .w_full()
-                        .min_w(px(0.0))
-                        .flex()
-                        .flex_wrap()
-                        .items_center()
-                        .gap(px(SETTINGS_PUBLIC_MCP_ROW_GAP))
-                        .child(approval_details)
-                        .child(self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.network.approve_action"),
-                            Some(Self::render_lucide_icon(
-                                LucideIcon::Check,
-                                SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
-                                rgb(self.tokens.ui.bg),
-                            )),
-                            ToolbarButtonOptions {
-                                button: ButtonOptions {
-                                    variant: ButtonVariant::Default,
-                                    ..ButtonOptions::default()
-                                },
-                                ..ToolbarButtonOptions::default()
-                            },
-                            cx.listener(move |this, _event, _window, cx| {
-                                if let Err(error) = this.public_mcp.set_approval_status(
-                                    &approval_ref_for_accept,
-                                    oxideterm_public_mcp::ApprovalStatus::Approved,
-                                ) {
-                                    this.public_mcp.record_action_error(error);
-                                }
-                                cx.notify();
-                                cx.stop_propagation();
-                            }),
-                        ))
-                        .child(self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.network.reject_action"),
-                            None,
-                            ToolbarButtonOptions::default(),
-                            cx.listener(move |this, _event, _window, cx| {
-                                if let Err(error) = this.public_mcp.set_approval_status(
-                                    &approval_ref_for_reject,
-                                    oxideterm_public_mcp::ApprovalStatus::Rejected,
-                                ) {
-                                    this.public_mcp.record_action_error(error);
-                                }
-                                cx.notify();
-                                cx.stop_propagation();
-                            }),
-                        )),
-                );
-            }
-        }
 
         self.settings_card(
             "settings_view.network.public_mcp",

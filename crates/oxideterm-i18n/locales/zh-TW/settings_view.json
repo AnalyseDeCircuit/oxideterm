@@ -78,9 +78,13 @@
       "help": "說明與關於",
       "keybindings": "快捷鍵",
       "graphics": "圖形",
-      "network": "網路與代理"
+      "network": "網路與外部存取"
     },
     "general": {
+      "portable_status_unlocked": "已解鎖",
+      "portable_status_locked": "已鎖定",
+      "portable_status_needs_setup": "待初始化",
+      "portable_status_disabled": "未啟用",
       "title": "一般",
       "description": "一般應用程式設定。",
       "startup": "啟動",
@@ -219,9 +223,12 @@
       "keep_running_on_close_hint": "關閉視窗後，OxideTerm 將繼續在背景執行。"
     },
     "terminal": {
+      "input_keyboard": "鍵盤與輸入提示",
+      "input_mouse_links": "滑鼠與連結",
+      "input_clipboard": "複製與貼上",
       "title": "終端機設定",
       "description": "設定終端機模擬器的外觀和行為。",
-      "font": "字型",
+      "font": "字型與排版",
       "font_family": "字型家族",
       "font_family_hint": "預設字型（✓ = 內建備用字型）",
       "select_font": "選擇字型",
@@ -266,7 +273,7 @@
       "cursor_bar": "直線 |",
       "cursor_blink": "游標閃爍",
       "cursor_blink_hint": "動態游標閃爍",
-      "input_safety": "輸入安全",
+      "input_safety": "輸入與互動",
       "paste_protection": "貼上保護",
       "paste_protection_hint": "貼上多行內容前確認，以防止意外執行命令",
       "osc52_clipboard": "OSC 52 剪貼簿",
@@ -612,7 +619,7 @@
       "page_display": "顯示",
       "page_input": "輸入",
       "page_commandBar": "命令列",
-      "page_awareness": "感知與整合",
+      "page_awareness": "Shell 整合與觸發器",
       "page_transfer": "傳輸",
       "page_highlight": "醒目標示",
       "page_logging": "日誌",
@@ -640,11 +647,15 @@
       "session_log_select_directory": "選擇終端日誌資料夾",
       "session_log_directory_template": "子資料夾範本",
       "session_log_directory_template_hint": "可選的日誌資料夾內相對配置。使用 / 分隔資料夾。可用變數：{date}、{time}、{datetime}、{session}、{host}、{username} 和 {protocol}。",
-      "page_local": "本機"
+      "page_local": "本機",
+      "font_hint": "設定終端字型、字級、字重、連字和行高。",
+      "display_behavior": "顯示行為",
+      "display_behavior_hint": "設定終端邊距、捲動和字元編碼。"
     },
     "appearance": {
+      "effects": "視覺效果與繪製",
       "title": "外觀",
-      "description": "自訂應用程式主題。",
+      "description": "設定主題、介面密度、動畫、背景和渲染策略。",
       "app_icon": "應用程式圖示",
       "app_icon_variant": "圖示顏色",
       "app_icon_variant_hint": "選擇 Dock 或工作列圖示顏色。支援執行期間切換的平台會立即生效。",
@@ -652,7 +663,7 @@
       "color_theme": "色彩主題",
       "color_theme_hint": "終端機配色方案",
       "select_theme": "選擇主題",
-      "layout": "版面配置",
+      "layout": "介面排版",
       "layout_hint": "可拖曳側邊欄右側邊緣來調整大小。使用收合按鈕 (◧) 來隱藏它。",
       "theme_group_oxide": "Oxide 系列",
       "theme_group_classic": "經典 / 其他",
@@ -780,8 +791,8 @@
     "connections": {
       "title": "連線預設值",
       "description": "新連線的預設設定。",
-      "keys_and_connections_title": "金鑰與連線",
-      "keys_and_connections_description": "集中管理已儲存連線、匯入、連線池與 SSH 金鑰。",
+      "keys_and_connections_title": "連線",
+      "keys_and_connections_description": "管理 SSH 金鑰、連線預設值、背景連線、自動重連和設定匯入。",
       "default_username": "預設使用者名稱",
       "default_port": "預設連接埠",
       "groups": {
@@ -929,8 +940,11 @@
       "action_failed": "託管金鑰操作失敗：{{error}}"
     },
     "ai": {
+      "automatic_placeholder": "自動",
+      "conversation_agents_hint": "以下選項僅作用於目前的 AI 對話。子 Agent 並行上限在全域工具原則中設定。",
+      "conversation_agents": "目前對話的子 Agent",
       "title": "OxideSens",
-      "description": "設定 OpenAI 相容 API 和內容限制。",
+      "description": "設定 AI 提供者、Agent、上下文、記憶、工具和擴充功能。",
       "general": "一般",
       "page_general": "一般",
       "page_providers": "供應商",
@@ -1184,6 +1198,9 @@
       "acp_agent_error_unknown": "未知錯誤"
     },
     "sftp": {
+      "unlimited_placeholder": "0 = 不限速",
+      "performance": "傳輸效能",
+      "opening": "開啟與傳輸方式",
       "title": "檔案傳輸",
       "description": "設定檔案傳輸行為和效能。",
       "presentation": "SFTP 開啟位置",
@@ -1213,6 +1230,8 @@
       "transfer_count_other": "{{count}} 個傳輸"
     },
     "ide": {
+      "editing_hint": "設定自動儲存和長行顯示方式。",
+      "editing": "編輯行為",
       "title": "IDE 模式 (Mini)",
       "description": "配置內建程式碼編輯器的行為。",
       "auto_save": "自動儲存",
@@ -1227,7 +1246,7 @@
       "agent_feature_search": "伺服器端 grep 搜尋和深層目錄樹載入",
       "agent_supported": "內建：x86_64、aarch64 (Linux)",
       "agent_binary_size": "約 2 MB",
-      "agent_auto_hint": "在支援的 Linux x86_64/aarch64 主機上開啟 IDE 模式時，將依下方「代理部署策略」決定是否部署——預設首次使用時會詢問您的意見。",
+      "agent_auto_hint": "在支援的 Linux x86_64/aarch64 主機上開啟 IDE 時，是否部署由所選原則決定；預設首次使用時詢問。",
       "agent_extra_hint": "其他架構不再提供預先編譯的二進位檔。你需要自行從原始碼建置 agent，然後手動上傳到遠端主機的 ~/.oxideterm/oxideterm-agent。",
       "agent_transparency_title": "透明度與隱私",
       "agent_path_label": "部署路徑",
@@ -1434,8 +1453,8 @@
       "import_failed": "無法匯入主機：{{error}}"
     },
     "mcp": {
-      "title": "MCP 伺服器",
-      "description": "連接模型上下文協議伺服器，透過外部工具擴展 AI 能力。",
+      "title": "MCP 工具伺服器",
+      "description": "為 OxideSens 連接外部 MCP 工具伺服器。外部用戶端存取 OxideTerm 的權限在「網路與外部存取」中設定。",
       "add_server": "新增伺服器",
       "no_servers": "尚未配置 MCP 伺服器。新增一個伺服器以開始使用。",
       "status_disconnected": "已斷開",
@@ -1491,6 +1510,9 @@
       "formula_hint": "重試使用帶抖動的指數退避策略：每次後續嘗試等待更長時間（不超過最大延遲），並加入少量隨機變化以避免驚群效應。"
     },
     "knowledge": {
+      "page_summary": "第 {{page}} / {{pages}} 頁 · 共 {{total}} 份文件",
+      "next_page": "下一頁",
+      "previous_page": "上一頁",
       "title": "知識庫",
       "description": "匯入並管理維運文件，用於 AI 智慧檢索。文件會被索引，並可在 OxideSens 對話中自動引用。",
       "collections": "集合",
@@ -1630,8 +1652,10 @@
       }
     },
     "network": {
+      "hide_permissions": "收合權限",
+      "show_permissions": "展開權限",
       "public_mcp": "外部 MCP 控制",
-      "public_mcp_hint": "允許已授權的外部 MCP 用戶端檢視連線並執行核准的 SSH 工作流程。",
+      "public_mcp_hint": "供外部用戶端呼叫 OxideTerm 的工具，並管理存取權限和操作核准。OxideSens 使用的外部工具伺服器請在其「工具」頁設定。",
       "public_mcp_security_hint": "服務僅監聽迴路位址。用戶端憑證只顯示一次，持久化時僅儲存摘要，且不會進入設定、.oxide 匯出或雲端同步。",
       "copy_endpoint": "複製端點",
       "public_mcp_port": "監聽連接埠",
@@ -1699,11 +1723,11 @@
       "approval_command": "命令：{{command}}",
       "approval_working_directory": "工作目錄：{{directory}}",
       "approval_notice_title": "外部 MCP 操作等待核准",
-      "approval_notice_description": "{{client}} 請求執行 {{tool}}。請前往「網路與代理 → 外部 MCP 控制」檢查。",
+      "approval_notice_description": "{{client}} 請求執行 {{tool}}。請前往「網路與外部存取 → 外部 MCP 控制」檢查。",
       "approve_action": "核准",
       "reject_action": "拒絕",
-      "title": "網路與代理",
-      "description": "設定 SSH 連線與應用程式網路請求所使用的代理路由。",
+      "title": "網路與外部存取",
+      "description": "設定代理路由、外部連線連結、MCP 用戶端存取與操作授權。",
       "shared_proxy": "共用代理",
       "shared_proxy_hint": "供 SSH 連線與應用程式流量重複使用的一份代理設定。",
       "shared_proxy_empty_hint": "請先新增共用代理，再決定哪些流量使用它。",

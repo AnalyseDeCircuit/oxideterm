@@ -608,18 +608,18 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let settings = self.settings_store.settings();
         match section_index {
-            0 => self.settings_ssh_section(0, cx),
-            1 => self.settings_card(
+            0 => self.settings_card(
                 "settings_view.connections.title",
                 "settings_view.connections.description",
                 vec![self.connection_defaults_section(settings, cx)],
             ),
-            2 => self.connection_section(
+            1 => self.connection_section(
                 "settings_view.connections.idle_timeout.title",
                 "settings_view.connections.idle_timeout.description",
                 vec![self.connection_idle_timeout_control(settings, cx)],
             ),
-            3 => self.settings_reconnect_section(0, cx),
+            2 => self.settings_reconnect_section(0, cx),
+            3 => self.settings_ssh_section(0, cx),
             4 => self.ssh_config_import_section(cx),
             5 => self.connection_importers_section(cx),
             _ => div().into_any_element(),
@@ -1051,16 +1051,7 @@ impl WorkspaceApp {
         description_key: &str,
         rows: Vec<AnyElement>,
     ) -> AnyElement {
-        let mut card_rows = vec![
-            div()
-                .text_size(px(self.tokens.metrics.ui_text_xs))
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(self.i18n.t(description_key))
-                .into_any_element(),
-        ];
-        card_rows.extend(rows);
-
-        self.settings_card(title_key, description_key, card_rows)
+        self.settings_card(title_key, description_key, rows)
     }
 
     pub(in crate::workspace) fn ssh_config_toggle_all_button(

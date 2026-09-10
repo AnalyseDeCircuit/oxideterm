@@ -117,6 +117,14 @@ impl WorkspaceApp {
                 cx,
             ),
             self.card_separator(),
+            self.bool_row(
+                "settings_view.terminal.show_performance_overlay",
+                "settings_view.terminal.show_performance_overlay_hint",
+                self.settings_store.settings().terminal.show_fps_overlay,
+                set_show_terminal_performance_overlay,
+                cx,
+            ),
+            self.card_separator(),
             self.help_action_row(
                 "settings_view.help.open_logs",
                 "settings_view.help.open_logs_hint",

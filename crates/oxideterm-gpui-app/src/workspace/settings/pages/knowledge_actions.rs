@@ -1,6 +1,27 @@
 use super::*;
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn show_knowledge_document_page(
+        &mut self,
+        collection_id: String,
+        page: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.set_knowledge_document_page(collection_id, page);
+            cx.notify();
+        });
+        self.sync_settings_section_list_state(cx);
+        self.settings_section_list_state
+            .scroll_to(gpui::ListOffset {
+                item_ix: SETTINGS_SECTION_HEADER_ITEM_COUNT
+                    + 2
+                    + usize::from(self.ai_entity.read(cx).knowledge_error().is_some()),
+                offset_in_item: px(0.0),
+            });
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn knowledge_create_collection(&mut self, cx: &mut Context<Self>) {
         let error_message = self
             .i18n

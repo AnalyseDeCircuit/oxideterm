@@ -103,7 +103,20 @@ impl WorkspaceApp {
         let (badge_label, badge_color) = portable_status
             .map(|status| {
                 (
-                    format!("{:?}", status.status),
+                    self.i18n.t(match status.status {
+                        oxideterm_portable_runtime::PortableBootstrapStatus::Disabled => {
+                            "settings_view.general.portable_status_disabled"
+                        }
+                        oxideterm_portable_runtime::PortableBootstrapStatus::NeedsSetup => {
+                            "settings_view.general.portable_status_needs_setup"
+                        }
+                        oxideterm_portable_runtime::PortableBootstrapStatus::Locked => {
+                            "settings_view.general.portable_status_locked"
+                        }
+                        oxideterm_portable_runtime::PortableBootstrapStatus::Unlocked => {
+                            "settings_view.general.portable_status_unlocked"
+                        }
+                    }),
                     portable_status_badge_color(status.status, &self.tokens),
                 )
             })

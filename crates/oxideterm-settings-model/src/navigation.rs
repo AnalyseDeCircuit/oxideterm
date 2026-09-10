@@ -197,20 +197,20 @@ pub fn settings_tab_section_count(
     match tab {
         SettingsTab::General => {
             if cfg!(any(target_os = "windows", target_os = "macos")) {
-                7
-            } else {
                 6
+            } else {
+                5
             }
         }
         SettingsTab::Portable => 1,
         SettingsTab::Terminal => terminal_settings_section_count(dynamic.terminal_page),
-        SettingsTab::Appearance => 4,
+        SettingsTab::Appearance => 5,
         // Reconnect controls share one card and therefore one virtual section.
         SettingsTab::Connections => 6,
         SettingsTab::Privilege => 1,
-        SettingsTab::Network => 3,
+        SettingsTab::Network => 4,
         SettingsTab::Sftp => 3,
-        SettingsTab::Ide => 5,
+        SettingsTab::Ide => 4,
         SettingsTab::Ai => ai_settings_section_count(dynamic.ai_page),
         SettingsTab::Knowledge => knowledge_settings_section_count(
             dynamic.knowledge_has_error,
@@ -225,8 +225,8 @@ pub fn settings_tab_section_count(
 
 pub fn terminal_settings_section_count(page: TerminalSettingsPage) -> usize {
     let page_cards = match page {
-        TerminalSettingsPage::Display => 4,
-        TerminalSettingsPage::Input => 1,
+        TerminalSettingsPage::Display => 5,
+        TerminalSettingsPage::Input => 3,
         // The dedicated keybindings page owns shortcut discovery and editing.
         TerminalSettingsPage::Local => 4,
         TerminalSettingsPage::CommandBar => 3,
@@ -247,8 +247,8 @@ pub fn ai_settings_section_count(page: AiSettingsPage) -> usize {
         // Context controls, prompt, memory, and model windows are
         // separate cards so each virtual row owns one stable responsibility.
         AiSettingsPage::Context => 4,
-        // Tool approval, Agent Skills, and MCP servers are independent cards.
-        AiSettingsPage::Tools => 3,
+        // Tool policy, conversation agents, skills, and MCP servers have separate scopes.
+        AiSettingsPage::Tools => 4,
     };
     // The first section is the subpage picker, matching terminal settings.
     1 + page_cards
@@ -259,7 +259,7 @@ pub fn keybinding_settings_section_count(visible_scope_count: usize) -> usize {
 }
 
 pub fn knowledge_settings_section_count(has_error: bool, has_selected_collection: bool) -> usize {
-    1 + usize::from(has_error) + usize::from(has_selected_collection)
+    2 + usize::from(has_error) + usize::from(has_selected_collection)
 }
 
 pub fn settings_section_list_identity(

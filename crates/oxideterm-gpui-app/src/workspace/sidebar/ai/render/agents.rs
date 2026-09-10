@@ -189,10 +189,10 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(self.tokens.spacing.two))
-            .pt(px(self.tokens.spacing.three))
-            .border_t_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .child(self.ai_section_title("ai.agents.options"));
+            .child(self.ai_section_title("settings_view.ai.conversation_agents"))
+            .child(div().text_size(px(self.tokens.metrics.ui_text_xs))
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child(self.i18n.t("settings_view.ai.conversation_agents_hint")));
         if let Some((id, title)) = conversation {
             let options = ai.agent_options(&id);
             let picker_open = ai.agents.settings_model_picker_open;
@@ -267,6 +267,13 @@ impl WorkspaceApp {
                     .child(self.i18n.t("ai.agents.no_conversation")),
             );
         }
+        section.into_any_element()
+    }
+
+    pub(in crate::workspace) fn render_ai_agent_concurrency_setting(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let current = self.agent_concurrency();
         let mut choices = oxideterm_gpui_ui::tabs::segmented_tabs(&self.tokens);
         for limit in 1..=oxideterm_ai::agent::MAX_AGENT_CONCURRENCY {
@@ -302,14 +309,12 @@ impl WorkspaceApp {
                 .aria_selected(current == limit),
             );
         }
-        section
-            .child(self.setting_row(
+        self.setting_row(
                 "ai.agents.concurrency",
                 "ai.agents.concurrency_hint",
                 choices.into_any_element(),
                 cx,
-            ))
-            .into_any_element()
+            )
     }
 
     fn render_ai_agent_resource_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {

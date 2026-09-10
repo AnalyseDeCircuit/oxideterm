@@ -9,6 +9,7 @@ use oxideterm_settings_model::{
 
 pub(in crate::workspace) mod agents;
 pub(in crate::workspace) mod knowledge;
+pub(in crate::workspace) use knowledge::KNOWLEDGE_DOCUMENT_PAGE_SIZE;
 
 /// Pending input is owned by this workspace and is never replayed from chat persistence.
 pub(in crate::workspace) struct AiQueuedChatTurn {

@@ -78,9 +78,13 @@
       "help": "Help & About",
       "keybindings": "Keybindings",
       "graphics": "Graphics",
-      "network": "Network & Proxy"
+      "network": "Network & External Access"
     },
     "general": {
+      "portable_status_unlocked": "Unlocked",
+      "portable_status_locked": "Locked",
+      "portable_status_needs_setup": "Setup required",
+      "portable_status_disabled": "Disabled",
       "title": "General",
       "description": "General application settings.",
       "startup": "Startup",
@@ -219,9 +223,12 @@
       "keep_running_on_close_hint": "Closing the window keeps OxideTerm running in the background."
     },
     "terminal": {
+      "input_keyboard": "Keyboard & Input Suggestions",
+      "input_mouse_links": "Mouse & Links",
+      "input_clipboard": "Copy & Paste",
       "title": "Terminal Settings",
       "description": "Configure appearance and behavior of the terminal emulator.",
-      "font": "Font",
+      "font": "Font & Typography",
       "font_family": "Font Family",
       "font_family_hint": "Preset fonts (✓ = bundled fallback)",
       "select_font": "Select font",
@@ -268,7 +275,7 @@
       "cursor_bar": "Bar |",
       "cursor_blink": "Cursor Blink",
       "cursor_blink_hint": "Animate cursor blinking",
-      "input_safety": "Input Safety",
+      "input_safety": "Input & Interaction",
       "paste_protection": "Paste Protection",
       "paste_protection_hint": "Confirm before pasting multi-line content to prevent accidental command execution",
       "osc52_clipboard": "OSC 52 Clipboard",
@@ -612,7 +619,7 @@
       "page_display": "Display",
       "page_input": "Input",
       "page_commandBar": "Command Bar",
-      "page_awareness": "Awareness & Integration",
+      "page_awareness": "Shell Integration & Triggers",
       "page_transfer": "Transfer",
       "page_highlight": "Highlight",
       "page_logging": "Logging",
@@ -640,11 +647,15 @@
       "session_log_select_directory": "Select Terminal Log Folder",
       "session_log_directory_template": "Subfolder Template",
       "session_log_directory_template_hint": "Optional relative layout under the log folder. Use / between folders. Available: {date}, {time}, {datetime}, {session}, {host}, {username}, and {protocol}.",
-      "page_local": "Local"
+      "page_local": "Local",
+      "font_hint": "Configure terminal font families, size, weight, ligatures, and line height.",
+      "display_behavior": "Display Behavior",
+      "display_behavior_hint": "Configure terminal padding, scrolling, and character encoding."
     },
     "appearance": {
+      "effects": "Visual Effects & Rendering",
       "title": "Appearance",
-      "description": "Customize the application theme.",
+      "description": "Configure themes, interface density, animations, backgrounds, and rendering policy.",
       "app_icon": "App Icon",
       "app_icon_variant": "Icon Color",
       "app_icon_variant_hint": "Choose the Dock/taskbar icon color. Runtime switching is applied where the platform supports it.",
@@ -652,7 +663,7 @@
       "color_theme": "Color Theme",
       "color_theme_hint": "Terminal color scheme",
       "select_theme": "Select theme",
-      "layout": "Layout",
+      "layout": "Interface Layout",
       "layout_hint": "Sidebar can be resized by dragging its right edge. Use the collapse button (◧) to hide it.",
       "theme_group_oxide": "Oxide Series",
       "theme_group_classic": "Classic / Other",
@@ -780,8 +791,8 @@
     "connections": {
       "title": "Connection Defaults",
       "description": "Default settings for new connections.",
-      "keys_and_connections_title": "Keys & Connections",
-      "keys_and_connections_description": "Manage saved connections, imports, connection pooling, and SSH keys in one place.",
+      "keys_and_connections_title": "Connections",
+      "keys_and_connections_description": "Manage SSH keys, connection defaults, background connections, reconnection, and profile imports.",
       "default_username": "Default Username",
       "default_port": "Default Port",
       "groups": {
@@ -929,8 +940,11 @@
       "action_failed": "Managed key operation failed: {{error}}"
     },
     "ai": {
+      "automatic_placeholder": "Automatic",
+      "conversation_agents_hint": "These options apply only to the current AI conversation. Set the subagent concurrency limit in the global tool policy.",
+      "conversation_agents": "Current Conversation Subagents",
       "title": "OxideSens",
-      "description": "Configure OpenAI-compatible API and context limits.",
+      "description": "Configure AI providers, agents, context, memory, tools, and extensions.",
       "general": "General",
       "page_general": "General",
       "page_providers": "Providers",
@@ -1184,6 +1198,9 @@
       "acp_agent_error_unknown": "Unknown error"
     },
     "sftp": {
+      "unlimited_placeholder": "0 = unlimited",
+      "performance": "Transfer Performance",
+      "opening": "Opening & Transfer Method",
       "title": "File Transfer",
       "description": "Configure file transfer behavior and performance.",
       "presentation": "Open SFTP in",
@@ -1213,6 +1230,8 @@
       "transfer_count_other": "{{count}} transfers"
     },
     "ide": {
+      "editing_hint": "Choose how edits are saved and long lines are displayed.",
+      "editing": "Editing Behavior",
       "title": "IDE Mode (Mini)",
       "description": "Configure the built-in code editor behavior.",
       "auto_save": "Auto Save",
@@ -1227,7 +1246,7 @@
       "agent_feature_search": "Server-side grep and deep directory tree loading",
       "agent_supported": "Bundled: x86_64, aarch64 (Linux)",
       "agent_binary_size": "~2 MB",
-      "agent_auto_hint": "When opening IDE mode on supported Linux x86_64/aarch64 hosts, the agent is deployed based on the policy below — you will be prompted to confirm on first use (or deploy automatically if set to 'Always Enable').",
+      "agent_auto_hint": "On supported Linux x86_64/aarch64 hosts, IDE agent deployment follows the selected policy. The default asks before the first deployment.",
       "agent_extra_hint": "Prebuilt binaries are no longer provided for other architectures. Build the agent from source yourself, then manually upload it to ~/.oxideterm/oxideterm-agent on the remote host.",
       "agent_transparency_title": "Transparency & Privacy",
       "agent_path_label": "Deploy Path",
@@ -1434,8 +1453,8 @@
       "import_failed": "Failed to import host: {{error}}"
     },
     "mcp": {
-      "title": "MCP Servers",
-      "description": "Connect to Model Context Protocol servers to extend AI capabilities with external tools.",
+      "title": "MCP Tool Servers",
+      "description": "Connect OxideSens to external MCP tool servers. Configure external clients’ access to OxideTerm under Network & External Access.",
       "add_server": "Add Server",
       "no_servers": "No MCP servers configured. Add a server to get started.",
       "status_disconnected": "Disconnected",
@@ -1491,6 +1510,9 @@
       "formula_hint": "Retries use exponential backoff with jitter: each subsequent attempt waits longer (up to the max delay), with a small random variation to avoid thundering herd."
     },
     "knowledge": {
+      "page_summary": "Page {{page}} / {{pages}} · {{total}} documents",
+      "next_page": "Next",
+      "previous_page": "Previous",
       "title": "Knowledge Base",
       "description": "Import and manage operations documentation for AI-powered retrieval. Documents are indexed and can be automatically referenced during OxideSens chat.",
       "collections": "Collections",
@@ -1630,8 +1652,10 @@
       }
     },
     "network": {
+      "hide_permissions": "Hide permissions",
+      "show_permissions": "Show permissions",
       "public_mcp": "External MCP Control",
-      "public_mcp_hint": "Let authorized external MCP clients inspect connections and run approved SSH workflows.",
+      "public_mcp_hint": "Let external clients call OxideTerm tools and manage their permissions and operation approvals. Configure external tool servers used by OxideSens on its Tools page.",
       "public_mcp_security_hint": "The endpoint is loopback-only. Client credentials are shown once, stored only as digests, and never included in settings, .oxide exports, or cloud sync.",
       "copy_endpoint": "Copy Endpoint",
       "public_mcp_port": "Listening port",
@@ -1699,11 +1723,11 @@
       "approval_command": "Command: {{command}}",
       "approval_working_directory": "Working directory: {{directory}}",
       "approval_notice_title": "External MCP action needs approval",
-      "approval_notice_description": "{{client}} requested {{tool}}. Review it under Network & Proxy → External MCP Control.",
+      "approval_notice_description": "{{client}} requested {{tool}}. Review it under Network & External Access → External MCP Control.",
       "approve_action": "Approve",
       "reject_action": "Reject",
-      "title": "Network & Proxy",
-      "description": "Configure proxy routing for SSH connections and application network requests.",
+      "title": "Network & External Access",
+      "description": "Configure proxy routing, external connection links, MCP client access, and operation approvals.",
       "shared_proxy": "Shared Proxy",
       "shared_proxy_hint": "One reusable proxy profile for SSH connections and application traffic.",
       "shared_proxy_empty_hint": "Add a shared proxy before assigning traffic to it.",

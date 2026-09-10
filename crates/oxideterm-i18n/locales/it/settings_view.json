@@ -78,9 +78,13 @@
       "help": "Aiuto e Info",
       "keybindings": "Scorciatoie da tastiera",
       "graphics": "Grafica",
-      "network": "Rete e proxy"
+      "network": "Rete e accesso esterno"
     },
     "general": {
+      "portable_status_unlocked": "Sbloccato",
+      "portable_status_locked": "Bloccato",
+      "portable_status_needs_setup": "Configurazione richiesta",
+      "portable_status_disabled": "Disattivato",
       "title": "Generale",
       "description": "Impostazioni generali dell'applicazione.",
       "startup": "Avvio",
@@ -219,9 +223,12 @@
       "keep_running_on_close_hint": "Dopo la chiusura della finestra, OxideTerm continuerà a essere eseguito in background."
     },
     "terminal": {
+      "input_keyboard": "Tastiera e suggerimenti di input",
+      "input_mouse_links": "Mouse e collegamenti",
+      "input_clipboard": "Copia e incolla",
       "title": "Impostazioni Terminale",
       "description": "Configura aspetto e comportamento dell'emulatore di terminale.",
-      "font": "Font",
+      "font": "Caratteri e tipografia",
       "font_family": "Famiglia Font",
       "font_family_hint": "Font preimpostati (✓ = fallback incluso)",
       "select_font": "Seleziona font",
@@ -266,7 +273,7 @@
       "cursor_bar": "Barra |",
       "cursor_blink": "Lampeggio Cursore",
       "cursor_blink_hint": "Anima il lampeggio del cursore",
-      "input_safety": "Sicurezza Input",
+      "input_safety": "Input e interazione",
       "paste_protection": "Protezione Incolla",
       "paste_protection_hint": "Conferma prima di incollare contenuti multi-riga per prevenire esecuzioni accidentali",
       "osc52_clipboard": "Appunti OSC 52",
@@ -612,7 +619,7 @@
       "page_display": "Display",
       "page_input": "Input",
       "page_commandBar": "Barra comandi",
-      "page_awareness": "Percezione e integrazione",
+      "page_awareness": "Integrazione Shell e trigger",
       "page_transfer": "Trasferimento",
       "page_highlight": "Evidenziazione",
       "page_logging": "Registrazione",
@@ -640,11 +647,15 @@
       "session_log_select_directory": "Seleziona la cartella dei registri del terminale",
       "session_log_directory_template": "Modello sottocartelle",
       "session_log_directory_template_hint": "Struttura relativa facoltativa nella cartella dei registri. Usa / tra le cartelle. Disponibili: {date}, {time}, {datetime}, {session}, {host}, {username} e {protocol}.",
-      "page_local": "Locale"
+      "page_local": "Locale",
+      "font_hint": "Configura caratteri, dimensione, peso, legature e altezza delle righe del terminale.",
+      "display_behavior": "Comportamento della visualizzazione",
+      "display_behavior_hint": "Configura margini, scorrimento e codifica del terminale."
     },
     "appearance": {
+      "effects": "Effetti visivi e rendering",
       "title": "Aspetto",
-      "description": "Personalizza il tema dell'applicazione.",
+      "description": "Configura temi, densità dell’interfaccia, animazioni, sfondi e criteri di rendering.",
       "app_icon": "Icona dell’app",
       "app_icon_variant": "Colore icona",
       "app_icon_variant_hint": "Scegli il colore dell’icona nel Dock o nella barra delle applicazioni. Il cambio a runtime si applica sulle piattaforme supportate.",
@@ -652,7 +663,7 @@
       "color_theme": "Tema Colori",
       "color_theme_hint": "Schema colori del terminale",
       "select_theme": "Seleziona tema",
-      "layout": "Layout",
+      "layout": "Layout dell’interfaccia",
       "layout_hint": "La barra laterale può essere ridimensionata trascinando il bordo destro. Usa il pulsante comprimi (◧) per nasconderla.",
       "theme_group_oxide": "Serie Oxide",
       "theme_group_classic": "Classico / Altri",
@@ -780,8 +791,8 @@
     "connections": {
       "title": "Impostazioni Connessione Predefinite",
       "description": "Impostazioni predefinite per nuove connessioni.",
-      "keys_and_connections_title": "Chiavi e connessioni",
-      "keys_and_connections_description": "Gestisci in un unico punto connessioni salvate, importazioni, pool di connessioni e chiavi SSH.",
+      "keys_and_connections_title": "Connessioni",
+      "keys_and_connections_description": "Gestisci chiavi SSH, valori di connessione predefiniti, connessioni in background, riconnessione e importazioni.",
       "default_username": "Nome Utente Predefinito",
       "default_port": "Porta Predefinita",
       "groups": {
@@ -929,8 +940,11 @@
       "action_failed": "Operazione sulla chiave gestita non riuscita: {{error}}"
     },
     "ai": {
+      "automatic_placeholder": "Automatico",
+      "conversation_agents_hint": "Queste opzioni si applicano solo alla conversazione IA attuale. Imposta il limite dei sottoagenti simultanei nella politica globale degli strumenti.",
+      "conversation_agents": "Sottoagenti della conversazione attuale",
       "title": "OxideSens",
-      "description": "Configura API compatibile OpenAI e limiti di contesto.",
+      "description": "Configura fornitori IA, agenti, contesto, memoria, strumenti ed estensioni.",
       "general": "Generale",
       "page_general": "Generale",
       "page_providers": "Provider",
@@ -1184,6 +1198,9 @@
       "acp_agent_error_unknown": "Errore sconosciuto"
     },
     "sftp": {
+      "unlimited_placeholder": "0 = illimitato",
+      "performance": "Prestazioni dei trasferimenti",
+      "opening": "Apertura e metodo di trasferimento",
       "title": "Trasferimento file",
       "description": "Configura comportamento e prestazioni del trasferimento file.",
       "presentation": "Apri SFTP in",
@@ -1213,6 +1230,8 @@
       "transfer_count_other": "{{count}} trasferimenti"
     },
     "ide": {
+      "editing_hint": "Configura il salvataggio automatico e la visualizzazione delle righe lunghe.",
+      "editing": "Comportamento dell’editor",
       "title": "Modalità IDE (Mini)",
       "description": "Configura il comportamento dell'editor di codice integrato.",
       "auto_save": "Salvataggio automatico",
@@ -1227,7 +1246,7 @@
       "agent_feature_search": "Ricerca grep lato server e caricamento profondo dell'albero delle directory",
       "agent_supported": "Inclusi: x86_64, aarch64 (Linux)",
       "agent_binary_size": "~2 MB",
-      "agent_auto_hint": "All'apertura della modalità IDE su host Linux x86_64/aarch64 supportati, il deploy segue la politica indicata sotto — per impostazione predefinita verrà richiesta conferma al primo utilizzo.",
+      "agent_auto_hint": "Sugli host Linux x86_64/aarch64 supportati, la distribuzione dell’agente IDE segue la politica selezionata. Per impostazione predefinita, viene richiesta conferma prima della prima distribuzione.",
       "agent_extra_hint": "Per le altre architetture non vengono piu forniti binari precompilati. Devi compilare l'agent dal codice sorgente e poi caricarlo manualmente in ~/.oxideterm/oxideterm-agent sull'host remoto.",
       "agent_transparency_title": "Trasparenza e privacy",
       "agent_path_label": "Percorso di distribuzione",
@@ -1434,8 +1453,8 @@
       "import_failed": "Impossibile importare host: {{error}}"
     },
     "mcp": {
-      "title": "Server MCP",
-      "description": "Connettiti ai server Model Context Protocol per estendere le capacità dell'IA con strumenti esterni.",
+      "title": "Server di strumenti MCP",
+      "description": "Collega OxideSens a server esterni di strumenti MCP. Configura l’accesso dei client esterni a OxideTerm in «Rete e accesso esterno».",
       "add_server": "Aggiungi server",
       "no_servers": "Nessun server MCP configurato. Aggiungi un server per iniziare.",
       "status_disconnected": "Disconnesso",
@@ -1491,6 +1510,9 @@
       "formula_hint": "I tentativi utilizzano il backoff esponenziale con jitter: ogni tentativo successivo attende più a lungo (fino al ritardo massimo), con una piccola variazione casuale per evitare l'effetto thundering herd."
     },
     "knowledge": {
+      "page_summary": "Pagina {{page}} / {{pages}} · {{total}} documenti",
+      "next_page": "Successiva",
+      "previous_page": "Precedente",
       "title": "Base di conoscenza",
       "description": "Importa e gestisci la documentazione operativa per il recupero assistito dall'IA. I documenti vengono indicizzati e possono essere referenziati automaticamente durante la chat OxideSens.",
       "collections": "Collezioni",
@@ -1630,8 +1652,10 @@
       }
     },
     "network": {
+      "hide_permissions": "Nascondi autorizzazioni",
+      "show_permissions": "Mostra autorizzazioni",
       "public_mcp": "External MCP Control",
-      "public_mcp_hint": "Let authorized external MCP clients inspect connections and run approved SSH workflows.",
+      "public_mcp_hint": "Consenti ai client esterni di usare gli strumenti di OxideTerm e gestisci autorizzazioni e approvazioni delle operazioni. Configura i server di strumenti esterni di OxideSens nella sua pagina degli strumenti.",
       "public_mcp_security_hint": "The endpoint is loopback-only. Client credentials are shown once, stored only as digests, and never included in settings, .oxide exports, or cloud sync.",
       "copy_endpoint": "Copy Endpoint",
       "public_mcp_port": "Listening port",
@@ -1702,8 +1726,8 @@
       "approval_notice_description": "{{client}} requested {{tool}}. Review it under Network & Proxy → External MCP Control.",
       "approve_action": "Approve",
       "reject_action": "Reject",
-      "title": "Rete e proxy",
-      "description": "Configura il routing proxy per le connessioni SSH e le richieste di rete dell’applicazione.",
+      "title": "Rete e accesso esterno",
+      "description": "Configura percorsi proxy, collegamenti di connessione esterni, accesso dei client MCP e approvazioni delle operazioni.",
       "shared_proxy": "Proxy condiviso",
       "shared_proxy_hint": "Un profilo proxy riutilizzabile per le connessioni SSH e il traffico dell’applicazione.",
       "shared_proxy_empty_hint": "Aggiungi prima un proxy condiviso, quindi assegnagli il traffico.",

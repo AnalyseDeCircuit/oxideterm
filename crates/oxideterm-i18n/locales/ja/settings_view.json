@@ -78,9 +78,13 @@
       "help": "ヘルプと詳細",
       "keybindings": "キーバインド",
       "graphics": "グラフィックス",
-      "network": "ネットワークとプロキシ"
+      "network": "ネットワークと外部アクセス"
     },
     "general": {
+      "portable_status_unlocked": "ロック解除済み",
+      "portable_status_locked": "ロック中",
+      "portable_status_needs_setup": "初期設定が必要",
+      "portable_status_disabled": "無効",
       "title": "一般",
       "description": "一般的なアプリケーション設定。",
       "startup": "起動",
@@ -219,9 +223,12 @@
       "keep_running_on_close_hint": "ウィンドウを閉じても、OxideTerm はバックグラウンドで実行し続けます。"
     },
     "terminal": {
+      "input_keyboard": "キーボードと入力候補",
+      "input_mouse_links": "マウスとリンク",
+      "input_clipboard": "コピーと貼り付け",
       "title": "ターミナル設定",
       "description": "ターミナルエミュレータの外観と動作を設定します。",
-      "font": "フォント",
+      "font": "フォントと文字組み",
       "font_family": "フォントファミリー",
       "font_family_hint": "プリセットフォント（✓ = バンドルフォールバック）",
       "select_font": "フォントを選択",
@@ -266,7 +273,7 @@
       "cursor_bar": "バー |",
       "cursor_blink": "カーソル点滅",
       "cursor_blink_hint": "カーソルの点滅アニメーション",
-      "input_safety": "入力安全性",
+      "input_safety": "入力と操作",
       "paste_protection": "ペースト保護",
       "paste_protection_hint": "複数行のコンテンツをペーストする前に確認し、コマンドの誤実行を防止",
       "osc52_clipboard": "OSC 52 クリップボード",
@@ -612,7 +619,7 @@
       "page_display": "表示",
       "page_input": "入力",
       "page_commandBar": "コマンドバー",
-      "page_awareness": "認識と統合",
+      "page_awareness": "Shell 連携とトリガー",
       "page_transfer": "転送",
       "page_highlight": "ハイライト",
       "page_logging": "ログ",
@@ -640,11 +647,15 @@
       "session_log_select_directory": "ターミナルログフォルダーを選択",
       "session_log_directory_template": "サブフォルダーテンプレート",
       "session_log_directory_template_hint": "ログフォルダー内の任意の相対配置です。フォルダーは / で区切ります。使用可能: {date}、{time}、{datetime}、{session}、{host}、{username}、{protocol}。",
-      "page_local": "ローカル"
+      "page_local": "ローカル",
+      "font_hint": "端末のフォント、サイズ、ウェイト、合字、行の高さを設定します。",
+      "display_behavior": "表示動作",
+      "display_behavior_hint": "端末の余白、スクロール、文字エンコーディングを設定します。"
     },
     "appearance": {
+      "effects": "視覚効果と描画",
       "title": "外観",
-      "description": "アプリケーションテーマをカスタマイズします。",
+      "description": "テーマ、画面の密度、アニメーション、背景、描画方針を設定します。",
       "app_icon": "アプリアイコン",
       "app_icon_variant": "アイコンカラー",
       "app_icon_variant_hint": "Dock やタスクバーに表示するアイコンの色を選びます。対応環境では実行中に反映されます。",
@@ -652,7 +663,7 @@
       "color_theme": "カラーテーマ",
       "color_theme_hint": "ターミナルの配色",
       "select_theme": "テーマを選択",
-      "layout": "レイアウト",
+      "layout": "インターフェースのレイアウト",
       "layout_hint": "サイドバーは右端をドラッグしてサイズ変更できます。折りたたみボタン（◧）を使用して非表示にします。",
       "theme_group_oxide": "Oxide シリーズ",
       "theme_group_classic": "クラシック / その他",
@@ -780,8 +791,8 @@
     "connections": {
       "title": "接続のデフォルト値",
       "description": "新しい接続のデフォルト設定。",
-      "keys_and_connections_title": "キーと接続",
-      "keys_and_connections_description": "保存済み接続、インポート、接続プール、SSH キーをまとめて管理します。",
+      "keys_and_connections_title": "接続",
+      "keys_and_connections_description": "SSH 鍵、接続の既定値、バックグラウンド接続、再接続、設定のインポートを管理します。",
       "default_username": "デフォルトユーザー名",
       "default_port": "デフォルトポート",
       "groups": {
@@ -929,8 +940,11 @@
       "action_failed": "管理対象キーの操作に失敗しました: {{error}}"
     },
     "ai": {
+      "automatic_placeholder": "自動",
+      "conversation_agents_hint": "これらの設定は現在の AI 会話にのみ適用されます。サブエージェントの同時実行数の上限は、全体のツールポリシーで設定します。",
+      "conversation_agents": "現在の会話のサブエージェント",
       "title": "OxideSens",
-      "description": "OpenAI互換APIとコンテキスト制限を設定します。",
+      "description": "AI プロバイダー、Agent、コンテキスト、メモリ、ツール、拡張機能を設定します。",
       "general": "一般",
       "page_general": "一般",
       "page_providers": "プロバイダー",
@@ -1184,6 +1198,9 @@
       "acp_agent_error_unknown": "不明なエラー"
     },
     "sftp": {
+      "unlimited_placeholder": "0 = 制限なし",
+      "performance": "転送パフォーマンス",
+      "opening": "開き方と転送方式",
       "title": "ファイル転送",
       "description": "ファイル転送の動作とパフォーマンスを設定します。",
       "presentation": "SFTP の表示先",
@@ -1213,6 +1230,8 @@
       "transfer_count_other": "{{count}} 転送"
     },
     "ide": {
+      "editing_hint": "自動保存と長い行の表示方法を設定します。",
+      "editing": "編集動作",
       "title": "IDE モード (Mini)",
       "description": "内蔵コードエディタの動作を設定します。",
       "auto_save": "自動保存",
@@ -1227,7 +1246,7 @@
       "agent_feature_search": "サーバーサイド grep と深いディレクトリツリーの読み込み",
       "agent_supported": "内蔵：x86_64、aarch64 (Linux)",
       "agent_binary_size": "約 2 MB",
-      "agent_auto_hint": "サポートされている Linux x86_64/aarch64 ホストで IDE モードを開くと、下記の「エージェントデプロイポリシー」に従って動作します。デフォルトでは初回に確認ダイアログが表示されます。",
+      "agent_auto_hint": "対応する Linux x86_64/aarch64 ホストでは、選択したポリシーに従って IDE エージェントをデプロイします。デフォルトでは初回デプロイ前に確認します。",
       "agent_extra_hint": "その他のアーキテクチャ向けには事前ビルド済みバイナリは提供されなくなりました。ユーザー自身でソースから agent をビルドし、リモートホストの ~/.oxideterm/oxideterm-agent へ手動でアップロードしてください。",
       "agent_transparency_title": "透明性とプライバシー",
       "agent_path_label": "配置パス",
@@ -1434,8 +1453,8 @@
       "import_failed": "ホストのインポートに失敗しました: {{error}}"
     },
     "mcp": {
-      "title": "MCP サーバー",
-      "description": "Model Context Protocol サーバーに接続して、外部ツールで AI の機能を拡張します。",
+      "title": "MCP ツールサーバー",
+      "description": "OxideSens を外部の MCP ツールサーバーに接続します。外部クライアントによる OxideTerm へのアクセス権限は「ネットワークと外部アクセス」で設定します。",
       "add_server": "サーバーを追加",
       "no_servers": "MCP サーバーが設定されていません。サーバーを追加して開始してください。",
       "status_disconnected": "切断済み",
@@ -1491,6 +1510,9 @@
       "formula_hint": "リトライはジッター付き指数バックオフを使用します：後続の試行はより長く待機し（最大遅延まで）、サンダーリングハードを避けるために小さなランダム変動が加えられます。"
     },
     "knowledge": {
+      "page_summary": "{{page}} / {{pages}} ページ · {{total}} 件の文書",
+      "next_page": "次へ",
+      "previous_page": "前へ",
       "title": "ナレッジベース",
       "description": "AI検索のための運用ドキュメントをインポート・管理します。ドキュメントはインデックス化され、OxideSens チャット中に自動的に参照できます。",
       "collections": "コレクション",
@@ -1630,8 +1652,10 @@
       }
     },
     "network": {
+      "hide_permissions": "権限を非表示",
+      "show_permissions": "権限を表示",
       "public_mcp": "External MCP Control",
-      "public_mcp_hint": "Let authorized external MCP clients inspect connections and run approved SSH workflows.",
+      "public_mcp_hint": "外部クライアントによる OxideTerm のツール利用を許可し、権限と操作の承認を管理します。OxideSens が使用する外部ツールサーバーは、そのツールページで設定してください。",
       "public_mcp_security_hint": "The endpoint is loopback-only. Client credentials are shown once, stored only as digests, and never included in settings, .oxide exports, or cloud sync.",
       "copy_endpoint": "Copy Endpoint",
       "public_mcp_port": "Listening port",
@@ -1702,8 +1726,8 @@
       "approval_notice_description": "{{client}} requested {{tool}}. Review it under Network & Proxy → External MCP Control.",
       "approve_action": "Approve",
       "reject_action": "Reject",
-      "title": "ネットワークとプロキシ",
-      "description": "SSH 接続とアプリケーションのネットワーク要求に使うプロキシ経路を設定します。",
+      "title": "ネットワークと外部アクセス",
+      "description": "プロキシ経路、外部からの接続リンク、MCP クライアントのアクセス、操作の承認を設定します。",
       "shared_proxy": "共有プロキシ",
       "shared_proxy_hint": "SSH 接続とアプリケーション通信で再利用するプロキシ設定です。",
       "shared_proxy_empty_hint": "先に共有プロキシを追加してから、使用する通信を選択してください。",

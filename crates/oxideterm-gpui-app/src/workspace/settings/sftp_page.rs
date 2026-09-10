@@ -13,6 +13,7 @@ impl WorkspaceApp {
         if section_index == 0 {
             return self.sftp_settings_card(
                 vec![
+                    self.card_title("settings_view.sftp.opening"),
                     self.sftp_settings_row(
                         "settings_view.sftp.presentation",
                         Some("settings_view.sftp.presentation_hint"),
@@ -31,32 +32,6 @@ impl WorkspaceApp {
                             file_transfer_protocol_label(
                                 settings.sftp.transfer_protocol,
                                 &self.i18n,
-                            ),
-                            cx,
-                        ),
-                    ),
-                    self.card_separator(),
-                    self.sftp_settings_row(
-                        "settings_view.sftp.concurrent",
-                        Some("settings_view.sftp.concurrent_hint"),
-                        self.sftp_select_control(
-                            SettingsSelect::SftpConcurrent,
-                            sftp_transfer_count_label(
-                                &self.i18n,
-                                settings.sftp.max_concurrent_transfers,
-                            ),
-                            cx,
-                        ),
-                    ),
-                    self.card_separator(),
-                    self.sftp_settings_row(
-                        "settings_view.sftp.directory_parallelism",
-                        Some("settings_view.sftp.directory_parallelism_hint"),
-                        self.sftp_select_control(
-                            SettingsSelect::SftpDirectoryParallelism,
-                            sftp_transfer_count_label(
-                                &self.i18n,
-                                settings.sftp.directory_parallelism,
                             ),
                             cx,
                         ),
@@ -90,7 +65,28 @@ impl WorkspaceApp {
             return div().into_any_element();
         }
 
-        let mut speed_rows = vec![
+        let mut performance_rows = vec![
+            self.card_title("settings_view.sftp.performance"),
+            self.sftp_settings_row(
+                "settings_view.sftp.concurrent",
+                Some("settings_view.sftp.concurrent_hint"),
+                self.sftp_select_control(
+                    SettingsSelect::SftpConcurrent,
+                    sftp_transfer_count_label(&self.i18n, settings.sftp.max_concurrent_transfers),
+                    cx,
+                ),
+            ),
+            self.card_separator(),
+            self.sftp_settings_row(
+                "settings_view.sftp.directory_parallelism",
+                Some("settings_view.sftp.directory_parallelism_hint"),
+                self.sftp_select_control(
+                    SettingsSelect::SftpDirectoryParallelism,
+                    sftp_transfer_count_label(&self.i18n, settings.sftp.directory_parallelism),
+                    cx,
+                ),
+            ),
+            self.card_separator(),
             self.sftp_settings_row(
                 "settings_view.sftp.bandwidth",
                 Some("settings_view.sftp.bandwidth_hint"),
@@ -116,7 +112,7 @@ impl WorkspaceApp {
         ];
 
         if settings.sftp.speed_limit_enabled {
-            speed_rows.push(
+            performance_rows.push(
                 div()
                     .pt(px(8.0))
                     .child(self.sftp_settings_row(
@@ -125,7 +121,7 @@ impl WorkspaceApp {
                         self.settings_text_input_control(
                             SettingsInput::SftpSpeedLimitKbps,
                             settings.sftp.speed_limit_kbps.to_string(),
-                            "0 = unlimited".to_string(),
+                            self.i18n.t("settings_view.sftp.unlimited_placeholder"),
                             SFTP_SETTINGS_SELECT_WIDTH,
                             cx,
                         ),
@@ -134,7 +130,7 @@ impl WorkspaceApp {
             );
         }
 
-        self.sftp_settings_card(speed_rows, 16.0)
+        self.sftp_settings_card(performance_rows, 16.0)
     }
 
     pub(in crate::workspace) fn sftp_settings_card(

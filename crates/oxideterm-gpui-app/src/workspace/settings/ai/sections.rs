@@ -1010,7 +1010,7 @@ impl WorkspaceApp {
                             .unwrap_or(oxideterm_settings::DEFAULT_AI_TOOL_MAX_ROUNDS),
                         cx,
                     ),
-                    self.render_ai_agent_settings(cx),
+                    self.render_ai_agent_concurrency_setting(cx),
                     policy_groups,
                     self.ai_disabled_tools_notice(settings, cx),
                     settings_ai_policy_warning(
@@ -1690,7 +1690,7 @@ impl WorkspaceApp {
             self.settings_text_input_control(
                 input,
                 self.current_settings_input_value(input, cx),
-                "Auto".to_string(),
+                self.i18n.t("settings_view.ai.automatic_placeholder"),
                 AI_CONTEXT_NUMBER_W,
                 cx,
             )
@@ -1720,7 +1720,7 @@ impl WorkspaceApp {
                     SettingsInput::AiActiveModelMaxResponseTokens,
                     cx,
                 ),
-                "Auto".to_string(),
+                self.i18n.t("settings_view.ai.automatic_placeholder"),
                 128.0,
                 cx,
             ),

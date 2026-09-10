@@ -78,9 +78,13 @@
       "help": "Aide et À propos",
       "keybindings": "Raccourcis clavier",
       "graphics": "Graphiques",
-      "network": "Réseau et proxy"
+      "network": "Réseau et accès externe"
     },
     "general": {
+      "portable_status_unlocked": "Déverrouillé",
+      "portable_status_locked": "Verrouillé",
+      "portable_status_needs_setup": "Configuration requise",
+      "portable_status_disabled": "Désactivé",
       "title": "Général",
       "description": "Paramètres généraux de l'application.",
       "startup": "Démarrage",
@@ -219,9 +223,12 @@
       "keep_running_on_close_hint": "Après la fermeture de la fenêtre, OxideTerm continue de s’exécuter en arrière-plan."
     },
     "terminal": {
+      "input_keyboard": "Clavier et suggestions de saisie",
+      "input_mouse_links": "Souris et liens",
+      "input_clipboard": "Copier et coller",
       "title": "Paramètres du terminal",
       "description": "Configurer l'apparence et le comportement de l'émulateur de terminal.",
-      "font": "Police",
+      "font": "Police et typographie",
       "font_family": "Famille de police",
       "font_family_hint": "Polices prédéfinies (✓ = police de secours incluse)",
       "select_font": "Sélectionner la police",
@@ -266,7 +273,7 @@
       "cursor_bar": "Barre |",
       "cursor_blink": "Clignotement du curseur",
       "cursor_blink_hint": "Animer le clignotement du curseur",
-      "input_safety": "Sécurité de saisie",
+      "input_safety": "Saisie et interaction",
       "paste_protection": "Protection au collage",
       "paste_protection_hint": "Confirmer avant de coller du contenu multiligne pour éviter l'exécution accidentelle de commandes",
       "osc52_clipboard": "Presse-papiers OSC 52",
@@ -612,7 +619,7 @@
       "page_display": "Affichage",
       "page_input": "Saisie",
       "page_commandBar": "Barre de commande",
-      "page_awareness": "Perception et intégration",
+      "page_awareness": "Intégration Shell et déclencheurs",
       "page_transfer": "Transfert",
       "page_highlight": "Surlignage",
       "page_logging": "Journalisation",
@@ -640,11 +647,15 @@
       "session_log_select_directory": "Sélectionner le dossier des journaux du terminal",
       "session_log_directory_template": "Modèle de sous-dossiers",
       "session_log_directory_template_hint": "Structure relative facultative dans le dossier des journaux. Utilisez / entre les dossiers. Variables disponibles : {date}, {time}, {datetime}, {session}, {host}, {username} et {protocol}.",
-      "page_local": "Local"
+      "page_local": "Local",
+      "font_hint": "Configurer les polices, la taille, la graisse, les ligatures et la hauteur de ligne du terminal.",
+      "display_behavior": "Comportement d’affichage",
+      "display_behavior_hint": "Configurer les marges, le défilement et l’encodage du terminal."
     },
     "appearance": {
+      "effects": "Effets visuels et rendu",
       "title": "Apparence",
-      "description": "Personnaliser le thème de l'application.",
+      "description": "Configurer les thèmes, la densité de l’interface, les animations, les arrière-plans et le rendu.",
       "app_icon": "Icône de l’application",
       "app_icon_variant": "Couleur de l’icône",
       "app_icon_variant_hint": "Choisissez la couleur de l’icône du Dock ou de la barre des tâches. Le changement à chaud s’applique sur les plateformes compatibles.",
@@ -652,7 +663,7 @@
       "color_theme": "Thème de couleurs",
       "color_theme_hint": "Schéma de couleurs du terminal",
       "select_theme": "Sélectionner le thème",
-      "layout": "Disposition",
+      "layout": "Disposition de l’interface",
       "layout_hint": "La barre latérale peut être redimensionnée en faisant glisser son bord droit. Utilisez le bouton de réduction (◧) pour la masquer.",
       "theme_group_oxide": "Série Oxide",
       "theme_group_classic": "Classique / Autre",
@@ -780,8 +791,8 @@
     "connections": {
       "title": "Valeurs par défaut des connexions",
       "description": "Paramètres par défaut pour les nouvelles connexions.",
-      "keys_and_connections_title": "Clés et connexions",
-      "keys_and_connections_description": "Gérez au même endroit les connexions enregistrées, les imports, le pool de connexions et les clés SSH.",
+      "keys_and_connections_title": "Connexions",
+      "keys_and_connections_description": "Gérer les clés SSH, les valeurs de connexion par défaut, les connexions en arrière-plan, la reconnexion et les imports.",
       "default_username": "Nom d'utilisateur par défaut",
       "default_port": "Port par défaut",
       "groups": {
@@ -929,8 +940,11 @@
       "action_failed": "Échec de l’opération sur la clé gérée : {{error}}"
     },
     "ai": {
+      "automatic_placeholder": "Automatique",
+      "conversation_agents_hint": "Ces options concernent uniquement la conversation IA actuelle. Définissez la limite de sous-agents simultanés dans la politique globale des outils.",
+      "conversation_agents": "Sous-agents de la conversation actuelle",
       "title": "OxideSens",
-      "description": "Configurer l'API compatible OpenAI et les limites de contexte.",
+      "description": "Configurer les fournisseurs IA, les agents, le contexte, la mémoire, les outils et les extensions.",
       "general": "Général",
       "page_general": "Général",
       "page_providers": "Fournisseurs",
@@ -1184,6 +1198,9 @@
       "acp_agent_error_unknown": "Erreur inconnue"
     },
     "sftp": {
+      "unlimited_placeholder": "0 = illimité",
+      "performance": "Performances des transferts",
+      "opening": "Ouverture et méthode de transfert",
       "title": "Transfert de fichiers",
       "description": "Configurer le comportement et les performances du transfert de fichiers.",
       "presentation": "Ouvrir SFTP dans",
@@ -1213,6 +1230,8 @@
       "transfer_count_other": "{{count}} transferts"
     },
     "ide": {
+      "editing_hint": "Configurez l’enregistrement automatique et l’affichage des lignes longues.",
+      "editing": "Comportement de l’éditeur",
       "title": "Mode IDE (Mini)",
       "description": "Configurer le comportement de l'éditeur de code intégré.",
       "auto_save": "Sauvegarde automatique",
@@ -1227,7 +1246,7 @@
       "agent_feature_search": "Recherche grep côté serveur et chargement profond de l'arborescence",
       "agent_supported": "Inclus : x86_64, aarch64 (Linux)",
       "agent_binary_size": "~2 Mo",
-      "agent_auto_hint": "Lors de l'ouverture du mode IDE sur les hôtes Linux x86_64/aarch64 pris en charge, le déploiement suit la politique ci-dessous — une confirmation vous sera demandée lors de la première utilisation (ou déploiement automatique si défini sur 'Toujours activer').",
+      "agent_auto_hint": "Sur les hôtes Linux x86_64/aarch64 compatibles, le déploiement de l’agent IDE suit la politique choisie. Par défaut, une confirmation est demandée avant le premier déploiement.",
       "agent_extra_hint": "Les binaires précompilés ne sont plus fournis pour les autres architectures. Vous devez compiler l'agent vous-même depuis les sources, puis le téléverser manuellement vers ~/.oxideterm/oxideterm-agent sur l'hôte distant.",
       "agent_transparency_title": "Transparence et confidentialité",
       "agent_path_label": "Chemin de déploiement",
@@ -1434,8 +1453,8 @@
       "import_failed": "Échec de l'importation de l'hôte : {{error}}"
     },
     "mcp": {
-      "title": "Serveurs MCP",
-      "description": "Connectez-vous aux serveurs Model Context Protocol pour étendre les capacités de l'IA avec des outils externes.",
+      "title": "Serveurs d’outils MCP",
+      "description": "Connectez OxideSens à des serveurs d’outils MCP externes. Configurez l’accès des clients externes à OxideTerm dans « Réseau et accès externe ».",
       "add_server": "Ajouter un serveur",
       "no_servers": "Aucun serveur MCP configuré. Ajoutez un serveur pour commencer.",
       "status_disconnected": "Déconnecté",
@@ -1491,6 +1510,9 @@
       "formula_hint": "Les réessais utilisent un backoff exponentiel avec gigue : chaque tentative suivante attend plus longtemps (jusqu'au délai maximum), avec une petite variation aléatoire pour éviter l'effet de troupeau."
     },
     "knowledge": {
+      "page_summary": "Page {{page}} / {{pages}} · {{total}} documents",
+      "next_page": "Suivante",
+      "previous_page": "Précédente",
       "title": "Base de connaissances",
       "description": "Importez et gérez la documentation opérationnelle pour la recherche assistée par IA. Les documents sont indexés et peuvent être référencés automatiquement lors du chat OxideSens.",
       "collections": "Collections",
@@ -1630,8 +1652,10 @@
       }
     },
     "network": {
+      "hide_permissions": "Masquer les permissions",
+      "show_permissions": "Afficher les permissions",
       "public_mcp": "External MCP Control",
-      "public_mcp_hint": "Let authorized external MCP clients inspect connections and run approved SSH workflows.",
+      "public_mcp_hint": "Autorisez les clients externes à utiliser les outils d’OxideTerm et gérez leurs permissions et approbations d’opérations. Configurez les serveurs d’outils externes d’OxideSens sur sa page d’outils.",
       "public_mcp_security_hint": "The endpoint is loopback-only. Client credentials are shown once, stored only as digests, and never included in settings, .oxide exports, or cloud sync.",
       "copy_endpoint": "Copy Endpoint",
       "public_mcp_port": "Listening port",
@@ -1702,8 +1726,8 @@
       "approval_notice_description": "{{client}} requested {{tool}}. Review it under Network & Proxy → External MCP Control.",
       "approve_action": "Approve",
       "reject_action": "Reject",
-      "title": "Réseau et proxy",
-      "description": "Configurer le routage proxy des connexions SSH et des requêtes réseau de l’application.",
+      "title": "Réseau et accès externe",
+      "description": "Configurer les routes proxy, les liens de connexion externes, l’accès des clients MCP et les approbations d’opérations.",
       "shared_proxy": "Proxy partagé",
       "shared_proxy_hint": "Un profil de proxy réutilisable pour les connexions SSH et le trafic de l’application.",
       "shared_proxy_empty_hint": "Ajoutez d’abord un proxy partagé, puis attribuez-lui du trafic.",

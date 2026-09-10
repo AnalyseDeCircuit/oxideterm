@@ -13,6 +13,7 @@ pub(in crate::workspace) enum KnowledgeExternalSyncOutcome {
 /// external-edit metadata can describe user-owned document content.
 pub(in crate::workspace) struct KnowledgePageState {
     pub(super) selected_collection_id: Option<String>,
+    pub(super) document_page: usize,
     pub(super) create_dialog_open: bool,
     pub(super) new_document_dialog_open: bool,
     pub(super) embedding_config_expanded: bool,
@@ -34,6 +35,7 @@ impl Default for KnowledgePageState {
     fn default() -> Self {
         Self {
             selected_collection_id: None,
+            document_page: 0,
             create_dialog_open: false,
             new_document_dialog_open: false,
             embedding_config_expanded: false,
@@ -71,6 +73,31 @@ impl AiWorkspaceEntity {
 
     pub(in crate::workspace) fn knowledge_selected_collection_id(&self) -> Option<&str> {
         self.knowledge_page.selected_collection_id.as_deref()
+    }
+
+    pub(in crate::workspace) fn knowledge_document_page_index(&self) -> usize {
+        self.knowledge_page.document_page
+    }
+
+    pub(in crate::workspace) fn set_knowledge_document_page(
+        &mut self,
+        collection_id: String,
+        page: usize,
+    ) {
+        self.knowledge_page.selected_collection_id = Some(collection_id);
+        self.knowledge_page.document_page = page;
+    }
+
+    pub(in crate::workspace) fn knowledge_document_page(
+        &self,
+        collection_id: &str,
+    ) -> Result<(usize, oxideterm_ai::RagPaginatedDocuments), String> {
+        let page = if self.knowledge_selected_collection_id() == Some(collection_id) {
+            self.knowledge_page.document_page
+        } else {
+            0
+        };
+        read_knowledge_document_page(&self.rag_store(), collection_id, page)
     }
 
     pub(in crate::workspace) fn knowledge_create_dialog_open(&self) -> bool {
@@ -147,6 +174,7 @@ impl AiWorkspaceEntity {
 
     pub(in crate::workspace) fn select_knowledge_collection(&mut self, collection_id: String) {
         self.knowledge_page.selected_collection_id = Some(collection_id);
+        self.knowledge_page.document_page = 0;
     }
 
     pub(in crate::workspace) fn set_knowledge_document_format(&mut self, format: String) {
@@ -306,7 +334,7 @@ impl AiWorkspaceEntity {
             },
         ) {
             Ok(collection) => {
-                self.knowledge_page.selected_collection_id = Some(collection.id);
+                self.select_knowledge_collection(collection.id);
                 self.knowledge_page.new_collection_name.clear();
                 self.knowledge_page.error = None;
                 true
@@ -711,4 +739,84 @@ fn set_private_permissions(path: &std::path::Path, mode: u32) -> std::io::Result
     let mut permissions = std::fs::metadata(path)?.permissions();
     permissions.set_mode(mode);
     std::fs::set_permissions(path, permissions)
+}
+
+pub(in crate::workspace) const KNOWLEDGE_DOCUMENT_PAGE_SIZE: usize = 100;
+
+fn read_knowledge_document_page(
+    store: &oxideterm_ai::RagStore,
+    collection_id: &str,
+    page: usize,
+) -> Result<(usize, oxideterm_ai::RagPaginatedDocuments), String> {
+    let documents = oxideterm_ai::rag_list_documents(
+        store,
+        collection_id,
+        Some(page * KNOWLEDGE_DOCUMENT_PAGE_SIZE),
+        Some(KNOWLEDGE_DOCUMENT_PAGE_SIZE),
+    )?;
+    let last_page = documents.total.saturating_sub(1) / KNOWLEDGE_DOCUMENT_PAGE_SIZE;
+    // Deleting the final document on a page returns the view to the last existing page.
+    if page > last_page {
+        return read_knowledge_document_page(store, collection_id, last_page);
+    }
+    Ok((page, documents))
+}
+
+#[cfg(test)]
+mod settings_pagination_tests {
+    use super::*;
+
+    #[test]
+    fn knowledge_pages_include_documents_after_the_first_hundred_and_recover_after_deletion() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = oxideterm_ai::RagStore::new(directory.path()).unwrap();
+        let collection = oxideterm_ai::rag_create_collection(
+            &store,
+            oxideterm_ai::RagCreateCollectionRequest {
+                name: "Pagination".into(),
+                scope: oxideterm_ai::RagDocScopeRequest::Global,
+            },
+        )
+        .unwrap();
+        let mut ids = Vec::new();
+        for index in 0..101 {
+            ids.push(
+                oxideterm_ai::rag_create_blank_document(
+                    &store,
+                    oxideterm_ai::RagCreateBlankDocumentRequest {
+                        collection_id: collection.id.clone(),
+                        title: format!("Document {index}"),
+                        format: "markdown".into(),
+                    },
+                )
+                .unwrap()
+                .id,
+            );
+        }
+        let (page, documents) = read_knowledge_document_page(&store, &collection.id, 1).unwrap();
+        assert_eq!(page, 1);
+        assert_eq!(
+            documents
+                .documents
+                .iter()
+                .map(|doc| doc.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Document 100"]
+        );
+        assert_eq!(documents.total, 101);
+
+        oxideterm_ai::rag_remove_document(&store, &ids[100]).unwrap();
+        let (page, documents) = read_knowledge_document_page(&store, &collection.id, 1).unwrap();
+        assert_eq!(page, 0);
+        assert_eq!(
+            documents
+                .documents
+                .iter()
+                .map(|doc| doc.title.clone())
+                .collect::<Vec<_>>(),
+            (0..100)
+                .map(|index| format!("Document {index}"))
+                .collect::<Vec<_>>()
+        );
+    }
 }

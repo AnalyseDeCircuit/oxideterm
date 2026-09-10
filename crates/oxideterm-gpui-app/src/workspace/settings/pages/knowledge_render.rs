@@ -19,12 +19,6 @@ impl WorkspaceApp {
         let selected_collection = selected_id
             .as_deref()
             .and_then(|id| collections.iter().find(|collection| collection.id == id));
-        let selected_documents = selected_id
-            .as_deref()
-            .and_then(|id| oxideterm_ai::rag_list_documents(&rag_store, id, None, Some(100)).ok());
-        let selected_stats = selected_id
-            .as_deref()
-            .and_then(|id| oxideterm_ai::rag_get_collection_stats(&rag_store, id).ok());
 
         let mut index = section_index;
         let knowledge_error = self
@@ -44,13 +38,24 @@ impl WorkspaceApp {
         }
 
         if index == 1 {
+            return self.knowledge_embedding_config_section(cx);
+        }
+        if index == 2 {
             if let Some(collection) = selected_collection {
-                return self.knowledge_documents_card(
-                    collection,
-                    selected_documents,
-                    selected_stats,
-                    cx,
-                );
+                let page = self
+                    .ai_entity
+                    .read(cx)
+                    .knowledge_document_page(&collection.id);
+                return match page {
+                    Ok((page_index, documents)) => self.knowledge_documents_card(
+                        collection,
+                        documents,
+                        page_index,
+                        oxideterm_ai::rag_get_collection_stats(&rag_store, &collection.id).ok(),
+                        cx,
+                    ),
+                    Err(error) => self.knowledge_error_row(&error),
+                };
             }
         }
 
@@ -133,14 +138,18 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn knowledge_documents_card(
         &self,
         collection: &oxideterm_ai::RagCollectionResponse,
-        documents: Option<oxideterm_ai::RagPaginatedDocuments>,
+        documents: oxideterm_ai::RagPaginatedDocuments,
+        page_index: usize,
         stats: Option<oxideterm_ai::RagStatsResponse>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let reindex_collection_id = collection.id.clone();
         let import_collection_id = collection.id.clone();
         let embedding_collection_id = collection.id.clone();
-        let documents = documents.map(|page| page.documents).unwrap_or_default();
+        let total = documents.total;
+        let page_size = crate::workspace::ai_state::KNOWLEDGE_DOCUMENT_PAGE_SIZE;
+        let page_count = total.div_ceil(page_size).max(1);
+        let documents = documents.documents;
         let import_progress = self.ai_entity.read(cx).knowledge_import_progress();
         let embedding_progress = self.ai_entity.read(cx).knowledge_embedding_progress();
         let import_label = import_progress
@@ -270,7 +279,6 @@ impl WorkspaceApp {
                 )
                 .into_any_element(),
         ];
-        rows.push(self.knowledge_embedding_config_section(cx));
         if let Some(stats) = stats {
             rows.push(self.knowledge_stats_row(stats, cx));
         }
@@ -285,6 +293,56 @@ impl WorkspaceApp {
             for document in documents {
                 rows.push(self.knowledge_document_row(document, cx));
             }
+        }
+        if page_count > 1 {
+            let previous_collection = collection.id.clone();
+            let next_collection = collection.id.clone();
+            rows.push(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(12.0))
+                    .child(self.knowledge_text_icon_button(
+                        LucideIcon::ChevronLeft,
+                        self.i18n.t("settings_view.knowledge.previous_page"),
+                        page_index == 0,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.show_knowledge_document_page(
+                                previous_collection.clone(),
+                                page_index.saturating_sub(1),
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(
+                                self.i18n
+                                    .t("settings_view.knowledge.page_summary")
+                                    .replace("{{page}}", &(page_index + 1).to_string())
+                                    .replace("{{pages}}", &page_count.to_string())
+                                    .replace("{{total}}", &total.to_string()),
+                            ),
+                    )
+                    .child(self.knowledge_text_icon_button(
+                        LucideIcon::ChevronRight,
+                        self.i18n.t("settings_view.knowledge.next_page"),
+                        page_index + 1 >= page_count,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.show_knowledge_document_page(
+                                next_collection.clone(),
+                                page_index + 1,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ))
+                    .into_any_element(),
+            );
         }
         self.settings_card(
             "settings_view.knowledge.title",

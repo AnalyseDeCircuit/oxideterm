@@ -78,9 +78,13 @@
       "help": "Trợ giúp & Giới thiệu",
       "keybindings": "Phím tắt",
       "graphics": "Đồ họa",
-      "network": "Mạng và proxy"
+      "network": "Mạng và truy cập bên ngoài"
     },
     "general": {
+      "portable_status_unlocked": "Đã mở khóa",
+      "portable_status_locked": "Đã khóa",
+      "portable_status_needs_setup": "Cần thiết lập",
+      "portable_status_disabled": "Đã tắt",
       "title": "Chung",
       "description": "Cài đặt ứng dụng chung.",
       "startup": "Khởi động",
@@ -219,9 +223,12 @@
       "keep_running_on_close_hint": "Sau khi đóng cửa sổ, OxideTerm sẽ tiếp tục chạy trong nền."
     },
     "terminal": {
+      "input_keyboard": "Bàn phím và gợi ý nhập",
+      "input_mouse_links": "Chuột và liên kết",
+      "input_clipboard": "Sao chép và dán",
       "title": "Cài đặt Terminal",
       "description": "Cấu hình giao diện và hành vi của trình giả lập terminal.",
-      "font": "Phông chữ",
+      "font": "Phông chữ và trình bày",
       "font_family": "Họ phông chữ",
       "font_family_hint": "Phông chữ có sẵn (✓ = phông dự phòng đi kèm)",
       "select_font": "Chọn phông chữ",
@@ -266,7 +273,7 @@
       "cursor_bar": "Thanh |",
       "cursor_blink": "Nhấp nháy con trỏ",
       "cursor_blink_hint": "Hiệu ứng nhấp nháy con trỏ",
-      "input_safety": "An toàn nhập liệu",
+      "input_safety": "Nhập liệu và tương tác",
       "paste_protection": "Bảo vệ dán",
       "paste_protection_hint": "Xác nhận trước khi dán nội dung nhiều dòng để tránh thực thi lệnh ngoài ý muốn",
       "osc52_clipboard": "Clipboard OSC 52",
@@ -612,7 +619,7 @@
       "page_display": "Hiển thị",
       "page_input": "Nhập liệu",
       "page_commandBar": "Thanh lệnh",
-      "page_awareness": "Nhận biết và tích hợp",
+      "page_awareness": "Tích hợp Shell và kích hoạt",
       "page_transfer": "Truyền",
       "page_highlight": "Tô sáng",
       "page_logging": "Nhật ký",
@@ -640,11 +647,15 @@
       "session_log_select_directory": "Chọn thư mục nhật ký terminal",
       "session_log_directory_template": "Mẫu thư mục con",
       "session_log_directory_template_hint": "Bố cục tương đối tùy chọn trong thư mục nhật ký. Dùng / để phân cách thư mục. Có thể dùng: {date}, {time}, {datetime}, {session}, {host}, {username} và {protocol}.",
-      "page_local": "Cục bộ"
+      "page_local": "Cục bộ",
+      "font_hint": "Cấu hình phông chữ, kích thước, độ đậm, chữ ghép và chiều cao dòng của terminal.",
+      "display_behavior": "Hành vi hiển thị",
+      "display_behavior_hint": "Cấu hình lề, cuộn và mã hóa ký tự của terminal."
     },
     "appearance": {
+      "effects": "Hiệu ứng hình ảnh và kết xuất",
       "title": "Giao diện",
-      "description": "Tùy chỉnh giao diện ứng dụng.",
+      "description": "Cấu hình chủ đề, mật độ giao diện, hoạt ảnh, nền và chính sách kết xuất.",
       "app_icon": "Biểu tượng ứng dụng",
       "app_icon_variant": "Màu biểu tượng",
       "app_icon_variant_hint": "Chọn màu biểu tượng trên Dock hoặc thanh tác vụ. Nền tảng hỗ trợ sẽ áp dụng ngay khi đang chạy.",
@@ -652,7 +663,7 @@
       "color_theme": "Chủ đề màu",
       "color_theme_hint": "Bảng màu terminal",
       "select_theme": "Chọn giao diện",
-      "layout": "Bố cục",
+      "layout": "Bố cục giao diện",
       "layout_hint": "Có thể thay đổi kích thước thanh bên bằng cách kéo cạnh phải. Sử dụng nút thu gọn (◧) để ẩn.",
       "theme_group_oxide": "Dòng Oxide",
       "theme_group_classic": "Cổ điển / Khác",
@@ -780,8 +791,8 @@
     "connections": {
       "title": "Mặc định kết nối",
       "description": "Cài đặt mặc định cho kết nối mới.",
-      "keys_and_connections_title": "Khóa và kết nối",
-      "keys_and_connections_description": "Quản lý kết nối đã lưu, nhập dữ liệu, nhóm kết nối và khóa SSH ở cùng một nơi.",
+      "keys_and_connections_title": "Kết nối",
+      "keys_and_connections_description": "Quản lý khóa SSH, mặc định kết nối, kết nối nền, kết nối lại và nhập cấu hình.",
       "default_username": "Tên người dùng mặc định",
       "default_port": "Cổng mặc định",
       "groups": {
@@ -929,8 +940,11 @@
       "action_failed": "Thao tác với key được quản lý thất bại: {{error}}"
     },
     "ai": {
+      "automatic_placeholder": "Tự động",
+      "conversation_agents_hint": "Các tùy chọn này chỉ áp dụng cho cuộc hội thoại AI hiện tại. Đặt giới hạn tác tử phụ chạy đồng thời trong chính sách công cụ toàn cục.",
+      "conversation_agents": "Tác tử phụ của cuộc hội thoại hiện tại",
       "title": "OxideSens",
-      "description": "Cấu hình API tương thích OpenAI và giới hạn ngữ cảnh.",
+      "description": "Cấu hình nhà cung cấp AI, Agent, ngữ cảnh, bộ nhớ, công cụ và phần mở rộng.",
       "general": "Chung",
       "page_general": "Chung",
       "page_providers": "Nhà cung cấp",
@@ -1184,6 +1198,9 @@
       "acp_agent_error_unknown": "Lỗi không xác định"
     },
     "sftp": {
+      "unlimited_placeholder": "0 = không giới hạn",
+      "performance": "Hiệu suất truyền",
+      "opening": "Cách mở và phương thức truyền",
       "title": "Truyền tệp",
       "description": "Cấu hình hành vi và hiệu suất truyền file.",
       "presentation": "Mở SFTP trong",
@@ -1213,6 +1230,8 @@
       "transfer_count_other": "{{count}} truyền tải"
     },
     "ide": {
+      "editing_hint": "Thiết lập tự động lưu và cách hiển thị dòng dài.",
+      "editing": "Hành vi chỉnh sửa",
       "title": "Chế độ IDE (Mini)",
       "description": "Cấu hình hành vi của trình soạn thảo mã tích hợp.",
       "auto_save": "Tự động lưu",
@@ -1227,7 +1246,7 @@
       "agent_feature_search": "Tìm kiếm grep phía máy chủ và tải sâu cây thư mục",
       "agent_supported": "Đi kèm: x86_64, aarch64 (Linux)",
       "agent_binary_size": "~2 MB",
-      "agent_auto_hint": "Khi mở chế độ IDE trên máy chủ Linux x86_64/aarch64 được hỗ trợ, việc triển khai tuân theo chính sách bên dưới — mặc định sẽ hỏi xác nhận lần đầu sử dụng.",
+      "agent_auto_hint": "Trên máy chủ Linux x86_64/aarch64 được hỗ trợ, việc triển khai tác tử IDE tuân theo chính sách đã chọn. Mặc định sẽ hỏi trước lần triển khai đầu tiên.",
       "agent_extra_hint": "Không còn cung cấp tệp nhị phân dựng sẵn cho các kiến trúc khác. Bạn cần tự xây dựng agent từ mã nguồn, sau đó tải thủ công lên ~/.oxideterm/oxideterm-agent trên máy chủ từ xa.",
       "agent_transparency_title": "Minh bạch và quyền riêng tư",
       "agent_path_label": "Đường dẫn triển khai",
@@ -1434,8 +1453,8 @@
       "import_failed": "Không thể nhập host: {{error}}"
     },
     "mcp": {
-      "title": "Máy chủ MCP",
-      "description": "Kết nối với máy chủ Model Context Protocol để mở rộng khả năng AI bằng các công cụ bên ngoài.",
+      "title": "Máy chủ công cụ MCP",
+      "description": "Kết nối OxideSens với các máy chủ công cụ MCP bên ngoài. Cấu hình quyền truy cập OxideTerm của máy khách bên ngoài trong “Mạng và truy cập bên ngoài”.",
       "add_server": "Thêm máy chủ",
       "no_servers": "Chưa có máy chủ MCP nào được cấu hình. Thêm máy chủ để bắt đầu.",
       "status_disconnected": "Đã ngắt kết nối",
@@ -1491,6 +1510,9 @@
       "formula_hint": "Thử lại sử dụng backoff lũy thừa với jitter: mỗi lần thử tiếp theo chờ lâu hơn (tối đa độ trễ), với một biến đổi ngẫu nhiên nhỏ để tránh hiệu ứng thundering herd."
     },
     "knowledge": {
+      "page_summary": "Trang {{page}} / {{pages}} · {{total}} tài liệu",
+      "next_page": "Tiếp",
+      "previous_page": "Trước",
       "title": "Cơ sở tri thức",
       "description": "Nhập và quản lý tài liệu vận hành cho tìm kiếm hỗ trợ AI. Tài liệu được lập chỉ mục và có thể được tham chiếu tự động trong cuộc trò chuyện OxideSens.",
       "collections": "Bộ sưu tập",
@@ -1630,8 +1652,10 @@
       }
     },
     "network": {
+      "hide_permissions": "Ẩn quyền",
+      "show_permissions": "Hiện quyền",
       "public_mcp": "External MCP Control",
-      "public_mcp_hint": "Let authorized external MCP clients inspect connections and run approved SSH workflows.",
+      "public_mcp_hint": "Cho phép máy khách bên ngoài gọi các công cụ OxideTerm và quản lý quyền cùng phê duyệt thao tác. Cấu hình máy chủ công cụ bên ngoài mà OxideSens sử dụng trên trang công cụ của nó.",
       "public_mcp_security_hint": "The endpoint is loopback-only. Client credentials are shown once, stored only as digests, and never included in settings, .oxide exports, or cloud sync.",
       "copy_endpoint": "Copy Endpoint",
       "public_mcp_port": "Listening port",
@@ -1702,8 +1726,8 @@
       "approval_notice_description": "{{client}} requested {{tool}}. Review it under Network & Proxy → External MCP Control.",
       "approve_action": "Approve",
       "reject_action": "Reject",
-      "title": "Mạng và proxy",
-      "description": "Cấu hình định tuyến proxy cho kết nối SSH và yêu cầu mạng của ứng dụng.",
+      "title": "Mạng và truy cập bên ngoài",
+      "description": "Cấu hình tuyến proxy, liên kết kết nối bên ngoài, quyền truy cập của máy khách MCP và phê duyệt thao tác.",
       "shared_proxy": "Proxy dùng chung",
       "shared_proxy_hint": "Một cấu hình proxy có thể dùng lại cho kết nối SSH và lưu lượng ứng dụng.",
       "shared_proxy_empty_hint": "Hãy thêm proxy dùng chung trước rồi chọn lưu lượng sẽ sử dụng proxy đó.",

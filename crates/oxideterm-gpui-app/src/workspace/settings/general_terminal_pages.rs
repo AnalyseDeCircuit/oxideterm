@@ -22,71 +22,58 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let settings = self.settings_store.settings();
+        let window_behavior_sections =
+            usize::from(cfg!(any(target_os = "windows", target_os = "macos")));
         match section_index {
             0 => self.settings_card(
                 "settings_view.general.language",
-                "settings_view.general.language_hint",
+                "",
                 vec![self.language_select_row(settings.general.language, cx)],
             ),
-            1 => {
+            index if index == 3 + window_behavior_sections => {
                 let data_dir_info = self.settings_data_directory_info();
                 let data_dir = data_dir_info.path.display().to_string();
-                self.plain_settings_card(vec![
-                    self.card_title("settings_view.general.data_directory"),
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(4.0))
-                        .child(
-                            div()
-                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .text_color(rgb(self.tokens.ui.text))
-                                .child(self.i18n.t("settings_view.general.data_directory")),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                .text_color(rgb(self.tokens.ui.text_muted))
-                                .child(self.i18n.t("settings_view.general.data_directory_hint")),
-                        )
-                        .into_any_element(),
-                    div()
-                        .w_full()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(16.0))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .text_size(px(self.tokens.metrics.ui_text_base))
-                                .text_color(rgb(self.tokens.ui.text))
-                                .font_family(settings_mono_font_family(
-                                    self.settings_store.settings(),
-                                ))
-                                .truncate()
-                                .child(data_dir),
-                        )
-                        .when(data_dir_info.can_change, |row| {
-                            row.child(self.settings_data_directory_change_button(cx))
-                        })
-                        .when(data_dir_info.can_change && data_dir_info.is_custom, |row| {
-                            row.child(self.settings_data_directory_reset_button(cx))
-                        })
-                        .into_any_element(),
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(self.tokens.ui.warning))
-                        .child(
-                            self.i18n
-                                .t("settings_view.general.data_directory_restart_notice"),
-                        )
-                        .into_any_element(),
-                ])
+                self.settings_card(
+                    "settings_view.general.data_directory",
+                    "settings_view.general.data_directory_hint",
+                    vec![
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(16.0))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .text_size(px(self.tokens.metrics.ui_text_base))
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .font_family(settings_mono_font_family(
+                                        self.settings_store.settings(),
+                                    ))
+                                    .truncate()
+                                    .child(data_dir),
+                            )
+                            .when(data_dir_info.can_change, |row| {
+                                row.child(self.settings_data_directory_change_button(cx))
+                            })
+                            .when(data_dir_info.can_change && data_dir_info.is_custom, |row| {
+                                row.child(self.settings_data_directory_reset_button(cx))
+                            })
+                            .into_any_element(),
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.warning))
+                            .child(
+                                self.i18n
+                                    .t("settings_view.general.data_directory_restart_notice"),
+                            )
+                            .into_any_element(),
+                    ],
+                )
             }
-            2 => {
+            index if index == 4 + window_behavior_sections => {
                 let cli = self.settings_workspace.read(cx).cli_companion_snapshot();
                 let cli_status = cli.status.as_ref();
                 let cli_loading = cli.loading;
@@ -354,19 +341,8 @@ impl WorkspaceApp {
                     },
                 ])
             }
-            3 => self.launch_at_login_settings_card(cx),
-            4 => self.settings_card(
-                "settings_view.general.connection_uri_integration",
-                "settings_view.general.connection_uri_integration_hint",
-                vec![self.general_checkbox_row(
-                    "settings_view.general.external_connection_uris",
-                    "settings_view.general.external_connection_uris_hint",
-                    settings.general.external_connection_uris_enabled,
-                    |settings, enabled| settings.general.external_connection_uris_enabled = enabled,
-                    cx,
-                )],
-            ),
-            5 if cfg!(any(target_os = "windows", target_os = "macos")) => {
+            1 => self.launch_at_login_settings_card(cx),
+            2 if cfg!(any(target_os = "windows", target_os = "macos")) => {
                 let (label_key, hint_key) = close_to_background_label_keys();
                 self.settings_card(
                     "settings_view.general.window_behavior",
@@ -380,10 +356,9 @@ impl WorkspaceApp {
                     )],
                 )
             }
-            6 if cfg!(any(target_os = "windows", target_os = "macos")) => {
+            index if index == 2 + window_behavior_sections => {
                 self.render_app_lock_settings_card(cx)
             }
-            5 => self.render_app_lock_settings_card(cx),
             _ => div().into_any_element(),
         }
     }
@@ -920,7 +895,17 @@ impl WorkspaceApp {
                         compact_decimal(settings.terminal.line_height),
                         cx,
                     ),
-                    self.card_separator(),
+                ]);
+                self.settings_card(
+                    "settings_view.terminal.font",
+                    "settings_view.terminal.font_hint",
+                    rows,
+                )
+            }
+            (TerminalSettingsPage::Display, 1) => self.settings_card(
+                "settings_view.terminal.display_behavior",
+                "settings_view.terminal.display_behavior_hint",
+                vec![
                     self.decimal_row(
                         "settings_view.terminal.padding_horizontal",
                         "settings_view.terminal.padding_horizontal_hint",
@@ -953,24 +938,11 @@ impl WorkspaceApp {
                         self.tokens.metrics.settings_select_width,
                         cx,
                     ),
-                    self.card_separator(),
-                    self.checkbox_row(
-                        "settings_view.terminal.show_performance_overlay",
-                        "settings_view.terminal.show_performance_overlay_hint",
-                        settings.terminal.show_fps_overlay,
-                        set_show_terminal_performance_overlay,
-                        cx,
-                    ),
-                ]);
-                self.settings_card(
-                    "settings_view.terminal.font",
-                    "settings_view.terminal.font_family_hint",
-                    rows,
-                )
-            }
-            (TerminalSettingsPage::Display, 1) => self.settings_card(
+                ],
+            ),
+            (TerminalSettingsPage::Display, 2) => self.settings_card(
                 "settings_view.terminal.cursor",
-                "settings_view.terminal.cursor_style_hint",
+                "",
                 vec![
                     self.select_setting_row(
                         "settings_view.terminal.cursor_style",
@@ -990,9 +962,9 @@ impl WorkspaceApp {
                     ),
                 ],
             ),
-            (TerminalSettingsPage::Display, 2) => self.settings_card(
+            (TerminalSettingsPage::Display, 3) => self.settings_card(
                 "settings_view.terminal.command_marks",
-                "settings_view.terminal.command_marks_hint",
+                "",
                 vec![
                     self.bool_row(
                         "settings_view.terminal.command_marks",
@@ -1011,9 +983,9 @@ impl WorkspaceApp {
                     ),
                 ],
             ),
-            (TerminalSettingsPage::Display, 3) => self.settings_card(
+            (TerminalSettingsPage::Display, 4) => self.settings_card(
                 "settings_view.terminal.buffer",
-                "settings_view.terminal.scrollback_hint",
+                "",
                 vec![
                     self.number_row(
                         "settings_view.terminal.scrollback",
@@ -1032,13 +1004,15 @@ impl WorkspaceApp {
                     ),
                 ],
             ),
-            (TerminalSettingsPage::Input, 0) => self.terminal_input_settings_card(settings, cx),
+            (TerminalSettingsPage::Input, index) => {
+                self.terminal_input_settings_card(index, settings, cx)
+            }
             (TerminalSettingsPage::Local, local_section_index) => {
                 self.settings_local_section(local_section_index, cx)
             }
             (TerminalSettingsPage::CommandBar, 0) => self.settings_card(
                 "settings_view.terminal.command_bar",
-                "settings_view.terminal.command_bar_hint",
+                "",
                 vec![
                     self.bool_row(
                         "settings_view.terminal.command_bar",
@@ -1071,6 +1045,14 @@ impl WorkspaceApp {
                         set_command_bar_show_current_directory,
                         cx,
                     ),
+                    self.card_separator(),
+                    self.bool_row(
+                        "settings_view.terminal.autosuggest_local_history",
+                        "settings_view.terminal.autosuggest_local_history_hint",
+                        settings.terminal.autosuggest.local_shell_history,
+                        set_autosuggest_local_history,
+                        cx,
+                    ),
                 ],
             ),
             (TerminalSettingsPage::CommandBar, 1) => self.settings_card(
@@ -1080,7 +1062,7 @@ impl WorkspaceApp {
             ),
             (TerminalSettingsPage::CommandBar, 2) => self.settings_card(
                 "settings_view.terminal.quick_commands",
-                "settings_view.terminal.quick_commands_hint",
+                "",
                 vec![
                     self.bool_row(
                         "settings_view.terminal.quick_commands",
@@ -1149,7 +1131,7 @@ impl WorkspaceApp {
             (TerminalSettingsPage::Awareness, 2) => self.terminal_triggers_settings_card(cx),
             (TerminalSettingsPage::Transfer, 0) => self.settings_card(
                 "settings_view.terminal.in_band_transfer.title",
-                "settings_view.terminal.in_band_transfer.runtime_note",
+                "",
                 vec![
                     self.bool_row(
                         "settings_view.terminal.in_band_transfer.enabled",
