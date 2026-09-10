@@ -23,7 +23,11 @@ impl SshOutputBatcher {
 
     fn push(&mut self, bytes: &[u8]) -> bool {
         if let Some(guarded) = self.utf8_guard.push(bytes) {
-            self.pending.extend_from_slice(&guarded);
+            if self.pending.is_empty() {
+                self.pending = guarded.into_owned();
+            } else {
+                self.pending.extend_from_slice(&guarded);
+            }
         }
         self.refresh_deadline();
         self.pending.len() >= SSH_OUTPUT_BATCH_MAX_BYTES
@@ -66,7 +70,12 @@ impl SshOutputBatcher {
         } else {
             SSH_OUTPUT_FLUSH_MS
         };
-        self.flush_deadline = Some(now + Duration::from_millis(delay));
+        // More output must not postpone bytes already waiting for the consumer.
+        let deadline = now + Duration::from_millis(delay);
+        self.flush_deadline = Some(
+            self.flush_deadline
+                .map_or(deadline, |current| current.min(deadline)),
+        );
     }
 }
 
@@ -100,9 +109,17 @@ struct RawUtf8ResidualGuard {
 }
 
 impl RawUtf8ResidualGuard {
-    fn push(&mut self, bytes: &[u8]) -> Option<Vec<u8>> {
+    fn push<'a>(&mut self, bytes: &'a [u8]) -> Option<std::borrow::Cow<'a, [u8]>> {
         if bytes.is_empty() && self.residual.is_empty() {
             return None;
+        }
+
+        if self.residual.is_empty() {
+            // Complete transport data can go straight into the batch; only an
+            // incomplete scalar needs storage beyond the borrowed packet.
+            let split = split_before_incomplete_utf8_tail(bytes);
+            self.residual.extend_from_slice(&bytes[split..]);
+            return (split > 0).then_some(std::borrow::Cow::Borrowed(&bytes[..split]));
         }
 
         let mut combined = Vec::with_capacity(self.residual.len() + bytes.len());
@@ -121,7 +138,7 @@ impl RawUtf8ResidualGuard {
             self.residual.clear();
         }
 
-        (!combined.is_empty()).then_some(combined)
+        (!combined.is_empty()).then_some(std::borrow::Cow::Owned(combined))
     }
 
     fn flush(&mut self) -> Option<Vec<u8>> {
@@ -178,14 +195,17 @@ mod tests {
         let mut guard = RawUtf8ResidualGuard::default();
 
         assert_eq!(guard.push(&[0xe4, 0xbd]), None);
-        assert_eq!(guard.push(&[0xa0]), Some("你".as_bytes().to_vec()));
+        assert_eq!(guard.push(&[0xa0]).as_deref(), Some("你".as_bytes()));
     }
 
     #[test]
     fn raw_utf8_guard_flushes_invalid_bytes_unchanged() {
         let mut guard = RawUtf8ResidualGuard::default();
 
-        assert_eq!(guard.push(&[0xff, b'a']), Some(vec![0xff, b'a']));
+        assert_eq!(
+            guard.push(&[0xff, b'a']).as_deref(),
+            Some([0xff, b'a'].as_slice())
+        );
     }
 
     #[test]
@@ -195,6 +215,68 @@ mod tests {
         assert!(!batcher.push(&[0xe4, 0xbd]));
         assert_eq!(batcher.take_flush(), None);
         assert_eq!(batcher.take_final_flush(), Some(vec![0xe4, 0xbd]));
+    }
+
+    #[test]
+    fn output_batcher_preserves_text_and_binary_protocol_bytes_across_chunks() {
+        let fixtures: &[&[u8]] = &[
+            "ASCII 中文 e\u{301} 🦀\r\n".as_bytes(),
+            b"\x1b[31mred\x1b[0m\r\n::TRZSZ:TRANSFER:S:1.1.0:12345678\r\n",
+            b"**\x18B00000000000000\r\n\x11\x00\xff\x80\xe4\xbd",
+        ];
+        for fixture in fixtures {
+            for chunk_size in 1..=fixture.len() {
+                for flush_each_chunk in [false, true] {
+                    let mut batcher = SshOutputBatcher::new();
+                    let mut received = Vec::new();
+                    for chunk in fixture.chunks(chunk_size) {
+                        let full = batcher.push(chunk);
+                        if (full || flush_each_chunk)
+                            && let Some(bytes) = batcher.take_flush()
+                        {
+                            received.extend(bytes);
+                        }
+                    }
+                    if let Some(bytes) = batcher.take_final_flush() {
+                        received.extend(bytes);
+                    }
+                    assert_eq!(
+                        received, *fixture,
+                        "chunk size {chunk_size}, flush each chunk {flush_each_chunk}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn output_batcher_flush_deadline_is_not_postponed_by_more_output() {
+        let mut batcher = SshOutputBatcher::new();
+        batcher.push(b"first");
+        let deadline = batcher.flush_due().unwrap();
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        batcher.push(b" second");
+        tokio::time::sleep_until(deadline).await;
+        assert!(batcher.flush_due().unwrap() <= Instant::now());
+        assert_eq!(
+            batcher.take_flush().as_deref(),
+            Some(b"first second".as_slice())
+        );
+
+        batcher.push(b"third");
+        let normal_deadline = batcher.flush_due().unwrap();
+        batcher.note_interaction();
+        let interactive_deadline = batcher.flush_due().unwrap();
+        assert!(interactive_deadline < normal_deadline);
+        tokio::time::sleep(Duration::from_micros(500)).await;
+        batcher.note_interaction();
+        batcher.push(b" fourth");
+        tokio::time::sleep_until(interactive_deadline).await;
+        assert!(batcher.flush_due().unwrap() <= Instant::now());
+        assert_eq!(
+            batcher.take_flush().as_deref(),
+            Some(b"third fourth".as_slice())
+        );
     }
 
     #[tokio::test]
@@ -231,5 +313,4 @@ mod tests {
         assert!(!modern.preferred.kex.contains(&russh::kex::DH_G14_SHA1));
         assert!(legacy.preferred.kex.contains(&russh::kex::DH_G14_SHA1));
     }
-
 }
