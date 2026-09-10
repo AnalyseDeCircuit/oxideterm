@@ -754,9 +754,6 @@ fn validate_save_form_non_secret(
     form: &NewConnectionForm,
     proxy_hop_prefix: &[NewConnectionProxyHop],
 ) -> anyhow::Result<()> {
-    if form.name.trim().is_empty() {
-        anyhow::bail!("Connection name is required");
-    }
     if form.host.trim().is_empty() {
         anyhow::bail!("Host is required");
     }
@@ -801,7 +798,12 @@ fn connection_draft_from_form_with_proxy_hop_prefix(
     persist_password_draft: bool,
 ) -> ConnectionDraft {
     ConnectionDraft {
-        name: form.name.clone(),
+        // Both new and edited forms allow an omitted display name; storage requires a label.
+        name: if form.name.trim().is_empty() {
+            format!("{}@{}", form.username.trim(), form.host.trim())
+        } else {
+            form.name.clone()
+        },
         host: form.host.clone(),
         port: form.port.clone(),
         username: form.username.clone(),

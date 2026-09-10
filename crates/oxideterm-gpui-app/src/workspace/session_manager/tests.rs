@@ -56,13 +56,15 @@ pub(super) fn ssh_config_display_projection_never_copies_proxy_command_secrets()
 }
 
 #[test]
-pub(super) fn save_request_from_form_preserves_custom_icon_and_independent_colors() {
+pub(super) fn unnamed_save_request_preserves_custom_icon_and_independent_colors() {
     let mut form = base_form();
+    form.name.clear();
     form.icon = "cloud".to_string();
     form.color = "#7dd3fc".to_string();
     form.icon_background_color = "#082f49".to_string();
     let request = save_request_from_form(&mut form, Some("conn-1".to_string())).unwrap();
 
+    assert_eq!(request.name, "me@192.168.1.2");
     assert_eq!(request.icon.as_deref(), Some("cloud"));
     assert_eq!(request.color.as_deref(), Some("#7dd3fc"));
     assert_eq!(request.icon_background_color.as_deref(), Some("#082f49"));
@@ -124,29 +126,42 @@ pub(super) fn new_connection_save_password_true_keeps_empty_password_as_submitte
 }
 
 #[test]
-pub(super) fn edit_properties_unloaded_password_preserves_saved_keychain_id() {
+pub(super) fn edit_properties_optional_name_preserves_connection_identity_and_saved_password() {
     let existing = SavedAuth::Password {
         keychain_id: Some("kc-password".to_string()),
         plaintext_password: None,
     };
-    let mut form = base_form();
-    form.password = String::new();
-    form.password_loaded = false;
-    form.save_password = true;
+    for (name, expected) in [
+        ("Home", "Home"),
+        ("", "deploy@server.example.com"),
+        (" \t ", "deploy@server.example.com"),
+    ] {
+        let mut form = base_form();
+        form.name = name.to_string();
+        form.host = " server.example.com ".to_string();
+        form.username = " deploy ".to_string();
+        form.password_loaded = false;
+        form.save_password = true;
 
-    let request = save_request_from_form_with_existing_auth(
-        &mut form,
-        Some("conn-1".to_string()),
-        Some(&existing),
-    )
-    .unwrap();
-
-    match request.auth {
-        SavedAuth::Password {
-            keychain_id: Some(keychain_id),
-            plaintext_password: None,
-        } => assert_eq!(keychain_id, "kc-password"),
-        other => panic!("unexpected auth: {other:?}"),
+        let request = save_request_from_form_with_existing_auth(
+            &mut form,
+            Some("conn-1".to_string()),
+            Some(&existing),
+        )
+        .unwrap();
+        assert_eq!(request.name, expected);
+        assert_eq!(request.id.as_deref(), Some("conn-1"));
+        assert_eq!(request.host, "server.example.com");
+        assert_eq!(request.username, "deploy");
+        match request.auth {
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                plaintext_password: None,
+            } => {
+                assert_eq!(keychain_id, "kc-password");
+            }
+            other => panic!("unexpected auth: {other:?}"),
+        }
     }
 }
 
