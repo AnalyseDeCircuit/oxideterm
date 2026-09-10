@@ -139,6 +139,8 @@ OxideTerm 2.0.28 本机基准结果，测试时间为 2026-09-10 09:00:29 UTC，
 - 连接标签在鼠标按下时切换，避免全屏下输入事件顺序导致松开前待切换状态丢失。
 - 恢复非阻塞连接进度卡片中持续可见的关闭按钮。
 
+![OxideTerm terminal throughput comparison through 2.0.28](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/main/.github/release-notes/assets/terminal-performance-2.0.28-comparison.png)
+
 ## 2.0.27
 
 ### English
