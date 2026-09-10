@@ -33,6 +33,17 @@ OxideTerm 2.0.28 adds AI message queues and optional subagent collaboration, exp
 - Fixed long or truncated command-like output being mistaken for XMODEM/YMODEM transfer commands. Complete subsequent transfer commands remain detectable, including across input chunks.
 - Made trzsz wait for complete handshake lines before starting a transfer, avoiding premature detection when protocol markers are split across reads.
 
+Local benchmark results for OxideTerm 2.0.28, recorded on 2026-09-10 at 09:00:29 UTC using the [repository benchmark](https://github.com/AnalyseDeCircuit/oxideterm/tree/v2.0.28/benchmark): 16 MiB per workload, one warm-up and three measured runs. The table reports medians.
+
+| Workload | Median time (ms) | Median throughput (MiB/s) |
+|---|---:|---:|
+| plain | 133.606 | 119.755 |
+| ansi | 159.822 | 100.111 |
+| unicode | 165.883 | 96.454 |
+| long-csi | 153.803 | 104.029 |
+
+These results measure process-to-PTY throughput, not completed rendering or input latency.
+
 #### 🔌 Connections, Recovery, and Encrypted Sync
 
 - Added restart recovery for standalone serial, Telnet, Mosh, RDP, and VNC session entries, including temporary sessions. Entries return disconnected; temporary credentials are not persisted and must be supplied again when reconnecting. This restores session entries, not past terminal output.
@@ -88,6 +99,17 @@ OxideTerm 2.0.28 新增 AI 消息排队与可选的子 Agent 协作，扩展加�
 - 本地终端快照遇到繁忙的解析锁时采用有上限的延后重试，减少持续输出期间的界面等待，避免无限推迟快照更新。
 - 修复过长或被截断的类命令输出误触发 XMODEM/YMODEM 传输。后续完整的传输命令仍可正常识别，并支持跨输入分块检测。
 - trzsz 等待完整握手行后再启动传输，避免协议标记跨读取分块时提前触发。
+
+OxideTerm 2.0.28 本机基准结果，测试时间为 2026-09-10 09:00:29 UTC，使用[仓库内的 benchmark](https://github.com/AnalyseDeCircuit/oxideterm/tree/v2.0.28/benchmark)：每种负载 16 MiB，预热 1 次、实测 3 次，下表为中位数。
+
+| 负载 | 耗时中位数（ms） | 吞吐量中位数（MiB/s） |
+|---|---:|---:|
+| plain | 133.606 | 119.755 |
+| ansi | 159.822 | 100.111 |
+| unicode | 165.883 | 96.454 |
+| long-csi | 153.803 | 104.029 |
+
+该结果衡量进程向 PTY 输出的吞吐量，不代表完整渲染耗时或输入延迟。
 
 #### 🔌 连接、恢复与加密同步
 
