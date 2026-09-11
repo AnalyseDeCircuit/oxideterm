@@ -185,7 +185,7 @@ fn editor_memory_performance(cx: &mut TestAppContext) {
                 let syntax = allocator_bytes();
                 drop(std::mem::take(&mut editor.highlight_spans));
                 let highlights = allocator_bytes();
-                drop(std::mem::take(&mut editor.bracket_pair_by_caret));
+                drop(std::mem::take(&mut editor.bracket_index));
                 let brackets = allocator_bytes();
                 let lines = allocator_bytes();
                 drop(std::mem::take(&mut editor.structure_cache));
@@ -284,5 +284,48 @@ fn editor_disruptive_edit_performance(cx: &mut TestAppContext) {
                 "DISRUPTIVE_EDIT workload={workload} bytes={bytes} run={run} edit_ms={edit_ms:.3} painted_ms={painted_ms:.3} ready_ms={ready_ms:.3}"
             );
         }
+    }
+}
+
+#[gpui::test]
+#[ignore = "manual coalesced input benchmark"]
+fn editor_burst_performance(cx: &mut TestAppContext) {
+    let source = "// burst benchmark\nfn sample() { let value = 42; }\n".repeat(22000);
+    let editor =
+        cx.new(|cx| TextEditorView::new(source.clone(), &oxideterm_theme::default_tokens(), cx));
+    editor.update(cx, |editor, cx| {
+        editor.set_language(Some(LanguageId::Rust), cx)
+    });
+    cx.run_until_parked();
+    let mut expected = source;
+    for run in 0..6 {
+        let started = Instant::now();
+        let input_ms = editor.update(cx, |editor, cx| {
+            editor
+                .cursor
+                .set_selection(Selection::caret(BufferOffset(3)));
+            let started = Instant::now();
+            for _ in 0..64 {
+                editor.insert_text("z", cx);
+            }
+            started.elapsed().as_secs_f64() * 1000.0
+        });
+        cx.run_until_parked();
+        let ready_ms = started.elapsed().as_secs_f64() * 1000.0;
+        expected.insert_str(3, &"z".repeat(64));
+        editor.read_with(cx, |editor, _| {
+            assert_eq!(editor.buffer.text(), expected);
+            assert_eq!(editor.syntax_version, Some(editor.buffer.version()));
+            assert_eq!(
+                editor
+                    .highlight_spans
+                    .spans_in_range(0..expected.len())
+                    .collect::<Vec<_>>(),
+                SyntaxSession::parse(LanguageId::Rust, &expected)
+                    .unwrap()
+                    .highlight_spans(&expected)
+            );
+        });
+        eprintln!("EDITOR_BURST run={run} input_ms={input_ms:.3} ready_ms={ready_ms:.3}");
     }
 }

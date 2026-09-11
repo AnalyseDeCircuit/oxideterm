@@ -31,27 +31,27 @@ impl Piece {
 
 /// Piece-table storage inspired by Monaco/VS Code's buffer model.
 ///
-/// `original` never changes after construction. Inserted text is appended to
+/// `original` is immutable and shared until dead ranges are compacted. Inserted text is appended to
 /// `add`, and `pieces` describes the visible document as byte spans into those
 /// two buffers. `TextBuffer` now materializes the full document only for
 /// boundary APIs such as save, syntax, search, and IME; edits themselves keep
 /// the piece table as the source of truth.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PieceTableTextBuffer {
-    pub(crate) original: Arc<String>,
+    pub(crate) original: Arc<str>,
     pub(crate) add: String,
     pub(crate) pieces: Vec<Piece>,
     len: usize,
 }
 
 impl PieceTableTextBuffer {
-    pub(crate) fn new(original: String) -> Self {
+    pub(crate) fn new(original: Arc<str>) -> Self {
         let len = original.len();
         let pieces = Piece::new(PieceSource::Original, 0, len)
             .into_iter()
             .collect();
         Self {
-            original: Arc::new(original),
+            original,
             add: String::new(),
             pieces,
             len,
@@ -201,7 +201,32 @@ impl PieceTableTextBuffer {
         self.len = self.len - (range.end - range.start) + replacement.len();
     }
 
-    pub(crate) fn reclaim_unused_add(&mut self) {
+    pub(crate) fn reclaim_unused_text(&mut self) {
+        let original_live = self
+            .pieces
+            .iter()
+            .filter(|piece| piece.source == PieceSource::Original)
+            .map(|piece| piece.len)
+            .sum::<usize>();
+        if original_live == 0 {
+            if !self.original.is_empty() {
+                self.original = Arc::from("");
+            }
+        } else if Arc::strong_count(&self.original) == 1
+            && self.original.len().saturating_sub(original_live) > original_live
+        {
+            // History owns inverse text. Do not copy a still-shared original:
+            // saved versions and worker snapshots would keep its allocation alive.
+            let mut compact = String::with_capacity(original_live);
+            for piece in &mut self.pieces {
+                if piece.source == PieceSource::Original {
+                    let start = compact.len();
+                    compact.push_str(&self.original[piece.start..piece.end()]);
+                    piece.start = start;
+                }
+            }
+            self.original = compact.into();
+        }
         let mut live = 0;
         let mut end = 0;
         for piece in &self.pieces {

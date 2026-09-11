@@ -212,7 +212,7 @@ impl TextEditorView {
         let target_index = current_index
             .saturating_add_signed(row_delta)
             .min(max_index);
-        let Some(target_row) = rows.get(target_index).copied() else {
+        let Some(target_row) = rows.get(target_index) else {
             return;
         };
         let preferred_column = self.cursor.preferred_column_or(current_screen_column);

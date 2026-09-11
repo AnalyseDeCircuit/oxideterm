@@ -654,3 +654,88 @@ fn multiline_structure_performance() {
         black_box((folds, guides));
     }
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "manual same-language session allocation benchmark"]
+fn syntax_sessions_memory() {
+    #[repr(C)]
+    #[derive(Default)]
+    struct Statistics {
+        blocks: u32,
+        live: usize,
+        peak: usize,
+        allocated: usize,
+    }
+    unsafe extern "C" {
+        fn malloc_zone_statistics(zone: *mut std::ffi::c_void, stats: *mut Statistics);
+    }
+    let allocated = || {
+        let mut stats = Statistics::default();
+        // Null includes every malloc zone; this excludes native stack and GPU memory.
+        unsafe { malloc_zone_statistics(std::ptr::null_mut(), &mut stats) };
+        stats.live
+    };
+    for (language, source) in [
+        (LanguageId::Rust, "fn main() { let n = 1; }"),
+        (LanguageId::Markdown, "# Heading\n\n**bold** text"),
+    ] {
+        let baseline = allocated();
+        let mut sessions = Vec::new();
+        for _ in 0..16 {
+            sessions.push(SyntaxSession::parse(language, source).unwrap());
+        }
+        let opened = allocated();
+        let expected = sessions[0].highlight_spans(source);
+        for session in &sessions {
+            assert_eq!(session.highlight_spans(source), expected);
+        }
+        drop(sessions);
+        eprintln!(
+            "SYNTAX_MEMORY language={language:?} baseline={baseline} opened={opened} closed={}",
+            allocated()
+        );
+    }
+}
+
+#[test]
+fn simultaneous_documents_share_queries_but_keep_independent_parse_state() {
+    use std::sync::{Arc, Barrier};
+    let barrier = Arc::new(Barrier::new(2));
+    let sessions = std::thread::scope(|scope| {
+        let tasks: Vec<_> = ["fn alpha() {}", "fn beta() {}"]
+            .into_iter()
+            .map(|source| {
+                let barrier = barrier.clone();
+                scope.spawn(move || {
+                    barrier.wait();
+                    (
+                        SyntaxSession::parse(LanguageId::Rust, source).unwrap(),
+                        source,
+                    )
+                })
+            })
+            .collect();
+        tasks
+            .into_iter()
+            .map(|task| task.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    assert!(Arc::ptr_eq(&sessions[0].0.queries, &sessions[1].0.queries));
+    let mut sessions = sessions.into_iter();
+    let (mut first, _) = sessions.next().unwrap();
+    let (second, source) = sessions.next().unwrap();
+    first.reparse("fn changed() {}").unwrap();
+    for (session, source, name) in [
+        (&first, "fn changed() {}", "changed"),
+        (&second, source, "beta"),
+    ] {
+        let names: Vec<_> = session
+            .highlight_spans(source)
+            .into_iter()
+            .filter(|span| span.scope == SyntaxScope::Function)
+            .map(|span| source[span.range.start.0..span.range.end.0].to_owned())
+            .collect();
+        assert_eq!(names, [name]);
+    }
+}

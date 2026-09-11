@@ -103,9 +103,14 @@ impl Render for TextEditorView {
         let visible = self
             .viewport
             .visible_rows(display_rows.len(), self.metrics.line_height);
+        let visible_rows: Vec<_> = visible
+            .range
+            .clone()
+            .filter_map(|index| display_rows.get(index))
+            .collect();
         let row_context = self.prepare_render_row_context(
             &display_rows,
-            &display_rows[visible.range.clone()],
+            &visible_rows,
             focused && self.caret_visible,
         );
         let view = cx.entity();
@@ -122,7 +127,7 @@ impl Render for TextEditorView {
             ))
             .h(px(display_rows.len() as f32 * self.metrics.line_height));
         for display_index in visible.range.clone() {
-            let Some(row) = display_rows.get(display_index).copied() else {
+            let Some(row) = display_rows.get(display_index) else {
                 continue;
             };
             rows = rows.child(self.render_row(display_index, row, &row_context, window, cx));
@@ -1053,7 +1058,7 @@ impl TextEditorView {
 
     fn prepare_render_row_context(
         &self,
-        display_rows: &[DisplayRow],
+        display_rows: &super::wrap::DisplayRows,
         visible_rows: &[DisplayRow],
         show_caret: bool,
     ) -> RenderRowContext {

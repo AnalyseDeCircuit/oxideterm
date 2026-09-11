@@ -14,7 +14,8 @@ use oxideterm_editor_core::{
     TextRange, word_at,
 };
 use oxideterm_editor_syntax::{
-    BracketPair, HighlightCache, LanguageId, StructureCache, SyntaxEdit, SyntaxSession,
+    BracketIndex, BracketPair, HighlightCache, LanguageId, StructureCache, SyntaxEdit,
+    SyntaxSession,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -36,7 +37,7 @@ use coords::{byte_column_for_visual_column, visual_column_for_byte_column};
 use wrap::DisplayRow;
 
 pub type SaveCallback =
-    Box<dyn FnMut(&str, &mut Window, &mut Context<TextEditorView>) -> Result<(), String>>;
+    Box<dyn FnMut(Arc<str>, &mut Window, &mut Context<TextEditorView>) -> Result<(), String>>;
 pub type ModifiedWordClickCallback =
     Box<dyn FnMut(String, &mut Window, &mut Context<TextEditorView>) -> Result<(), String>>;
 
@@ -215,7 +216,7 @@ struct DisplayRowsCache {
     wrap_column: Option<usize>,
     fold_revision: u64,
     max_width_columns: usize,
-    rows: Arc<Vec<DisplayRow>>,
+    rows: Arc<wrap::DisplayRows>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -298,9 +299,7 @@ pub struct TextEditorView {
     pending_syntax: Option<syntax_task::SyntaxRequest>,
     highlight_spans: HighlightCache,
     structure_cache: StructureCache,
-    // Cursor movement queries bracket matches on every frame. Index every
-    // accepted caret slot so lookup does not rescan the document's pairs.
-    bracket_pair_by_caret: HashMap<usize, BracketPair>,
+    bracket_index: BracketIndex,
     content_bounds: Option<Bounds<Pixels>>,
     marked_text: Option<MarkedText>,
     secondary_selections: Vec<Selection>,
@@ -327,10 +326,16 @@ pub struct TextEditorView {
 }
 
 impl TextEditorView {
-    pub fn new(text: impl Into<String>, tokens: &ThemeTokens, cx: &mut Context<Self>) -> Self {
+    pub fn new(text: impl Into<Arc<str>>, tokens: &ThemeTokens, cx: &mut Context<Self>) -> Self {
         let metrics = EditorMetrics::from_theme(tokens);
         let settings = EditorSettings::default();
-        let buffer = TextBuffer::new(normalize_editor_text(text.into()));
+        let text: Arc<str> = text.into();
+        let text = if text.contains('\r') {
+            normalize_editor_text(text.to_string()).into()
+        } else {
+            text
+        };
+        let buffer = TextBuffer::new(text);
         Self {
             buffer,
             cursor: Cursor::new(BufferOffset::ZERO),
@@ -351,7 +356,7 @@ impl TextEditorView {
             language: None,
             highlight_spans: HighlightCache::default(),
             structure_cache: StructureCache::default(),
-            bracket_pair_by_caret: HashMap::new(),
+            bracket_index: BracketIndex::default(),
             content_bounds: None,
             marked_text: None,
             secondary_selections: Vec::new(),
@@ -748,10 +753,10 @@ impl TextEditorView {
         }
         let row_edit = self.unwrapped_row_edit(range, &replacement);
         let caret = BufferOffset(range.start.0 + replacement.len());
-        let syntax_edit = self.language.map(|_| {
-            self.buffer
-                .with_text(|text| SyntaxEdit::replace(text, range, &replacement))
-        });
+        let syntax_edit = self
+            .language
+            .filter(|_| self.syntax_task.is_none() && !self.is_large_file())
+            .and_then(|_| SyntaxEdit::from_buffer(&self.buffer, range, &replacement).ok());
         if self
             .buffer
             .apply_transaction(EditTransaction::single(TextEdit::new(range, replacement)))
@@ -838,7 +843,7 @@ impl TextEditorView {
             cx.notify();
             return;
         };
-        let result = self.buffer.with_text(|text| on_save(text, window, cx));
+        let result = on_save(self.buffer.text_snapshot(), window, cx);
         match result {
             Ok(()) => {
                 // The IDE save path is asynchronous, matching Tauri's
@@ -1229,7 +1234,7 @@ impl TextEditorView {
 
     fn matching_bracket_pair(&self) -> Option<BracketPair> {
         let head = self.cursor.selection().head.0;
-        self.bracket_pair_by_caret.get(&head).cloned()
+        self.bracket_index.pair_at(head).cloned()
     }
 }
 
@@ -1396,7 +1401,7 @@ mod tests {
         cx.run_until_parked();
         editor.update(cx, |editor, _cx| {
             assert!(editor.highlight_spans.is_empty());
-            assert!(editor.bracket_pair_by_caret.is_empty());
+            assert!(editor.bracket_index.is_empty());
             assert!(editor.structure_cache.columns_for_line(1).is_empty());
             assert!(editor.find_matches.is_empty());
             assert!(editor.find_line_matches.is_empty());

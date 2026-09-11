@@ -178,7 +178,8 @@ impl WorkspaceApp {
             paste: self.i18n.t("menu.paste"),
             select_all: self.i18n.t("fileManager.selectAll"),
         };
-        let workspace = cx.entity();
+        // The workspace owns the dialog editor; saving must not keep it alive.
+        let workspace = cx.weak_entity();
         let editor = cx.new(|cx| {
             let mut editor = oxideterm_gpui_editor::TextEditorView::new(value, &tokens, cx);
             let mut editor_settings = oxideterm_gpui_editor::EditorSettings::default();

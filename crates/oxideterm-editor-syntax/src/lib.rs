@@ -24,6 +24,7 @@ mod work;
 #[cfg(test)]
 mod tests;
 
+pub use brackets::BracketIndex;
 pub use cache::HighlightCache;
 pub use edit::{SyntaxChange, SyntaxEdit};
 pub use error::SyntaxError;

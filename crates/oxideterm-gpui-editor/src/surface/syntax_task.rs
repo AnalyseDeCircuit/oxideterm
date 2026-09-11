@@ -12,7 +12,6 @@ pub(super) struct SyntaxRequest {
     generation: u64,
     version: u64,
     language: LanguageId,
-    text: Arc<String>,
     edit: Option<SyntaxEdit>,
     reset: bool,
     tab_size: usize,
@@ -23,7 +22,7 @@ struct SyntaxState {
     syntax: Option<SyntaxSession>,
     highlights: HighlightCache,
     structure: StructureCache,
-    brackets: HashMap<usize, BracketPair>,
+    brackets: BracketIndex,
 }
 
 // A completion can be dropped by a closing view or a cancelled foreground
@@ -55,7 +54,7 @@ impl TextEditorView {
                 syntax: self.syntax.take(),
                 highlights: std::mem::take(&mut self.highlight_spans),
                 structure: std::mem::take(&mut self.structure_cache),
-                brackets: std::mem::take(&mut self.bracket_pair_by_caret),
+                brackets: std::mem::take(&mut self.bracket_index),
             }),
             executor: self.syntax_executor.clone(),
         }
@@ -78,13 +77,12 @@ impl TextEditorView {
             generation,
             version: self.buffer.version(),
             language,
-            text: self.buffer.text_snapshot(),
             edit,
             reset,
             tab_size: self.settings.tab_size,
         };
         if self.syntax_task.is_some() {
-            // Text transactions remain in TextBuffer. Only derived work is coalesced.
+            // Keep only metadata while busy; overwritten requests must not copy text.
             self.pending_syntax = Some(request);
         } else {
             let runtime = self.take_syntax_state();
@@ -102,9 +100,10 @@ impl TextEditorView {
         let version = request.version;
         let language = request.language;
         let token = self.syntax_generation.clone();
+        let text = self.buffer.text_snapshot();
         let background = self.syntax_executor.spawn_dedicated(move |_| async move {
             let work = SyntaxWork::new(token, generation, SYNTAX_SLICE);
-            compute(runtime, &request, &work)
+            compute(runtime, &request, &text, &work)
         });
         self.syntax_task = Some(cx.spawn(async move |weak, cx| {
             let result = background.await;
@@ -149,7 +148,7 @@ impl TextEditorView {
         self.syntax_version = state.version;
         self.highlight_spans = state.highlights;
         self.structure_cache = state.structure;
-        self.bracket_pair_by_caret = state.brackets;
+        self.bracket_index = state.brackets;
         self.highlight_chunk_cache.borrow_mut().clear();
         if !self.folded_ranges.is_empty() {
             self.refresh_foldable_ranges();
@@ -170,6 +169,7 @@ impl Drop for TextEditorView {
 fn compute(
     mut runtime: OwnedSyntax,
     request: &SyntaxRequest,
+    text: &str,
     work: &SyntaxWork,
 ) -> Result<OwnedSyntax, SyntaxError> {
     let result = (|| -> Result<(), SyntaxError> {
@@ -179,51 +179,39 @@ fn compute(
             .syntax
             .as_ref()
             .is_some_and(|syntax| syntax.language_id() == request.language);
-        let change = if !request.reset && same_language && state.version == Some(request.version) {
-            None
-        } else if !request.reset
-            && same_language
-            && state.version.and_then(|version| version.checked_add(1)) == Some(request.version)
-            && let Some(edit) = request.edit
-        {
-            Some(state.syntax.as_mut().unwrap().apply_edit_controlled(
-                &request.text,
-                edit,
-                Some(work),
-            )?)
-        } else {
-            state.syntax = Some(SyntaxSession::parse_controlled(
-                request.language,
-                &request.text,
-                Some(work),
-            )?);
-            None
-        };
+        let change =
+            if !request.reset && same_language && state.version == Some(request.version) {
+                None
+            } else if !request.reset
+                && same_language
+                && state.version.and_then(|version| version.checked_add(1)) == Some(request.version)
+                && let Some(edit) = request.edit
+            {
+                Some(state.syntax.as_mut().unwrap().apply_edit_controlled(
+                    text,
+                    edit,
+                    Some(work),
+                )?)
+            } else {
+                state.syntax = Some(SyntaxSession::parse_controlled(
+                    request.language,
+                    text,
+                    Some(work),
+                )?);
+                None
+            };
         let syntax = state.syntax.as_ref().unwrap();
         state
             .highlights
-            .update_controlled(syntax, &request.text, change.as_ref(), Some(work))?;
+            .update_controlled(syntax, text, change.as_ref(), Some(work))?;
         state.structure.update_controlled(
             syntax,
-            &request.text,
+            text,
             request.tab_size,
             change.as_ref(),
             Some(work),
         )?;
-        let pairs = syntax.brackets_controlled(&request.text, Some(work))?;
-        let mut brackets = HashMap::with_capacity(pairs.len().saturating_mul(4));
-        for pair in pairs {
-            work.checkpoint()?;
-            for caret in [
-                pair.open.0,
-                pair.open.0.saturating_add(1),
-                pair.close.0,
-                pair.close.0.saturating_add(1),
-            ] {
-                brackets.entry(caret).or_insert_with(|| pair.clone());
-            }
-        }
-        state.brackets = brackets;
+        state.brackets = syntax.bracket_index_controlled(text, Some(work))?;
         state.version = Some(request.version);
         work.checkpoint()
     })();
@@ -336,8 +324,8 @@ mod tests {
             }
             assert_eq!(editor.buffer.text(), "fn abcmain() {}\n");
             assert_eq!(
-                editor.pending_syntax.as_ref().unwrap().text.as_str(),
-                "fn abcmain() {}\n"
+                editor.pending_syntax.as_ref().unwrap().version,
+                editor.buffer.version()
             );
             assert!(
                 editor.highlight_spans.is_empty(),

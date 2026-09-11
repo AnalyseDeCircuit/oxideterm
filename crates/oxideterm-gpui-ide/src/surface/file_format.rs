@@ -364,12 +364,11 @@ impl IdeSurface {
                 }
                 match result {
                     Ok(data) => {
-                        let _ = this
-                            .workspace
-                            .replace_buffer_text(tab_id, data.text.clone());
+                        let text: Arc<str> = data.text.into();
+                        let _ = this.workspace.replace_buffer_text(tab_id, text.clone());
                         let _ = this.workspace.set_file_format(tab_id, data.format);
                         let _ = this.workspace.mark_saved(tab_id, data.version);
-                        this.create_editor(tab_id, &location, data.text, cx);
+                        this.create_editor(tab_id, &location, text, cx);
                     }
                     Err(error) => this.last_error = Some(this.file_error_message(&error)),
                 }

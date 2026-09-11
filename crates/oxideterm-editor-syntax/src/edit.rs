@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use oxideterm_editor_core::{BufferOffset, LineCol, TextRange};
+use oxideterm_editor_core::{BufferOffset, EditorError, LineCol, TextBuffer, TextRange};
 use tree_sitter::{InputEdit, Point, Tree};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -23,6 +23,28 @@ impl SyntaxEdit {
     pub fn replace(source_before: &str, range: TextRange, replacement: &str) -> Self {
         let start_position = point_for_byte(source_before, range.start.0);
         let old_end_position = point_for_byte(source_before, range.end.0);
+        Self::at_positions(range, start_position, old_end_position, replacement)
+    }
+
+    pub fn from_buffer(
+        buffer: &TextBuffer,
+        range: TextRange,
+        replacement: &str,
+    ) -> Result<Self, EditorError> {
+        Ok(Self::at_positions(
+            range,
+            buffer.offset_to_line_col(range.start)?,
+            buffer.offset_to_line_col(range.end)?,
+            replacement,
+        ))
+    }
+
+    fn at_positions(
+        range: TextRange,
+        start_position: LineCol,
+        old_end_position: LineCol,
+        replacement: &str,
+    ) -> Self {
         let new_end_position = advance_position(start_position, replacement);
         Self {
             start_byte: range.start.0,

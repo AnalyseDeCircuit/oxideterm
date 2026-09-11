@@ -7,13 +7,32 @@ const SPANS_PER_INDEX_ENTRY: usize = 64;
 
 use oxideterm_editor_core::{BufferOffset, TextRange};
 
-use crate::{HighlightSpan, LanguageId, SyntaxChange, SyntaxSession};
+use crate::{HighlightSpan, LanguageId, SyntaxChange, SyntaxScope, SyntaxSession};
+
+// Tree-sitter's node byte offsets are uint32_t, including on 64-bit hosts.
+// Keep that width in retained spans; expand only at the public range boundary.
+#[derive(Debug)]
+struct CachedHighlight {
+    start: u32,
+    end: u32,
+    scope: SyntaxScope,
+}
+
+impl CachedHighlight {
+    fn relative(span: HighlightSpan, base: usize) -> Self {
+        Self {
+            start: u32::try_from(span.range.start.0 - base).expect("tree-sitter byte offset"),
+            end: u32::try_from(span.range.end.0 - base).expect("tree-sitter byte offset"),
+            scope: span.scope,
+        }
+    }
+}
 
 #[derive(Debug)]
 struct HighlightBlock {
     kind_id: u16,
     range: Range<usize>,
-    spans: Box<[HighlightSpan]>,
+    spans: Box<[CachedHighlight]>,
 }
 
 /// Relative spans retain their storage across edits; only block positions move.
@@ -47,14 +66,16 @@ impl HighlightCache {
                 let first = self.span_ends.get(&block.range.start).map_or(0, |ends| {
                     ends.partition_point(|last| *last <= start) * SPANS_PER_INDEX_ENTRY
                 });
-                let last = block.spans.partition_point(|span| span.range.start.0 < end);
+                let last = block
+                    .spans
+                    .partition_point(|span| (span.start as usize) < end);
                 block.spans[first.min(last)..last]
                     .iter()
-                    .filter(move |span| span.range.end.0 > start)
+                    .filter(move |span| (span.end as usize) > start)
                     .map(move |span| HighlightSpan {
                         range: TextRange::new(
-                            BufferOffset(block.range.start + span.range.start.0),
-                            BufferOffset(block.range.start + span.range.end.0),
+                            BufferOffset(block.range.start + span.start as usize),
+                            BufferOffset(block.range.start + span.end as usize),
                         ),
                         scope: span.scope,
                     })
@@ -86,9 +107,9 @@ impl HighlightCache {
         // The bundled Rust query has no source_file or cross-root patterns.
         // Other grammars retain full queries until their context rules are verified.
         let partitioned = session.language_id == LanguageId::Rust
-            && (0..session.highlight_query.pattern_count()).all(|i| {
-                session.highlight_query.is_pattern_rooted(i)
-                    && !session.highlight_query.is_pattern_non_local(i)
+            && (0..session.queries.highlight.pattern_count()).all(|i| {
+                session.queries.highlight.is_pattern_rooted(i)
+                    && !session.queries.highlight.is_pattern_non_local(i)
             });
         let mut reusable = partitioned
             && change.is_some_and(|change| {
@@ -111,6 +132,11 @@ impl HighlightCache {
                 reusable = false;
             }
         }
+        if !reusable {
+            // No old block can contribute to this result. Release it before
+            // allocating the full query output and the replacement cache.
+            self.clear();
+        }
         let mut span_ends = HashMap::new();
         if !partitioned {
             self.blocks = vec![HighlightBlock {
@@ -122,6 +148,9 @@ impl HighlightCache {
                         TextRange::new(BufferOffset(0), BufferOffset(source.len())),
                         work,
                     )?
+                    .into_iter()
+                    .map(|span| CachedHighlight::relative(span, 0))
+                    .collect::<Vec<_>>()
                     .into(),
             }];
             if let Some(index) = index_span_ends(&self.blocks[0].spans) {
@@ -132,16 +161,19 @@ impl HighlightCache {
             let mut cursor = root.walk();
             let mut blocks = Vec::with_capacity(root.child_count());
             // Initial/full refresh uses one query rather than one query per node.
-            let full = if reusable {
+            let mut full = if reusable {
                 None
             } else {
-                Some(session.highlights_controlled(
-                    source,
-                    TextRange::new(BufferOffset(0), BufferOffset(source.len())),
-                    work,
-                )?)
+                Some(
+                    session
+                        .highlights_controlled(
+                            source,
+                            TextRange::new(BufferOffset(0), BufferOffset(source.len())),
+                            work,
+                        )?
+                        .into_iter(),
+                )
             };
-            let mut full_index = 0;
             for node in root.children(&mut cursor) {
                 crate::work::checkpoint(work)?;
                 let range = node.byte_range();
@@ -165,33 +197,27 @@ impl HighlightCache {
                     }
                     std::mem::take(&mut block.spans)
                 } else {
-                    let spans = if let Some(full) = &full {
-                        let first = full_index;
-                        while full_index < full.len() && full[full_index].range.start.0 < range.end
-                        {
-                            full_index += 1;
-                        }
-                        full[first..full_index].to_vec()
+                    let spans: Box<[_]> = if let Some(full) = &mut full {
+                        let count = full
+                            .as_slice()
+                            .partition_point(|span| span.range.start.0 < range.end);
+                        full.by_ref()
+                            .take(count)
+                            .map(|span| CachedHighlight::relative(span, range.start))
+                            .collect::<Vec<_>>()
+                            .into()
                     } else {
-                        session.highlights_controlled(
-                            source,
-                            TextRange::new(BufferOffset(range.start), BufferOffset(range.end)),
-                            work,
-                        )?
+                        session
+                            .highlights_controlled(
+                                source,
+                                TextRange::new(BufferOffset(range.start), BufferOffset(range.end)),
+                                work,
+                            )?
+                            .into_iter()
+                            .map(|span| CachedHighlight::relative(span, range.start))
+                            .collect::<Vec<_>>()
+                            .into()
                     };
-                    // Rust captures are contained in their root child. Preserve
-                    // whole captures, including multi-line strings and comments.
-                    let spans: Box<[_]> = spans
-                        .into_iter()
-                        .map(|span| HighlightSpan {
-                            range: TextRange::new(
-                                BufferOffset(span.range.start.0 - range.start),
-                                BufferOffset(span.range.end.0 - range.start),
-                            ),
-                            scope: span.scope,
-                        })
-                        .collect::<Vec<_>>()
-                        .into();
                     if let Some(index) = index_span_ends(&spans) {
                         span_ends.insert(range.start, index);
                     }
@@ -214,7 +240,7 @@ impl HighlightCache {
 
 // Prefix maxima preserve captures enclosing later spans. Index groups rather
 // than every token to keep full-query languages compact as well.
-fn index_span_ends(spans: &[HighlightSpan]) -> Option<Box<[usize]>> {
+fn index_span_ends(spans: &[CachedHighlight]) -> Option<Box<[usize]>> {
     if spans.len() <= SPANS_PER_INDEX_ENTRY {
         return None;
     }
@@ -223,7 +249,13 @@ fn index_span_ends(spans: &[HighlightSpan]) -> Option<Box<[usize]>> {
         spans
             .chunks(SPANS_PER_INDEX_ENTRY)
             .map(|chunk| {
-                maximum = maximum.max(chunk.iter().map(|span| span.range.end.0).max().unwrap_or(0));
+                maximum = maximum.max(
+                    chunk
+                        .iter()
+                        .map(|span| span.end as usize)
+                        .max()
+                        .unwrap_or(0),
+                );
                 maximum
             })
             .collect::<Vec<_>>()
@@ -235,6 +267,66 @@ fn index_span_ends(spans: &[HighlightSpan]) -> Option<Box<[usize]>> {
 mod tests {
     use super::*;
     use crate::{SyntaxEdit, SyntaxScope};
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "manual full-highlight rebuild allocation benchmark"]
+    fn highlight_rebuild_memory() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        #[repr(C)]
+        #[derive(Default)]
+        struct Statistics {
+            blocks: u32,
+            live: usize,
+            peak: usize,
+            allocated: usize,
+        }
+        unsafe extern "C" {
+            fn malloc_zone_statistics(zone: *mut std::ffi::c_void, stats: *mut Statistics);
+        }
+        fn allocated() -> usize {
+            let mut stats = Statistics::default();
+            // Sample live heap allocation across all zones, not process RSS.
+            unsafe { malloc_zone_statistics(std::ptr::null_mut(), &mut stats) };
+            stats.live
+        }
+        for language in [LanguageId::Rust, LanguageId::Python] {
+            let source = match language {
+                LanguageId::Rust => "fn sample() { let value = 42; }\n".repeat(34000),
+                _ => "value = 42 # sample\n".repeat(56000),
+            };
+            let mut session = SyntaxSession::parse(language, &source).unwrap();
+            let mut cache = HighlightCache::default();
+            cache.update(&session, &source, None);
+            for run in 0..4 {
+                session.reparse(&source).unwrap();
+                let before = allocated();
+                let peak = AtomicUsize::new(before);
+                let stop = AtomicBool::new(false);
+                let started = std::time::Instant::now();
+                std::thread::scope(|scope| {
+                    scope.spawn(|| {
+                        while !stop.load(Ordering::Acquire) {
+                            peak.fetch_max(allocated(), Ordering::Relaxed);
+                            std::thread::sleep(std::time::Duration::from_micros(100));
+                        }
+                    });
+                    cache.update(&session, &source, None);
+                    peak.fetch_max(allocated(), Ordering::Relaxed);
+                    stop.store(true, Ordering::Release);
+                });
+                let rebuild_ms = started.elapsed().as_secs_f64() * 1000.0;
+                eprintln!(
+                    "HIGHLIGHT_REBUILD language={language:?} run={run} baseline={before} peak={} rebuild_ms={rebuild_ms:.3}",
+                    peak.load(Ordering::Relaxed)
+                );
+                assert_eq!(
+                    cache.spans_in_range(0..source.len()).collect::<Vec<_>>(),
+                    session.highlight_spans(&source)
+                );
+            }
+        }
+    }
 
     #[test]
     fn large_blocks_and_full_query_languages_keep_range_results() {

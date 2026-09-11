@@ -125,9 +125,10 @@ impl WorkspaceApp {
             paste: self.i18n.t("menu.paste"),
             select_all: self.i18n.t("fileManager.selectAll"),
         };
-        let sftp_entity = self.sftp_view.clone();
+        // The SFTP view owns its preview editor, so this backlink must be weak.
+        let sftp_entity = self.sftp_view.downgrade();
         let (editor_text, line_ending) = normalize_text_line_endings(&data);
-        let initial_editor_text: Arc<str> = Arc::from(editor_text.as_str());
+        let initial_editor_text: Arc<str> = editor_text.into();
         let existing_editor = self.sftp_view.read(cx).preview_editor.clone();
         let configure_editor =
             move |editor: &mut TextEditorView, cx: &mut Context<TextEditorView>| {
@@ -144,7 +145,6 @@ impl WorkspaceApp {
                 );
                 editor.set_language(syntax_language, cx);
                 editor.set_on_save(Box::new(move |text, _window, cx| {
-                    let text = text.to_string();
                     let _ = sftp_entity.update(cx, |sftp, cx| {
                         sftp.save_preview_editor_content(text, cx);
                     });
@@ -158,7 +158,7 @@ impl WorkspaceApp {
             editor
         } else {
             cx.new(|cx| {
-                let mut editor = TextEditorView::new(editor_text, &tokens, cx);
+                let mut editor = TextEditorView::new(initial_editor_text.clone(), &tokens, cx);
                 configure_editor(&mut editor, cx);
                 editor
             })
@@ -203,7 +203,7 @@ impl WorkspaceApp {
         }) else {
             return;
         };
-        let content = editor.read(cx).buffer().text();
+        let content = editor.read(cx).buffer().text_snapshot();
         self.sftp_view.update(cx, |sftp, cx| {
             sftp.sync_preview_editor_state(&editor, cx);
             sftp.save_preview_editor_content(content, cx);
@@ -524,14 +524,14 @@ impl SftpWorkspaceEntity {
         editor: &Entity<TextEditorView>,
         cx: &mut Context<Self>,
     ) {
-        let content = editor.read(cx).buffer().text();
-        let content_changed = content.as_str() != self.preview_editor_observed_content.as_ref();
+        let content = editor.read(cx).buffer().text_snapshot();
+        let content_changed = content.as_ref() != self.preview_editor_observed_content.as_ref();
         self.preview_editor_dirty =
-            content.as_str() != self.preview_editor_initial_content.as_ref();
+            content.as_ref() != self.preview_editor_initial_content.as_ref();
         if content_changed {
             // Editor notifications include cursor-only movement. Only content
             // changes clear a previous save failure.
-            self.preview_editor_observed_content = Arc::from(content);
+            self.preview_editor_observed_content = content;
             self.preview_editor_save_error = None;
             self.preview_editor_network_error = false;
             self.preview_editor_last_atomic_write = None;
@@ -539,13 +539,13 @@ impl SftpWorkspaceEntity {
         }
     }
 
-    fn save_preview_editor_content(&mut self, content: String, cx: &mut Context<Self>) {
+    fn save_preview_editor_content(&mut self, content: Arc<str>, cx: &mut Context<Self>) {
         if self.preview_editor_saving {
             return;
         }
         self.preview_editor_dirty =
-            content.as_str() != self.preview_editor_initial_content.as_ref();
-        self.preview_editor_observed_content = Arc::from(content.as_str());
+            content.as_ref() != self.preview_editor_initial_content.as_ref();
+        self.preview_editor_observed_content = content.clone();
         if !self.preview_editor_dirty {
             return;
         }
@@ -558,7 +558,7 @@ impl SftpWorkspaceEntity {
         self.preview_generation = self.preview_generation.wrapping_add(1);
         cx.emit(SftpWorkspaceEvent::PreviewSaveRequested {
             path,
-            content: Arc::<str>::from(content),
+            content,
             encoding: Arc::<str>::from(self.preview_editor_encoding.as_str()),
             line_ending: self.preview_editor_line_ending,
             generation: self.preview_generation,
@@ -582,10 +582,66 @@ impl SftpWorkspaceEntity {
             let _ = entity.update(cx, |sftp, cx| {
                 sftp.preview_editor_retry_task = None;
                 sftp.sync_preview_editor_state(&editor, cx);
-                let content = editor.read(cx).buffer().text();
+                let content = editor.read(cx).buffer().text_snapshot();
                 sftp.save_preview_editor_content(content, cx);
             });
         }));
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn preview_save_shares_the_captured_version_across_later_edits(cx: &mut TestAppContext) {
+        let entity = cx.new(SftpWorkspaceEntity::new);
+        let original: Arc<str> = "saved\n中文".into();
+        let editor = cx.new(|cx| {
+            TextEditorView::new(original.clone(), &oxideterm_theme::default_tokens(), cx)
+        });
+        entity.update(cx, |sftp, _| {
+            sftp.preview_editor_initial_content = original.clone();
+            sftp.preview_editor_observed_content = original.clone();
+            sftp.preview_path = Some("/tmp/shared.txt".into());
+        });
+        let captured = Arc::new(std::sync::Mutex::new(None));
+        let observed = captured.clone();
+        let _subscription = entity.update(cx, |_, cx| {
+            cx.subscribe(&entity, move |_, _, event: &SftpWorkspaceEvent, _| {
+                if let SftpWorkspaceEvent::PreviewSaveRequested { path, content, .. } = event {
+                    assert_eq!(path, "/tmp/shared.txt");
+                    *observed.lock().unwrap() = Some(content.clone());
+                }
+            })
+        });
+        editor.update(cx, |editor, cx| editor.insert_text("new\n", cx));
+        let version = cx.read(|cx| editor.read(cx).buffer().text_snapshot());
+        entity.update(cx, |sftp, cx| {
+            sftp.sync_preview_editor_state(&editor, cx);
+            assert!(Arc::ptr_eq(&version, &sftp.preview_editor_observed_content));
+            sftp.save_preview_editor_content(version.clone(), cx);
+        });
+        let saved = captured
+            .lock()
+            .unwrap()
+            .take()
+            .expect("save request delivered");
+        assert!(Arc::ptr_eq(&saved, &version));
+        editor.update(cx, |editor, cx| editor.insert_text("later", cx));
+        entity.update(cx, |sftp, cx| sftp.sync_preview_editor_state(&editor, cx));
+        assert_eq!(saved.as_ref(), "new\nsaved\n中文");
+        cx.read(|cx| {
+            assert_eq!(
+                entity.read(cx).preview_editor_observed_content.as_ref(),
+                "new\nlatersaved\n中文"
+            );
+            assert_eq!(
+                entity.read(cx).preview_editor_initial_content.as_ref(),
+                "saved\n中文"
+            );
+        });
     }
 }

@@ -1,7 +1,10 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, OnceLock, Weak},
+};
 
 use oxideterm_editor_core::{BufferOffset, TextRange};
 use tree_sitter::{Language, Parser, Query, Tree};
@@ -15,8 +18,7 @@ pub struct SyntaxSession {
     pub(crate) language_id: LanguageId,
     language: Language,
     parser: Parser,
-    pub(crate) highlight_query: Query,
-    markdown_inline_query: Option<Query>,
+    pub(crate) queries: Arc<LanguageQueries>,
     pub(crate) tree: Tree,
     pub(crate) cache_owner: Arc<()>,
     pub(crate) revision: u64,
@@ -36,24 +38,14 @@ impl SyntaxSession {
         let language = language_id.tree_sitter_language();
         let mut parser = Parser::new();
         parser.set_language(&language)?;
-        let highlight_query = Query::new(&language, language_id.highlight_query())?;
-        let markdown_inline_query = if language_id == LanguageId::Markdown {
-            let inline_language: Language = tree_sitter_md::INLINE_LANGUAGE.into();
-            Some(Query::new(
-                &inline_language,
-                tree_sitter_md::HIGHLIGHT_QUERY_INLINE,
-            )?)
-        } else {
-            None
-        };
+        let queries = LanguageQueries::shared(language_id, &language)?;
         let tree = crate::work::parse(&mut parser, source, None, work)?;
 
         Ok(Self {
             language_id,
             language,
             parser,
-            highlight_query,
-            markdown_inline_query,
+            queries,
             tree,
             cache_owner: Arc::new(()),
             revision: 0,
@@ -134,8 +126,8 @@ impl SyntaxSession {
         highlight::highlight_spans(
             self.language_id,
             &self.tree,
-            &self.highlight_query,
-            self.markdown_inline_query.as_ref(),
+            &self.queries.highlight,
+            self.queries.markdown_inline.as_ref(),
             source,
             range.start.0..range.end.0,
             work,
@@ -144,6 +136,14 @@ impl SyntaxSession {
 
     pub fn bracket_pairs(&self, source: &str) -> Vec<BracketPair> {
         brackets::bracket_pairs(source)
+    }
+
+    pub fn bracket_index_controlled(
+        &self,
+        source: &str,
+        work: Option<&crate::SyntaxWork>,
+    ) -> Result<crate::BracketIndex, SyntaxError> {
+        crate::BracketIndex::new(self.brackets_controlled(source, work)?, work)
     }
 
     pub fn brackets_controlled(
@@ -160,5 +160,43 @@ impl SyntaxSession {
 
     pub fn indent_guides(&self, source: &str, tab_size: usize) -> Vec<crate::IndentGuide> {
         indent::indent_guides(self.tree.root_node(), source, tab_size)
+    }
+}
+
+/// Queries are immutable language data; parsers, trees and cursors stay per document.
+pub(crate) struct LanguageQueries {
+    pub(crate) highlight: Query,
+    markdown_inline: Option<Query>,
+}
+
+impl LanguageQueries {
+    fn shared(language_id: LanguageId, language: &Language) -> Result<Arc<Self>, SyntaxError> {
+        static QUERIES: OnceLock<Mutex<HashMap<LanguageId, Weak<LanguageQueries>>>> =
+            OnceLock::new();
+        let mut queries = QUERIES
+            .get_or_init(Mutex::default)
+            .lock()
+            .expect("language query cache poisoned");
+        if let Some(existing) = queries.get(&language_id).and_then(Weak::upgrade) {
+            return Ok(existing);
+        }
+        let highlight = Query::new(language, language_id.highlight_query())?;
+        let markdown_inline = if language_id == LanguageId::Markdown {
+            let language: Language = tree_sitter_md::INLINE_LANGUAGE.into();
+            Some(Query::new(
+                &language,
+                tree_sitter_md::HIGHLIGHT_QUERY_INLINE,
+            )?)
+        } else {
+            None
+        };
+        let compiled = Arc::new(Self {
+            highlight,
+            markdown_inline,
+        });
+        // Idle languages retain only a weak entry; closing the last document
+        // releases the compiled queries along with its syntax state.
+        queries.insert(language_id, Arc::downgrade(&compiled));
+        Ok(compiled)
     }
 }
