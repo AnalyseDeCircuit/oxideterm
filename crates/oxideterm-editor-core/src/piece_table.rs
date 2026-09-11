@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PieceSource {
@@ -38,7 +38,7 @@ impl Piece {
 /// the piece table as the source of truth.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PieceTableTextBuffer {
-    pub(crate) original: String,
+    pub(crate) original: Arc<String>,
     pub(crate) add: String,
     pub(crate) pieces: Vec<Piece>,
     len: usize,
@@ -51,7 +51,7 @@ impl PieceTableTextBuffer {
             .into_iter()
             .collect();
         Self {
-            original,
+            original: Arc::new(original),
             add: String::new(),
             pieces,
             len,
@@ -199,6 +199,35 @@ impl PieceTableTextBuffer {
 
         self.pieces = next;
         self.len = self.len - (range.end - range.start) + replacement.len();
+    }
+
+    pub(crate) fn reclaim_unused_add(&mut self) {
+        let mut live = 0;
+        let mut end = 0;
+        for piece in &self.pieces {
+            if piece.source == PieceSource::Add {
+                live += piece.len;
+                end = end.max(piece.end());
+            }
+        }
+        if live == 0 {
+            self.add = String::new();
+        } else if self.add.len().saturating_sub(live) > live {
+            // Compact only when discarded bytes outweigh copying the live data.
+            // History owns replacement strings, not offsets into this buffer.
+            let mut compact = String::with_capacity(live);
+            for piece in &mut self.pieces {
+                if piece.source == PieceSource::Add {
+                    let start = compact.len();
+                    compact.push_str(&self.add[piece.start..piece.end()]);
+                    piece.start = start;
+                }
+            }
+            self.add = compact;
+        } else {
+            // An unreferenced suffix can be reused without copying live pieces.
+            self.add.truncate(end);
+        }
     }
 
     fn append_add_piece(&mut self, text: &str) -> Option<Piece> {
