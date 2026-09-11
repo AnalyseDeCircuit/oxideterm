@@ -8076,6 +8076,7 @@ dependencies = [
  "async-channel",
  "chrono",
  "criterion 0.5.1",
+ "crossbeam-channel",
  "futures",
  "gpui",
  "gpui_platform",
@@ -8093,9 +8094,12 @@ dependencies = [
  "oxideterm-theme",
  "oxideterm-trzsz",
  "parking_lot",
+ "rand 0.10.1",
  "regex",
+ "russh",
  "serde_json",
  "tempfile",
+ "tokio",
  "unicode-segmentation",
  "unicode-width",
  "vte",
@@ -8572,6 +8576,8 @@ dependencies = [
  "oxideterm-tmux",
  "oxideterm-trzsz",
  "polling",
+ "rand 0.10.1",
+ "russh",
  "serde",
  "serialport",
  "tempfile",
@@ -8689,6 +8695,7 @@ dependencies = [
  "unicode-normalization",
  "uuid",
  "walkdir",
+ "zeroize",
 ]
 
 [[package]]

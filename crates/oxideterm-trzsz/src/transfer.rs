@@ -69,6 +69,10 @@ pub struct TrzszTransferInput {
 }
 
 impl TrzszTransferInput {
+    pub fn buffered_bytes(&self) -> usize {
+        self.buffer.buffered_bytes()
+    }
+
     pub fn add_received_data(&self, data: &[u8]) {
         self.buffer.add_buffer(data);
     }
@@ -79,6 +83,10 @@ impl TrzszTransferInput {
 }
 
 impl TrzszTransfer {
+    pub fn set_wake_callback(&self, wake: std::sync::Arc<dyn Fn() + Send + Sync>) {
+        self.buffer.set_wake_callback(wake);
+    }
+
     pub fn new(
         writer: impl Fn(Vec<u8>) + Send + Sync + 'static,
         is_windows_shell: bool,

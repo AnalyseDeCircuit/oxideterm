@@ -103,7 +103,7 @@ mod tests {
 
     #[test]
     fn ssh_terminal_is_not_interactive_until_shell_channel_is_ready() {
-        let session = SshPtySession::new_disconnected_for_test(
+        let session = crate::session::SshPtyCore::new_disconnected_for_test(
             SshSessionConfig::new("127.0.0.1", 9, "nobody"),
             80,
             24,
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn ssh_resize_resets_command_mark_coordinates_only_when_grid_changes() {
-        let mut session = SshPtySession::new_disconnected_for_test(
+        let mut session = crate::session::SshPtyCore::new_disconnected_for_test(
             SshSessionConfig::new("127.0.0.1", 9, "nobody"),
             80,
             24,

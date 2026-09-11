@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "processing_failed": "終端處理已停止，請重新連線此工作階段。",
     "local_terminal": "本機終端機",
     "tmux": {
       "tmux": "tmux",

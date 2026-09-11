@@ -471,7 +471,7 @@ impl LocalPtySession {
     }
 
     pub fn tmux_action(&mut self, action: crate::TmuxAction) -> Result<bool> {
-        let Some(command) = self.tmux_display.action_command(action) else {
+        let Some(command) = self.tmux_display.action_command(&action) else {
             return Ok(false);
         };
         self.write_control_bytes(command)?;

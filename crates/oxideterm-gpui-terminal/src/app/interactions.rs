@@ -53,7 +53,33 @@ struct TerminalWheelScrollDelta {
     animate_rows: bool,
 }
 
+pub(super) enum DeferredTmuxMouse {
+    Down(MouseDownEvent),
+    Move(MouseMoveEvent),
+    Up(MouseUpEvent),
+}
+
 impl TerminalPane {
+    pub(super) fn cancel_pending_tmux_mouse(&mut self) {
+        self.pending_tmux_mouse.clear();
+        self.tmux_selection_pending = false;
+        self.completed_tmux_selection = None;
+    }
+
+    pub(super) fn finish_tmux_mouse_selection(&mut self, selected: bool, cx: &mut Context<Self>) {
+        self.tmux_selection_pending = false;
+        self.completed_tmux_selection = Some(selected);
+        let events = std::mem::take(&mut self.pending_tmux_mouse);
+        for event in events {
+            match event {
+                DeferredTmuxMouse::Down(event) => self.handle_mouse_down(&event, cx),
+                DeferredTmuxMouse::Move(event) => self.handle_mouse_move(&event, cx),
+                DeferredTmuxMouse::Up(event) => self.handle_mouse_up(&event, cx),
+            }
+        }
+        self.completed_tmux_selection = None;
+    }
+
     pub(crate) fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
@@ -1358,6 +1384,11 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_mouse_down(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        if self.tmux_selection_pending {
+            self.pending_tmux_mouse
+                .push_back(DeferredTmuxMouse::Down(event.clone()));
+            return;
+        }
         if self.context_menu.is_some() {
             self.dismiss_terminal_context_menu(cx);
         }
@@ -1439,12 +1470,22 @@ impl TerminalPane {
         let mut selected_tmux_pane = false;
         if event.button == MouseButton::Left && event.click_count <= 1 {
             let point = self.terminal_point_for_position(event.position);
-            let selected_snapshot = {
-                let mut terminal = self.terminal.lock();
-                terminal
-                    .select_tmux_pane_at(point.col, point.row)
-                    .unwrap_or(false)
-                    .then(|| terminal.snapshot())
+            let selection = match self.completed_tmux_selection.take() {
+                Some(selected) => Ok(Some(selected)),
+                None => self
+                    .terminal
+                    .lock()
+                    .begin_tmux_pane_selection(point.col, point.row),
+            };
+            let selected_snapshot = match selection {
+                Ok(None) => {
+                    self.tmux_selection_pending = true;
+                    self.pending_tmux_mouse
+                        .push_back(DeferredTmuxMouse::Down(event.clone()));
+                    return;
+                }
+                Ok(Some(true)) => Some(self.terminal.lock().snapshot()),
+                _ => None,
             };
             if let Some(snapshot) = selected_snapshot {
                 self.set_selection(None);
@@ -1560,6 +1601,11 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if self.tmux_selection_pending {
+            self.pending_tmux_mouse
+                .push_back(DeferredTmuxMouse::Move(event.clone()));
+            return;
+        }
         if let Some(drag) = self.horizontal_scrollbar_drag
             && event.pressed_button == Some(MouseButton::Left)
         {
@@ -1647,6 +1693,11 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_mouse_up(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
+        if self.tmux_selection_pending {
+            self.pending_tmux_mouse
+                .push_back(DeferredTmuxMouse::Up(event.clone()));
+            return;
+        }
         if self.horizontal_scrollbar_drag.take().is_some() {
             cx.notify();
             return;

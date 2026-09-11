@@ -1513,7 +1513,7 @@ impl SshTransportClient {
                                 let _ = channel.window_change(cols as u32, rows as u32, 0, 0).await;
                             }
                             SshTransportCommand::Close => {
-                                if let Some(bytes) = output_batcher.take_final_flush() {
+                                if let Some(bytes) = output_batcher.take_flush() {
                                     let _ = output_tx.send(bytes).await;
                                 }
                                 let _ = channel.eof().await;
@@ -1541,7 +1541,7 @@ impl SshTransportClient {
                                 }
                             }
                             ChannelMsg::Eof | ChannelMsg::Close => {
-                                if let Some(bytes) = output_batcher.take_final_flush() {
+                                if let Some(bytes) = output_batcher.take_flush() {
                                     let _ = output_tx.send(bytes).await;
                                 }
                                 break;
@@ -1556,7 +1556,7 @@ impl SshTransportClient {
             // EOF alone leaves the server session allocated. Close only this
             // consumer channel; other consumers retain the shared transport.
             let _ = channel.close().await;
-            if let Some(bytes) = output_batcher.take_final_flush() {
+            if let Some(bytes) = output_batcher.take_flush() {
                 let _ = output_tx.send(bytes).await;
             }
             let _ = output_tx

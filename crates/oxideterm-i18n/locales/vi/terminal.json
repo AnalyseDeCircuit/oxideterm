@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "processing_failed": "Quá trình xử lý thiết bị đầu cuối đã dừng. Hãy kết nối lại phiên này để tiếp tục.",
     "local_terminal": "Terminal cục bộ",
     "tmux": {
       "tmux": "tmux",

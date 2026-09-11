@@ -1407,7 +1407,7 @@ impl WorkspaceApp {
         // Both policies keep remounted tabs on the deferred PTY boundary
         // so authentication cannot briefly start at a fallback size.
         .with_deferred_pty(true)
-        .with_runtime_handle(self.forwarding_runtime.handle().clone())
+        .with_runtime(self.forwarding_runtime.clone())
         .with_trzsz_policy(preferences.trzsz_policy.clone());
         self.register_existing_ssh_terminal_session(node_id, session_id, cx)?;
         let shared_session = TerminalPane::ssh_shared_session(session_config, &preferences);

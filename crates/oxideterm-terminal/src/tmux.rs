@@ -107,6 +107,17 @@ pub enum TmuxAction {
     RunCommand(String),
 }
 
+impl zeroize::Zeroize for TmuxAction {
+    fn zeroize(&mut self) {
+        match self {
+            Self::RunCommand(text)
+            | Self::RenameSession { name: text, .. }
+            | Self::RenameWindow { name: text, .. } => zeroize::Zeroize::zeroize(text),
+            _ => {}
+        }
+    }
+}
+
 #[derive(Default)]
 struct TmuxDisplayState {
     active: bool,
@@ -183,7 +194,7 @@ impl TmuxDisplay {
         })
     }
 
-    pub(crate) fn action_command(&self, action: TmuxAction) -> Option<Vec<u8>> {
+    pub(crate) fn action_command(&self, action: &TmuxAction) -> Option<Vec<u8>> {
         let state = self
             .state
             .read()
@@ -195,11 +206,11 @@ impl TmuxDisplay {
         let active_window = state.windows.iter().find(|window| window.active);
         let command = match action {
             TmuxAction::SelectSession(id)
-                if state.sessions.iter().any(|session| session.id == id) =>
+                if state.sessions.iter().any(|session| session.id == *id) =>
             {
                 format!("switch-client -t ${id}\n")
             }
-            TmuxAction::SelectWindow(id) if state.windows.iter().any(|window| window.id == id) => {
+            TmuxAction::SelectWindow(id) if state.windows.iter().any(|window| window.id == *id) => {
                 format!("select-window -t @{id}\n")
             }
             TmuxAction::PreviousWindow => "previous-window\n".to_string(),
@@ -227,12 +238,12 @@ impl TmuxDisplay {
                 format!("send-keys -X -t {active_pane} cancel\n")
             }
             TmuxAction::RenameSession { id, name }
-                if state.sessions.iter().any(|session| session.id == id) =>
+                if state.sessions.iter().any(|session| session.id == *id) =>
             {
                 format!("rename-session -t ${id} {}\n", quote_tmux_argument(&name)?)
             }
             TmuxAction::RenameWindow { id, name }
-                if state.windows.iter().any(|window| window.id == id) =>
+                if state.windows.iter().any(|window| window.id == *id) =>
             {
                 format!("rename-window -t @{id} {}\n", quote_tmux_argument(&name)?)
             }
@@ -312,6 +323,19 @@ impl TmuxDisplay {
             self.expect_ignored_replies(1);
         }
         command
+    }
+
+    pub(crate) fn can_select_pane(&self, col: usize, row: usize) -> bool {
+        let state = self
+            .state
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.ready
+            && state
+                .layout
+                .as_ref()
+                .and_then(|layout| layout.pane_at(col, row))
+                .is_some_and(|pane| state.pane != Some(pane))
     }
 
     pub(crate) fn select_pane_command(&self, col: usize, row: usize) -> Option<Vec<u8>> {

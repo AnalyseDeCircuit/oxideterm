@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "processing_failed": "Terminal processing stopped. Reconnect this session to continue.",
     "local_terminal": "Local Terminal",
     "tmux": {
       "tmux": "tmux",

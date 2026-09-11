@@ -15,6 +15,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 unicode-normalization.workspace = true
 uuid.workspace = true
+zeroize.workspace = true
 walkdir = "2.5"
 
 [dev-dependencies]

@@ -1,6 +1,5 @@
 struct SshOutputBatcher {
     pending: Vec<u8>,
-    utf8_guard: RawUtf8ResidualGuard,
     flush_deadline: Option<Instant>,
     interactive_until: Option<Instant>,
 }
@@ -9,7 +8,6 @@ impl SshOutputBatcher {
     fn new() -> Self {
         Self {
             pending: Vec::new(),
-            utf8_guard: RawUtf8ResidualGuard::default(),
             flush_deadline: None,
             interactive_until: None,
         }
@@ -22,12 +20,12 @@ impl SshOutputBatcher {
     }
 
     fn push(&mut self, bytes: &[u8]) -> bool {
-        if let Some(guarded) = self.utf8_guard.push(bytes) {
-            if self.pending.is_empty() {
-                self.pending = guarded.into_owned();
-            } else {
-                self.pending.extend_from_slice(&guarded);
-            }
+        // Transport bytes can belong to a binary protocol. Text decoders own
+        // incomplete characters only after protocol consumers release display data.
+        if self.pending.is_empty() {
+            self.pending = bytes.to_vec();
+        } else {
+            self.pending.extend_from_slice(bytes);
         }
         self.refresh_deadline();
         self.pending.len() >= SSH_OUTPUT_BATCH_MAX_BYTES
@@ -46,13 +44,6 @@ impl SshOutputBatcher {
         }
         self.flush_deadline = None;
         Some(std::mem::take(&mut self.pending))
-    }
-
-    fn take_final_flush(&mut self) -> Option<Vec<u8>> {
-        if let Some(residual) = self.utf8_guard.flush() {
-            self.pending.extend_from_slice(&residual);
-        }
-        self.take_flush()
     }
 
     fn refresh_deadline(&mut self) {
@@ -103,118 +94,18 @@ impl SftpExecChannelOpener for SshConnectionHandle {
     }
 }
 
-#[derive(Default)]
-struct RawUtf8ResidualGuard {
-    residual: Vec<u8>,
-}
-
-impl RawUtf8ResidualGuard {
-    fn push<'a>(&mut self, bytes: &'a [u8]) -> Option<std::borrow::Cow<'a, [u8]>> {
-        if bytes.is_empty() && self.residual.is_empty() {
-            return None;
-        }
-
-        if self.residual.is_empty() {
-            // Complete transport data can go straight into the batch; only an
-            // incomplete scalar needs storage beyond the borrowed packet.
-            let split = split_before_incomplete_utf8_tail(bytes);
-            self.residual.extend_from_slice(&bytes[split..]);
-            return (split > 0).then_some(std::borrow::Cow::Borrowed(&bytes[..split]));
-        }
-
-        let mut combined = Vec::with_capacity(self.residual.len() + bytes.len());
-        combined.extend_from_slice(&self.residual);
-        combined.extend_from_slice(bytes);
-        self.residual.clear();
-
-        let split = split_before_incomplete_utf8_tail(&combined);
-        if split < combined.len() {
-            self.residual.extend_from_slice(&combined[split..]);
-            combined.truncate(split);
-        }
-
-        if self.residual.len() >= UTF8_RESIDUAL_MAX_BYTES {
-            combined.extend_from_slice(&self.residual);
-            self.residual.clear();
-        }
-
-        (!combined.is_empty()).then_some(std::borrow::Cow::Owned(combined))
-    }
-
-    fn flush(&mut self) -> Option<Vec<u8>> {
-        (!self.residual.is_empty()).then(|| std::mem::take(&mut self.residual))
-    }
-}
-
-fn split_before_incomplete_utf8_tail(bytes: &[u8]) -> usize {
-    let len = bytes.len();
-    let max_tail = len.min(UTF8_RESIDUAL_MAX_BYTES - 1);
-
-    for tail_len in 1..=max_tail {
-        let start = len - tail_len;
-        let first = bytes[start];
-        let width = utf8_char_width(first);
-        if width == 0 {
-            continue;
-        }
-
-        if width > tail_len
-            && bytes[start + 1..]
-                .iter()
-                .all(|byte| is_utf8_continuation(*byte))
-        {
-            return start;
-        }
-
-        break;
-    }
-
-    len
-}
-
-fn utf8_char_width(byte: u8) -> usize {
-    match byte {
-        0x00..=0x7f => 1,
-        0xc2..=0xdf => 2,
-        0xe0..=0xef => 3,
-        0xf0..=0xf4 => 4,
-        _ => 0,
-    }
-}
-
-fn is_utf8_continuation(byte: u8) -> bool {
-    (0x80..=0xbf).contains(&byte)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn raw_utf8_guard_keeps_incomplete_scalar_tail() {
-        let mut guard = RawUtf8ResidualGuard::default();
-
-        assert_eq!(guard.push(&[0xe4, 0xbd]), None);
-        assert_eq!(guard.push(&[0xa0]).as_deref(), Some("你".as_bytes()));
-    }
-
-    #[test]
-    fn raw_utf8_guard_flushes_invalid_bytes_unchanged() {
-        let mut guard = RawUtf8ResidualGuard::default();
-
-        assert_eq!(
-            guard.push(&[0xff, b'a']).as_deref(),
-            Some([0xff, b'a'].as_slice())
-        );
-    }
-
-    #[test]
-    fn output_batcher_holds_utf8_tail_until_final_flush() {
+    fn output_batcher_flushes_binary_tail_without_another_packet() {
         let mut batcher = SshOutputBatcher::new();
-
-        assert!(!batcher.push(&[0xe4, 0xbd]));
-        assert_eq!(batcher.take_flush(), None);
-        assert_eq!(batcher.take_final_flush(), Some(vec![0xe4, 0xbd]));
+        batcher.push(&[0x02, 0xe4, 0xbd]);
+        assert_eq!(
+            batcher.take_flush().as_deref(),
+            Some([0x02, 0xe4, 0xbd].as_slice())
+        );
     }
 
     #[test]
@@ -237,7 +128,7 @@ mod tests {
                             received.extend(bytes);
                         }
                     }
-                    if let Some(bytes) = batcher.take_final_flush() {
+                    if let Some(bytes) = batcher.take_flush() {
                         received.extend(bytes);
                     }
                     assert_eq!(
@@ -302,6 +193,85 @@ mod tests {
             .expect("released bytes should wake the producer")
             .unwrap()
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn output_cancellation_wakes_both_byte_and_message_capacity_waiters() {
+        for chunk_size in [1, SSH_OUTPUT_BATCH_MAX_BYTES] {
+            let (sender, receiver) = ssh_output_channel();
+            let count = SSH_OUTPUT_CHANNEL_CAPACITY.min(SSH_OUTPUT_BACKLOG_BYTES / chunk_size);
+            for _ in 0..count {
+                sender.send(vec![b'x'; chunk_size]).await.unwrap();
+            }
+            let pending_sender = sender.clone();
+            let mut pending =
+                tokio::spawn(async move { pending_sender.send(b"blocked".to_vec()).await });
+            assert!(
+                tokio::time::timeout(Duration::from_millis(10), &mut pending)
+                    .await
+                    .is_err()
+            );
+            receiver.cancellation_handle().cancel();
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(1), pending)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                Err(b"blocked".to_vec())
+            );
+            let (other, mut other_rx) = ssh_output_channel();
+            other.send(b"independent".to_vec()).await.unwrap();
+            assert_eq!(&*other_rx.try_recv().unwrap(), b"independent");
+        }
+    }
+
+    #[tokio::test]
+    async fn output_receiver_drop_wakes_sender_while_a_chunk_is_retained() {
+        let (sender, mut receiver) = ssh_output_channel();
+        sender
+            .send(vec![b'x'; SSH_OUTPUT_BACKLOG_BYTES])
+            .await
+            .unwrap();
+        let retained = receiver.try_recv().unwrap();
+        let mut blocked = tokio::spawn(async move { sender.send(b"next".to_vec()).await });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), &mut blocked)
+                .await
+                .is_err()
+        );
+        drop(receiver);
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), blocked)
+                .await
+                .unwrap()
+                .unwrap(),
+            Err(b"next".to_vec())
+        );
+        assert_eq!(&retained[..4], b"xxxx");
+    }
+
+    #[tokio::test]
+    async fn output_boundary_excludes_later_packets_and_keeps_received_capacity() {
+        let (sender, mut receiver) = ssh_output_channel();
+        sender.send(b"first".to_vec()).await.unwrap();
+        let boundary = receiver.published_sequence();
+        sender.send(b"later".to_vec()).await.unwrap();
+        let first = receiver.try_recv().unwrap();
+        let later = receiver.try_recv().unwrap();
+        assert_eq!((first.sequence(), &*first), (boundary, b"first".as_slice()));
+        assert_eq!(
+            (later.sequence(), &*later),
+            (boundary + 1, b"later".as_slice())
+        );
+        assert_eq!(
+            sender.byte_permits.available_permits(),
+            SSH_OUTPUT_BACKLOG_BYTES - 10
+        );
+        drop(first);
+        assert_eq!(
+            sender.byte_permits.available_permits(),
+            SSH_OUTPUT_BACKLOG_BYTES - 5
+        );
     }
 
     #[test]

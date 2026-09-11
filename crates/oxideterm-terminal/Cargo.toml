@@ -34,6 +34,8 @@ zeroize.workspace = true
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [dev-dependencies]
+russh = { path = "../russh" }
+rand10.workspace = true
 criterion.workspace = true
 
 [[bench]]

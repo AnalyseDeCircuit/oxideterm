@@ -12,16 +12,21 @@ impl TerminalPane {
             protocol,
             direction,
         };
-        let Some(transfer) = self.terminal.lock().start_modem_transfer(request.clone()) else {
-            self.emit_trzsz_notice(
-                self.preferences.trzsz_labels.failed_title.clone(),
-                None,
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-            return;
-        };
-        self.handle_modem_transfer_prompt(request, transfer, cx);
+        let result = self.terminal.lock().begin_modem_transfer(request.clone());
+        match result {
+            Ok(Some(transfer)) => self.handle_modem_transfer_prompt(request, transfer, cx),
+            Ok(None) => {}
+            Err(_) => self.manual_modem_transfer_failed(cx),
+        }
+    }
+
+    fn manual_modem_transfer_failed(&mut self, cx: &mut Context<Self>) {
+        self.emit_trzsz_notice(
+            self.preferences.trzsz_labels.failed_title.clone(),
+            None,
+            TerminalNoticeVariant::Error,
+        );
+        cx.notify();
     }
 
     fn handle_modem_transfer_prompt(

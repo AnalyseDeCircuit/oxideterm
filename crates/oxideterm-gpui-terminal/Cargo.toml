@@ -36,6 +36,10 @@ vte.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+russh = { path = "../russh" }
+rand10.workspace = true
+tokio.workspace = true
+crossbeam-channel.workspace = true
 criterion.workspace = true
 gpui = { workspace = true, features = ["bench"] }
 gpui_platform = { workspace = true, features = ["font-kit", "test-support"] }

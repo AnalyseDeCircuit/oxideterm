@@ -6,15 +6,16 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use crate::TrzszError;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct TrzszBuffer {
     inner: Arc<BufferInner>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct BufferInner {
     state: Mutex<BufferState>,
     notify: Condvar,
+    wake: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 #[derive(Debug, Default)]
@@ -23,11 +24,42 @@ struct BufferState {
     next_buffer: Vec<u8>,
     next_index: usize,
     stopped: bool,
+    buffered_bytes: usize,
+}
+
+impl std::fmt::Debug for TrzszBuffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TrzszBuffer")
+            .field("buffered_bytes", &self.buffered_bytes())
+            .finish_non_exhaustive()
+    }
 }
 
 impl TrzszBuffer {
+    pub fn buffered_bytes(&self) -> usize {
+        self.inner
+            .state
+            .lock()
+            .expect("trzsz buffer mutex")
+            .buffered_bytes
+    }
+
+    pub fn set_wake_callback(&self, wake: Arc<dyn Fn() + Send + Sync>) {
+        *self.inner.wake.lock().expect("trzsz buffer wake") = Some(wake);
+    }
+
+    fn wake_host(&self) {
+        if let Some(wake) = &*self.inner.wake.lock().expect("trzsz buffer wake") {
+            wake();
+        }
+    }
+
     pub fn add_buffer(&self, buffer: impl AsRef<[u8]>) {
         let mut state = self.inner.state.lock().expect("trzsz buffer mutex");
+        if state.stopped {
+            return;
+        }
+        state.buffered_bytes += buffer.as_ref().len();
         state.queue.push_back(buffer.as_ref().to_vec());
         self.inner.notify.notify_all();
     }
@@ -35,14 +67,27 @@ impl TrzszBuffer {
     pub fn stop_buffer(&self) {
         let mut state = self.inner.state.lock().expect("trzsz buffer mutex");
         state.stopped = true;
+        for mut bytes in state.queue.drain(..) {
+            zeroize::Zeroize::zeroize(&mut bytes);
+        }
+        zeroize::Zeroize::zeroize(&mut state.next_buffer);
+        state.next_index = 0;
+        state.buffered_bytes = 0;
         self.inner.notify.notify_all();
+        drop(state);
+        self.wake_host();
     }
 
     pub fn drain_buffer(&self) {
         let mut state = self.inner.state.lock().expect("trzsz buffer mutex");
-        state.queue.clear();
-        state.next_buffer.clear();
+        for mut bytes in state.queue.drain(..) {
+            zeroize::Zeroize::zeroize(&mut bytes);
+        }
+        zeroize::Zeroize::zeroize(&mut state.next_buffer);
         state.next_index = 0;
+        state.buffered_bytes = 0;
+        drop(state);
+        self.wake_host();
     }
 
     pub fn read_line(&self) -> Result<String, TrzszError> {
@@ -183,6 +228,9 @@ impl TrzszBuffer {
     fn consume(&self, length: usize) {
         let mut state = self.inner.state.lock().expect("trzsz buffer mutex");
         state.next_index = state.next_index.saturating_add(length);
+        state.buffered_bytes = state.buffered_bytes.saturating_sub(length);
+        drop(state);
+        self.wake_host();
     }
 
     fn previous_chunk_had_newline(&self) -> bool {

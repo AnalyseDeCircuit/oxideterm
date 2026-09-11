@@ -132,13 +132,12 @@ fn upstream_proxy_protocol_label(protocol: UpstreamProxyProtocol) -> &'static st
 }
 const SSH_COMMAND_CHANNEL_CAPACITY: usize = 1024;
 const SSH_OUTPUT_CHANNEL_CAPACITY: usize = 1024;
-// Keep parser handoff chunks small enough for the UI-side elapsed-time budget to yield promptly.
+// Bound each handoff so parser turns and cancellation remain responsive.
 const SSH_OUTPUT_BATCH_MAX_BYTES: usize = 16 * 1024;
 const SSH_OUTPUT_BACKLOG_BYTES: usize = 1024 * 1024;
 const SSH_OUTPUT_FLUSH_MS: u64 = 4;
 const SSH_OUTPUT_INTERACTIVE_FLUSH_MS: u64 = 1;
 const SSH_OUTPUT_INTERACTIVE_WINDOW_MS: u64 = 120;
-const UTF8_RESIDUAL_MAX_BYTES: usize = 4;
 const MAX_PROXY_CHAIN_DEPTH: usize = 32;
 const MAX_AUTH_BANNER_BYTES: usize = 16 * 1024;
 
@@ -453,6 +452,7 @@ pub struct SshPtyHandle {
 }
 
 pub struct SshOutputChunk {
+    sequence: u64,
     bytes: Vec<u8>,
     _byte_permit: tokio::sync::OwnedSemaphorePermit,
 }
@@ -460,6 +460,9 @@ pub struct SshOutputChunk {
 type SshOutputActivityCallbackSlot = Arc<RwLock<Option<Arc<dyn Fn() + Send + Sync>>>>;
 
 impl SshOutputChunk {
+    pub fn sequence(&self) -> u64 {
+        self.sequence
+    }
     pub fn len(&self) -> usize {
         self.bytes.len()
     }
@@ -477,12 +480,42 @@ impl std::ops::Deref for SshOutputChunk {
     }
 }
 
+#[derive(Clone)]
+pub struct SshOutputBoundary(Arc<std::sync::atomic::AtomicU64>);
+impl SshOutputBoundary {
+    pub fn capture(&self) -> u64 {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
 pub struct SshOutputReceiver {
+    published: Arc<std::sync::atomic::AtomicU64>,
+    byte_permits: Arc<tokio::sync::Semaphore>,
+    cancelled: Arc<tokio::sync::Notify>,
     receiver: mpsc::Receiver<SshOutputChunk>,
     activity_callback: SshOutputActivityCallbackSlot,
 }
 
 impl SshOutputReceiver {
+    pub fn boundary_handle(&self) -> SshOutputBoundary {
+        SshOutputBoundary(self.published.clone())
+    }
+    /// Captures a finite prefix without receiving chunks or releasing their byte permits.
+    pub fn published_sequence(&self) -> u64 {
+        self.published.load(Ordering::Acquire)
+    }
+
+    pub fn cancellation_handle(&self) -> SshOutputCancellation {
+        SshOutputCancellation {
+            permits: self.byte_permits.clone(),
+            cancelled: self.cancelled.clone(),
+        }
+    }
+
+    pub fn close(&mut self) {
+        self.cancellation_handle().cancel();
+        self.receiver.close();
+    }
     pub fn try_recv(&mut self) -> Result<SshOutputChunk, mpsc::error::TryRecvError> {
         self.receiver.try_recv()
     }
@@ -497,10 +530,31 @@ impl SshOutputReceiver {
     }
 }
 
+impl Drop for SshOutputReceiver {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+#[derive(Clone)]
+pub struct SshOutputCancellation {
+    permits: Arc<tokio::sync::Semaphore>,
+    cancelled: Arc<tokio::sync::Notify>,
+}
+
+impl SshOutputCancellation {
+    pub fn cancel(&self) {
+        self.permits.close();
+        self.cancelled.notify_waiters();
+    }
+}
+
 #[derive(Clone)]
 struct SshOutputSender {
-    sender: mpsc::Sender<SshOutputChunk>,
+    published: Arc<std::sync::atomic::AtomicU64>,
+    sender: Option<mpsc::Sender<SshOutputChunk>>,
     byte_permits: Arc<tokio::sync::Semaphore>,
+    cancelled: Arc<tokio::sync::Notify>,
     activity_callback: SshOutputActivityCallbackSlot,
 }
 
@@ -518,13 +572,27 @@ impl SshOutputSender {
             Ok(permit) => permit,
             Err(_) => return Err(bytes),
         };
-        self.sender
-            .send(SshOutputChunk {
-                bytes,
-                _byte_permit: permit,
-            })
-            .await
-            .map_err(|error| error.0.bytes)?;
+        let cancelled = self.cancelled.notified();
+        tokio::pin!(cancelled);
+        cancelled.as_mut().enable();
+        if self.byte_permits.is_closed() {
+            return Err(bytes);
+        }
+        let slot = tokio::select! {
+            _ = &mut cancelled => return Err(bytes),
+            slot = self.sender.as_ref().expect("live SSH publisher").reserve() => match slot {
+                Ok(slot) => slot,
+                Err(_) => return Err(bytes),
+            },
+        };
+        // One transport task publishes this stream. Reserve before assigning
+        // the sequence so a rejected send cannot leave an unfillable boundary.
+        let sequence = self.published.fetch_add(1, Ordering::AcqRel) + 1;
+        slot.send(SshOutputChunk {
+            bytes,
+            sequence,
+            _byte_permit: permit,
+        });
         let callback = self.activity_callback.read().clone();
         if let Some(callback) = callback {
             callback();
@@ -533,17 +601,33 @@ impl SshOutputSender {
     }
 }
 
+impl Drop for SshOutputSender {
+    fn drop(&mut self) {
+        drop(self.sender.take());
+        if let Some(callback) = self.activity_callback.read().clone() {
+            callback();
+        }
+    }
+}
+
 fn ssh_output_channel() -> (SshOutputSender, SshOutputReceiver) {
     let (sender, receiver) = mpsc::channel(SSH_OUTPUT_CHANNEL_CAPACITY);
     let byte_permits = Arc::new(tokio::sync::Semaphore::new(SSH_OUTPUT_BACKLOG_BYTES));
     let activity_callback = Arc::new(RwLock::new(None));
+    let published = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let cancelled = Arc::new(tokio::sync::Notify::new());
     (
         SshOutputSender {
-            sender,
-            byte_permits,
+            published: published.clone(),
+            sender: Some(sender),
+            cancelled: cancelled.clone(),
+            byte_permits: byte_permits.clone(),
             activity_callback: activity_callback.clone(),
         },
         SshOutputReceiver {
+            published,
+            cancelled,
+            byte_permits,
             receiver,
             activity_callback,
         },

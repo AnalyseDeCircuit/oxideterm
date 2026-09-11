@@ -149,7 +149,11 @@ include!("session/facade.rs");
 include!("session/playback.rs");
 include!("session/local_backend.rs");
 include!("session/ssh_config.rs");
+mod ssh_parser;
+use ssh_parser::SshParser;
 include!("session/ssh_pty.rs");
+mod ssh_worker;
+pub use ssh_worker::SshPtySession;
 include!("session/telnet.rs");
 include!("session/mosh.rs");
 include!("session/serial.rs");
@@ -249,7 +253,7 @@ mod tests {
 
     #[test]
     fn ssh_output_events_are_emitted_only_when_enabled() {
-        let mut session = SshPtySession::new(
+        let mut session = SshPtyCore::new_disconnected_for_test(
             SshSessionConfig::new("127.0.0.1", 9, "nobody"),
             80,
             24,
@@ -260,7 +264,9 @@ mod tests {
 
         // TerminalEvent::Output duplicates decoded display bytes for recording,
         // so SSH keeps it disabled on the normal render path.
-        session.feed_utf8_terminal_output(b"not recorded");
+        session
+            .parser_state
+            .feed_utf8_terminal_output(b"not recorded");
         assert!(
             session
                 .take_events()
@@ -269,7 +275,7 @@ mod tests {
         );
 
         TerminalSessionBackend::set_output_events_enabled(&mut session, true);
-        session.feed_utf8_terminal_output(b"recorded");
+        session.parser_state.feed_utf8_terminal_output(b"recorded");
 
         assert!(
             session
@@ -316,7 +322,7 @@ mod tests {
             updated_at: 1,
         };
         let rules = compile_active(&snapshot, 7).unwrap();
-        let mut session = SshPtySession::new_disconnected_for_test(
+        let mut session = SshPtyCore::new_disconnected_for_test(
             SshSessionConfig::new("127.0.0.1", 9, "nobody"),
             80,
             24,
@@ -326,8 +332,12 @@ mod tests {
         );
         TerminalSessionBackend::set_trigger_rules(&mut session, rules);
 
-        session.feed_plain_transport_output_to_terminal(b"RE");
-        session.feed_plain_transport_output_to_terminal(b"ADY");
+        session
+            .parser_state
+            .feed_plain_transport_output_to_terminal(b"RE");
+        session
+            .parser_state
+            .feed_plain_transport_output_to_terminal(b"ADY");
         let events = session.take_events();
 
         assert!(events.iter().any(|event| {

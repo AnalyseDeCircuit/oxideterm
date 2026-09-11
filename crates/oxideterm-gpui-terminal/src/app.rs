@@ -499,6 +499,9 @@ pub struct TerminalPane {
     horizontal_scroll_offset_px: Pixels,
     horizontal_scrollbar_drag: Option<HorizontalScrollbarDrag>,
     tmux_separator_drag: Option<TmuxSeparatorDrag>,
+    pending_tmux_mouse: std::collections::VecDeque<interactions::DeferredTmuxMouse>,
+    tmux_selection_pending: bool,
+    completed_tmux_selection: Option<bool>,
     selection_autoscroll_position: Option<Point<Pixels>>,
     selection_autoscroll_scheduled: bool,
     copy_on_select_generation: u64,
@@ -1034,7 +1037,8 @@ impl TerminalPane {
                         this.tick(cx);
                         let listen_for_backend = backend_activity_enabled
                             && !backend_activity_closed
-                            && !this.terminal_exited
+                            && (!this.terminal_exited
+                                || this.session_kind == TerminalSessionKind::SshPty)
                             && !this.last_drain_budget_exhausted;
                         (
                             this.next_maintenance_interval(),
@@ -1170,6 +1174,9 @@ impl TerminalPane {
             horizontal_scroll_offset_px: px(0.0),
             horizontal_scrollbar_drag: None,
             tmux_separator_drag: None,
+            pending_tmux_mouse: Default::default(),
+            tmux_selection_pending: false,
+            completed_tmux_selection: None,
             selection_autoscroll_position: None,
             selection_autoscroll_scheduled: false,
             copy_on_select_generation: 0,
@@ -3176,13 +3183,31 @@ impl TerminalPane {
                 self.reset_cursor_blink();
                 TerminalEventEffect::notify()
             }
+            TerminalEvent::TmuxPaneSelected { selected } => {
+                self.finish_tmux_mouse_selection(selected, cx);
+                TerminalEventEffect::notify()
+            }
+            TerminalEvent::ProcessingFailed => {
+                self.cancel_pending_tmux_mouse();
+                self.notify_trzsz_connection_lost_if_active();
+                self.notify_modem_connection_lost_if_active();
+                self.terminal_exited = true;
+                self.emit_trzsz_notice(
+                    self.preferences.processing_failed_message.clone(),
+                    None,
+                    TerminalNoticeVariant::Error,
+                );
+                TerminalEventEffect::notify()
+            }
             TerminalEvent::StartupFailed => {
+                self.cancel_pending_tmux_mouse();
                 self.notify_trzsz_connection_lost_if_active();
                 self.notify_modem_connection_lost_if_active();
                 self.terminal_exited = true;
                 TerminalEventEffect::notify()
             }
             TerminalEvent::ChildExited(code) => {
+                self.cancel_pending_tmux_mouse();
                 self.notify_trzsz_connection_lost_if_active();
                 self.notify_modem_connection_lost_if_active();
                 let should_emit_exit = !self.terminal_exited;
@@ -3213,6 +3238,10 @@ impl TerminalPane {
                     },
                     cx,
                 );
+                TerminalEventEffect::notify()
+            }
+            TerminalEvent::ModemTransferStartFailed => {
+                self.manual_modem_transfer_failed(cx);
                 TerminalEventEffect::notify()
             }
             TerminalEvent::ModemTransferPrompt { request, transfer } => {
@@ -4740,3 +4769,7 @@ mod tests {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "app/ssh_worker_tests.rs"]
+mod ssh_worker_tests;

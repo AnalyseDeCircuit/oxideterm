@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "processing_failed": "L’elaborazione del terminale si è interrotta. Riconnetti questa sessione per continuare.",
     "local_terminal": "Terminale locale",
     "tmux": {
       "tmux": "tmux",

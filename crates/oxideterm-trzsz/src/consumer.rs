@@ -22,8 +22,10 @@ pub struct TrzszConsumer {
     transfer: Option<TrzszTransfer>,
     transfer_input: Option<TrzszTransferInput>,
     server_writes: Arc<Mutex<Vec<Vec<u8>>>>,
+    server_writes_closed: Arc<std::sync::atomic::AtomicBool>,
     is_windows_shell: bool,
     max_data_chunk_size: usize,
+    wake_host: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl TrzszConsumer {
@@ -44,9 +46,15 @@ impl TrzszConsumer {
             transfer: None,
             transfer_input: None,
             server_writes: Arc::new(Mutex::new(Vec::new())),
+            server_writes_closed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             is_windows_shell,
             max_data_chunk_size,
+            wake_host: None,
         }
+    }
+
+    pub fn set_wake_callback(&mut self, wake: Arc<dyn Fn() + Send + Sync>) {
+        self.wake_host = Some(wake);
     }
 
     pub fn filter(&self) -> &TrzszFilter {
@@ -86,6 +94,15 @@ impl TrzszConsumer {
         self.finish_transfer();
     }
 
+    pub fn close(&mut self) {
+        self.server_writes_closed
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.interrupt_transfer();
+        for mut bytes in self.take_server_writes() {
+            zeroize::Zeroize::zeroize(&mut bytes);
+        }
+    }
+
     pub fn take_active_transfer(&mut self) -> Option<TrzszTransfer> {
         self.transfer.take()
     }
@@ -95,6 +112,12 @@ impl TrzszConsumer {
             .max_chunk_bytes
             .clamp(1024, DEFAULT_MAX_DATA_CHUNK_SIZE);
         self.filter.update_transfer_policy(transfer_policy);
+    }
+
+    pub fn buffered_input_bytes(&self) -> usize {
+        self.transfer_input
+            .as_ref()
+            .map_or(0, TrzszTransferInput::buffered_bytes)
     }
 
     pub fn take_server_writes(&mut self) -> Vec<Vec<u8>> {
@@ -190,12 +213,28 @@ impl TrzszConsumer {
 
     fn start_transfer(&mut self, handshake: TrzszDetectedHandshake) {
         let output = self.server_writes.clone();
+        let wake = self.wake_host.clone();
+        let closed = self.server_writes_closed.clone();
         let mut transfer = TrzszTransfer::new(
-            move |bytes| output.lock().expect("trzsz server writes").push(bytes),
+            move |mut bytes| {
+                let mut pending = output.lock().expect("trzsz server writes");
+                if closed.load(std::sync::atomic::Ordering::Acquire) {
+                    zeroize::Zeroize::zeroize(&mut bytes);
+                    return;
+                }
+                pending.push(bytes);
+                drop(pending);
+                if let Some(wake) = &wake {
+                    wake();
+                }
+            },
             self.is_windows_shell,
             self.max_data_chunk_size,
         );
         transfer.set_remote_platform(handshake.remote_is_windows);
+        if let Some(wake) = &self.wake_host {
+            transfer.set_wake_callback(wake.clone());
+        }
         self.transfer_input = Some(transfer.input_handle());
         self.transfer = Some(transfer);
     }

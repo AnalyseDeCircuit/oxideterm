@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "processing_failed": "터미널 처리가 중지되었습니다. 계속하려면 이 세션에 다시 연결하세요.",
     "local_terminal": "로컬 터미널",
     "tmux": {
       "tmux": "tmux",

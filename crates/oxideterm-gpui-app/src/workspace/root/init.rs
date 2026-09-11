@@ -1125,6 +1125,7 @@ impl WorkspaceApp {
             session_log_settings.directory.as_deref(),
         );
         TerminalUiPreferences {
+            processing_failed_message: self.i18n.t("terminal.processing_failed"),
             font_family: terminal
                 .font_family
                 .terminal_family_name(&terminal.custom_font_family),

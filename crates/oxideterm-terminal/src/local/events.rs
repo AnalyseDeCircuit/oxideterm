@@ -90,12 +90,17 @@ pub enum TerminalEvent {
     ChildExited(Option<i32>),
     // Failed startup must remain visible instead of triggering normal exit auto-close.
     StartupFailed,
+    ProcessingFailed,
+    TmuxPaneSelected {
+        selected: bool,
+    },
     MagicDetected(TerminalMagicKind),
     TrzszTransferPrompt {
         direction: TrzszTransferDirection,
         selection: TrzszTransferSelection,
         remote_is_windows: bool,
     },
+    ModemTransferStartFailed,
     ModemTransferPrompt {
         request: ModemTransferRequest,
         transfer: ModemTransfer,

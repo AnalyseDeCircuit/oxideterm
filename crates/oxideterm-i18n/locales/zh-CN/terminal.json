@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "processing_failed": "终端处理已停止，请重新连接此会话。",
     "local_terminal": "本地终端",
     "tmux": {
       "tmux": "tmux",

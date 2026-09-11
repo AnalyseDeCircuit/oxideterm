@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "processing_failed": "Die Terminalverarbeitung wurde angehalten. Verbinden Sie diese Sitzung erneut, um fortzufahren.",
     "local_terminal": "Lokales Terminal",
     "tmux": {
       "tmux": "tmux",

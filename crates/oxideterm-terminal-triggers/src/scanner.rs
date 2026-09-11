@@ -52,6 +52,18 @@ pub struct TriggerMatched {
 }
 
 impl TriggerMatched {
+    /// Retained allocation size for bounded cross-thread event delivery.
+    pub fn retained_bytes(&self) -> usize {
+        self.trigger_id.capacity()
+            + self.full_match.capacity()
+            + self.captures.capacity() * std::mem::size_of::<TriggerCapture>()
+            + self
+                .captures
+                .iter()
+                .map(|capture| capture.name.capacity() + capture.value.capacity())
+                .sum::<usize>()
+    }
+
     pub fn trigger_id(&self) -> &str {
         &self.trigger_id
     }

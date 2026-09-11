@@ -21,7 +21,7 @@ pub struct SshSessionConfig {
     prompt_handler: Option<Arc<dyn SshPromptHandler>>,
     managed_key_resolver: Option<ManagedKeyResolver>,
     trzsz_policy: Option<TrzszTransferPolicy>,
-    runtime_handle: Option<tokio::runtime::Handle>,
+    runtime: Option<Arc<tokio::runtime::Runtime>>,
     defer_pty_until_resize: bool,
     post_connect_command: Option<String>,
 }
@@ -52,7 +52,7 @@ impl SshSessionConfig {
             prompt_handler: None,
             managed_key_resolver: None,
             trzsz_policy: None,
-            runtime_handle: None,
+            runtime: None,
             defer_pty_until_resize: false,
             post_connect_command: None,
         }
@@ -80,7 +80,7 @@ impl SshSessionConfig {
             prompt_handler: None,
             managed_key_resolver: None,
             trzsz_policy: None,
-            runtime_handle: None,
+            runtime: None,
             defer_pty_until_resize: false,
             post_connect_command: None,
         }
@@ -138,8 +138,8 @@ impl SshSessionConfig {
         self
     }
 
-    pub fn with_runtime_handle(mut self, handle: tokio::runtime::Handle) -> Self {
-        self.runtime_handle = Some(handle);
+    pub fn with_runtime(mut self, runtime: Arc<tokio::runtime::Runtime>) -> Self {
+        self.runtime = Some(runtime);
         self
     }
 
@@ -186,7 +186,7 @@ impl From<oxideterm_ssh::SshConfig> for SshSessionConfig {
             prompt_handler: None,
             managed_key_resolver: None,
             trzsz_policy: None,
-            runtime_handle: None,
+            runtime: None,
             defer_pty_until_resize: false,
             post_connect_command,
         }
@@ -303,7 +303,7 @@ impl std::fmt::Debug for SshSessionConfig {
             .field("prompt_handler", &self.prompt_handler.is_some())
             .field("managed_key_resolver", &self.managed_key_resolver.is_some())
             .field("trzsz_policy", &self.trzsz_policy)
-            .field("runtime_handle", &self.runtime_handle.is_some())
+            .field("runtime", &self.runtime.is_some())
             .field("defer_pty_until_resize", &self.defer_pty_until_resize)
             .field("post_connect_command", &self.post_connect_command.is_some())
             .finish()

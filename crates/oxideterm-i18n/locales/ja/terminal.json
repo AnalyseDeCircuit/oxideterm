@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "processing_failed": "端末の処理が停止しました。このセッションに再接続してください。",
     "local_terminal": "ローカルターミナル",
     "tmux": {
       "tmux": "tmux",
