@@ -107,7 +107,7 @@ impl RemoteDesktopSessionEntity {
         self.automatic_reconnect_task = Some(reconnect_task);
     }
 
-    fn shutdown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn shutdown(&mut self, mut window: Option<&mut Window>, cx: &mut Context<Self>) {
         self.cancel_automatic_reconnect();
         if let Some(worker_wake) = self.worker_wake.take() {
             worker_wake.stop();
@@ -118,8 +118,13 @@ impl RemoteDesktopSessionEntity {
         drop(self.password.take());
         let images = self.state.take_all_images();
         let textures = self.state.take_all_textures();
-        self.drop_images(images, window, cx);
-        Self::drop_textures(textures, window);
+        for image in images {
+            cx.drop_image(image, window.as_deref_mut());
+        }
+        // A destroyed window has already released its texture atlas.
+        if let Some(window) = window {
+            Self::drop_textures(textures, window);
+        }
     }
 
     fn poll_deliveries(
@@ -1020,7 +1025,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn close_remote_desktop_tab(
         &mut self,
         tab_id: TabId,
-        window: &mut Window,
+        window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
         self.release_public_mcp_desktop_for_closed_tab(tab_id);
@@ -2091,7 +2096,7 @@ mod tests {
 
         window
             .update(cx, |_root, window, cx| {
-                session.update(cx, |session, cx| session.shutdown(window, cx));
+                session.update(cx, |session, cx| session.shutdown(Some(window), cx));
             })
             .unwrap();
 
@@ -2204,7 +2209,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn repeated_shutdown_closes_only_once(cx: &mut TestAppContext) {
+    fn shutdown_after_window_close_releases_worker_and_secrets_once(cx: &mut TestAppContext) {
         let window = cx.add_window(|_window, _cx| RemoteDesktopSessionTestRoot);
         let protocol = RemoteDesktopProtocol::Rdp;
         let profile = preview_remote_desktop_profile(protocol);
@@ -2234,14 +2239,14 @@ mod tests {
             session
         });
 
-        // Repeated close paths must not duplicate helper shutdown or retain
-        // session-owned credentials.
         window
-            .update(cx, |_root, window, cx| {
-                session.update(cx, |session, cx| session.shutdown(window, cx));
-                session.update(cx, |session, cx| session.shutdown(window, cx));
-            })
+            .update(cx, |_, window, _| window.remove_window())
             .unwrap();
+        cx.run_until_parked();
+        // The native window is gone; repeated cleanup still releases the worker
+        // and credentials exactly once without accessing its stale handle.
+        session.update(cx, |session, cx| session.shutdown(None, cx));
+        session.update(cx, |session, cx| session.shutdown(None, cx));
 
         assert!(observed_wake.is_stopped());
         assert!(matches!(

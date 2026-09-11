@@ -606,17 +606,16 @@ impl WorkspaceApp {
         tab_id: TabId,
         mount_id: tabs::TabMountId,
         window_registration: window_registry::WindowRegistration,
-        current_window: &mut Window,
+        window_id: gpui::WindowId,
         cx: &mut Context<Self>,
     ) {
-        let window_id = current_window.window_handle().window_id();
         self.release_workspace_window(window_registration, window_id, cx);
         let transition = self.tab_host.update(cx, |tab_host, _cx| {
             tab_host.remove_tab_for_detached_window_release(tab_id, mount_id, window_id)
         });
         if let Some(transition) = transition {
             self.detached_tab_return_drag = None;
-            self.finish_tab_removal(transition, None, current_window, cx);
+            self.finish_tab_removal(transition, None, None, cx);
         }
     }
 

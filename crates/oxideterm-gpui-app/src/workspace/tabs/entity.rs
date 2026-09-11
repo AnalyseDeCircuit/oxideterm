@@ -2206,81 +2206,96 @@ mod tests {
         assert!(tab_host.rollback_detach(tab_id, replacement_mount_id));
     }
 
+    struct ClosingTabWindow {
+        _close: Subscription,
+    }
+
+    impl Render for ClosingTabWindow {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
     #[gpui::test]
     fn detached_window_release_closes_only_its_current_tab_mount(cx: &mut TestAppContext) {
-        let (_, cx) = cx.add_window_view(|_window, _cx| TabHostTestRoot);
-        let first_window = cx.window_handle();
-        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
-        let tab_id = tab_host.update(cx, |tab_host, _cx| {
-            let tab_id = tab_host.alloc_tab_id();
-            tab_host.insert_tab(test_tab(tab_id, None));
-            tab_id
-        });
-        let first_mount_id = tab_host.update(cx, |tab_host, _cx| {
-            let mount_id = tab_host.begin_detach(tab_id).expect("first reservation");
-            assert!(tab_host.commit_detach(tab_id, mount_id, first_window));
-            mount_id
-        });
-
-        let (_, cx) = cx.add_window_view(|_window, _cx| TabHostTestRoot);
-        let second_window = cx.window_handle();
-        let second_mount_id = tab_host.update(cx, |tab_host, _cx| {
-            assert!(
-                tab_host
-                    .return_to_main(tab_id, TabMountCloseReason::ReturnToMain)
-                    .is_some()
-            );
-            let mount_id = tab_host
-                .begin_detach(tab_id)
-                .expect("replacement reservation");
-            assert!(tab_host.commit_detach(tab_id, mount_id, second_window));
-            mount_id
-        });
-
-        tab_host.update(cx, |tab_host, _cx| {
-            assert!(
-                tab_host
-                    .remove_tab_for_detached_window_release(
-                        tab_id,
-                        first_mount_id,
-                        first_window.window_id(),
-                    )
-                    .is_none()
-            );
-            assert!(
-                tab_host
-                    .remove_tab_for_detached_window_release(
-                        tab_id,
-                        second_mount_id,
-                        first_window.window_id(),
-                    )
-                    .is_none()
-            );
-            assert_eq!(
-                tab_host.mount(tab_id),
-                Some(TabMount::Detached {
-                    mount_id: second_mount_id,
-                    window_id: second_window.window_id(),
-                    handle: second_window,
-                })
-            );
-
-            let transition = tab_host
-                .remove_tab_for_detached_window_release(
-                    tab_id,
-                    second_mount_id,
-                    second_window.window_id(),
-                )
-                .expect("current release removes tab");
-            assert_eq!(transition.tab.id, tab_id);
-            assert_eq!(
-                transition.mount_cleanup.reason,
-                TabMountCloseReason::TabClosed
-            );
-            assert_eq!(transition.mount_cleanup.detached_window, None);
-            assert_eq!(tab_host.mount(tab_id), None);
-            assert!(tab_host.tab_by_id(tab_id).is_none());
-        });
+        for kind in [
+            TabKind::LocalTerminal,
+            TabKind::Settings,
+            TabKind::Runtime,
+            TabKind::PluginManager,
+        ] {
+            let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
+            let tab_id = tab_host.update(cx, |tabs, _| {
+                let id = tabs.alloc_tab_id();
+                let mut tab = test_tab(id, None);
+                tab.kind = kind.clone();
+                tabs.insert_tab(tab);
+                id
+            });
+            let open = |cx: &mut TestAppContext| {
+                let mount = tab_host.update(cx, |tabs, _| tabs.begin_detach(tab_id).unwrap());
+                let owner = tab_host.clone();
+                let handle: AnyWindowHandle = cx
+                    .add_window(move |window, cx| ClosingTabWindow {
+                        _close: window_shell::observe_window_close(window, cx, move |id, cx| {
+                            owner.update(cx, |tabs, _| {
+                                if let Some(transition) =
+                                    tabs.remove_tab_for_detached_window_release(tab_id, mount, id)
+                                {
+                                    assert_eq!(transition.mount_cleanup.detached_window, None);
+                                }
+                            });
+                        }),
+                    })
+                    .into();
+                tab_host.update(cx, |tabs, _| {
+                    assert!(tabs.commit_detach(tab_id, mount, handle))
+                });
+                (handle, mount)
+            };
+            let (first, _) = open(cx);
+            tab_host.update(cx, |tabs, _| {
+                tabs.return_to_main(tab_id, TabMountCloseReason::ReturnToMain)
+                    .unwrap();
+            });
+            let (second, mount) = open(cx);
+            tab_host.update(cx, |tabs, _| {
+                assert!(
+                    tabs.remove_tab_for_detached_window_release(tab_id, mount, first.window_id())
+                        .is_none()
+                );
+            });
+            // Closing a retired shell during its owner's update must not re-enter
+            // that owner or remove the replacement mount.
+            tab_host.update(cx, |_, cx| {
+                first
+                    .update(cx, |_, window, _| window.remove_window())
+                    .unwrap();
+            });
+            cx.run_until_parked();
+            tab_host.read_with(cx, |tabs, _| {
+                assert_eq!(
+                    tabs.mount(tab_id),
+                    Some(TabMount::Detached {
+                        mount_id: mount,
+                        window_id: second.window_id(),
+                        handle: second,
+                    })
+                );
+                assert_eq!(tabs.tab_by_id(tab_id).unwrap().kind, kind);
+            });
+            second
+                .update(cx, |_, window, _| window.remove_window())
+                .unwrap();
+            cx.run_until_parked();
+            tab_host.update(cx, |tabs, _| {
+                assert!(
+                    tabs.tab_by_id(tab_id).is_none(),
+                    "closed {kind:?} tab remains registered"
+                );
+                assert_eq!(tabs.mount(tab_id), None);
+            });
+        }
     }
 
     #[gpui::test]

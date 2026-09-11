@@ -186,6 +186,24 @@ pub(in crate::workspace) fn render_resizable_window_content(
         .into_any_element()
 }
 
+pub(in crate::workspace) fn observe_window_close(
+    window: &Window,
+    cx: &App,
+    on_close: impl FnOnce(gpui::WindowId, &mut App) + 'static,
+) -> Subscription {
+    let window_id = window.window_handle().window_id();
+    let mut on_close = Some(on_close);
+    cx.on_window_closed(move |cx, closed_id| {
+        if closed_id == window_id
+            && let Some(on_close) = on_close.take()
+        {
+            // The window is already gone, and its session may still be updating.
+            // Deliver cleanup after that update without re-entering the dead handle.
+            cx.defer(move |cx| on_close(closed_id, cx));
+        }
+    })
+}
+
 /// Owns native-window state while retaining the shared workspace session.
 pub(crate) struct WorkspaceWindowShell {
     session: Entity<WorkspaceApp>,
@@ -194,7 +212,7 @@ pub(crate) struct WorkspaceWindowShell {
     background: Entity<WorkspaceWindowBackgroundEntity>,
     _session_observation: Subscription,
     _background_observation: Subscription,
-    _release_subscription: Subscription,
+    _close_subscription: Subscription,
 }
 
 impl WorkspaceWindowShell {
@@ -222,14 +240,10 @@ impl WorkspaceWindowShell {
             session.commit_workspace_window(window_registration, window_handle, cx)
         });
         debug_assert!(window_registered, "main window registration must commit");
-        let session_on_release = session.clone();
-        let release_subscription = cx.on_release_in(window, move |_shell, window, cx| {
-            session_on_release.update(cx, |session, cx| {
-                session.release_workspace_window(
-                    window_registration,
-                    window.window_handle().window_id(),
-                    cx,
-                );
+        let session_on_close = session.clone();
+        let close_subscription = observe_window_close(window, cx, move |window_id, cx| {
+            session_on_close.update(cx, |session, cx| {
+                session.release_workspace_window(window_registration, window_id, cx);
             });
         });
         Self {
@@ -239,7 +253,7 @@ impl WorkspaceWindowShell {
             background,
             _session_observation: session_observation,
             _background_observation: background_observation,
-            _release_subscription: release_subscription,
+            _close_subscription: close_subscription,
         }
     }
 }

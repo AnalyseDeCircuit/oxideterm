@@ -3,8 +3,6 @@ use super::*;
 pub(super) struct DetachedTabWindow {
     session: Entity<WorkspaceApp>,
     tab_id: TabId,
-    mount_id: tabs::TabMountId,
-    window_registration: window_registry::WindowRegistration,
     entry_handoff_origin: Option<TabWindowHandoffOrigin>,
     entry_handoff_duration: Duration,
     focus_handle: FocusHandle,
@@ -13,7 +11,7 @@ pub(super) struct DetachedTabWindow {
     background: Entity<window_shell::WorkspaceWindowBackgroundEntity>,
     _session_observation: Subscription,
     _background_observation: Subscription,
-    _release_subscription: Subscription,
+    _close_subscription: Subscription,
 }
 
 impl DetachedTabWindow {
@@ -35,7 +33,7 @@ impl DetachedTabWindow {
         );
         let session_observation = window_shell::observe_window_session(&session, cx);
         let background_observation = window_shell::observe_window_background(&background, cx);
-        let session_on_release = session.clone();
+        let session_on_close = session.clone();
         cx.on_next_frame(window, |detached, _window, cx| {
             detached.ready = true;
             if detached.entry_handoff_origin.is_some() && !detached.entry_handoff_duration.is_zero()
@@ -56,23 +54,22 @@ impl DetachedTabWindow {
         });
         // The detached native window owns this tab consumer. Releasing the
         // window closes that tab while shared node-owned transports stay live.
-        let release_subscription = cx.on_release_in(window, move |detached, window, cx| {
-            session_on_release.update(cx, |session, cx| {
-                session.release_detached_tab_window(
-                    detached.tab_id,
-                    detached.mount_id,
-                    detached.window_registration,
-                    window,
-                    cx,
-                );
+        let close_subscription =
+            window_shell::observe_window_close(window, cx, move |window_id, cx| {
+                session_on_close.update(cx, |session, cx| {
+                    session.release_detached_tab_window(
+                        tab_id,
+                        mount_id,
+                        window_registration,
+                        window_id,
+                        cx,
+                    );
+                });
             });
-        });
 
         Self {
             session,
             tab_id,
-            mount_id,
-            window_registration,
             entry_handoff_origin,
             entry_handoff_duration,
             focus_handle,
@@ -81,7 +78,7 @@ impl DetachedTabWindow {
             background,
             _session_observation: session_observation,
             _background_observation: background_observation,
-            _release_subscription: release_subscription,
+            _close_subscription: close_subscription,
         }
     }
 }
