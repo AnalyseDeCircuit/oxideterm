@@ -140,6 +140,12 @@ fn terminal_input_corpora() -> Vec<(&'static str, Vec<u8>)> {
             repeated_input("OxideTerm 中文输出 e\u{301} Rust 🦀 终端基准测试\r\n".as_bytes()),
         ),
         (
+            "mixed-log",
+            repeated_input(
+                "2026-09-11 INFO request completed method=GET path=/api/sessions status=200 elapsed_ms=12 message=连接成功 remote=server.example.com bytes=16384\r\n".as_bytes(),
+            ),
+        ),
+        (
             "long-csi",
             repeated_input(b"\x1b[1;2;3;4;5;7;8;9;22;23;24;25;27;28;29;38;5;42mX\x1b[0m"),
         ),
