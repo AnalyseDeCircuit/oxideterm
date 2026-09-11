@@ -14,9 +14,9 @@ pub use app::TerminalPlaybackUpdateTimings;
 pub use app::{
     SharedTerminalSession, TerminalBroadcastInputKind, TerminalContextAction, TerminalCursorAnchor,
     TerminalCwdShellIntegrationStatus, TerminalInputBroadcaster, TerminalInputInterceptor,
-    TerminalInputInterceptorResult, TerminalPane, TerminalPaneEvent, TerminalSearchStatus,
-    TerminalSerialAction, TerminalSerialStatus, TerminalTelnetAction,
-    TerminalWorkingDirectorySource,
+    TerminalInputInterceptorResult, TerminalKeybindings, TerminalPane, TerminalPaneEvent,
+    TerminalSearchStatus, TerminalSerialAction, TerminalSerialStatus, TerminalShortcut,
+    TerminalTelnetAction, TerminalWorkingDirectorySource,
 };
 pub use background_cache::BackgroundImageRenderCache;
 pub use command_facts::{

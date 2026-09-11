@@ -637,8 +637,7 @@ impl WorkspaceApp {
                 ai.knowledge_reindex_progress().hash(&mut hasher);
             }
             SettingsTab::Keybindings => {
-                // The toolbar owns the moving scope indicator. Keep row zero
-                // mounted while filtered table rows are replaced underneath it.
+                // Keep the search control mounted while scope filtering replaces tables.
                 if index > 0 {
                     let keybinding_state = self.settings_workspace.read(cx);
                     format!("{:?}", keybinding_state.keybinding_scope_filter()).hash(&mut hasher);
@@ -648,6 +647,17 @@ impl WorkspaceApp {
                         .hash(&mut hasher);
                 }
                 settings.keybindings.overrides.len().hash(&mut hasher);
+                for entry in &self
+                    .plugin_entity
+                    .read(cx)
+                    .registry()
+                    .contributions()
+                    .runtime_keybindings
+                {
+                    entry.plugin_id.hash(&mut hasher);
+                    entry.normalized_keybinding.hash(&mut hasher);
+                    entry.label.hash(&mut hasher);
+                }
             }
             _ => {}
         }
@@ -680,6 +690,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn visible_keybinding_scope_count(&self, cx: &App) -> usize {
+        let catalog = self.keybinding_definitions(cx);
         let keybinding_state = self.settings_workspace.read(cx);
         let query = keybinding_state
             .keybinding_search_query()
@@ -691,10 +702,17 @@ impl WorkspaceApp {
             crate::keybindings::ActionScope::Terminal,
             crate::keybindings::ActionScope::Split,
             crate::keybindings::ActionScope::Palette,
+            crate::keybindings::ActionScope::Editor,
+            crate::keybindings::ActionScope::Sftp,
+            crate::keybindings::ActionScope::FileManager,
+            crate::keybindings::ActionScope::Preview,
+            crate::keybindings::ActionScope::RemoteDesktop,
+            crate::keybindings::ActionScope::Plugin,
+            crate::keybindings::ActionScope::AiPanel,
         ]
         .into_iter()
         .filter(|scope| {
-            crate::keybindings::ACTION_DEFINITIONS
+            catalog
                 .iter()
                 .filter(|definition| definition.scope == *scope)
                 .filter(|definition| {
@@ -704,7 +722,7 @@ impl WorkspaceApp {
                     if query.is_empty() {
                         return true;
                     }
-                    let label = self.i18n.t(&definition.label_key()).to_lowercase();
+                    let label = self.keybinding_label(definition).to_lowercase();
                     label.contains(&query) || definition.id.to_lowercase().contains(&query)
                 })
         })
@@ -1185,6 +1203,9 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) {
+        if previous_settings.keybindings != settings.keybindings {
+            crate::keybindings::install_context_keybindings(&settings.keybindings.overrides, cx);
+        }
         install_application_proxy_policy_from_settings(settings, &self.connection_store);
         if previous_settings.appearance.app_icon != settings.appearance.app_icon {
             // Replacing the macOS application icon decodes the bundled image on the main thread,

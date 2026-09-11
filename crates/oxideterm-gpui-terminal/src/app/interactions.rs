@@ -20,8 +20,9 @@ use zeroize::Zeroizing;
 use super::{
     FreeTypeDragAction, FreeTypeDragState, HorizontalScrollbarDrag, HorizontalScrollbarGeometry,
     PendingTerminalEditorClipboard, ScrollbarDrag, ScrollbarGeometry, SelectionHighlightCache,
-    SmoothScrollAnimation, TerminalContextMenu, TerminalPane, TerminalPaneEvent,
-    TmuxSeparatorDirection, TmuxSeparatorDrag, command_mark_ui_available,
+    SmoothScrollAnimation, TerminalContextMenu, TerminalKeybindings, TerminalPane,
+    TerminalPaneEvent, TerminalShortcut, TmuxSeparatorDirection, TmuxSeparatorDrag,
+    command_mark_ui_available,
 };
 use crate::command_facts::TerminalAutosuggestInputState;
 use crate::terminal_ui::*;
@@ -177,8 +178,16 @@ impl TerminalPane {
             return true;
         }
 
-        if modifiers.platform && modifiers.shift && key.eq_ignore_ascii_case("k") {
-            let result = if modifiers.alt {
+        let bindings = cx.try_global::<TerminalKeybindings>();
+        let legacy = bindings.is_none();
+        let configured = bindings.and_then(|bindings| bindings.resolve(&event.keystroke));
+        if matches!(
+            configured,
+            Some(TerminalShortcut::Terminate | TerminalShortcut::Kill)
+        ) || (legacy && modifiers.platform && modifiers.shift && key.eq_ignore_ascii_case("k"))
+        {
+            let result = if configured == Some(TerminalShortcut::Kill) || (legacy && modifiers.alt)
+            {
                 self.terminal.lock().kill_active_task()
             } else {
                 self.terminal.lock().terminate_active_task()
@@ -220,17 +229,21 @@ impl TerminalPane {
         if self.handle_free_type_clipboard_shortcut(event, mode, cx) {
             return true;
         }
-        if is_legacy_terminal_copy_shortcut(key, modifiers) {
+        if configured == Some(TerminalShortcut::Copy)
+            || (legacy && is_legacy_terminal_copy_shortcut(key, modifiers))
+        {
             // Preserve the long-standing terminal convention without consuming plain Insert.
             self.copy_current_selection_or_snapshot(cx);
             return true;
         }
-        if is_legacy_terminal_paste_shortcut(key, modifiers) {
+        if configured == Some(TerminalShortcut::Paste)
+            || (legacy && is_legacy_terminal_paste_shortcut(key, modifiers))
+        {
             // Clipboard paste must be handled before Insert is encoded as a terminal sequence.
             self.paste_from_clipboard(cx);
             return true;
         }
-        if is_platform_copy_shortcut(event) {
+        if legacy && is_platform_copy_shortcut(event) {
             // macOS terminals reserve Cmd+C for copy; Ctrl+C remains the
             // protocol interrupt path below.
             self.copy_current_selection_or_snapshot(cx);
@@ -245,7 +258,17 @@ impl TerminalPane {
             return true;
         }
 
-        if let Some(action) = oxideterm_terminal_scroll_action(&event.keystroke) {
+        let scroll = match configured {
+            Some(TerminalShortcut::PageUp) => Some(TerminalScrollAction::PageUp),
+            Some(TerminalShortcut::PageDown) => Some(TerminalScrollAction::PageDown),
+            Some(TerminalShortcut::LineUp) => Some(TerminalScrollAction::LineUp),
+            Some(TerminalShortcut::LineDown) => Some(TerminalScrollAction::LineDown),
+            Some(TerminalShortcut::Top) => Some(TerminalScrollAction::Top),
+            Some(TerminalShortcut::Bottom) => Some(TerminalScrollAction::Bottom),
+            _ if legacy => oxideterm_terminal_scroll_action(&event.keystroke),
+            _ => None,
+        };
+        if let Some(action) = scroll {
             self.apply_scroll_action(action, cx);
             return true;
         }
@@ -3261,6 +3284,61 @@ mod tests {
             assert!(!pane.handle_terminal_autosuggest_key("up", Modifiers::default(), cx));
             assert_eq!(pane.autosuggest_selected_index, None);
             assert_eq!(pane.autosuggest_dismissed_query.as_deref(), Some("ls"));
+        });
+    }
+
+    #[gpui::test]
+    fn configured_terminal_keybindings_replace_fixed_scroll_keys(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| TerminalScrollTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.set_global(TerminalKeybindings {
+                bindings: vec![(
+                    gpui::KeyBinding::new("ctrl-u", gpui::NoAction {}, None),
+                    TerminalShortcut::Top,
+                )],
+                normalize: |key| Some(key.clone()),
+            });
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    20,
+                    2,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .unwrap()
+            })
+        });
+        let event = |key| KeyDownEvent {
+            keystroke: gpui::Keystroke::parse(key).unwrap(),
+            is_held: false,
+            prefer_character_input: false,
+        };
+        pane.update(cx, |pane, cx| {
+            pane.terminal
+                .lock()
+                .feed_recording_output(b"zero\r\none\r\ntwo\r\nthree");
+            let snapshot = pane.terminal.lock().snapshot();
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            pane.handle_key(&event("shift-home"), cx);
+            assert_eq!(pane.snapshot.display_offset, 0);
+            pane.handle_key(&event("ctrl-u"), cx);
+            assert_eq!(pane.snapshot.display_offset, 2);
+            assert_eq!(
+                pane.visible_text_snapshot()
+                    .lines()
+                    .next()
+                    .unwrap()
+                    .trim_end(),
+                "zero"
+            );
+            pane.apply_scroll_action(TerminalScrollAction::Bottom, cx);
+            cx.set_global(TerminalKeybindings {
+                bindings: Vec::new(),
+                normalize: |key| Some(key.clone()),
+            });
+            pane.handle_key(&event("ctrl-u"), cx);
+            assert_eq!(pane.snapshot.display_offset, 0);
         });
     }
 

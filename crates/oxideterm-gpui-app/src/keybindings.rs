@@ -1,7 +1,7 @@
 use gpui::{KeyBinding, Keystroke, NoAction};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::sync::LazyLock;
+use std::{borrow::Cow, sync::LazyLock};
 
 use crate::{
     CloseOtherTabs, CloseTab, CommandPalette, Copy, Cut, Find, FontDecrease, FontIncrease,
@@ -21,15 +21,57 @@ pub(crate) enum ActionScope {
     Terminal,
     Split,
     Palette,
+    Editor,
+    Sftp,
+    FileManager,
+    Preview,
+    RemoteDesktop,
+    Plugin,
+    AiPanel,
 }
 
 impl ActionScope {
+    fn local(self) -> bool {
+        matches!(
+            self,
+            Self::Editor
+                | Self::Sftp
+                | Self::FileManager
+                | Self::Preview
+                | Self::RemoteDesktop
+                | Self::Plugin
+                | Self::AiPanel
+        )
+    }
+
+    fn overlaps(self, other: Self) -> bool {
+        self == other
+            || matches!(self, Self::Global | Self::Palette | Self::Plugin)
+            || matches!(other, Self::Global | Self::Palette | Self::Plugin)
+            || matches!(
+                (self, other),
+                (Self::Terminal, Self::Split)
+                    | (Self::Split, Self::Terminal)
+                    | (Self::FileManager, Self::Preview)
+                    | (Self::Preview, Self::FileManager)
+                    | (Self::AiPanel, Self::Terminal | Self::Split | Self::Editor)
+                    | (Self::Terminal | Self::Split | Self::Editor, Self::AiPanel)
+            )
+    }
+
     pub(crate) fn label_key(self) -> &'static str {
         match self {
             Self::Global => "settings_view.keybindings.scope_global",
             Self::Terminal => "settings_view.keybindings.scope_terminal",
             Self::Split => "settings_view.keybindings.scope_split",
             Self::Palette => "settings_view.keybindings.scope_palette",
+            Self::Editor => "settings_view.keybindings.scope_editor",
+            Self::Sftp => "settings_view.keybindings.scope_sftp",
+            Self::FileManager => "settings_view.keybindings.scope_files",
+            Self::Preview => "settings_view.keybindings.scope_preview",
+            Self::RemoteDesktop => "settings_view.keybindings.scope_remote_desktop",
+            Self::Plugin => "settings_view.keybindings.scope_plugins",
+            Self::AiPanel => "settings_view.keybindings.scope_ai_panel",
         }
     }
 }
@@ -162,7 +204,8 @@ impl KeyCombo {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ActionDefinition {
-    pub(crate) id: &'static str,
+    pub(crate) id: Cow<'static, str>,
+    pub(crate) label: Option<String>,
     pub(crate) scope: ActionScope,
     pub(crate) terminal_behavior: TerminalBehavior,
     pub(crate) mac: KeyCombo,
@@ -291,7 +334,7 @@ pub(crate) static ACTION_DEFINITIONS: LazyLock<Vec<ActionDefinition>> = LazyLock
 
     for index in 1..=9 {
         actions.push(def(
-            Box::leak(format!("app.goToTab{index}").into_boxed_str()),
+            format!("app.goToTab{index}"),
             ActionScope::Global,
             KeyCombo::cmd(index.to_string()),
             KeyCombo::ctrl(index.to_string()),
@@ -431,22 +474,386 @@ pub(crate) static ACTION_DEFINITIONS: LazyLock<Vec<ActionDefinition>> = LazyLock
         ),
     ]);
 
+    actions.extend([
+        def(
+            "editor.save",
+            ActionScope::Editor,
+            KeyCombo::cmd("s"),
+            KeyCombo::ctrl("s"),
+        ),
+        def(
+            "editor.copy",
+            ActionScope::Editor,
+            KeyCombo::cmd("c"),
+            KeyCombo::ctrl("c"),
+        ),
+        def(
+            "editor.cut",
+            ActionScope::Editor,
+            KeyCombo::cmd("x"),
+            KeyCombo::ctrl("x"),
+        ),
+        def(
+            "editor.paste",
+            ActionScope::Editor,
+            KeyCombo::cmd("v"),
+            KeyCombo::ctrl("v"),
+        ),
+        def(
+            "editor.selectAll",
+            ActionScope::Editor,
+            KeyCombo::cmd("a"),
+            KeyCombo::ctrl("a"),
+        ),
+        def(
+            "editor.undo",
+            ActionScope::Editor,
+            KeyCombo::cmd("z"),
+            KeyCombo::ctrl("z"),
+        ),
+        def(
+            "editor.redo",
+            ActionScope::Editor,
+            KeyCombo::cmd_shift("z"),
+            KeyCombo::ctrl_shift("z"),
+        ),
+        def(
+            "editor.addNextMatch",
+            ActionScope::Editor,
+            KeyCombo::cmd("d"),
+            KeyCombo::ctrl("d"),
+        ),
+        def(
+            "editor.find",
+            ActionScope::Editor,
+            KeyCombo::cmd("f"),
+            KeyCombo::ctrl("f"),
+        ),
+        def(
+            "sftp.selectAll",
+            ActionScope::Sftp,
+            KeyCombo::cmd("a"),
+            KeyCombo::ctrl("a"),
+        ),
+        def(
+            "sftp.editPath",
+            ActionScope::Sftp,
+            KeyCombo::cmd("l"),
+            KeyCombo::ctrl("l"),
+        ),
+        def(
+            "sftp.open",
+            ActionScope::Sftp,
+            KeyCombo::plain("enter"),
+            KeyCombo::plain("enter"),
+        ),
+        def(
+            "sftp.preview",
+            ActionScope::Sftp,
+            KeyCombo::plain("space"),
+            KeyCombo::plain("space"),
+        ),
+        def(
+            "sftp.upload",
+            ActionScope::Sftp,
+            KeyCombo::plain("arrowright"),
+            KeyCombo::plain("arrowright"),
+        ),
+        def(
+            "sftp.download",
+            ActionScope::Sftp,
+            KeyCombo::plain("arrowleft"),
+            KeyCombo::plain("arrowleft"),
+        ),
+        def(
+            "sftp.delete",
+            ActionScope::Sftp,
+            KeyCombo::plain("delete"),
+            KeyCombo::plain("delete"),
+        ),
+        def(
+            "sftp.rename",
+            ActionScope::Sftp,
+            KeyCombo::plain("f2"),
+            KeyCombo::plain("f2"),
+        ),
+    ]);
+
+    actions.push(def(
+        "sftp.togglePreviewSource",
+        ActionScope::Sftp,
+        KeyCombo::plain("u"),
+        KeyCombo::plain("u"),
+    ));
+
+    actions.extend([
+        def(
+            "fileManager.selectAll",
+            ActionScope::FileManager,
+            KeyCombo::cmd("a"),
+            KeyCombo::ctrl("a"),
+        ),
+        def(
+            "fileManager.copy",
+            ActionScope::FileManager,
+            KeyCombo::cmd("c"),
+            KeyCombo::ctrl("c"),
+        ),
+        def(
+            "fileManager.cut",
+            ActionScope::FileManager,
+            KeyCombo::cmd("x"),
+            KeyCombo::ctrl("x"),
+        ),
+        def(
+            "fileManager.paste",
+            ActionScope::FileManager,
+            KeyCombo::cmd("v"),
+            KeyCombo::ctrl("v"),
+        ),
+        def(
+            "fileManager.editPath",
+            ActionScope::FileManager,
+            KeyCombo::cmd("l"),
+            KeyCombo::ctrl("l"),
+        ),
+        def(
+            "fileManager.open",
+            ActionScope::FileManager,
+            KeyCombo::plain("enter"),
+            KeyCombo::plain("enter"),
+        ),
+        def(
+            "fileManager.preview",
+            ActionScope::FileManager,
+            KeyCombo::plain("space"),
+            KeyCombo::plain("space"),
+        ),
+        def(
+            "fileManager.delete",
+            ActionScope::FileManager,
+            KeyCombo::plain("delete"),
+            KeyCombo::plain("delete"),
+        ),
+        def(
+            "fileManager.deleteOrParent",
+            ActionScope::FileManager,
+            KeyCombo::plain("backspace"),
+            KeyCombo::plain("backspace"),
+        ),
+        def(
+            "fileManager.rename",
+            ActionScope::FileManager,
+            KeyCombo::plain("f2"),
+            KeyCombo::plain("f2"),
+        ),
+        def(
+            "preview.previous",
+            ActionScope::Preview,
+            KeyCombo::plain("arrowleft"),
+            KeyCombo::plain("arrowleft"),
+        ),
+        def(
+            "preview.next",
+            ActionScope::Preview,
+            KeyCombo::plain("arrowright"),
+            KeyCombo::plain("arrowright"),
+        ),
+        def(
+            "preview.metadata",
+            ActionScope::Preview,
+            KeyCombo::plain("i"),
+            KeyCombo::plain("i"),
+        ),
+        def(
+            "preview.source",
+            ActionScope::Preview,
+            KeyCombo::plain("u"),
+            KeyCombo::plain("u"),
+        ),
+        def(
+            "preview.zoomIn",
+            ActionScope::Preview,
+            KeyCombo::plain("="),
+            KeyCombo::plain("="),
+        ),
+        def(
+            "preview.zoomOut",
+            ActionScope::Preview,
+            KeyCombo::plain("-"),
+            KeyCombo::plain("-"),
+        ),
+        def(
+            "preview.resetZoom",
+            ActionScope::Preview,
+            KeyCombo::plain("0"),
+            KeyCombo::plain("0"),
+        ),
+        def(
+            "preview.rotate",
+            ActionScope::Preview,
+            KeyCombo::plain("r"),
+            KeyCombo::plain("r"),
+        ),
+        def(
+            "remoteDesktop.copy",
+            ActionScope::RemoteDesktop,
+            KeyCombo::cmd("c"),
+            KeyCombo::ctrl("c"),
+        ),
+        def(
+            "remoteDesktop.paste",
+            ActionScope::RemoteDesktop,
+            KeyCombo::cmd("v"),
+            KeyCombo::ctrl("v"),
+        ),
+    ]);
+    actions.extend([
+        def(
+            "terminal.scrollPageUp",
+            ActionScope::Terminal,
+            KeyCombo {
+                shift: true,
+                ..KeyCombo::plain("pageup")
+            },
+            KeyCombo {
+                shift: true,
+                ..KeyCombo::plain("pageup")
+            },
+        ),
+        def(
+            "terminal.scrollPageDown",
+            ActionScope::Terminal,
+            KeyCombo {
+                shift: true,
+                ..KeyCombo::plain("pagedown")
+            },
+            KeyCombo {
+                shift: true,
+                ..KeyCombo::plain("pagedown")
+            },
+        ),
+        def(
+            "terminal.scrollLineUp",
+            ActionScope::Terminal,
+            KeyCombo {
+                shift: true,
+                ..KeyCombo::plain("arrowup")
+            },
+            KeyCombo {
+                shift: true,
+                ..KeyCombo::plain("arrowup")
+            },
+        ),
+        def(
+            "terminal.scrollLineDown",
+            ActionScope::Terminal,
+            KeyCombo {
+                shift: true,
+                ..KeyCombo::plain("arrowdown")
+            },
+            KeyCombo {
+                shift: true,
+                ..KeyCombo::plain("arrowdown")
+            },
+        ),
+        def(
+            "terminal.scrollTop",
+            ActionScope::Terminal,
+            KeyCombo {
+                shift: true,
+                ..KeyCombo::plain("home")
+            },
+            KeyCombo {
+                shift: true,
+                ..KeyCombo::plain("home")
+            },
+        ),
+        def(
+            "terminal.scrollBottom",
+            ActionScope::Terminal,
+            KeyCombo {
+                shift: true,
+                ..KeyCombo::plain("end")
+            },
+            KeyCombo {
+                shift: true,
+                ..KeyCombo::plain("end")
+            },
+        ),
+        def(
+            "terminal.pasteAlternate",
+            ActionScope::Terminal,
+            KeyCombo {
+                shift: true,
+                ..KeyCombo::plain("insert")
+            },
+            KeyCombo {
+                shift: true,
+                ..KeyCombo::plain("insert")
+            },
+        ),
+        def(
+            "terminal.copyAlternate",
+            ActionScope::Terminal,
+            KeyCombo::ctrl("insert"),
+            KeyCombo::ctrl("insert"),
+        ),
+        def(
+            "terminal.terminateTask",
+            ActionScope::Terminal,
+            KeyCombo::cmd_shift("k"),
+            KeyCombo::cmd_shift("k"),
+        ),
+        def(
+            "terminal.killTask",
+            ActionScope::Terminal,
+            KeyCombo {
+                alt: true,
+                ..KeyCombo::cmd_shift("k")
+            },
+            KeyCombo {
+                alt: true,
+                ..KeyCombo::cmd_shift("k")
+            },
+        ),
+    ]);
+    actions.extend([
+        def(
+            "terminal.aiSubmit",
+            ActionScope::AiPanel,
+            KeyCombo::plain("enter"),
+            KeyCombo::plain("enter"),
+        ),
+        def(
+            "terminal.aiInsert",
+            ActionScope::AiPanel,
+            KeyCombo::plain("tab"),
+            KeyCombo::plain("tab"),
+        ),
+    ]);
     actions
 });
 
-fn def(id: &'static str, scope: ActionScope, mac: KeyCombo, other: KeyCombo) -> ActionDefinition {
+fn def(
+    id: impl Into<Cow<'static, str>>,
+    scope: ActionScope,
+    mac: KeyCombo,
+    other: KeyCombo,
+) -> ActionDefinition {
     def_with_terminal_behavior(id, scope, TerminalBehavior::Always, mac, other)
 }
 
 fn def_with_terminal_behavior(
-    id: &'static str,
+    id: impl Into<Cow<'static, str>>,
     scope: ActionScope,
     terminal_behavior: TerminalBehavior,
     mac: KeyCombo,
     other: KeyCombo,
 ) -> ActionDefinition {
     ActionDefinition {
-        id,
+        id: id.into(),
+        label: None,
         scope,
         terminal_behavior,
         mac: normalize_combo(mac),
@@ -463,8 +870,73 @@ pub(crate) fn effective_combo(
     overrides: &Map<String, Value>,
     side: KeybindingSide,
 ) -> Option<KeyCombo> {
-    override_binding(definition.id, overrides, side)
+    override_binding(&definition.id, overrides, side)
         .unwrap_or_else(|| Some(definition.default_combo(side).clone()))
+}
+
+fn effective_combos(
+    definition: &ActionDefinition,
+    overrides: &Map<String, Value>,
+    side: KeybindingSide,
+) -> Vec<KeyCombo> {
+    let mut combos: Vec<_> = effective_combo(definition, overrides, side)
+        .into_iter()
+        .collect();
+    if override_binding(&definition.id, overrides, side).is_none() {
+        if definition.id == "terminal.scrollPageUp" {
+            combos.push(KeyCombo::cmd("arrowup"));
+        }
+        if definition.id == "terminal.scrollPageDown" {
+            combos.push(KeyCombo::cmd("arrowdown"));
+        }
+        if definition.scope == ActionScope::RemoteDesktop {
+            for (ctrl, meta) in [(true, false), (false, true), (true, true)] {
+                for shift in [false, true] {
+                    let mut alias = definition.other.clone();
+                    alias.ctrl = ctrl;
+                    alias.meta = meta;
+                    alias.shift = shift;
+                    if !combos.contains(&alias) {
+                        combos.push(alias);
+                    }
+                }
+            }
+        }
+        if definition.id == "preview.zoomIn" {
+            combos.push(KeyCombo::plain("+"));
+        }
+        if side == KeybindingSide::Mac
+            && definition.scope == ActionScope::Plugin
+            && definition.other.ctrl
+        {
+            combos.push(definition.other.clone());
+        }
+        if side == KeybindingSide::Mac
+            && definition.scope == ActionScope::FileManager
+            && definition.mac.meta
+        {
+            combos.push(definition.other.clone());
+        }
+        if definition.id == "sftp.delete" {
+            combos.push(KeyCombo::plain("backspace"));
+        }
+        if side == KeybindingSide::Mac
+            && ((definition.scope == ActionScope::Editor && definition.id != "editor.find")
+                || matches!(definition.id.as_ref(), "sftp.selectAll" | "sftp.editPath"))
+        {
+            let mut control = definition.mac.clone();
+            control.meta = false;
+            control.ctrl = true;
+            combos.push(control);
+        }
+        if definition.id == "editor.redo" {
+            combos.push(KeyCombo::ctrl("y"));
+            if side == KeybindingSide::Mac {
+                combos.push(KeyCombo::cmd("y"));
+            }
+        }
+    }
+    combos
 }
 
 fn override_binding(
@@ -487,7 +959,7 @@ pub(crate) fn set_unbound_override(
     action_id: &str,
     side: KeybindingSide,
 ) {
-    if action_definition(action_id).is_none() {
+    if action_definition(action_id).is_none() && !is_plugin_action_id(action_id) {
         return;
     }
     let mut entry = overrides
@@ -499,6 +971,7 @@ pub(crate) fn set_unbound_override(
     overrides.insert(action_id.to_string(), Value::Object(entry));
 }
 
+#[cfg(test)]
 pub(crate) fn set_override(
     overrides: &mut Map<String, Value>,
     action_id: &str,
@@ -508,6 +981,16 @@ pub(crate) fn set_override(
     let Some(definition) = action_definition(action_id) else {
         return;
     };
+    set_definition_override(overrides, definition, side, combo);
+}
+
+pub(crate) fn set_definition_override(
+    overrides: &mut Map<String, Value>,
+    definition: &ActionDefinition,
+    side: KeybindingSide,
+    combo: KeyCombo,
+) {
+    let action_id = definition.id.as_ref();
     let combo = normalize_combo(combo);
     if combo == *definition.default_combo(side) {
         reset_override(overrides, action_id, side);
@@ -548,7 +1031,7 @@ pub(crate) fn sanitize_imported_overrides(value: Value) -> Result<Map<String, Va
 
     let mut sanitized = Map::new();
     for (action_id, value) in input {
-        if action_definition(&action_id).is_none() {
+        if action_definition(&action_id).is_none() && !is_plugin_action_id(&action_id) {
             return Err(format!("unknown action id: {action_id}"));
         }
         let Value::Object(object) = value else {
@@ -579,22 +1062,36 @@ pub(crate) fn sanitize_imported_overrides(value: Value) -> Result<Map<String, Va
 }
 
 pub(crate) fn modified_count(overrides: &Map<String, Value>) -> usize {
-    ACTION_DEFINITIONS
-        .iter()
-        .filter(|definition| overrides.contains_key(definition.id))
-        .count()
+    overrides.len()
 }
 
+#[cfg(test)]
 pub(crate) fn conflicts_for_combo(
     action_id: &str,
     combo: &KeyCombo,
     overrides: &Map<String, Value>,
     side: KeybindingSide,
 ) -> Vec<&'static ActionDefinition> {
-    ACTION_DEFINITIONS
+    conflicts_in_definitions(action_id, combo, overrides, side, &ACTION_DEFINITIONS)
+}
+
+pub(crate) fn conflicts_in_definitions<'a>(
+    action_id: &str,
+    combo: &KeyCombo,
+    overrides: &Map<String, Value>,
+    side: KeybindingSide,
+    definitions: &'a [ActionDefinition],
+) -> Vec<&'a ActionDefinition> {
+    let Some(action) = definitions
         .iter()
-        .filter(|definition| definition.id != action_id)
-        .filter(|definition| effective_combo(definition, overrides, side).as_ref() == Some(combo))
+        .find(|definition| definition.id == action_id)
+    else {
+        return Vec::new();
+    };
+    definitions
+        .iter()
+        .filter(|definition| definition.id != action_id && action.scope.overlaps(definition.scope))
+        .filter(|definition| effective_combos(definition, overrides, side).contains(combo))
         .collect()
 }
 
@@ -609,7 +1106,7 @@ pub(crate) fn keystroke_matches_action(
     let Some(combo) = combo_from_keystroke(keystroke) else {
         return false;
     };
-    effective_combo(definition, overrides, KeybindingSide::current()).as_ref() == Some(&combo)
+    effective_combos(definition, overrides, KeybindingSide::current()).contains(&combo)
 }
 
 pub(crate) fn matched_action_for_keystroke(
@@ -620,6 +1117,7 @@ pub(crate) fn matched_action_for_keystroke(
     let side = KeybindingSide::current();
     ACTION_DEFINITIONS
         .iter()
+        .filter(|definition| !definition.scope.local())
         .find(|definition| effective_combo(definition, overrides, side).as_ref() == Some(&combo))
         .map(|definition| (definition, combo))
 }
@@ -861,7 +1359,10 @@ fn combo_to_gpui(combo: &KeyCombo) -> String {
 pub(crate) fn startup_key_bindings(overrides: &Map<String, Value>) -> Vec<KeyBinding> {
     let side = KeybindingSide::current();
     let mut bindings = Vec::new();
-    for definition in ACTION_DEFINITIONS.iter() {
+    for definition in ACTION_DEFINITIONS
+        .iter()
+        .filter(|definition| !definition.scope.local() && !terminal_leaf_action(&definition.id))
+    {
         let default = definition.default_combo(side).clone();
         let effective = effective_combo(definition, overrides, side);
         if effective.as_ref() != Some(&default) {
@@ -871,7 +1372,7 @@ pub(crate) fn startup_key_bindings(overrides: &Map<String, Value>) -> Vec<KeyBin
                 NoAction {},
                 Some(CONTEXT),
             ));
-            if matches!(definition.id, "app.commandPalette" | "app.quit") {
+            if matches!(definition.id.as_ref(), "app.commandPalette" | "app.quit") {
                 bindings.push(KeyBinding::new(&default_keystroke, NoAction {}, None));
             }
         }
@@ -884,7 +1385,7 @@ pub(crate) fn startup_key_bindings(overrides: &Map<String, Value>) -> Vec<KeyBin
         if definition.id == "split.closePane" && effective == default {
             continue;
         }
-        push_action_binding(&mut bindings, definition.id, &effective);
+        push_action_binding(&mut bindings, &definition.id, &effective);
     }
     bindings
 }
@@ -894,6 +1395,12 @@ pub(crate) fn runtime_rebind_key_bindings(
     previous: Option<&KeyCombo>,
     next: Option<&KeyCombo>,
 ) -> Vec<KeyBinding> {
+    if is_plugin_action_id(action_id) || terminal_leaf_action(action_id) {
+        return Vec::new();
+    }
+    if action_definition(action_id).is_some_and(|definition| definition.scope.local()) {
+        return Vec::new();
+    }
     let mut bindings = Vec::new();
     if previous != next {
         if let Some(previous) = previous {
@@ -993,6 +1500,341 @@ fn push_action_binding(bindings: &mut Vec<KeyBinding>, action_id: &str, combo: &
 mod tests {
     use super::*;
     use gpui::{Keystroke, Modifiers};
+
+    #[gpui::test]
+    fn terminal_keybindings_disable_primary_and_alternate_chords_independently(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use oxideterm_gpui_terminal::{TerminalKeybindings, TerminalShortcut};
+        let mut overrides = Map::new();
+        let side = KeybindingSide::current();
+        set_override(
+            &mut overrides,
+            "terminal.scrollTop",
+            side,
+            KeyCombo::ctrl("u"),
+        );
+        set_unbound_override(&mut overrides, "terminal.copy", side);
+        set_unbound_override(&mut overrides, "terminal.scrollPageUp", side);
+        cx.update(|cx| install_context_keybindings(&overrides, cx));
+        cx.read(|cx| {
+            let bindings = cx.global::<TerminalKeybindings>();
+            assert_eq!(
+                bindings.resolve(&Keystroke::parse("ctrl-u").unwrap()),
+                Some(TerminalShortcut::Top)
+            );
+            assert_eq!(
+                bindings.resolve(&Keystroke::parse("shift-home").unwrap()),
+                None
+            );
+            assert_eq!(
+                bindings.resolve(&Keystroke::parse("ctrl-insert").unwrap()),
+                Some(TerminalShortcut::Copy)
+            );
+            let primary = action_definition("terminal.copy")
+                .unwrap()
+                .default_combo(side);
+            assert_eq!(
+                bindings.resolve(&Keystroke::parse(&combo_to_gpui(primary)).unwrap()),
+                None
+            );
+            assert_eq!(
+                bindings.resolve(&Keystroke::parse("shift-pageup").unwrap()),
+                None
+            );
+            assert_eq!(bindings.resolve(&Keystroke::parse("cmd-up").unwrap()), None);
+        });
+    }
+
+    #[test]
+    fn plugin_keybindings_keep_overrides_across_registration_lifetimes() {
+        let mut entry = oxideterm_plugin_registry::NativePluginRuntimeKeybindingContribution {
+            plugin_id: "test.tools".into(),
+            plugin_name: "Tools".into(),
+            registration_id: "first-instance".into(),
+            keybinding: "Ctrl+Shift+K".into(),
+            normalized_keybinding: "ctrl+k+shift".into(),
+            command: "open-tools".into(),
+            label: "Open tools".into(),
+        };
+        let definition = plugin_action_definition(&entry).unwrap();
+        let mut overrides = Map::new();
+        let original = Keystroke::parse("ctrl-shift-k").unwrap();
+        let custom = Keystroke::parse("ctrl-f10").unwrap();
+        assert!(plugin_binding_matches(&entry, &original, &overrides));
+        set_definition_override(
+            &mut overrides,
+            &definition,
+            KeybindingSide::current(),
+            KeyCombo::ctrl("f10"),
+        );
+        entry.registration_id = "second-instance".into();
+        entry.label = "Reloaded tools".into();
+        let mut imported = sanitize_imported_overrides(Value::Object(overrides)).unwrap();
+        assert!(plugin_binding_matches(&entry, &custom, &imported));
+        assert!(!plugin_binding_matches(&entry, &original, &imported));
+        set_unbound_override(&mut imported, &definition.id, KeybindingSide::current());
+        let mut imported = sanitize_imported_overrides(Value::Object(imported)).unwrap();
+        assert!(!plugin_binding_matches(&entry, &custom, &imported));
+        assert!(!plugin_binding_matches(&entry, &original, &imported));
+        reset_override(&mut imported, &definition.id, KeybindingSide::current());
+        assert!(plugin_binding_matches(&entry, &original, &imported));
+        let mut definitions = ACTION_DEFINITIONS.to_vec();
+        definitions.push(definition.clone());
+        assert_eq!(
+            conflicts_in_definitions(
+                &definition.id,
+                &KeyCombo::ctrl("n"),
+                &imported,
+                KeybindingSide::Other,
+                &definitions
+            )
+            .iter()
+            .map(|definition| definition.id.as_ref())
+            .collect::<Vec<_>>(),
+            ["app.newConnection"]
+        );
+    }
+
+    #[test]
+    fn file_and_preview_keybindings_release_old_chords_without_changing_other_scopes() {
+        let side = KeybindingSide::current();
+        let mut overrides = Map::new();
+        set_override(
+            &mut overrides,
+            "fileManager.rename",
+            side,
+            KeyCombo::ctrl("r"),
+        );
+        assert_eq!(
+            matched_scoped_action(
+                &Keystroke::parse("ctrl-r").unwrap(),
+                ActionScope::FileManager,
+                &overrides
+            ),
+            Some("fileManager.rename")
+        );
+        assert_eq!(
+            matched_scoped_action(
+                &Keystroke::parse("f2").unwrap(),
+                ActionScope::FileManager,
+                &overrides
+            ),
+            None
+        );
+        assert_eq!(
+            matched_scoped_action(
+                &Keystroke::parse("f2").unwrap(),
+                ActionScope::Sftp,
+                &overrides
+            ),
+            Some("sftp.rename")
+        );
+        assert_eq!(
+            matched_scoped_action(
+                &Keystroke::parse("+").unwrap(),
+                ActionScope::Preview,
+                &overrides
+            ),
+            Some("preview.zoomIn")
+        );
+        set_unbound_override(&mut overrides, "preview.zoomIn", side);
+        for key in ["+", "="] {
+            assert_eq!(
+                matched_scoped_action(
+                    &Keystroke::parse(key).unwrap(),
+                    ActionScope::Preview,
+                    &overrides
+                ),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn local_keybindings_conflict_only_in_overlapping_scopes() {
+        let side = KeybindingSide::Other;
+        let mut overrides = Map::new();
+        set_override(&mut overrides, "editor.save", side, KeyCombo::ctrl("a"));
+        let conflicts: Vec<_> =
+            conflicts_for_combo("editor.save", &KeyCombo::ctrl("a"), &overrides, side)
+                .iter()
+                .map(|definition| definition.id.as_ref())
+                .collect();
+        assert_eq!(conflicts, ["editor.selectAll"]);
+        assert_eq!(
+            conflicts_for_combo("editor.save", &KeyCombo::ctrl("n"), &overrides, side)
+                .iter()
+                .map(|definition| definition.id.as_ref())
+                .collect::<Vec<_>>(),
+            ["app.newConnection"]
+        );
+        assert_eq!(
+            conflicts_for_combo(
+                "sftp.rename",
+                &KeyCombo::plain("backspace"),
+                &overrides,
+                side
+            )
+            .iter()
+            .map(|definition| definition.id.as_ref())
+            .collect::<Vec<_>>(),
+            ["sftp.delete"]
+        );
+        set_unbound_override(&mut overrides, "sftp.delete", side);
+        assert!(
+            conflicts_for_combo(
+                "sftp.rename",
+                &KeyCombo::plain("backspace"),
+                &overrides,
+                side
+            )
+            .is_empty()
+        );
+    }
+
+    #[gpui::test]
+    fn editor_keybindings_rebind_unbind_and_restore_on_an_open_editor(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use gpui::Focusable;
+        use oxideterm_gpui_editor::TextEditorView;
+        let side = KeybindingSide::current();
+        let mut overrides = Map::new();
+        set_override(&mut overrides, "editor.undo", side, KeyCombo::ctrl("u"));
+        cx.update(|cx| install_context_keybindings(&overrides, cx));
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            let editor = TextEditorView::new("base", &oxideterm_theme::default_tokens(), cx);
+            editor.focus_handle(cx).focus(window, cx);
+            editor
+        });
+        editor.update(cx, |editor, cx| editor.insert_text("new", cx));
+        let default = combo_to_gpui(
+            action_definition("editor.undo")
+                .unwrap()
+                .default_combo(side),
+        );
+        cx.simulate_keystrokes(&default);
+        editor.read_with(cx, |editor, _| {
+            assert_eq!(editor.buffer().text(), "newbase")
+        });
+        cx.simulate_keystrokes("ctrl-u");
+        editor.read_with(cx, |editor, _| assert_eq!(editor.buffer().text(), "base"));
+        editor.update(cx, |editor, cx| {
+            editor.reveal_line_column(1, 1, cx);
+            editor.insert_text("later", cx);
+        });
+        set_unbound_override(&mut overrides, "editor.undo", side);
+        cx.update(|_, cx| install_context_keybindings(&overrides, cx));
+        cx.simulate_keystrokes("ctrl-u");
+        editor.read_with(cx, |editor, _| {
+            assert_eq!(editor.buffer().text(), "laterbase")
+        });
+        reset_override(&mut overrides, "editor.undo", side);
+        cx.update(|_, cx| install_context_keybindings(&overrides, cx));
+        cx.simulate_keystrokes(&default);
+        editor.read_with(cx, |editor, _| assert_eq!(editor.buffer().text(), "base"));
+        set_override(&mut overrides, "editor.undo", side, KeyCombo::ctrl("{"));
+        cx.update(|_, cx| install_context_keybindings(&overrides, cx));
+        editor.update(cx, |editor, cx| editor.insert_text("symbol", cx));
+        cx.simulate_keystrokes("ctrl-alt-shift-[->{");
+        editor.read_with(cx, |editor, _| assert_eq!(editor.buffer().text(), "base"));
+    }
+
+    #[gpui::test]
+    fn editor_keybindings_take_precedence_over_workspace_actions(cx: &mut gpui::TestAppContext) {
+        use gpui::{
+            AppContext, Context, Entity, Focusable, InteractiveElement, IntoElement, ParentElement,
+            Render, Styled, Window, div,
+        };
+        use oxideterm_gpui_editor::TextEditorView;
+        struct Host {
+            editor: Entity<TextEditorView>,
+            zen: usize,
+        }
+        impl Render for Host {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .size_full()
+                    .key_context("Workspace")
+                    .on_action(cx.listener(|this, _: &ZenMode, _, _| this.zen += 1))
+                    .child(self.editor.clone())
+            }
+        }
+        cx.update(|cx| {
+            let overrides = Map::new();
+            install_context_keybindings(&overrides, cx);
+            cx.bind_keys(startup_key_bindings(&overrides));
+        });
+        let (host, cx) = cx.add_window_view(|window, cx| {
+            let editor = cx.new(|cx| {
+                let mut editor =
+                    TextEditorView::new("base", &oxideterm_theme::default_tokens(), cx);
+                editor.insert_text("new", cx);
+                editor.focus_handle(cx).focus(window, cx);
+                editor
+            });
+            Host { editor, zen: 0 }
+        });
+        let side = KeybindingSide::current();
+        let undo = combo_to_gpui(
+            action_definition("editor.undo")
+                .unwrap()
+                .default_combo(side),
+        );
+        let redo = combo_to_gpui(
+            action_definition("editor.redo")
+                .unwrap()
+                .default_combo(side),
+        );
+        cx.simulate_keystrokes(&undo);
+        host.read_with(cx, |host, cx| {
+            assert_eq!(host.editor.read(cx).buffer().text(), "base")
+        });
+        cx.simulate_keystrokes(&redo);
+        host.read_with(cx, |host, cx| {
+            assert_eq!(host.editor.read(cx).buffer().text(), "newbase");
+            assert_eq!(host.zen, 0);
+        });
+    }
+
+    #[test]
+    fn sftp_keybindings_customization_releases_defaults_and_imports_tombstones() {
+        let side = KeybindingSide::current();
+        let mut overrides = Map::new();
+        assert!(keystroke_matches_action(
+            &Keystroke::parse("backspace").unwrap(),
+            "sftp.delete",
+            &overrides
+        ));
+        set_override(
+            &mut overrides,
+            "sftp.delete",
+            side,
+            KeyCombo::ctrl_shift("d"),
+        );
+        for key in ["backspace", "delete"] {
+            assert!(!keystroke_matches_action(
+                &Keystroke::parse(key).unwrap(),
+                "sftp.delete",
+                &overrides
+            ));
+        }
+        assert!(keystroke_matches_action(
+            &Keystroke::parse("ctrl-shift-d").unwrap(),
+            "sftp.delete",
+            &overrides
+        ));
+        set_unbound_override(&mut overrides, "editor.find", side);
+        let imported = sanitize_imported_overrides(Value::Object(overrides)).unwrap();
+        assert!(keystroke_matches_action(
+            &Keystroke::parse("ctrl-shift-d").unwrap(),
+            "sftp.delete",
+            &imported
+        ));
+        let find = action_definition("editor.find").unwrap();
+        assert!(effective_combo(find, &imported, side).is_none());
+    }
 
     #[test]
     fn overrides_are_diff_based_per_platform_side() {
@@ -1098,4 +1940,159 @@ mod tests {
             &overrides
         ));
     }
+}
+
+pub(crate) fn install_context_keybindings(overrides: &Map<String, Value>, cx: &mut gpui::App) {
+    use oxideterm_gpui_editor::{EditorKeybindings, EditorShortcut};
+    let mut bindings = Vec::new();
+    let mut editor_context = Vec::new();
+    for (id, action) in [
+        ("editor.save", EditorShortcut::Save),
+        ("editor.copy", EditorShortcut::Copy),
+        ("editor.cut", EditorShortcut::Cut),
+        ("editor.paste", EditorShortcut::Paste),
+        ("editor.selectAll", EditorShortcut::SelectAll),
+        ("editor.undo", EditorShortcut::Undo),
+        ("editor.redo", EditorShortcut::Redo),
+        ("editor.addNextMatch", EditorShortcut::AddNextMatch),
+        ("editor.find", EditorShortcut::Find),
+    ] {
+        let definition = action_definition(id).expect("editor shortcut is registered");
+        for combo in effective_combos(definition, overrides, KeybindingSide::current()) {
+            let keystroke = combo_to_gpui(&combo);
+            bindings.push((KeyBinding::new(&keystroke, NoAction {}, None), action));
+            // Native action dispatch precedes keydown bubbling. Let the editor
+            // handle these chords instead of a lower-priority workspace action.
+            editor_context.push(KeyBinding::new(&keystroke, NoAction {}, Some("TextEditor")));
+        }
+    }
+    cx.bind_keys(editor_context);
+    cx.set_global(EditorKeybindings {
+        bindings,
+        normalize: |keystroke| {
+            let combo = combo_from_keystroke(keystroke)?;
+            Keystroke::parse(&combo_to_gpui(&combo)).ok()
+        },
+    });
+    use oxideterm_gpui_terminal::{TerminalKeybindings, TerminalShortcut};
+    let mut bindings = Vec::new();
+    for (id, action) in [
+        ("terminal.copy", TerminalShortcut::Copy),
+        ("terminal.paste", TerminalShortcut::Paste),
+        ("terminal.copyAlternate", TerminalShortcut::Copy),
+        ("terminal.pasteAlternate", TerminalShortcut::Paste),
+        ("terminal.terminateTask", TerminalShortcut::Terminate),
+        ("terminal.killTask", TerminalShortcut::Kill),
+        ("terminal.scrollPageUp", TerminalShortcut::PageUp),
+        ("terminal.scrollPageDown", TerminalShortcut::PageDown),
+        ("terminal.scrollLineUp", TerminalShortcut::LineUp),
+        ("terminal.scrollLineDown", TerminalShortcut::LineDown),
+        ("terminal.scrollTop", TerminalShortcut::Top),
+        ("terminal.scrollBottom", TerminalShortcut::Bottom),
+    ] {
+        for combo in effective_combos(
+            action_definition(id).unwrap(),
+            overrides,
+            KeybindingSide::current(),
+        ) {
+            bindings.push((
+                KeyBinding::new(&combo_to_gpui(&combo), NoAction {}, None),
+                action,
+            ));
+        }
+    }
+    cx.set_global(TerminalKeybindings {
+        bindings,
+        normalize: |key| {
+            let combo = combo_from_keystroke(key)?;
+            Keystroke::parse(&combo_to_gpui(&combo)).ok()
+        },
+    });
+}
+
+fn is_plugin_action_id(id: &str) -> bool {
+    id.strip_prefix("plugin.keybinding:")
+        .and_then(|key| serde_json::from_str::<[String; 2]>(key).ok())
+        .is_some_and(|parts| parts.iter().all(|part| !part.is_empty()))
+}
+
+pub(crate) fn plugin_action_definition(
+    entry: &oxideterm_plugin_registry::NativePluginRuntimeKeybindingContribution,
+) -> Option<ActionDefinition> {
+    let mut other = KeyCombo::plain("");
+    for part in entry.normalized_keybinding.split('+') {
+        match part {
+            "ctrl" => other.ctrl = true,
+            "shift" => other.shift = true,
+            "alt" => other.alt = true,
+            key if other.key.is_empty() => other.key = key.to_string(),
+            _ => return None,
+        }
+    }
+    if other.key.is_empty() {
+        return None;
+    }
+    let other = normalize_combo(other);
+    let mut mac = other.clone();
+    if mac.ctrl {
+        mac.ctrl = false;
+        mac.meta = true;
+    }
+    Some(ActionDefinition {
+        // Runtime registration IDs may change on activation. The plugin and
+        // declared chord identify the binding independently of that lifecycle.
+        id: format!(
+            "plugin.keybinding:{}",
+            serde_json::to_string(&[&entry.plugin_id, &entry.normalized_keybinding]).ok()?
+        )
+        .into(),
+        label: Some(format!("{}: {}", entry.plugin_name, entry.label)),
+        scope: ActionScope::Plugin,
+        terminal_behavior: TerminalBehavior::Never,
+        mac,
+        other,
+    })
+}
+
+pub(crate) fn plugin_binding_matches(
+    entry: &oxideterm_plugin_registry::NativePluginRuntimeKeybindingContribution,
+    keystroke: &Keystroke,
+    overrides: &Map<String, Value>,
+) -> bool {
+    let Some(definition) = plugin_action_definition(entry) else {
+        return false;
+    };
+    if override_binding(&definition.id, overrides, KeybindingSide::current()).is_none() {
+        return normalize_plugin_keystroke(keystroke).as_ref()
+            == Some(&entry.normalized_keybinding);
+    }
+    combo_from_keystroke(keystroke).is_some_and(|combo| {
+        effective_combo(&definition, overrides, KeybindingSide::current()).as_ref() == Some(&combo)
+    })
+}
+
+pub(crate) fn matched_scoped_action(
+    keystroke: &Keystroke,
+    scope: ActionScope,
+    overrides: &Map<String, Value>,
+) -> Option<&'static str> {
+    let combo = combo_from_keystroke(keystroke)?;
+    ACTION_DEFINITIONS
+        .iter()
+        .filter(|definition| definition.scope == scope)
+        .find(|definition| {
+            effective_combos(definition, overrides, KeybindingSide::current()).contains(&combo)
+        })
+        .map(|definition| definition.id.as_ref())
+}
+
+fn terminal_leaf_action(id: &str) -> bool {
+    id.starts_with("terminal.scroll")
+        || matches!(
+            id,
+            "terminal.copyAlternate"
+                | "terminal.pasteAlternate"
+                | "terminal.terminateTask"
+                | "terminal.killTask"
+        )
 }

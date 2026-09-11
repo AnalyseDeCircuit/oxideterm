@@ -1160,7 +1160,15 @@ impl WorkspaceApp {
                 section: PaletteSection::Plugins,
                 icon: LucideIcon::Keyboard,
                 detail: Some(self.i18n.t("plugin.keybinding_detail")),
-                shortcut: Some(keybinding.keybinding.clone()),
+                shortcut: crate::keybindings::plugin_action_definition(keybinding)
+                    .and_then(|definition| {
+                        crate::keybindings::effective_combo(
+                            &definition,
+                            &self.settings_store.settings().keybindings.overrides,
+                            crate::keybindings::KeybindingSide::current(),
+                        )
+                    })
+                    .map(|combo| crate::keybindings::format_combo(&combo)),
                 value: format!(
                     "{} {} {} {}",
                     keybinding.plugin_name,

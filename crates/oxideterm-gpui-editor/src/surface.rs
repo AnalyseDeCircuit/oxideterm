@@ -32,7 +32,7 @@ mod search;
 mod syntax_task;
 mod wrap;
 
-pub use commands::EditorCommand;
+pub use commands::{EditorCommand, EditorKeybindings, EditorShortcut};
 use coords::{byte_column_for_visual_column, visual_column_for_byte_column};
 use wrap::DisplayRow;
 

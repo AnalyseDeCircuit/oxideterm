@@ -182,6 +182,7 @@ impl Render for TextEditorView {
             .id("oxideterm-gpui-editor")
             .size_full()
             .track_focus(&self.focus_handle)
+            .key_context("TextEditor")
             // Paint and measurement must use the same fallback chain, or a
             // missing configured font can make the caret drift on Windows.
             .font(editor_code_font(

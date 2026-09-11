@@ -79,31 +79,6 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let key = event.keystroke.key.as_str();
-        if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
-            match key {
-                "a" => {
-                    self.select_all_file_manager_files(cx);
-                    return true;
-                }
-                "c" => {
-                    self.copy_file_manager_selection(false, cx);
-                    return true;
-                }
-                "x" => {
-                    self.copy_file_manager_selection(true, cx);
-                    return true;
-                }
-                "v" => {
-                    self.paste_file_manager_clipboard(cx);
-                    return true;
-                }
-                "l" => {
-                    self.start_file_manager_path_edit(cx);
-                    return true;
-                }
-                _ => return false,
-            }
-        }
         if key == "escape" && self.dismiss_workspace_context_menus(cx) {
             cx.notify();
             return true;
@@ -167,6 +142,7 @@ impl WorkspaceApp {
             if self.handle_active_text_input_transpose(&event.keystroke, cx) {
                 return true;
             }
+            return false;
         }
         if self.handle_file_manager_dialog_footer_key(event, cx) {
             return true;
@@ -181,8 +157,32 @@ impl WorkspaceApp {
                 ),
             )
         };
+        let overrides = &self.settings_store.settings().keybindings.overrides;
+        let file_action = crate::keybindings::matched_scoped_action(
+            &event.keystroke,
+            crate::keybindings::ActionScope::FileManager,
+            overrides,
+        );
         if preview_dialog_open {
-            match key {
+            let preview_action = crate::keybindings::matched_scoped_action(
+                &event.keystroke,
+                crate::keybindings::ActionScope::Preview,
+                overrides,
+            );
+            let command = match preview_action {
+                Some("preview.previous") => "left",
+                Some("preview.next") => "right",
+                Some("preview.metadata") => "i",
+                Some("preview.source") => "u",
+                Some("preview.zoomIn") => "+",
+                Some("preview.zoomOut") => "-",
+                Some("preview.resetZoom") => "0",
+                Some("preview.rotate") => "r",
+                _ if file_action == Some("fileManager.preview") => "space",
+                _ if key == "escape" => "escape",
+                _ => "",
+            };
+            match command {
                 "escape" => {
                     self.begin_file_manager_rich_dialog_exit(cx);
                     return true;
@@ -278,7 +278,39 @@ impl WorkspaceApp {
                 _ => {}
             }
         }
-        match key {
+        if self.file_manager.read(cx).dialog.is_some() {
+            return false;
+        }
+        let command = match file_action {
+            Some("fileManager.selectAll") => {
+                self.select_all_file_manager_files(cx);
+                return true;
+            }
+            Some("fileManager.copy") => {
+                self.copy_file_manager_selection(false, cx);
+                return true;
+            }
+            Some("fileManager.cut") => {
+                self.copy_file_manager_selection(true, cx);
+                return true;
+            }
+            Some("fileManager.paste") => {
+                self.paste_file_manager_clipboard(cx);
+                return true;
+            }
+            Some("fileManager.editPath") => {
+                self.start_file_manager_path_edit(cx);
+                return true;
+            }
+            Some("fileManager.open") => "enter",
+            Some("fileManager.preview") => "space",
+            Some("fileManager.delete") => "delete",
+            Some("fileManager.deleteOrParent") => "backspace",
+            Some("fileManager.rename") => "f2",
+            _ if key == "escape" => "escape",
+            _ => "",
+        };
+        match command {
             "escape" => {
                 self.dismiss_file_manager_context_menu(cx);
                 self.file_manager.update(cx, |file_manager, cx| {

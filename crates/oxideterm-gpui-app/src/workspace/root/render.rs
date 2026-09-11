@@ -447,10 +447,52 @@ impl WorkspaceApp {
                 } else if this.handle_privilege_prompt_helper_key(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.terminal_command_sender_editor_focused(window, cx) {
+                } else if this.terminal_command_sender_editor_focused(window, cx)
+                    || (window.context_stack().iter().any(|context| {
+                        context
+                            .primary()
+                            .is_some_and(|entry| entry.key == "TextEditor")
+                    }) && cx
+                        .try_global::<oxideterm_gpui_editor::EditorKeybindings>()
+                        .is_some_and(|bindings| bindings.resolve(&event.keystroke).is_some()))
+                {
                     // The editor owns its complete key model, including Tab and
                     // navigation keys that otherwise fall through to the pane.
                 } else if this.forward_remote_desktop_key_from_capture(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this
+                    .active_tab(cx)
+                    .is_some_and(|tab| tab.kind == TabKind::Sftp)
+                    && this.sftp_view.read(cx).dialog.is_none()
+                    && this.sftp_view.read(cx).focused_input.is_none()
+                    && crate::keybindings::ACTION_DEFINITIONS
+                        .iter()
+                        .any(|definition| {
+                            definition.scope == crate::keybindings::ActionScope::Sftp
+                                && crate::keybindings::keystroke_matches_action(
+                                    &event.keystroke,
+                                    &definition.id,
+                                    &this.settings_store.settings().keybindings.overrides,
+                                )
+                        })
+                    && this.handle_sftp_key(event, window, cx)
+                {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this
+                    .active_tab(cx)
+                    .is_some_and(|tab| tab.kind == TabKind::FileManager)
+                    && this.file_manager.read(cx).dialog.is_none()
+                    && this.file_manager.read(cx).focused_input.is_none()
+                    && crate::keybindings::matched_scoped_action(
+                        &event.keystroke,
+                        crate::keybindings::ActionScope::FileManager,
+                        &this.settings_store.settings().keybindings.overrides,
+                    )
+                    .is_some()
+                    && this.handle_file_manager_key(event, cx)
+                {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.dispatch_registered_keybinding(event, window, cx) {

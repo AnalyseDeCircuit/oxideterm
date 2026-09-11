@@ -1327,17 +1327,20 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(normalized_keybinding) =
-            crate::keybindings::normalize_plugin_keystroke(&event.keystroke)
-        else {
-            return false;
-        };
         let Some(keybinding) = self
             .plugin_entity
             .read(cx)
             .registry()
             .contributions()
-            .runtime_keybinding_for_normalized_key(&normalized_keybinding)
+            .runtime_keybindings
+            .iter()
+            .find(|entry| {
+                crate::keybindings::plugin_binding_matches(
+                    entry,
+                    &event.keystroke,
+                    &self.settings_store.settings().keybindings.overrides,
+                )
+            })
             .cloned()
         else {
             return false;

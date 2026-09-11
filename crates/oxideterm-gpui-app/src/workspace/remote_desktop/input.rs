@@ -119,30 +119,35 @@ pub(super) fn next_remote_desktop_worker_generation(current: u64) -> u64 {
     current.saturating_add(1).max(1)
 }
 
-pub(super) fn remote_desktop_paste_shortcut(keystroke: &gpui::Keystroke) -> bool {
-    let modifiers = keystroke.modifiers;
-    remote_desktop_key_matches(keystroke, "v")
-        && !modifiers.alt
-        && (modifiers.platform || modifiers.control)
+pub(super) fn remote_desktop_paste_shortcut(
+    keystroke: &gpui::Keystroke,
+    overrides: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    remote_desktop_clipboard_shortcut(keystroke, "remoteDesktop.paste", overrides)
 }
 
-pub(super) fn remote_desktop_copy_shortcut(keystroke: &gpui::Keystroke) -> bool {
-    let modifiers = keystroke.modifiers;
-    remote_desktop_key_matches(keystroke, "c")
-        && !modifiers.alt
-        && (modifiers.platform || modifiers.control)
+pub(super) fn remote_desktop_copy_shortcut(
+    keystroke: &gpui::Keystroke,
+    overrides: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    remote_desktop_clipboard_shortcut(keystroke, "remoteDesktop.copy", overrides)
 }
 
-pub(super) fn remote_desktop_key_matches(keystroke: &gpui::Keystroke, key: &str) -> bool {
-    let event_key = keystroke.key.as_str();
-    event_key.eq_ignore_ascii_case(key)
-        || (event_key.len() == key.len() + "Key".len()
-            && event_key
-                .get(.."Key".len())
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("Key"))
-            && event_key
-                .get("Key".len()..)
-                .is_some_and(|suffix| suffix.eq_ignore_ascii_case(key)))
+fn remote_desktop_clipboard_shortcut(
+    keystroke: &gpui::Keystroke,
+    action: &str,
+    overrides: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    let mut key = keystroke.clone();
+    if key.key.len() == 4
+        && key
+            .key
+            .get(..3)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("key"))
+    {
+        key.key = key.key[3..].to_lowercase();
+    }
+    crate::keybindings::keystroke_matches_action(&key, action, overrides)
 }
 
 pub(super) fn remote_desktop_shortcut_modifier_release_codes(

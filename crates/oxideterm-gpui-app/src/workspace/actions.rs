@@ -381,7 +381,7 @@ impl WorkspaceApp {
             return false;
         }
 
-        self.dispatch_keybinding_action(definition.id, window, cx)
+        self.dispatch_keybinding_action(&definition.id, window, cx)
     }
 
     pub(super) fn registered_keybinding_matches(&self, event: &KeyDownEvent) -> bool {
@@ -1391,9 +1391,10 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) {
+        let definitions = self.keybinding_definitions(cx);
         let overrides = &self.settings_store.settings().keybindings.overrides;
         let action = self.settings_workspace.update(cx, |settings, cx| {
-            settings.handle_keybinding_recording_key(event, overrides, cx)
+            settings.handle_keybinding_recording_key(event, overrides, &definitions, cx)
         });
         if action == Some(settings::KeybindingRecordingKeyAction::Confirm) {
             self.confirm_keybinding_recording(cx);
@@ -1419,13 +1420,13 @@ impl WorkspaceApp {
         }) else {
             return;
         };
-        let Some(definition) = crate::keybindings::action_definition(&commit.action_id) else {
+        let Some(definition) = self.keybinding_definition(&commit.action_id, cx) else {
             return;
         };
 
         let side = crate::keybindings::KeybindingSide::current();
         let previous = crate::keybindings::effective_combo(
-            definition,
+            &definition,
             &self.settings_store.settings().keybindings.overrides,
             side,
         );
@@ -1437,9 +1438,9 @@ impl WorkspaceApp {
 
         self.edit_settings(
             move |settings| {
-                crate::keybindings::set_override(
+                crate::keybindings::set_definition_override(
                     &mut settings.keybindings.overrides,
-                    &commit.action_id,
+                    &definition,
                     side,
                     commit.combo,
                 );
@@ -1456,12 +1457,12 @@ impl WorkspaceApp {
     }
 
     pub(super) fn reset_keybinding(&mut self, action_id: &str, cx: &mut Context<Self>) {
-        let Some(definition) = crate::keybindings::action_definition(action_id) else {
+        let Some(definition) = self.keybinding_definition(action_id, cx) else {
             return;
         };
         let side = crate::keybindings::KeybindingSide::current();
         let previous = crate::keybindings::effective_combo(
-            definition,
+            &definition,
             &self.settings_store.settings().keybindings.overrides,
             side,
         );
@@ -1486,12 +1487,12 @@ impl WorkspaceApp {
     }
 
     pub(super) fn unbind_keybinding(&mut self, action_id: &str, cx: &mut Context<Self>) {
-        let Some(definition) = crate::keybindings::action_definition(action_id) else {
+        let Some(definition) = self.keybinding_definition(action_id, cx) else {
             return;
         };
         let side = crate::keybindings::KeybindingSide::current();
         let previous = crate::keybindings::effective_combo(
-            definition,
+            &definition,
             &self.settings_store.settings().keybindings.overrides,
             side,
         );
@@ -1520,7 +1521,7 @@ impl WorkspaceApp {
                 .flat_map(|definition| {
                     let previous = crate::keybindings::effective_combo(definition, overrides, side);
                     crate::keybindings::runtime_rebind_key_bindings(
-                        definition.id,
+                        &definition.id,
                         previous.as_ref(),
                         Some(definition.default_combo(side)),
                     )

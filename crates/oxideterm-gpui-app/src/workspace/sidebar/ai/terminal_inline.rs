@@ -27,6 +27,18 @@ pub(in crate::workspace) struct AiInlinePanelPlacement {
 }
 
 impl WorkspaceApp {
+    fn terminal_ai_keybinding_label(&self, id: &str) -> Option<String> {
+        crate::keybindings::action_definition(id)
+            .and_then(|definition| {
+                crate::keybindings::effective_combo(
+                    definition,
+                    &self.settings_store.settings().keybindings.overrides,
+                    crate::keybindings::KeybindingSide::current(),
+                )
+            })
+            .map(|combo| crate::keybindings::format_combo(&combo))
+    }
+
     pub(in crate::workspace) fn toggle_terminal_ai_inline_panel(
         &mut self,
         window: &mut Window,
@@ -88,7 +100,17 @@ impl WorkspaceApp {
             let panel = self.ai_entity.read(cx).terminal_inline_panel();
             (panel.open, panel.loading, panel.response.trim().is_empty())
         };
-        if !panel_open || event.keystroke.modifiers.platform {
+        let submit = crate::keybindings::keystroke_matches_action(
+            &event.keystroke,
+            "terminal.aiSubmit",
+            &self.settings_store.settings().keybindings.overrides,
+        );
+        let insert = crate::keybindings::keystroke_matches_action(
+            &event.keystroke,
+            "terminal.aiInsert",
+            &self.settings_store.settings().keybindings.overrides,
+        );
+        if !panel_open || (event.keystroke.modifiers.platform && !submit && !insert) {
             return false;
         }
         if self
@@ -112,7 +134,7 @@ impl WorkspaceApp {
             {
                 true
             }
-            "enter" if !event.keystroke.modifiers.shift => {
+            _ if submit => {
                 if panel_loading {
                     return true;
                 }
@@ -123,7 +145,7 @@ impl WorkspaceApp {
                 }
                 true
             }
-            "tab" if !response_is_empty && !panel_loading => {
+            _ if insert && !response_is_empty && !panel_loading => {
                 self.insert_terminal_ai_inline_response(window, cx);
                 true
             }
@@ -181,9 +203,9 @@ impl WorkspaceApp {
         } else {
             prompt.clone()
         };
-        let prompt_range = selected_range.clone().filter(|_| {
-            focused && !prompt.is_empty() && marked_text.is_none()
-        });
+        let prompt_range = selected_range
+            .clone()
+            .filter(|_| focused && !prompt.is_empty() && marked_text.is_none());
         let selection_range = prompt_range.clone().filter(|range| range.start < range.end);
         let caret_offset = prompt_range
             .as_ref()
@@ -512,21 +534,35 @@ window.focus(&this.focus_handle, cx);
             .gap(px(6.0))
             .text_size(px(10.0))
             .text_color(rgb(theme.text_muted))
-            .when(
-                !response_has_text && !loading && prompt_has_text,
-                |hints| {
-                    hints
-                        .child(inline_ai_keycap(&self.tokens, "Enter"))
-                        .child(self.i18n.t("terminal.ai.to_send"))
-                },
-            )
+            .when(!response_has_text && !loading && prompt_has_text, |hints| {
+                hints.when_some(
+                    self.terminal_ai_keybinding_label("terminal.aiSubmit"),
+                    |hints, key| {
+                        hints
+                            .child(inline_ai_keycap(&self.tokens, key))
+                            .child(self.i18n.t("terminal.ai.to_send"))
+                    },
+                )
+            })
             .when(response_has_text && !loading, |hints| {
-                    hints
-                        .child(inline_ai_keycap(&self.tokens, "Tab"))
-                        .child(self.i18n.t("terminal.ai.to_insert"))
-                        .child(inline_ai_keycap(&self.tokens, "Enter"))
-                        .child(self.i18n.t("terminal.ai.to_run"))
-                })
+                hints
+                    .when_some(
+                        self.terminal_ai_keybinding_label("terminal.aiInsert"),
+                        |hints, key| {
+                            hints
+                                .child(inline_ai_keycap(&self.tokens, key))
+                                .child(self.i18n.t("terminal.ai.to_insert"))
+                        },
+                    )
+                    .when_some(
+                        self.terminal_ai_keybinding_label("terminal.aiSubmit"),
+                        |hints, key| {
+                            hints
+                                .child(inline_ai_keycap(&self.tokens, key))
+                                .child(self.i18n.t("terminal.ai.to_run"))
+                        },
+                    )
+            })
             .into_any_element()
     }
 
@@ -741,9 +777,8 @@ window.focus(&this.focus_handle, cx);
         let provider = active_provider_view(&providers, settings.ai.active_provider_id.as_deref())
             .cloned()
             .ok_or_else(|| self.i18n.t("ai.model_selector.no_provider"))?;
-        let model = active_model_selection(settings.ai.active_model.as_deref()).ok_or_else(|| {
-            self.i18n.t("ai.model_selector.no_model_selected")
-        })?;
+        let model = active_model_selection(settings.ai.active_model.as_deref())
+            .ok_or_else(|| self.i18n.t("ai.model_selector.no_model_selected"))?;
         let reasoning_effort = settings
             .ai
             .reasoning_model_overrides
@@ -785,10 +820,7 @@ window.focus(&this.focus_handle, cx);
     }
 }
 
-pub(in crate::workspace) fn inline_ai_keycap(
-    tokens: &ThemeTokens,
-    label: &'static str,
-) -> AnyElement {
+pub(in crate::workspace) fn inline_ai_keycap(tokens: &ThemeTokens, label: String) -> AnyElement {
     div()
         .rounded(px(tokens.radii.sm))
         .bg(rgb(tokens.ui.bg_hover))
@@ -986,7 +1018,6 @@ mod terminal_inline_tests {
             "cargo test",
         );
     }
-
 
     #[test]
     pub(in crate::workspace) fn places_panel_below_cursor_when_space_allows() {

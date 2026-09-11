@@ -45,7 +45,9 @@ impl IdeSurface {
         let buffer = active_tab_id.and_then(|tab_id| self.workspace.buffer(tab_id));
         let is_dirty = buffer.is_some_and(|buffer| buffer.is_dirty());
         let active_language = active_tab
-            .and_then(|tab| buffer.and_then(|buffer| language_for_location(&tab.location, &buffer.text)))
+            .and_then(|tab| {
+                buffer.and_then(|buffer| language_for_location(&tab.location, &buffer.text))
+            })
             .map(|language| format!("{language:?}"));
         let (code_snippet, snippet_start_line) = buffer
             .map(|buffer| ai_code_snippet_around_start(&buffer.text))
@@ -781,11 +783,17 @@ impl IdeSurface {
 
     fn handle_editor_find_shortcut(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
         let modifiers = event.keystroke.modifiers;
-        if modifiers.secondary()
-            && !modifiers.alt
-            && !modifiers.shift
-            && event.keystroke.key.eq_ignore_ascii_case("f")
+        let matches = if let Some(bindings) =
+            cx.try_global::<oxideterm_gpui_editor::EditorKeybindings>()
         {
+            bindings.resolve(&event.keystroke) == Some(oxideterm_gpui_editor::EditorShortcut::Find)
+        } else {
+            modifiers.secondary()
+                && !modifiers.alt
+                && !modifiers.shift
+                && event.keystroke.key.eq_ignore_ascii_case("f")
+        };
+        if matches {
             self.open_editor_search(cx);
             cx.stop_propagation();
         }
@@ -911,7 +919,9 @@ impl IdeSurface {
     fn replace_all_editor_search_matches(&mut self, cx: &mut Context<Self>) {
         if let Some(editor) = self.active_editor() {
             let replacement = self.editor_search.replacement.clone();
-            editor.update(cx, |editor, cx| editor.replace_all_find_matches(replacement, cx));
+            editor.update(cx, |editor, cx| {
+                editor.replace_all_find_matches(replacement, cx)
+            });
         }
     }
 
@@ -1570,11 +1580,10 @@ impl IdeSurface {
             let result = await_ide_backend(backend_runtime.spawn({
                 async move {
                     match input.kind {
-                        TreeNameInputKind::NewFile => {
-                            fs.create_file(node_id_for_task, new_path_for_task.clone())
-                                .await
-                                .map(|_| ())
-                        }
+                        TreeNameInputKind::NewFile => fs
+                            .create_file(node_id_for_task, new_path_for_task.clone())
+                            .await
+                            .map(|_| ()),
                         TreeNameInputKind::NewFolder => {
                             fs.create_folder(node_id_for_task, new_path_for_task).await
                         }
@@ -2229,9 +2238,10 @@ impl IdeSurface {
             .await;
             let _ = weak.update(cx, |this, cx| {
                 if this.generation != generation
-                    || this.workspace.buffer(conflict.tab_id).is_none_or(|current| {
-                        current.location != conflict_location
-                    })
+                    || this
+                        .workspace
+                        .buffer(conflict.tab_id)
+                        .is_none_or(|current| current.location != conflict_location)
                 {
                     return;
                 }

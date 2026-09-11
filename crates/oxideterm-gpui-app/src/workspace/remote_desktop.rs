@@ -1098,21 +1098,64 @@ mod tests {
         let mut modifiers = gpui::Modifiers::default();
         modifiers.control = true;
 
-        assert!(remote_desktop_paste_shortcut(&gpui::Keystroke {
-            modifiers,
-            key: "KeyV".to_string(),
-            key_char: Some("v".to_string()),
-        }));
-        assert!(remote_desktop_paste_shortcut(&gpui::Keystroke {
-            modifiers,
-            key: "keyv".to_string(),
-            key_char: Some("v".to_string()),
-        }));
-        assert!(remote_desktop_copy_shortcut(&gpui::Keystroke {
-            modifiers,
-            key: "KeyC".to_string(),
-            key_char: Some("c".to_string()),
-        }));
+        assert!(remote_desktop_paste_shortcut(
+            &gpui::Keystroke {
+                modifiers,
+                key: "KeyV".to_string(),
+                key_char: Some("v".to_string()),
+            },
+            &serde_json::Map::new()
+        ));
+        assert!(remote_desktop_paste_shortcut(
+            &gpui::Keystroke {
+                modifiers,
+                key: "keyv".to_string(),
+                key_char: Some("v".to_string()),
+            },
+            &serde_json::Map::new()
+        ));
+        assert!(remote_desktop_copy_shortcut(
+            &gpui::Keystroke {
+                modifiers,
+                key: "KeyC".to_string(),
+                key_char: Some("c".to_string()),
+            },
+            &serde_json::Map::new()
+        ));
+    }
+
+    #[test]
+    fn remote_desktop_clipboard_keybindings_rebind_and_unbind() {
+        use crate::keybindings::{
+            KeyCombo, KeybindingSide, action_definition, set_definition_override,
+            set_unbound_override,
+        };
+        let mut overrides = serde_json::Map::new();
+        let custom = gpui::Keystroke::parse("ctrl-alt-k").unwrap();
+        let combo = KeyCombo {
+            key: "k".into(),
+            ctrl: true,
+            alt: true,
+            shift: false,
+            meta: false,
+        };
+        set_definition_override(
+            &mut overrides,
+            action_definition("remoteDesktop.paste").unwrap(),
+            KeybindingSide::current(),
+            combo,
+        );
+        assert!(remote_desktop_paste_shortcut(&custom, &overrides));
+        assert!(!remote_desktop_paste_shortcut(
+            &gpui::Keystroke::parse("ctrl-v").unwrap(),
+            &overrides
+        ));
+        set_unbound_override(
+            &mut overrides,
+            "remoteDesktop.paste",
+            KeybindingSide::current(),
+        );
+        assert!(!remote_desktop_paste_shortcut(&custom, &overrides));
     }
 
     #[test]

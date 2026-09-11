@@ -7,7 +7,6 @@ pub(in crate::workspace) enum KeybindingToolbarAction {
     ResetAll,
 }
 
-pub(in crate::workspace) const KEYBINDING_SCOPE_FILTER_WIDTH: f32 = 300.0;
 pub(in crate::workspace) const KEYBINDING_BG_ACTIVE_ELEVATED_ALPHA: u32 = 0x73; // Tauri [data-bg-active] --color-theme-bg-elevated: 45%.
 pub(in crate::workspace) const KEYBINDING_BG_ACTIVE_BORDER_ALPHA: u32 = 0xbf; // Tauri [data-bg-active] --color-theme-border: 75%.
 pub(in crate::workspace) const KEYBINDING_HEADER_BG_ALPHA: u32 = 0x80; // Tauri bg-theme-bg-elevated/50.
@@ -19,7 +18,18 @@ pub(in crate::workspace) fn settings_keybinding_scope_matches(
     scope: crate::keybindings::ActionScope,
 ) -> bool {
     match filter {
+        SettingsKeybindingScopeFilter::Files => {
+            scope == crate::keybindings::ActionScope::FileManager
+        }
+        SettingsKeybindingScopeFilter::Preview => scope == crate::keybindings::ActionScope::Preview,
+        SettingsKeybindingScopeFilter::RemoteDesktop => {
+            scope == crate::keybindings::ActionScope::RemoteDesktop
+        }
+        SettingsKeybindingScopeFilter::Plugins => scope == crate::keybindings::ActionScope::Plugin,
+        SettingsKeybindingScopeFilter::AiPanel => scope == crate::keybindings::ActionScope::AiPanel,
         SettingsKeybindingScopeFilter::All => true,
+        SettingsKeybindingScopeFilter::Editor => scope == crate::keybindings::ActionScope::Editor,
+        SettingsKeybindingScopeFilter::Sftp => scope == crate::keybindings::ActionScope::Sftp,
         SettingsKeybindingScopeFilter::Global => scope == crate::keybindings::ActionScope::Global,
         SettingsKeybindingScopeFilter::Terminal => {
             scope == crate::keybindings::ActionScope::Terminal
@@ -52,6 +62,49 @@ impl KeybindingToolbarAction {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn keybinding_definitions(
+        &self,
+        cx: &App,
+    ) -> Vec<crate::keybindings::ActionDefinition> {
+        let mut definitions = crate::keybindings::ACTION_DEFINITIONS.to_vec();
+        for entry in &self
+            .plugin_entity
+            .read(cx)
+            .registry()
+            .contributions()
+            .runtime_keybindings
+        {
+            if let Some(definition) = crate::keybindings::plugin_action_definition(entry)
+                && !definitions
+                    .iter()
+                    .any(|existing| existing.id == definition.id)
+            {
+                definitions.push(definition);
+            }
+        }
+        definitions
+    }
+
+    pub(in crate::workspace) fn keybinding_definition(
+        &self,
+        id: &str,
+        cx: &App,
+    ) -> Option<crate::keybindings::ActionDefinition> {
+        self.keybinding_definitions(cx)
+            .into_iter()
+            .find(|definition| definition.id == id)
+    }
+
+    pub(in crate::workspace) fn keybinding_label(
+        &self,
+        definition: &crate::keybindings::ActionDefinition,
+    ) -> String {
+        definition
+            .label
+            .clone()
+            .unwrap_or_else(|| self.i18n.t(&definition.label_key()))
+    }
+
     pub(in crate::workspace) fn keybinding_surface_border(&self) -> gpui::Rgba {
         oxideterm_gpui_ui::color_for_background(
             self.tokens.ui.border,
@@ -109,14 +162,22 @@ impl WorkspaceApp {
             .trim()
             .to_lowercase();
         let scope_filter = self.settings_workspace.read(cx).keybinding_scope_filter();
+        let catalog = self.keybinding_definitions(cx);
         let mut visible_index = 0;
         for scope in [
             crate::keybindings::ActionScope::Global,
             crate::keybindings::ActionScope::Terminal,
             crate::keybindings::ActionScope::Split,
             crate::keybindings::ActionScope::Palette,
+            crate::keybindings::ActionScope::Editor,
+            crate::keybindings::ActionScope::Sftp,
+            crate::keybindings::ActionScope::FileManager,
+            crate::keybindings::ActionScope::Preview,
+            crate::keybindings::ActionScope::RemoteDesktop,
+            crate::keybindings::ActionScope::Plugin,
+            crate::keybindings::ActionScope::AiPanel,
         ] {
-            let definitions = crate::keybindings::ACTION_DEFINITIONS
+            let definitions = catalog
                 .iter()
                 .filter(|definition| definition.scope == scope)
                 .filter(|definition| {
@@ -126,7 +187,7 @@ impl WorkspaceApp {
                     if query.is_empty() {
                         return true;
                     }
-                    let label = self.i18n.t(&definition.label_key()).to_lowercase();
+                    let label = self.keybinding_label(definition).to_lowercase();
                     label.contains(&query) || definition.id.to_lowercase().contains(&query)
                 })
                 .collect::<Vec<_>>();
@@ -239,65 +300,30 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let filters = SettingsKeybindingScopeFilter::all();
-        let scope_filter = self.settings_workspace.read(cx).keybinding_scope_filter();
-        let previous_scope_filter = self
-            .settings_workspace
-            .read(cx)
-            .previous_keybinding_scope_filter();
-        let active_index = filters
-            .iter()
-            .position(|filter| *filter == scope_filter)
-            .unwrap_or(0);
-        let previous_index = filters
-            .iter()
-            .position(|filter| *filter == previous_scope_filter)
-            .unwrap_or(active_index);
-        let mut items = Vec::with_capacity(filters.len());
-        for (filter_index, filter) in filters.iter().copied().enumerate() {
-            let active = scope_filter == filter;
+        let selected = self.settings_workspace.read(cx).keybinding_scope_filter();
+        let mut filters = div().flex().flex_wrap().gap(px(4.0)).max_w_full();
+        for filter in SettingsKeybindingScopeFilter::all().iter().copied() {
+            let active = filter == selected;
             let item = oxideterm_gpui_ui::segmented_control_item(
                 &self.tokens,
                 self.i18n.t(filter.label_key()),
                 active,
             )
+            .flex_none()
+            .when(active, |item| item.bg(self.keybinding_hover_background()))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    if this.settings_workspace.update(cx, |settings, cx| {
-                        settings.set_keybinding_scope_filter(filter, cx)
-                    }) {
-                        this.begin_user_segmented_control_transition(
-                            selection_motion::KEYBINDING_SCOPE_SWITCHER_ID,
-                            filter_index,
-                            cx,
-                        );
-                    }
+                cx.listener(move |this, _, _, cx| {
+                    this.settings_workspace.update(cx, |settings, cx| {
+                        settings.set_keybinding_scope_filter(filter, cx);
+                    });
                     cx.stop_propagation();
                     cx.notify();
                 }),
             );
-            items.push(item.into_any_element());
+            filters = filters.child(item);
         }
-        // Match the runtime header switcher: the compact control owns the
-        // image-aware selected surface and its sliding indicator.
-        oxideterm_gpui_ui::segmented_control(
-            &self.tokens,
-            selection_motion::KEYBINDING_SCOPE_SWITCHER_ID,
-            oxideterm_gpui_ui::SegmentedControlOptions::new(
-                active_index,
-                previous_index,
-                filters.len(),
-            )
-            .user_transition_active(self.segmented_control_user_transition_active(
-                selection_motion::KEYBINDING_SCOPE_SWITCHER_ID,
-                active_index,
-            ))
-            .has_background_image(self.settings_background_active())
-            .compact(KEYBINDING_SCOPE_FILTER_WIDTH),
-            items,
-        )
-        .into_any_element()
+        filters.into_any_element()
     }
 
     pub(in crate::workspace) fn keybinding_toolbar_button(
@@ -513,8 +539,8 @@ impl WorkspaceApp {
                             .child(self.render_display_text_with_role(
                                 SelectableTextRole::PlainDocument,
                                 "settings-keybinding-action",
-                                definition.id,
-                                self.i18n.t(&definition.label_key()),
+                                definition.id.as_ref(),
+                                self.keybinding_label(definition),
                                 theme.text,
                                 cx,
                             )),
@@ -659,7 +685,7 @@ impl WorkspaceApp {
                                     SelectableTextRole::PlainDocument,
                                     "settings-keybindings-conflict",
                                     conflicts.join("|"),
-                                    self.keybinding_conflict_text(conflicts, side),
+                                    self.keybinding_conflict_text(conflicts, side, cx),
                                     theme.warning,
                                     cx,
                                 )),
@@ -840,10 +866,11 @@ impl WorkspaceApp {
         &self,
         conflicts: &[String],
         side: crate::keybindings::KeybindingSide,
+        cx: &App,
     ) -> String {
         let Some(conflict) = conflicts
             .iter()
-            .filter_map(|id| crate::keybindings::action_definition(id))
+            .filter_map(|id| self.keybinding_definition(id, cx))
             .next()
         else {
             return String::new();
@@ -851,7 +878,7 @@ impl WorkspaceApp {
         self.i18n
             .t("settings_view.keybindings.conflict_warning")
             .replace("{{scope}}", &self.i18n.t(conflict.scope.label_key()))
-            .replace("{{action}}", &self.i18n.t(&conflict.label_key()))
+            .replace("{{action}}", &self.keybinding_label(&conflict))
             .replace(
                 "{{shortcut}}",
                 &crate::keybindings::format_combo(conflict.default_combo(side)),

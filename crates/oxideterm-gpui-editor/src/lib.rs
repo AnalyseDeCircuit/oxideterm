@@ -15,7 +15,7 @@ mod viewport;
 pub use metrics::{EditorAppearance, EditorMetrics};
 pub use settings::EditorSettings;
 pub use surface::{
-    EditorCommand, EditorContextMenuLabels, EditorPresentation, EditorSaveStatus, SaveCallback,
-    TextEditorView,
+    EditorCommand, EditorContextMenuLabels, EditorKeybindings, EditorPresentation,
+    EditorSaveStatus, EditorShortcut, SaveCallback, TextEditorView,
 };
 pub use viewport::{EditorViewport, VisibleRows};

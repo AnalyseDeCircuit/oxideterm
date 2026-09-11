@@ -268,6 +268,7 @@ fn main() {
         cx.activate(true);
         cx.on_action(quit);
         cx.bind_keys(platform::app_key_bindings(&startup_settings));
+        keybindings::install_context_keybindings(&startup_settings.keybindings.overrides, cx);
         cx.set_menus(platform::app_menus(&I18n::default()));
 
         let desktop_presence_menu = desktop_presence_menu(&I18n::new(locale_from_settings(

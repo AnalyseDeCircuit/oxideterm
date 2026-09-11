@@ -404,11 +404,17 @@ impl WorkspaceApp {
         let Some(tab_id) = self.active_remote_desktop_tab_id(cx) else {
             return false;
         };
-        if remote_desktop_paste_shortcut(&event.keystroke) {
+        if remote_desktop_paste_shortcut(
+            &event.keystroke,
+            &self.settings_store.settings().keybindings.overrides,
+        ) {
             self.paste_remote_desktop_from_keystroke(&event.keystroke, cx);
             return true;
         }
-        if remote_desktop_copy_shortcut(&event.keystroke) {
+        if remote_desktop_copy_shortcut(
+            &event.keystroke,
+            &self.settings_store.settings().keybindings.overrides,
+        ) {
             self.copy_remote_desktop_from_keystroke(&event.keystroke, cx);
             return true;
         }
@@ -430,9 +436,13 @@ impl WorkspaceApp {
         let Some(tab_id) = self.active_remote_desktop_tab_id(cx) else {
             return false;
         };
-        if remote_desktop_paste_shortcut(&event.keystroke)
-            || remote_desktop_copy_shortcut(&event.keystroke)
-        {
+        if remote_desktop_paste_shortcut(
+            &event.keystroke,
+            &self.settings_store.settings().keybindings.overrides,
+        ) || remote_desktop_copy_shortcut(
+            &event.keystroke,
+            &self.settings_store.settings().keybindings.overrides,
+        ) {
             return true;
         }
         self.handle_remote_desktop_key(

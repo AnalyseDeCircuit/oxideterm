@@ -95,6 +95,40 @@ struct TmuxSeparatorDrag {
     last_point: TerminalPoint,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalShortcut {
+    Copy,
+    Paste,
+    Terminate,
+    Kill,
+    PageUp,
+    PageDown,
+    LineUp,
+    LineDown,
+    Top,
+    Bottom,
+}
+
+pub struct TerminalKeybindings {
+    pub bindings: Vec<(gpui::KeyBinding, TerminalShortcut)>,
+    pub normalize: fn(&gpui::Keystroke) -> Option<gpui::Keystroke>,
+}
+impl gpui::Global for TerminalKeybindings {}
+impl TerminalKeybindings {
+    pub fn resolve(&self, key: &gpui::Keystroke) -> Option<TerminalShortcut> {
+        let key = (self.normalize)(key)?;
+        self.bindings
+            .iter()
+            .find(|(binding, _)| {
+                binding
+                    .keystrokes()
+                    .first()
+                    .is_some_and(|binding| key.should_match(binding))
+            })
+            .map(|(_, action)| *action)
+    }
+}
+
 pub type SharedTerminalSession = Arc<Mutex<TerminalSession>>;
 pub type TerminalInputInterceptor =
     Arc<dyn Fn(&[u8]) -> TerminalInputInterceptorResult + Send + Sync>;

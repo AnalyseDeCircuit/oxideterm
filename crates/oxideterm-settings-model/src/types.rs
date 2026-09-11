@@ -71,6 +71,13 @@ pub enum SettingsKeybindingScopeFilter {
     Terminal,
     Split,
     Palette,
+    Editor,
+    Sftp,
+    Files,
+    Preview,
+    RemoteDesktop,
+    Plugins,
+    AiPanel,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -339,6 +346,13 @@ impl SettingsKeybindingScopeFilter {
             Self::Terminal,
             Self::Split,
             Self::Palette,
+            Self::Editor,
+            Self::Sftp,
+            Self::Files,
+            Self::Preview,
+            Self::RemoteDesktop,
+            Self::Plugins,
+            Self::AiPanel,
         ]
     }
 
@@ -349,6 +363,13 @@ impl SettingsKeybindingScopeFilter {
             Self::Terminal => "settings_view.keybindings.scope_terminal",
             Self::Split => "settings_view.keybindings.scope_split",
             Self::Palette => "settings_view.keybindings.scope_palette",
+            Self::Editor => "settings_view.keybindings.scope_editor",
+            Self::Sftp => "settings_view.keybindings.scope_sftp",
+            Self::Files => "settings_view.keybindings.scope_files",
+            Self::Preview => "settings_view.keybindings.scope_preview",
+            Self::RemoteDesktop => "settings_view.keybindings.scope_remote_desktop",
+            Self::Plugins => "settings_view.keybindings.scope_plugins",
+            Self::AiPanel => "settings_view.keybindings.scope_ai_panel",
         }
     }
 }

@@ -793,7 +793,7 @@ impl WorkspaceApp {
                                             side,
                                         );
                                         crate::keybindings::runtime_rebind_key_bindings(
-                                            definition.id,
+                                            &definition.id,
                                             previous.as_ref(),
                                             next.as_ref(),
                                         )

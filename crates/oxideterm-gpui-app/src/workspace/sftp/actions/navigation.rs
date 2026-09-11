@@ -12,7 +12,11 @@ impl WorkspaceApp {
             self.sftp_view.read(cx).dialog,
             Some(SftpDialog::Editor { .. })
         ) {
-            if event.keystroke.modifiers.platform && key == "s" {
+            if crate::keybindings::keystroke_matches_action(
+                &event.keystroke,
+                "editor.save",
+                &self.settings_store.settings().keybindings.overrides,
+            ) {
                 self.save_sftp_preview_editor(cx);
                 cx.notify();
                 return true;
@@ -33,6 +37,21 @@ impl WorkspaceApp {
             (sftp.dialog.clone(), sftp.focused_input)
         };
         if dialog.is_some() && focused_input.is_none() {
+            if matches!(dialog, Some(SftpDialog::Preview { .. }))
+                && self.sftp_preview_is_markdown_content(cx)
+                && crate::keybindings::keystroke_matches_action(
+                    &event.keystroke,
+                    "sftp.togglePreviewSource",
+                    &self.settings_store.settings().keybindings.overrides,
+                )
+            {
+                self.sftp_view.update(cx, |sftp, cx| {
+                    sftp.preview_markdown_source_mode = !sftp.preview_markdown_source_mode;
+                    cx.notify();
+                });
+                cx.notify();
+                return true;
+            }
             match key {
                 "escape" => {
                     if let Some(SftpDialog::EditorCloseConfirm { name }) = dialog {
@@ -42,18 +61,6 @@ impl WorkspaceApp {
                     }
                     cx.notify();
                     return true;
-                }
-                "u" => {
-                    if matches!(dialog, Some(SftpDialog::Preview { .. }))
-                        && self.sftp_preview_is_markdown_content(cx)
-                    {
-                        self.sftp_view.update(cx, |sftp, cx| {
-                            sftp.preview_markdown_source_mode = !sftp.preview_markdown_source_mode;
-                            cx.notify();
-                        });
-                        cx.notify();
-                        return true;
-                    }
                 }
                 "enter" => {
                     if matches!(dialog, Some(SftpDialog::EditorCloseConfirm { .. })) {
@@ -132,28 +139,52 @@ impl WorkspaceApp {
             if self.handle_active_text_input_transpose(&event.keystroke, cx) {
                 return true;
             }
+            return false;
         }
         let active_pane = self.sftp_view.read(cx).active_pane;
-        if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
-            match key {
-                "a" => {
-                    self.select_all_sftp_files(active_pane, cx);
-                    self.sftp_view
-                        .update(cx, |sftp, cx| sftp.dismiss_context_menu(cx));
-                    cx.notify();
-                    return true;
-                }
-                "l" => {
-                    self.start_sftp_path_edit(active_pane, cx);
-                    self.sftp_view
-                        .update(cx, |sftp, cx| sftp.dismiss_context_menu(cx));
-                    cx.notify();
-                    return true;
-                }
-                _ => return false,
+        let overrides = &self.settings_store.settings().keybindings.overrides;
+        let action = [
+            ("sftp.selectAll", "selectAll"),
+            ("sftp.editPath", "editPath"),
+            ("sftp.open", "enter"),
+            ("sftp.preview", "space"),
+            ("sftp.upload", "right"),
+            ("sftp.download", "left"),
+            ("sftp.delete", "delete"),
+            ("sftp.rename", "f2"),
+        ]
+        .into_iter()
+        .find(|(id, _)| {
+            crate::keybindings::keystroke_matches_action(&event.keystroke, id, overrides)
+        })
+        .map(|(_, action)| action);
+        let command = action.unwrap_or_else(|| {
+            if event.keystroke.modifiers.platform
+                || event.keystroke.modifiers.control
+                || event.keystroke.modifiers.alt
+            {
+                return "";
             }
-        }
-        match key {
+            match key {
+                "escape" | "up" | "arrowup" | "down" | "arrowdown" => key,
+                _ => "",
+            }
+        });
+        match command {
+            "selectAll" => {
+                self.select_all_sftp_files(active_pane, cx);
+                self.sftp_view
+                    .update(cx, |sftp, cx| sftp.dismiss_context_menu(cx));
+                cx.notify();
+                true
+            }
+            "editPath" => {
+                self.start_sftp_path_edit(active_pane, cx);
+                self.sftp_view
+                    .update(cx, |sftp, cx| sftp.dismiss_context_menu(cx));
+                cx.notify();
+                true
+            }
             "escape" => {
                 self.sftp_view
                     .update(cx, |sftp, cx| sftp.dismiss_context_menu(cx));
