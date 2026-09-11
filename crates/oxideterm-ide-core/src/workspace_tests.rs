@@ -198,6 +198,10 @@ fn stale_save_completion_preserves_newer_dirty_text() {
     else {
         panic!("file should open");
     };
+    let initial = workspace.buffer(tab_id).unwrap();
+    assert_eq!(initial.text.as_ptr(), initial.saved_text.as_ptr());
+    let snapshot = workspace.snapshot().unwrap();
+    assert_eq!(snapshot.buffers[0].text.as_ptr(), initial.text.as_ptr());
     workspace
         .replace_buffer_text(tab_id, "saved request")
         .unwrap();
@@ -223,9 +227,10 @@ fn stale_save_completion_preserves_newer_dirty_text() {
 
     let buffer = workspace.buffer(tab_id).unwrap();
     assert!(!clean);
-    assert_eq!(buffer.text, "newer local edit");
-    assert_eq!(buffer.saved_text, "saved request");
+    assert_eq!(buffer.text.as_ref(), "newer local edit");
+    assert_eq!(buffer.saved_text.as_ref(), "saved request");
     assert_eq!(buffer.version.etag.as_deref(), Some("saved-request"));
+    assert_eq!(&*snapshot.buffers[0].text, "old");
     assert!(buffer.is_dirty());
 }
 
@@ -266,8 +271,8 @@ fn close_after_save_keeps_tab_open_when_newer_edit_arrives() {
     let buffer = workspace.buffer(tab_id).unwrap();
     assert!(!closed);
     assert!(workspace.pending_close().is_none());
-    assert_eq!(buffer.text, "keep me");
-    assert_eq!(buffer.saved_text, "save me");
+    assert_eq!(buffer.text.as_ref(), "keep me");
+    assert_eq!(buffer.saved_text.as_ref(), "save me");
     assert!(buffer.is_dirty());
 }
 
@@ -289,7 +294,7 @@ fn reload_tab_with_refuses_dirty_buffers() {
     );
 
     assert_eq!(result, Err(ReloadError::DirtyBuffer));
-    assert_eq!(workspace.buffer(tab_id).unwrap().text, "dirty");
+    assert_eq!(workspace.buffer(tab_id).unwrap().text.as_ref(), "dirty");
 }
 
 #[test]
@@ -313,7 +318,7 @@ fn reload_tab_with_replaces_clean_buffer() {
         .unwrap();
 
     let buffer = workspace.buffer(tab_id).unwrap();
-    assert_eq!(buffer.text, "remote");
+    assert_eq!(buffer.text.as_ref(), "remote");
     assert_eq!(buffer.version, version);
     assert!(!buffer.is_dirty());
 }
@@ -415,7 +420,7 @@ fn rename_path_retargets_open_tabs_without_clearing_dirty_text() {
     );
     let buffer = workspace.buffer(tab_id).unwrap();
     assert_eq!(buffer.location, tab.location);
-    assert_eq!(buffer.text, "dirty");
+    assert_eq!(buffer.text.as_ref(), "dirty");
     assert!(buffer.is_dirty());
 }
 
@@ -480,13 +485,23 @@ fn snapshot_restore_preserves_dirty_buffers_and_active_tab() {
     source.replace_buffer_text(first, "dirty").unwrap();
 
     let snapshot = source.snapshot().unwrap();
+    let serialized = serde_json::to_value(&snapshot).unwrap();
+    assert_eq!(serialized["buffers"][0]["text"], "dirty");
+    assert_eq!(serialized["buffers"][0]["saved_text"], "saved");
+    assert_eq!(serialized["buffers"][1]["text"], "b");
+    let snapshot = serde_json::from_value(serialized).unwrap();
     let mut restored = IdeWorkspace::new();
     assert_eq!(
         restored.restore_snapshot(snapshot),
         RestoreSnapshotResult::Restored { tab_count: 2 }
     );
     assert_eq!(restored.active_tab(), Some(second));
-    assert_eq!(restored.buffer(first).unwrap().text, "dirty");
+    assert_eq!(restored.buffer(first).unwrap().text.as_ref(), "dirty");
+    assert_eq!(restored.buffer(first).unwrap().saved_text.as_ref(), "saved");
+    let clean = restored.buffer(second).unwrap();
+    assert_eq!(clean.text.as_ref(), "b");
+    assert_eq!(clean.text.as_ptr(), clean.saved_text.as_ptr());
+    assert!(!clean.is_dirty());
     assert!(restored.buffer(first).unwrap().is_dirty());
 }
 
@@ -514,7 +529,7 @@ fn reconnect_restore_restores_open_file_without_clearing_dirty_buffer() {
 
     let buffer = restored.buffer(tab_id).unwrap();
     assert_eq!(buffer.location, location);
-    assert_eq!(buffer.text, "dirty local edit");
+    assert_eq!(buffer.text.as_ref(), "dirty local edit");
     assert!(buffer.is_dirty());
 }
 
@@ -542,7 +557,7 @@ fn stale_reload_result_cannot_overwrite_newer_dirty_buffer() {
         Err(ReloadError::DirtyBuffer)
     );
     assert_eq!(
-        workspace.buffer(tab_id).unwrap().text,
+        workspace.buffer(tab_id).unwrap().text.as_ref(),
         "newer dirty local edit"
     );
     assert!(workspace.buffer(tab_id).unwrap().is_dirty());
@@ -738,4 +753,72 @@ fn format_changes_remain_dirty_when_an_earlier_save_completes() {
     restored.restore_snapshot(snapshot);
     assert_eq!(restored.buffer(tab).unwrap().format, format);
     assert!(restored.buffer(tab).unwrap().is_dirty());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "manual IDE snapshot live-allocation benchmark"]
+fn workspace_snapshot_memory() {
+    #[repr(C)]
+    #[derive(Default)]
+    struct Statistics {
+        blocks_in_use: u32,
+        size_in_use: usize,
+        max_size_in_use: usize,
+        size_allocated: usize,
+    }
+    unsafe extern "C" {
+        fn malloc_zone_statistics(zone: *mut std::ffi::c_void, stats: *mut Statistics);
+    }
+    let allocated = || {
+        let mut stats = Statistics::default();
+        // A null zone reports live allocations across all macOS malloc zones.
+        unsafe {
+            malloc_zone_statistics(std::ptr::null_mut(), &mut stats);
+        }
+        stats.size_in_use
+    };
+    for bytes in [16 * 1024 * 1024, 64 * 1024 * 1024] {
+        let baseline = allocated();
+        let mut workspace = IdeWorkspace::new();
+        workspace.open_project(IdeLocation::local("/tmp/oxideterm"), "OxideTerm");
+        let OpenFileOutcome::Opened(tab_id) = workspace
+            .open_file(
+                local_file("memory.txt"),
+                "x".repeat(bytes),
+                SavedFileVersion::unknown(),
+            )
+            .unwrap()
+        else {
+            panic!("file should open");
+        };
+        let opened = allocated();
+        let snapshot = workspace.snapshot().unwrap();
+        let snapshotted = allocated();
+        let saving = workspace.buffer(tab_id).unwrap().clone();
+        let captured = saving.text.clone();
+        let save_pending = allocated();
+        workspace
+            .replace_buffer_text(tab_id, "newer input")
+            .unwrap();
+        workspace
+            .complete_save_at_revision(
+                tab_id,
+                captured,
+                saving.revision,
+                saving.format,
+                SavedFileVersion::unknown(),
+            )
+            .unwrap();
+        let edited = allocated();
+        std::hint::black_box(&snapshot);
+        drop(saving.text);
+        drop(saving.saved_text);
+        drop(snapshot);
+        drop(workspace);
+        let closed = allocated();
+        eprintln!(
+            "IDE_MEMORY bytes={bytes} baseline={baseline} opened={opened} snapshotted={snapshotted} save_pending={save_pending} edited={edited} closed={closed}"
+        );
+    }
 }

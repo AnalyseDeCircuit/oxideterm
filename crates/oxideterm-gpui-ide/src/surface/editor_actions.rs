@@ -270,7 +270,7 @@ impl IdeSurface {
         self.editors.clear();
         self.loading_file_tabs.clear();
         for buffer in buffers {
-            self.create_editor(buffer.tab_id, &buffer.location, buffer.text, cx);
+            self.create_editor(buffer.tab_id, &buffer.location, buffer.text.to_string(), cx);
         }
         self.resume_agent_sampling(cx);
         cx.notify();
@@ -1143,7 +1143,7 @@ impl IdeSurface {
                             .and_then(|path| this.pending_restore_dirty_contents.remove(path));
                         let _ = this
                             .workspace
-                            .replace_buffer_text(tab_id, result.text.clone());
+                            .replace_buffer_text(tab_id, result.text.as_str());
                         let _ = this.workspace.set_file_format(tab_id, result.format);
                         let _ = this.workspace.mark_saved(tab_id, result.version);
                         this.create_editor(tab_id, &result.location, result.text, cx);
@@ -1255,7 +1255,7 @@ impl IdeSurface {
         {
             let _ = self.workspace.set_file_format(tab_id, format);
         }
-        if dirty_text == buffer.saved_text {
+        if dirty_text.as_str() == buffer.saved_text.as_ref() {
             return;
         }
 
@@ -1263,7 +1263,7 @@ impl IdeSurface {
         // keeps the same user-intent rule so edits made after the snapshot win.
         let _ = self
             .workspace
-            .replace_buffer_text(tab_id, dirty_text.clone());
+            .replace_buffer_text(tab_id, dirty_text.as_str());
         if let Some(editor) = self.editors.get(&tab_id) {
             editor.update(cx, |editor, cx| {
                 editor.replace_text_external(dirty_text, cx);
@@ -2246,7 +2246,7 @@ impl IdeSurface {
                         this.conflict_state = None;
                         let _ = this
                             .workspace
-                            .replace_buffer_text(conflict.tab_id, data.text.clone());
+                            .replace_buffer_text(conflict.tab_id, data.text.as_str());
                         let _ = this.workspace.set_file_format(conflict.tab_id, data.format);
                         let _ = this.workspace.mark_saved(conflict.tab_id, data.version);
                         if let Some(editor) = this.editors.get(&conflict.tab_id) {

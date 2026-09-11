@@ -168,7 +168,7 @@ impl IdeSurface {
                     || buffer.format != buffer.saved_format
             })
             .filter_map(|buffer| match &buffer.location {
-                IdeLocation::Remote { path, .. } => Some((path.clone(), buffer.text.clone())),
+                IdeLocation::Remote { path, .. } => Some((path.clone(), buffer.text.to_string())),
                 IdeLocation::Local { .. } => None,
             })
             .collect::<BTreeMap<_, _>>();
