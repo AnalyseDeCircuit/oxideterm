@@ -14,8 +14,7 @@ use oxideterm_editor_core::{
     TextRange, word_at,
 };
 use oxideterm_editor_syntax::{
-    BracketPair, HighlightCache, LanguageId, StructureCache, SyntaxChange, SyntaxEdit,
-    SyntaxSession,
+    BracketPair, HighlightCache, LanguageId, StructureCache, SyntaxEdit, SyntaxSession,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -29,6 +28,7 @@ mod fold;
 mod input;
 mod render;
 mod search;
+mod syntax_task;
 mod wrap;
 
 pub use commands::EditorCommand;
@@ -291,6 +291,11 @@ pub struct TextEditorView {
     save_status: EditorSaveStatus,
     language: Option<LanguageId>,
     syntax: Option<SyntaxSession>,
+    syntax_version: Option<u64>,
+    syntax_generation: Arc<std::sync::atomic::AtomicU64>,
+    syntax_executor: gpui::BackgroundExecutor,
+    syntax_task: Option<Task<()>>,
+    pending_syntax: Option<syntax_task::SyntaxRequest>,
     highlight_spans: HighlightCache,
     structure_cache: StructureCache,
     // Cursor movement queries bracket matches on every frame. Index every
@@ -338,6 +343,11 @@ impl TextEditorView {
             on_modified_word_click: None,
             save_status: EditorSaveStatus::Clean,
             syntax: None,
+            syntax_version: None,
+            syntax_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            syntax_executor: cx.background_executor().clone(),
+            syntax_task: None,
+            pending_syntax: None,
             language: None,
             highlight_spans: HighlightCache::default(),
             structure_cache: StructureCache::default(),
@@ -462,7 +472,7 @@ impl TextEditorView {
             self.secondary_selections.clear();
             self.marked_text = None;
             self.save_status = EditorSaveStatus::Dirty;
-            self.reparse_syntax();
+            self.request_syntax(None, true, cx);
             self.clear_folds_after_buffer_change();
             self.refresh_find_matches();
             self.viewport
@@ -520,8 +530,13 @@ impl TextEditorView {
     }
 
     pub fn set_settings(&mut self, settings: EditorSettings, cx: &mut Context<Self>) {
+        let tab_changed = self.settings.tab_size != settings.tab_size;
         self.settings = settings;
-        self.refresh_foldable_ranges();
+        if tab_changed {
+            self.request_syntax(None, false, cx);
+        } else if self.syntax_task.is_none() {
+            self.refresh_foldable_ranges();
+        }
         self.viewport
             .clamp(self.document_row_count(), self.metrics.line_height);
         self.refresh_find_matches();
@@ -601,13 +616,7 @@ impl TextEditorView {
 
     pub fn set_language(&mut self, language: Option<LanguageId>, cx: &mut Context<Self>) {
         self.language = language;
-        self.syntax = language
-            .filter(|_| !self.is_large_file())
-            .and_then(|language| {
-                self.buffer
-                    .with_text(|text| SyntaxSession::parse(language, text).ok())
-            });
-        self.refresh_highlights();
+        self.request_syntax(None, true, cx);
         self.refresh_foldable_ranges();
         cx.notify();
     }
@@ -739,7 +748,7 @@ impl TextEditorView {
         }
         let row_edit = self.unwrapped_row_edit(range, &replacement);
         let caret = BufferOffset(range.start.0 + replacement.len());
-        let syntax_edit = self.syntax.as_ref().map(|_| {
+        let syntax_edit = self.language.map(|_| {
             self.buffer
                 .with_text(|text| SyntaxEdit::replace(text, range, &replacement))
         });
@@ -748,7 +757,7 @@ impl TextEditorView {
             .apply_transaction(EditTransaction::single(TextEdit::new(range, replacement)))
             .is_ok()
         {
-            self.apply_syntax_edit(syntax_edit);
+            self.request_syntax(syntax_edit, false, cx);
             self.cursor.set_selection(Selection::caret(caret));
             self.secondary_selections.clear();
             self.marked_text = None;
@@ -814,7 +823,7 @@ impl TextEditorView {
             self.secondary_selections.clear();
             self.marked_text = None;
             self.save_status = EditorSaveStatus::Dirty;
-            self.reparse_syntax();
+            self.request_syntax(None, true, cx);
             self.clear_folds_after_buffer_change();
             self.refresh_find_matches();
             self.viewport
@@ -847,87 +856,6 @@ impl TextEditorView {
         }
         self.on_save = Some(on_save);
         cx.notify();
-    }
-
-    fn apply_syntax_edit(&mut self, edit: Option<SyntaxEdit>) {
-        if self.is_large_file() {
-            self.syntax = None;
-        } else if self.syntax.is_none() {
-            self.syntax = self.language.and_then(|language| {
-                self.buffer
-                    .with_text(|text| SyntaxSession::parse(language, text).ok())
-            });
-            self.refresh_highlights();
-            return;
-        }
-        let change = if let (Some(syntax), Some(edit)) = (self.syntax.as_mut(), edit) {
-            match self.buffer.with_text(|text| syntax.apply_edit(text, edit)) {
-                Ok(change) => Some(change),
-                Err(_) => {
-                    let language = syntax.language_id();
-                    self.syntax = self
-                        .buffer
-                        .with_text(|text| SyntaxSession::parse(language, text).ok());
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        self.refresh_highlights_after_edit(change.as_ref());
-    }
-
-    fn reparse_syntax(&mut self) {
-        if self.is_large_file() {
-            self.syntax = None;
-        } else if self.syntax.is_none() {
-            self.syntax = self.language.and_then(|language| {
-                self.buffer
-                    .with_text(|text| SyntaxSession::parse(language, text).ok())
-            });
-        }
-        if let Some(syntax) = self.syntax.as_mut()
-            && self.buffer.with_text(|text| syntax.reparse(text)).is_err()
-        {
-            let language = syntax.language_id();
-            self.syntax = self
-                .buffer
-                .with_text(|text| SyntaxSession::parse(language, text).ok());
-        }
-        self.refresh_highlights();
-    }
-
-    fn refresh_highlights(&mut self) {
-        self.refresh_highlights_after_edit(None);
-    }
-
-    fn refresh_highlights_after_edit(&mut self, change: Option<&SyntaxChange>) {
-        let Some(syntax) = self.syntax.as_ref() else {
-            self.highlight_spans.clear();
-            self.structure_cache.clear();
-            self.bracket_pair_by_caret.clear();
-            self.highlight_chunk_cache.borrow_mut().clear();
-            return;
-        };
-        self.buffer.with_text(|text| {
-            self.highlight_spans.update(syntax, text, change);
-            self.structure_cache
-                .update(syntax, text, self.settings.tab_size, change);
-        });
-        let bracket_pairs = self.buffer.with_text(|text| syntax.bracket_pairs(text));
-        self.bracket_pair_by_caret = build_bracket_pair_index(&bracket_pairs);
-        self.highlight_chunk_cache.borrow_mut().clear();
-    }
-
-    pub(super) fn refresh_structure_cache(&mut self) {
-        if let Some(syntax) = self.syntax.as_ref() {
-            self.buffer.with_text(|text| {
-                self.structure_cache
-                    .update(syntax, text, self.settings.tab_size, None)
-            });
-        } else {
-            self.structure_cache.clear();
-        }
     }
 
     fn active_selections(&self) -> Vec<Selection> {
@@ -1305,23 +1233,6 @@ impl TextEditorView {
     }
 }
 
-fn build_bracket_pair_index(pairs: &[BracketPair]) -> HashMap<usize, BracketPair> {
-    let mut index = HashMap::with_capacity(pairs.len().saturating_mul(4));
-    for pair in pairs {
-        for caret in [
-            pair.open.0,
-            pair.open.0.saturating_add(1),
-            pair.close.0,
-            pair.close.0.saturating_add(1),
-        ] {
-            // Preserve the syntax provider's first-match behavior when two
-            // bracket pairs share the caret slot between adjacent tokens.
-            index.entry(caret).or_insert_with(|| pair.clone());
-        }
-    }
-    index
-}
-
 impl Focusable for TextEditorView {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -1347,10 +1258,16 @@ mod tests {
             cx.new(|cx| TextEditorView::new(source, &oxideterm_theme::default_tokens(), cx));
         editor.update(cx, |editor, cx| {
             editor.set_language(Some(LanguageId::Rust), cx);
+        });
+        cx.run_until_parked();
+        editor.update(cx, |editor, cx| {
             editor
                 .cursor
                 .set_selection(Selection::caret(BufferOffset(0)));
             editor.insert_text("// 🙂\n", cx);
+        });
+        cx.run_until_parked();
+        editor.update(cx, |editor, cx| {
             assert_eq!(
                 editor.structure_cache.fold_lines().collect::<Vec<_>>(),
                 [(1, 3), (4, 6)]
@@ -1358,12 +1275,18 @@ mod tests {
             assert_eq!(editor.structure_cache.columns_for_line(2), [0]);
             assert_eq!(editor.structure_cache.columns_for_line(5), [0]);
             editor.undo(cx);
+        });
+        cx.run_until_parked();
+        editor.update(cx, |editor, cx| {
             assert_eq!(editor.buffer.text(), source);
             assert_eq!(
                 editor.structure_cache.fold_lines().collect::<Vec<_>>(),
                 [(0, 2), (3, 5)]
             );
             editor.redo(cx);
+        });
+        cx.run_until_parked();
+        editor.update(cx, |editor, cx| {
             assert_eq!(
                 editor.structure_cache.fold_lines().collect::<Vec<_>>(),
                 [(1, 3), (4, 6)]
@@ -1379,15 +1302,21 @@ mod tests {
         use super::{BufferOffset, LanguageId, Selection, TextEditorView, TextRange};
         use oxideterm_editor_syntax::SyntaxScope;
         let source = "fn first() { let value = foo; }\nfn second() {}\n";
+        let start = source.find("foo").unwrap();
         let editor =
             cx.new(|cx| TextEditorView::new(source, &oxideterm_theme::default_tokens(), cx));
         editor.update(cx, |editor, cx| {
             editor.set_language(Some(LanguageId::Rust), cx);
-            let start = source.find("foo").unwrap();
+        });
+        cx.run_until_parked();
+        editor.update(cx, |editor, cx| {
             editor
                 .cursor
                 .set_selection(Selection::new(BufferOffset(start), BufferOffset(start + 3)));
             editor.insert_text("Foo", cx);
+        });
+        cx.run_until_parked();
+        editor.update(cx, |editor, cx| {
             assert_eq!(
                 editor.buffer.text(),
                 "fn first() { let value = Foo; }\nfn second() {}\n"
@@ -1401,6 +1330,9 @@ mod tests {
                         && span.scope == SyntaxScope::Type)
             );
             editor.undo(cx);
+        });
+        cx.run_until_parked();
+        editor.update(cx, |editor, cx| {
             assert_eq!(editor.buffer.text(), source);
             assert!(
                 !editor
@@ -1409,6 +1341,9 @@ mod tests {
                     .any(|span| span.scope == SyntaxScope::Type)
             );
             editor.redo(cx);
+        });
+        cx.run_until_parked();
+        editor.update(cx, |editor, cx| {
             assert!(
                 editor
                     .highlight_spans
@@ -1432,6 +1367,9 @@ mod tests {
         });
         editor.update(cx, |editor, cx| {
             editor.set_language(Some(LanguageId::Rust), cx);
+        });
+        cx.run_until_parked();
+        editor.update(cx, |editor, cx| {
             editor.set_find_query("value", cx);
             assert!(
                 editor
@@ -1454,6 +1392,9 @@ mod tests {
                 .cursor
                 .set_selection(Selection::caret(BufferOffset(0)));
             editor.insert_text("z", cx);
+        });
+        cx.run_until_parked();
+        editor.update(cx, |editor, _cx| {
             assert!(editor.highlight_spans.is_empty());
             assert!(editor.bracket_pair_by_caret.is_empty());
             assert!(editor.structure_cache.columns_for_line(1).is_empty());

@@ -8,18 +8,30 @@ use tree_sitter::Node;
 use crate::IndentGuide;
 
 pub(crate) fn indent_guides(root: Node<'_>, source: &str, tab_size: usize) -> Vec<IndentGuide> {
+    indent_guides_controlled(root, source, tab_size, None)
+        .expect("uncontrolled traversal cannot be cancelled")
+}
+
+pub(crate) fn indent_guides_controlled(
+    root: Node<'_>,
+    source: &str,
+    tab_size: usize,
+    work: Option<&crate::SyntaxWork>,
+) -> Result<Vec<IndentGuide>, crate::SyntaxError> {
     let mut guides = BTreeSet::new();
-    crate::visit_multiline_nodes(root, |node| {
-        collect_indent_guides(node, source, tab_size.max(1), &mut guides)
-    });
-    guides
+    crate::visit_multiline_nodes_controlled(
+        root,
+        |node| collect_indent_guides(node, source, tab_size.max(1), &mut guides),
+        work,
+    )?;
+    Ok(guides
         .into_iter()
         .map(|(start_line, end_line, column)| IndentGuide {
             start_line,
             end_line,
             column,
         })
-        .collect()
+        .collect())
 }
 
 fn collect_indent_guides(

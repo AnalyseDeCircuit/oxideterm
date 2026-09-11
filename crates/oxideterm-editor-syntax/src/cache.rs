@@ -62,6 +62,18 @@ impl HighlightCache {
     }
 
     pub fn update(&mut self, session: &SyntaxSession, source: &str, change: Option<&SyntaxChange>) {
+        self.update_controlled(session, source, change, None)
+            .expect("uncontrolled cache updates cannot be cancelled");
+    }
+
+    pub fn update_controlled(
+        &mut self,
+        session: &SyntaxSession,
+        source: &str,
+        change: Option<&SyntaxChange>,
+        work: Option<&crate::SyntaxWork>,
+    ) -> Result<(), crate::SyntaxError> {
+        crate::work::checkpoint(work)?;
         if change.is_none()
             && self.revision == session.revision
             && self
@@ -69,7 +81,7 @@ impl HighlightCache {
                 .as_ref()
                 .is_some_and(|owner| Arc::ptr_eq(owner, &session.cache_owner))
         {
-            return;
+            return Ok(());
         }
         // The bundled Rust query has no source_file or cross-root patterns.
         // Other grammars retain full queries until their context rules are verified.
@@ -78,7 +90,7 @@ impl HighlightCache {
                 session.highlight_query.is_pattern_rooted(i)
                     && !session.highlight_query.is_pattern_non_local(i)
             });
-        let reusable = partitioned
+        let mut reusable = partitioned
             && change.is_some_and(|change| {
                 self.owner
                     .as_ref()
@@ -87,12 +99,30 @@ impl HighlightCache {
                     && self.revision.checked_add(1) == Some(session.revision)
                     && change.revision == session.revision
             });
+        if reusable && let Some(change) = change {
+            let changed_bytes = change
+                .structural_ranges()
+                .map(|range| range.len())
+                .sum::<usize>()
+                .max(change.edit.new_end_byte - change.edit.start_byte);
+            // Broad invalidations are cheaper as one query than thousands of
+            // per-root queries. Repartition its result without mixing old spans.
+            if changed_bytes > source.len() / 2 {
+                reusable = false;
+            }
+        }
         let mut span_ends = HashMap::new();
         if !partitioned {
             self.blocks = vec![HighlightBlock {
                 kind_id: 0,
                 range: 0..source.len(),
-                spans: session.highlight_spans(source).into(),
+                spans: session
+                    .highlights_controlled(
+                        source,
+                        TextRange::new(BufferOffset(0), BufferOffset(source.len())),
+                        work,
+                    )?
+                    .into(),
             }];
             if let Some(index) = index_span_ends(&self.blocks[0].spans) {
                 span_ends.insert(0, index);
@@ -102,9 +132,18 @@ impl HighlightCache {
             let mut cursor = root.walk();
             let mut blocks = Vec::with_capacity(root.child_count());
             // Initial/full refresh uses one query rather than one query per node.
-            let full = (!reusable).then(|| session.highlight_spans(source));
+            let full = if reusable {
+                None
+            } else {
+                Some(session.highlights_controlled(
+                    source,
+                    TextRange::new(BufferOffset(0), BufferOffset(source.len())),
+                    work,
+                )?)
+            };
             let mut full_index = 0;
             for node in root.children(&mut cursor) {
+                crate::work::checkpoint(work)?;
                 let range = node.byte_range();
                 if range.is_empty() {
                     continue;
@@ -134,10 +173,11 @@ impl HighlightCache {
                         }
                         full[first..full_index].to_vec()
                     } else {
-                        session.highlight_spans_in_range(
+                        session.highlights_controlled(
                             source,
                             TextRange::new(BufferOffset(range.start), BufferOffset(range.end)),
-                        )
+                            work,
+                        )?
                     };
                     // Rust captures are contained in their root child. Preserve
                     // whole captures, including multi-line strings and comments.
@@ -168,6 +208,7 @@ impl HighlightCache {
         self.span_ends = span_ends;
         self.owner = Some(session.cache_owner.clone());
         self.revision = session.revision;
+        crate::work::checkpoint(work)
     }
 }
 

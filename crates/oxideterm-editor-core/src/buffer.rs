@@ -55,6 +55,15 @@ impl TextBuffer {
         self.with_text(str::to_string)
     }
 
+    pub fn text_snapshot(&self) -> Arc<String> {
+        self.with_text(|_| ());
+        self.text_cache
+            .borrow()
+            .as_ref()
+            .expect("text cache was materialized")
+            .clone()
+    }
+
     pub fn with_text<R>(&self, f: impl FnOnce(&str) -> R) -> R {
         if self.text_cache.borrow().is_none() {
             *self.text_cache.borrow_mut() = Some(Arc::new(self.storage.to_text()));

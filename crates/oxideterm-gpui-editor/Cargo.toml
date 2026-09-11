@@ -9,6 +9,7 @@ default = []
 
 [dependencies]
 gpui.workspace = true
+tracing.workspace = true
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
 oxideterm-editor-syntax = { path = "../oxideterm-editor-syntax" }
 oxideterm-theme = { path = "../oxideterm-theme" }

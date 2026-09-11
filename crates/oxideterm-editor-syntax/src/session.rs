@@ -24,6 +24,15 @@ pub struct SyntaxSession {
 
 impl SyntaxSession {
     pub fn parse(language_id: LanguageId, source: &str) -> Result<Self, SyntaxError> {
+        Self::parse_controlled(language_id, source, None)
+    }
+
+    pub fn parse_controlled(
+        language_id: LanguageId,
+        source: &str,
+        work: Option<&crate::SyntaxWork>,
+    ) -> Result<Self, SyntaxError> {
+        crate::work::checkpoint(work)?;
         let language = language_id.tree_sitter_language();
         let mut parser = Parser::new();
         parser.set_language(&language)?;
@@ -37,9 +46,7 @@ impl SyntaxSession {
         } else {
             None
         };
-        let tree = parser
-            .parse(source, None)
-            .ok_or(SyntaxError::ParseCancelled)?;
+        let tree = crate::work::parse(&mut parser, source, None, work)?;
 
         Ok(Self {
             language_id,
@@ -66,13 +73,21 @@ impl SyntaxSession {
         source_after: &str,
         edit: SyntaxEdit,
     ) -> Result<SyntaxChange, SyntaxError> {
+        self.apply_edit_controlled(source_after, edit, None)
+    }
+
+    /// On cancellation, discard the session or fully reparse before reuse.
+    pub fn apply_edit_controlled(
+        &mut self,
+        source_after: &str,
+        edit: SyntaxEdit,
+        work: Option<&crate::SyntaxWork>,
+    ) -> Result<SyntaxChange, SyntaxError> {
+        crate::work::checkpoint(work)?;
         // tree-sitter incremental parsing requires the old tree to be edited
         // with the same byte/point delta before it is passed back as a hint.
         self.tree.edit(&edit.as_input_edit());
-        let tree = self
-            .parser
-            .parse(source_after, Some(&self.tree))
-            .ok_or(SyntaxError::ParseCancelled)?;
+        let tree = crate::work::parse(&mut self.parser, source_after, Some(&self.tree), work)?;
         let old_tree = std::mem::replace(&mut self.tree, tree);
         self.revision += 1;
         Ok(SyntaxChange {
@@ -106,6 +121,16 @@ impl SyntaxSession {
     /// Return full, absolute spans intersecting a half-open byte range, without
     /// clipping captures that cross its edges. Source must match this session's tree.
     pub fn highlight_spans_in_range(&self, source: &str, range: TextRange) -> Vec<HighlightSpan> {
+        self.highlights_controlled(source, range, None)
+            .expect("uncontrolled highlight queries cannot be cancelled")
+    }
+
+    pub fn highlights_controlled(
+        &self,
+        source: &str,
+        range: TextRange,
+        work: Option<&crate::SyntaxWork>,
+    ) -> Result<Vec<HighlightSpan>, SyntaxError> {
         highlight::highlight_spans(
             self.language_id,
             &self.tree,
@@ -113,11 +138,20 @@ impl SyntaxSession {
             self.markdown_inline_query.as_ref(),
             source,
             range.start.0..range.end.0,
+            work,
         )
     }
 
     pub fn bracket_pairs(&self, source: &str) -> Vec<BracketPair> {
         brackets::bracket_pairs(source)
+    }
+
+    pub fn brackets_controlled(
+        &self,
+        source: &str,
+        work: Option<&crate::SyntaxWork>,
+    ) -> Result<Vec<BracketPair>, SyntaxError> {
+        brackets::bracket_pairs_controlled(source, work)
     }
 
     pub fn fold_ranges(&self) -> Vec<FoldRange> {

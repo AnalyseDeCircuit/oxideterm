@@ -7990,6 +7990,7 @@ dependencies = [
  "oxideterm-editor-core",
  "oxideterm-editor-syntax",
  "oxideterm-theme",
+ "tracing",
  "unicode-segmentation",
  "unicode-width",
 ]

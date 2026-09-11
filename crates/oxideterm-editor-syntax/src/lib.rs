@@ -19,6 +19,7 @@ mod queries;
 mod session;
 mod structure;
 mod types;
+mod work;
 
 #[cfg(test)]
 mod tests;
@@ -30,14 +31,17 @@ pub use language::{LanguageId, SUPPORTED_LANGUAGES};
 pub use session::SyntaxSession;
 pub use structure::StructureCache;
 pub use types::{BracketPair, FoldRange, HighlightSpan, IndentGuide, SyntaxScope};
+pub use work::SyntaxWork;
 
-fn visit_multiline_nodes<'tree>(
+fn visit_multiline_nodes_controlled<'tree>(
     root: tree_sitter::Node<'tree>,
     mut visit: impl FnMut(tree_sitter::Node<'tree>),
-) {
+    work: Option<&SyntaxWork>,
+) -> Result<(), SyntaxError> {
     // Reuse one cursor for the traversal instead of allocating one at every node.
     let mut cursor = root.walk();
     loop {
+        work::checkpoint(work)?;
         let node = cursor.node();
         // A single-line subtree cannot contain a multiline fold or guide.
         if node.end_position().row > node.start_position().row {
@@ -48,7 +52,7 @@ fn visit_multiline_nodes<'tree>(
         }
         while !cursor.goto_next_sibling() {
             if !cursor.goto_parent() {
-                return;
+                return Ok(());
             }
         }
     }

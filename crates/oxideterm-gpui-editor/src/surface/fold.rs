@@ -50,7 +50,6 @@ impl TextEditorView {
     }
 
     pub(super) fn clear_folds_after_buffer_change(&mut self) {
-        self.refresh_structure_cache();
         if !self.folded_ranges.is_empty() {
             self.folded_ranges.clear();
         }
@@ -58,7 +57,6 @@ impl TextEditorView {
     }
 
     pub(super) fn refresh_foldable_ranges(&mut self) {
-        self.refresh_structure_cache();
         self.folded_ranges.retain(|folded| {
             self.structure_cache.fold_at_line(folded.start_line)
                 == Some((folded.start_line, folded.end_line))

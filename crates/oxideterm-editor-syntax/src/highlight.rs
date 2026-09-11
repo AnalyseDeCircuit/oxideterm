@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::ops::Range;
+use std::{cell::Cell, ops::Range};
 
 use oxideterm_editor_core::{BufferOffset, TextRange};
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
@@ -15,22 +15,39 @@ pub(crate) fn highlight_spans(
     markdown_inline_query: Option<&Query>,
     source: &str,
     requested: Range<usize>,
-) -> Vec<HighlightSpan> {
+    work: Option<&crate::SyntaxWork>,
+) -> Result<Vec<HighlightSpan>, crate::SyntaxError> {
     let requested = requested.start..requested.end.min(source.len());
     if requested.start >= requested.end {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let mut cursor = QueryCursor::new();
     // Query from the root so predicates and captures keep their ancestor context.
     cursor.set_byte_range(requested.clone());
-    let mut captures = cursor.captures(highlight_query, tree.root_node(), source.as_bytes());
+    let paused = Cell::new(false);
+    let mut pause = |_: &tree_sitter::QueryCursorState| {
+        let stop = work.is_some_and(crate::SyntaxWork::should_pause);
+        paused.set(stop);
+        stop
+    };
+    let mut captures = cursor.captures_with_options(
+        highlight_query,
+        tree.root_node(),
+        source.as_bytes(),
+        tree_sitter::QueryCursorOptions::new().progress_callback(&mut pause),
+    );
     let names = highlight_query.capture_names();
     let mut spans = Vec::new();
 
-    while {
+    loop {
+        crate::work::checkpoint(work)?;
         captures.advance();
-        captures.get().is_some()
-    } {
+        if captures.get().is_none() {
+            if paused.replace(false) {
+                continue;
+            }
+            break;
+        }
         let Some((query_match, capture_index)) = captures.get() else {
             continue;
         };
@@ -65,10 +82,12 @@ pub(crate) fn highlight_spans(
             inline_query,
             &requested,
             &mut spans,
-        );
+            work,
+        )?;
     }
 
-    normalize_highlight_spans(spans)
+    crate::work::checkpoint(work)?;
+    Ok(normalize_highlight_spans(spans))
 }
 
 fn scope_for_capture(capture: &str, node_kind: &str) -> Option<SyntaxScope> {
@@ -113,19 +132,29 @@ fn collect_markdown_inline_highlights(
     inline_query: &Query,
     requested: &Range<usize>,
     spans: &mut Vec<HighlightSpan>,
-) {
+    work: Option<&crate::SyntaxWork>,
+) -> Result<(), crate::SyntaxError> {
+    crate::work::checkpoint(work)?;
     if node.start_byte() >= requested.end || node.end_byte() <= requested.start {
-        return;
+        return Ok(());
     }
     if node.kind() == "inline" {
-        collect_markdown_inline_node_highlights(node, source, inline_query, requested, spans);
-        return;
+        collect_markdown_inline_node_highlights(
+            node,
+            source,
+            inline_query,
+            requested,
+            spans,
+            work,
+        )?;
+        return Ok(());
     }
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        collect_markdown_inline_highlights(child, source, inline_query, requested, spans);
+        collect_markdown_inline_highlights(child, source, inline_query, requested, spans, work)?;
     }
+    Ok(())
 }
 
 fn collect_markdown_inline_node_highlights(
@@ -134,35 +163,45 @@ fn collect_markdown_inline_node_highlights(
     inline_query: &Query,
     requested: &Range<usize>,
     spans: &mut Vec<HighlightSpan>,
-) {
+    work: Option<&crate::SyntaxWork>,
+) -> Result<(), crate::SyntaxError> {
+    crate::work::checkpoint(work)?;
     let range = node.byte_range();
     if range.start >= range.end || range.end > source.len() {
-        return;
+        return Ok(());
     }
     let inline_language: Language = tree_sitter_md::INLINE_LANGUAGE.into();
     let mut parser = Parser::new();
-    if parser.set_language(&inline_language).is_err() {
-        return;
-    }
-    let Some(tree) = parser.parse(&source[range.clone()], None) else {
-        return;
-    };
+    parser.set_language(&inline_language)?;
+    let tree = crate::work::parse(&mut parser, &source[range.clone()], None, work)?;
 
     let mut query_cursor = QueryCursor::new();
     query_cursor.set_byte_range(
         requested.start.saturating_sub(range.start)..requested.end.min(range.end) - range.start,
     );
-    let mut captures = query_cursor.captures(
+    let paused = Cell::new(false);
+    let mut pause = |_: &tree_sitter::QueryCursorState| {
+        let stop = work.is_some_and(crate::SyntaxWork::should_pause);
+        paused.set(stop);
+        stop
+    };
+    let mut captures = query_cursor.captures_with_options(
         inline_query,
         tree.root_node(),
         source[range.clone()].as_bytes(),
+        tree_sitter::QueryCursorOptions::new().progress_callback(&mut pause),
     );
     let names = inline_query.capture_names();
 
-    while {
+    loop {
+        crate::work::checkpoint(work)?;
         captures.advance();
-        captures.get().is_some()
-    } {
+        if captures.get().is_none() {
+            if paused.replace(false) {
+                continue;
+            }
+            break;
+        }
         let Some((query_match, capture_index)) = captures.get() else {
             continue;
         };
@@ -185,6 +224,7 @@ fn collect_markdown_inline_node_highlights(
             });
         }
     }
+    Ok(())
 }
 
 fn normalize_highlight_spans(mut spans: Vec<HighlightSpan>) -> Vec<HighlightSpan> {

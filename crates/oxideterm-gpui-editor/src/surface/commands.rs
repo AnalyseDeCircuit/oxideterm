@@ -276,10 +276,7 @@ impl TextEditorView {
     }
 
     fn after_history_change(&mut self, cx: &mut Context<Self>) {
-        if let Some(syntax) = self.syntax.as_mut() {
-            let _ = self.buffer.with_text(|text| syntax.reparse(text));
-        }
-        self.refresh_highlights();
+        self.request_syntax(None, true, cx);
         self.clear_folds_after_buffer_change();
         self.refresh_find_matches();
         self.secondary_selections.clear();
