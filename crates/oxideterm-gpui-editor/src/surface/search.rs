@@ -130,6 +130,12 @@ impl TextEditorView {
     }
 
     pub(super) fn refresh_find_matches(&mut self) {
+        if self.find_query.is_empty() {
+            self.find_matches.clear();
+            self.find_line_matches.clear();
+            self.active_find_index = None;
+            return;
+        }
         self.find_matches = self
             .buffer
             .with_text(|text| find_all(text, &self.find_query, self.find_options()));

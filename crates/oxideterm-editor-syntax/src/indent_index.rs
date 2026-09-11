@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use oxideterm_editor_syntax::IndentGuide;
+use crate::IndentGuide;
 
 #[derive(Debug, Default)]
 pub(super) struct IndentGuideIndex {
@@ -12,7 +12,7 @@ pub(super) struct IndentGuideIndex {
 struct IndentGuideNode {
     center_line: usize,
     guides_by_start: Vec<IndentGuide>,
-    guides_by_end: Vec<IndentGuide>,
+    guides_by_end: Vec<usize>,
     before: Option<Box<IndentGuideNode>>,
     after: Option<Box<IndentGuideNode>>,
 }
@@ -22,6 +22,10 @@ impl IndentGuideIndex {
         Self {
             root: IndentGuideNode::build(guides),
         }
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.root.is_none()
     }
 
     pub(super) fn columns_for_line(&self, line: usize) -> Vec<usize> {
@@ -59,9 +63,11 @@ impl IndentGuideNode {
             }
         }
 
-        let mut guides_by_start = overlapping.clone();
+        let mut guides_by_start = overlapping;
         guides_by_start.sort_by_key(|guide| (guide.start_line, guide.column, guide.end_line));
-        overlapping.sort_by_key(|guide| {
+        let mut guides_by_end: Vec<_> = (0..guides_by_start.len()).collect();
+        guides_by_end.sort_by_key(|&index| {
+            let guide = &guides_by_start[index];
             (
                 std::cmp::Reverse(guide.end_line),
                 guide.column,
@@ -71,7 +77,7 @@ impl IndentGuideNode {
         Some(Box::new(Self {
             center_line,
             guides_by_start,
-            guides_by_end: overlapping,
+            guides_by_end,
             before: Self::build(before),
             after: Self::build(after),
         }))
@@ -97,6 +103,7 @@ impl IndentGuideNode {
                 columns.extend(
                     self.guides_by_end
                         .iter()
+                        .map(|&index| &self.guides_by_start[index])
                         .take_while(|guide| guide.end_line >= line)
                         .map(|guide| guide.column),
                 );

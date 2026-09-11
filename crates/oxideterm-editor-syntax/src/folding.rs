@@ -8,7 +8,7 @@ use crate::FoldRange;
 
 pub(crate) fn fold_ranges(root: Node<'_>) -> Vec<FoldRange> {
     let mut ranges = Vec::new();
-    collect_fold_ranges(root, &mut ranges);
+    crate::visit_multiline_nodes(root, |node| collect_fold_ranges(node, &mut ranges));
     ranges
 }
 
@@ -26,11 +26,6 @@ fn collect_fold_ranges(node: Node<'_>, ranges: &mut Vec<FoldRange>) {
                 end_line: end.row,
             });
         }
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_fold_ranges(child, ranges);
     }
 }
 

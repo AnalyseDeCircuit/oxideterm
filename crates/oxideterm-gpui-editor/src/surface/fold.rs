@@ -1,11 +1,8 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use gpui::Context;
 use oxideterm_editor_core::Selection;
-use oxideterm_editor_syntax::{FoldRange as SyntaxFoldRange, SyntaxSession};
 
 use super::{FoldRange, TextEditorView};
 
@@ -37,10 +34,12 @@ impl TextEditorView {
     }
 
     pub(super) fn foldable_range_starting_at(&self, line: usize) -> Option<FoldRange> {
-        self.foldable_ranges
-            .binary_search_by_key(&line, |range| range.start_line)
-            .ok()
-            .map(|index| self.foldable_ranges[index])
+        self.structure_cache
+            .fold_at_line(line)
+            .map(|(start_line, end_line)| FoldRange {
+                start_line,
+                end_line,
+            })
     }
 
     pub(super) fn folded_range_containing_line(&self, line: usize) -> Option<FoldRange> {
@@ -51,8 +50,7 @@ impl TextEditorView {
     }
 
     pub(super) fn clear_folds_after_buffer_change(&mut self) {
-        self.foldable_ranges = fold_ranges_from_syntax(self.syntax.as_ref());
-        self.refresh_indent_guides();
+        self.refresh_structure_cache();
         if !self.folded_ranges.is_empty() {
             self.folded_ranges.clear();
         }
@@ -60,12 +58,10 @@ impl TextEditorView {
     }
 
     pub(super) fn refresh_foldable_ranges(&mut self) {
-        self.foldable_ranges = fold_ranges_from_syntax(self.syntax.as_ref());
-        self.refresh_indent_guides();
+        self.refresh_structure_cache();
         self.folded_ranges.retain(|folded| {
-            self.foldable_ranges.iter().any(|range| {
-                range.start_line == folded.start_line && range.end_line == folded.end_line
-            })
+            self.structure_cache.fold_at_line(folded.start_line)
+                == Some((folded.start_line, folded.end_line))
         });
         self.invalidate_display_rows();
     }
@@ -101,60 +97,6 @@ impl TextEditorView {
     }
 }
 
-fn fold_ranges_from_syntax(syntax: Option<&SyntaxSession>) -> Vec<FoldRange> {
-    let Some(syntax) = syntax else {
-        return Vec::new();
-    };
-    normalize_syntax_fold_ranges(syntax.fold_ranges())
-}
-
-fn normalize_syntax_fold_ranges(syntax_ranges: Vec<SyntaxFoldRange>) -> Vec<FoldRange> {
-    let mut ranges = BTreeMap::<usize, FoldRange>::new();
-    for range in syntax_ranges {
-        if range.end_line <= range.start_line {
-            continue;
-        }
-        // Multiple tree-sitter nodes can start on the same line. The gutter
-        // has one control per visual line, so keep the largest visible fold.
-        insert_widest_range(
-            &mut ranges,
-            FoldRange {
-                start_line: range.start_line,
-                end_line: range.end_line,
-            },
-        );
-    }
-    ranges.into_values().collect()
-}
-
-fn insert_widest_range(ranges: &mut BTreeMap<usize, FoldRange>, range: FoldRange) {
-    match ranges.get(&range.start_line) {
-        Some(existing) if existing.end_line >= range.end_line => {}
-        _ => {
-            ranges.insert(range.start_line, range);
-        }
-    }
-}
-
 fn fold_ranges_overlap(left: FoldRange, right: FoldRange) -> bool {
     left.start_line <= right.end_line && right.start_line <= left.end_line
-}
-
-#[cfg(test)]
-mod tests {
-    use oxideterm_editor_syntax::LanguageId;
-
-    use super::*;
-
-    #[test]
-    fn syntax_ranges_drive_foldable_ranges() {
-        let source = "fn main() {\n    if true {\n        println!(\"x\");\n    }\n}\n";
-        let session = SyntaxSession::parse(LanguageId::Rust, source).unwrap();
-
-        assert!(
-            fold_ranges_from_syntax(Some(&session))
-                .iter()
-                .any(|range| range.start_line == 0 && range.end_line >= 3)
-        );
-    }
 }

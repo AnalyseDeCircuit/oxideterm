@@ -1,6 +1,8 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::ops::Range;
+
 use oxideterm_editor_core::{BufferOffset, TextRange};
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
@@ -12,8 +14,15 @@ pub(crate) fn highlight_spans(
     highlight_query: &Query,
     markdown_inline_query: Option<&Query>,
     source: &str,
+    requested: Range<usize>,
 ) -> Vec<HighlightSpan> {
+    let requested = requested.start..requested.end.min(source.len());
+    if requested.start >= requested.end {
+        return Vec::new();
+    }
     let mut cursor = QueryCursor::new();
+    // Query from the root so predicates and captures keep their ancestor context.
+    cursor.set_byte_range(requested.clone());
     let mut captures = cursor.captures(highlight_query, tree.root_node(), source.as_bytes());
     let names = highlight_query.capture_names();
     let mut spans = Vec::new();
@@ -35,11 +44,14 @@ pub(crate) fn highlight_spans(
             continue;
         };
         let range = capture.node.byte_range();
-        if range.start < range.end && range.end <= source.len() {
+        if range.start < range.end
+            && range.end <= source.len()
+            && range.start < requested.end
+            && requested.start < range.end
+        {
             spans.push(HighlightSpan {
                 range: TextRange::new(BufferOffset(range.start), BufferOffset(range.end)),
                 scope,
-                capture: capture_name.to_string(),
             });
         }
     }
@@ -47,7 +59,13 @@ pub(crate) fn highlight_spans(
     if language_id == LanguageId::Markdown
         && let Some(inline_query) = markdown_inline_query
     {
-        collect_markdown_inline_highlights(tree.root_node(), source, inline_query, &mut spans);
+        collect_markdown_inline_highlights(
+            tree.root_node(),
+            source,
+            inline_query,
+            &requested,
+            &mut spans,
+        );
     }
 
     normalize_highlight_spans(spans)
@@ -93,16 +111,20 @@ fn collect_markdown_inline_highlights(
     node: Node<'_>,
     source: &str,
     inline_query: &Query,
+    requested: &Range<usize>,
     spans: &mut Vec<HighlightSpan>,
 ) {
+    if node.start_byte() >= requested.end || node.end_byte() <= requested.start {
+        return;
+    }
     if node.kind() == "inline" {
-        collect_markdown_inline_node_highlights(node, source, inline_query, spans);
+        collect_markdown_inline_node_highlights(node, source, inline_query, requested, spans);
         return;
     }
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        collect_markdown_inline_highlights(child, source, inline_query, spans);
+        collect_markdown_inline_highlights(child, source, inline_query, requested, spans);
     }
 }
 
@@ -110,6 +132,7 @@ fn collect_markdown_inline_node_highlights(
     node: Node<'_>,
     source: &str,
     inline_query: &Query,
+    requested: &Range<usize>,
     spans: &mut Vec<HighlightSpan>,
 ) {
     let range = node.byte_range();
@@ -126,6 +149,9 @@ fn collect_markdown_inline_node_highlights(
     };
 
     let mut query_cursor = QueryCursor::new();
+    query_cursor.set_byte_range(
+        requested.start.saturating_sub(range.start)..requested.end.min(range.end) - range.start,
+    );
     let mut captures = query_cursor.captures(
         inline_query,
         tree.root_node(),
@@ -152,11 +178,10 @@ fn collect_markdown_inline_node_highlights(
         let capture_range = capture.node.byte_range();
         let start = range.start + capture_range.start;
         let end = range.start + capture_range.end;
-        if start < end && end <= source.len() {
+        if start < end && end <= source.len() && start < requested.end && requested.start < end {
             spans.push(HighlightSpan {
                 range: TextRange::new(BufferOffset(start), BufferOffset(end)),
                 scope,
-                capture: capture_name.to_string(),
             });
         }
     }

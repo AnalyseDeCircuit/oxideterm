@@ -1,20 +1,25 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::sync::Arc;
+
+use oxideterm_editor_core::{BufferOffset, TextRange};
 use tree_sitter::{Language, Parser, Query, Tree};
 
 use crate::{
-    BracketPair, FoldRange, HighlightSpan, LanguageId, SyntaxEdit, SyntaxError, brackets, folding,
-    highlight, indent,
+    BracketPair, FoldRange, HighlightSpan, LanguageId, SyntaxChange, SyntaxEdit, SyntaxError,
+    brackets, folding, highlight, indent,
 };
 
 pub struct SyntaxSession {
-    language_id: LanguageId,
+    pub(crate) language_id: LanguageId,
     language: Language,
     parser: Parser,
-    highlight_query: Query,
+    pub(crate) highlight_query: Query,
     markdown_inline_query: Option<Query>,
-    tree: Tree,
+    pub(crate) tree: Tree,
+    pub(crate) cache_owner: Arc<()>,
+    pub(crate) revision: u64,
 }
 
 impl SyntaxSession {
@@ -43,6 +48,8 @@ impl SyntaxSession {
             highlight_query,
             markdown_inline_query,
             tree,
+            cache_owner: Arc::new(()),
+            revision: 0,
         })
     }
 
@@ -54,18 +61,33 @@ impl SyntaxSession {
         self.tree.root_node().has_error()
     }
 
-    pub fn apply_edit(&mut self, source_after: &str, edit: SyntaxEdit) -> Result<(), SyntaxError> {
+    pub fn apply_edit(
+        &mut self,
+        source_after: &str,
+        edit: SyntaxEdit,
+    ) -> Result<SyntaxChange, SyntaxError> {
         // tree-sitter incremental parsing requires the old tree to be edited
         // with the same byte/point delta before it is passed back as a hint.
         self.tree.edit(&edit.as_input_edit());
-        self.tree = self
+        let tree = self
             .parser
             .parse(source_after, Some(&self.tree))
             .ok_or(SyntaxError::ParseCancelled)?;
-        Ok(())
+        let old_tree = std::mem::replace(&mut self.tree, tree);
+        self.revision += 1;
+        Ok(SyntaxChange {
+            edit,
+            owner: self.cache_owner.clone(),
+            revision: self.revision,
+            structural_ranges: Default::default(),
+            old_tree,
+            new_tree: self.tree.clone(),
+        })
     }
 
     pub fn reparse(&mut self, source: &str) -> Result<(), SyntaxError> {
+        self.cache_owner = Arc::new(());
+        self.revision = 0;
         self.parser.set_language(&self.language)?;
         self.tree = self
             .parser
@@ -75,12 +97,22 @@ impl SyntaxSession {
     }
 
     pub fn highlight_spans(&self, source: &str) -> Vec<HighlightSpan> {
+        self.highlight_spans_in_range(
+            source,
+            TextRange::new(BufferOffset(0), BufferOffset(source.len())),
+        )
+    }
+
+    /// Return full, absolute spans intersecting a half-open byte range, without
+    /// clipping captures that cross its edges. Source must match this session's tree.
+    pub fn highlight_spans_in_range(&self, source: &str, range: TextRange) -> Vec<HighlightSpan> {
         highlight::highlight_spans(
             self.language_id,
             &self.tree,
             &self.highlight_query,
             self.markdown_inline_query.as_ref(),
             source,
+            range.start.0..range.end.0,
         )
     }
 

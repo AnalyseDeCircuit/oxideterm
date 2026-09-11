@@ -24,7 +24,6 @@ pub enum SyntaxScope {
 pub struct HighlightSpan {
     pub range: TextRange,
     pub scope: SyntaxScope,
-    pub capture: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

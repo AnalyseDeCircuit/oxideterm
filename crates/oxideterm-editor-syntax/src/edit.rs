@@ -1,8 +1,13 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use oxideterm_editor_core::{LineCol, TextRange};
-use tree_sitter::{InputEdit, Point};
+use std::{
+    ops::Range,
+    sync::{Arc, OnceLock},
+};
+
+use oxideterm_editor_core::{BufferOffset, LineCol, TextRange};
+use tree_sitter::{InputEdit, Point, Tree};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SyntaxEdit {
@@ -77,4 +82,56 @@ fn advance_position(start: LineCol, text: &str) -> LineCol {
         }
     }
     LineCol::new(line, column)
+}
+
+/// Edit coordinates and structural changes are inputs to cache invalidation,
+/// not a complete highlight invalidation boundary: query context can extend them.
+#[derive(Clone, Debug)]
+pub struct SyntaxChange {
+    pub edit: SyntaxEdit,
+    pub(crate) owner: Arc<()>,
+    pub(crate) revision: u64,
+    pub(crate) structural_ranges: OnceLock<Vec<TextRange>>,
+    pub(crate) old_tree: Tree,
+    pub(crate) new_tree: Tree,
+}
+
+impl SyntaxChange {
+    /// Compute structural changes in the new document's coordinates on demand.
+    /// Text-only edits can leave this empty; callers must also account for
+    /// `edit` in both versions. Tree comparison is deferred because it can be
+    /// substantial work even when incremental parsing reused most of the tree.
+    pub fn structural_ranges(&self) -> impl ExactSizeIterator<Item = TextRange> {
+        self.changed_ranges().iter().copied()
+    }
+
+    fn changed_ranges(&self) -> &[TextRange] {
+        self.structural_ranges.get_or_init(|| {
+            self.old_tree
+                .changed_ranges(&self.new_tree)
+                .map(|range| {
+                    TextRange::new(BufferOffset(range.start_byte), BufferOffset(range.end_byte))
+                })
+                .collect()
+        })
+    }
+
+    pub(crate) fn unchanged_old_range(&self, range: Range<usize>) -> Option<Range<usize>> {
+        let changes = self.changed_ranges();
+        let first = changes.partition_point(|changed| changed.end.0 < range.start);
+        if changes
+            .get(first)
+            .is_some_and(|changed| changed.start.0 <= range.end)
+        {
+            return None;
+        }
+        let start = if range.end < self.edit.start_byte {
+            range.start
+        } else if range.start > self.edit.new_end_byte {
+            range.start - self.edit.new_end_byte + self.edit.old_end_byte
+        } else {
+            return None;
+        };
+        Some(start..start + range.len())
+    }
 }

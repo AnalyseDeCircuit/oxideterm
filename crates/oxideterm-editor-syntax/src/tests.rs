@@ -214,7 +214,63 @@ fn parses_and_highlights_all_supported_languages() {
         let session = SyntaxSession::parse(language, source)
             .unwrap_or_else(|error| panic!("{language:?} query failed: {error}"));
         let spans = session.highlight_spans(source);
+        let mut structure = StructureCache::default();
+        structure.update(&session, source, 4, None);
+        let expected_folds: std::collections::BTreeMap<_, _> =
+            session.fold_ranges().into_iter().fold(
+                std::collections::BTreeMap::<usize, usize>::new(),
+                |mut folds, range| {
+                    folds
+                        .entry(range.start_line)
+                        .and_modify(|end| *end = (*end).max(range.end_line))
+                        .or_insert(range.end_line);
+                    folds
+                },
+            );
+        assert_eq!(
+            structure.fold_lines().collect::<Vec<_>>(),
+            expected_folds.into_iter().collect::<Vec<_>>(),
+            "{language:?} folds"
+        );
+        let guides = session.indent_guides(source, 4);
+        for line in 0..=source.lines().count() {
+            let mut expected: Vec<_> = guides
+                .iter()
+                .filter(|guide| guide.start_line < line && guide.end_line >= line)
+                .map(|guide| guide.column)
+                .collect();
+            expected.sort_unstable();
+            expected.dedup();
+            assert_eq!(
+                structure.columns_for_line(line),
+                expected,
+                "{language:?} line {line}"
+            );
+        }
+        let mut cache = HighlightCache::default();
+        cache.update(&session, source, None);
+        assert_eq!(
+            cache.spans_in_range(0..source.len()).collect::<Vec<_>>(),
+            spans,
+            "{language:?} initial cache"
+        );
 
+        for (start, ch) in source.char_indices() {
+            let end = start + ch.len_utf8();
+            let expected: Vec<_> = spans
+                .iter()
+                .filter(|span| span.range.start.0 < end && span.range.end.0 > start)
+                .cloned()
+                .collect();
+            assert_eq!(
+                session.highlight_spans_in_range(
+                    source,
+                    TextRange::new(BufferOffset(start), BufferOffset(end))
+                ),
+                expected,
+                "{language:?}, range {start}..{end}"
+            );
+        }
         assert!(
             !spans.is_empty(),
             "{language:?} should produce highlight spans"
@@ -354,4 +410,247 @@ fn computes_bracket_and_fold_ranges() {
             .iter()
             .any(|range| range.start_line == 0 && range.end_line >= 3)
     );
+}
+
+#[test]
+fn fold_and_indent_traversal_preserves_nested_and_sibling_ranges() {
+    let source = "fn main() {\n    if true {\n        a();\n    }\n}\nfn other() {\n    b();\n}\n";
+    let session = SyntaxSession::parse(LanguageId::Rust, source).unwrap();
+    assert_eq!(
+        session
+            .fold_ranges()
+            .iter()
+            .map(|r| (r.start_line, r.end_line))
+            .collect::<Vec<_>>(),
+        [(0, 4), (0, 4), (1, 3), (5, 7), (5, 7)]
+    );
+    assert_eq!(
+        session
+            .indent_guides(source, 4)
+            .iter()
+            .map(|g| (g.start_line, g.end_line, g.column))
+            .collect::<Vec<_>>(),
+        [(0, 4, 0), (1, 3, 4), (5, 7, 0)]
+    );
+}
+
+#[test]
+#[ignore = "manual release-profile syntax stage benchmark"]
+fn syntax_stage_performance() {
+    use std::{hint::black_box, time::Instant};
+    let pattern = "fn example() { let value = 42; }\n";
+    for target in [100usize * 1024, 1024 * 1024] {
+        for position in ["start", "middle", "end"] {
+            let mut source = pattern.repeat(target.div_ceil(pattern.len()));
+            let offset = match position {
+                "start" => 0,
+                "middle" => source.len() / pattern.len() / 2 * pattern.len(),
+                _ => source.len() - pattern.len(),
+            } + pattern.find("42").unwrap();
+            let mut session = SyntaxSession::parse(LanguageId::Rust, &source).unwrap();
+            for run in 0..12 {
+                let replacement = if run % 2 == 0 { "43" } else { "42" };
+                let edit = SyntaxEdit::replace(
+                    &source,
+                    TextRange::new(BufferOffset(offset), BufferOffset(offset + 2)),
+                    replacement,
+                );
+                source.replace_range(offset..offset + 2, replacement);
+                let started = Instant::now();
+                let change = session.apply_edit(&source, edit).unwrap();
+                let parsed = started.elapsed().as_secs_f64() * 1000.0;
+                let started = Instant::now();
+                black_box(change.structural_ranges().collect::<Vec<_>>());
+                let compared = started.elapsed().as_secs_f64() * 1000.0;
+                let started = Instant::now();
+                black_box(session.highlight_spans(&source));
+                let highlighted = started.elapsed().as_secs_f64() * 1000.0;
+                let range_start = (offset / pattern.len() * pattern.len())
+                    .min(source.len().saturating_sub(40 * pattern.len()));
+                let started = Instant::now();
+                black_box(session.highlight_spans_in_range(
+                    &source,
+                    TextRange::new(
+                        BufferOffset(range_start),
+                        BufferOffset(range_start + 40 * pattern.len()),
+                    ),
+                ));
+                let ranged = started.elapsed().as_secs_f64() * 1000.0;
+                let started = Instant::now();
+                black_box(session.bracket_pairs(&source));
+                let brackets = started.elapsed().as_secs_f64() * 1000.0;
+                let started = Instant::now();
+                black_box(session.fold_ranges());
+                let folds = started.elapsed().as_secs_f64() * 1000.0;
+                let started = Instant::now();
+                black_box(session.indent_guides(&source, 4));
+                let indent = started.elapsed().as_secs_f64() * 1000.0;
+                eprintln!(
+                    "SYNTAX_STAGE bytes={} position={position} run={run} parse_ms={parsed:.3} compare_ms={compared:.3} highlight_ms={highlighted:.3} range_ms={ranged:.3} brackets_ms={brackets:.3} folds_ms={folds:.3} indent_ms={indent:.3}",
+                    source.len()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn range_highlights_keep_crossing_captures_and_byte_coordinates() {
+    let comment = "/* first\n中文🙂 e\u{301} */";
+    let source = format!("{comment}\nfn main() {{}}\n");
+    let session = SyntaxSession::parse(LanguageId::Rust, &source).unwrap();
+    let start = source.find('🙂').unwrap();
+    assert_eq!(
+        session.highlight_spans_in_range(
+            &source,
+            TextRange::new(BufferOffset(start), BufferOffset(start + 4))
+        ),
+        vec![HighlightSpan {
+            range: TextRange::new(BufferOffset(0), BufferOffset(comment.len())),
+            scope: SyntaxScope::Comment,
+        }]
+    );
+    for offset in [0, start, source.len(), source.len() + 10] {
+        assert_eq!(
+            session.highlight_spans_in_range(
+                &source,
+                TextRange::new(BufferOffset(offset), BufferOffset(offset))
+            ),
+            vec![]
+        );
+    }
+    assert_eq!(
+        session.highlight_spans_in_range(
+            &source,
+            TextRange::new(BufferOffset(source.len()), BufferOffset(source.len() + 10))
+        ),
+        vec![]
+    );
+}
+
+#[test]
+fn text_only_changes_are_reported_when_query_predicates_change() {
+    let before = "fn main() { let value = foo; }\n";
+    let after = "fn main() { let value = Foo; }\n";
+    let start = before.find("foo").unwrap();
+    let range = TextRange::new(BufferOffset(start), BufferOffset(start + 3));
+    let mut session = SyntaxSession::parse(LanguageId::Rust, before).unwrap();
+    let previous = session.highlight_spans_in_range(before, range);
+    assert!(!previous.iter().any(|span| span.scope == SyntaxScope::Type));
+    let edit = SyntaxEdit::replace(before, range, "Foo");
+    let change = session.apply_edit(after, edit).unwrap();
+    assert_eq!(change.edit, edit);
+    assert!(
+        change.structural_ranges().len() == 0,
+        "equal-size identifier edit changed structure"
+    );
+    assert!(
+        session
+            .highlight_spans_in_range(after, range)
+            .contains(&HighlightSpan {
+                range,
+                scope: SyntaxScope::Type
+            })
+    );
+}
+
+#[test]
+fn range_queries_follow_boundary_edits_in_sequence() {
+    for (language, initial, edits) in [
+        (
+            LanguageId::Rust,
+            "fn first() {}\nfn second() {}\n",
+            vec![(0, 0, "/*"), (2, 2, "*/"), (0, 4, "")],
+        ),
+        (
+            LanguageId::Rust,
+            "fn main() { let x = \"中文🙂\"; }\n",
+            vec![(0, 0, "//"), (0, 2, ""), (0, 0, "\n")],
+        ),
+        (
+            LanguageId::Markdown,
+            "**中文🙂** and [link](https://example.com)\n\n`code`\n",
+            vec![(0, 2, ""), (0, 0, "**"), (0, 0, "# ")],
+        ),
+    ] {
+        let mut source = initial.to_string();
+        let mut session = SyntaxSession::parse(language, &source).unwrap();
+        let mut comment_change: Option<SyntaxChange> = None;
+        for (start, end, replacement) in edits {
+            let edit = SyntaxEdit::replace(
+                &source,
+                TextRange::new(BufferOffset(start), BufferOffset(end)),
+                replacement,
+            );
+            source.replace_range(start..end, replacement);
+            let change = session.apply_edit(&source, edit).unwrap();
+            assert_eq!(change.edit.start_byte, start);
+            assert_eq!(change.edit.old_end_byte, end);
+            assert_eq!(change.edit.new_end_byte, start + replacement.len());
+            if replacement == "/*" {
+                let second = source.find("second").unwrap();
+                assert!(
+                    change
+                        .structural_ranges()
+                        .any(|range| range.start.0 <= second && range.end.0 > second),
+                    "comment boundary did not report the distant structural change"
+                );
+            }
+            if replacement == "/*" {
+                comment_change = Some(change);
+            }
+            if let Some(change) = &comment_change {
+                // Deferred changes must keep their own trees after later edits.
+                let second = initial.find("second").unwrap() + 2;
+                assert!(
+                    change
+                        .structural_ranges()
+                        .any(|range| range.start.0 <= second && range.end.0 > second)
+                );
+            }
+            let fresh = SyntaxSession::parse(language, &source)
+                .unwrap()
+                .highlight_spans(&source);
+            for (offset, ch) in source.char_indices() {
+                let end = offset + ch.len_utf8();
+                let expected: Vec<_> = fresh
+                    .iter()
+                    .filter(|span| span.range.start.0 < end && span.range.end.0 > offset)
+                    .cloned()
+                    .collect();
+                assert_eq!(
+                    session.highlight_spans_in_range(
+                        &source,
+                        TextRange::new(BufferOffset(offset), BufferOffset(end))
+                    ),
+                    expected,
+                    "{language:?} after {edit:?}, range {offset}..{end}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "manual multiline fold and indent benchmark"]
+fn multiline_structure_performance() {
+    use std::{hint::black_box, time::Instant};
+    let pattern = "fn example() {\n    if ready {\n        run();\n    }\n}\n";
+    for bytes in [200usize * 1024, 1024 * 1024] {
+        let source = pattern.repeat(bytes.div_ceil(pattern.len()));
+        let session = SyntaxSession::parse(LanguageId::Rust, &source).unwrap();
+        let started = Instant::now();
+        let folds = session.fold_ranges();
+        let fold_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let started = Instant::now();
+        let guides = session.indent_guides(&source, 4);
+        let indent_ms = started.elapsed().as_secs_f64() * 1000.0;
+        eprintln!(
+            "MULTILINE_STRUCTURE bytes={} fold_ms={fold_ms:.3} indent_ms={indent_ms:.3} folds={} guides={}",
+            source.len(),
+            folds.len(),
+            guides.len()
+        );
+        black_box((folds, guides));
+    }
 }

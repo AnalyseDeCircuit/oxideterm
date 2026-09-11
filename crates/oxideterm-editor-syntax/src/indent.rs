@@ -9,7 +9,9 @@ use crate::IndentGuide;
 
 pub(crate) fn indent_guides(root: Node<'_>, source: &str, tab_size: usize) -> Vec<IndentGuide> {
     let mut guides = BTreeSet::new();
-    collect_indent_guides(root, source, tab_size.max(1), &mut guides);
+    crate::visit_multiline_nodes(root, |node| {
+        collect_indent_guides(node, source, tab_size.max(1), &mut guides)
+    });
     guides
         .into_iter()
         .map(|(start_line, end_line, column)| IndentGuide {
@@ -36,11 +38,6 @@ fn collect_indent_guides(
             // indentation of an arbitrary statement inside it.
             guides.insert((start.row, end.row, column));
         }
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_indent_guides(child, source, tab_size, guides);
     }
 }
 
@@ -90,15 +87,15 @@ fn indent_guide_column(node: Node<'_>, source: &str, tab_size: usize) -> Option<
         // Bracketed blocks own the indentation of their closing delimiter.
         // This keeps the guide aligned with braces even when the opening brace
         // follows a declaration or condition on the same line.
-        return source
+        return source[node.end_byte() - end.column..]
             .lines()
-            .nth(end.row)
+            .next()
             .map(|line| leading_visual_columns(line, tab_size));
     }
 
     // Languages without closing delimiters, such as Python, still use the
     // first nested statement to establish their body indentation.
-    first_nested_line_indent(source, start.row, end.row, tab_size)
+    first_nested_line_indent(&source[node.start_byte()..], end.row - start.row, tab_size)
 }
 
 fn node_ends_with_closing_delimiter(node: Node<'_>, source: &str) -> bool {
@@ -109,24 +106,14 @@ fn node_ends_with_closing_delimiter(node: Node<'_>, source: &str) -> bool {
         .is_some_and(|byte| matches!(byte, b'}' | b']'))
 }
 
-fn first_nested_line_indent(
-    source: &str,
-    start_line: usize,
-    end_line: usize,
-    tab_size: usize,
-) -> Option<usize> {
-    source
-        .lines()
-        .enumerate()
-        .skip(start_line.saturating_add(1))
-        .take(end_line.saturating_sub(start_line))
-        .find_map(|(_line, text)| {
-            if text.trim().is_empty() {
-                return None;
-            }
-            let column = leading_visual_columns(text, tab_size);
-            (column > 0).then_some(column)
-        })
+fn first_nested_line_indent(source: &str, line_count: usize, tab_size: usize) -> Option<usize> {
+    source.lines().skip(1).take(line_count).find_map(|text| {
+        if text.trim().is_empty() {
+            return None;
+        }
+        let column = leading_visual_columns(text, tab_size);
+        (column > 0).then_some(column)
+    })
 }
 
 fn leading_visual_columns(text: &str, tab_size: usize) -> usize {

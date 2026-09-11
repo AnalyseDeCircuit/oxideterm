@@ -13,7 +13,10 @@ use oxideterm_editor_core::{
     BufferOffset, Cursor, EditTransaction, FindMatch, LineCol, Selection, TextBuffer, TextEdit,
     TextRange, word_at,
 };
-use oxideterm_editor_syntax::{BracketPair, HighlightSpan, LanguageId, SyntaxEdit, SyntaxSession};
+use oxideterm_editor_syntax::{
+    BracketPair, HighlightCache, LanguageId, StructureCache, SyntaxChange, SyntaxEdit,
+    SyntaxSession,
+};
 use oxideterm_theme::ThemeTokens;
 
 use crate::{
@@ -23,7 +26,6 @@ use crate::{
 mod commands;
 mod coords;
 mod fold;
-mod indent_index;
 mod input;
 mod render;
 mod search;
@@ -31,7 +33,6 @@ mod wrap;
 
 pub use commands::EditorCommand;
 use coords::{byte_column_for_visual_column, visual_column_for_byte_column};
-use indent_index::IndentGuideIndex;
 use wrap::DisplayRow;
 
 pub type SaveCallback =
@@ -290,8 +291,8 @@ pub struct TextEditorView {
     save_status: EditorSaveStatus,
     language: Option<LanguageId>,
     syntax: Option<SyntaxSession>,
-    highlight_spans: Vec<HighlightSpan>,
-    highlight_line_spans: Vec<Range<usize>>,
+    highlight_spans: HighlightCache,
+    structure_cache: StructureCache,
     // Cursor movement queries bracket matches on every frame. Index every
     // accepted caret slot so lookup does not rescan the document's pairs.
     bracket_pair_by_caret: HashMap<usize, BracketPair>,
@@ -305,9 +306,7 @@ pub struct TextEditorView {
     // indexed by line so each row does not scan every match in a large file.
     find_line_matches: Vec<Range<usize>>,
     active_find_index: Option<usize>,
-    foldable_ranges: Vec<FoldRange>,
     folded_ranges: Vec<FoldRange>,
-    indent_guide_index: IndentGuideIndex,
     fold_revision: u64,
     display_rows_cache: RefCell<Option<DisplayRowsCache>>,
     highlight_chunk_cache: RefCell<HighlightChunkCache>,
@@ -340,8 +339,8 @@ impl TextEditorView {
             save_status: EditorSaveStatus::Clean,
             syntax: None,
             language: None,
-            highlight_spans: Vec::new(),
-            highlight_line_spans: Vec::new(),
+            highlight_spans: HighlightCache::default(),
+            structure_cache: StructureCache::default(),
             bracket_pair_by_caret: HashMap::new(),
             content_bounds: None,
             marked_text: None,
@@ -351,9 +350,7 @@ impl TextEditorView {
             find_matches: Vec::new(),
             find_line_matches: Vec::new(),
             active_find_index: None,
-            foldable_ranges: Vec::new(),
             folded_ranges: Vec::new(),
-            indent_guide_index: IndentGuideIndex::default(),
             fold_revision: 0,
             display_rows_cache: RefCell::new(None),
             highlight_chunk_cache: RefCell::new(HighlightChunkCache::default()),
@@ -863,18 +860,21 @@ impl TextEditorView {
             self.refresh_highlights();
             return;
         }
-        if let (Some(syntax), Some(edit)) = (self.syntax.as_mut(), edit)
-            && self
-                .buffer
-                .with_text(|text| syntax.apply_edit(text, edit))
-                .is_err()
-        {
-            let language = syntax.language_id();
-            self.syntax = self
-                .buffer
-                .with_text(|text| SyntaxSession::parse(language, text).ok());
-        }
-        self.refresh_highlights();
+        let change = if let (Some(syntax), Some(edit)) = (self.syntax.as_mut(), edit) {
+            match self.buffer.with_text(|text| syntax.apply_edit(text, edit)) {
+                Ok(change) => Some(change),
+                Err(_) => {
+                    let language = syntax.language_id();
+                    self.syntax = self
+                        .buffer
+                        .with_text(|text| SyntaxSession::parse(language, text).ok());
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        self.refresh_highlights_after_edit(change.as_ref());
     }
 
     fn reparse_syntax(&mut self) {
@@ -898,33 +898,36 @@ impl TextEditorView {
     }
 
     fn refresh_highlights(&mut self) {
-        self.highlight_spans = self.buffer.with_text(|text| {
-            self.syntax
-                .as_ref()
-                .map(|syntax| syntax.highlight_spans(text))
-                .unwrap_or_default()
+        self.refresh_highlights_after_edit(None);
+    }
+
+    fn refresh_highlights_after_edit(&mut self, change: Option<&SyntaxChange>) {
+        let Some(syntax) = self.syntax.as_ref() else {
+            self.highlight_spans.clear();
+            self.structure_cache.clear();
+            self.bracket_pair_by_caret.clear();
+            self.highlight_chunk_cache.borrow_mut().clear();
+            return;
+        };
+        self.buffer.with_text(|text| {
+            self.highlight_spans.update(syntax, text, change);
+            self.structure_cache
+                .update(syntax, text, self.settings.tab_size, change);
         });
-        self.highlight_spans
-            .sort_by_key(|span| (span.range.start.0, span.range.end.0));
-        self.highlight_line_spans = self.build_highlight_line_spans();
-        let bracket_pairs = self.buffer.with_text(|text| {
-            self.syntax
-                .as_ref()
-                .map(|syntax| syntax.bracket_pairs(text))
-                .unwrap_or_default()
-        });
+        let bracket_pairs = self.buffer.with_text(|text| syntax.bracket_pairs(text));
         self.bracket_pair_by_caret = build_bracket_pair_index(&bracket_pairs);
         self.highlight_chunk_cache.borrow_mut().clear();
     }
 
-    pub(super) fn refresh_indent_guides(&mut self) {
-        let guides = self.buffer.with_text(|text| {
-            self.syntax
-                .as_ref()
-                .map(|syntax| syntax.indent_guides(text, self.settings.tab_size))
-                .unwrap_or_default()
-        });
-        self.indent_guide_index = IndentGuideIndex::new(guides);
+    pub(super) fn refresh_structure_cache(&mut self) {
+        if let Some(syntax) = self.syntax.as_ref() {
+            self.buffer.with_text(|text| {
+                self.structure_cache
+                    .update(syntax, text, self.settings.tab_size, None)
+            });
+        } else {
+            self.structure_cache.clear();
+        }
     }
 
     fn active_selections(&self) -> Vec<Selection> {
@@ -947,40 +950,6 @@ impl TextEditorView {
             selections.dedup();
         }
         selections
-    }
-
-    fn build_highlight_line_spans(&self) -> Vec<Range<usize>> {
-        let mut ranges = Vec::with_capacity(self.buffer.line_count());
-        let mut first_span = 0;
-        let mut last_span = 0;
-
-        for line in 0..self.buffer.line_count() {
-            let Some(line_start) = self.buffer.line_start_offset(line).map(|offset| offset.0)
-            else {
-                ranges.push(0..0);
-                continue;
-            };
-            let line_end = self
-                .buffer
-                .line_end_offset(line)
-                .map(|offset| offset.0)
-                .unwrap_or(line_start);
-
-            while first_span < self.highlight_spans.len()
-                && self.highlight_spans[first_span].range.end.0 <= line_start
-            {
-                first_span += 1;
-            }
-            last_span = last_span.max(first_span);
-            while last_span < self.highlight_spans.len()
-                && self.highlight_spans[last_span].range.start.0 < line_end
-            {
-                last_span += 1;
-            }
-            ranges.push(first_span..last_span);
-        }
-
-        ranges
     }
 
     fn build_find_line_matches(&self) -> Vec<Range<usize>> {
@@ -1365,9 +1334,134 @@ fn colored_text(text: &str, color: u32) -> Div {
 
 #[cfg(test)]
 mod tests {
+    use gpui::AppContext;
     use std::sync::Arc;
 
     use super::{HighlightChunkCache, HighlightChunkCacheKey, LineChunkSpec};
+
+    #[gpui::test]
+    fn folds_and_guides_follow_newlines_and_history(cx: &mut gpui::TestAppContext) {
+        use super::{BufferOffset, LanguageId, Selection, TextEditorView};
+        let source = "fn first() {\n    call();\n}\nfn second() {\n    call();\n}\n";
+        let editor =
+            cx.new(|cx| TextEditorView::new(source, &oxideterm_theme::default_tokens(), cx));
+        editor.update(cx, |editor, cx| {
+            editor.set_language(Some(LanguageId::Rust), cx);
+            editor
+                .cursor
+                .set_selection(Selection::caret(BufferOffset(0)));
+            editor.insert_text("// 🙂\n", cx);
+            assert_eq!(
+                editor.structure_cache.fold_lines().collect::<Vec<_>>(),
+                [(1, 3), (4, 6)]
+            );
+            assert_eq!(editor.structure_cache.columns_for_line(2), [0]);
+            assert_eq!(editor.structure_cache.columns_for_line(5), [0]);
+            editor.undo(cx);
+            assert_eq!(editor.buffer.text(), source);
+            assert_eq!(
+                editor.structure_cache.fold_lines().collect::<Vec<_>>(),
+                [(0, 2), (3, 5)]
+            );
+            editor.redo(cx);
+            assert_eq!(
+                editor.structure_cache.fold_lines().collect::<Vec<_>>(),
+                [(1, 3), (4, 6)]
+            );
+            editor.set_language(None, cx);
+            assert!(editor.structure_cache.fold_lines().next().is_none());
+            assert!(editor.structure_cache.columns_for_line(2).is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn highlight_cache_tracks_typing_and_history(cx: &mut gpui::TestAppContext) {
+        use super::{BufferOffset, LanguageId, Selection, TextEditorView, TextRange};
+        use oxideterm_editor_syntax::SyntaxScope;
+        let source = "fn first() { let value = foo; }\nfn second() {}\n";
+        let editor =
+            cx.new(|cx| TextEditorView::new(source, &oxideterm_theme::default_tokens(), cx));
+        editor.update(cx, |editor, cx| {
+            editor.set_language(Some(LanguageId::Rust), cx);
+            let start = source.find("foo").unwrap();
+            editor
+                .cursor
+                .set_selection(Selection::new(BufferOffset(start), BufferOffset(start + 3)));
+            editor.insert_text("Foo", cx);
+            assert_eq!(
+                editor.buffer.text(),
+                "fn first() { let value = Foo; }\nfn second() {}\n"
+            );
+            assert!(
+                editor
+                    .highlight_spans
+                    .spans_in_range(start..start + 3)
+                    .any(|span| span.range
+                        == TextRange::new(BufferOffset(start), BufferOffset(start + 3))
+                        && span.scope == SyntaxScope::Type)
+            );
+            editor.undo(cx);
+            assert_eq!(editor.buffer.text(), source);
+            assert!(
+                !editor
+                    .highlight_spans
+                    .spans_in_range(start..start + 3)
+                    .any(|span| span.scope == SyntaxScope::Type)
+            );
+            editor.redo(cx);
+            assert!(
+                editor
+                    .highlight_spans
+                    .spans_in_range(start..start + 3)
+                    .any(|span| span.scope == SyntaxScope::Type)
+            );
+            editor.set_language(None, cx);
+            assert!(editor.highlight_spans.is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn disabling_syntax_and_search_clears_presented_metadata(cx: &mut gpui::TestAppContext) {
+        use super::{BufferOffset, LanguageId, Selection, TextEditorView};
+        let editor = cx.new(|cx| {
+            TextEditorView::new(
+                "fn main() {\n    let value = 1;\n}\n",
+                &oxideterm_theme::default_tokens(),
+                cx,
+            )
+        });
+        editor.update(cx, |editor, cx| {
+            editor.set_language(Some(LanguageId::Rust), cx);
+            editor.set_find_query("value", cx);
+            assert!(
+                editor
+                    .highlight_spans
+                    .spans_in_range(0..usize::MAX)
+                    .any(|s| s.range.start.0 == 0 && s.range.end.0 == 2)
+            );
+            assert_eq!(
+                editor
+                    .find_matches
+                    .iter()
+                    .map(|m| (m.range.start.0, m.range.end.0))
+                    .collect::<Vec<_>>(),
+                [(20, 25)]
+            );
+            assert_eq!(editor.structure_cache.columns_for_line(1), [0]);
+            editor.set_language(None, cx);
+            editor.set_find_query("", cx);
+            editor
+                .cursor
+                .set_selection(Selection::caret(BufferOffset(0)));
+            editor.insert_text("z", cx);
+            assert!(editor.highlight_spans.is_empty());
+            assert!(editor.bracket_pair_by_caret.is_empty());
+            assert!(editor.structure_cache.columns_for_line(1).is_empty());
+            assert!(editor.find_matches.is_empty());
+            assert!(editor.find_line_matches.is_empty());
+            assert_eq!(editor.buffer.line_text(0).as_deref(), Some("zfn main() {"));
+        });
+    }
 
     fn cache_key(line: usize) -> HighlightChunkCacheKey {
         HighlightChunkCacheKey {
@@ -1428,3 +1522,6 @@ mod line_ending_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod performance;
