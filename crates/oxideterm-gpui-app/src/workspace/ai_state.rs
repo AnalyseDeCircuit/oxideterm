@@ -4725,6 +4725,7 @@ mod entity_tests {
             content: zeroize::Zeroizing::new(id.into()),
             context: None,
             config: oxideterm_ai::AiChatStreamConfig {
+                api_protocol: oxideterm_ai::AiApiProtocol::default(),
                 execution_backend: Default::default(),
                 provider_id: Some("provider".into()),
                 acp_agent_id: None,
@@ -4761,9 +4762,11 @@ mod entity_tests {
                 .create_conversation("a".into(), None, 1, None);
             ai.conversation_state
                 .create_conversation("b".into(), None, 2, None);
+            let mut responses_turn = queued_turn("a1");
+            responses_turn.config.api_protocol = oxideterm_ai::AiApiProtocol::Responses;
             ai.queued_chat_turns.insert(
                 "a".into(),
-                VecDeque::from([queued_turn("a1"), queued_turn("a2")]),
+                VecDeque::from([responses_turn, queued_turn("a2")]),
             );
             ai.queued_chat_turns
                 .insert("b".into(), VecDeque::from([queued_turn("b1")]));
@@ -4774,8 +4777,8 @@ mod entity_tests {
             ai.cancel_chat_stream_for("a");
             let first = ai.take_queued_chat_turn("a").unwrap();
             assert_eq!(
-                (first.id.as_str(), first.config.model.as_str()),
-                ("a1", "queued-model")
+                (first.id.as_str(), first.config.model.as_str(), first.config.api_protocol),
+                ("a1", "queued-model", oxideterm_ai::AiApiProtocol::Responses)
             );
             assert_eq!(ai.take_queued_chat_turn("a").unwrap().id, "a2");
             assert!(ai.take_queued_chat_turn("a").is_none());
@@ -5309,6 +5312,7 @@ mod entity_tests {
             assert!(entity.provider_key_status_pending.is_empty());
             assert!(!entity.request_selector_provider_probe(
                 oxideterm_ai::AiProviderView {
+                    api_protocol: oxideterm_ai::AiApiProtocol::default(),
                     id: "provider-a".to_string(),
                     provider_type: "ollama".to_string(),
                     name: "Provider A".to_string(),

@@ -432,6 +432,9 @@ mod tests {
     fn export_selected_extended_sections() {
         let mut settings = PersistedSettings::default();
         settings.ai.enabled = true;
+        settings.ai.providers = vec![
+            json!({"id":"responses-provider","type":"openai_compatible","apiProtocol":"responses","baseUrl":"https://example.test/v1","models":["model"]}),
+        ];
         settings.settings_navigation.groups = vec![vec!["terminal".to_string()]];
         settings.local_terminal.default_cwd = Some("/tmp".to_string());
         settings
@@ -446,6 +449,18 @@ mod tests {
         let exported =
             export_oxide_settings_snapshot_json(&settings, Some(&selected), false).expect("export");
         let parsed: Value = serde_json::from_str(&exported).expect("json");
+        let restored = merge_oxide_settings_snapshot(
+            &PersistedSettings::default(),
+            &exported,
+            Some(&selected),
+        )
+        .unwrap();
+        assert_eq!(
+            restored.ai.providers,
+            vec![
+                json!({"id":"responses-provider","type":"openai_compatible","apiProtocol":"responses","baseUrl":"https://example.test/v1","models":["model"]})
+            ]
+        );
         let section_ids = parsed["sectionIds"]
             .as_array()
             .expect("section ids")

@@ -12,6 +12,7 @@ use crate::{AiPolicySafetyMode, AiToolChoice, AiToolUsePolicy};
 
 fn test_stream_config(provider_type: &str) -> AiChatStreamConfig {
     AiChatStreamConfig {
+        api_protocol: crate::AiApiProtocol::default(),
         execution_backend: AiExecutionBackend::Provider,
         provider_id: Some("provider".to_string()),
         acp_agent_id: None,
@@ -430,6 +431,7 @@ fn settings_provider_mutations_stay_out_of_gpui() {
     assert!(providers[1].get("defaultModel").is_none());
 
     let empty_default_provider = AiProviderView {
+        api_protocol: crate::AiApiProtocol::default(),
         id: "custom-empty".into(),
         provider_type: "openai_compatible".into(),
         name: "Empty".into(),
@@ -1997,3 +1999,6 @@ fn gemini_signed_parts_round_trip_without_rebuilding() {
         ])
     );
 }
+
+#[path = "responses_tests.rs"]
+mod responses;

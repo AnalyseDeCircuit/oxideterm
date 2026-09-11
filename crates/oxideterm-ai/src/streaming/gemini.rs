@@ -385,6 +385,7 @@ mod tests {
 
     fn config(model: &str, effort: &str) -> AiChatStreamConfig {
         AiChatStreamConfig {
+            api_protocol: crate::AiApiProtocol::default(),
             execution_backend: AiExecutionBackend::Provider,
             provider_id: Some("gemini".to_string()),
             acp_agent_id: None,

@@ -599,6 +599,7 @@ impl WorkspaceApp {
             .filter(|models| !models.is_empty())
             .unwrap_or_else(|| vec![fallback_model.clone()]);
         AiProviderView {
+            api_protocol: oxideterm_ai::AiApiProtocol::default(),
             id: Self::ai_acp_provider_id(&agent.id),
             provider_type: "acp".to_string(),
             name: format!("{label} (ACP)"),
@@ -1097,6 +1098,7 @@ mod model_selector_status_signature_tests {
         enabled: bool,
     ) -> AiProviderView {
         AiProviderView {
+            api_protocol: oxideterm_ai::AiApiProtocol::default(),
             id: id.to_string(),
             provider_type: provider_type.to_string(),
             name: id.to_string(),

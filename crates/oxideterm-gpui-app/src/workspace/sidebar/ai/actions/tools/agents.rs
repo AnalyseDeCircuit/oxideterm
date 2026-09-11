@@ -70,6 +70,7 @@ async fn configure_ai_child_model(
         return Err("The selected provider requires an API key".into());
     }
     config.provider_id = Some(provider.id);
+    config.api_protocol = provider.api_protocol;
     config.provider_type = provider.provider_type;
     config.base_url = provider.base_url;
     config.model = model.model;

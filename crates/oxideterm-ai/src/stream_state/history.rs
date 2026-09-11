@@ -67,8 +67,8 @@ pub fn ai_prompt_token_breakdown(
         if message.role == AiChatRole::Assistant
             && let Some(provider_state_tokens) = provider_state_tokens
         {
-            // Gemini replays signed parts instead of rebuilding the visible
-            // assistant message, so counting both would double the same turn.
+            // Native replay replaces the visible projection; counting both
+            // would double the same assistant turn.
             breakdown.tool_results = breakdown.tool_results.saturating_add(provider_state_tokens);
             continue;
         }
@@ -178,6 +178,9 @@ fn ai_provider_parts_estimated_tokens(
     message: &AiChatMessage,
     provider_type: &str,
 ) -> Option<usize> {
+    if matches!(provider_type, "openai" | "openai_compatible") {
+        return crate::responses_state::responses_history_tokens(message);
+    }
     (provider_type == "gemini")
         .then(|| super::turn::ai_provider_parts(message, provider_type))
         .flatten()
@@ -228,12 +231,11 @@ pub fn normalize_ai_stream_history_for_provider(history: &mut Vec<AiChatMessage>
                 }
             }
             AiChatRole::Assistant => {
-                if message.content.trim().is_empty() {
+                if message.content.trim().is_empty() && !crate::has_responses_history(&message) {
                     continue;
                 }
-                // Tauri replays prior turns as plain assistant text. Tool protocol
-                // messages are only emitted inside the live tool loop, where every
-                // assistant tool_call is immediately followed by its matching tool result.
+                // Runtime tool fields cannot survive across turns. Responses keeps
+                // completed wire rounds separately in the scoped turn metadata.
                 message.tool_calls.clear();
                 message.tool_call_id = None;
                 message.thinking_content = None;
@@ -604,28 +606,27 @@ fn trim_ai_stream_history_with_estimator(
         .saturating_sub(response_reserve)
         .saturating_sub(system_tokens)
         .saturating_sub(fixed_prompt_overhead);
-    if budget == 0 {
-        // Preserve the latest request even when fixed prompt overhead consumes
-        // the entire history budget.
-        let keep_index = regular_indices[total_regular - 1];
-        *history = history
-            .drain(..)
-            .enumerate()
-            .filter_map(|(index, message)| {
-                (message.role == AiChatRole::System || index == keep_index).then_some(message)
-            })
-            .collect();
-        return total_regular.saturating_sub(1);
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for index in regular_indices {
+        if history[index].role == AiChatRole::Tool && !groups.is_empty() {
+            groups.last_mut().unwrap().push(index);
+        } else {
+            groups.push(vec![index]);
+        }
     }
     let mut kept_indices = std::collections::HashSet::<usize>::new();
     let mut used = 0usize;
-    for index in regular_indices.iter().rev().copied() {
-        let tokens = estimate_message(&history[index]);
+    for group in groups.iter().rev() {
+        let tokens = group
+            .iter()
+            .map(|index| estimate_message(&history[*index]))
+            .sum::<usize>();
         if used.saturating_add(tokens) > budget && !kept_indices.is_empty() {
             break;
         }
+        // Keep the latest request/complete tool round even if it alone exceeds the budget.
         used = used.saturating_add(tokens);
-        kept_indices.insert(index);
+        kept_indices.extend(group.iter().copied());
     }
     let kept_regular = kept_indices.len();
     if kept_regular >= total_regular {

@@ -396,6 +396,7 @@ mod tests {
     async fn embedding_errors_do_not_include_raw_content() {
         let raw_secret = "sk-proj-abcdefghijklmnopqrstuvwxyz123456";
         let provider = AiProviderView {
+            api_protocol: crate::AiApiProtocol::default(),
             id: "unsupported".to_string(),
             provider_type: "unsupported".to_string(),
             name: "Unsupported".to_string(),

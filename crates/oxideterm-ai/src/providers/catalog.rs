@@ -80,6 +80,10 @@ pub fn provider_view(value: &serde_json::Value) -> Option<AiProviderView> {
     let provider_type =
         provider_string(value, "type").unwrap_or_else(|| "openai_compatible".to_string());
     Some(AiProviderView {
+        api_protocol: match value.get("apiProtocol") {
+            Some(value) => serde_json::from_value(value.clone()).ok()?,
+            None => crate::AiApiProtocol::default(),
+        },
         custom: id.starts_with("custom-"),
         id,
         provider_type,

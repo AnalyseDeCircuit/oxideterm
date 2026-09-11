@@ -14,6 +14,7 @@ mod provider_embeddings;
 mod providers;
 mod rag;
 mod reasoning;
+mod responses_state;
 mod references;
 mod runtime_context;
 mod settings;
@@ -164,11 +165,16 @@ pub use tool_result_protocol::{
     ai_tool_result_evidence_facts_for_model, ai_tool_result_model_content,
     ai_tool_result_model_error, condense_ai_tool_messages, truncate_ai_tool_result_for_model,
 };
+pub use responses_state::{
+    append_responses_round, has_responses_history, responses_error_label, responses_round_state,
+    scope_responses_history,
+};
 pub use types::{
-    AiChatMessage, AiChatMessageMetadata, AiChatRole, AiChatState, AiChatStreamConfig,
-    AiConversation, AiFollowUpSuggestion, AiMessageBranches, AiProviderTemplate, AiProviderView,
-    AiStreamEvent, AiToolCall, AiToolChoice, AiToolDefinition, ModelSelectorProviderGroup,
-    ModelSelectorProviderProbe, ProviderModelRefresh, SharedAiProviderKey,
+    AiApiProtocol, AiChatMessage, AiChatMessageMetadata, AiChatRole, AiChatState,
+    AiChatStreamConfig, AiConversation, AiFollowUpSuggestion, AiMessageBranches,
+    AiProviderTemplate, AiProviderView, AiStreamEvent, AiToolCall, AiToolChoice, AiToolDefinition,
+    ModelSelectorProviderGroup, ModelSelectorProviderProbe, ProviderModelRefresh,
+    SharedAiProviderKey,
 };
 
 #[cfg(test)]

@@ -246,6 +246,7 @@ impl WorkspaceApp {
                 self.ai_entity.read(cx).mcp_registry(),
             );
             return Ok(AiChatStreamConfig {
+                api_protocol: oxideterm_ai::AiApiProtocol::default(),
                 execution_backend: AiExecutionBackend::Acp,
                 provider_id: None,
                 acp_agent_id: Some(acp_agent_id),
@@ -311,6 +312,7 @@ impl WorkspaceApp {
             self.ai_entity.read(cx).mcp_registry(),
         );
         Ok(AiChatStreamConfig {
+            api_protocol: provider.api_protocol,
             execution_backend: AiExecutionBackend::Provider,
             provider_id: Some(provider.id),
             acp_agent_id: None,
@@ -392,6 +394,7 @@ impl WorkspaceApp {
         .as_str()
         .to_string();
         Ok(AiChatStreamConfig {
+            api_protocol: provider.api_protocol,
             execution_backend: AiExecutionBackend::Provider,
             provider_id: Some(provider.id),
             acp_agent_id: None,
@@ -504,6 +507,7 @@ impl WorkspaceApp {
         rag_system_prompt: Option<&str>,
     ) -> Vec<AiChatMessage> {
         apply_chat_request_overrides(&mut history, request_content, None);
+        oxideterm_ai::scope_responses_history(&mut history, config);
         normalize_ai_stream_history_for_provider(&mut history);
         let base_system_prompt = self.build_ai_base_system_prompt(
             config,

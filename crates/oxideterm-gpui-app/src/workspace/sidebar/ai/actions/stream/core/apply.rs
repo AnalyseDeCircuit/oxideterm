@@ -275,9 +275,13 @@ impl AiWorkspaceEntity {
                 });
                 AiStreamApplyOutcome::Applied
             }
-            AiStreamEvent::ProviderResponsePart { .. } => {
-                // The live tool loop consumes provider replay metadata before
-                // UI delivery; other stream surfaces intentionally ignore it.
+            AiStreamEvent::ProviderResponsePart {
+                provider_type,
+                part,
+            } => {
+                self.update_chat_message(conversation_id, message_id, |message| {
+                    oxideterm_ai::append_responses_round(message, &provider_type, part);
+                });
                 AiStreamApplyOutcome::Applied
             }
             AiStreamEvent::ToolCall {
@@ -443,8 +447,13 @@ impl WorkspaceApp {
         event: AiStreamEvent,
         cx: &mut Context<Self>,
     ) {
-        let safe_error = matches!(&event, AiStreamEvent::Error(_))
-            .then(|| self.i18n.t("settings_view.ai.acp_agent_error_unknown"));
+        let safe_error = match &event {
+            AiStreamEvent::Error(error) => Some(
+                self.i18n.t(oxideterm_ai::responses_error_label(error)
+                    .unwrap_or("settings_view.ai.acp_agent_error_unknown")),
+            ),
+            _ => None,
+        };
         let child_message = self.ai_entity.read(cx).is_agent_message(message_id);
         let outcome = self.ai_entity.update(cx, |ai, _cx| {
             ai.apply_stream_event_state(

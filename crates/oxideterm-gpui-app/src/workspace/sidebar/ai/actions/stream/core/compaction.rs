@@ -41,7 +41,7 @@ impl WorkspaceApp {
     ) -> Result<(), Option<AiPendingChatStream>> {
         // Return an unconsumed pre-send request when compaction is skipped so
         // its zeroizing provider configuration never needs to be cloned.
-        let messages = match self
+        let mut messages = match self
             .ai_entity
             .read(cx)
             .conversation_state()
@@ -74,6 +74,7 @@ impl WorkspaceApp {
                 return Err(resume_after);
             }
         };
+        oxideterm_ai::scope_responses_history(&mut messages, &config);
         let context_window = self.ai_active_model_context_window(&config);
         if silent && !force {
             let total_tokens = messages

@@ -452,6 +452,7 @@ mod tests {
 
     fn config(reasoning_effort: &str, max_response_tokens: i64) -> AiChatStreamConfig {
         AiChatStreamConfig {
+            api_protocol: crate::AiApiProtocol::default(),
             execution_backend: AiExecutionBackend::Provider,
             provider_id: Some("anthropic".to_string()),
             acp_agent_id: None,

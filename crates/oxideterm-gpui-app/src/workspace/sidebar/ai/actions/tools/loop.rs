@@ -65,6 +65,7 @@ async fn execute_ai_chat_tool_loop(
             return AiAgentLoopOutcome { content: error, failed: true };
         }
     }
+    oxideterm_ai::scope_responses_history(history, &config);
     let max_rounds = config
         .tool_policy
         .max_rounds
@@ -260,9 +261,11 @@ async fn execute_ai_chat_tool_loop(
                     provider_type,
                     part,
                 } => {
-                    if provider_type == config.provider_type {
-                        // Provider-native response parts remain inside this
-                        // live tool loop and are never written to diagnostics.
+                    if provider_type == config.provider_type
+                        || (config.uses_responses() && provider_type == config.response_state_key())
+                    {
+                        // Keep wire metadata out of diagnostics. Responses rounds are
+                        // delivered to durable history only after their tool results exist.
                         round_provider_parts.push(part);
                     }
                 }
@@ -396,6 +399,10 @@ async fn execute_ai_chat_tool_loop(
             return AiAgentLoopOutcome { content: assistant_content, failed: true };
         }
 
+        let response_round = config
+            .uses_responses()
+            .then(|| oxideterm_ai::responses_round_state(&round_provider_parts, &call_ids, &[]))
+            .flatten();
         let round_number = round_index.saturating_add(1) as i64;
         let round_id = format!("{assistant_id}-round-{round_number}");
         let _ = send_ai_assistant_round(
@@ -527,7 +534,27 @@ async fn execute_ai_chat_tool_loop(
                 hard_deny_retry_count = retry_attempt;
                 continue;
             }
-            history.push(agent_chat_message(AiChatRole::Assistant, round_content.clone()));
+            let mut final_message =
+                agent_chat_message(AiChatRole::Assistant, round_content.clone());
+            if let Some(round) = response_round {
+                set_ai_provider_parts(
+                    &mut final_message,
+                    &config.response_state_key(),
+                    vec![round.clone()],
+                );
+                let _ = send_ai_loop_delivery(
+                    execution.is_some(),
+                    &ui_tx,
+                    generation,
+                    &conversation_id,
+                    &assistant_id,
+                    AiStreamDeliveryEvent::Stream(AiStreamEvent::ProviderResponsePart {
+                        provider_type: config.response_state_key(),
+                        part: round,
+                    }),
+                );
+            }
+            history.push(final_message);
             if let Some(agent) = execution.as_mut() {
                 if !summary_only { let _ = agent.runtime.refund_empty_round(&agent.run); }
                 if !agent.is_child() && agent.runtime.children(&agent.run).is_ok_and(|children| children.iter().any(|child| !child.state.is_terminal())) {
@@ -635,12 +662,21 @@ async fn execute_ai_chat_tool_loop(
             branches: None,
             suggestions: Vec::new(),
         };
-        set_ai_provider_parts(
-            &mut assistant_round,
-            &config.provider_type,
-            round_provider_parts,
-        );
+        if let Some(round) = response_round {
+            set_ai_provider_parts(
+                &mut assistant_round,
+                &config.response_state_key(),
+                vec![round],
+            );
+        } else {
+            set_ai_provider_parts(
+                &mut assistant_round,
+                &config.provider_type,
+                round_provider_parts.clone(),
+            );
+        }
         history.push(assistant_round);
+        let response_results_start = history.len();
 
         let mut round_results = Vec::new();
         for call in completed_calls {
@@ -957,6 +993,25 @@ async fn execute_ai_chat_tool_loop(
             history.push(ai_tool_result_message(executed));
         }
 
+        if config.uses_responses()
+            && let Some(round) = oxideterm_ai::responses_round_state(
+                &round_provider_parts,
+                &call_ids,
+                &history[response_results_start..],
+            )
+        {
+            let _ = send_ai_loop_delivery(
+                execution.is_some(),
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                AiStreamDeliveryEvent::Stream(AiStreamEvent::ProviderResponsePart {
+                    provider_type: config.response_state_key(),
+                    part: round,
+                }),
+            );
+        }
         if round_index >= 1 {
             condense_ai_tool_messages(&mut history);
         }

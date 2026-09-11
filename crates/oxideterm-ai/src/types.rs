@@ -52,6 +52,8 @@ pub struct AiProviderView {
     pub models: Vec<String>,
     pub enabled: bool,
     pub custom: bool,
+    #[serde(default)]
+    pub api_protocol: AiApiProtocol,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -233,8 +235,17 @@ pub enum AiToolChoice {
     Named(String),
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiApiProtocol {
+    #[default]
+    ChatCompletions,
+    Responses,
+}
+
 #[derive(Clone)]
 pub struct AiChatStreamConfig {
+    pub api_protocol: AiApiProtocol,
     pub execution_backend: AiExecutionBackend,
     pub provider_id: Option<String>,
     pub acp_agent_id: Option<String>,
@@ -282,4 +293,27 @@ pub enum AiStreamEvent {
     },
     Done,
     Error(String),
+}
+
+impl AiChatStreamConfig {
+    pub fn uses_responses(&self) -> bool {
+        self.api_protocol == AiApiProtocol::Responses
+            && matches!(self.provider_type.as_str(), "openai" | "openai_compatible")
+    }
+
+    pub fn response_state_key(&self) -> String {
+        use sha2::{Digest, Sha256};
+        // Bind opaque state to the endpoint and model without retaining a URL in metadata.
+        let mut identity = Sha256::new();
+        for part in [
+            self.provider_id.as_deref().unwrap_or_default(),
+            &self.provider_type,
+            &self.base_url,
+            &self.model,
+        ] {
+            identity.update((part.len() as u64).to_le_bytes());
+            identity.update(part.as_bytes());
+        }
+        format!("responses:{:x}", identity.finalize())
+    }
 }

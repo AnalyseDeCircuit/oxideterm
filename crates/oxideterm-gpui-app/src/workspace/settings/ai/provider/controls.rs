@@ -272,7 +272,62 @@ impl WorkspaceApp {
                     cx,
                 ),
             ))
+            .when(
+                matches!(
+                    provider.provider_type.as_str(),
+                    "openai" | "openai_compatible"
+                ),
+                |fields| {
+                    fields.child(self.ai_provider_field(
+                        "settings_view.ai.api_protocol",
+                        self.ai_provider_protocol_control(index, provider, cx),
+                    ))
+                },
+            )
             .into_any_element()
+    }
+
+    fn ai_provider_protocol_control(
+        &self,
+        index: usize,
+        provider: &AiProviderView,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut row = div().flex().flex_wrap().gap(px(4.0));
+        for (protocol, key) in [
+            (
+                oxideterm_ai::AiApiProtocol::ChatCompletions,
+                "settings_view.ai.protocol_chat_completions",
+            ),
+            (
+                oxideterm_ai::AiApiProtocol::Responses,
+                "settings_view.ai.protocol_responses",
+            ),
+        ] {
+            row = row.child(
+                oxideterm_gpui_ui::segmented_control_item(
+                    &self.tokens,
+                    self.i18n.t(key),
+                    provider.api_protocol == protocol,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.edit_settings(
+                            |settings| {
+                                ai_update_provider(settings, index, |provider| {
+                                    provider
+                                        .insert("apiProtocol".into(), serde_json::json!(protocol));
+                                });
+                            },
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }),
+                ),
+            );
+        }
+        row.into_any_element()
     }
 
     pub(in crate::workspace) fn ai_provider_text_input_control(

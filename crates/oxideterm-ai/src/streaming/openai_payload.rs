@@ -303,6 +303,7 @@ mod tests {
 
     fn config(provider_type: &str, reasoning_effort: &str) -> AiChatStreamConfig {
         AiChatStreamConfig {
+            api_protocol: crate::AiApiProtocol::default(),
             execution_backend: AiExecutionBackend::Provider,
             provider_id: Some("provider".to_string()),
             acp_agent_id: None,

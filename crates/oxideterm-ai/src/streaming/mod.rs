@@ -4,6 +4,9 @@ mod gemini;
 mod openai;
 mod openai_parse;
 mod openai_payload;
+mod responses;
+mod responses_parse;
+mod responses_payload;
 
 use std::time::Duration;
 
@@ -45,23 +48,38 @@ pub async fn stream_chat_completion(
     messages: Vec<AiChatMessage>,
     events: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
 ) {
-    let result = match chat_stream_provider_family(&config.provider_type) {
-        ChatStreamProviderFamily::Ollama => {
-            openai::stream_ollama_completion(config, messages, events.clone()).await
+    let responses = config.api_protocol == crate::AiApiProtocol::Responses;
+    let result = if responses {
+        if config.uses_responses() {
+            responses::stream_responses(config, messages, events.clone()).await
+        } else {
+            Err(anyhow::anyhow!("Responses requires an OpenAI-compatible provider"))
         }
-        ChatStreamProviderFamily::Anthropic => {
-            anthropic::stream_anthropic_completion(config, messages, events.clone()).await
-        }
-        ChatStreamProviderFamily::Gemini => {
-            gemini::stream_gemini_completion(config, messages, events.clone()).await
-        }
-        ChatStreamProviderFamily::OpenAiCompatible => {
-            openai::stream_openai_completion(config, messages, events.clone()).await
+    } else {
+        match chat_stream_provider_family(&config.provider_type) {
+            ChatStreamProviderFamily::Ollama => {
+                openai::stream_ollama_completion(config, messages, events.clone()).await
+            }
+            ChatStreamProviderFamily::Anthropic => {
+                anthropic::stream_anthropic_completion(config, messages, events.clone()).await
+            }
+            ChatStreamProviderFamily::Gemini => {
+                gemini::stream_gemini_completion(config, messages, events.clone()).await
+            }
+            ChatStreamProviderFamily::OpenAiCompatible => {
+                openai::stream_openai_completion(config, messages, events.clone()).await
+            }
         }
     };
 
     if let Err(error) = result {
-        let _ = events.send(AiStreamEvent::Error(error.to_string()));
+        let error = error.to_string();
+        let error = if responses && crate::responses_error_label(&error).is_none() {
+            "responses_failed".to_string()
+        } else {
+            error
+        };
+        let _ = events.send(AiStreamEvent::Error(error));
     }
 }
 
@@ -81,3 +99,8 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+pub(crate) use responses_parse::ResponsesStream;
+#[cfg(test)]
+pub(crate) use responses_payload::responses_body;

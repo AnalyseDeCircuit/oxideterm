@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+bytes.workspace = true
 agent-client-protocol.workspace = true
 anyhow.workspace = true
 async-process.workspace = true

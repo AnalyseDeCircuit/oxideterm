@@ -231,6 +231,11 @@ pub(in crate::workspace) fn send_ai_stream_delivery(
         // Provider and protocol errors may contain response bodies, process
         // paths, or request metadata. The UI maps this stable category to a
         // localized message.
+        AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(ref error))
+            if oxideterm_ai::responses_error_label(error).is_some() =>
+        {
+            event
+        }
         AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(_)) => {
             AiStreamDeliveryEvent::Stream(AiStreamEvent::Error("stream_failed".to_string()))
         }

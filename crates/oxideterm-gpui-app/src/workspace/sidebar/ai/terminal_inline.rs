@@ -794,6 +794,7 @@ window.focus(&this.focus_handle, cx);
         .as_str()
         .to_string();
         Ok(AiChatStreamConfig {
+            api_protocol: provider.api_protocol,
             execution_backend: AiExecutionBackend::Provider,
             provider_id: Some(provider.id.clone()),
             acp_agent_id: None,
