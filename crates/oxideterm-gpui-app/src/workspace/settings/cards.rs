@@ -797,6 +797,13 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn blur_text_inputs(&mut self, cx: &mut Context<Self>) {
         let mut changed = false;
+        if self.terminal_command_sender.read(cx).compact_focused() {
+            self.terminal_command_sender.update(cx, |sender, cx| {
+                sender.set_compact_focused(false, cx);
+            });
+            self.ime_marked_text = None;
+            changed = true;
+        }
         if self
             .settings_workspace
             .update(cx, |settings, cx| settings.blur_settings_entity_input(cx))

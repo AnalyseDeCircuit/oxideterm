@@ -795,6 +795,8 @@ impl WorkspaceApp {
                             let pane_id = *pane_id;
                             let tab_id = tab_id;
                             move |this, _event, window, cx| {
+                                // Release logical input ownership before focusing the native pane.
+                                this.blur_text_inputs(cx);
                                 if let Some(tab_id) = tab_id {
                                     this.tab_host.update(cx, |tab_host, _| {
                                         tab_host.set_active_pane(Some(tab_id), pane_id);
