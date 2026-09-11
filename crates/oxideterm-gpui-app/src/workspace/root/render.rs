@@ -415,7 +415,7 @@ impl WorkspaceApp {
                     && this.settings_workspace.read(cx).route_snapshot().active_tab
                         == SettingsTab::Keybindings
                 {
-                    this.handle_keybinding_recording_key(event, window, cx);
+                    this.handle_keybinding_recording_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if {

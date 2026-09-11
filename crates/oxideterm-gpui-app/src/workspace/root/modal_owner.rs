@@ -1093,7 +1093,7 @@ impl WorkspaceApp {
                 true
             }
             ActiveTabWindowModalKind::KeybindingReset => {
-                self.handle_keybinding_reset_confirm_key(event, window, cx)
+                self.handle_keybinding_reset_confirm_key(event, cx)
             }
             ActiveTabWindowModalKind::KnowledgeDelete => {
                 self.handle_knowledge_delete_confirm_key(event, cx)

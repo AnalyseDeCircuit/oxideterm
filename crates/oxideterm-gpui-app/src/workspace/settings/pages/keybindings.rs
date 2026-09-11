@@ -339,9 +339,9 @@ impl WorkspaceApp {
                 hover_text_color: Some(hover_text_color),
                 ..ToolbarButtonOptions::default()
             },
-            cx.listener(move |this, _event, window, cx| {
+            cx.listener(move |this, _event, _window, cx| {
                 match action {
-                    KeybindingToolbarAction::Import => this.import_keybindings(window, cx),
+                    KeybindingToolbarAction::Import => this.import_keybindings(cx),
                     KeybindingToolbarAction::Export => this.export_keybindings(cx),
                     KeybindingToolbarAction::ResetAll => {
                         this.settings_workspace.update(cx, |settings, cx| {
@@ -578,8 +578,8 @@ impl WorkspaceApp {
                                         hover_background: Some(self.keybinding_hover_background()),
                                         ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
                                     },
-                                    move |this, _event, window, cx| {
-                                        this.unbind_keybinding(&unbind_action_id, window, cx);
+                                    move |this, _event, _window, cx| {
+                                        this.unbind_keybinding(&unbind_action_id, cx);
                                         cx.stop_propagation();
                                     },
                                     cx,
@@ -598,8 +598,8 @@ impl WorkspaceApp {
                                         // wrapper so reset actions cannot drift.
                                         ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
                                     },
-                                    move |this, _event, window, cx| {
-                                        this.reset_keybinding(&reset_action_id, window, cx);
+                                    move |this, _event, _window, cx| {
+                                        this.reset_keybinding(&reset_action_id, cx);
                                         cx.stop_propagation();
                                     },
                                     cx,
@@ -796,10 +796,9 @@ impl WorkspaceApp {
                     == Some(KeybindingRecordingFooterAction::Confirm),
                 ..ToolbarButtonOptions::default()
             },
-            cx.listener(|this, _event, window, cx| {
+            cx.listener(|this, _event, _window, cx| {
                 this.activate_keybinding_recording_footer_action(
                     KeybindingRecordingFooterAction::Confirm,
-                    window,
                     cx,
                 );
                 cx.stop_propagation();
@@ -825,10 +824,9 @@ impl WorkspaceApp {
                     == Some(KeybindingRecordingFooterAction::Cancel),
                 ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
             },
-            |this, _event, window, cx| {
+            |this, _event, _window, cx| {
                 this.activate_keybinding_recording_footer_action(
                     KeybindingRecordingFooterAction::Cancel,
-                    window,
                     cx,
                 );
                 cx.stop_propagation();
@@ -914,9 +912,9 @@ impl WorkspaceApp {
                 cx.stop_propagation();
                 cx.notify();
             }),
-            cx.listener(|this, _event, window, cx| {
+            cx.listener(|this, _event, _window, cx| {
                 if this.begin_keybinding_reset_all_confirm_exit(cx) {
-                    this.reset_all_keybindings(window, cx);
+                    this.reset_all_keybindings(cx);
                 }
                 cx.stop_propagation();
             }),

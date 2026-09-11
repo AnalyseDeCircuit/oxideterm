@@ -675,7 +675,7 @@ impl WorkspaceApp {
             return;
         }
 
-        if self.handle_settings_confirm_key(event, window, cx) {
+        if self.handle_settings_confirm_key(event, cx) {
             return;
         }
 
@@ -985,7 +985,6 @@ impl WorkspaceApp {
     pub(super) fn handle_settings_confirm_key(
         &mut self,
         event: &KeyDownEvent,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         if self
@@ -998,7 +997,7 @@ impl WorkspaceApp {
             }
             // The import dialog owns keyboard input while it is mounted.
             true
-        } else if self.handle_keybinding_reset_confirm_key(event, window, cx) {
+        } else if self.handle_keybinding_reset_confirm_key(event, cx) {
             true
         } else if self.handle_knowledge_delete_confirm_key(event, cx) {
             true
@@ -1014,7 +1013,6 @@ impl WorkspaceApp {
     pub(super) fn handle_keybinding_reset_confirm_key(
         &mut self,
         event: &KeyDownEvent,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         if !self
@@ -1041,7 +1039,7 @@ impl WorkspaceApp {
             }
             Some(settings::KeybindingResetConfirmKeyAction::Confirm) => {
                 if self.begin_keybinding_reset_all_confirm_exit(cx) {
-                    self.reset_all_keybindings(window, cx);
+                    self.reset_all_keybindings(cx);
                 }
                 true
             }
@@ -1391,7 +1389,6 @@ impl WorkspaceApp {
     pub(super) fn handle_keybinding_recording_key(
         &mut self,
         event: &KeyDownEvent,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let overrides = &self.settings_store.settings().keybindings.overrides;
@@ -1399,29 +1396,24 @@ impl WorkspaceApp {
             settings.handle_keybinding_recording_key(event, overrides, cx)
         });
         if action == Some(settings::KeybindingRecordingKeyAction::Confirm) {
-            self.confirm_keybinding_recording(window, cx);
+            self.confirm_keybinding_recording(cx);
         }
     }
 
     pub(super) fn activate_keybinding_recording_footer_action(
         &mut self,
         action: settings::KeybindingRecordingFooterAction,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let should_confirm = self.settings_workspace.update(cx, |settings, cx| {
             settings.activate_keybinding_recording_footer(action, cx)
         });
         if should_confirm {
-            self.confirm_keybinding_recording(window, cx);
+            self.confirm_keybinding_recording(cx);
         }
     }
 
-    pub(super) fn confirm_keybinding_recording(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn confirm_keybinding_recording(&mut self, cx: &mut Context<Self>) {
         let Some(commit) = self.settings_workspace.update(cx, |settings, cx| {
             settings.take_keybinding_recording_commit(cx)
         }) else {
@@ -1454,7 +1446,7 @@ impl WorkspaceApp {
             },
             cx,
         );
-        self.apply_runtime_key_bindings(runtime_bindings, window, cx);
+        Self::apply_runtime_key_bindings(runtime_bindings, cx);
     }
 
     pub(super) fn cancel_keybinding_recording(&mut self, cx: &mut Context<Self>) {
@@ -1463,12 +1455,7 @@ impl WorkspaceApp {
         });
     }
 
-    pub(super) fn reset_keybinding(
-        &mut self,
-        action_id: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn reset_keybinding(&mut self, action_id: &str, cx: &mut Context<Self>) {
         let Some(definition) = crate::keybindings::action_definition(action_id) else {
             return;
         };
@@ -1495,15 +1482,10 @@ impl WorkspaceApp {
             cx,
         );
         self.cancel_keybinding_recording(cx);
-        self.apply_runtime_key_bindings(runtime_bindings, window, cx);
+        Self::apply_runtime_key_bindings(runtime_bindings, cx);
     }
 
-    pub(super) fn unbind_keybinding(
-        &mut self,
-        action_id: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn unbind_keybinding(&mut self, action_id: &str, cx: &mut Context<Self>) {
         let Some(definition) = crate::keybindings::action_definition(action_id) else {
             return;
         };
@@ -1526,10 +1508,10 @@ impl WorkspaceApp {
             cx,
         );
         self.cancel_keybinding_recording(cx);
-        self.apply_runtime_key_bindings(runtime_bindings, window, cx);
+        Self::apply_runtime_key_bindings(runtime_bindings, cx);
     }
 
-    pub(super) fn reset_all_keybindings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn reset_all_keybindings(&mut self, cx: &mut Context<Self>) {
         let side = crate::keybindings::KeybindingSide::current();
         let runtime_bindings = {
             let overrides = &self.settings_store.settings().keybindings.overrides;
@@ -1547,7 +1529,7 @@ impl WorkspaceApp {
         };
         self.edit_settings(|settings| settings.keybindings.overrides.clear(), cx);
         self.cancel_keybinding_recording(cx);
-        self.apply_runtime_key_bindings(runtime_bindings, window, cx);
+        Self::apply_runtime_key_bindings(runtime_bindings, cx);
     }
 
     pub(super) fn export_keybindings(&mut self, cx: &mut Context<Self>) {
@@ -1572,7 +1554,7 @@ impl WorkspaceApp {
         });
     }
 
-    pub(super) fn import_keybindings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn import_keybindings(&mut self, cx: &mut Context<Self>) {
         let receiver = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -1588,33 +1570,19 @@ impl WorkspaceApp {
             }
         };
         let runtime = self.forwarding_runtime.handle().clone();
-        let target_window = window.window_handle();
         self.settings_workspace.update(cx, |settings, cx| {
-            settings.start_keybinding_import(selection, runtime, target_window, cx);
+            settings.start_keybinding_import(selection, runtime, cx);
         });
     }
 
-    fn apply_runtime_key_bindings(
-        &self,
+    pub(in crate::workspace) fn apply_runtime_key_bindings(
         bindings: Vec<gpui::KeyBinding>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) {
-        self.apply_runtime_key_bindings_to_window_handle(bindings, window.window_handle(), cx);
-    }
-
-    pub(in crate::workspace) fn apply_runtime_key_bindings_to_window_handle(
-        &self,
-        bindings: Vec<gpui::KeyBinding>,
-        window_handle: AnyWindowHandle,
-        cx: &mut Context<Self>,
-    ) {
-        if bindings.is_empty() {
-            return;
+        if !bindings.is_empty() {
+            // The keymap belongs to the app; the calling window may already be updating.
+            cx.bind_keys(bindings);
         }
-        let _ = cx.update_window(window_handle, move |_root, _window, app| {
-            app.bind_keys(bindings);
-        });
     }
 
     pub(super) fn handle_terminal_cast_search_key(
@@ -3005,5 +2973,75 @@ pub(super) fn classify_command_risk(command: &str) -> Option<&'static str> {
         Some(QuickCommandRisk::High) => Some("high"),
         Some(QuickCommandRisk::Medium) => Some("medium"),
         None => None,
+    }
+}
+
+#[cfg(test)]
+mod keybinding_update_tests {
+    use super::*;
+    use gpui::{FocusHandle, KeyBinding, TestAppContext};
+
+    struct ShortcutTarget {
+        focus: FocusHandle,
+        actions: usize,
+        input: Vec<String>,
+    }
+
+    impl Render for ShortcutTarget {
+        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .key_context("Workspace")
+                .track_focus(&self.focus)
+                .on_action(cx.listener(|this, _: &NewTerminal, _, _| this.actions += 1))
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, _| {
+                    this.input.push(event.keystroke.unparse());
+                }))
+        }
+    }
+
+    #[gpui::test]
+    fn runtime_rebind_releases_old_shortcut_during_window_update(cx: &mut TestAppContext) {
+        use crate::keybindings::{KeybindingSide, action_definition, runtime_rebind_key_bindings};
+
+        cx.update(|cx| cx.bind_keys([KeyBinding::new("ctrl-t", NewTerminal, Some("Workspace"))]));
+        let previous = action_definition("app.newTerminal")
+            .unwrap()
+            .default_combo(KeybindingSide::Other)
+            .clone();
+        let mut next = previous.clone();
+        next.key = "p".into();
+        let (target, cx) = cx.add_window_view(|window, cx| {
+            let focus = cx.focus_handle();
+            focus.focus(window, cx);
+            ShortcutTarget {
+                focus,
+                actions: 0,
+                input: Vec::new(),
+            }
+        });
+        cx.simulate_keystrokes("ctrl-t");
+        target.read_with(cx, |target, _| assert_eq!(target.actions, 1));
+        for (label, previous, next, expected_input, expected_actions) in [
+            ("rebind", Some(&previous), Some(&next), vec!["ctrl-t"], 1),
+            ("unbind", Some(&next), None, vec!["ctrl-t", "ctrl-p"], 0),
+            ("restore", None, Some(&previous), vec!["ctrl-p"], 1),
+        ] {
+            target.update(cx, |target, _| {
+                target.actions = 0;
+                target.input.clear();
+            });
+            // Settings callbacks already hold the window when updating the keymap.
+            cx.update(|_window, cx| {
+                WorkspaceApp::apply_runtime_key_bindings(
+                    runtime_rebind_key_bindings("app.newTerminal", previous, next),
+                    cx,
+                );
+            });
+            cx.simulate_keystrokes("ctrl-t ctrl-p");
+            target.read_with(cx, |target, _| {
+                assert_eq!(target.input, expected_input, "{label}");
+                assert_eq!(target.actions, expected_actions, "{label}");
+            });
+        }
     }
 }

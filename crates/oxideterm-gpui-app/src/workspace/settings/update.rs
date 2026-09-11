@@ -774,7 +774,6 @@ impl WorkspaceApp {
                         }
                         KeybindingFileOperationResult::Imported {
                             overrides: next_overrides,
-                            target_window,
                         } => {
                             let side = crate::keybindings::KeybindingSide::current();
                             let runtime_bindings = {
@@ -807,11 +806,7 @@ impl WorkspaceApp {
                                 },
                                 cx,
                             );
-                            self.apply_runtime_key_bindings_to_window_handle(
-                                runtime_bindings,
-                                target_window,
-                                cx,
-                            );
+                            Self::apply_runtime_key_bindings(runtime_bindings, cx);
                             self.push_ai_settings_toast(
                                 self.i18n.t("settings_view.keybindings.import_success"),
                                 TerminalNoticeVariant::Success,
