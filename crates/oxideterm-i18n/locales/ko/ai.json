@@ -351,7 +351,8 @@
         "manage_telnet_session": "Telnet 세션 관리",
         "open_transport_profile": "전송 프로필 열기",
         "read_skill_resource": "스킬 리소스 읽기",
-        "wait_terminal_output": "터미널 출력 대기"
+        "wait_terminal_output": "터미널 출력 대기",
+        "ask_user": "사용자에게 질문"
       },
       "risk_labels": {
         "read": "읽기",
@@ -544,6 +545,11 @@
       "draft_not_empty": "대기 메시지를 편집하기 전에 현재 초안을 보내거나 지우세요.",
       "steer_unavailable": "현재 턴은 방향 조정 메시지를 받을 수 없습니다. 메시지는 보관되었습니다.",
       "client_command_busy": "현재 작업이 끝난 뒤 이 명령을 사용하세요."
+    },
+    "questions": {
+      "waiting": "답변을 기다리는 중",
+      "answer": "답변 보내기",
+      "hint": "옵션을 선택하거나 아래에 답변을 입력하세요. 답변 후 작업이 계속됩니다."
     }
   }
 }

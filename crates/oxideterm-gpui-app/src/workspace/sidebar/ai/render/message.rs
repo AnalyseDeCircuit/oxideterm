@@ -1377,6 +1377,36 @@ window.focus(&this.focus_handle, cx);
                 );
             }
 
+            if name == "ask_user" {
+                let active = self.ai_entity.read(cx).active_user_question()
+                    == Some((approval_generation, id.clone()));
+                if active {
+                    if let Some(question) = result.and_then(|value| value.get("question")).and_then(serde_json::Value::as_str) {
+                        let mut prompt = div().flex().flex_col().gap(px(self.tokens.spacing.two))
+                            .p(px(self.tokens.spacing.three))
+                            .text_size(px(12.0)).child(question.to_owned());
+                        for (index, option) in result.and_then(|value| value.get("options")).and_then(serde_json::Value::as_array).into_iter().flatten().filter_map(serde_json::Value::as_str).enumerate() {
+                            let answer = option.to_owned();
+                            let call_id = id.clone();
+                            prompt = prompt.child(self.agent_button(
+                                format!("ai-question-{approval_generation}-{id}-{index}"),
+                                option.to_owned(),
+                                move |this, _, cx| {
+                                    this.ai_entity.update(cx, |ai, _| {
+                                        ai.resolve_user_question(approval_generation, &call_id, zeroize::Zeroizing::new(answer.clone()));
+                                    });
+                                    cx.notify();
+                                },
+                                cx,
+                            ));
+                        }
+                        prompt = prompt.child(div().text_size(px(10.0)).text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.i18n.t("ai.questions.hint")));
+                        item = item.child(prompt);
+                    }
+                }
+            }
+
             if status == AiToolStatus::PendingApproval {
                 let wait_expired = result.and_then(|value| value.get("waitTimedOut")).and_then(serde_json::Value::as_bool) == Some(true);
                 let acp_options = result

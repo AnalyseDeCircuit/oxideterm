@@ -52,6 +52,8 @@ impl WorkspaceApp {
             self.i18n.t("ai.input.placeholder_disabled")
         } else if !model_selected {
             self.i18n.t("ai.model_selector.select_model")
+        } else if self.ai_entity.read(cx).active_user_question().is_some() {
+            self.i18n.t("ai.questions.hint")
         } else {
             self.i18n.t("ai.input.placeholder")
         };
@@ -184,7 +186,9 @@ window.focus(&this.focus_handle, cx);
         let loading = self.ai_entity.read(cx).chat_is_loading();
         let action = ai_send_button(
             &self.tokens,
-            self.i18n.t(if loading {
+            self.i18n.t(if self.ai_entity.read(cx).active_user_question().is_some() {
+                "ai.questions.answer"
+            } else if loading {
                 "ai.queue.enqueue"
             } else {
                 "ai.input.send_btn"
@@ -212,7 +216,7 @@ window.focus(&this.focus_handle, cx);
                     SelectableTextRole::PlainDocument,
                     "ai-input-footer",
                     "thinking",
-                    self.i18n.t("ai.input.thinking"),
+                    self.i18n.t(if self.ai_entity.read(cx).active_user_question().is_some() { "ai.questions.waiting" } else { "ai.input.thinking" }),
                     self.tokens.ui.accent,
                     cx,
                 )))

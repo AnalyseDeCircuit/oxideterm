@@ -775,6 +775,10 @@ fn normalize_interrupted_assistant_projection(message: &mut AiChatMessage) {
 }
 
 fn ai_tool_call_is_unfinished(call: &Value) -> bool {
+    if call.get("name").and_then(Value::as_str) == Some("ask_user")
+        && call.get("status").and_then(Value::as_str) == Some("waiting_user") {
+        return true;
+    }
     if call.get("result").is_some_and(|result| !result.is_null()) {
         return false;
     }
@@ -1073,7 +1077,15 @@ fn persisted_from_message_with_projection(
         tool_calls: message
             .tool_calls
             .iter()
-            .filter_map(|value| serde_json::from_value::<PersistedToolCall>(value.clone()).ok())
+            .filter_map(|value| {
+                let mut call = value.clone();
+                if call["name"] == "ask_user" && call["status"] == "waiting_user" {
+                    // A question preview is not a completed result or a durable reply channel.
+                    call["status"] = Value::String("pending".into());
+                    call["result"] = Value::Null;
+                }
+                serde_json::from_value::<PersistedToolCall>(call).ok()
+            })
             .collect(),
         tool_call_id: message.tool_call_id.clone(),
         context_snapshot: message.context.as_ref().map(|context| ContextSnapshot {

@@ -162,6 +162,11 @@ pub(in crate::workspace) enum AiStreamDeliveryEvent {
         round_id: Option<String>,
         round_number: Option<i64>,
     },
+    UserQuestionRequested {
+        call: AiToolCall,
+        dispatch: Option<oxideterm_ai::agent::AgentDispatch>,
+        sender: tokio::sync::oneshot::Sender<zeroize::Zeroizing<String>>,
+    },
     ToolApprovalRequested {
         tool_call_id: String,
         name: String,

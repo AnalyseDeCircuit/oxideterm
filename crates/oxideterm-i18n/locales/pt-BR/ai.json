@@ -351,7 +351,8 @@
         "manage_telnet_session": "Gerenciar sessão Telnet",
         "open_transport_profile": "Abrir perfil de transporte",
         "read_skill_resource": "Ler recurso da habilidade",
-        "wait_terminal_output": "Aguardar saída do terminal"
+        "wait_terminal_output": "Aguardar saída do terminal",
+        "ask_user": "Perguntar ao usuário"
       },
       "risk_labels": {
         "read": "Leitura",
@@ -544,6 +545,11 @@
       "draft_not_empty": "Envie ou limpe o rascunho atual antes de editar uma mensagem na fila.",
       "steer_unavailable": "Este turno não pode receber um redirecionamento agora. Sua mensagem foi mantida.",
       "client_command_busy": "Aguarde o término da tarefa atual antes de usar este comando."
+    },
+    "questions": {
+      "waiting": "Aguardando sua resposta",
+      "answer": "Enviar resposta",
+      "hint": "Escolha uma opção ou digite sua resposta abaixo. A tarefa continuará após a resposta."
     }
   }
 }

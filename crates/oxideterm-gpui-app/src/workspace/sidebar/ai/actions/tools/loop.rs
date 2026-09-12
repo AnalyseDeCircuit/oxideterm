@@ -733,6 +733,7 @@ async fn execute_ai_chat_tool_loop(
         history.push(assistant_round);
         let response_results_start = history.len();
 
+        let mixed_question_batch = completed_calls.len() > 1 && completed_calls.iter().any(|call| call.name == "ask_user");
         let mut pause_requested = false;
         let mut round_results = Vec::new();
         let mut dependencies = oxideterm_ai::agent::ToolDependencies::new(&completed_calls);
@@ -759,7 +760,11 @@ async fn execute_ai_chat_tool_loop(
             for call in &batch { checkpoint.pending(call); }
             let _ = send_ai_loop_delivery(execution.is_some(), &ui_tx, generation, &conversation_id, &assistant_id,
                 AiStreamDeliveryEvent::Checkpoint(checkpoint.clone()));
-            let results = if dependencies.failed_dependency(&batch[0]) {
+            let results = if mixed_question_batch {
+                // No speculative operations may run before the model has read the user's answer.
+                batch.iter().map(|call| Ok(pre_execution_rejected_ai_tool_result(call.id.clone(), call.name.clone(),
+                    "invalid_tool_arguments", "Call ask_user alone, then plan other operations after receiving the answer. This batch was not executed."))).collect()
+            } else if dependencies.failed_dependency(&batch[0]) {
                 batch.iter().map(|call| Ok(pre_execution_rejected_ai_tool_result(call.id.clone(), call.name.clone(),
                     "dependency_failed", "A preceding dependency failed; this call was not dispatched."))).collect()
             } else if batch.len() > 1 {

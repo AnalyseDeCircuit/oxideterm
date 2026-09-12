@@ -351,7 +351,8 @@
         "manage_telnet_session": "管理 Telnet 会话",
         "open_transport_profile": "打开传输配置",
         "read_skill_resource": "读取技能资源",
-        "wait_terminal_output": "等待终端输出"
+        "wait_terminal_output": "等待终端输出",
+        "ask_user": "向用户提问"
       },
       "risk_labels": {
         "read": "只读",
@@ -544,6 +545,11 @@
       "draft_not_empty": "请先发送或清空当前草稿，再编辑排队消息。",
       "steer_unavailable": "当前轮暂时无法接收调整方向的消息，内容已保留。",
       "client_command_busy": "请等当前任务结束后再使用此命令。"
+    },
+    "questions": {
+      "waiting": "等待你的回答",
+      "answer": "发送回答",
+      "hint": "选择一个选项，或在下方输入框中回答。收到回答后任务将继续。"
     }
   }
 }

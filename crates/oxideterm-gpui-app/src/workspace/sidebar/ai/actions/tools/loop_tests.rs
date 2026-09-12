@@ -110,6 +110,204 @@ mod agent_loop_tests {
             Err(oxideterm_ai::agent::AgentError::ResourceUnresolved)));
     }
 
+    #[tokio::test]
+    async fn user_question_resumes_the_same_responses_call_with_the_answer() {
+        let (url, server) = model_server(vec![
+            (200, completed(json!([call("mixed-question", "ask_user", json!({"question":"Which environment?"})),
+                call("premature-command","run_command",json!({"command":"exit 0"}))]))),
+            (200, completed(json!([call("question-wire", "ask_user", json!({"question":"Which environment?","options":["Staging","Production"]}))]))),
+            (200, completed(json!([{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Using staging."}]}]))),
+        ]).await;
+        let mut config = crate::workspace::ai_state::entity_tests::queued_turn("task").config;
+        config.api_protocol = oxideterm_ai::AiApiProtocol::Responses;
+        config.base_url = url;
+        config.tool_policy.enabled = true;
+        config.tools = oxideterm_ai::agent::agent_tool_definitions(false)
+            .into_iter()
+            .filter(|tool| tool.name == "ask_user")
+            .collect();
+        config.tools.extend(
+            oxideterm_ai::orchestrator_tool_definitions()
+                .into_iter()
+                .filter(|tool| tool.name == "run_command"),
+        );
+        let runtime = oxideterm_ai::agent::AgentRuntime::new(1);
+        let run = runtime.create_group(
+            "conversation".into(),
+            AgentModel {
+                provider_id: "provider".into(),
+                model: config.model.clone(),
+            },
+            oxideterm_ai::agent::AgentScope::default(),
+            8,
+        );
+        let execution = AgentExecution::new(
+            runtime,
+            run,
+            oxideterm_ai::agent::AgentResourceCoordinator::default(),
+        )
+        .unwrap();
+        let (sender, receiver) = AiStreamDeliverySender::channel();
+        let host = std::thread::spawn(move || {
+            let mut asked = false;
+            let mut final_text = String::new();
+            while let Ok(delivery) = receiver.recv_timeout(Duration::from_secs(5)) {
+                match delivery.event {
+                    AiStreamDeliveryEvent::RuntimeContextRequested { sender, .. } => {
+                        sender.send(Some("Test runtime".into())).unwrap();
+                    }
+                    AiStreamDeliveryEvent::UserQuestionRequested { call, sender, .. } => {
+                        assert!(!asked, "a pending question must not poll or repeat");
+                        asked = true;
+                        assert_eq!(
+                            serde_json::from_str::<Value>(&call.arguments).unwrap()["question"],
+                            "Which environment?"
+                        );
+                        sender
+                            .send(zeroize::Zeroizing::new("Staging, read only".into()))
+                            .unwrap();
+                    }
+                    AiStreamDeliveryEvent::ToolExecutionRequested { .. } => {
+                        panic!("question reached a side-effect executor")
+                    }
+                    AiStreamDeliveryEvent::Stream(AiStreamEvent::Content(text)) => {
+                        final_text.push_str(&text)
+                    }
+                    _ => {}
+                }
+            }
+            assert!(asked);
+            assert_eq!(final_text, "Using staging.");
+        });
+        let temp = tempfile::tempdir().unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            run_ai_chat_tool_loop(
+                config,
+                vec![agent_chat_message(
+                    AiChatRole::User,
+                    "Inspect the deployment".into(),
+                )],
+                AiModelRuntimeState {
+                    context_window: 128000,
+                },
+                services(temp.path()),
+                1,
+                1,
+                ToolSessionId::new(),
+                "conversation".into(),
+                "assistant".into(),
+                sender,
+                Some(execution),
+            ),
+        )
+        .await
+        .unwrap();
+        host.join().unwrap();
+        let requests = server.await.unwrap();
+        let output = requests[2]["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "function_call_output" && item["call_id"] == "question-wire")
+            .unwrap();
+        assert_eq!(output["call_id"], "question-wire");
+        let answer: Value = serde_json::from_str(output["output"].as_str().unwrap()).unwrap();
+        let response: Value = serde_json::from_str(answer["output"].as_str().unwrap()).unwrap();
+        assert_eq!(response["answer"], "Staging, read only");
+    }
+
+    #[tokio::test]
+    async fn user_question_wait_is_cancelled_by_steering_or_stopping() {
+        for steer in [true, false] {
+            let runtime = oxideterm_ai::agent::AgentRuntime::new(1);
+            let run = runtime.create_group(
+                "conversation".into(),
+                AgentModel {
+                    provider_id: "provider".into(),
+                    model: "model".into(),
+                },
+                oxideterm_ai::agent::AgentScope::default(),
+                8,
+            );
+            let dispatch = runtime.dispatch(&run).unwrap();
+            let agent = AgentExecution::new(
+                runtime.clone(),
+                run.clone(),
+                oxideterm_ai::agent::AgentResourceCoordinator::default(),
+            )
+            .unwrap();
+            let (ui, receiver) = AiStreamDeliverySender::channel();
+            let (question_tx, question_rx) = tokio::sync::oneshot::channel();
+            let host = std::thread::spawn(move || {
+                while let Ok(delivery) = receiver.recv_timeout(Duration::from_secs(5)) {
+                    if let AiStreamDeliveryEvent::UserQuestionRequested { sender, .. } = delivery.event
+                    {
+                        question_tx.send(sender).unwrap();
+                        break;
+                    }
+                }
+            });
+            let task = tokio::spawn(async move {
+                let mut execution = Some(agent);
+                execute_ai_agent_coordination(
+                    &mut execution,
+                    &ui,
+                    1,
+                    &ToolSessionId::new(),
+                    "conversation",
+                    "assistant",
+                    &AiToolCall {
+                        id: "question".into(),
+                        name: "ask_user".into(),
+                        arguments: json!({"question":"Which host?"}).to_string(),
+                    },
+                    Some(&dispatch),
+                )
+                .await
+            });
+            let answer_sender = question_rx.await.unwrap();
+            assert_eq!(
+                runtime.snapshot(&run).unwrap().state,
+                AgentState::AwaitingUser
+            );
+            assert!(!task.is_finished());
+            if steer {
+                runtime
+                    .send(
+                        &run,
+                        &run,
+                        AgentMessageKind::UserSupplement,
+                        AgentText::new("Cancel this approach"),
+                    )
+                    .unwrap();
+            } else {
+                runtime.cancel_group(&run).unwrap();
+            }
+            let result = tokio::time::timeout(Duration::from_secs(1), task)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                result
+                    .envelope
+                    .pointer("/error/code")
+                    .and_then(Value::as_str),
+                Some(if steer {
+                    "agent_direction_changed"
+                } else {
+                    "operation_cancelled"
+                })
+            );
+            assert!(
+                answer_sender
+                    .send(zeroize::Zeroizing::new("Late answer".into()))
+                    .is_err()
+            );
+            host.join().unwrap();
+        }
+    }
+
     #[test]
     fn command_observation_deadline_is_bounded_and_can_be_renewed() {
         let start = std::time::Instant::now();

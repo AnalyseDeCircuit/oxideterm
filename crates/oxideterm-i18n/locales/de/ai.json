@@ -351,7 +351,8 @@
         "manage_telnet_session": "Telnet-Sitzung verwalten",
         "open_transport_profile": "Transportprofil öffnen",
         "read_skill_resource": "Skill-Ressource lesen",
-        "wait_terminal_output": "Auf Terminalausgabe warten"
+        "wait_terminal_output": "Auf Terminalausgabe warten",
+        "ask_user": "Benutzer fragen"
       },
       "risk_labels": {
         "read": "Lesen",
@@ -544,6 +545,11 @@
       "draft_not_empty": "Senden oder leeren Sie den aktuellen Entwurf, bevor Sie eine wartende Nachricht bearbeiten.",
       "steer_unavailable": "Dieser Durchlauf kann gerade keine neue Ausrichtung annehmen. Ihre Nachricht bleibt erhalten.",
       "client_command_busy": "Warten Sie mit diesem Befehl, bis die aktuelle Aufgabe beendet ist."
+    },
+    "questions": {
+      "waiting": "Warten auf deine Antwort",
+      "answer": "Antwort senden",
+      "hint": "Wähle eine Option oder gib unten deine Antwort ein. Danach wird die Aufgabe fortgesetzt."
     }
   }
 }

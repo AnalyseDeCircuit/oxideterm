@@ -100,6 +100,7 @@ impl AiChatPersistenceStore {
                                 "running"
                                     | "pending"
                                     | "pending_user_approval"
+                                    | "waiting_user"
                                     | "pending_user_selection"
                             )
                         ) {

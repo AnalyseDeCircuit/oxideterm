@@ -799,6 +799,20 @@ impl WorkspaceApp {
                         cx,
                     );
                 }
+                AiStreamDeliveryEvent::UserQuestionRequested { call, dispatch, sender } => {
+                    if sender.is_closed() || dispatch.as_ref().is_some_and(|guard| guard.check().is_err()) { continue; }
+                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    let question = serde_json::from_str::<serde_json::Value>(&call.arguments).unwrap_or_default();
+                    self.apply_ai_tool_status(delivery.generation, &delivery.conversation_id, &delivery.assistant_id,
+                        &call.id, &call.name, &call.arguments, "waiting_user", Some(question), Some("read".into()),
+                        Some(self.i18n.t("ai.questions.waiting")), false, None, None, None, cx);
+                    self.notify_ai_agent_attention(&delivery.conversation_id, &delivery.assistant_id, "ai.questions.waiting", cx);
+                    self.ai_entity.update(cx, |ai, _| {
+                        ai.pending_user_questions.insert((delivery.generation, call.id), crate::workspace::ai_state::AiPendingUserQuestion {
+                            conversation_id: delivery.conversation_id.clone(), dispatch, sender,
+                        });
+                    });
+                }
                 AiStreamDeliveryEvent::ToolApprovalRequested {
                     tool_call_id,
                     name,

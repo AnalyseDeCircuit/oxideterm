@@ -404,6 +404,14 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
+        let question = self.ai_entity.read(cx).active_user_question();
+        if let Some((generation, id)) = question {
+            if self.ai_entity.update(cx, |ai, _| ai.resolve_user_question(generation, &id, zeroize::Zeroizing::new(content))) {
+                self.reset_ai_chat_input_after_submit(cx);
+            }
+            cx.notify();
+            return;
+        }
         self.bootstrap_ai_mcp_registry(cx);
 
         let parsed_input = parse_ai_user_input(&content);

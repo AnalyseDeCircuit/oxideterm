@@ -351,7 +351,8 @@
         "manage_telnet_session": "Quản lý phiên Telnet",
         "open_transport_profile": "Mở cấu hình truyền tải",
         "read_skill_resource": "Đọc tài nguyên kỹ năng",
-        "wait_terminal_output": "Chờ đầu ra đầu cuối"
+        "wait_terminal_output": "Chờ đầu ra đầu cuối",
+        "ask_user": "Hỏi người dùng"
       },
       "risk_labels": {
         "read": "Chỉ đọc",
@@ -544,6 +545,11 @@
       "draft_not_empty": "Gửi hoặc xóa bản nháp hiện tại trước khi sửa tin nhắn đang chờ.",
       "steer_unavailable": "Lượt hiện tại chưa thể nhận yêu cầu đổi hướng. Tin nhắn của bạn đã được giữ lại.",
       "client_command_busy": "Chờ tác vụ hiện tại kết thúc trước khi dùng lệnh này."
+    },
+    "questions": {
+      "waiting": "Đang chờ câu trả lời",
+      "answer": "Gửi câu trả lời",
+      "hint": "Chọn một phương án hoặc nhập câu trả lời bên dưới. Tác vụ sẽ tiếp tục sau khi bạn trả lời."
     }
   }
 }

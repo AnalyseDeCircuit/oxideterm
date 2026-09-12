@@ -351,7 +351,8 @@
         "manage_telnet_session": "Manage Telnet Session",
         "open_transport_profile": "Open Transport Profile",
         "read_skill_resource": "Read Skill Resource",
-        "wait_terminal_output": "Wait for Terminal Output"
+        "wait_terminal_output": "Wait for Terminal Output",
+        "ask_user": "Ask user"
       },
       "risk_labels": {
         "read": "Read",
@@ -544,6 +545,11 @@
       "draft_not_empty": "Send or clear the current draft before editing a queued message.",
       "steer_unavailable": "This turn cannot accept steering right now. Your message has been kept.",
       "client_command_busy": "Wait for the current task to finish before using this command."
+    },
+    "questions": {
+      "waiting": "Waiting for your answer",
+      "answer": "Send answer",
+      "hint": "Choose an option, or type your answer below. The task will continue after you answer."
     }
   }
 }

@@ -351,7 +351,8 @@
         "manage_telnet_session": "Telnet セッションを管理",
         "open_transport_profile": "トランスポートプロファイルを開く",
         "read_skill_resource": "スキルリソースを読み取る",
-        "wait_terminal_output": "ターミナル出力を待機"
+        "wait_terminal_output": "ターミナル出力を待機",
+        "ask_user": "ユーザーに質問"
       },
       "risk_labels": {
         "read": "読み取り",
@@ -544,6 +545,11 @@
       "draft_not_empty": "送信待ちのメッセージを編集する前に、現在の下書きを送信するか消去してください。",
       "steer_unavailable": "現在のターンでは方針を調整できません。メッセージは保持されています。",
       "client_command_busy": "このコマンドは現在のタスクが終了してから使用してください。"
+    },
+    "questions": {
+      "waiting": "回答を待っています",
+      "answer": "回答を送信",
+      "hint": "選択肢を選ぶか、下の入力欄に回答してください。回答後にタスクを続行します。"
     }
   }
 }

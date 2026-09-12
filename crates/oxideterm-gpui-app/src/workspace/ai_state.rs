@@ -11,6 +11,18 @@ pub(in crate::workspace) mod agents;
 pub(in crate::workspace) mod knowledge;
 pub(in crate::workspace) use knowledge::KNOWLEDGE_DOCUMENT_PAGE_SIZE;
 
+pub(in crate::workspace) struct AiPendingUserQuestion {
+    pub conversation_id: String,
+    pub dispatch: Option<oxideterm_ai::agent::AgentDispatch>,
+    pub sender: tokio::sync::oneshot::Sender<zeroize::Zeroizing<String>>,
+}
+
+impl AiPendingUserQuestion {
+    fn active(&self) -> bool {
+        !self.sender.is_closed() && self.dispatch.as_ref().is_none_or(|guard| guard.check().is_ok())
+    }
+}
+
 /// Pending input is owned by this workspace and is never replayed from chat persistence.
 pub(in crate::workspace) struct AiQueuedChatTurn {
     pub id: String,
@@ -350,6 +362,7 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     pub(in crate::workspace) chat_launches: HashMap<String, String>,
     chat_drafts: HashMap<String, zeroize::Zeroizing<String>>,
     next_chat_sequence: u64,
+    pub(in crate::workspace) pending_user_questions: HashMap<(u64, String), AiPendingUserQuestion>,
     pending_tool_approvals: HashMap<(u64, String), tokio::sync::oneshot::Sender<bool>>,
     pending_acp_permission_choices:
         HashMap<(u64, String), tokio::sync::oneshot::Sender<Option<String>>>,
@@ -1124,6 +1137,7 @@ impl AiWorkspaceEntity {
             chat_launches: HashMap::new(),
             chat_drafts: HashMap::new(),
             next_chat_sequence: 0,
+            pending_user_questions: HashMap::new(),
             pending_tool_approvals: HashMap::new(),
             pending_acp_permission_choices: HashMap::new(),
             pending_tool_candidate_selections: HashMap::new(),
@@ -3495,7 +3509,7 @@ impl AiWorkspaceEntity {
                 for call in &mut message.tool_calls {
                     if matches!(
                         call.get("status").and_then(serde_json::Value::as_str),
-                        Some("running" | "pending" | "pending_user_approval")
+                        Some("running" | "pending" | "pending_user_approval" | "waiting_user")
                     ) {
                         call["status"] = serde_json::json!("cancelled");
                     }
@@ -3535,6 +3549,7 @@ impl AiWorkspaceEntity {
     }
 
     fn reject_run_tool_interactions(&mut self, generation: u64) {
+        self.pending_user_questions.retain(|(run, _), _| *run != generation);
         let approvals: Vec<_> = self
             .pending_tool_approvals
             .keys()
@@ -3580,6 +3595,20 @@ impl AiWorkspaceEntity {
                 self.chat_ui.footer_focus = selection.footer_focus;
             }
         }
+    }
+
+    pub(in crate::workspace) fn active_user_question(&self) -> Option<(u64, String)> {
+        let conversation = self.conversation_state().active_conversation_id.as_deref()?;
+        self.pending_user_questions.iter().find(|((generation, _), question)|
+            question.conversation_id == conversation && question.active() && self.run_accepts_tools(*generation))
+            .map(|(key, _)| key.clone())
+    }
+
+    pub(in crate::workspace) fn resolve_user_question(&mut self, generation: u64, id: &str, answer: zeroize::Zeroizing<String>) -> bool {
+        if answer.trim().is_empty() || !self.run_accepts_tools(generation) { return false; }
+        let key = (generation, id.to_owned());
+        if !self.pending_user_questions.get(&key).is_some_and(AiPendingUserQuestion::active) { return false; }
+        self.pending_user_questions.remove(&key).is_some_and(|question| question.sender.send(answer).is_ok())
     }
 
     pub(in crate::workspace) fn register_tool_approval(
@@ -3655,6 +3684,7 @@ impl AiWorkspaceEntity {
     }
 
     fn reject_all_tool_approvals(&mut self) {
+        self.pending_user_questions.clear();
         for (_, sender) in self.pending_tool_approvals.drain() {
             let _ = sender.send(false);
         }
@@ -5763,6 +5793,63 @@ pub(in crate::workspace) mod entity_tests {
         cx.run_until_parked();
 
         assert_eq!(release_receiver.try_recv(), Ok(false));
+    }
+
+    #[gpui::test]
+    fn user_question_answers_are_scoped_to_the_live_conversation_run(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let (first_tx, mut first_rx) = tokio::sync::oneshot::channel();
+        let (second_tx, mut second_rx) = tokio::sync::oneshot::channel();
+        entity.update(cx, |ai, _| {
+            let first = ai.begin_chat_stream("first".into(), "reply-first".into()).0;
+            let second = ai
+                .begin_chat_stream("second".into(), "reply-second".into())
+                .0;
+            ai.pending_user_questions.insert(
+                (first, "question".into()),
+                AiPendingUserQuestion {
+                    conversation_id: "first".into(),
+                    dispatch: None,
+                    sender: first_tx,
+                },
+            );
+            ai.pending_user_questions.insert(
+                (second, "question".into()),
+                AiPendingUserQuestion {
+                    conversation_id: "second".into(),
+                    dispatch: None,
+                    sender: second_tx,
+                },
+            );
+            ai.cancel_chat_stream_for("first");
+            assert!(!ai.resolve_user_question(
+                first,
+                "question",
+                zeroize::Zeroizing::new("stale answer".into())
+            ));
+            assert!(!ai.resolve_user_question(
+                second,
+                "question",
+                zeroize::Zeroizing::new("  ".into())
+            ));
+            assert!(ai.resolve_user_question(
+                second,
+                "question",
+                zeroize::Zeroizing::new("Staging".into())
+            ));
+            assert!(!ai.resolve_user_question(
+                second,
+                "question",
+                zeroize::Zeroizing::new("duplicate".into())
+            ));
+        });
+        assert!(matches!(
+            first_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed)
+        ));
+        assert_eq!(second_rx.try_recv().unwrap().as_str(), "Staging");
     }
 
     #[gpui::test]

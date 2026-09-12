@@ -1036,6 +1036,10 @@ fn chat_persistence_hydrates_interrupted_stream_as_closed_turn() {
                 "arguments": "{}",
                 "status": "running",
                 "result": serde_json::Value::Null,
+            }), serde_json::json!({
+                "id": "question-1", "name": "ask_user", "arguments": "{}",
+                "status": "waiting_user", "approvalGeneration": 42,
+                "result": {"question":"Which environment?","options":["Staging","Production"]}
             })],
             turn: Some(serde_json::json!({
                 "id": "assistant-1",
@@ -1066,6 +1070,7 @@ fn chat_persistence_hydrates_interrupted_stream_as_closed_turn() {
     let loaded = store.load_state().unwrap();
     let message = &loaded.conversations[0].messages[0];
     assert!(!message.is_streaming);
+    assert_eq!(message.tool_calls[1]["status"], "rejected");
     let turn = message.turn.as_ref().expect("turn");
     assert_eq!(
         turn.get("status").and_then(serde_json::Value::as_str),

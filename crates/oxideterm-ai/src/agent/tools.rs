@@ -2,6 +2,7 @@ use crate::AiToolDefinition;
 use serde_json::json;
 
 pub const PARENT_AGENT_TOOLS: &[&str] = &[
+    "ask_user",
     "delegate_task",
     "send_agent_message",
     "wait_agents",
@@ -32,6 +33,12 @@ pub fn agent_tool_definitions(child: bool) -> Vec<AiToolDefinition> {
         ]
     } else {
         vec![
+            (
+                "ask_user",
+                "Ask the user one focused question when missing information would materially change the task. The host waits for an explicit answer and resumes this same tool call without polling. Offer up to four concise options when helpful; free text is always allowed. Do not request passwords, tokens, or other secrets. Call this tool alone and plan dependent operations after reading the answer. This is clarification, not permission to bypass tool approval. Children must use ask_parent.",
+                json!({"question":{"type":"string","minLength":1,"maxLength":2000},"options":{"type":"array","maxItems":4,"items":{"type":"string","minLength":1,"maxLength":300}}}),
+                vec!["question"],
+            ),
             (
                 "delegate_task",
                 "Delegate a bounded task to one child using currently discovered target handles. Delegation does not authorize more tools or targets. Children share the tool-round budget. Returns immediately; use wait_agents for questions and results.",

@@ -351,7 +351,8 @@
         "manage_telnet_session": "管理 Telnet 工作階段",
         "open_transport_profile": "開啟傳輸設定檔",
         "read_skill_resource": "讀取技能資源",
-        "wait_terminal_output": "等待終端輸出"
+        "wait_terminal_output": "等待終端輸出",
+        "ask_user": "向使用者提問"
       },
       "risk_labels": {
         "read": "唯讀",
@@ -544,6 +545,11 @@
       "draft_not_empty": "請先傳送或清空目前草稿，再編輯排隊訊息。",
       "steer_unavailable": "目前回合暫時無法接收調整方向的訊息，內容已保留。",
       "client_command_busy": "請等目前任務結束後再使用此命令。"
+    },
+    "questions": {
+      "waiting": "等待你的回答",
+      "answer": "傳送回答",
+      "hint": "選擇一個選項，或在下方輸入框中回答。收到回答後任務將繼續。"
     }
   }
 }
