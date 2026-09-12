@@ -1,7 +1,8 @@
 use super::*;
 use crate::agent::{AgentRecord, AgentRunId};
 
-const AGENT_RECORDS: TableDefinition<&str, &[u8]> = TableDefinition::new("agent_records");
+pub(super) const AGENT_RECORDS: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("agent_records");
 const AGENT_SUMMARIES: TableDefinition<&str, &[u8]> = TableDefinition::new("agent_summaries");
 
 pub(super) fn initialize(transaction: &redb::WriteTransaction) -> Result<()> {

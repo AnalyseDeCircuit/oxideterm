@@ -14,7 +14,38 @@ use redb::{Database, ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod agent_queries;
 mod agents;
+mod content;
+mod reachability;
+mod records;
+mod stream_delta;
+mod text;
+mod tool_payloads;
+pub use agent_queries::{AgentCommunicationPage, agent_history_branch};
+pub use stream_delta::{HistoryStreamDelta, HistoryStreamSnapshot};
+mod archives;
+mod cache;
+mod compaction;
+mod decoding;
+mod live_windows;
+mod migration;
+mod mutations;
+mod queries;
+mod store;
+mod windows;
+mod writer;
+pub use live_windows::{live_content_page, live_message_view};
+pub use mutations::HistoryMutation;
+pub use records::{
+    ConversationHead, HISTORY_CACHE_BYTES, HISTORY_PAGE_SIZE, HistoryCursor, HistoryPage,
+    MessageDescriptor, MessagePage,
+};
+pub use store::ConversationStore;
+pub use windows::{
+    HistoryContentCursor, HistoryContentPage, HistoryEventLocation, HistoryMessageView,
+};
+pub use writer::{HISTORY_PENDING_BYTES, HistoryWriteState, HistoryWriter};
 
 use crate::{
     AiChatMessage, AiChatMessageMetadata, AiChatRole, AiChatState, AiConversation,
@@ -115,6 +146,10 @@ impl AiChatPersistenceStore {
 
     pub fn load_conversation(&self, conversation_id: &str) -> Result<Option<AiConversation>> {
         self.initialize()?;
+        self.read_conversation(conversation_id)
+    }
+
+    fn read_conversation(&self, conversation_id: &str) -> Result<Option<AiConversation>> {
         let read_txn = self.db.begin_read()?;
         let conv_table = read_txn.open_table(CONVERSATIONS_TABLE)?;
         let Some(meta_bytes) = conv_table.get(conversation_id)? else {
@@ -760,7 +795,8 @@ fn normalize_interrupted_assistant_projection(message: &mut AiChatMessage) {
 
 fn ai_tool_call_is_unfinished(call: &Value) -> bool {
     if call.get("name").and_then(Value::as_str) == Some("ask_user")
-        && call.get("status").and_then(Value::as_str) == Some("waiting_user") {
+        && call.get("status").and_then(Value::as_str) == Some("waiting_user")
+    {
         return true;
     }
     if call.get("result").is_some_and(|result| !result.is_null()) {
@@ -812,7 +848,11 @@ fn load_round_summaries_from_transcript(
     read_txn: &redb::ReadTransaction,
     conversation_id: &str,
 ) -> Result<Vec<TranscriptRoundSummary>> {
-    let transcript_index_table = read_txn.open_table(CONV_TRANSCRIPT_TABLE)?;
+    let transcript_index_table = match read_txn.open_table(CONV_TRANSCRIPT_TABLE) {
+        Ok(table) => table,
+        Err(redb::TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
     let transcript_table = read_txn.open_table(TRANSCRIPT_TABLE)?;
     let ids = transcript_index_table
         .get(conversation_id)?
@@ -1452,3 +1492,6 @@ pub struct PersistedDiagnosticEvent {
     #[serde(default)]
     pub data: Value,
 }
+
+#[cfg(test)]
+mod storage_tests;

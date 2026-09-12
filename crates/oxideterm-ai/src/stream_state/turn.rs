@@ -437,13 +437,11 @@ pub fn append_ai_turn_text_part(
             .and_then(serde_json::Value::as_object_mut)
             .filter(|part| part.get("type").and_then(serde_json::Value::as_str) == Some(part_type))
         {
-            let next = last
-                .get("text")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string()
-                + text;
-            last.insert("text".to_string(), serde_json::json!(next));
+            if let Some(serde_json::Value::String(existing)) = last.get_mut("text") {
+                existing.push_str(text);
+            } else {
+                last.insert("text".to_string(), serde_json::json!(text));
+            }
             if part_type == "thinking" {
                 last.insert("streaming".to_string(), serde_json::json!(streaming));
             }

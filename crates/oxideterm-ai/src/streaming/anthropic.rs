@@ -38,7 +38,7 @@ pub(crate) async fn stream_anthropic_completion(
         .await
         .map_err(|error| anyhow::Error::new(error.without_url()))?;
     if !response.status().is_success() {
-            super::retry::check_transient_response(&response)?;
+        super::retry::check_transient_response(&response)?;
         let status = response.status().as_u16();
         let error_text = response.text().await.unwrap_or_default();
         return Err(anyhow!(parse_anthropic_error(status, &error_text)));
@@ -48,7 +48,9 @@ pub(crate) async fn stream_anthropic_completion(
         parse_anthropic_data_line_with_accumulator(line, &mut accumulator)
     })
     .await?;
-    if !matches!(result, StreamParseResult::Done) { return Err(anyhow!("ai_stream_interrupted")); }
+    if !matches!(result, StreamParseResult::Done) {
+        return Err(anyhow!("ai_stream_interrupted"));
+    }
     let _ = events.send(AiStreamEvent::Done);
     Ok(())
 }
@@ -408,7 +410,10 @@ pub(crate) fn parse_anthropic_data_line_with_accumulator(
                     });
                 }
             }
-            Some("message_delta") if json.pointer("/delta/stop_reason").and_then(Value::as_str) == Some("max_tokens") => {
+            Some("message_delta")
+                if json.pointer("/delta/stop_reason").and_then(Value::as_str)
+                    == Some("max_tokens") =>
+            {
                 events.push(AiStreamEvent::Error("ai_output_incomplete".into()));
             }
             Some("message_stop") => events.push(AiStreamEvent::Done),

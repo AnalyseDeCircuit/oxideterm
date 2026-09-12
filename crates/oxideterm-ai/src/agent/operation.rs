@@ -47,9 +47,10 @@ pub fn result_recovery(result: &AiExecutedToolResult) -> Option<Recovery> {
         | "unknown_tool"
         | "tool_unavailable"
         | "tool_not_available" => Recovery::InvalidCall,
-        "operation_cancelled" | "agent_direction_changed" | "dependency_failed" | "agent_wait_paused" => {
-            Recovery::Cancelled
-        }
+        "operation_cancelled"
+        | "agent_direction_changed"
+        | "dependency_failed"
+        | "agent_wait_paused" => Recovery::Cancelled,
         "agent_scope_denied" | "runtime_capability_unavailable" => Recovery::Permanent,
         _ => Recovery::OutcomeUnknown,
     })

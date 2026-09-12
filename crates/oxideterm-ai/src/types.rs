@@ -124,11 +124,21 @@ pub struct AiFollowUpSuggestion {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AiHistoryRange {
+    pub branch_id: String,
+    pub first_message_id: Option<String>,
+    pub last_message_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AiMessageBranches {
     pub total: usize,
     pub active_index: usize,
     #[serde(default)]
     pub tails: HashMap<usize, Vec<AiChatMessage>>,
+    #[serde(default)]
+    pub refs: HashMap<usize, AiHistoryRange>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -142,6 +152,8 @@ pub struct AiChatMessageMetadata {
     pub compacted_at_ms: Option<i64>,
     #[serde(default)]
     pub original_messages: Option<Vec<AiChatMessage>>,
+    #[serde(default)]
+    pub original_ref: Option<AiHistoryRange>,
     #[serde(default)]
     pub original_user_count: Option<usize>,
 }
@@ -298,7 +310,10 @@ pub enum AiStreamEvent {
 impl AiChatStreamConfig {
     pub fn uses_responses(&self) -> bool {
         self.api_protocol == AiApiProtocol::Responses
-            && matches!(self.provider_type.as_str(), "openai" | "openai_compatible" | "xai")
+            && matches!(
+                self.provider_type.as_str(),
+                "openai" | "openai_compatible" | "xai"
+            )
     }
 
     pub fn response_state_key(&self) -> String {

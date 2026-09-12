@@ -67,7 +67,9 @@ pub async fn stream_chat_completion(
         while let Ok(event) = receiver.try_recv() {
             delivered_output |= !matches!(event, AiStreamEvent::Usage { .. });
             let failed = matches!(event, AiStreamEvent::Error(_));
-            if events.send(event).is_err() || failed { return; }
+            if events.send(event).is_err() || failed {
+                return;
+            }
         }
         match result {
             Ok(()) => return,
@@ -81,9 +83,12 @@ pub async fn stream_chat_completion(
                 }
                 let error = error.to_string();
                 let error = if config.api_protocol == crate::AiApiProtocol::Responses
-                    && crate::stream_error_label(&error).is_none() {
+                    && crate::stream_error_label(&error).is_none()
+                {
                     "responses_failed".to_string()
-                } else { error };
+                } else {
+                    error
+                };
                 let _ = events.send(AiStreamEvent::Error(error));
                 return;
             }
@@ -101,7 +106,9 @@ async fn stream_once(
         if config.uses_responses() {
             responses::stream_responses(config, messages, events.clone()).await
         } else {
-            Err(anyhow::anyhow!("Responses requires an OpenAI-compatible provider"))
+            Err(anyhow::anyhow!(
+                "Responses requires an OpenAI-compatible provider"
+            ))
         }
     } else {
         match chat_stream_provider_family(&config.provider_type) {

@@ -174,7 +174,7 @@ pub(crate) async fn stream_ollama_completion(
             anyhow!("Cannot connect to Ollama. Make sure Ollama is running (ollama serve).")
         })?;
     if !response.status().is_success() {
-            super::retry::check_transient_response(&response)?;
+        super::retry::check_transient_response(&response)?;
         let status = response.status().as_u16();
         let error_text = response.text().await.unwrap_or_default();
         let parsed = parse_ollama_error(status, &error_text);
@@ -186,7 +186,7 @@ pub(crate) async fn stream_ollama_completion(
                     anyhow!("Cannot connect to Ollama. Make sure Ollama is running (ollama serve).")
                 })?;
             if !response.status().is_success() {
-            super::retry::check_transient_response(&response)?;
+                super::retry::check_transient_response(&response)?;
                 let retry_status = response.status().as_u16();
                 let retry_error_text = response.text().await.unwrap_or_default();
                 return Err(anyhow!(parse_ollama_error(retry_status, &retry_error_text)));

@@ -42,6 +42,7 @@ fn conversation_turn_count_preserves_submissions_across_live_compacted_and_summa
         kind: "compaction-anchor".to_string(),
         original_count: Some(14),
         compacted_at_ms: Some(1),
+        original_ref: None,
         original_messages: None,
         original_user_count: Some(7),
     });
@@ -75,6 +76,7 @@ fn provider_history_preserves_text_and_summary_order_without_replaying_old_tool_
         kind: "compaction-anchor".to_string(),
         original_count: Some(4),
         compacted_at_ms: Some(1),
+        original_ref: None,
         original_messages: None,
         original_user_count: None,
     });

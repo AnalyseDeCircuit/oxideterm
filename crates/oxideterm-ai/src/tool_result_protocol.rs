@@ -310,6 +310,4 @@ mod tests {
                 .is_some_and(|output| output.contains("[truncated:"))
         );
     }
-
-
 }

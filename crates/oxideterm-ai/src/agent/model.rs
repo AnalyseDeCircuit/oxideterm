@@ -89,6 +89,22 @@ pub struct AgentRecord {
     pub revision: i64,
 }
 
+impl AgentRecord {
+    /// Display metadata has no ownership of message bodies or communication history.
+    pub fn metadata_projection(&self) -> Self {
+        Self {
+            parent_usage: self.parent_usage,
+            created_at_ms: self.created_at_ms,
+            snapshot: self.snapshot.clone(),
+            parent_message_id: self.parent_message_id.clone(),
+            target_labels: self.target_labels.clone(),
+            messages: Vec::new(),
+            communication: Vec::new(),
+            revision: self.revision,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AgentScope {
     /// Host-owned identities survive pane selection, but cannot enter model or durable data.

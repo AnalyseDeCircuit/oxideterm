@@ -139,6 +139,7 @@ fn responses_replay_restores_wire_ids_and_survives_persistence_and_scope_changes
             json!({"output":branch_output,"results":[],"callIds":{}}),
         );
         assistant.branches = Some(AiMessageBranches {
+            refs: Default::default(),
             total: 2,
             active_index: 1,
             tails: HashMap::from([(0, vec![branch])]),
@@ -149,9 +150,14 @@ fn responses_replay_restores_wire_ids_and_survives_persistence_and_scope_changes
         let id = state.create_conversation("conversation".into(), None, 1, None);
         state.add_message(&id, assistant);
         store.save_state(state).unwrap();
-        let mut history = store.load_conversation(&id).unwrap().unwrap().messages;
-        let branch = &history[0].branches.as_ref().unwrap().tails[&0];
-        assert_eq!(responses_body(&config, branch)["input"], branch_output);
+        drop(store);
+        let store =
+            crate::ConversationStore::open_or_migrate(&dir.path().join("chat.redb"), |_, _| {})
+                .unwrap();
+        let mut history = store.page(&id, "main", None, 50).unwrap().messages;
+        let range = &history[0].branches.as_ref().unwrap().refs[&0];
+        let branch = store.range_messages(&id, range, None, 50).unwrap().messages;
+        assert_eq!(responses_body(&config, &branch)["input"], branch_output);
         normalize_ai_stream_history_for_provider(&mut history);
         history.push(chat_message("next", AiChatRole::User, "continue"));
         assert_eq!(
@@ -230,7 +236,10 @@ fn responses_request_maps_tools_limits_and_legacy_provider_default() {
     );
     config.provider_type = "openai_compatible".into();
     config.model = "gpt-5-pro".into();
-    assert_eq!(responses_body(&config, &[])["reasoning"], json!({"effort":"high","summary":"auto"}));
+    assert_eq!(
+        responses_body(&config, &[])["reasoning"],
+        json!({"effort":"high","summary":"auto"})
+    );
     config.model = "gpt-4o".into();
     config.reasoning_effort = Some("auto".into());
     assert_eq!(responses_body(&config, &[]).get("reasoning"), None);

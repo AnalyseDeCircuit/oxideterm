@@ -16,8 +16,13 @@ pub(crate) async fn fetch_provider_models_payload(
         "xai" => {
             api_key_required_ref(provider_type, api_key.map(|key| key.as_str()))?;
             fetch_openai_compatible_json(
-                client, &provider.base_url, "/language-models", api_key, "xAI language model list",
-            ).await
+                client,
+                &provider.base_url,
+                "/language-models",
+                api_key,
+                "xAI language model list",
+            )
+            .await
         }
         "anthropic" => {
             let api_key =

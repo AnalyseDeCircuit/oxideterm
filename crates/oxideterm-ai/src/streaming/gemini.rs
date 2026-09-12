@@ -41,13 +41,15 @@ pub(crate) async fn stream_gemini_completion(
         .await
         .map_err(|error| anyhow::Error::new(error.without_url()))?;
     if !response.status().is_success() {
-            super::retry::check_transient_response(&response)?;
+        super::retry::check_transient_response(&response)?;
         let status = response.status().as_u16();
         let error_text = response.text().await.unwrap_or_default();
         return Err(anyhow!(parse_gemini_error(status, &error_text)));
     }
     let result = stream_sse_response(response, &events, parse_gemini_data_line).await?;
-    if !matches!(result, StreamParseResult::Done) { return Err(anyhow!("ai_stream_interrupted")); }
+    if !matches!(result, StreamParseResult::Done) {
+        return Err(anyhow!("ai_stream_interrupted"));
+    }
     let _ = events.send(AiStreamEvent::Done);
     Ok(())
 }
@@ -339,8 +341,15 @@ pub(crate) fn parse_gemini_data_line(line: &str) -> ParsedStreamLine {
                 }
             }
         }
-        if let Some(reason) = json.pointer("/candidates/0/finishReason").and_then(Value::as_str) {
-            events.push(if reason == "STOP" { AiStreamEvent::Done } else { AiStreamEvent::Error("ai_output_incomplete".into()) });
+        if let Some(reason) = json
+            .pointer("/candidates/0/finishReason")
+            .and_then(Value::as_str)
+        {
+            events.push(if reason == "STOP" {
+                AiStreamEvent::Done
+            } else {
+                AiStreamEvent::Error("ai_output_incomplete".into())
+            });
         }
     }
     ParsedStreamLine {

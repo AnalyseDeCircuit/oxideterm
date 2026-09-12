@@ -190,7 +190,11 @@ pub(crate) fn parse_openai_json_events(body: &str, context: &str) -> Result<Vec<
             output_tokens: usage.get("completion_tokens").and_then(Value::as_u64),
         });
     }
-    if matches!(json.pointer("/choices/0/finish_reason").and_then(Value::as_str), Some("length" | "content_filter")) {
+    if matches!(
+        json.pointer("/choices/0/finish_reason")
+            .and_then(Value::as_str),
+        Some("length" | "content_filter")
+    ) {
         events.retain(|event| !matches!(event, AiStreamEvent::ToolCallComplete { .. }));
         events.push(AiStreamEvent::Error("ai_output_incomplete".into()));
     }

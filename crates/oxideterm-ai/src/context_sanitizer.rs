@@ -279,6 +279,29 @@ pub fn sanitize_tool_result_json_for_persistence(tool_name: &str, value: &Value)
     sanitize_tool_result_value_for_persistence(tool_name, value)
 }
 
+pub(crate) fn sanitize_tool_protocol_field_for_persistence(
+    key: &str,
+    value: &Value,
+    tool_name: Option<&str>,
+) -> Option<Value> {
+    if is_runtime_authority_json_key(key) {
+        return None;
+    }
+    Some(if value.is_string() && is_sensitive_json_key(key) {
+        Value::String(REDACTED.to_string())
+    } else if is_embedded_json_key(key) {
+        value
+            .as_str()
+            .map(sanitize_tool_arguments_text_for_persistence)
+            .map(Value::String)
+            .unwrap_or_else(|| sanitize_tool_arguments_json_for_persistence(value))
+    } else if normalized_json_key(key) == "result" {
+        sanitize_tool_result_value_for_persistence(tool_name.unwrap_or_default(), value)
+    } else {
+        sanitize_tool_protocol_value_for_persistence(value, tool_name)
+    })
+}
+
 fn sanitize_tool_protocol_value_for_persistence(
     value: &Value,
     inherited_tool_name: Option<&str>,
@@ -294,28 +317,8 @@ fn sanitize_tool_protocol_value_for_persistence(
                 object
                     .iter()
                     .filter_map(|(key, value)| {
-                        if is_runtime_authority_json_key(key) {
-                            return None;
-                        }
-                        let sanitized = if value.is_string() && is_sensitive_json_key(key) {
-                            Value::String(REDACTED.to_string())
-                        } else if is_embedded_json_key(key) {
-                            value
-                                .as_str()
-                                .map(sanitize_tool_arguments_text_for_persistence)
-                                .map(Value::String)
-                                .unwrap_or_else(|| {
-                                    sanitize_tool_arguments_json_for_persistence(value)
-                                })
-                        } else if normalized_json_key(key) == "result" {
-                            sanitize_tool_result_value_for_persistence(
-                                tool_name.unwrap_or_default(),
-                                value,
-                            )
-                        } else {
-                            sanitize_tool_protocol_value_for_persistence(value, tool_name)
-                        };
-                        Some((key.clone(), sanitized))
+                        sanitize_tool_protocol_field_for_persistence(key, value, tool_name)
+                            .map(|value| (key.clone(), value))
                     })
                     .collect(),
             )

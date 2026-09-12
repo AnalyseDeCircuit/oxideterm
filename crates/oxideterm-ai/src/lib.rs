@@ -14,8 +14,8 @@ mod provider_embeddings;
 mod providers;
 mod rag;
 mod reasoning;
-mod responses_state;
 mod references;
+mod responses_state;
 mod runtime_context;
 mod settings;
 mod slash;
@@ -78,7 +78,14 @@ pub use orchestrator::{
     OrchestratorArgumentError, canonicalize_orchestrator_tool_arguments,
     orchestrator_tool_definitions,
 };
-pub use persistence::{AiChatPersistenceStore, PersistedDiagnosticEvent, PersistedTranscriptEntry};
+pub use persistence::{
+    AgentCommunicationPage, AiChatPersistenceStore, ConversationHead, ConversationStore,
+    HISTORY_CACHE_BYTES, HISTORY_PAGE_SIZE, HISTORY_PENDING_BYTES, HistoryContentCursor,
+    HistoryContentPage, HistoryCursor, HistoryEventLocation, HistoryMessageView, HistoryMutation,
+    HistoryPage, HistoryStreamDelta, HistoryStreamSnapshot, HistoryWriteState, HistoryWriter,
+    MessageDescriptor, MessagePage, PersistedDiagnosticEvent, PersistedTranscriptEntry,
+    agent_history_branch, live_content_page, live_message_view,
+};
 pub use policy::{
     AiActionRisk, AiPolicyDecision, AiPolicyDecisionKind, AiPolicySafetyMode, AiToolUsePolicy,
     denied_commands, has_denied_commands, is_command_denied, is_orchestrator_tool_name,
@@ -122,6 +129,9 @@ pub use references::{
     ai_reference_context_block, ai_reference_label, current_terminal_context_system_message,
     extract_ai_error_context, infer_ai_cwd,
 };
+pub use responses_state::{
+    append_responses_round, has_responses_history, responses_round_state, scope_responses_history,
+};
 pub use runtime_context::{
     RuntimeCapability, RuntimeCapabilityRegistry, RuntimeContextError, RuntimeContextSnapshot,
     RuntimeHandleId, RuntimeHandleProjection, RuntimeOwnerGeneration, RuntimeOwnerKey,
@@ -131,10 +141,10 @@ pub use runtime_context::{
 };
 pub use settings::{
     AiProviderKeyDisplayState, AiProviderRefreshKeyPolicy, add_provider_from_template,
-    add_provider_model, apply_provider_model_refresh,
-    provider_chat_requires_key, provider_key_display_state, provider_refresh_key_policy,
-    remove_provider_at, remove_provider_at_with_scoped_settings, select_provider_model,
-    set_active_provider_selection, take_provider_key_secret,
+    add_provider_model, apply_provider_model_refresh, provider_chat_requires_key,
+    provider_key_display_state, provider_refresh_key_policy, remove_provider_at,
+    remove_provider_at_with_scoped_settings, select_provider_model, set_active_provider_selection,
+    take_provider_key_secret,
 };
 pub use slash::{
     AI_PARTICIPANTS, AI_REFERENCES, AI_SLASH_COMMANDS, AiAutocompleteCandidate, AiAutocompleteKind,
@@ -164,13 +174,9 @@ pub use tool_result_protocol::{
     ai_tool_result_evidence_facts_for_model, ai_tool_result_model_content,
     ai_tool_result_model_error, truncate_ai_tool_result_for_model,
 };
-pub use responses_state::{
-    append_responses_round, has_responses_history, responses_round_state,
-    scope_responses_history,
-};
 pub use types::{
     AiApiProtocol, AiChatMessage, AiChatMessageMetadata, AiChatRole, AiChatState,
-    AiChatStreamConfig, AiConversation, AiFollowUpSuggestion, AiMessageBranches,
+    AiChatStreamConfig, AiConversation, AiFollowUpSuggestion, AiHistoryRange, AiMessageBranches,
     AiProviderTemplate, AiProviderView, AiStreamEvent, AiToolCall, AiToolChoice, AiToolDefinition,
     ModelSelectorProviderGroup, ModelSelectorProviderProbe, ProviderModelRefresh,
     SharedAiProviderKey,

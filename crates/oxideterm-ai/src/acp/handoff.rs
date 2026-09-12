@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
@@ -6,6 +6,7 @@ use zeroize::Zeroizing;
 use crate::{AiChatRole, AiConversation, sanitize_for_ai};
 
 const MESSAGE_BACKENDS_METADATA_KEY: &str = "messageBackends";
+const MESSAGE_BACKEND_KEY: &str = "backendProvenance";
 const HANDOFF_MAX_CHARS: usize = 48 * 1024;
 const HANDOFF_MESSAGE_MAX_CHARS: usize = 12 * 1024;
 const HANDOFF_OMISSION_NOTICE_MAX_CHARS: usize = 64;
@@ -45,6 +46,16 @@ pub fn ai_message_backend_provenance(
     conversation: &AiConversation,
     message_id: &str,
 ) -> Option<AiMessageBackendProvenance> {
+    if let Some(value) = conversation
+        .messages
+        .iter()
+        .find(|message| message.id == message_id)
+        .and_then(|message| message.turn.as_ref())
+        .and_then(|turn| turn.get(MESSAGE_BACKEND_KEY))
+    {
+        return serde_json::from_value(value.clone()).ok();
+    }
+    // Released histories stored provenance at conversation scope; migration moves it onto messages.
     conversation
         .session_metadata
         .as_ref()?
@@ -59,39 +70,66 @@ pub fn store_ai_message_backend_provenance(
     message_id: &str,
     provenance: AiMessageBackendProvenance,
 ) -> bool {
-    let retained_message_ids = conversation
+    let Some(message) = conversation
         .messages
-        .iter()
-        .map(|message| message.id.as_str())
-        .collect::<HashSet<_>>();
-    if !retained_message_ids.contains(message_id) {
-        return false;
-    }
-    let metadata = conversation
-        .session_metadata
-        .get_or_insert_with(|| serde_json::json!({}));
-    let Some(metadata) = metadata.as_object_mut() else {
+        .iter_mut()
+        .rev()
+        .find(|message| message.id == message_id)
+    else {
         return false;
     };
-    let backends = metadata
-        .entry(MESSAGE_BACKENDS_METADATA_KEY.to_string())
-        .or_insert_with(|| serde_json::json!({}));
-    if !backends.is_object() {
-        *backends = serde_json::json!({});
-    }
-    let Some(backends) = backends.as_object_mut() else {
+    store_message_backend(message, provenance)
+}
+
+fn store_message_backend(
+    message: &mut crate::AiChatMessage,
+    provenance: AiMessageBackendProvenance,
+) -> bool {
+    let turn = message.turn.get_or_insert_with(|| serde_json::json!({}));
+    let Some(turn) = turn.as_object_mut() else {
         return false;
     };
-    let Ok(provenance) = serde_json::to_value(provenance) else {
+    let Ok(value) = serde_json::to_value(provenance) else {
         return false;
     };
-    backends.insert(message_id.to_string(), provenance);
-    if backends.len() > retained_message_ids.len().saturating_add(32) {
-        // Message projections are bounded independently from conversation
-        // metadata, so prune provenance that no longer has a message owner.
-        backends.retain(|id, _| retained_message_ids.contains(id.as_str()));
-    }
+    turn.insert(MESSAGE_BACKEND_KEY.into(), value);
     true
+}
+
+pub(crate) fn migrate_message_backends(
+    message: &mut crate::AiChatMessage,
+    legacy: &serde_json::Value,
+) -> anyhow::Result<()> {
+    if message
+        .turn
+        .as_ref()
+        .and_then(|turn| turn.get(MESSAGE_BACKEND_KEY))
+        .is_none()
+    {
+        if let Some(value) = legacy.get(&message.id) {
+            let provenance: AiMessageBackendProvenance = serde_json::from_value(value.clone())?;
+            if !store_message_backend(message, provenance) {
+                return Err(anyhow::anyhow!("History backend provenance is invalid"));
+            }
+        }
+    }
+    if let Some(originals) = message
+        .metadata
+        .as_mut()
+        .and_then(|metadata| metadata.original_messages.as_mut())
+    {
+        for original in originals {
+            migrate_message_backends(original, legacy)?;
+        }
+    }
+    if let Some(branches) = &mut message.branches {
+        for tail in branches.tails.values_mut() {
+            for message in tail {
+                migrate_message_backends(message, legacy)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn acp_conversation_handoff_cursor(
@@ -318,8 +356,8 @@ mod tests {
         ));
         conversation
             .session_metadata
-            .as_mut()
-            .and_then(serde_json::Value::as_object_mut)
+            .get_or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
             .expect("metadata object")
             .insert(
                 "acp".to_string(),

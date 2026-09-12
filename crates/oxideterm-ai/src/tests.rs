@@ -1619,6 +1619,7 @@ fn chat_persistence_preserves_message_branches() {
     );
     let mut edited = chat_message("message-live", AiChatRole::User, "new prompt");
     edited.branches = Some(AiMessageBranches {
+        refs: Default::default(),
         total: 2,
         active_index: 1,
         tails: HashMap::from([(
@@ -1750,8 +1751,13 @@ fn chat_persistence_preserves_long_history_across_repeated_saves() {
         let reloaded = store.load_state().unwrap();
         let messages = &reloaded.conversations[0].messages;
         assert_eq!(
-            messages.iter().map(|message| (message.id.clone(), message.content.clone())).collect::<Vec<_>>(),
-            (0..2_105).map(|index| (format!("message-{index}"), format!("content-{index}"))).collect::<Vec<_>>()
+            messages
+                .iter()
+                .map(|message| (message.id.clone(), message.content.clone()))
+                .collect::<Vec<_>>(),
+            (0..2_105)
+                .map(|index| (format!("message-{index}"), format!("content-{index}")))
+                .collect::<Vec<_>>()
         );
         store.save_state(reloaded).unwrap();
     }
@@ -2011,12 +2017,28 @@ mod responses;
 
 #[test]
 fn provider_token_limits_are_not_reported_as_completed_turns() {
-    assert_eq!(parse_openai_data_line(r#"data: {"choices":[{"delta":{"content":"partial"},"finish_reason":"length"}]}"#).events,
-        vec![AiStreamEvent::Content("partial".into()),AiStreamEvent::Error("ai_output_incomplete".into())]);
+    assert_eq!(
+        parse_openai_data_line(
+            r#"data: {"choices":[{"delta":{"content":"partial"},"finish_reason":"length"}]}"#
+        )
+        .events,
+        vec![
+            AiStreamEvent::Content("partial".into()),
+            AiStreamEvent::Error("ai_output_incomplete".into())
+        ]
+    );
     let events=parse_gemini_data_line(r#"data: {"candidates":[{"content":{"parts":[{"text":"partial"}]},"finishReason":"MAX_TOKENS"}]}"#).events;
-    assert_eq!(events.last(),Some(&AiStreamEvent::Error("ai_output_incomplete".into())));
-    assert_eq!(parse_anthropic_data_line(r#"data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"}}"#).events,
-        vec![AiStreamEvent::Error("ai_output_incomplete".into())]);
+    assert_eq!(
+        events.last(),
+        Some(&AiStreamEvent::Error("ai_output_incomplete".into()))
+    );
+    assert_eq!(
+        parse_anthropic_data_line(
+            r#"data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"}}"#
+        )
+        .events,
+        vec![AiStreamEvent::Error("ai_output_incomplete".into())]
+    );
 }
 
 #[tokio::test]

@@ -35,7 +35,10 @@ pub(super) async fn stream_responses(
         if let Some(key) = config.api_key.as_ref().filter(|key| !key.is_empty()) {
             request = request.bearer_auth(key.as_str());
         }
-        let response = request.send().await.map_err(|error| anyhow::Error::new(error.without_url()))?;
+        let response = request
+            .send()
+            .await
+            .map_err(|error| anyhow::Error::new(error.without_url()))?;
         if !response.status().is_success() {
             super::retry::check_transient_response(&response)?;
             let status = response.status();

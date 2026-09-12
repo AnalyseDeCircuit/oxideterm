@@ -2644,3 +2644,5 @@ mod tests {
         assert_eq!(error.code, agent_client_protocol::ErrorCode::MethodNotFound);
     }
 }
+
+pub(crate) use handoff::migrate_message_backends;
