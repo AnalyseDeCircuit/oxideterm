@@ -496,7 +496,13 @@ impl PrivilegePromptTracker {
         }
     }
 
-    fn prompt_is_waiting_for_secret(&self, now: Instant) -> bool {
+    pub(crate) fn input_answers_prompt(&self, bytes: &[u8], now: Instant) -> bool {
+        self.prompt_is_waiting_for_secret(now)
+            && !normalize_privilege_input_bytes(bytes).bytes.iter()
+                .any(|byte| matches!(byte, 0x03 | 0x04 | 0x1a))
+    }
+
+    pub(crate) fn prompt_is_waiting_for_secret(&self, now: Instant) -> bool {
         match &self.state {
             PrivilegePromptTrackerState::PromptVisible { last_seen_at, .. } => {
                 now.saturating_duration_since(*last_seen_at) <= PRIVILEGE_PROMPT_VISIBLE_TTL

@@ -1664,6 +1664,15 @@ impl TerminalPane {
         self.privilege_prompt_inline_hint.clone()
     }
 
+    pub fn ai_waiting_for_secret(&self) -> bool {
+        self.privilege_prompt_tracker.prompt_is_waiting_for_secret(Instant::now())
+    }
+
+    // A password answers the running command; it neither takes ownership nor belongs in broadcasts.
+    fn input_answers_privilege_prompt(&self, bytes: &[u8]) -> bool {
+        self.privilege_prompt_tracker.input_answers_prompt(bytes, Instant::now())
+    }
+
     pub fn privilege_prompt_snapshot(&self) -> Option<PrivilegePromptSnapshot> {
         self.privilege_prompt_tracker.snapshot(Instant::now())
     }
@@ -2366,7 +2375,8 @@ impl TerminalPane {
     }
 
     pub fn paste_text(&mut self, text: &str, cx: &mut Context<Self>) {
-        if self.paste_text_without_broadcast(text, cx) {
+        let secret_entry = self.input_answers_privilege_prompt(text.as_bytes());
+        if self.paste_text_without_broadcast(text, cx) && !secret_entry {
             self.broadcast_user_input(TerminalBroadcastInputKind::Paste, text.as_bytes(), cx);
         }
     }
@@ -3509,7 +3519,8 @@ impl TerminalPane {
     }
 
     pub(crate) fn send_user_protocol_bytes(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
-        if self.send_user_protocol_bytes_without_broadcast(bytes, cx) {
+        let secret_entry = self.input_answers_privilege_prompt(bytes);
+        if self.send_user_protocol_bytes_without_broadcast(bytes, cx) && !secret_entry {
             self.broadcast_user_input(TerminalBroadcastInputKind::Protocol, bytes, cx);
         }
     }
@@ -3724,7 +3735,8 @@ impl TerminalPane {
             cx.notify();
             return;
         }
-        if self.commit_text_without_broadcast(text, cx) {
+        let secret_entry = self.input_answers_privilege_prompt(text.as_bytes());
+        if self.commit_text_without_broadcast(text, cx) && !secret_entry {
             self.broadcast_user_input(TerminalBroadcastInputKind::Text, text.as_bytes(), cx);
         }
     }
@@ -4425,6 +4437,38 @@ mod tests {
             recorder.read_with(cx, |recorder, _cx| recorder.delivered.len()),
             3
         );
+    }
+
+    #[gpui::test]
+    fn privilege_answers_stay_local_but_interrupts_still_take_over(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| TerminalPane::new_recording_playback(DEFAULT_COLS, DEFAULT_ROWS,
+                TerminalUiPreferences::default(), window, cx).unwrap())
+        });
+        let recorder = cx.new(|_| TerminalBroadcastRecorder { delivered: Vec::new() });
+        let sink = recorder.downgrade();
+        pane.update(cx, |pane, cx| {
+            pane.test_accepts_input = true;
+            pane.set_input_broadcaster(Some(Rc::new(move |kind, bytes, cx| {
+                sink.update(cx, |sink, _| sink.delivered.push((kind, bytes.to_vec()))).unwrap();
+            })));
+            let prompt = oxideterm_terminal::detect_terminal_privilege_prompt("[sudo] password for deploy:").unwrap();
+            pane.privilege_prompt_tracker.observe_terminal_prompt_event(
+                oxideterm_terminal::TerminalPrivilegePromptEvent::Visible { prompt: prompt.clone(), retry: false }, Instant::now());
+            assert!(pane.ai_waiting_for_secret());
+            pane.commit_text("secret", cx);
+            pane.paste_text("-suffix", cx);
+            assert!(pane.ai_waiting_for_secret());
+            pane.send_user_protocol_bytes(b"\r", cx);
+            assert!(!pane.ai_waiting_for_secret());
+            pane.privilege_prompt_tracker.observe_terminal_prompt_event(
+                oxideterm_terminal::TerminalPrivilegePromptEvent::Visible { prompt, retry: true }, Instant::now());
+            pane.send_user_protocol_bytes(b"\x03", cx);
+            assert!(!pane.ai_waiting_for_secret());
+        });
+        assert_eq!(recorder.read_with(cx, |sink, _| sink.delivered.clone()),
+            vec![(TerminalBroadcastInputKind::Protocol, vec![3])]);
     }
 
     #[gpui::test]
