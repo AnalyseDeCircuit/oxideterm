@@ -272,6 +272,11 @@ impl AgentToolLease {
             .response_finished
             .load(std::sync::atomic::Ordering::Acquire)
     }
+    pub fn command_unresolved(&self) {
+        if self.is_current() {
+            self.0.coordinator.invalidate(&self.0.lease.resource);
+        }
+    }
     pub fn command_finished(&self) {
         self.0.coordinator.complete(&self.0.lease);
     }

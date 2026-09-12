@@ -93,13 +93,16 @@ pub(in crate::workspace) async fn execute_ai_tool(
                 Err(_) => {
                     return rejected_ai_tool_result(tool_call_id, tool_name, "agent_direction_changed", "Task direction changed before dispatch.");
                 }
-                _ => {
+                Ok(Ok(Err(oxideterm_ai::agent::AgentError::ResourceUnresolved))) => {
                     return rejected_ai_tool_result(
                         tool_call_id,
                         tool_name,
                         "resource_execution_unresolved",
                         "Terminal control was taken over or a previous operation is unresolved. Ask the user to return control explicitly before retrying.",
                     );
+                }
+                _ => {
+                    return rejected_ai_tool_result(tool_call_id, tool_name, "operation_cancelled", "Agent run ended while waiting for the resource.");
                 }
             }
         }

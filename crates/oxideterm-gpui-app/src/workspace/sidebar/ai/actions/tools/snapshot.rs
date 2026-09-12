@@ -2601,7 +2601,7 @@ impl WorkspaceApp {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_string);
             self.start_ai_owned_local_command(owner, tool_call_id, tool_name, command, cwd,
-                dangerous_command_approved, wait_timeout, snapshot, sender, cx);
+                dangerous_command_approved, wait_timeout, snapshot, execution_leases, sender, cx);
             return;
         }
         let crate::workspace::ai_runtime_context::AiRunCommandOwner::Terminal(session_id) = command_owner

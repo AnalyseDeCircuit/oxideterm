@@ -1,7 +1,36 @@
-struct AiOwnedCommandTask(tokio::task::JoinHandle<AiActionResultLite>);
+struct AiOwnedCommandTask {
+    process: tokio::task::JoinHandle<AiActionResultLite>,
+    leases: Vec<oxideterm_ai::agent::AgentToolLease>,
+}
+impl AiOwnedCommandTask {
+    fn new(
+        process: tokio::task::JoinHandle<AiActionResultLite>,
+        leases: Vec<oxideterm_ai::agent::AgentToolLease>,
+    ) -> Self {
+        for lease in &leases {
+            lease.monitor_command();
+        }
+        Self { process, leases }
+    }
+
+    fn finish(&self, action: &AiActionResultLite) {
+        // A failed exit still completes the operation; losing observation does not.
+        if matches!(
+            action.data.get("executionState").and_then(serde_json::Value::as_str),
+            Some("completed" | "not_started")
+        ) {
+            for lease in &self.leases {
+                lease.command_finished();
+            }
+        }
+    }
+}
 impl Drop for AiOwnedCommandTask {
     fn drop(&mut self) {
-        self.0.abort();
+        self.process.abort();
+        for lease in &self.leases {
+            lease.command_unresolved();
+        }
     }
 }
 
@@ -49,6 +78,7 @@ impl WorkspaceApp {
         approved: bool,
         wait_timeout: Duration,
         snapshot: AiOrchestratorRuntimeSnapshot,
+        leases: Vec<oxideterm_ai::agent::AgentToolLease>,
         sender: tokio::sync::oneshot::Sender<AiExecutedToolResult>,
         cx: &mut Context<Self>,
     ) {
@@ -61,6 +91,7 @@ impl WorkspaceApp {
         let process = self.forwarding_runtime.spawn(async move {
             run_local_ai_command(&command, cwd.as_deref(), approved, resource).await
         });
+        let process = AiOwnedCommandTask::new(process, leases);
         let key = (
             owner.conversation_id.clone(),
             owner.generation,
@@ -68,7 +99,7 @@ impl WorkspaceApp {
         );
         let task_key = key.clone();
         let task = cx.spawn(async move |weak, cx| {
-            let mut process = AiOwnedCommandTask(process);
+            let mut process = process;
             let mut sender = Some(sender);
             let started = std::time::Instant::now();
             loop {
@@ -81,7 +112,7 @@ impl WorkspaceApp {
                 let result = tokio::select! {
                     biased;
                     _ = async { if let Some(dispatch) = &owner.dispatch { dispatch.cancelled().await; } else { std::future::pending::<()>().await; } } => break,
-                    result = &mut process.0 => Some(result),
+                    result = &mut process.process => Some(result),
                     _ = Timer::after(wait_timeout), if sender.is_some() => None,
                     _ = async { if let Some(sender) = &mut sender { sender.closed().await; } else { std::future::pending::<()>().await; } } => break,
                     _ = async { if let Some(dispatch) = &owner.dispatch { dispatch.invalidated().await; } else { std::future::pending::<()>().await; } }, if sender.is_some() => {
@@ -94,6 +125,7 @@ impl WorkspaceApp {
                     }
                 };
                 if let Some(result) = result {
+                    if let Ok(action) = &result { process.finish(action); }
                     if let (Ok(action), Some(sender)) = (result, sender.take()) {
                         let _ = sender.send(snapshot.to_executed_tool_result(call_id.clone(), name.clone(), action, started.elapsed().as_millis()));
                     }

@@ -218,7 +218,7 @@ pub(in crate::workspace) async fn run_local_ai_command(
             ok: false,
             summary: "Local command failed.".to_string(),
             output: "Command denied for security reasons".to_string(),
-            data: serde_json::Value::Null,
+            data: serde_json::json!({"executionState": "not_started"}),
             error_code: Some("local_command_error".to_string()),
             error_message: Some("Command denied for security reasons".to_string()),
             risk: "execute",
@@ -250,7 +250,7 @@ pub(in crate::workspace) async fn run_local_ai_command(
                 ok: false,
                 summary: "Local command failed.".to_string(),
                 output: format!("Working directory does not exist: {cwd}"),
-                data: serde_json::Value::Null,
+                data: serde_json::json!({"executionState": "not_started"}),
                 error_code: Some("local_command_error".to_string()),
                 error_message: Some("Working directory does not exist.".to_string()),
                 risk: "execute",
@@ -265,8 +265,11 @@ pub(in crate::workspace) async fn run_local_ai_command(
         process.current_dir(path);
     }
     let evidence_record = resource.clone();
+    let mut dispatched = false;
     let result = match async {
-        oxideterm_ai::agent::AgentProcess::spawn(&mut process)?.track(resource).output().await
+        let process = oxideterm_ai::agent::AgentProcess::spawn(&mut process)?.track(resource);
+        dispatched = true;
+        process.output().await
     }.await {
         Ok(output) => {
             let stdout_bytes = zeroize::Zeroizing::new(output.stdout);
@@ -310,7 +313,7 @@ pub(in crate::workspace) async fn run_local_ai_command(
                 data: serde_json::json!({
                     "exitCode": exit_code,
                     "timedOut": false,
-                    "executionState": if output.status.success() { "completed" } else { "output_captured" },
+                    "executionState": "completed",
                     "visibleInTerminal": false,
                 }),
                 error_code: (!ok).then(|| "local_command_failed".to_string()),
@@ -331,7 +334,7 @@ pub(in crate::workspace) async fn run_local_ai_command(
             ok: false,
             summary: "Local command failed.".to_string(),
             output: error.to_string(),
-            data: serde_json::Value::Null,
+            data: serde_json::json!({"executionState": if dispatched { "unknown" } else { "not_started" }}),
             error_code: Some("local_command_error".to_string()),
             error_message: Some("The local command could not be started.".to_string()),
             risk: "execute",
