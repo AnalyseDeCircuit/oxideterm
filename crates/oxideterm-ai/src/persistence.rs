@@ -22,9 +22,6 @@ use crate::{
 };
 
 pub const AI_CHAT_DB_VERSION: u32 = 3;
-// Prompt compaction keeps the active model context bounded independently; this
-// larger guard only limits retained local history for a single conversation.
-pub const MAX_MESSAGES_PER_CONVERSATION: usize = 2_000;
 
 const COMPRESSION_THRESHOLD: usize = 4096;
 const ANCHOR_META_HEADER: &str = "$$ANCHOR_B64$$";
@@ -536,11 +533,6 @@ fn replace_conversation_messages(
     let new_ids = conversation
         .messages
         .iter()
-        .rev()
-        .take(MAX_MESSAGES_PER_CONVERSATION)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
         .map(|message| message.id.clone())
         .collect::<Vec<_>>();
     let retained = new_ids.iter().cloned().collect::<HashSet<_>>();
@@ -549,15 +541,7 @@ fn replace_conversation_messages(
             let _ = message_table.remove(old_id.as_str())?;
         }
     }
-    for message in conversation
-        .messages
-        .iter()
-        .rev()
-        .take(MAX_MESSAGES_PER_CONVERSATION)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-    {
+    for message in &conversation.messages {
         let persisted = persisted_from_message_with_projection(
             &conversation.id,
             message,

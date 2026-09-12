@@ -1725,7 +1725,7 @@ fn chat_persistence_keeps_more_than_legacy_conversation_limit() {
 }
 
 #[test]
-fn chat_persistence_keeps_more_than_legacy_message_limit() {
+fn chat_persistence_preserves_long_history_across_repeated_saves() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("chat_history.redb");
     let store = AiChatPersistenceStore::new(&path);
@@ -1733,9 +1733,8 @@ fn chat_persistence_keeps_more_than_legacy_message_limit() {
     let conversation_id =
         state.create_conversation("long-conversation".into(), Some("Long".into()), 1, None);
 
-    // Local retention is intentionally wider than prompt history. The prompt
-    // budget and automatic compaction remain responsible for model input size.
-    for index in 0..250 {
+    // Cross the former 2,000-message retention boundary with distinguishable content.
+    for index in 0..2_105 {
         state.add_message(
             &conversation_id,
             chat_message(
@@ -1747,9 +1746,15 @@ fn chat_persistence_keeps_more_than_legacy_message_limit() {
     }
     store.save_state(state).unwrap();
 
-    let reloaded = store.load_conversation(&conversation_id).unwrap().unwrap();
-    assert_eq!(reloaded.messages.len(), 250);
-    assert_eq!(reloaded.messages.first().unwrap().id, "message-0");
+    for _ in 0..2 {
+        let reloaded = store.load_state().unwrap();
+        let messages = &reloaded.conversations[0].messages;
+        assert_eq!(
+            messages.iter().map(|message| (message.id.clone(), message.content.clone())).collect::<Vec<_>>(),
+            (0..2_105).map(|index| (format!("message-{index}"), format!("content-{index}"))).collect::<Vec<_>>()
+        );
+        store.save_state(reloaded).unwrap();
+    }
 }
 
 #[test]
