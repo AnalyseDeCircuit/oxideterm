@@ -1207,7 +1207,8 @@
       "resource_stopped": "Gestoppt",
       "resource_unknown": "Ergebnis unbekannt",
       "wait_until": "Bis {{time}}",
-      "dependency_failed": "Ein vorheriger erforderlicher Schritt ist fehlgeschlagen; dieser Vorgang wurde nicht ausgeführt."
+      "dependency_failed": "Ein vorheriger erforderlicher Schritt ist fehlgeschlagen; dieser Vorgang wurde nicht ausgeführt.",
+      "provider_template_xai": "xAI (Grok)"
     },
     "sftp": {
       "unlimited_placeholder": "0 = unbegrenzt",

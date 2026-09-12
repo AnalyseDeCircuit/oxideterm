@@ -95,99 +95,111 @@ fn responses_stream_interleaves_items_without_duplicate_text_or_early_execution(
 
 #[test]
 fn responses_replay_restores_wire_ids_and_survives_persistence_and_scope_changes() {
-    let config = config();
-    let scope = config.response_state_key();
-    let output = json!([
-        {"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"gAAAA-opaque"},
-        function("wire-a","first","{}")
-    ]);
-    let ids = HashMap::from([("wire-a".into(), "local-unique".into())]);
-    let mut result = chat_message("result", AiChatRole::Tool, "done");
-    result.tool_call_id = Some("local-unique".into());
-    let mut assistant = chat_message("assistant", AiChatRole::Assistant, "All done");
-    let live = responses_round_state(&[json!({"output":output})], &ids, &[]).unwrap();
-    set_ai_provider_parts(&mut assistant, &scope, vec![live]);
-    assert_eq!(
-        responses_body(&config, &[assistant.clone(), result.clone()])["input"],
-        json!([
-            {"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"gAAAA-opaque"},
-            function("wire-a","first","{}"),
-            {"type":"function_call_output","call_id":"wire-a","output":"done"}
-        ])
-    );
-    assistant.turn = None;
-    append_responses_round(
-        &mut assistant,
-        &scope,
-        responses_round_state(&[json!({"output":output})], &ids, &[result]).unwrap(),
-    );
-    append_responses_round(
-        &mut assistant,
-        &scope,
-        json!({"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"All done","annotations":[]}]}],"results":[],"callIds":{}}),
-    );
-    let mut branch = chat_message("earlier-branch", AiChatRole::Assistant, "Earlier branch");
-    let branch_output = json!([{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Earlier branch","annotations":[]}]}]);
-    append_responses_round(&mut branch, &scope, json!({"output":branch_output,"results":[],"callIds":{}}));
-    assistant.branches = Some(AiMessageBranches {
-        total: 2, active_index: 1, tails: HashMap::from([(0, vec![branch])]),
-    });
-    let dir = tempfile::tempdir().unwrap();
-    let store = AiChatPersistenceStore::new(dir.path().join("chat.redb"));
-    let mut state = AiChatState::default();
-    let id = state.create_conversation("conversation".into(), None, 1, None);
-    state.add_message(&id, assistant);
-    store.save_state(state).unwrap();
-    let mut history = store.load_conversation(&id).unwrap().unwrap().messages;
-    let branch = &history[0].branches.as_ref().unwrap().tails[&0];
-    assert_eq!(responses_body(&config, branch)["input"], branch_output);
-    normalize_ai_stream_history_for_provider(&mut history);
-    history.push(chat_message("next", AiChatRole::User, "continue"));
-    assert_eq!(
-        responses_body(&config, &history)["input"],
-        json!([
-            {"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"gAAAA-opaque"},
-            function("wire-a","first","{}"),
-            {"type":"function_call_output","call_id":"wire-a","output":"done"},
-            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"All done","annotations":[]}]},
-            {"role":"user","content":"continue"}
-        ])
-    );
-    for field in ["provider", "model", "endpoint"] {
-        let mut changed = config.clone();
-        match field {
-            "provider" => changed.provider_id = Some("other".into()),
-            "model" => changed.model = "other".into(),
-            _ => changed.base_url = "https://other.test/v1".into(),
+    for provider_type in ["openai", "xai"] {
+        let mut config = config();
+        config.provider_type = provider_type.into();
+        if provider_type == "xai" {
+            config.model = "grok-4.6".into();
         }
-        let mut projected = history.clone();
-        scope_responses_history(&mut projected, &changed);
+        let scope = config.response_state_key();
+        let output = json!([
+            {"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"gAAAA-opaque"},
+            function("wire-a","first","{}")
+        ]);
+        let ids = HashMap::from([("wire-a".into(), "local-unique".into())]);
+        let mut result = chat_message("result", AiChatRole::Tool, "done");
+        result.tool_call_id = Some("local-unique".into());
+        let mut assistant = chat_message("assistant", AiChatRole::Assistant, "All done");
+        let live = responses_round_state(&[json!({"output":output})], &ids, &[]).unwrap();
+        set_ai_provider_parts(&mut assistant, &scope, vec![live]);
         assert_eq!(
-            ai_prompt_token_breakdown(&projected, &[], "openai", 0).tool_results,
-            0,
-            "{field}"
+            responses_body(&config, &[assistant.clone(), result.clone()])["input"],
+            json!([
+                {"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"gAAAA-opaque"},
+                function("wire-a","first","{}"),
+                {"type":"function_call_output","call_id":"wire-a","output":"done"}
+            ])
+        );
+        assistant.turn = None;
+        append_responses_round(
+            &mut assistant,
+            &scope,
+            responses_round_state(&[json!({"output":output})], &ids, &[result]).unwrap(),
+        );
+        append_responses_round(
+            &mut assistant,
+            &scope,
+            json!({"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"All done","annotations":[]}]}],"results":[],"callIds":{}}),
+        );
+        let mut branch = chat_message("earlier-branch", AiChatRole::Assistant, "Earlier branch");
+        let branch_output = json!([{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Earlier branch","annotations":[]}]}]);
+        append_responses_round(
+            &mut branch,
+            &scope,
+            json!({"output":branch_output,"results":[],"callIds":{}}),
+        );
+        assistant.branches = Some(AiMessageBranches {
+            total: 2,
+            active_index: 1,
+            tails: HashMap::from([(0, vec![branch])]),
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let store = AiChatPersistenceStore::new(dir.path().join("chat.redb"));
+        let mut state = AiChatState::default();
+        let id = state.create_conversation("conversation".into(), None, 1, None);
+        state.add_message(&id, assistant);
+        store.save_state(state).unwrap();
+        let mut history = store.load_conversation(&id).unwrap().unwrap().messages;
+        let branch = &history[0].branches.as_ref().unwrap().tails[&0];
+        assert_eq!(responses_body(&config, branch)["input"], branch_output);
+        normalize_ai_stream_history_for_provider(&mut history);
+        history.push(chat_message("next", AiChatRole::User, "continue"));
+        assert_eq!(
+            responses_body(&config, &history)["input"],
+            json!([
+                {"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"gAAAA-opaque"},
+                function("wire-a","first","{}"),
+                {"type":"function_call_output","call_id":"wire-a","output":"done"},
+                {"type":"message","role":"assistant","content":[{"type":"output_text","text":"All done","annotations":[]}]},
+                {"role":"user","content":"continue"}
+            ])
+        );
+        for field in ["provider", "model", "endpoint"] {
+            let mut changed = config.clone();
+            match field {
+                "provider" => changed.provider_id = Some("other".into()),
+                "model" => changed.model = "other".into(),
+                _ => changed.base_url = "https://other.test/v1".into(),
+            }
+            let mut projected = history.clone();
+            scope_responses_history(&mut projected, &changed);
+            assert_eq!(
+                ai_prompt_token_breakdown(&projected, &[], "openai", 0).tool_results,
+                0,
+                "{field}"
+            );
+            assert_eq!(
+                responses_body(&changed, &projected)["input"],
+                json!([
+                    {"role":"assistant","content":"All done"},{"role":"user","content":"continue"}
+                ]),
+                "{field}"
+            );
+        }
+        let mut legacy = config.clone();
+        legacy.api_protocol = AiApiProtocol::ChatCompletions;
+        scope_responses_history(&mut history, &legacy);
+        assert_eq!(
+            ai_prompt_token_breakdown(&history, &[], "openai", 0).tool_results,
+            0
         );
         assert_eq!(
-            responses_body(&changed, &projected)["input"],
+            Value::Array(openai_chat_messages(&legacy, &history)),
             json!([
                 {"role":"assistant","content":"All done"},{"role":"user","content":"continue"}
-            ]),
-            "{field}"
+            ])
         );
     }
-    let mut legacy = config.clone();
-    legacy.api_protocol = AiApiProtocol::ChatCompletions;
-    scope_responses_history(&mut history, &legacy);
-    assert_eq!(
-        ai_prompt_token_breakdown(&history, &[], "openai", 0).tool_results,
-        0
-    );
-    assert_eq!(
-        Value::Array(openai_chat_messages(&legacy, &history)),
-        json!([
-            {"role":"assistant","content":"All done"},{"role":"user","content":"continue"}
-        ])
-    );
 }
 
 #[test]
@@ -499,4 +511,105 @@ fn responses_durable_round_removes_execution_payloads_but_retains_opaque_reasoni
         serde_json::from_str(round["results"][0]["output"].as_str().unwrap()).unwrap();
     assert_eq!(output["data"], json!({"exitCode":0}));
     assert!(!round.to_string().contains("supersecret123456"));
+}
+
+#[tokio::test]
+async fn xai_stream_uses_responses_and_preserves_reasoning_and_function_calls() {
+    let output = json!([
+        {"type":"reasoning","id":"reasoning","summary":[{"type":"summary_text","text":"检查配置"}],"encrypted_content":"opaque-xai-state"},
+        function("xai-call", "inspect_config", "{}")
+    ]);
+    let data = format!(
+        "data: {}\n\ndata: {}\n\n",
+        json!({"type":"response.reasoning_text.delta","output_index":0,"content_index":0,"delta":"检查配置"}),
+        completed(output.clone())
+    );
+    let (url, server) = mock_response(data, "text/event-stream").await;
+    let mut config = config();
+    config.provider_type = "xai".into();
+    config.model = "grok-4.6".into();
+    config.base_url = url;
+    config.api_key = Some(SharedAiProviderKey::new(zeroize::Zeroizing::new(
+        "fixture-key".into(),
+    )));
+    config.reasoning_effort = Some("xhigh".into());
+    config.tools = vec![AiToolDefinition {
+        name: "inspect_config".into(),
+        description: "Inspect configuration".into(),
+        parameters: json!({"type":"object","properties":{}}),
+    }];
+    config.tool_choice = AiToolChoice::Named("inspect_config".into());
+    let scope = config.response_state_key();
+    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    stream_chat_completion(
+        config,
+        vec![chat_message(
+            "user",
+            AiChatRole::User,
+            "Inspect configuration",
+        )],
+        sender,
+    )
+    .await;
+    let mut events = Vec::new();
+    while let Some(event) = receiver.recv().await {
+        events.push(event);
+    }
+    assert_eq!(
+        events,
+        vec![
+            AiStreamEvent::Thinking("检查配置".into()),
+            AiStreamEvent::ToolCallComplete {
+                id: "xai-call".into(),
+                name: "inspect_config".into(),
+                arguments: "{}".into()
+            },
+            AiStreamEvent::ProviderResponsePart {
+                provider_type: scope,
+                part: json!({"output":output})
+            },
+            AiStreamEvent::Usage {
+                input_tokens: Some(12),
+                output_tokens: Some(9)
+            },
+            AiStreamEvent::Done,
+        ]
+    );
+    let (headers, body) = server.await.unwrap();
+    assert!(headers.starts_with("POST /v1/responses HTTP/1.1"));
+    assert!(
+        headers
+            .to_ascii_lowercase()
+            .contains("authorization: bearer fixture-key")
+    );
+    assert_eq!(body["reasoning"], json!({"effort":"xhigh"}));
+    assert_eq!(body["store"], false);
+    assert_eq!(body["include"], json!(["reasoning.encrypted_content"]));
+    assert_eq!(
+        body["tool_choice"],
+        json!({"type":"function","name":"inspect_config"})
+    );
+    assert_eq!(body["tools"][0]["strict"], false);
+}
+
+#[test]
+fn xai_reasoning_settings_only_emit_documented_effort_levels() {
+    let mut config = config();
+    config.provider_type = "xai".into();
+    for (model, requested, expected) in [
+        ("grok-4.6", "auto", None),
+        ("grok-4.6", "none", None),
+        ("grok-4.6", "xhigh", Some("xhigh")),
+        ("grok-4.5", "high", Some("high")),
+        ("grok-4.5", "xhigh", None),
+        ("grok-4", "high", None),
+    ] {
+        config.model = model.into();
+        config.reasoning_effort = Some(requested.into());
+        assert_eq!(
+            responses_body(&config, &[]).get("reasoning").cloned(),
+            expected.map(|effort| json!({"effort":effort})),
+            "{model}/{requested}"
+        );
+    }
 }

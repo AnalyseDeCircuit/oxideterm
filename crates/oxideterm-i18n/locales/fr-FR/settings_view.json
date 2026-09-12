@@ -1207,7 +1207,8 @@
       "resource_stopped": "Arrêté",
       "resource_unknown": "Résultat inconnu",
       "wait_until": "Jusqu’à {{time}}",
-      "dependency_failed": "Une étape préalable a échoué ; cette opération n’a pas été exécutée."
+      "dependency_failed": "Une étape préalable a échoué ; cette opération n’a pas été exécutée.",
+      "provider_template_xai": "xAI (Grok)"
     },
     "sftp": {
       "unlimited_placeholder": "0 = illimité",

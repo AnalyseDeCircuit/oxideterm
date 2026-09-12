@@ -1207,7 +1207,8 @@
       "resource_stopped": "停止済み",
       "resource_unknown": "結果不明",
       "wait_until": "{{time}} まで待機",
-      "dependency_failed": "前提となる処理が失敗したため、この操作は実行されませんでした。"
+      "dependency_failed": "前提となる処理が失敗したため、この操作は実行されませんでした。",
+      "provider_template_xai": "xAI (Grok)"
     },
     "sftp": {
       "unlimited_placeholder": "0 = 制限なし",

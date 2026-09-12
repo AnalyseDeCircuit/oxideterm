@@ -13,6 +13,12 @@ pub(crate) async fn fetch_provider_models_payload(
 ) -> Result<Value> {
     let provider_type = provider.provider_type.as_str();
     match provider_type {
+        "xai" => {
+            api_key_required_ref(provider_type, api_key.map(|key| key.as_str()))?;
+            fetch_openai_compatible_json(
+                client, &provider.base_url, "/language-models", api_key, "xAI language model list",
+            ).await
+        }
         "anthropic" => {
             let api_key =
                 api_key_required_ref(provider_type, api_key.map(|api_key| api_key.as_str()))?;

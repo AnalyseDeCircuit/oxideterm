@@ -2008,3 +2008,52 @@ fn provider_token_limits_are_not_reported_as_completed_turns() {
     assert_eq!(parse_anthropic_data_line(r#"data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"}}"#).events,
         vec![AiStreamEvent::Error("ai_output_incomplete".into())]);
 }
+
+#[tokio::test]
+async fn xai_template_discovers_language_models_with_the_stored_key() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut provider = new_provider_from_template(
+        provider_template_by_type("xai"),
+        "grok-provider".into(),
+        "xAI (Grok)".into(),
+        1,
+    );
+    assert_eq!(provider["baseUrl"], "https://api.x.ai/v1");
+    assert_eq!(provider["apiProtocol"], "responses");
+    assert_eq!(provider["models"], serde_json::json!(["grok-4.6"]));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    provider["baseUrl"] =
+        serde_json::json!(format!("http://{}/v1", listener.local_addr().unwrap()));
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut headers = Vec::new();
+        while !headers.ends_with(b"\r\n\r\n") {
+            headers.push(stream.read_u8().await.unwrap());
+        }
+        let headers = String::from_utf8(headers).unwrap();
+        assert!(headers.starts_with("GET /v1/language-models HTTP/1.1"));
+        assert!(
+            headers
+                .to_ascii_lowercase()
+                .contains("authorization: bearer fixture-key")
+        );
+        let body = serde_json::json!({"models":[{"id":"grok-4.6","input_modalities":["text","image"],"output_modalities":["text"]},{"id":"grok-4.5","output_modalities":["text"]}]}).to_string();
+        stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+    });
+    let view = provider_views(&[provider])[0].clone();
+    assert_eq!(view.api_protocol, AiApiProtocol::Responses);
+    let refresh = fetch_provider_models(view, Some(zeroize::Zeroizing::new("fixture-key".into())))
+        .await
+        .unwrap();
+    assert_eq!(refresh.models, vec!["grok-4.5", "grok-4.6"]);
+    server.await.unwrap();
+    assert_eq!(
+        model_context_window(
+            "grok-4.6",
+            &serde_json::Map::new(),
+            None,
+            &serde_json::Map::new()
+        ),
+        500_000
+    );
+}

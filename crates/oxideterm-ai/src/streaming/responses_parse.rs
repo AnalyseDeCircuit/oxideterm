@@ -23,15 +23,14 @@ impl ResponsesStream {
         match kind {
             "response.output_text.delta"
             | "response.refusal.delta"
-            | "response.reasoning_summary_text.delta" => {
-                let thinking = kind == "response.reasoning_summary_text.delta";
-                let part = value[if thinking {
-                    "summary_index"
+            | "response.reasoning_summary_text.delta"
+            | "response.reasoning_text.delta" => {
+                let thinking = matches!(kind, "response.reasoning_summary_text.delta" | "response.reasoning_text.delta");
+                let part = if thinking {
+                    value.get("summary_index").or_else(|| value.get("content_index"))
                 } else {
-                    "content_index"
-                }]
-                .as_u64()
-                .unwrap_or(0);
+                    value.get("content_index")
+                }.and_then(Value::as_u64).unwrap_or(0);
                 if let Some(delta) = value["delta"].as_str() {
                     self.text
                         .entry((index, part, thinking))

@@ -298,7 +298,7 @@ pub enum AiStreamEvent {
 impl AiChatStreamConfig {
     pub fn uses_responses(&self) -> bool {
         self.api_protocol == AiApiProtocol::Responses
-            && matches!(self.provider_type.as_str(), "openai" | "openai_compatible")
+            && matches!(self.provider_type.as_str(), "openai" | "openai_compatible" | "xai")
     }
 
     pub fn response_state_key(&self) -> String {

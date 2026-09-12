@@ -38,7 +38,7 @@ pub(crate) fn parse_provider_models(provider_type: &str, payload: &Value) -> Vec
                     .map(str::to_string)
             })
             .collect::<Vec<_>>(),
-        "openai_compatible" | "deepseek" | "kimi" | "glm" => {
+        "openai_compatible" | "deepseek" | "kimi" | "glm" | "xai" => {
             openai_compatible_model_values(payload)
                 .filter_map(|model| {
                     model

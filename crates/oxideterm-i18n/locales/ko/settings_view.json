@@ -1207,7 +1207,8 @@
       "resource_stopped": "중지됨",
       "resource_unknown": "결과 알 수 없음",
       "wait_until": "{{time}}까지 대기",
-      "dependency_failed": "선행 단계가 실패하여 이 작업을 실행하지 않았습니다."
+      "dependency_failed": "선행 단계가 실패하여 이 작업을 실행하지 않았습니다.",
+      "provider_template_xai": "xAI (Grok)"
     },
     "sftp": {
       "unlimited_placeholder": "0 = 무제한",

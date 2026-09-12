@@ -23,7 +23,12 @@ pub(super) async fn stream_responses(
     for (index, url) in urls.iter().enumerate() {
         let mut request = client
             .post(url)
-            .timeout(CHAT_STREAM_TIMEOUT)
+            // xAI documents hour-long request timeouts for its reasoning models; cancellation remains task-owned.
+            .timeout(if config.provider_type == "xai" {
+                std::time::Duration::from_secs(3600)
+            } else {
+                CHAT_STREAM_TIMEOUT
+            })
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .header(reqwest::header::ACCEPT, "text/event-stream")
             .body(body.clone());

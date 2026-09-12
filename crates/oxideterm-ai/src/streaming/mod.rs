@@ -37,7 +37,7 @@ fn chat_stream_provider_family(provider_type: &str) -> ChatStreamProviderFamily 
         "ollama" => ChatStreamProviderFamily::Ollama,
         "anthropic" => ChatStreamProviderFamily::Anthropic,
         "gemini" => ChatStreamProviderFamily::Gemini,
-        "openai" | "openai_compatible" | "deepseek" | "kimi" | "glm" => {
+        "openai" | "openai_compatible" | "deepseek" | "kimi" | "glm" | "xai" => {
             ChatStreamProviderFamily::OpenAiCompatible
         }
         _ => ChatStreamProviderFamily::OpenAiCompatible,

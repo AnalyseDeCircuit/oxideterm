@@ -1207,7 +1207,8 @@
       "resource_stopped": "Interrompido",
       "resource_unknown": "Resultado desconhecido",
       "wait_until": "Até {{time}}",
-      "dependency_failed": "Uma etapa necessária falhou; esta operação não foi executada."
+      "dependency_failed": "Uma etapa necessária falhou; esta operação não foi executada.",
+      "provider_template_xai": "xAI (Grok)"
     },
     "sftp": {
       "unlimited_placeholder": "0 = ilimitado",

@@ -69,19 +69,34 @@ pub(crate) fn responses_body(config: &AiChatStreamConfig, messages: &[AiChatMess
     if let Some(tokens) = config.max_response_tokens.filter(|tokens| *tokens > 0) {
         body["max_output_tokens"] = json!(tokens);
     }
-    if let Some(effort) = config
-        .reasoning_effort
-        .as_deref()
-        .filter(|effort| *effort != "auto")
-    {
+    let effort = config.reasoning_effort.as_deref().map(|value| {
+        if config.provider_type == "xai" {
+            let level = crate::normalize_reasoning_level_for_model("xai", &config.model, value);
+            if crate::model_reasoning_capability("xai", &config.model)
+                .levels
+                .contains(&level)
+            {
+                level.as_str()
+            } else {
+                "auto"
+            }
+        } else {
+            value
+        }
+    });
+    if let Some(effort) = effort.filter(|effort| *effort != "auto") {
         body["reasoning"] = json!({"effort": effort});
     }
     // Compatible gateways use the same OpenAI model names; provider branding must not hide summaries.
     let capability = crate::model_reasoning_capability("openai", &config.model);
-    let explicit_reasoning = config.reasoning_effort.as_deref()
+    let explicit_reasoning = config
+        .reasoning_effort
+        .as_deref()
         .is_some_and(|effort| !matches!(effort, "auto" | "none"));
-    if (capability.known_model && capability.request_format == crate::AiReasoningRequestFormat::OpenAi)
-        || (!capability.known_model && explicit_reasoning)
+    if config.provider_type != "xai"
+        && ((capability.known_model
+            && capability.request_format == crate::AiReasoningRequestFormat::OpenAi)
+            || (!capability.known_model && explicit_reasoning))
     {
         body["reasoning"]["summary"] = json!("auto");
     }

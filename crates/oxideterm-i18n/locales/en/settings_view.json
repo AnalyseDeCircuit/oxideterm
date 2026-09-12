@@ -1207,7 +1207,8 @@
       "resource_stopped": "Stopped",
       "resource_unknown": "Outcome unknown",
       "wait_until": "Until {{time}}",
-      "dependency_failed": "A prerequisite failed; this operation was not executed."
+      "dependency_failed": "A prerequisite failed; this operation was not executed.",
+      "provider_template_xai": "xAI (Grok)"
     },
     "sftp": {
       "unlimited_placeholder": "0 = unlimited",

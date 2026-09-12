@@ -450,6 +450,7 @@ mod tests {
         settings.ai.enabled = true;
         settings.ai.providers = vec![
             json!({"id":"responses-provider","type":"openai_compatible","apiProtocol":"responses","baseUrl":"https://example.test/v1","models":["model"]}),
+            json!({"id":"grok-provider","type":"xai","apiProtocol":"responses","baseUrl":"https://api.x.ai/v1","models":["grok-4.6"]}),
         ];
         settings.settings_navigation.groups = vec![vec!["terminal".to_string()]];
         settings.local_terminal.default_cwd = Some("/tmp".to_string());
@@ -474,7 +475,8 @@ mod tests {
         assert_eq!(
             restored.ai.providers,
             vec![
-                json!({"id":"responses-provider","type":"openai_compatible","apiProtocol":"responses","baseUrl":"https://example.test/v1","models":["model"]})
+                json!({"id":"responses-provider","type":"openai_compatible","apiProtocol":"responses","baseUrl":"https://example.test/v1","models":["model"]}),
+                json!({"id":"grok-provider","type":"xai","apiProtocol":"responses","baseUrl":"https://api.x.ai/v1","models":["grok-4.6"]})
             ]
         );
         let section_ids = parsed["sectionIds"]

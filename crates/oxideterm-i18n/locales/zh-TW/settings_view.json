@@ -1207,7 +1207,8 @@
       "resource_stopped": "已停止",
       "resource_unknown": "結果未知",
       "wait_until": "等待至 {{time}}",
-      "dependency_failed": "前置步驟失敗，此操作未執行。"
+      "dependency_failed": "前置步驟失敗，此操作未執行。",
+      "provider_template_xai": "xAI (Grok)"
     },
     "sftp": {
       "unlimited_placeholder": "0 = 不限速",

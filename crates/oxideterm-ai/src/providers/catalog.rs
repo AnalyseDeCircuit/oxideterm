@@ -44,6 +44,12 @@ pub const AI_PROVIDER_TEMPLATES: &[AiProviderTemplate] = &[
         initial_models: &["gpt-4o-mini"],
     },
     AiProviderTemplate {
+        provider_type: "xai",
+        label_key: "settings_view.ai.provider_template_xai",
+        base_url: "https://api.x.ai/v1",
+        initial_models: &["grok-4.6"],
+    },
+    AiProviderTemplate {
         provider_type: "anthropic",
         label_key: "settings_view.ai.provider_template_anthropic",
         base_url: "https://api.anthropic.com",
@@ -82,6 +88,7 @@ pub fn provider_view(value: &serde_json::Value) -> Option<AiProviderView> {
     Some(AiProviderView {
         api_protocol: match value.get("apiProtocol") {
             Some(value) => serde_json::from_value(value.clone()).ok()?,
+            None if provider_type == "xai" => crate::AiApiProtocol::Responses,
             None => crate::AiApiProtocol::default(),
         },
         custom: id.starts_with("custom-"),
@@ -161,7 +168,7 @@ pub fn new_provider_from_template(
         .map(|model| (*model).to_string())
         .collect::<Vec<_>>();
 
-    serde_json::json!({
+    let mut provider = serde_json::json!({
         "id": id,
         "type": template.provider_type,
         "name": name,
@@ -169,5 +176,9 @@ pub fn new_provider_from_template(
         "models": models,
         "enabled": true,
         "createdAt": now_ms,
-    })
+    });
+    if template.provider_type == "xai" {
+        provider["apiProtocol"] = serde_json::json!(crate::AiApiProtocol::Responses);
+    }
+    provider
 }

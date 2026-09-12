@@ -33,6 +33,8 @@ pub struct ModelContextWindowInfo {
 
 static MODEL_CONTEXT_WINDOWS: LazyLock<Vec<(Regex, i64)>> = LazyLock::new(|| {
     [
+        // https://docs.x.ai/developers/grok-4-6
+        (r"^grok-4\.6($|-)", 500_000),
         (r"gpt-4\.1", 1_048_576),
         (r"o[3-9][-.]|o[3-9]$", 200_000),
         (r"o[1-2][-.]|o[1-2]$", 200_000),

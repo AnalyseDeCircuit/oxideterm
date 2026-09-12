@@ -275,7 +275,7 @@ impl WorkspaceApp {
             .when(
                 matches!(
                     provider.provider_type.as_str(),
-                    "openai" | "openai_compatible"
+                    "openai" | "openai_compatible" | "xai"
                 ),
                 |fields| {
                     fields.child(self.ai_provider_field(

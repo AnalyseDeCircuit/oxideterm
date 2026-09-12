@@ -1207,7 +1207,8 @@
       "resource_stopped": "Detenido",
       "resource_unknown": "Resultado desconocido",
       "wait_until": "Hasta las {{time}}",
-      "dependency_failed": "Falló un paso previo necesario; esta operación no se ejecutó."
+      "dependency_failed": "Falló un paso previo necesario; esta operación no se ejecutó.",
+      "provider_template_xai": "xAI (Grok)"
     },
     "sftp": {
       "unlimited_placeholder": "0 = sin límite",

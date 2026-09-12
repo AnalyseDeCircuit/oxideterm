@@ -208,7 +208,12 @@ async fn openai_stream_request(
 ) -> Result<reqwest::Response> {
     let mut request = client
         .post(url)
-        .timeout(CHAT_STREAM_TIMEOUT)
+        // xAI documents hour-long request timeouts for its reasoning models; cancellation remains task-owned.
+        .timeout(if config.provider_type == "xai" {
+            std::time::Duration::from_secs(3600)
+        } else {
+            CHAT_STREAM_TIMEOUT
+        })
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .json(body);
     if let Some(api_key) = config.api_key.as_ref().filter(|key| !key.is_empty()) {
