@@ -1,16 +1,7 @@
 impl WorkspaceApp {
     pub(in crate::workspace) fn ensure_ai_chat_initialized(&mut self, cx: &mut App) {
-        let outcome = self.ai_entity.update(cx, |ai, _cx| {
-            ai.ensure_chat_initialized(default_ai_conversations_path())
-        });
-        if matches!(outcome, AiChatInitializationOutcome::Loaded) {
-            self.reset_ai_message_list(cx);
-        }
-    }
-
-    fn reset_ai_message_list(&mut self, cx: &mut App) {
-        self.ai_entity.update(cx, |ai, _cx| {
-            ai.reset_chat_message_list();
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.ensure_chat_initialized(default_ai_conversations_path(),cx);
         });
     }
 
@@ -237,12 +228,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn retry_ai_chat_initialization(&mut self, cx: &mut Context<Self>) {
-        let outcome = self.ai_entity.update(cx, |ai, _cx| {
-            ai.retry_chat_initialization(default_ai_conversations_path())
-        });
-        if matches!(outcome, AiChatInitializationOutcome::Loaded) {
-            self.reset_ai_message_list(cx);
-        }
+        self.ai_entity.update(cx, |ai, cx| ai.retry_chat_initialization(default_ai_conversations_path(),cx));
         cx.notify();
     }
 

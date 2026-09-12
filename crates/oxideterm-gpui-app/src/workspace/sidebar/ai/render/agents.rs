@@ -194,9 +194,12 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(self.tokens.spacing.two))
             .child(self.ai_section_title("settings_view.ai.conversation_agents"))
-            .child(div().text_size(px(self.tokens.metrics.ui_text_xs))
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(self.i18n.t("settings_view.ai.conversation_agents_hint")));
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("settings_view.ai.conversation_agents_hint")),
+            );
         if let Some((id, title)) = conversation {
             let options = ai.agent_options(&id);
             let picker_open = ai.agents.settings_model_picker_open;
@@ -314,11 +317,11 @@ impl WorkspaceApp {
             );
         }
         self.setting_row(
-                "ai.agents.concurrency",
-                "ai.agents.concurrency_hint",
-                choices.into_any_element(),
-                cx,
-            )
+            "ai.agents.concurrency",
+            "ai.agents.concurrency_hint",
+            choices.into_any_element(),
+            cx,
+        )
     }
 
     fn render_ai_agent_resource_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -576,20 +579,46 @@ impl WorkspaceApp {
                             .text_size(px(11.0))
                             .child(summary.to_owned()),
                     )
-                    .children(snapshot.resources.iter().filter(|resource|
-                        resource.kind != oxideterm_ai::agent::OwnedResourceKind::Observation
-                            || resource.state == oxideterm_ai::agent::OwnedResourceState::Running).map(|resource| {
-                        use oxideterm_ai::agent::{OwnedResourceKind, OwnedResourceState};
-                        let key = match resource.state {
-                            OwnedResourceState::Running if resource.kind == OwnedResourceKind::TerminalCommand => "settings_view.ai.remote_running",
-                            OwnedResourceState::Running => "settings_view.ai.waiting_condition",
-                            OwnedResourceState::Completed => "settings_view.ai.resource_completed",
-                            OwnedResourceState::Stopped => "settings_view.ai.resource_stopped",
-                            OwnedResourceState::OutcomeUnknown => "settings_view.ai.resource_unknown",
-                        };
-                        div().text_size(px(11.0)).text_color(rgb(self.tokens.ui.text_muted))
-                            .child(format!("{} · {}", resource.label.as_str(), self.i18n.t(key)))
-                    }));
+                    .children(
+                        snapshot
+                            .resources
+                            .iter()
+                            .filter(|resource| {
+                                resource.kind != oxideterm_ai::agent::OwnedResourceKind::Observation
+                                    || resource.state
+                                        == oxideterm_ai::agent::OwnedResourceState::Running
+                            })
+                            .map(|resource| {
+                                use oxideterm_ai::agent::{OwnedResourceKind, OwnedResourceState};
+                                let key = match resource.state {
+                                    OwnedResourceState::Running
+                                        if resource.kind == OwnedResourceKind::TerminalCommand =>
+                                    {
+                                        "settings_view.ai.remote_running"
+                                    }
+                                    OwnedResourceState::Running => {
+                                        "settings_view.ai.waiting_condition"
+                                    }
+                                    OwnedResourceState::Completed => {
+                                        "settings_view.ai.resource_completed"
+                                    }
+                                    OwnedResourceState::Stopped => {
+                                        "settings_view.ai.resource_stopped"
+                                    }
+                                    OwnedResourceState::OutcomeUnknown => {
+                                        "settings_view.ai.resource_unknown"
+                                    }
+                                };
+                                div()
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .child(format!(
+                                        "{} · {}",
+                                        resource.label.as_str(),
+                                        self.i18n.t(key)
+                                    ))
+                            }),
+                    );
                 let task_row = self
                     .agent_control(
                         format!("agent-task-{id}"),
@@ -655,7 +684,13 @@ impl WorkspaceApp {
 
     fn render_ai_agent_detail(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let id = self.ai_entity.read(cx).agents.detail.clone()?;
-        let record = self.ai_entity.read(cx).agents.records.get(&id)?.clone();
+        let record = self
+            .ai_entity
+            .read(cx)
+            .agents
+            .records
+            .get(&id)?
+            .metadata_projection();
         let run = record.snapshot.run.clone();
         let state = record.snapshot.state;
         let mut header = div()
@@ -670,7 +705,7 @@ impl WorkspaceApp {
                 self.i18n.t("ai.agents.back"),
                 |this, _, cx| {
                     this.ai_entity.update(cx, |ai, _cx| {
-                        ai.agents.detail = None;
+                        ai.close_agent_detail();
                         ai.agents.model_picker_open = false;
                     });
                     cx.notify();
@@ -753,28 +788,81 @@ impl WorkspaceApp {
                     .child(self.i18n.t("ai.agents.load_error")),
             );
         }
-        for message in &record.messages {
-            if message.role != AiChatRole::Assistant {
-                continue;
+        let owner = crate::workspace::ai_state::history::HistoryViewOwner::Agent(
+            record.snapshot.conversation_id.clone(),
+            id.clone(),
+        );
+        let (descriptions, live, older, newer) = {
+            let ai = self.ai_entity.read(cx);
+            let page = ai.history_view(&owner);
+            let mut descriptions: Vec<_> = page
+                .map(|page| page.descriptions.values().cloned().collect())
+                .unwrap_or_default();
+            descriptions.sort_unstable_by_key(|message| message.sequence);
+            let live: Vec<_> = ai
+                .agents
+                .records
+                .get(&id)
+                .into_iter()
+                .flat_map(|record| &record.messages)
+                .filter_map(|message| ai.live_history_view(&owner, &message.id))
+                .collect();
+            descriptions
+                .retain(|description| !live.iter().any(|view| view.message.id == description.id));
+            (
+                descriptions,
+                live,
+                page.is_some_and(|page| page.before.is_some()),
+                page.is_some_and(|page| page.after.is_some()),
+            )
+        };
+        for (enabled, older, label) in [
+            (older, true, "ai.history.older"),
+            (newer, false, "ai.history.newer"),
+        ] {
+            if enabled {
+                let id = id.clone();
+                body = body.child(self.agent_button(
+                    format!("agent-page-{older}"),
+                    self.i18n.t(label),
+                    move |this, _, cx| {
+                        this.ai_entity.update(cx, |ai, cx| {
+                            ai.load_agent_message_page(id.clone(), Some(older), cx)
+                        });
+                        cx.notify();
+                    },
+                    cx,
+                ));
             }
-            let mut content = div()
-                .w_full()
-                .min_w_0()
-                .flex_none()
-                .flex()
-                .flex_col()
-                .gap(px(self.tokens.spacing.two));
-            if ai_turn_parts(message).is_some_and(|parts| !parts.is_empty()) {
-                content = self.render_ai_turn_parts(content, message, None, cx);
-            } else {
-                if !message.content.is_empty() {
-                    content = content.child(self.render_ai_message_content(message, None, cx));
-                }
-                if !message.tool_calls.is_empty() {
-                    content = content.child(self.render_ai_tool_calls(message, cx));
-                }
+        }
+        if !descriptions.is_empty() {
+            if let Some(list) = self
+                .ai_entity
+                .read(cx)
+                .agents
+                .detail_lists
+                .get(&id)
+                .cloned()
+            {
+                list.reset(descriptions.len());
+                let entity = cx.entity();
+                let owner = owner.clone();
+                body = body.child(
+                    tauri_virtual_list(list, ai_chat_virtual_list_spec(), move |index, _, cx| {
+                        let Some(description) = descriptions.get(index) else {
+                            return div().into_any_element();
+                        };
+                        entity.update(cx, |this, cx| {
+                            this.render_ai_history_description(owner.clone(), description, cx)
+                        })
+                    })
+                    .w_full()
+                    .h(px(400.0)),
+                );
             }
-            body = body.child(content);
+        }
+        for view in live {
+            body = body.child(self.render_ai_owned_message(owner.clone(), view, false, None, cx));
         }
         let auxiliary_key = format!("agent-{id}-context");
         let auxiliary_open = self
@@ -868,39 +956,105 @@ impl WorkspaceApp {
                     ));
                 }
             }
-            if !record.communication.is_empty() {
+            let communication = self
+                .ai_entity
+                .read(cx)
+                .agents
+                .communication_pages
+                .get(&id)
+                .map(|view| {
+                    (
+                        view.page.clone(),
+                        view.cursors.len() > 1,
+                        view.loading,
+                        view.failed,
+                    )
+                });
+            if let Some((page, newer, loading, failed)) = communication {
                 body = body.child(ai_tool_heading(
                     &self.tokens,
                     self.i18n.t("ai.agents.communication"),
                 ));
-                for (index, message) in record.communication.iter().enumerate() {
+                for (enabled, direction, label) in [
+                    (
+                        page.as_ref().is_some_and(|page| page.before.is_some()),
+                        Some(true),
+                        "ai.history.older",
+                    ),
+                    (newer, Some(false), "ai.history.newer"),
+                    (failed, None, "common.actions.retry"),
+                ] {
+                    if enabled && !loading {
+                        let id = id.clone();
+                        body = body.child(self.agent_button(
+                            format!("agent-communication-{label}"),
+                            self.i18n.t(label),
+                            move |this, _, cx| {
+                                this.ai_entity.update(cx, |ai, cx| {
+                                    ai.load_agent_communication(id.clone(), direction, cx)
+                                });
+                                cx.notify();
+                            },
+                            cx,
+                        ));
+                    }
+                }
+                if loading {
+                    body = body.child(self.i18n.t("ai.history.loading"));
+                }
+                if failed {
+                    body = body.child(self.i18n.t("ai.agents.load_error"));
+                }
+                if let Some(page) = page {
+                    let message = &page.message;
                     let label = self.i18n.t(if message.consumed {
                         "ai.agents.consumed"
                     } else {
                         "ai.agents.received"
                     });
-                    body = body.child(
-                        div()
-                            .text_size(px(11.0))
-                            .child(format!(
-                                "{} → {} · {label}",
-                                if message.from.agent_id == run.agent_id {
-                                    record.snapshot.title.as_str().to_owned()
-                                } else {
-                                    self.i18n.t("ai.agents.parent")
-                                },
-                                if message.to.agent_id == run.agent_id {
-                                    record.snapshot.title.as_str().to_owned()
-                                } else {
-                                    self.i18n.t("ai.agents.parent")
-                                }
-                            ))
-                            .child(self.render_agent_markdown(
-                                format!("agent-{id}-communication-{index}"),
-                                message.text.as_str(),
-                                cx,
-                            )),
-                    );
+                    body = body.child(div().text_size(px(11.0)).child(format!(
+                        "{} → {} · {label}",
+                        if message.from.agent_id == run.agent_id {
+                            record.snapshot.title.as_str().to_owned()
+                        } else {
+                            self.i18n.t("ai.agents.parent")
+                        },
+                        if message.to.agent_id == run.agent_id {
+                            record.snapshot.title.as_str().to_owned()
+                        } else {
+                            self.i18n.t("ai.agents.parent")
+                        }
+                    )));
+                    let message = AiChatMessage {
+                        id: format!("agent-communication-{}", page.sequence),
+                        role: AiChatRole::Assistant,
+                        content: message.text.as_str().into(),
+                        timestamp_ms: 0,
+                        model: None,
+                        context: None,
+                        thinking_content: None,
+                        is_streaming: false,
+                        metadata: None,
+                        tool_call_id: None,
+                        tool_calls: Vec::new(),
+                        turn: None,
+                        transcript_ref: None,
+                        summary_ref: None,
+                        branches: None,
+                        suggestions: Vec::new(),
+                    };
+                    body = body.child(self.render_ai_owned_message(
+                        owner.clone(),
+                        Arc::new(oxideterm_ai::HistoryMessageView {
+                            message,
+                            section: 0,
+                            sections: 1,
+                            more: page.more.clone(),
+                        }),
+                        false,
+                        None,
+                        cx,
+                    ));
                 }
             }
             body = body.child(self.agent_usage_label(record.snapshot.usage));

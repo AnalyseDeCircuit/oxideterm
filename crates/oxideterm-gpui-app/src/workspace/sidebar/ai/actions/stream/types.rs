@@ -9,6 +9,7 @@ pub(in crate::workspace) type AiStreamDeliverySender =
     crate::workspace::delivery::ActiveDeliverySender<AiStreamDelivery>;
 
 pub(in crate::workspace) struct AiCompactionDelivery {
+    pub(in crate::workspace) generation: u64,
     pub(in crate::workspace) kind: AiCompactionDeliveryKind,
     pub(in crate::workspace) conversation_id: String,
     pub(in crate::workspace) base_ids: Vec<String>,

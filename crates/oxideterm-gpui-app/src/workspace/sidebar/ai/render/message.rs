@@ -1,9 +1,367 @@
 impl WorkspaceApp {
+    fn render_ai_stored_message(
+        &self,
+        conversation: &str,
+        view: Arc<oxideterm_ai::HistoryMessageView>,
+        last_assistant: bool,
+        viewport: Option<AiMessageViewport>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_ai_owned_message(
+            crate::workspace::ai_state::history::HistoryViewOwner::Main(conversation.into()),
+            view,
+            last_assistant,
+            viewport,
+            cx,
+        )
+    }
+    fn render_ai_owned_message(
+        &self,
+        owner: crate::workspace::ai_state::history::HistoryViewOwner,
+        view: Arc<oxideterm_ai::HistoryMessageView>,
+        last_assistant: bool,
+        viewport: Option<AiMessageViewport>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let message_id = view.message.id.clone();
+        let mut body = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(self.render_ai_history_message(
+                &view.message,
+                last_assistant,
+                viewport,
+                !matches!(
+                    owner,
+                    crate::workspace::ai_state::history::HistoryViewOwner::Main(_)
+                ),
+                cx,
+            ));
+        let mut navigation = div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(self.tokens.spacing.two));
+        for (enabled, section, key, icon) in [
+            (
+                view.section > 0,
+                view.section.saturating_sub(1),
+                "ai.history.older",
+                LucideIcon::ChevronLeft,
+            ),
+            (
+                view.section + 1 < view.sections,
+                view.section + 1,
+                "ai.history.newer",
+                LucideIcon::ChevronDown,
+            ),
+        ] {
+            if enabled {
+                let owner = owner.clone();
+                let message = message_id.clone();
+                navigation = navigation.child(
+                    ai_message_action(
+                        &self.tokens,
+                        self.i18n.t(key),
+                        Self::render_lucide_icon(icon, 12.0, rgb(self.tokens.ui.text_muted)),
+                        false,
+                    )
+                    .id(gpui::SharedString::from(format!(
+                        "history-{message_id}-section-{section}"
+                    )))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.ai_entity.update(cx, |ai, _| {
+                            ai.request_history_owned_body(
+                                owner.clone(),
+                                message.clone(),
+                                Some(section),
+                                true,
+                            )
+                        });
+                        cx.notify();
+                    })),
+                );
+            }
+        }
+        if view.sections > 1 {
+            navigation = navigation.child(format!("{} / {}", view.section + 1, view.sections));
+        }
+        for (index, cursor) in view.more.iter().enumerate() {
+            let owner = owner.clone();
+            let cursor = cursor.clone();
+            let message = message_id.clone();
+            navigation = navigation.child(
+                ai_message_action(
+                    &self.tokens,
+                    self.i18n.t("ai.history.more_content"),
+                    Self::render_lucide_icon(
+                        LucideIcon::ChevronDown,
+                        12.0,
+                        rgb(self.tokens.ui.text_muted),
+                    ),
+                    false,
+                )
+                .id(gpui::SharedString::from(format!(
+                    "history-{message_id}-content-{index}"
+                )))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.ai_entity.update(cx, |ai, _| {
+                        ai.request_history_owned_content(
+                            owner.clone(),
+                            message.clone(),
+                            cursor.clone(),
+                        )
+                    });
+                    cx.notify();
+                })),
+            );
+        }
+        body = body.child(navigation);
+        let content = self
+            .ai_entity
+            .read(cx)
+            .history_view(&owner)
+            .and_then(|page| page.content.as_ref())
+            .filter(|(id, _)| id == &message_id)
+            .map(|(_, page)| (page.value.clone(), page.more.clone()));
+        if let Some((value, more)) = content {
+            let text = match value {
+                serde_json::Value::String(text) => text,
+                value => serde_json::to_string_pretty(&value)
+                    .unwrap_or_else(|_| self.i18n.t("ai.chat.load_failed_generic")),
+            };
+            body = body.child(ai_raw_block(
+                &self.tokens,
+                ("ai-history-content", ai_message_element_seed(&message_id)),
+                Some(320.0),
+                text,
+            ));
+            let target = owner.clone();
+            let message = message_id.clone();
+            let mut continuation = div()
+                .flex()
+                .flex_wrap()
+                .gap(px(self.tokens.spacing.two))
+                .child(
+                    ai_message_action(
+                        &self.tokens,
+                        self.i18n.t("ai.history.older"),
+                        Self::render_lucide_icon(
+                            LucideIcon::ChevronLeft,
+                            12.0,
+                            rgb(self.tokens.ui.text_muted),
+                        ),
+                        false,
+                    )
+                    .id(gpui::SharedString::from(format!(
+                        "history-{message_id}-previous-content"
+                    )))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.ai_entity.update(cx, |ai, _| {
+                            ai.previous_history_content(target.clone(), message.clone())
+                        });
+                        cx.notify();
+                    })),
+                );
+            for (index, cursor) in more.into_iter().enumerate() {
+                let owner = owner.clone();
+                let message = message_id.clone();
+                continuation = continuation.child(
+                    ai_message_action(
+                        &self.tokens,
+                        self.i18n.t("ai.history.more_content"),
+                        Self::render_lucide_icon(
+                            LucideIcon::ChevronDown,
+                            12.0,
+                            rgb(self.tokens.ui.text_muted),
+                        ),
+                        false,
+                    )
+                    .id(gpui::SharedString::from(format!(
+                        "history-{message_id}-continuation-{index}"
+                    )))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.ai_entity.update(cx, |ai, _| {
+                            ai.request_history_owned_content(
+                                owner.clone(),
+                                message.clone(),
+                                cursor.clone(),
+                            )
+                        });
+                        cx.notify();
+                    })),
+                );
+            }
+            body = body.child(continuation);
+        }
+        if let Some(page) = self.ai_entity.read(cx).history_view(&owner) {
+            if page.content_loading.as_deref() == Some(&message_id) {
+                body = body.child(self.i18n.t("ai.history.loading"));
+            }
+            if page.content_error.as_deref() == Some(&message_id) {
+                body = body.child(self.i18n.t("ai.chat.load_failed_generic"));
+            }
+        }
+        body.into_any_element()
+    }
+
     pub(in crate::workspace) fn render_ai_message(
         &self,
         message: &AiChatMessage,
         last_assistant: bool,
         viewport: Option<AiMessageViewport>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_ai_history_message(message, last_assistant, viewport, false, cx)
+    }
+
+    fn render_ai_archive_page(
+        &self,
+        conversation: &str,
+        message: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let view = self
+            .ai_entity
+            .read(cx)
+            .history
+            .archives
+            .get(&(conversation.into(), message.into()))?;
+        if !view.expanded {
+            return None;
+        }
+        let loading = view.loading;
+        let failed = view.failed;
+        let older = view.before.is_some();
+        let newer = view.cursors.len() > 1;
+        let messages = view.messages.clone();
+        let state = view.list.clone();
+        let owner = crate::workspace::ai_state::history::HistoryViewOwner::Archive(
+            conversation.into(),
+            message.into(),
+        );
+        let mut header = div()
+            .flex()
+            .items_center()
+            .gap(px(12.0))
+            .text_size(px(12.0))
+            .text_color(rgb(self.tokens.ui.accent));
+        for (enabled, direction, key) in [
+            (older, true, "ai.history.older"),
+            (newer, false, "ai.history.newer"),
+        ] {
+            if enabled && !loading {
+                let conversation = conversation.to_owned();
+                let message = message.to_owned();
+                header = header.child(
+                    div()
+                        .id(key)
+                        .cursor_pointer()
+                        .child(self.i18n.t(key))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.ai_entity.update(cx, |ai, _| {
+                                ai.page_history_archive(
+                                    conversation.clone(),
+                                    message.clone(),
+                                    direction,
+                                )
+                            });
+                            cx.notify();
+                        })),
+                );
+            }
+        }
+        let mut body = div().flex().flex_col().gap(px(8.0)).child(header);
+        if loading {
+            body = body.child(self.i18n.t("ai.history.loading"));
+        }
+        if failed {
+            body = body.child(self.i18n.t("ai.chat.load_failed_generic"));
+        }
+        let entity = cx.entity();
+        body = body.child(
+            tauri_virtual_list(state, ai_chat_virtual_list_spec(), move |index, _, cx| {
+                let Some(message) = messages.get(index) else {
+                    return div().into_any_element();
+                };
+                entity.update(cx, |this, cx| {
+                    this.render_ai_history_description(owner.clone(), message, cx)
+                })
+            })
+            .w_full()
+            .h(px(400.0)),
+        );
+        Some(body.into_any_element())
+    }
+
+    fn render_ai_history_description(
+        &self,
+        owner: crate::workspace::ai_state::history::HistoryViewOwner,
+        description: &oxideterm_ai::MessageDescriptor,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (view, failed) = self
+            .ai_entity
+            .read(cx)
+            .history_view(&owner)
+            .map(|page| {
+                (
+                    page.bodies
+                        .get(&description.id)
+                        .and_then(std::sync::Weak::upgrade),
+                    page.body_errors.contains(&description.id),
+                )
+            })
+            .unwrap_or_default();
+        if let Some(view) = view {
+            return self.render_ai_owned_message(owner, view, false, None, cx);
+        }
+        let id = description.id.clone();
+        if !failed {
+            self.ai_entity.update(cx, |ai, _| {
+                ai.request_history_owned_body(owner.clone(), id.clone(), None, false)
+            });
+        }
+        div()
+            .flex()
+            .flex_col()
+            .child(description.preview.clone())
+            .child(
+                ai_message_action(
+                    &self.tokens,
+                    self.i18n.t(if failed {
+                        "common.actions.retry"
+                    } else {
+                        "ai.history.loading"
+                    }),
+                    Self::render_lucide_icon(
+                        LucideIcon::RefreshCw,
+                        12.0,
+                        rgb(self.tokens.ui.text_muted),
+                    ),
+                    false,
+                )
+                .id(gpui::SharedString::from(format!(
+                    "history-body-{}",
+                    description.storage_id
+                )))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.ai_entity.update(cx, |ai, _| {
+                        ai.request_history_owned_body(owner.clone(), id.clone(), None, true)
+                    });
+                    cx.notify();
+                })),
+            )
+            .into_any_element()
+    }
+
+    fn render_ai_history_message(
+        &self,
+        message: &AiChatMessage,
+        last_assistant: bool,
+        viewport: Option<AiMessageViewport>,
+        read_only: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if message
@@ -20,6 +378,26 @@ impl WorkspaceApp {
                 .i18n
                 .t("ai.context.compacted_messages")
                 .replace("{{count}}", &original_count.to_string());
+            let conversation = self
+                .ai_entity
+                .read(cx)
+                .conversation_state()
+                .active_conversation_id
+                .clone()
+                .unwrap_or_default();
+            let range = message
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.original_ref.clone());
+            let expanded = self
+                .ai_entity
+                .read(cx)
+                .history
+                .archives
+                .get(&(conversation.clone(), message.id.clone()))
+                .is_some_and(|view| view.expanded);
+            let archive_id = message.id.clone();
+            let archive_conversation = conversation.clone();
             return div()
                 .px(px(self.tokens.spacing.three))
                 .py(px(self.tokens.spacing.two))
@@ -31,6 +409,24 @@ impl WorkspaceApp {
                         .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
                         .child(
                             div()
+                                .id(SharedString::from(format!(
+                                    "ai-archive-toggle-{}",
+                                    message.id
+                                )))
+                                .when_some(range, |row, range| {
+                                    row.cursor_pointer().on_click(cx.listener(
+                                        move |this, _, _, cx| {
+                                            this.ai_entity.update(cx, |ai, _| {
+                                                ai.toggle_history_archive(
+                                                    archive_conversation.clone(),
+                                                    archive_id.clone(),
+                                                    range.clone(),
+                                                )
+                                            });
+                                            cx.notify();
+                                        },
+                                    ))
+                                })
                                 .flex()
                                 .items_center()
                                 .gap(px(self.tokens.spacing.two))
@@ -61,7 +457,11 @@ impl WorkspaceApp {
                                         )),
                                 )
                                 .child(Self::render_lucide_icon(
-                                    LucideIcon::ChevronRight,
+                                    if expanded {
+                                        LucideIcon::ChevronDown
+                                    } else {
+                                        LucideIcon::ChevronRight
+                                    },
                                     12.0,
                                     rgba((self.tokens.ui.text_muted << 8) | 0x66),
                                 )),
@@ -84,6 +484,7 @@ impl WorkspaceApp {
                                 )),
                         ),
                 )
+                .children(self.render_ai_archive_page(&conversation, &message.id, cx))
                 .into_any_element();
         }
         let role = match message.role {
@@ -93,8 +494,15 @@ impl WorkspaceApp {
             AiChatRole::Tool => oxideterm_gpui_ui::ai::AiMessageRole::Assistant,
         };
         let user = message.role == AiChatRole::User;
-        let editing =
-            user && self.ai_entity.read(cx).chat_ui().editing_message_id.as_deref() == Some(message.id.as_str());
+        let editing = !read_only
+            && user
+            && self
+                .ai_entity
+                .read(cx)
+                .chat_ui()
+                .editing_message_id
+                .as_deref()
+                == Some(message.id.as_str());
         let label = match message.role {
             AiChatRole::User => self.i18n.t("ai.message.you"),
             AiChatRole::Assistant => self.i18n.t("ai.chat.title"),
@@ -141,7 +549,11 @@ impl WorkspaceApp {
                     .filter(|content| !content.is_empty())
             })
             .flatten();
-        let thinking_expanded = self.ai_entity.read(cx).chat_ui().thinking_expansion_state
+        let thinking_expanded = self
+            .ai_entity
+            .read(cx)
+            .chat_ui()
+            .thinking_expansion_state
             .get(&message.id)
             .copied()
             .unwrap_or_else(|| self.settings_store.settings().ai.thinking_default_expanded);
@@ -261,8 +673,13 @@ impl WorkspaceApp {
             // round-level transition at the message footer so it appears once.
             body = body.child(self.render_ai_tool_summary_indicator(message, cx));
         }
-        if let Some(group) = self.render_ai_agent_group(&message.id, cx) { body = body.child(group); }
-        if user
+        if !read_only {
+            if let Some(group) = self.render_ai_agent_group(&message.id, cx) {
+                body = body.child(group);
+            }
+        }
+        if !read_only
+            && user
             && !editing
             && let Some(branches) = message
                 .branches
@@ -351,8 +768,8 @@ impl WorkspaceApp {
                     ),
             );
         }
-        if !user && !message.is_streaming && !editing {
-            let content = message.content.clone();
+        if !read_only && !user && !message.is_streaming && !editing {
+            let copy_id = message.id.clone();
             let delete_id = message.id.clone();
             body = body.child(
                 div()
@@ -373,8 +790,8 @@ impl WorkspaceApp {
                         )
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(move |_this, _event, _window, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(content.clone()));
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.copy_ai_message(copy_id.clone(), cx);
                                 cx.stop_propagation();
                             }),
                         ),
@@ -383,9 +800,15 @@ impl WorkspaceApp {
                         row.child(
                             ai_message_action(
                                 &self.tokens,
-                                self.i18n.t(if oxideterm_ai::agent::recoverable_checkpoint(message).is_some() {
-                                    "settings_view.ai.resume_task"
-                                } else { "ai.message.regenerate" }),
+                                self.i18n.t(
+                                    if oxideterm_ai::agent::recoverable_checkpoint(message)
+                                        .is_some()
+                                    {
+                                        "settings_view.ai.resume_task"
+                                    } else {
+                                        "ai.message.regenerate"
+                                    },
+                                ),
                                 Self::render_lucide_icon(
                                     LucideIcon::RotateCcw,
                                     12.0,
@@ -422,10 +845,9 @@ impl WorkspaceApp {
                         ),
                     ),
             );
-        } else if user && !message.is_streaming && !editing {
+        } else if !read_only && user && !message.is_streaming && !editing {
             let delete_id = message.id.clone();
             let edit_id = message.id.clone();
-            let edit_content = message.content.clone();
             body = body.child(
                 div()
                     .mt(px(6.0))
@@ -446,12 +868,8 @@ impl WorkspaceApp {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _event, window, cx| {
-                                this.start_edit_ai_message(
-                                    edit_id.clone(),
-                                    edit_content.clone(),
-                                    cx,
-                                );
-window.focus(&this.focus_handle, cx);
+                                this.start_edit_ai_message(edit_id.clone(), cx);
+                                window.focus(&this.focus_handle, cx);
                                 cx.stop_propagation();
                             }),
                         ),
@@ -588,7 +1006,7 @@ window.focus(&this.focus_handle, cx);
             .filter(|_| !message.is_streaming)
             .map(|viewport| {
                 markdown_render::render_document_windowed_selectable_with_code_actions(
-                    &cached.document,
+                    &cached.projection.document,
                     &cached.layout,
                     &self.tokens,
                     &options,
@@ -601,7 +1019,7 @@ window.focus(&this.focus_handle, cx);
             })
             .unwrap_or_else(|| {
                 markdown_render::render_document_selectable_with_code_actions(
-                    &cached.document,
+                    &cached.projection.document,
                     &self.tokens,
                     &options,
                     Some(&code_actions),
@@ -850,7 +1268,11 @@ window.focus(&this.focus_handle, cx);
             .and_then(serde_json::Value::as_str)
             .filter(|value| !value.trim().is_empty());
         let expanded_key = format!("{}-guardrail-{segment_index}", message.id);
-        let expanded = self.ai_entity.read(cx).chat_ui().tool_call_expansion_state
+        let expanded = self
+            .ai_entity
+            .read(cx)
+            .chat_ui()
+            .tool_call_expansion_state
             .contains(&expanded_key);
         let mut block = ai_guardrail_block(
             &self.tokens,
@@ -924,7 +1346,11 @@ window.focus(&this.focus_handle, cx);
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let thinking_key = format!("{}-thinking-{segment_index}", message.id);
-        let thinking_expanded = self.ai_entity.read(cx).chat_ui().thinking_expansion_state
+        let thinking_expanded = self
+            .ai_entity
+            .read(cx)
+            .chat_ui()
+            .thinking_expansion_state
             .get(&thinking_key)
             .copied()
             .unwrap_or_else(|| self.settings_store.settings().ai.thinking_default_expanded);
@@ -938,9 +1364,7 @@ window.focus(&this.focus_handle, cx);
                 Self::render_lucide_icon(LucideIcon::Brain, 12.0, rgb(self.tokens.ui.text_muted)),
                 self.render_animated_chevron(
                     (
-                        gpui::SharedString::from(format!(
-                            "thinking-stream-chevron-{thinking_key}"
-                        )),
+                        gpui::SharedString::from(format!("thinking-stream-chevron-{thinking_key}")),
                         thinking_expanded as usize,
                     ),
                     thinking_expanded,
@@ -1062,7 +1486,11 @@ window.focus(&this.focus_handle, cx);
             0
         };
         let condensed_key = format!("{}:condensed-tools", message.id);
-        let show_condensed = self.ai_entity.read(cx).chat_ui().tool_call_expansion_state
+        let show_condensed = self
+            .ai_entity
+            .read(cx)
+            .chat_ui()
+            .tool_call_expansion_state
             .contains(&condensed_key);
         if should_condense {
             let hidden_count = split_at;
@@ -1104,7 +1532,9 @@ window.focus(&this.focus_handle, cx);
                     ))
                     .child(self.render_animated_chevron(
                         (
-                            gpui::SharedString::from(format!("tool-condensed-chevron-{expanded_key}")),
+                            gpui::SharedString::from(format!(
+                                "tool-condensed-chevron-{expanded_key}"
+                            )),
                             show_condensed as usize,
                         ),
                         show_condensed,
@@ -1130,7 +1560,10 @@ window.focus(&this.focus_handle, cx);
             .filter(|(index, _)| !should_condense || show_condensed || *index >= split_at)
             .map(|(_, call)| call);
         for call in calls {
-            let approval_generation = call.get("approvalGeneration").and_then(serde_json::Value::as_u64).unwrap_or_default();
+            let approval_generation = call
+                .get("approvalGeneration")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or_default();
             let id = call
                 .get("id")
                 .and_then(serde_json::Value::as_str)
@@ -1171,16 +1604,33 @@ window.focus(&this.focus_handle, cx);
                         .and_then(serde_json::Value::as_str)
                         .map(str::to_string)
                 })
-                .unwrap_or_else(|| match call.get("status").and_then(serde_json::Value::as_str) {
-                    Some("waiting_condition") => self.i18n.t("settings_view.ai.waiting_condition"),
-                    Some("waiting_user") => self.i18n.t("settings_view.ai.waiting_user"),
-                    Some("waiting_connection") => self.i18n.t("settings_view.ai.waiting_connection"),
-                    _ => self.ai_tool_status_label(status),
-                });
-            if let Some(deadline) = result.and_then(|value| value.get("waitDeadline")).and_then(serde_json::Value::as_i64)
-                .and_then(chrono::DateTime::from_timestamp_millis) {
+                .unwrap_or_else(
+                    || match call.get("status").and_then(serde_json::Value::as_str) {
+                        Some("waiting_condition") => {
+                            self.i18n.t("settings_view.ai.waiting_condition")
+                        }
+                        Some("waiting_user") => self.i18n.t("settings_view.ai.waiting_user"),
+                        Some("waiting_connection") => {
+                            self.i18n.t("settings_view.ai.waiting_connection")
+                        }
+                        _ => self.ai_tool_status_label(status),
+                    },
+                );
+            if let Some(deadline) = result
+                .and_then(|value| value.get("waitDeadline"))
+                .and_then(serde_json::Value::as_i64)
+                .and_then(chrono::DateTime::from_timestamp_millis)
+            {
                 summary.push_str(" · ");
-                summary.push_str(&self.i18n.t("settings_view.ai.wait_until").replace("{{time}}", &deadline.with_timezone(&chrono::Local).format("%H:%M:%S").to_string()));
+                summary.push_str(
+                    &self.i18n.t("settings_view.ai.wait_until").replace(
+                        "{{time}}",
+                        &deadline
+                            .with_timezone(&chrono::Local)
+                            .format("%H:%M:%S")
+                            .to_string(),
+                    ),
+                );
             }
             let bypass_approval = result
                 .and_then(|value| value.pointer("/meta/approvalMode"))
@@ -1206,7 +1656,11 @@ window.focus(&this.focus_handle, cx);
             };
             let tool_mono_font = settings_mono_font_family(self.settings_store.settings());
             let expansion_key = format!("{}:{id}", message.id);
-            let expanded = self.ai_entity.read(cx).chat_ui().tool_call_expansion_state
+            let expanded = self
+                .ai_entity
+                .read(cx)
+                .chat_ui()
+                .tool_call_expansion_state
                 .contains(&expansion_key);
             let header_key = expansion_key.clone();
             let args_scroll =
@@ -1303,19 +1757,13 @@ window.focus(&this.focus_handle, cx);
                     .get("acpFileWriteReview")
                     .and_then(serde_json::Value::as_bool)
                     .filter(|enabled| *enabled)
-                    .and_then(|_| {
-                        self.acp_entity
-                            .read(cx)
-                            .file_write_preview(&id)
-                    });
+                    .and_then(|_| self.acp_entity.read(cx).file_write_preview(&id));
                 let output = file_write_preview.unwrap_or_else(|| {
                     result
                         .get("output")
                         .and_then(serde_json::Value::as_str)
                         .map(str::to_string)
-                        .unwrap_or_else(|| {
-                            serde_json::to_string_pretty(result).unwrap_or_default()
-                        })
+                        .unwrap_or_else(|| serde_json::to_string_pretty(result).unwrap_or_default())
                 });
                 details = details.child(
                     div()
@@ -1346,46 +1794,58 @@ window.focus(&this.focus_handle, cx);
                     recovery_code.and_then(ai_runtime_recovery_action)
             {
                 let prompt = action_prompt.to_string();
-                item = item.child(
-                    ai_tool_approval_bar(
+                item = item.child(ai_tool_approval_bar(
+                    &self.tokens,
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(px(10.0))
+                        .text_color(rgba((self.tokens.ui.text_muted << 8) | 0xcc))
+                        .child(self.i18n.t("ai.tool_use.recoverable_error")),
+                    ai_tool_approval_button(
                         &self.tokens,
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_size(px(10.0))
-                            .text_color(rgba((self.tokens.ui.text_muted << 8) | 0xcc))
-                            .child(self.i18n.t("ai.tool_use.recoverable_error")),
-                        ai_tool_approval_button(
-                            &self.tokens,
-                            self.i18n.t(action_label_key),
-                            true,
-                            Self::render_lucide_icon(
-                                LucideIcon::RefreshCw,
-                                11.0,
-                                rgb(self.tokens.ui.accent),
-                            ),
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.send_ai_follow_up_suggestion(prompt.clone(), cx);
-                                cx.stop_propagation();
-                            }),
+                        self.i18n.t(action_label_key),
+                        true,
+                        Self::render_lucide_icon(
+                            LucideIcon::RefreshCw,
+                            11.0,
+                            rgb(self.tokens.ui.accent),
                         ),
-                        div(),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.send_ai_follow_up_suggestion(prompt.clone(), cx);
+                            cx.stop_propagation();
+                        }),
                     ),
-                );
+                    div(),
+                ));
             }
 
             if name == "ask_user" {
                 let active = self.ai_entity.read(cx).active_user_question()
                     == Some((approval_generation, id.clone()));
                 if active {
-                    if let Some(question) = result.and_then(|value| value.get("question")).and_then(serde_json::Value::as_str) {
-                        let mut prompt = div().flex().flex_col().gap(px(self.tokens.spacing.two))
+                    if let Some(question) = result
+                        .and_then(|value| value.get("question"))
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        let mut prompt = div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(self.tokens.spacing.two))
                             .p(px(self.tokens.spacing.three))
-                            .text_size(px(12.0)).child(question.to_owned());
-                        for (index, option) in result.and_then(|value| value.get("options")).and_then(serde_json::Value::as_array).into_iter().flatten().filter_map(serde_json::Value::as_str).enumerate() {
+                            .text_size(px(12.0))
+                            .child(question.to_owned());
+                        for (index, option) in result
+                            .and_then(|value| value.get("options"))
+                            .and_then(serde_json::Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .filter_map(serde_json::Value::as_str)
+                            .enumerate()
+                        {
                             let answer = option.to_owned();
                             let call_id = id.clone();
                             prompt = prompt.child(self.agent_button(
@@ -1393,22 +1853,33 @@ window.focus(&this.focus_handle, cx);
                                 option.to_owned(),
                                 move |this, _, cx| {
                                     this.ai_entity.update(cx, |ai, _| {
-                                        ai.resolve_user_question(approval_generation, &call_id, zeroize::Zeroizing::new(answer.clone()));
+                                        ai.resolve_user_question(
+                                            approval_generation,
+                                            &call_id,
+                                            zeroize::Zeroizing::new(answer.clone()),
+                                        );
                                     });
                                     cx.notify();
                                 },
                                 cx,
                             ));
                         }
-                        prompt = prompt.child(div().text_size(px(10.0)).text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t("ai.questions.hint")));
+                        prompt = prompt.child(
+                            div()
+                                .text_size(px(10.0))
+                                .text_color(rgb(self.tokens.ui.text_muted))
+                                .child(self.i18n.t("ai.questions.hint")),
+                        );
                         item = item.child(prompt);
                     }
                 }
             }
 
             if status == AiToolStatus::PendingApproval {
-                let wait_expired = result.and_then(|value| value.get("waitTimedOut")).and_then(serde_json::Value::as_bool) == Some(true);
+                let wait_expired = result
+                    .and_then(|value| value.get("waitTimedOut"))
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true);
                 let acp_options = result
                     .and_then(|value| value.get("acpPermissionOptions"))
                     .and_then(serde_json::Value::as_array)
@@ -1424,10 +1895,18 @@ window.focus(&this.focus_handle, cx);
                             .min_w_0()
                             .text_size(px(10.0))
                             .text_color(rgba((self.tokens.ui.text_muted << 8) | 0xcc))
-                            .child(self.i18n.t(if wait_expired { "settings_view.ai.wait_expired" } else { "ai.tool_use.approval_required" })),
+                            .child(self.i18n.t(if wait_expired {
+                                "settings_view.ai.wait_expired"
+                            } else {
+                                "ai.tool_use.approval_required"
+                            })),
                         ai_tool_approval_button(
                             &self.tokens,
-                            self.i18n.t(if wait_expired { "settings_view.ai.continue_waiting" } else { "ai.tool_use.approve" }),
+                            self.i18n.t(if wait_expired {
+                                "settings_view.ai.continue_waiting"
+                            } else {
+                                "ai.tool_use.approve"
+                            }),
                             true,
                             Self::render_lucide_icon(
                                 LucideIcon::Check,
@@ -1438,13 +1917,22 @@ window.focus(&this.focus_handle, cx);
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.resolve_ai_tool_approval(approval_generation, approve_id.clone(), true, cx);
+                                this.resolve_ai_tool_approval(
+                                    approval_generation,
+                                    approve_id.clone(),
+                                    true,
+                                    cx,
+                                );
                                 cx.stop_propagation();
                             }),
                         ),
                         ai_tool_approval_button(
                             &self.tokens,
-                            self.i18n.t(if wait_expired { "settings_view.ai.stop_waiting" } else { "ai.tool_use.reject" }),
+                            self.i18n.t(if wait_expired {
+                                "settings_view.ai.stop_waiting"
+                            } else {
+                                "ai.tool_use.reject"
+                            }),
                             false,
                             Self::render_lucide_icon(
                                 LucideIcon::X,
@@ -1455,14 +1943,22 @@ window.focus(&this.focus_handle, cx);
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.resolve_ai_tool_approval(approval_generation, reject_id.clone(), false, cx);
+                                this.resolve_ai_tool_approval(
+                                    approval_generation,
+                                    reject_id.clone(),
+                                    false,
+                                    cx,
+                                );
                                 cx.stop_propagation();
                             }),
                         ),
                     ));
                 } else {
-                    let mut option_buttons =
-                        div().flex().flex_wrap().justify_end().gap(px(self.tokens.spacing.one));
+                    let mut option_buttons = div()
+                        .flex()
+                        .flex_wrap()
+                        .justify_end()
+                        .gap(px(self.tokens.spacing.one));
                     for option in acp_options {
                         let option_id = option
                             .get("id")
@@ -1489,31 +1985,22 @@ window.focus(&this.focus_handle, cx);
                                 rgb(self.tokens.ui.success),
                             )
                         } else {
-                            Self::render_lucide_icon(
-                                LucideIcon::X,
-                                11.0,
-                                rgb(self.tokens.ui.error),
-                            )
+                            Self::render_lucide_icon(LucideIcon::X, 11.0, rgb(self.tokens.ui.error))
                         };
                         option_buttons = option_buttons.child(
-                            ai_tool_approval_button(
-                                &self.tokens,
-                                option_name,
-                                allow,
-                                icon,
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.resolve_ai_acp_permission(
-                                        approval_generation,
-                                        tool_call_id.clone(),
-                                        Some(option_id.clone()),
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            ),
+                            ai_tool_approval_button(&self.tokens, option_name, allow, icon)
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.resolve_ai_acp_permission(
+                                            approval_generation,
+                                            tool_call_id.clone(),
+                                            Some(option_id.clone()),
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }),
+                                ),
                         );
                     }
                     item = item.child(ai_tool_approval_bar(
@@ -1643,33 +2130,30 @@ window.focus(&this.focus_handle, cx);
                             },
                         ))
                         .child(
-                            div()
-                                .flex()
-                                .justify_end()
-                                .child(
-                                    ai_tool_approval_button(
-                                        &self.tokens,
-                                        self.i18n.t("ai.tool_use.cancel_selection"),
-                                        false,
-                                        Self::render_lucide_icon(
-                                            LucideIcon::X,
-                                            11.0,
-                                            rgb(self.tokens.ui.text_muted),
-                                        ),
-                                    )
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(move |this, _event, _window, cx| {
-                                            this.resolve_ai_tool_candidate_selection(
-                                                approval_generation,
-                                                cancel_id.clone(),
-                                                None,
-                                                cx,
-                                            );
-                                            cx.stop_propagation();
-                                        }),
+                            div().flex().justify_end().child(
+                                ai_tool_approval_button(
+                                    &self.tokens,
+                                    self.i18n.t("ai.tool_use.cancel_selection"),
+                                    false,
+                                    Self::render_lucide_icon(
+                                        LucideIcon::X,
+                                        11.0,
+                                        rgb(self.tokens.ui.text_muted),
                                     ),
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.resolve_ai_tool_candidate_selection(
+                                            approval_generation,
+                                            cancel_id.clone(),
+                                            None,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }),
                                 ),
+                            ),
                         ),
                 );
             }
@@ -1720,7 +2204,13 @@ window.focus(&this.focus_handle, cx);
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let target = WorkspaceImeTarget::AiMessageEdit;
-        let save_disabled = self.ai_entity.read(cx).chat_ui().editing_message_draft.trim().is_empty();
+        let save_disabled = self
+            .ai_entity
+            .read(cx)
+            .chat_ui()
+            .editing_message_draft
+            .trim()
+            .is_empty();
         let input = text_input(
             &self.tokens,
             TextInputView {
@@ -1748,7 +2238,7 @@ window.focus(&this.focus_handle, cx);
                     ai.set_model_selector_search_focused(false);
                 });
                 this.ime_marked_text = None;
-window.focus(&this.focus_handle, cx);
+                window.focus(&this.focus_handle, cx);
                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                 cx.stop_propagation();
             }),
@@ -1834,7 +2324,10 @@ window.focus(&this.focus_handle, cx);
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let active_title = self.ai_entity.read(cx).conversation_state()
+        let active_title = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
             .active_conversation()
             .map(|conversation| conversation.title.clone());
         div()
@@ -1903,7 +2396,11 @@ window.focus(&this.focus_handle, cx);
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(|this, _event, _window, cx| {
-                                        let next_open = !this.ai_entity.read(cx).chat_ui().conversation_list_open;
+                                        let next_open = !this
+                                            .ai_entity
+                                            .read(cx)
+                                            .chat_ui()
+                                            .conversation_list_open;
                                         this.close_ai_sidebar_popovers(cx);
                                         this.ai_entity.update(cx, |ai, _cx| {
                                             ai.set_chat_popover_open(
@@ -1949,7 +2446,11 @@ window.focus(&this.focus_handle, cx);
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let disabled = matches!(action, Some(AiHeaderAction::NewChat))
-            && self.ai_entity.read(cx).chat_initialization_error().is_some();
+            && self
+                .ai_entity
+                .read(cx)
+                .chat_initialization_error()
+                .is_some();
         // Tauri AiChatPanel header buttons are title-backed icon buttons. Route
         // tooltip ownership and disabled New Chat activation through the shared
         // workspace helper so AI header actions match other toolbar buttons.
@@ -1979,7 +2480,7 @@ window.focus(&this.focus_handle, cx);
                             this.ai_entity.update(cx, |ai, _cx| {
                                 ai.set_chat_popover_open(AiChatPopover::Menu, next_open);
                             });
-window.focus(&this.focus_handle, cx);
+                            window.focus(&this.focus_handle, cx);
                             cx.notify();
                         }
                         None => {}
@@ -2117,7 +2618,9 @@ pub(in crate::workspace) fn ai_tool_status_from_value(
         "pending_user_approval" | "pending_approval" => AiToolStatus::PendingApproval,
         "pending_user_selection" => AiToolStatus::PendingSelection,
         "approved" => AiToolStatus::Approved,
-        "running" | "waiting_user" | "waiting_condition" | "waiting_connection" => AiToolStatus::Running,
+        "running" | "waiting_user" | "waiting_condition" | "waiting_connection" => {
+            AiToolStatus::Running
+        }
         "completed" => AiToolStatus::Completed,
         "error" | "failed" => AiToolStatus::Error,
         "rejected" => AiToolStatus::Rejected,
@@ -2321,9 +2824,7 @@ pub(in crate::workspace) fn ai_tool_status_icon(status: AiToolStatus) -> LucideI
         AiToolStatus::Completed => LucideIcon::Check,
         AiToolStatus::Error => LucideIcon::AlertCircle,
         AiToolStatus::Rejected => LucideIcon::X,
-        AiToolStatus::PendingApproval | AiToolStatus::PendingSelection => {
-            LucideIcon::ListChecks
-        }
+        AiToolStatus::PendingApproval | AiToolStatus::PendingSelection => LucideIcon::ListChecks,
         AiToolStatus::Running | AiToolStatus::Approved => LucideIcon::LoaderCircle,
         AiToolStatus::Pending => LucideIcon::Clock,
     }

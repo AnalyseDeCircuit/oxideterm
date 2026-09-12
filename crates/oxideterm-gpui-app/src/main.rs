@@ -457,8 +457,7 @@ fn looks_like_connection_uri(value: &str) -> bool {
 }
 
 fn quit(_: &Quit, cx: &mut App) {
-    oxideterm_desktop_presence::request_quit();
-    cx.quit();
+    workspace::request_app_quit(cx);
 }
 
 fn desktop_presence_menu(i18n: &I18n) -> oxideterm_desktop_presence::DesktopPresenceMenu {

@@ -777,9 +777,11 @@ impl WorkspaceApp {
     ) -> AnyElement {
         settings_ai_context_controls_section(
             self.ai_section_title("settings_view.ai.context_controls"),
-            div().text_size(px(self.tokens.metrics.ui_text_sm))
+            div()
+                .text_size(px(self.tokens.metrics.ui_text_sm))
                 .text_color(rgb(self.tokens.ui.text_muted))
-                .child(self.i18n.t("settings_view.ai.context_automatic_hint")).into_any_element(),
+                .child(self.i18n.t("settings_view.ai.context_automatic_hint"))
+                .into_any_element(),
             settings_ai_context_sources_group(
                 &self.tokens,
                 self.i18n.t("settings_view.ai.context_sources"),
@@ -802,8 +804,6 @@ impl WorkspaceApp {
             ),
         )
     }
-
-
 
     pub(in crate::workspace) fn ai_context_source_row(
         &self,
@@ -828,10 +828,6 @@ impl WorkspaceApp {
         )
         .into_any_element()
     }
-
-
-
-
 
     pub(in crate::workspace) fn ai_system_prompt_section(
         &self,
@@ -1663,8 +1659,6 @@ impl WorkspaceApp {
             model_index == 0,
         )
     }
-
-
 
     pub(in crate::workspace) fn ai_tool_expand_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let expanded = self

@@ -642,9 +642,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             AiSettingsPage::Context,
             4,
             "settings_view.ai.model_context_windows",
-            &[
-                "settings_view.ai.model_context_windows_hint",
-            ],
+            &["settings_view.ai.model_context_windows_hint"],
         ),
         ai_search_entry(
             AiSettingsPage::Tools,

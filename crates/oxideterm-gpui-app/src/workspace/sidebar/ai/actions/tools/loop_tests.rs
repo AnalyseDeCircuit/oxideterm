@@ -153,6 +153,7 @@ mod agent_loop_tests {
             let mut final_text = String::new();
             while let Ok(delivery) = receiver.recv_timeout(Duration::from_secs(5)) {
                 match delivery.event {
+                    AiStreamDeliveryEvent::HistoryBarrier(sender) => { let _ = sender.send(true); }
                     AiStreamDeliveryEvent::RuntimeContextRequested { sender, .. } => {
                         sender.send(Some("Test runtime".into())).unwrap();
                     }
@@ -524,6 +525,8 @@ mod agent_loop_tests {
                         ));
                         // Neither request can complete until both have reached the real loop's executor boundary.
                         if pending.len() == 2 {
+                            // Preflight awaits may reorder arrivals; complete in reverse model order deliberately.
+                            pending.sort_by(|left, right| left.3.cmp(&right.3));
                             assert_eq!(
                                 pending
                                     .iter()
@@ -556,6 +559,7 @@ mod agent_loop_tests {
                             .send(executed(tool_call_id, name, "Created result"))
                             .unwrap();
                     }
+                    AiStreamDeliveryEvent::HistoryBarrier(sender) => { let _ = sender.send(true); }
                     AiStreamDeliveryEvent::Checkpoint(value) => checkpoint = Some(value),
                     AiStreamDeliveryEvent::Stream(AiStreamEvent::Content(text)) => {
                         answer.push_str(&text)
@@ -750,6 +754,7 @@ mod agent_loop_tests {
                     AiStreamDeliveryEvent::RuntimeContextRequested { sender, .. } => {
                         sender.send(Some("runtime".into())).unwrap();
                     }
+                    AiStreamDeliveryEvent::HistoryBarrier(sender) => { let _ = sender.send(true); }
                     AiStreamDeliveryEvent::Checkpoint(value) => checkpoint = Some(value),
                     AiStreamDeliveryEvent::ToolPreflightRequested { sender, .. } => {
                         sender.send(None).unwrap();
@@ -827,6 +832,7 @@ mod agent_loop_tests {
                     let mut workers = Vec::new();
                     while workers.len() < 4 {
                         match receiver.recv_timeout(Duration::from_secs(5)).unwrap().event {
+                            AiStreamDeliveryEvent::HistoryBarrier(sender) => { let _ = sender.send(true); }
                             AiStreamDeliveryEvent::ToolPreflightRequested { sender, .. } => {
                                 sender.send(None).unwrap();
                             }

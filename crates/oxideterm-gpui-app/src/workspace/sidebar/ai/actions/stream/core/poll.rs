@@ -43,6 +43,10 @@ impl WorkspaceApp {
                     self.flush_pending_ai_stream_text(&mut pending_text, cx);
                     self.handle_ai_agent_command(delivery.generation, &delivery.conversation_id, &tool_session_id, call, sender, cx);
                 }
+                AiStreamDeliveryEvent::HistoryBarrier(sender) => {
+                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai_entity.update(cx, |ai, _| { ai.persist_chat_state(); ai.history_barrier(sender); });
+                }
                 AiStreamDeliveryEvent::Checkpoint(checkpoint) => {
                     self.flush_pending_ai_stream_text(&mut pending_text, cx);
                     self.ai_entity.update(cx, |ai, _| {
@@ -1061,6 +1065,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         for delivery in deliveries {
+            if self.ai_entity.read(cx).history.compaction_runs.get(&delivery.conversation_id).is_none_or(|(generation, _)| *generation != delivery.generation) { continue; }
             match delivery.kind {
                 AiCompactionDeliveryKind::Compact => {
                     if let Some(plan) = delivery.plan {

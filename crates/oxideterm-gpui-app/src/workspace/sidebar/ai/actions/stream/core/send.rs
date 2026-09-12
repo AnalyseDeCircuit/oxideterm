@@ -7,7 +7,7 @@ impl AiWorkspaceEntity {
         backend: oxideterm_ai::AiMessageBackendProvenance,
     ) {
         let message_id = message.id.clone();
-        self.conversation_state_mut()
+        self
             .add_message(conversation_id, message);
         if let Some(conversation) = self
             .conversation_state_mut()
@@ -89,10 +89,7 @@ impl WorkspaceApp {
         let request_message = self
             .ai_entity
             .read(cx)
-            .conversation_state()
-            .conversations
-            .iter()
-            .find(|conversation| conversation.id == conversation_id)
+            .history.model_contexts.get(&conversation_id)
             .and_then(|conversation| {
                 conversation
                     .messages
@@ -132,10 +129,7 @@ impl WorkspaceApp {
             (!already_known).then_some((catalog, catalog_hash))
         });
 
-        let handoff = self.ai_entity.read(cx).conversation_state()
-            .conversations
-            .iter()
-            .find(|conversation| conversation.id == conversation_id)
+        let handoff = self.ai_entity.read(cx).history.model_contexts.get(&conversation_id)
             .and_then(|conversation| {
                 let cursor = ai_acp_session_state(conversation)
                     .filter(|state| state.agent_id == launch.launch_config.id)
@@ -150,6 +144,7 @@ impl WorkspaceApp {
         if let Some(handoff) = handoff {
             prompt.push_str(handoff.as_str());
         }
+        self.ai_entity.update(cx, |ai, _| { ai.history.model_contexts.remove(&conversation_id); });
         let mut append_prompt_section = |heading: &str, value: &str| {
             let safe_value = zeroize::Zeroizing::new(oxideterm_ai::sanitize_for_ai(value));
             if !prompt.is_empty() {
@@ -460,6 +455,7 @@ impl WorkspaceApp {
         ) else {
             return;
         };
+        self.ai_entity.update(cx,|ai,_| { ai.history.model_contexts.remove(&conversation_id); });
         if trimmed_count > 0 {
             self.show_ai_trim_notice(trimmed_count, cx);
         }

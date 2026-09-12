@@ -465,10 +465,6 @@ pub fn ai_tool_policy_groups(settings: &PersistedSettings) -> Vec<AiToolPolicyGr
     ]
 }
 
-
-
-
-
 pub fn ai_model_context_window_panels(
     settings: &PersistedSettings,
     providers: &[AiProviderView],
@@ -706,8 +702,6 @@ pub fn set_ai_user_context_window(
         settings.ai.user_context_windows.remove(provider_id);
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {

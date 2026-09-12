@@ -8,29 +8,24 @@ impl AiWorkspaceEntity {
         anchor_id: &str,
         now_ms: i64,
     ) -> Option<(serde_json::Value, Option<String>, Option<String>, usize)> {
+        let through_message = plan.compact_messages.last()?.id.clone();
+        let (source_branch, source) = self.history.compaction_sources.remove(conversation_id)?;
+        if self.history.branches.get(conversation_id).is_some_and(|branch| branch != &source_branch)
+            || !source.messages.iter().map(|message| &message.id).eq(base_ids.iter())
+        { return None; }
+        self.capture_history_before_edit(conversation_id);
         let conversation = self
             .conversation_state_mut()
             .conversations
             .iter_mut()
             .find(|conversation| conversation.id == conversation_id)?;
-        let latest_ids = conversation
-            .messages
-            .iter()
-            .take(base_ids.len())
-            .map(|message| message.id.as_str())
-            .collect::<Vec<_>>();
-        let stale = latest_ids.len() != base_ids.len()
-            || latest_ids
-                .iter()
-                .zip(base_ids.iter())
-                .any(|(latest, expected)| *latest != expected);
-        if stale {
-            return None;
-        }
+        let last_source = base_ids.last()?;
+        let suffix_start = conversation.messages.iter().position(|message| &message.id == last_source)
+            .map(|index| index + 1).unwrap_or(conversation.messages.len());
         let appended = conversation
             .messages
             .iter()
-            .skip(base_ids.len())
+            .skip(suffix_start)
             .cloned()
             .collect::<Vec<_>>();
         let summary_source_transcript_ref =
@@ -40,7 +35,7 @@ impl AiWorkspaceEntity {
             ai_transcript_boundary_id(plan.compact_messages.last(), "end");
         let total_compacted = ai_compaction_original_count(&plan.compact_messages);
         let total_compacted_turns = ai_conversation_turn_count(&plan.compact_messages);
-        let snapshot_messages = ai_compaction_anchor_snapshot(&plan.compact_messages);
+        let original_ref = oxideterm_ai::AiHistoryRange { branch_id:source_branch,first_message_id:plan.compact_messages.first().map(|message| message.id.clone()),last_message_id:plan.compact_messages.last().map(|message| message.id.clone()) };
         let summary_entry_id = format!("transcript-summary-created-{anchor_id}");
         let transcript_ref = serde_json::json!({
             "conversationId": conversation_id,
@@ -64,7 +59,8 @@ impl AiWorkspaceEntity {
                 kind: "compaction-anchor".to_string(),
                 original_count: Some(total_compacted),
                 compacted_at_ms: Some(now_ms),
-                original_messages: Some(snapshot_messages),
+                original_ref: Some(original_ref),
+                original_messages: None,
                 original_user_count: Some(total_compacted_turns),
             }),
             tool_call_id: None,
@@ -104,6 +100,10 @@ impl AiWorkspaceEntity {
                 );
             }
         }
+        if let Some(conversation) = self.conversation_state().conversations.iter().find(|conversation| conversation.id == conversation_id) {
+            self.history.model_contexts.insert(conversation_id.to_owned(),conversation.clone());
+        }
+        self.compact_history(conversation_id,through_message);
         self.persist_chat_state();
         Some((
             summary_source_transcript_ref,
@@ -122,28 +122,21 @@ impl AiWorkspaceEntity {
         prefix: &str,
         now_ms: i64,
     ) -> Option<(serde_json::Value, Option<String>)> {
+        let through_message = base_ids.last()?.clone();
+        let (source_branch, source) = self.history.compaction_sources.remove(conversation_id)?;
+        if self.history.branches.get(conversation_id).is_some_and(|branch| branch != &source_branch)
+            || !source.messages.iter().map(|message| &message.id).eq(base_ids.iter())
+        { return None; }
+        self.capture_history_before_edit(conversation_id);
         let conversation = self
             .conversation_state_mut()
             .conversations
             .iter_mut()
             .find(|conversation| conversation.id == conversation_id)?;
-        let latest_ids = conversation
-            .messages
-            .iter()
-            .map(|message| message.id.as_str())
-            .collect::<Vec<_>>();
-        let stale = latest_ids.len() != base_ids.len()
-            || latest_ids
-                .iter()
-                .zip(base_ids.iter())
-                .any(|(latest, expected)| *latest != expected);
-        if stale {
-            return None;
-        }
         let summary_source_transcript_ref =
-            ai_summary_source_transcript_ref(&conversation.messages, conversation_id);
-        let summary_round_id = ai_latest_summary_round_id(&conversation.messages);
-        let original_user_count = ai_conversation_turn_count(&conversation.messages);
+            ai_summary_source_transcript_ref(&source.messages, conversation_id);
+        let summary_round_id = ai_latest_summary_round_id(&source.messages);
+        let original_user_count = ai_conversation_turn_count(&source.messages);
         let summary_entry_id = format!("transcript-summary-created-{summary_id}");
         let transcript_ref = serde_json::json!({
             "conversationId": conversation_id,
@@ -190,6 +183,10 @@ impl AiWorkspaceEntity {
         conversation.updated_at_ms = now_ms;
         conversation.message_count = conversation.messages.len();
         conversation.turn_count = ai_conversation_turn_count(&conversation.messages);
+        if let Some(conversation) = self.conversation_state().conversations.iter().find(|conversation| conversation.id == conversation_id) {
+            self.history.model_contexts.insert(conversation_id.to_owned(),conversation.clone());
+        }
+        self.compact_history(conversation_id,through_message);
         self.persist_chat_state();
         Some((summary_source_transcript_ref, summary_round_id))
     }
@@ -210,6 +207,7 @@ impl WorkspaceApp {
         self.ai_entity
             .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
         if failed {
+            self.ai_entity.update(cx, |ai, _| { ai.history.compaction_sources.remove(&conversation_id); });
             if silent {
                 self.ai_entity.update(cx, |ai, cx| {
                     ai.clear_compaction_notice_for(&conversation_id, cx);
@@ -227,6 +225,7 @@ impl WorkspaceApp {
             return;
         }
         if summary.trim().is_empty() {
+            self.ai_entity.update(cx, |ai, _| { ai.history.compaction_sources.remove(&conversation_id); });
             if silent {
                 self.ai_entity.update(cx, |ai, cx| {
                     ai.clear_compaction_notice_for(&conversation_id, cx);
@@ -324,6 +323,7 @@ impl WorkspaceApp {
             .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
         self.ai_entity.update(cx, |ai, _cx| ai.set_conversation_loading(&conversation_id, false));
         if failed {
+            self.ai_entity.update(cx, |ai, _| { ai.history.compaction_sources.remove(&conversation_id); });
             self.push_ai_settings_toast(
                 self.i18n.t("settings_view.ai.acp_agent_error_unknown"),
                 TerminalNoticeVariant::Error,
@@ -333,6 +333,7 @@ impl WorkspaceApp {
             return;
         }
         if summary.trim().is_empty() {
+            self.ai_entity.update(cx, |ai, _| { ai.history.compaction_sources.remove(&conversation_id); });
             cx.notify();
             return;
         }

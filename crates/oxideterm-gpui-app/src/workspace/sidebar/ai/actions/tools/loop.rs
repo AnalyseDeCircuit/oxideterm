@@ -157,6 +157,9 @@ async fn execute_ai_chat_tool_loop(
             notice.id = "agent-no-progress".into();
             history.push(notice);
         }
+        if !await_ai_history_commit(&ui_tx,generation,&conversation_id,&assistant_id).await {
+            return AiAgentLoopOutcome { content: assistant_content, status: AiAgentLoopStatus::Failed };
+        }
         let Some(runtime_context) = request_ai_runtime_context(
             &ui_tx,
             generation,
@@ -760,6 +763,9 @@ async fn execute_ai_chat_tool_loop(
             for call in &batch { checkpoint.pending(call); }
             let _ = send_ai_loop_delivery(execution.is_some(), &ui_tx, generation, &conversation_id, &assistant_id,
                 AiStreamDeliveryEvent::Checkpoint(checkpoint.clone()));
+            if !await_ai_history_commit(&ui_tx,generation,&conversation_id,&assistant_id).await {
+                return AiAgentLoopOutcome { content: assistant_content, status: AiAgentLoopStatus::Failed };
+            }
             let results = if mixed_question_batch {
                 // No speculative operations may run before the model has read the user's answer.
                 batch.iter().map(|call| Ok(pre_execution_rejected_ai_tool_result(call.id.clone(), call.name.clone(),
@@ -1133,4 +1139,10 @@ pub(in crate::workspace) fn acp_session_cwd_from_agent(
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::PathBuf::from("."))
     })
+}
+
+async fn await_ai_history_commit(ui_tx: &AiStreamDeliverySender,generation:u64,conversation_id:&str,assistant_id:&str) -> bool {
+    let (sender,receiver) = tokio::sync::oneshot::channel();
+    if send_ai_stream_delivery(ui_tx,generation,conversation_id,assistant_id,AiStreamDeliveryEvent::HistoryBarrier(sender)).is_err() { return false; }
+    receiver.await.unwrap_or(false)
 }

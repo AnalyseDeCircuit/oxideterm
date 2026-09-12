@@ -430,10 +430,7 @@ impl WorkspaceApp {
             rag_system_prompt.as_deref(),
             cx,
         );
-        let history = self.ai_entity.read(cx).conversation_state()
-            .conversations
-            .iter()
-            .find(|conversation| conversation.id == conversation_id)
+        let history = self.ai_entity.read(cx).history.model_contexts.get(conversation_id)
             .map(|conversation| conversation.messages.clone())?;
         let mut history = self.compose_ai_stream_history(
             history,

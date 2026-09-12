@@ -434,14 +434,27 @@ mod tests {
         source["ai"]["contextSources"] = json!({"ide":false,"sftp":true});
         source["ai"]["userContextWindows"] = json!({"provider":{"model":128000}});
         let loaded: PersistedSettings = serde_json::from_value(source).unwrap();
-        let exported = export_oxide_settings_snapshot_json(&loaded, Some(&HashSet::from(["ai".into()])), false).unwrap();
-        let restored = merge_oxide_settings_snapshot(&PersistedSettings::default(), &exported, None).unwrap();
+        let exported = export_oxide_settings_snapshot_json(
+            &loaded,
+            Some(&HashSet::from(["ai".into()])),
+            false,
+        )
+        .unwrap();
+        let restored =
+            merge_oxide_settings_snapshot(&PersistedSettings::default(), &exported, None).unwrap();
         let ai = &restored.to_value()["ai"];
-        for retired in ["contextMaxChars","contextVisibleLines","modelMaxResponseTokens"] {
+        for retired in [
+            "contextMaxChars",
+            "contextVisibleLines",
+            "modelMaxResponseTokens",
+        ] {
             assert_eq!(ai.get(retired), None);
         }
         assert_eq!(ai["contextSources"], json!({"ide":false,"sftp":true}));
-        assert_eq!(ai["userContextWindows"], json!({"provider":{"model":128000}}));
+        assert_eq!(
+            ai["userContextWindows"],
+            json!({"provider":{"model":128000}})
+        );
     }
 
     #[test]

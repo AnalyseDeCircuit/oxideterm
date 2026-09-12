@@ -154,6 +154,7 @@ impl AiWorkspaceEntity {
         }
         // Advance only after the ACP prompt completed successfully. Failed or
         // cancelled turns retain the previous cursor so context is never lost.
+        self.history_metadata_changed(conversation_id);
         self.persist_chat_state();
         true
     }
@@ -174,6 +175,7 @@ impl AiWorkspaceEntity {
         let Some(mut state) = ai_acp_session_state(conversation) else {
             return false;
         };
+        let title_changed = matches!(&update, oxideterm_ai::AcpSessionStateUpdate::SessionInfo { title: Some(title), .. } if !title.trim().is_empty());
         match update {
             oxideterm_ai::AcpSessionStateUpdate::ConfigOptions(config_options) => {
                 synchronize_ai_acp_config_selections(
@@ -213,6 +215,8 @@ impl AiWorkspaceEntity {
             return false;
         };
         metadata.insert(AI_ACP_SESSION_METADATA_KEY.to_string(), value);
+        self.history_metadata_changed(conversation_id);
+        if title_changed { self.history_title_changed(conversation_id); }
         self.persist_chat_state();
         true
     }
@@ -240,6 +244,7 @@ impl AiWorkspaceEntity {
             agent_id,
         );
         if applied {
+            self.history_metadata_changed(conversation_id);
             self.persist_chat_state();
         }
         applied
@@ -259,20 +264,11 @@ impl AiWorkspaceEntity {
         match event {
             AiStreamEvent::Usage { .. } => AiStreamApplyOutcome::Applied,
             AiStreamEvent::Content(chunk) => {
-                self.update_chat_message(conversation_id, message_id, |message| {
-                    message.content.push_str(&chunk);
-                    append_ai_turn_text_part(message, "text", &chunk, false);
-                });
+                self.append_chat_stream_text(conversation_id, message_id, &chunk, false);
                 AiStreamApplyOutcome::Applied
             }
             AiStreamEvent::Thinking(chunk) => {
-                self.update_chat_message(conversation_id, message_id, |message| {
-                    message
-                        .thinking_content
-                        .get_or_insert_with(String::new)
-                        .push_str(&chunk);
-                    append_ai_turn_text_part(message, "thinking", &chunk, true);
-                });
+                self.append_chat_stream_text(conversation_id, message_id, &chunk, true);
                 AiStreamApplyOutcome::Applied
             }
             AiStreamEvent::ProviderResponsePart {

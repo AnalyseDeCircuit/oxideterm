@@ -20,8 +20,7 @@ use oxideterm_settings_model::{
     SemanticSchemeDocument, SettingsDynamicSectionCounts, SettingsInputDraftApply,
     TERMINAL_THEME_COLOR_FIELDS, ThemeColorField, ThemeEditorSection, ThemeEditorState,
     UI_THEME_COLOR_FIELDS, add_custom_semantic_rule, ai_add_acp_agent, ai_add_acp_agent_preset,
-    ai_delete_acp_agent,
-    ai_mcp_configs, ai_mcp_server_signature, ai_mcp_transport_label,
+    ai_delete_acp_agent, ai_mcp_configs, ai_mcp_server_signature, ai_mcp_transport_label,
     ai_model_context_window_panels,
     ai_model_context_window_row as ai_model_context_window_row_model, ai_provider_card_signature,
     ai_provider_model_chip_rows, ai_provider_model_row_signature, ai_provider_views,
@@ -234,8 +233,8 @@ pub(in crate::workspace) use terminal_triggers::TerminalTriggersSettingsState;
 mod update;
 mod update_ui;
 
+use ai_page::AI_PROVIDER_SELECT_W;
 pub(in crate::workspace) use ai_page::AiTextEditorDialog;
-use ai_page::{AI_PROVIDER_SELECT_W};
 pub(in crate::workspace) use cli_companion::{
     CLI_COMPANION_COMMAND_NAME, LEGACY_CLI_COMPANION_COMMAND_NAME, cli_install_path,
 };

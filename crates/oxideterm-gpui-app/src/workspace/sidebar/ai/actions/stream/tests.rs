@@ -72,8 +72,8 @@ mod ai_turn_order_tests {
             )
         });
         entity.update(cx, |ai, _| {
-            let conversation = ai.conversation_state_mut().create_conversation("responses-conversation".into(), None, 1, None);
-            ai.conversation_state_mut().add_message(&conversation, test_message("assistant", AiChatRole::Assistant, "visible".into()));
+            let conversation = ai.create_conversation("responses-conversation".into(), None, 1, None);
+            ai.add_message(&conversation, test_message("assistant", AiChatRole::Assistant, "visible".into()));
             let (generation, _) = ai.begin_chat_stream(conversation.clone(), "assistant".into());
             let part = serde_json::json!({"output":[{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"opaque"}],"results":[],"callIds":{}});
             let event = AiStreamEvent::ProviderResponsePart {provider_type:"responses:scope".into(),part:part.clone()};
@@ -729,6 +729,7 @@ mod ai_turn_order_tests {
                 kind: "compaction-anchor".to_string(),
                 original_count: Some(compacted.len()),
                 compacted_at_ms: Some(1),
+                original_ref: None,
                 original_messages: Some(compacted),
                 original_user_count: Some(2),
             }),

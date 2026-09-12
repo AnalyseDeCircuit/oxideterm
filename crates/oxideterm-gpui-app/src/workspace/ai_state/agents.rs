@@ -40,6 +40,15 @@ pub(in crate::workspace) struct AiAgentGroup {
     pub context_window: usize,
 }
 
+#[derive(Default)]
+pub(in crate::workspace) struct AgentCommunicationView {
+    pub page: Option<Arc<oxideterm_ai::AgentCommunicationPage>>,
+    pub cursors: Vec<Option<u64>>,
+    pub loading: bool,
+    pub failed: bool,
+    task: Option<Task<()>>,
+}
+
 pub(in crate::workspace) struct AiAgentWorkspace {
     pub tool_leases:
         HashMap<(oxideterm_ai::ToolSessionId, String), Vec<oxideterm_ai::agent::AgentToolLease>>,
@@ -50,14 +59,17 @@ pub(in crate::workspace) struct AiAgentWorkspace {
     pub records: HashMap<AgentRunId, AgentRecord>,
     pub message_runs: HashMap<String, AgentRunId>,
     pub detail: Option<AgentRunId>,
-    pub details_loaded: HashSet<AgentRunId>,
     pub details_loading: HashSet<AgentRunId>,
     pub detail_errors: HashSet<AgentRunId>,
+    detail_tasks: HashMap<AgentRunId, Task<()>>,
     pub dirty: std::cell::RefCell<HashSet<AgentRunId>>,
+    communication_versions: std::cell::RefCell<HashMap<(AgentRunId, u64), bool>>,
     pub settings_model_picker_open: bool,
     pub model_picker_open: bool,
     pub expanded_groups: HashMap<AgentGroupId, bool>,
     pub parent_revisions: HashMap<String, u64>,
+    pub communication_pages: HashMap<AgentRunId, AgentCommunicationView>,
+    pub detail_lists: HashMap<AgentRunId, gpui::ListState>,
     pub detail_scroll: HashMap<AgentRunId, gpui::ScrollHandle>,
     watch: Option<Task<()>>,
 }
@@ -73,15 +85,18 @@ impl AiAgentWorkspace {
             records: HashMap::new(),
             message_runs: HashMap::new(),
             detail: None,
-            details_loaded: HashSet::new(),
             details_loading: HashSet::new(),
             detail_errors: HashSet::new(),
+            detail_tasks: HashMap::new(),
             dirty: std::cell::RefCell::new(HashSet::new()),
+            communication_versions: std::cell::RefCell::new(HashMap::new()),
             settings_model_picker_open: false,
             model_picker_open: false,
             expanded_groups: HashMap::new(),
             parent_revisions: HashMap::new(),
             detail_scroll: HashMap::new(),
+            detail_lists: HashMap::new(),
+            communication_pages: HashMap::new(),
             watch: None,
         }
     }
@@ -206,9 +221,18 @@ impl AiWorkspaceEntity {
                 .message_runs
                 .insert(message.id.clone(), id.clone());
         }
-        self.agents.details_loaded.insert(id.clone());
         self.agents.dirty.borrow_mut().insert(id.clone());
+        let conversation = record.snapshot.conversation_id.clone();
+        let messages: Vec<_> = record
+            .messages
+            .iter()
+            .map(|message| message.id.clone())
+            .collect();
+        self.history_agent_created(&conversation, id.clone());
         self.agents.records.insert(id, record);
+        for message in messages {
+            self.history_message_changed(&conversation, &message);
+        }
     }
 
     pub(super) fn schedule_agent_updates(&mut self, cx: &mut Context<Self>) {
@@ -238,6 +262,7 @@ impl AiWorkspaceEntity {
             .values()
             .map(|record| record.snapshot.conversation_id.clone())
             .collect();
+        let mut changed_messages = Vec::new();
         for conversation_id in conversation_ids {
             let snapshots = self.agents.services.runtime.snapshots(&conversation_id);
             for snapshot in &snapshots {
@@ -265,7 +290,11 @@ impl AiWorkspaceEntity {
                     {
                         record.snapshot = snapshot.clone();
                         for message in &mut record.messages {
-                            message.model = Some(snapshot.model.model.clone());
+                            if message.model.as_deref() != Some(snapshot.model.model.as_str()) {
+                                message.model = Some(snapshot.model.model.clone());
+                                changed_messages
+                                    .push((conversation_id.clone(), message.id.clone()));
+                            }
                         }
                         record.parent_usage = parent_usage;
                         record.communication = communication;
@@ -284,41 +313,44 @@ impl AiWorkspaceEntity {
                 }
             }
         }
+        for (conversation, message) in changed_messages {
+            self.history_message_changed(&conversation, &message);
+        }
     }
 
     pub(in crate::workspace) fn persist_agent_records(&self) {
-        let Some(store) = self.persistence_store.clone() else {
-            return;
-        };
         let ids: Vec<_> = self.agents.dirty.borrow_mut().drain().collect();
-        let records: Vec<_> = ids
-            .iter()
-            .filter_map(|id| self.agents.records.get(id).cloned())
-            .collect();
-        if records.is_empty() {
-            return;
-        }
-        self.task_runtime.spawn_blocking(move || {
-            if store.save_agent_records(records).is_err() {
-                eprintln!("[AiChatStore] Failed to persist agent records");
+        for id in ids {
+            if let Some(record) = self.agents.records.get(&id) {
+                let metadata = record.metadata_projection();
+                self.queue_history_event(
+                    &record.snapshot.conversation_id,
+                    "agent",
+                    &id.to_string(),
+                    super::history::HistoryEvent::Agent(metadata),
+                );
+                let family = format!("agent-communication:{id}");
+                let mut versions = self.agents.communication_versions.borrow_mut();
+                for message in &record.communication {
+                    let key = (id.clone(), message.sequence);
+                    if versions.get(&key) == Some(&message.consumed) {
+                        continue;
+                    }
+                    self.queue_history_event(
+                        &record.snapshot.conversation_id,
+                        &family,
+                        &message.sequence.to_string(),
+                        super::history::HistoryEvent::AgentCommunication(message.clone()),
+                    );
+                    // The journal owns this version until the writer acknowledges it.
+                    versions.insert(key, message.consumed);
+                }
             }
-        });
+        }
     }
 
     pub(in crate::workspace) fn load_agent_summaries(&mut self, conversation_id: &str) {
-        if let Some(store) = self.persistence_store.as_ref() {
-            match store.load_agent_summaries(conversation_id) {
-                Ok(records) => {
-                    for record in records {
-                        self.agents
-                            .records
-                            .entry(record.snapshot.run.run_id.clone())
-                            .or_insert(record);
-                    }
-                }
-                Err(_) => eprintln!("[AiChatStore] Failed to load agent summaries"),
-            }
-        }
+        self.request_history_agents(conversation_id);
     }
 
     pub(in crate::workspace) fn open_agent_detail(
@@ -326,50 +358,242 @@ impl AiWorkspaceEntity {
         id: AgentRunId,
         cx: &mut Context<Self>,
     ) {
+        if self.agents.detail.as_ref() != Some(&id) {
+            self.close_agent_detail();
+        }
         self.agents.detail = Some(id.clone());
+        self.agents
+            .detail_lists
+            .entry(id.clone())
+            .or_insert_with(|| gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(500.0)));
         self.agents.model_picker_open = false;
         self.agents.detail_scroll.entry(id.clone()).or_default();
-        if self.agents.details_loaded.contains(&id) || self.agents.details_loading.contains(&id) {
-            return;
+        self.load_agent_communication(id.clone(), None, cx);
+        self.load_agent_message_page(id, None, cx);
+    }
+
+    pub(super) fn release_committed_agent_messages(&mut self) {
+        let ready: Vec<_> = self
+            .agents
+            .records
+            .iter()
+            .filter(|(_, record)| record.snapshot.state.is_terminal())
+            .filter(|(_, record)| {
+                record.messages.iter().all(|message| {
+                    !self.history_message_is_pending(&record.snapshot.conversation_id, &message.id)
+                })
+            })
+            .map(|(run, _)| run.clone())
+            .collect();
+        for run in ready {
+            if let Some(record) = self.agents.records.get_mut(&run) {
+                record.messages.clear();
+            }
         }
+    }
+
+    pub(super) fn remove_agent_history_views(&mut self, removed: &HashSet<AgentRunId>) {
+        self.agents
+            .detail_tasks
+            .retain(|run, _| !removed.contains(run));
+        self.agents
+            .detail_lists
+            .retain(|run, _| !removed.contains(run));
+        self.agents
+            .communication_pages
+            .retain(|run, _| !removed.contains(run));
+        self.agents
+            .communication_versions
+            .borrow_mut()
+            .retain(|(run, _), _| !removed.contains(run));
+        self.history.auxiliary_pages.retain(|owner, _| !matches!(owner, super::history::HistoryViewOwner::Agent(_, run) if removed.contains(run)));
+    }
+
+    pub(in crate::workspace) fn close_agent_detail(&mut self) {
+        if let Some(id) = self.agents.detail.take() {
+            self.agents.detail_tasks.remove(&id);
+            self.agents.details_loading.remove(&id);
+            self.agents.detail_lists.remove(&id);
+            self.agents.communication_pages.remove(&id);
+            self.history.auxiliary_pages.retain(|owner, _| !matches!(owner, super::history::HistoryViewOwner::Agent(_, run) if run == &id));
+        }
+    }
+
+    pub(in crate::workspace) fn load_agent_communication(
+        &mut self,
+        id: AgentRunId,
+        older: Option<bool>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(record) = self.agents.records.get(&id) else {
             return;
         };
-        let Some(store) = self.persistence_store.clone() else {
+        let conversation = record.snapshot.conversation_id.clone();
+        let Some(store) = self.history.store.clone() else {
+            return;
+        };
+        let view = self
+            .agents
+            .communication_pages
+            .entry(id.clone())
+            .or_default();
+        if view.loading {
+            return;
+        }
+        match older {
+            Some(true) => {
+                let Some(before) = view.page.as_ref().and_then(|page| page.before) else {
+                    return;
+                };
+                view.cursors.push(Some(before));
+            }
+            Some(false) if view.cursors.len() > 1 => {
+                view.cursors.pop();
+            }
+            Some(false) => return,
+            None => {
+                view.cursors = vec![None];
+            }
+        }
+        let before = view.cursors.last().copied().flatten();
+        view.loading = true;
+        view.failed = false;
+        let (sender, committed) = tokio::sync::oneshot::channel();
+        self.history_barrier(sender);
+        let run = id.clone();
+        let task = tokio_util::task::AbortOnDropHandle::new(self.task_runtime.spawn(async move {
+            if committed.await != Ok(true) {
+                return Err(anyhow::anyhow!("History save failed"));
+            }
+            tokio::task::spawn_blocking(move || {
+                store.agent_communication_page(&conversation, &run, before)
+            })
+            .await
+            .map_err(anyhow::Error::from)?
+        }));
+        let key = id.clone();
+        let task = cx.spawn(async move |weak, cx| {
+            let loaded = task.await;
+            let _ = weak.update(cx, |ai, cx| {
+                if ai.agents.detail.as_ref() != Some(&id) {
+                    return;
+                }
+                let Some(view) = ai.agents.communication_pages.get_mut(&id) else {
+                    return;
+                };
+                view.loading = false;
+                view.task.take();
+                match loaded {
+                    Ok(Ok(page)) => view.page = page.map(Arc::new),
+                    _ => view.failed = true,
+                }
+                cx.emit(AiWorkspaceEvent::ChatStreamDeliveryReady);
+            });
+        });
+        self.agents.communication_pages.get_mut(&key).unwrap().task = Some(task);
+    }
+
+    pub(in crate::workspace) fn load_agent_message_page(
+        &mut self,
+        id: AgentRunId,
+        older: Option<bool>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(record) = self.agents.records.get(&id) else {
+            return;
+        };
+        let conversation = record.snapshot.conversation_id.clone();
+        let owner = super::history::HistoryViewOwner::Agent(conversation.clone(), id.clone());
+        if self.agents.details_loading.contains(&id) {
+            return;
+        }
+        let cursor = older.and_then(|older| {
+            self.history.auxiliary_pages.get(&owner).and_then(|page| {
+                if older {
+                    page.before.clone()
+                } else {
+                    page.after.clone()
+                }
+            })
+        });
+        if older.is_some() && cursor.is_none() {
+            return;
+        }
+        let Some(store) = self.history.store.clone() else {
             self.agents.detail_errors.insert(id);
             return;
         };
-        let conversation_id = record.snapshot.conversation_id.clone();
-        let revision = record.revision;
         self.agents.details_loading.insert(id.clone());
         self.agents.detail_errors.remove(&id);
-        let load_id = id.clone();
-        let task = self
-            .task_runtime
-            .spawn_blocking(move || store.load_agent_record(&conversation_id, &load_id));
-        cx.spawn(async move |weak, cx| {
+        let branch = oxideterm_ai::agent_history_branch(&id);
+        let record_revision = record.revision;
+        let (sender, committed) = tokio::sync::oneshot::channel();
+        self.history_barrier(sender);
+        let task = self.task_runtime.spawn(async move {
+            if committed.await != Ok(true) {
+                return Err(anyhow::anyhow!("History save failed"));
+            }
+            tokio::task::spawn_blocking(move || {
+                let page = if older == Some(false) {
+                    store.message_page_after(
+                        &conversation,
+                        &branch,
+                        cursor.as_ref().unwrap(),
+                        oxideterm_ai::HISTORY_PAGE_SIZE,
+                    )?
+                } else {
+                    store.message_page(
+                        &conversation,
+                        &branch,
+                        cursor.as_ref(),
+                        oxideterm_ai::HISTORY_PAGE_SIZE,
+                    )?
+                };
+                Ok::<_, anyhow::Error>(page)
+            })
+            .await
+            .map_err(anyhow::Error::from)?
+        });
+        let task = tokio_util::task::AbortOnDropHandle::new(task);
+        let key = id.clone();
+        let task = cx.spawn(async move |weak, cx| {
             let loaded = task.await;
             let _ = weak.update(cx, |ai, cx| {
+                ai.agents.detail_tasks.remove(&id);
                 ai.agents.details_loading.remove(&id);
-                let Some(current) = ai.agents.records.get(&id) else {
-                    return;
-                };
-                // A disk read must not replace newer live delivery.
-                if current.revision != revision || ai.agents.details_loaded.contains(&id) {
+                if ai.agents.detail.as_ref() != Some(&id) {
                     return;
                 }
                 match loaded {
-                    Ok(Ok(Some(record)))
+                    Ok(Ok(page)) => {
                         if ai
-                            .conversation_state
-                            .conversations
-                            .iter()
-                            .any(|conversation| {
-                                conversation.id == record.snapshot.conversation_id
-                            }) =>
-                    {
-                        ai.agents.records.insert(id.clone(), record);
-                        ai.agents.details_loaded.insert(id);
+                            .agents
+                            .records
+                            .get(&id)
+                            .is_some_and(|record| record.revision != record_revision)
+                        {
+                            ai.load_agent_message_page(id, None, cx);
+                            return;
+                        }
+                        if let Some(list) = ai.agents.detail_lists.get(&id) {
+                            list.reset(page.messages.len());
+                        }
+                        let state = ai.history.auxiliary_pages.entry(owner).or_default();
+                        state.before = page.before;
+                        state.after = page.after;
+                        state.descriptions = page
+                            .messages
+                            .into_iter()
+                            .map(|message| (message.id.clone(), message))
+                            .collect();
+                        state
+                            .bodies
+                            .retain(|id, _| state.descriptions.contains_key(id));
+                        if let Some(record) = ai.agents.records.get_mut(&id) {
+                            if record.snapshot.state.is_terminal() {
+                                record.messages.clear();
+                            }
+                        }
                     }
                     _ => {
                         ai.agents.detail_errors.insert(id);
@@ -377,7 +601,7 @@ impl AiWorkspaceEntity {
                 }
                 cx.emit(AiWorkspaceEvent::ChatStreamDeliveryReady);
             });
-        })
-        .detach();
+        });
+        self.agents.detail_tasks.insert(key, task);
     }
 }

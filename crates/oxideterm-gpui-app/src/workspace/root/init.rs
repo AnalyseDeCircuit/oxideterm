@@ -1671,28 +1671,3 @@ mod semantic_scheme_tests {
         assert_eq!(inherited.session_log_automatic, None);
     }
 }
-
-pub(in crate::workspace) fn ai_chat_initialization_error(
-    error: &anyhow::Error,
-) -> AiChatInitializationError {
-    let message = error.to_string();
-    if message.contains("Database already open") || message.contains("Cannot acquire lock") {
-        return AiChatInitializationError {
-            message_key: "ai.chat.database_locked",
-            can_retry: true,
-        };
-    }
-    if message.contains("requires format upgrade")
-        || message.contains("upgrade required")
-        || message.contains("manual upgrade required")
-    {
-        return AiChatInitializationError {
-            message_key: "ai.chat.database_upgrade_required",
-            can_retry: false,
-        };
-    }
-    AiChatInitializationError {
-        message_key: "ai.chat.load_failed_generic",
-        can_retry: true,
-    }
-}

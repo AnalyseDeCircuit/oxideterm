@@ -162,3 +162,89 @@ pub enum Inline {
     /// Soft or hard line break inside a paragraph.
     LineBreak,
 }
+
+impl MarkdownDocument {
+    /// Allocation capacities retained by the parsed tree, excluding the document value itself.
+    pub fn retained_bytes(&self) -> usize {
+        blocks_bytes(&self.blocks)
+            + self.footnotes.capacity() * std::mem::size_of::<FootnoteDefinition>()
+            + self
+                .footnotes
+                .iter()
+                .map(|note| note.label.capacity() + blocks_bytes(&note.blocks))
+                .sum::<usize>()
+    }
+}
+
+fn inlines_bytes(inlines: &Vec<Inline>) -> usize {
+    inlines.capacity() * std::mem::size_of::<Inline>()
+        + inlines
+            .iter()
+            .map(|inline| {
+                (match inline {
+                    Inline::Text(text) | Inline::Code(text) | Inline::Html(text) => text.capacity(),
+                    Inline::Bold(items)
+                    | Inline::Italic(items)
+                    | Inline::Kbd(items)
+                    | Inline::Subscript(items)
+                    | Inline::Superscript(items)
+                    | Inline::Underline(items)
+                    | Inline::Highlight(items)
+                    | Inline::Strikethrough(items) => inlines_bytes(items),
+                    Inline::Link { text, url } => inlines_bytes(text) + url.capacity(),
+                    Inline::Image { alt, url } => alt.capacity() + url.capacity(),
+                    Inline::Math { latex, .. } => latex.capacity(),
+                    Inline::FootnoteReference { label, .. } => label.capacity(),
+                    Inline::LineBreak => 0,
+                }) + 32
+            })
+            .sum::<usize>()
+}
+
+fn blocks_bytes(blocks: &Vec<Block>) -> usize {
+    blocks.capacity() * std::mem::size_of::<Block>()
+        + blocks
+            .iter()
+            .map(|block| {
+                (match block {
+                    Block::Heading { id, inlines, .. } => id.capacity() + inlines_bytes(inlines),
+                    Block::Paragraph { inlines } => inlines_bytes(inlines),
+                    Block::Html(text) => text.capacity(),
+                    Block::HtmlContainer { blocks, .. } | Block::Blockquote { blocks, .. } => {
+                        blocks_bytes(blocks)
+                    }
+                    Block::CodeBlock { language, code } => {
+                        language.as_ref().map_or(0, String::capacity) + code.capacity()
+                    }
+                    Block::UnorderedList { items } | Block::OrderedList { items, .. } => {
+                        items.capacity() * std::mem::size_of::<ListItem>()
+                            + items
+                                .iter()
+                                .map(|item| {
+                                    inlines_bytes(&item.inlines) + blocks_bytes(&item.children) + 32
+                                })
+                                .sum::<usize>()
+                    }
+                    Block::Table {
+                        headers,
+                        alignments,
+                        rows,
+                    } => {
+                        headers.capacity() * std::mem::size_of::<Vec<Inline>>()
+                            + headers.iter().map(inlines_bytes).sum::<usize>()
+                            + alignments.capacity() * std::mem::size_of::<TableAlignment>()
+                            + rows.capacity() * std::mem::size_of::<Vec<Vec<Inline>>>()
+                            + rows
+                                .iter()
+                                .map(|row| {
+                                    row.capacity() * std::mem::size_of::<Vec<Inline>>()
+                                        + row.iter().map(inlines_bytes).sum::<usize>()
+                                        + 32
+                                })
+                                .sum::<usize>()
+                    }
+                    Block::HorizontalRule => 0,
+                }) + 32
+            })
+            .sum::<usize>()
+}

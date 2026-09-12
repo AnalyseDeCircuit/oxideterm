@@ -107,6 +107,10 @@ pub(in crate::workspace) async fn execute_ai_tool(
             }
         }
     }
+    match ai_pending_dispatch(dispatch.as_ref(), await_ai_history_commit(ui_tx,generation,conversation_id,assistant_id)).await {
+        Ok(true) => {},
+        _ => return rejected_ai_tool_result(tool_call_id,tool_name,"operation_cancelled","The task stopped or changed direction before its execution record was saved."),
+    }
     let _response = oxideterm_ai::agent::AgentToolResponse(leases.clone());
     if !ai_tool_requires_ui_thread(&tool_name, &args) {
         for lease in &leases {

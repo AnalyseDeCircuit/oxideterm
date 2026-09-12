@@ -90,6 +90,7 @@ pub(in crate::workspace) enum AiSftpTransferError {
 
 pub(in crate::workspace) enum AiStreamDeliveryEvent {
     Checkpoint(oxideterm_ai::agent::AgentCheckpoint),
+    HistoryBarrier(tokio::sync::oneshot::Sender<bool>),
     ToolResourcesRequested {
         tool_session_id: ToolSessionId,
         name: String,

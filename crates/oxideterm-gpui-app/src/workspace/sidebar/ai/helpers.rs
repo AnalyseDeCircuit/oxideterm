@@ -13,38 +13,43 @@ impl WorkspaceApp {
         cacheable: bool,
         cx: &App,
     ) -> AiCachedMarkdownDocument {
-        if !cacheable {
-            let document = markdown_parser::parse(source);
-            let layout = MarkdownBlockLayout::from_document(&document, options);
-            return AiCachedMarkdownDocument { document, layout };
-        }
-
-        if let Some(cached) = self.ai_entity.read(cx).chat_ui().markdown_cache
-            .borrow()
-            .documents
-            .get(source)
-            .cloned()
-        {
-            return cached;
-        }
-
-        let document = markdown_parser::parse(source);
-        let layout = MarkdownBlockLayout::from_document(&document, options);
-        let cached = AiCachedMarkdownDocument { document, layout };
-        let mut cache = self.ai_entity.read(cx).chat_ui().markdown_cache.borrow_mut();
-        if !cache.documents.contains_key(source) {
-            cache.insertion_order.push_back(source.to_string());
-        }
-        cache.documents.insert(source.to_string(), cached.clone());
-
-        while cache.documents.len() > AI_MARKDOWN_DOCUMENT_CACHE_MAX_ENTRIES {
-            let Some(oldest) = cache.insertion_order.pop_front() else {
-                break;
-            };
-            cache.documents.remove(&oldest);
-        }
-
-        cached
+        use std::hash::{Hash, Hasher};
+        let ai = self.ai_entity.read(cx);
+        let conversation = ai
+            .conversation_state()
+            .active_conversation_id
+            .as_deref()
+            .unwrap_or_default();
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        source.hash(&mut hash);
+        let key = format!("markdown:{:016x}", hash.finish());
+        let store = ai.history.store.as_ref();
+        let projection = cacheable
+            .then(|| {
+                store.and_then(|store| {
+                    store.cached_render::<AiMarkdownProjection>(conversation, &key)
+                })
+            })
+            .flatten()
+            .filter(|projection| projection.source == source)
+            .unwrap_or_else(|| {
+                let projection = Arc::new(AiMarkdownProjection {
+                    source: source.to_owned(),
+                    document: markdown_parser::parse(source),
+                });
+                if cacheable {
+                    if let Some(store) = store {
+                        let bytes = std::mem::size_of::<AiMarkdownProjection>()
+                            + projection.source.capacity()
+                            + projection.document.retained_bytes();
+                        store.cache_render(conversation, &key, projection.clone(), bytes);
+                    }
+                }
+                projection
+            });
+        // Layout belongs to this visible render, so it cannot retain an evicted document.
+        let layout = MarkdownBlockLayout::from_document(&projection.document, options);
+        AiCachedMarkdownDocument { projection, layout }
     }
 }
 
@@ -78,11 +83,7 @@ fn format_local_time_label(
     use chrono::Datelike;
 
     let clock = time.format("%H:%M");
-    match now
-        .date()
-        .signed_duration_since(time.date())
-        .num_days()
-    {
+    match now.date().signed_duration_since(time.date()).num_days() {
         0 => format!("{today_label} {clock}"),
         1 => format!("{yesterday_label} {clock}"),
         _ if time.year() == now.year() => time.format("%m-%d %H:%M").to_string(),
@@ -95,7 +96,13 @@ mod time_label_tests {
     use super::format_local_time_label;
     use chrono::NaiveDate;
 
-    fn local_time(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> chrono::NaiveDateTime {
+    fn local_time(
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        minute: u32,
+    ) -> chrono::NaiveDateTime {
         NaiveDate::from_ymd_opt(year, month, day)
             .expect("valid date")
             .and_hms_opt(hour, minute, 0)
@@ -107,39 +114,19 @@ mod time_label_tests {
         let now = local_time(2026, 7, 29, 16, 0);
 
         assert_eq!(
-            format_local_time_label(
-                local_time(2026, 7, 29, 8, 5),
-                now,
-                "Today",
-                "Yesterday"
-            ),
+            format_local_time_label(local_time(2026, 7, 29, 8, 5), now, "Today", "Yesterday"),
             "Today 08:05"
         );
         assert_eq!(
-            format_local_time_label(
-                local_time(2026, 7, 28, 23, 17),
-                now,
-                "Today",
-                "Yesterday"
-            ),
+            format_local_time_label(local_time(2026, 7, 28, 23, 17), now, "Today", "Yesterday"),
             "Yesterday 23:17"
         );
         assert_eq!(
-            format_local_time_label(
-                local_time(2026, 7, 20, 9, 30),
-                now,
-                "Today",
-                "Yesterday"
-            ),
+            format_local_time_label(local_time(2026, 7, 20, 9, 30), now, "Today", "Yesterday"),
             "07-20 09:30"
         );
         assert_eq!(
-            format_local_time_label(
-                local_time(2025, 12, 31, 23, 59),
-                now,
-                "Today",
-                "Yesterday"
-            ),
+            format_local_time_label(local_time(2025, 12, 31, 23, 59), now, "Today", "Yesterday"),
             "2025-12-31 23:59"
         );
     }
