@@ -23,8 +23,51 @@ struct ScrollbarGeometry {
 }
 
 #[derive(Clone)]
+enum ScrollbarHandle {
+    Scroll(ScrollHandle),
+    List(gpui::ListState),
+}
+
+impl ScrollbarHandle {
+    fn bounds(&self) -> gpui::Bounds<gpui::Pixels> {
+        match self {
+            Self::Scroll(handle) => handle.bounds(),
+            Self::List(state) => state.viewport_bounds(),
+        }
+    }
+    fn max_offset(&self) -> Point<gpui::Pixels> {
+        match self {
+            Self::Scroll(handle) => handle.max_offset(),
+            Self::List(state) => state.max_offset_for_scrollbar(),
+        }
+    }
+    fn offset(&self) -> Point<gpui::Pixels> {
+        match self {
+            Self::Scroll(handle) => handle.offset(),
+            Self::List(state) => state.scroll_px_offset_for_scrollbar(),
+        }
+    }
+    fn set_offset(&self, offset: Point<gpui::Pixels>) {
+        match self {
+            Self::Scroll(handle) => handle.set_offset(offset),
+            Self::List(state) => state.set_offset_from_scrollbar(offset),
+        }
+    }
+    fn begin_drag(&self) {
+        if let Self::List(state) = self {
+            state.scrollbar_drag_started();
+        }
+    }
+    fn end_drag(&self) {
+        if let Self::List(state) = self {
+            state.scrollbar_drag_ended();
+        }
+    }
+}
+
+#[derive(Clone)]
 struct ScrollbarDragState {
-    scroll_handle: ScrollHandle,
+    scroll_handle: ScrollbarHandle,
     axis: ScrollbarAxis,
     grab_offset: Rc<Cell<f32>>,
 }
@@ -239,7 +282,7 @@ pub enum ScrollbarAxis {
 #[derive(IntoElement)]
 pub struct Scrollbar {
     id: ElementId,
-    scroll_handle: ScrollHandle,
+    scroll_handle: ScrollbarHandle,
     axis: ScrollbarAxis,
 }
 
@@ -247,7 +290,15 @@ impl Scrollbar {
     pub fn new(scroll_handle: &ScrollHandle) -> Self {
         Self {
             id: "scrollbar".into(),
-            scroll_handle: scroll_handle.clone(),
+            scroll_handle: ScrollbarHandle::Scroll(scroll_handle.clone()),
+            axis: ScrollbarAxis::Vertical,
+        }
+    }
+
+    pub fn for_list(state: &gpui::ListState) -> Self {
+        Self {
+            id: "list-scrollbar".into(),
+            scroll_handle: ScrollbarHandle::List(state.clone()),
             axis: ScrollbarAxis::Vertical,
         }
     }
@@ -296,7 +347,7 @@ impl RenderOnce for Scrollbar {
 
 fn render_vertical_scrollbar(
     id: impl Into<ElementId>,
-    scroll_handle: &ScrollHandle,
+    scroll_handle: &ScrollbarHandle,
     window: &mut Window,
 ) -> AnyElement {
     let bounds = scroll_handle.bounds();
@@ -314,6 +365,8 @@ fn render_vertical_scrollbar(
         grab_offset: Rc::new(Cell::new(0.0)),
     };
 
+    let release = scroll_handle.clone();
+    let release_outside = scroll_handle.clone();
     div()
         .id(id)
         .absolute()
@@ -332,7 +385,12 @@ fn render_vertical_scrollbar(
                 .rounded(px(SCROLLBAR_THUMB_RADIUS))
                 .bg(thumb_color)
                 .cursor(CursorStyle::OpenHand)
+                .on_mouse_up(gpui::MouseButton::Left, move |_, _, _| release.end_drag())
+                .on_mouse_up_out(gpui::MouseButton::Left, move |_, _, _| {
+                    release_outside.end_drag()
+                })
                 .on_drag(drag_state.clone(), |drag, position, _window, cx| {
+                    drag.scroll_handle.begin_drag();
                     drag.grab_offset.set(f32::from(position.y));
                     cx.new(|_| EmptyView)
                 })
@@ -346,7 +404,7 @@ fn render_vertical_scrollbar(
 
 fn render_horizontal_scrollbar(
     id: impl Into<ElementId>,
-    scroll_handle: &ScrollHandle,
+    scroll_handle: &ScrollbarHandle,
     window: &mut Window,
 ) -> AnyElement {
     let bounds = scroll_handle.bounds();

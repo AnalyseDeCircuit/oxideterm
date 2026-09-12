@@ -98,7 +98,7 @@ pub(in crate::workspace) async fn execute_ai_tool(
                         tool_call_id,
                         tool_name,
                         "resource_execution_unresolved",
-                        "Terminal control was taken over or a previous operation is unresolved. Ask the user to return control explicitly before retrying.",
+                        "The terminal changed while this request was queued. Rediscover its current state before submitting a new request.",
                     );
                 }
                 _ => {
@@ -225,7 +225,6 @@ impl WorkspaceApp {
         for lease in leases {
             let before = zeroize::Zeroizing::new(before.to_owned());
             let record = record.clone();
-            lease.monitor_command();
             let key = lease.lease().resource.clone();
             let node_id = node_id.clone();
             let command_id = command_id.clone();
@@ -235,7 +234,25 @@ impl WorkspaceApp {
                 loop {
                     Timer::after(Duration::from_millis(250)).await;
                     let finished = weak.update(cx, |this, cx| {
-                        if !lease.is_current() { return true; }
+                        if !lease.is_current() {
+                            // A returned tool no longer owns input. Preserve any confirmed outcome
+                            // without invalidating or extending the next request's ownership.
+                            if let Some(record) = &record {
+                                let completed = this.ai_terminal_session(session_id, cx).and_then(|(_, pane)| {
+                                    let pane = pane.read(cx);
+                                    command_id.as_deref().and_then(|id| pane.ai_command_records().into_iter()
+                                        .find(|entry| entry.command_id == id && entry.status == oxideterm_gpui_terminal::TerminalCommandFactStatus::Closed))
+                                        .map(|entry| (entry.exit_code, terminal_delta_output(&before, &pane.ai_buffer_snapshot())))
+                                });
+                                if let Some((exit_code, output)) = completed {
+                                    record.outcome(&serde_json::json!({"exitCode":exit_code, "output":output}).to_string());
+                                    record.finish(oxideterm_ai::agent::OwnedResourceState::Completed);
+                                } else {
+                                    record.finish(oxideterm_ai::agent::OwnedResourceState::OutcomeUnknown);
+                                }
+                            }
+                            return true;
+                        }
                         let recovering = node_id.as_ref().and_then(|node| this.node_router.connection_id_for_node(node))
                             .and_then(|id| this.ssh_registry.get(&id)).is_some_and(|connection|
                                 matches!(connection.state(), ConnectionState::Connecting | ConnectionState::LinkDown | ConnectionState::Reconnecting | ConnectionState::Error(_)));

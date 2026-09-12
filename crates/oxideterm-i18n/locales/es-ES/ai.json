@@ -29,8 +29,6 @@
       "communication": "Comunicación entre agentes",
       "received": "Recibido",
       "consumed": "Procesado",
-      "remote_unknown": "El agente se ha detenido. No se ha confirmado el fin del comando remoto.",
-      "return_control": "Devolver el control del terminal a la IA",
       "usage_unknown": "Uso de tokens desconocido",
       "message_not_sent": "No se pudieron enviar las instrucciones adicionales.",
       "supplement": "Instrucciones adicionales",
@@ -559,8 +557,7 @@
       "cancel_quit": "Cancelar salida",
       "discard_quit": "Salir sin guardar",
       "older": "Mensajes anteriores",
-      "newer": "Mensajes posteriores",
-      "more_content": "Más contenido"
+      "newer": "Mensajes posteriores"
     }
   }
 }

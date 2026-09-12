@@ -29,8 +29,6 @@
       "communication": "Communication",
       "received": "Received",
       "consumed": "Consumed",
-      "remote_unknown": "The agent has stopped. Remote command termination has not been confirmed.",
-      "return_control": "Return terminal control to AI",
       "usage_unknown": "Token usage unavailable",
       "message_not_sent": "Could not send the additional instructions.",
       "supplement": "Additional instructions",
@@ -559,8 +557,7 @@
       "cancel_quit": "Cancel quit",
       "discard_quit": "Quit without saving",
       "older": "Earlier messages",
-      "newer": "Later messages",
-      "more_content": "More content"
+      "newer": "Later messages"
     }
   }
 }

@@ -70,7 +70,7 @@ mod agent_loop_tests {
     }
 
     #[tokio::test]
-    async fn local_command_control_tracks_process_completion_instead_of_tool_success() {
+    async fn local_command_cleanup_and_request_ownership_are_independent() {
         use oxideterm_ai::agent::{AgentModel, AgentResourceCoordinator, AgentRuntime, AgentScope, AgentToolLease};
         let runtime = AgentRuntime::new(1);
         let run = runtime.create_group("local-command".into(), AgentModel {
@@ -89,7 +89,7 @@ mod agent_loop_tests {
             });
             let mut task = AiOwnedCommandTask::new(process, vec![lease.clone()]);
             if let Some(success) = early_response { lease.finish_response(success); }
-            assert!(resources.owned_by(&key, &run).is_some(), "early response must not release the process");
+            assert_eq!(resources.owned_by(&key, &run).is_some(), early_response.is_none(), "ownership ends with the request, independently of process outcome");
             release.send(()).unwrap();
             let action = (&mut task.process).await.unwrap();
             assert!(!action.ok);
@@ -106,8 +106,9 @@ mod agent_loop_tests {
         lease.dispatched();
         let task = AiOwnedCommandTask::new(tokio::spawn(std::future::pending()), vec![lease]);
         drop(task);
-        assert!(matches!(resources.acquire(key, run.clone(), runtime.cancellation(&run).unwrap()).await,
-            Err(oxideterm_ai::agent::AgentError::ResourceUnresolved)));
+        let next = resources.acquire(key, run.clone(), runtime.cancellation(&run).unwrap()).await.unwrap();
+        assert!(resources.owns(&next));
+        assert!(resources.complete(&next));
     }
 
     #[tokio::test]

@@ -29,8 +29,6 @@
       "communication": "エージェント間の通信",
       "received": "受信済み",
       "consumed": "処理済み",
-      "remote_unknown": "エージェントは停止しました。リモートコマンドの終了は未確認です。",
-      "return_control": "端末の制御を AI に戻す",
       "usage_unknown": "トークン使用量は不明です",
       "message_not_sent": "追加指示を送信できませんでした。",
       "supplement": "追加指示",
@@ -559,8 +557,7 @@
       "cancel_quit": "終了をキャンセル",
       "discard_quit": "保存せずに終了",
       "older": "以前のメッセージ",
-      "newer": "新しいメッセージ",
-      "more_content": "続きを表示"
+      "newer": "新しいメッセージ"
     }
   }
 }

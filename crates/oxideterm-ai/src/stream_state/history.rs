@@ -367,14 +367,7 @@ pub fn should_retain_stopped_ai_message(message: &AiChatMessage) -> bool {
 }
 
 pub fn cancel_rejected_tool_call(call: &serde_json::Value) -> Option<(String, String, String)> {
-    let status = call
-        .get("status")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    if matches!(status, "completed" | "error" | "rejected") {
-        return None;
-    }
-    if call.get("result").is_some_and(|result| !result.is_null()) {
+    if !crate::persistence::ai_tool_call_is_unfinished(call) {
         return None;
     }
     let id = call.get("id").and_then(serde_json::Value::as_str)?;

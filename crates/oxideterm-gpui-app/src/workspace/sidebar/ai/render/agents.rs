@@ -324,42 +324,6 @@ impl WorkspaceApp {
         )
     }
 
-    fn render_ai_agent_resource_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let ai = self.ai_entity.read(cx);
-        let id = ai.conversation_state().active_conversation_id.as_deref()?;
-        let resources = ai.agents.services.resources.clone();
-        let keys = ai
-            .agents
-            .services
-            .runtime
-            .unresolved_resources(id, &resources);
-        if keys.is_empty() {
-            return None;
-        }
-        Some(
-            ai_tool_block(&self.tokens)
-                .px(px(self.tokens.spacing.three))
-                .child(
-                    div()
-                        .text_size(px(11.0))
-                        .child(self.i18n.t("ai.agents.remote_unknown")),
-                )
-                .child(self.agent_button(
-                    "agent-return-conversation-control".into(),
-                    self.i18n.t("ai.agents.return_control"),
-                    move |_, _, cx| {
-                        for key in &keys {
-                            resources.invalidate(key);
-                            resources.allow_new_requests(key);
-                        }
-                        cx.notify();
-                    },
-                    cx,
-                ))
-                .into_any_element(),
-        )
-    }
-
     fn render_ai_agent_group(
         &self,
         message_id: &str,
@@ -1046,6 +1010,7 @@ impl WorkspaceApp {
                     body = body.child(self.render_ai_owned_message(
                         owner.clone(),
                         Arc::new(oxideterm_ai::HistoryMessageView {
+                            first_section: 0,
                             message,
                             section: 0,
                             sections: 1,
@@ -1058,23 +1023,6 @@ impl WorkspaceApp {
                 }
             }
             body = body.child(self.agent_usage_label(record.snapshot.usage));
-        }
-        let resources = self.ai_entity.read(cx).agents.services.resources.clone();
-        let keys = resources.unresolved_owned_by(&run, state.is_terminal());
-        if !keys.is_empty() {
-            body = body.child(self.i18n.t("ai.agents.remote_unknown"));
-            body = body.child(self.agent_button(
-                "agent-return-control".into(),
-                self.i18n.t("ai.agents.return_control"),
-                move |_, _, cx| {
-                    for key in &keys {
-                        resources.invalidate(key);
-                        resources.allow_new_requests(key);
-                    }
-                    cx.notify();
-                },
-                cx,
-            ));
         }
         Some(
             div()

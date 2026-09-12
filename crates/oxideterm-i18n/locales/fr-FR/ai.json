@@ -29,8 +29,6 @@
       "communication": "Communication des agents",
       "received": "Reçu",
       "consumed": "Traité",
-      "remote_unknown": "L’agent est arrêté. La fin de la commande distante n’a pas été confirmée.",
-      "return_control": "Rendre le contrôle du terminal à l’IA",
       "usage_unknown": "Utilisation des tokens inconnue",
       "message_not_sent": "Impossible d’envoyer les instructions supplémentaires.",
       "supplement": "Instructions supplémentaires",
@@ -559,8 +557,7 @@
       "cancel_quit": "Annuler la fermeture",
       "discard_quit": "Quitter sans enregistrer",
       "older": "Messages précédents",
-      "newer": "Messages suivants",
-      "more_content": "Plus de contenu"
+      "newer": "Messages suivants"
     }
   }
 }

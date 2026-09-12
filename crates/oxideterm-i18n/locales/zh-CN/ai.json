@@ -29,8 +29,6 @@
       "communication": "主子通信",
       "received": "已接收",
       "consumed": "已消费",
-      "remote_unknown": "代理已停止，尚未确认远端命令是否结束。",
-      "return_control": "将终端控制权交还 AI",
       "usage_unknown": "Token 用量未知",
       "message_not_sent": "无法发送补充说明。",
       "supplement": "补充说明",
@@ -559,8 +557,7 @@
       "cancel_quit": "取消退出",
       "discard_quit": "放弃未保存内容并退出",
       "older": "更早的消息",
-      "newer": "较新的消息",
-      "more_content": "更多内容"
+      "newer": "较新的消息"
     }
   }
 }

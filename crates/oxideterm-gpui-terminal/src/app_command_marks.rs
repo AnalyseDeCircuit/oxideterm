@@ -59,7 +59,10 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) -> Option<String> {
         let command = command.trim();
-        if command.is_empty() || !self.settings.command_marks_enabled {
+        if command.is_empty()
+            || (!self.settings.command_marks_enabled
+                && source != TerminalCommandMarkDetectionSource::Ai)
+        {
             return None;
         }
         let (mode, snapshot) = {

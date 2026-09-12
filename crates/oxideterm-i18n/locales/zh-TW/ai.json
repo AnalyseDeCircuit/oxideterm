@@ -29,8 +29,6 @@
       "communication": "主子通訊",
       "received": "已接收",
       "consumed": "已取用",
-      "remote_unknown": "代理已停止，尚未確認遠端命令是否結束。",
-      "return_control": "將終端控制權交還 AI",
       "usage_unknown": "Token 用量未知",
       "message_not_sent": "無法傳送補充說明。",
       "supplement": "補充說明",
@@ -559,8 +557,7 @@
       "cancel_quit": "取消結束",
       "discard_quit": "捨棄未儲存內容並結束",
       "older": "較早的訊息",
-      "newer": "較新的訊息",
-      "more_content": "更多內容"
+      "newer": "較新的訊息"
     }
   }
 }

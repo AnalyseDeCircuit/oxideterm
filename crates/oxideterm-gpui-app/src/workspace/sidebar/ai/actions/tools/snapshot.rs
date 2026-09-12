@@ -2744,7 +2744,7 @@ impl WorkspaceApp {
                         .is_some_and(|connection| matches!(connection.state(), ConnectionState::Connecting | ConnectionState::LinkDown | ConnectionState::Reconnecting | ConnectionState::Error(_)));
                     if recovering {
                         connection_lost = true;
-                        return Some((last.clone(), false, None, true));
+                        return Some((last.clone(), false, None, true, false));
                     }
                     if let Some(node) = &node_id {
                         let alive = this.node_router.connection_id_for_node(node).and_then(|id| this.ssh_registry.get(&id))
@@ -2780,10 +2780,11 @@ impl WorkspaceApp {
                                     .find(|record| record.command_id == *command_id)
                             }),
                             false,
+                            pane.shell_integration_status().detected,
                         )
                     })
                 });
-                let (current, waiting_for_secret, command_record, recovering) = match current {
+                let (current, waiting_for_secret, command_record, recovering, shell_integration_detected) = match current {
                     Ok(Some(current)) => current,
                     Ok(None) => {
                         owner_closed = true;
@@ -2805,6 +2806,38 @@ impl WorkspaceApp {
                 }
                 if !recovering { connection_lost = false; }
                 last_waiting_for_secret = waiting_for_secret;
+                if ai_terminal_command_output_ready(
+                    command_completed, shell_integration_detected, &before, &current,
+                    changed_at.elapsed(), waiting_for_secret, recovering,
+                ) {
+                    let result = weak.update(cx, |this, cx| {
+                        let current_snapshot = this
+                            .ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
+                        current_snapshot.to_executed_tool_result(
+                            tool_call_id.clone(),
+                            tool_name.clone(),
+                            current_snapshot
+                                .ok(
+                                    "Terminal command output captured.",
+                                    terminal_delta_output(&before, &current),
+                                    serde_json::json!({
+                                        "executionState": if command_completed { "completed" } else { "output_captured" },
+                                        "visibleInTerminal": true,
+                                        "waitingForInput": false,
+                                        "commandId": command_id,
+                                        "exitCode": command_record.as_ref().and_then(|record| record.exit_code),
+                                    }),
+                                    "interactive",
+                                )
+                                .with_optional_target(target.clone()),
+                            started.elapsed().as_millis(),
+                        )
+                    });
+                    if let (Some(sender), Ok(result)) = (sender.take(), result) {
+                        let _ = sender.send(result);
+                    }
+                    return;
+                }
                 let expired = wait.expired(std::time::Instant::now());
                 // Secret entry is local to the terminal. Keep this request alive without another model turn.
                 let wait_state = if recovering { "waiting_connection" } else if waiting_for_secret { "waiting_user" } else { "waiting_condition" };
@@ -2840,39 +2873,6 @@ impl WorkspaceApp {
                         _ => { paused = true; break; },
                     }
                 }
-                let fallback_output_stable = command_id.is_none()
-                    && !looks_waiting_for_input(&current)
-                    && current != before
-                    && changed_at.elapsed() >= Duration::from_millis(400);
-                if command_completed || (fallback_output_stable && !waiting_for_secret && !recovering) {
-                    let result = weak.update(cx, |this, cx| {
-                        let current_snapshot = this
-                            .ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
-                        current_snapshot.to_executed_tool_result(
-                            tool_call_id.clone(),
-                            tool_name.clone(),
-                            current_snapshot
-                                .ok(
-                                    "Terminal command output captured.",
-                                    terminal_delta_output(&before, &current),
-                                    serde_json::json!({
-                                        "executionState": if command_completed { "completed" } else { "output_captured" },
-                                        "visibleInTerminal": true,
-                                        "waitingForInput": false,
-                                        "commandId": command_id,
-                                        "exitCode": command_record.as_ref().and_then(|record| record.exit_code),
-                                    }),
-                                    "interactive",
-                                )
-                                .with_optional_target(target.clone()),
-                            started.elapsed().as_millis(),
-                        )
-                    });
-                    if let (Some(sender), Ok(result)) = (sender.take(), result) {
-                        let _ = sender.send(result);
-                    }
-                    return;
-                }
                 tokio::select! {
                     _ = activity_rx.changed() => {},
                     _ = Timer::after(Duration::from_millis(250)) => {},
@@ -2885,8 +2885,10 @@ impl WorkspaceApp {
                 let output = terminal_delta_output(&before, &last);
                 let output_empty = output.trim().is_empty();
                 if paused {
-                    return current_snapshot.to_executed_tool_result(tool_call_id, tool_name,
-                        current_snapshot.fail("Command observation paused.", "agent_wait_paused", "The command may still be running; observation was paused by the user.", "interactive"), started.elapsed().as_millis());
+                    let mut action = current_snapshot.fail("Command observation paused.", "agent_wait_paused", "The command may still be running; observation was paused by the user.", "interactive");
+                    if !output_empty { action.output = output; }
+                    action.data = serde_json::json!({"executionState":if output_empty { "running" } else { "output_captured" }, "commandId":command_id, "outcomeUnknown":true});
+                    return current_snapshot.to_executed_tool_result(tool_call_id, tool_name, action, started.elapsed().as_millis());
                 }
                 if outcome_unknown {
                     return current_snapshot.to_executed_tool_result(tool_call_id, tool_name,

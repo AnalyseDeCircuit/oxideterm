@@ -7,9 +7,6 @@ impl AiOwnedCommandTask {
         process: tokio::task::JoinHandle<AiActionResultLite>,
         leases: Vec<oxideterm_ai::agent::AgentToolLease>,
     ) -> Self {
-        for lease in &leases {
-            lease.monitor_command();
-        }
         Self { process, leases }
     }
 

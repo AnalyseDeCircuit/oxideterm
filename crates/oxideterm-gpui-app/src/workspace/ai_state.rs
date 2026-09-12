@@ -6056,6 +6056,9 @@ pub(in crate::workspace) mod entity_tests {
             );
             std::thread::sleep(Duration::from_millis(1));
         }
+        let cached_main = entity.read_with(cx, |ai, _| {
+            ai.history.pages["paged"].bodies["message-999"].upgrade().unwrap()
+        });
         let archive_owner = history::HistoryViewOwner::Archive("paged".into(), "archive".into());
         entity.update(cx, |ai, _| {
             let description = ai.history.pages["paged"].descriptions["message-999"].clone();
@@ -6091,7 +6094,83 @@ pub(in crate::workspace) mod entity_tests {
             );
             std::thread::sleep(Duration::from_millis(1));
         }
+        settle(cx, "message-950", 50);
+        entity.read_with(cx, |ai, _| {
+            let refreshed = ai.history.pages["paged"].bodies["message-999"].upgrade().unwrap();
+            assert!(Arc::ptr_eq(&cached_main, &refreshed), "unchanged history refresh must retain the decoded row");
+        });
+        struct HistoryPageRow {
+            ai: Entity<AiWorkspaceEntity>,
+            state: gpui::ListState,
+        }
+        impl gpui::Render for HistoryPageRow {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let ai = self.ai.clone();
+                let list = gpui::list(self.state.clone(), move |_, _, cx| {
+                    ai.update(cx, |ai, cx| {
+                        ai.request_visible_history_page("paged".into(), true, cx)
+                    });
+                    div().h(gpui::px(20.0)).w_full().into_any_element()
+                })
+                .size_full();
+                div().relative().size_full().child(list).child(
+                    oxideterm_gpui_ui::scroll::Scrollbar::for_list(&self.state)
+                )
+            }
+        }
+        let list_state = entity.read_with(cx, |ai, _| ai.chat_ui.message_list_state.clone());
+        list_state.reset(1);
+        for mode in [gpui::FollowMode::Tail, gpui::FollowMode::Normal] {
+            list_state.set_follow_mode(mode);
+            let view = cx.new(|_| HistoryPageRow {
+                ai: entity.clone(),
+                state: list_state.clone(),
+            });
+            cx.add_empty_window().draw(
+                gpui::point(gpui::px(0.0), gpui::px(0.0)),
+                gpui::size(gpui::px(200.0), gpui::px(100.0)),
+                move |_, _| view.clone().into_any_element(),
+            );
+            if matches!(mode, gpui::FollowMode::Tail) {
+                cx.run_until_parked();
+                assert_eq!(
+                    entity.read_with(cx, |ai, _| ai
+                        .conversation_state
+                        .active_conversation()
+                        .unwrap()
+                        .messages
+                        .first()
+                        .unwrap()
+                        .id
+                        .clone()),
+                    "message-950"
+                );
+            } else {
+                settle(cx, "message-900", 100);
+            }
+        }
         assert!(store.cached_bytes() <= oxideterm_ai::HISTORY_CACHE_BYTES);
+        let owner = history::HistoryViewOwner::Main("paged".into());
+        let held = entity.update(cx, |ai, cx| {
+            let mut body = message(999);
+            body.content = "visible payload".into();
+            let body = Arc::new(oxideterm_ai::live_message_view(&body, "paged", 1, None).unwrap());
+            let weak = Arc::downgrade(&body);
+            ai.history.pages.get_mut("paged").unwrap().bodies
+                .insert("message-999".into(), weak.clone());
+            ai.retain_visible_history_body(owner.clone(), "message-999".into(), cx);
+            weak
+        });
+        cx.run_until_parked();
+        assert_eq!(held.upgrade().unwrap().message.content, "visible payload");
+        entity.update(cx, |ai, cx| {
+            ai.retain_visible_history_body(owner, "message-998".into(), cx);
+        });
+        cx.run_until_parked();
+        assert!(
+            held.upgrade().is_none(),
+            "scrolling away must release uncached body ownership"
+        );
     }
 
     #[gpui::test]

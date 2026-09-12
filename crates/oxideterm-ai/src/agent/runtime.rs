@@ -309,26 +309,6 @@ impl AgentRuntime {
             .collect()
     }
 
-    pub fn unresolved_resources(
-        &self,
-        conversation_id: &str,
-        resources: &AgentResourceCoordinator,
-    ) -> Vec<crate::RuntimeOwnerKey> {
-        if !resources.has_unresolved() {
-            return Vec::new();
-        }
-        self.state
-            .lock()
-            .groups
-            .values()
-            .flat_map(|group| group.runs.values())
-            .filter(|run| run.snapshot.conversation_id == conversation_id)
-            .flat_map(|run| {
-                resources.unresolved_owned_by(&run.snapshot.run, run.snapshot.state.is_terminal())
-            })
-            .collect()
-    }
-
     pub fn snapshot(&self, run: &AgentRunRef) -> Result<AgentSnapshot, AgentError> {
         let mut state = self.state.lock();
         Ok(current_group(&mut state, run)?.runs[&run.agent_id]

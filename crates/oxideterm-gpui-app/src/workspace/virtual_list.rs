@@ -236,7 +236,9 @@ pub(super) fn sync_virtual_list_state_by_signatures(
     let shared_len = old_len.min(new_len);
     for (index, signature) in signatures.iter().take(shared_len).enumerate() {
         if cache.signatures.get(index) != Some(signature) {
-            state.splice(index..index + 1, 1);
+            // A streamed or newly loaded body is still the same row. Splicing it
+            // resets the reader's offset inside that row to zero.
+            state.remeasure_items(index..index + 1);
         }
     }
     if old_len < new_len {
@@ -372,6 +374,34 @@ mod tests {
             state.is_following_tail(),
             "stream updates must preserve the user's active tail-follow mode"
         );
+    }
+
+    #[test]
+    fn message_updates_preserve_scroll_offset() {
+        let mut state = ListState::new(0, ListAlignment::Top, px(0.0));
+        let mut cache = VirtualListSignatureCache::default();
+        sync_virtual_list_state_by_signatures(
+            &mut state,
+            &mut cache,
+            "chat",
+            &[1, 2, 3],
+            ListAlignment::Top,
+            px(32.0),
+        );
+        state.scroll_to(gpui::ListOffset {
+            item_ix: 1,
+            offset_in_item: px(240.0),
+        });
+        sync_virtual_list_state_by_signatures(
+            &mut state,
+            &mut cache,
+            "chat",
+            &[1, 9, 3],
+            ListAlignment::Top,
+            px(32.0),
+        );
+        let top = state.logical_scroll_top();
+        assert_eq!((top.item_ix, top.offset_in_item), (1, px(240.0)));
     }
 
     #[test]

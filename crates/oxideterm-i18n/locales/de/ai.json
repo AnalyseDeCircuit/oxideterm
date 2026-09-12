@@ -29,8 +29,6 @@
       "communication": "Agentenkommunikation",
       "received": "Empfangen",
       "consumed": "Verarbeitet",
-      "remote_unknown": "Der Agent wurde gestoppt. Das Ende des entfernten Befehls ist nicht bestätigt.",
-      "return_control": "Terminalsteuerung an KI zurückgeben",
       "usage_unknown": "Tokenverbrauch unbekannt",
       "message_not_sent": "Zusätzliche Anweisungen konnten nicht gesendet werden.",
       "supplement": "Zusätzliche Anweisungen",
@@ -559,8 +557,7 @@
       "cancel_quit": "Beenden abbrechen",
       "discard_quit": "Ohne Speichern beenden",
       "older": "Frühere Nachrichten",
-      "newer": "Spätere Nachrichten",
-      "more_content": "Weitere Inhalte"
+      "newer": "Spätere Nachrichten"
     }
   }
 }

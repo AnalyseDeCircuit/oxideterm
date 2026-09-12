@@ -22,8 +22,6 @@ pub struct AgentResourceCoordinator {
 struct ResourceState {
     leases: HashMap<RuntimeOwnerKey, AgentResourceLease>,
     epochs: HashMap<RuntimeOwnerKey, u64>,
-    blocked: std::collections::HashSet<RuntimeOwnerKey>,
-    blocked_owners: HashMap<RuntimeOwnerKey, AgentRunRef>,
 }
 impl Default for AgentResourceCoordinator {
     fn default() -> Self {
@@ -35,36 +33,8 @@ impl Default for AgentResourceCoordinator {
     }
 }
 impl AgentResourceCoordinator {
-    pub fn has_unresolved(&self) -> bool {
-        let state = self.state.lock();
-        !state.leases.is_empty() || !state.blocked.is_empty()
-    }
-
-    pub fn unresolved_owned_by(
-        &self,
-        run: &AgentRunRef,
-        include_running_command: bool,
-    ) -> Vec<RuntimeOwnerKey> {
-        let state = self.state.lock();
-        state
-            .blocked_owners
-            .iter()
-            .filter(|(_, owner)| *owner == run)
-            .map(|(key, _)| key.clone())
-            .chain(
-                state
-                    .leases
-                    .values()
-                    .filter(|lease| include_running_command && &lease.owner == run)
-                    .map(|lease| lease.resource.clone()),
-            )
-            .collect()
-    }
     pub fn workspace_resource(&self) -> RuntimeOwnerKey {
         self.workspace.clone()
-    }
-    pub fn is_blocked(&self, resource: &RuntimeOwnerKey) -> bool {
-        self.state.lock().blocked.contains(resource)
     }
     pub fn has_owner(&self, resource: &RuntimeOwnerKey) -> bool {
         self.state.lock().leases.contains_key(resource)
@@ -101,9 +71,7 @@ impl AgentResourceCoordinator {
             }
             {
                 let mut state = self.state.lock();
-                if state.blocked.contains(&resource)
-                    || state.epochs.get(&resource).copied().unwrap_or_default() != epoch
-                {
+                if state.epochs.get(&resource).copied().unwrap_or_default() != epoch {
                     return Err(AgentError::ResourceUnresolved);
                 }
                 if !state.leases.contains_key(&resource) {
@@ -123,7 +91,7 @@ impl AgentResourceCoordinator {
         }
     }
 
-    /// Only a confirmed command boundary releases ownership. A timed-out waiter must not call this.
+    /// Release this request without allowing a late callback to release a newer request.
     pub fn complete(&self, lease: &AgentResourceLease) -> bool {
         let mut state = self.state.lock();
         if state.leases.get(&lease.resource) != Some(lease) {
@@ -136,32 +104,15 @@ impl AgentResourceCoordinator {
         true
     }
 
-    /// User takeover/disconnect blocks queued work as well as invalidating the current owner.
+    /// Invalidate current and already queued requests; newly submitted requests use the new epoch.
     pub fn invalidate(&self, resource: &RuntimeOwnerKey) -> Option<AgentRunRef> {
         let mut state = self.state.lock();
-        state.blocked.insert(resource.clone());
         *state.epochs.entry(resource.clone()).or_default() += 1;
         let removed = state.leases.remove(resource);
-        if let Some(lease) = &removed {
-            state
-                .blocked_owners
-                .insert(resource.clone(), lease.owner.clone());
-        }
         drop(state);
         self.changed
             .send_modify(|revision| *revision = revision.wrapping_add(1));
         removed.map(|lease| lease.owner)
-    }
-
-    /// The host calls this only after an explicit hand-back or a confirmed new connection.
-    /// Requests queued before takeover still fail their epoch check.
-    pub fn allow_new_requests(&self, resource: &RuntimeOwnerKey) {
-        let mut state = self.state.lock();
-        state.blocked.remove(resource);
-        state.blocked_owners.remove(resource);
-        drop(state);
-        self.changed
-            .send_modify(|revision| *revision = revision.wrapping_add(1));
     }
 
     pub fn owns(&self, lease: &AgentResourceLease) -> bool {
@@ -174,7 +125,6 @@ struct ToolLeaseState {
     coordinator: AgentResourceCoordinator,
     lease: AgentResourceLease,
     dispatched: std::sync::atomic::AtomicBool,
-    command_monitor: std::sync::atomic::AtomicBool,
     response_finished: std::sync::atomic::AtomicBool,
 }
 
@@ -188,9 +138,6 @@ impl Drop for ToolLeaseState {
             {
                 self.coordinator.invalidate(&self.lease.resource);
             }
-            return;
-        }
-        if self.command_monitor.load(Ordering::Acquire) {
             return;
         }
         if self.dispatched.load(Ordering::Acquire) {
@@ -214,7 +161,6 @@ impl AgentToolLease {
             coordinator,
             lease,
             dispatched: false.into(),
-            command_monitor: false.into(),
             response_finished: false.into(),
         }))
     }
@@ -228,7 +174,6 @@ impl AgentToolLease {
             coordinator,
             lease,
             dispatched: false.into(),
-            command_monitor: false.into(),
             response_finished: false.into(),
         }))
     }
@@ -243,11 +188,6 @@ impl AgentToolLease {
             .dispatched
             .store(true, std::sync::atomic::Ordering::Release);
     }
-    pub fn monitor_command(&self) {
-        self.0
-            .command_monitor
-            .store(true, std::sync::atomic::Ordering::Release);
-    }
     pub fn finish_response(&self, success: bool) {
         use std::sync::atomic::Ordering;
         if self.0.response_finished.swap(true, Ordering::AcqRel) {
@@ -259,12 +199,11 @@ impl AgentToolLease {
             }
             return;
         }
-        if !self.0.command_monitor.load(Ordering::Acquire) {
-            if success || !self.0.dispatched.load(Ordering::Acquire) {
-                self.0.coordinator.complete(&self.0.lease);
-            } else if self.is_current() {
-                self.0.coordinator.invalidate(&self.0.lease.resource);
-            }
+        // Execution observation is separate from permission to submit the next tool request.
+        if success || !self.0.dispatched.load(Ordering::Acquire) {
+            self.0.coordinator.complete(&self.0.lease);
+        } else if self.is_current() {
+            self.0.coordinator.invalidate(&self.0.lease.resource);
         }
     }
     pub fn response_finished(&self) -> bool {

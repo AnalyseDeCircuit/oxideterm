@@ -218,7 +218,7 @@ async fn waiting_releases_capacity_and_model_stays_locked_until_followup() {
 }
 
 #[tokio::test]
-async fn terminal_response_and_interactive_input_do_not_release_running_command() {
+async fn tool_response_releases_request_ownership_without_a_remote_exit_event() {
     let runtime = AgentRuntime::new(2);
     let parent = group(&runtime);
     let first = child(&runtime, &parent);
@@ -234,30 +234,30 @@ async fn terminal_response_and_interactive_input_do_not_release_running_command(
         .unwrap();
     let command = AgentToolLease::new(resources.clone(), lease.clone());
     command.dispatched();
-    command.monitor_command();
-    command.finish_response(true);
-    drop(AgentToolResponse(vec![command.clone()]));
-    assert!(resources.owns(&lease));
-    drop(AgentToolLease::borrow_command(
-        resources.clone(),
-        lease.clone(),
-    ));
-    assert!(resources.owns(&lease));
-    let input = AgentToolLease::borrow_command(
-        resources.clone(),
-        resources.owned_by(&key, &first).unwrap(),
-    );
+    let input = AgentToolLease::borrow_command(resources.clone(), lease.clone());
     input.dispatched();
     input.finish_response(true);
-    drop(AgentToolResponse(vec![input]));
     assert!(resources.owns(&lease));
+    command.finish_response(true);
+    let next = resources
+        .acquire(
+            key.clone(),
+            first.clone(),
+            runtime.cancellation(&first).unwrap(),
+        )
+        .await
+        .unwrap();
     command.command_finished();
-    assert!(!resources.has_owner(&key));
-    assert!(!resources.is_blocked(&key));
+    drop(AgentToolResponse(vec![command]));
+    assert!(
+        resources.owns(&next),
+        "late completion must not release a newer request"
+    );
+    assert!(resources.complete(&next));
 }
 
 #[tokio::test]
-async fn dropped_mutation_blocks_reuse_but_undispatched_work_does_not() {
+async fn dropped_requests_allow_fresh_requests_without_manual_handback() {
     let runtime = AgentRuntime::new(1);
     let parent = group(&runtime);
     let resources = AgentResourceCoordinator::default();
@@ -282,12 +282,12 @@ async fn dropped_mutation_blocks_reuse_but_undispatched_work_does_not() {
     let tool = AgentToolLease::new(resources.clone(), lease);
     tool.dispatched();
     drop(AgentToolResponse(vec![tool]));
-    assert!(matches!(
-        resources
-            .acquire(key, parent.clone(), runtime.cancellation(&parent).unwrap())
-            .await,
-        Err(AgentError::ResourceUnresolved)
-    ));
+    let next = resources
+        .acquire(key, parent.clone(), runtime.cancellation(&parent).unwrap())
+        .await
+        .unwrap();
+    assert!(resources.owns(&next));
+    assert!(resources.complete(&next));
 }
 
 #[tokio::test]
@@ -405,17 +405,6 @@ async fn resource_timeout_retains_ownership_and_takeover_rejects_late_completion
     );
     assert!(resources.owns(&lease));
     assert_eq!(resources.invalidate(&resource), Some(first));
-    assert!(matches!(
-        resources
-            .acquire(
-                resource.clone(),
-                second.clone(),
-                runtime.cancellation(&second).unwrap()
-            )
-            .await,
-        Err(AgentError::ResourceUnresolved)
-    ));
-    resources.allow_new_requests(&resource);
     let next = resources
         .acquire(
             resource.clone(),
@@ -580,7 +569,7 @@ async fn changing_concurrency_and_cancelling_a_queued_future_preserves_progress(
 }
 
 #[tokio::test]
-async fn takeover_rejects_previously_queued_commands_even_after_hand_back() {
+async fn takeover_rejects_previously_queued_commands_without_blocking_fresh_requests() {
     let runtime = AgentRuntime::new(1);
     let parent = group(&runtime);
     let first = child(&runtime, &parent);
@@ -610,7 +599,6 @@ async fn takeover_rejects_previously_queued_commands_even_after_hand_back() {
     tokio::pin!(queued);
     assert!(futures_util::poll!(&mut queued).is_pending());
     resources.invalidate(&resource);
-    resources.allow_new_requests(&resource);
     assert_eq!(queued.await, Err(AgentError::ResourceUnresolved));
 }
 

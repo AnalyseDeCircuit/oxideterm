@@ -127,9 +127,15 @@ pub struct HistoryContentPage {
 
 pub struct HistoryMessageView {
     pub message: AiChatMessage,
+    pub first_section: u64,
     pub section: u64,
     pub sections: u64,
     pub more: Vec<HistoryContentCursor>,
+}
+
+impl HistoryMessageView {
+    // Each activity has its own 64 KiB payload window; old rounds stay on disk.
+    pub const ACTIVITY_WINDOW: u64 = 16;
 }
 
 impl ConversationStore {
@@ -220,11 +226,17 @@ impl ConversationStore {
         } else {
             1 + u64::from(thinking) + tools
         };
-        let section = section.unwrap_or_else(|| if parts > 0 { parts - 1 } else { 0 });
+        let complete = section.is_none();
+        let section = section.unwrap_or(sections.saturating_sub(1));
         if section >= sections {
             return Err(anyhow!("History section is unavailable"));
         }
-        let cache_key = format!("message:{storage_id}:{revision}:{section}");
+        let first_section = if complete {
+            0
+        } else {
+            section.saturating_sub(HistoryMessageView::ACTIVITY_WINDOW - 1)
+        };
+        let cache_key = format!("message:{storage_id}:{revision}:{section}:{complete}");
         if let Some(view) = self.cache.lock().get_message(conversation, &cache_key) {
             return Ok(view);
         }
@@ -263,6 +275,9 @@ impl ConversationStore {
             let mut cursor = cursor.clone();
             cursor.path = path;
             let source = resolve(&tx, conversation, root.clone(), &cursor.path)?;
+            if complete {
+                return super::content::load_value(&tx, conversation, source, &self.cache);
+            }
             let identity = match &source {
                 StoredValue::Object(_) | StoredValue::ObjectRef { .. } => Some(
                     super::content::object_fields(&tx, conversation, source.clone())?,
@@ -298,76 +313,93 @@ impl ConversationStore {
             more.extend(window.more);
             Ok(value)
         };
-        if parts > 0 {
-            let path = vec!["turn".into(), "parts".into(), section.to_string()];
-            let fields = super::content::object_fields(
-                &tx,
-                conversation,
-                resolve(&tx, conversation, root.clone(), &path)?,
-            )?;
-            let mut identity = serde_json::Map::new();
-            for key in ["type", "id", "toolCallId"] {
-                if let Some(value) = fields.get(key) {
-                    identity.insert(
-                        key.into(),
-                        super::content::load_value(&tx, conversation, value.clone(), &self.cache)?,
-                    );
-                }
-            }
-            let part = Value::Object(identity);
-            let kind = part.get("type").and_then(Value::as_str).unwrap_or_default();
-            if matches!(kind, "tool_call" | "tool_result") {
-                let id = part
-                    .get("id")
-                    .or_else(|| part.get("toolCallId"))
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| anyhow!("History tool identity is missing"))?;
-                let links: ToolParts = tx
-                    .open_table(TOOL_PARTS)?
-                    .get((conversation, storage_id, id))?
-                    .map(|row| rmp_serde::from_slice(row.value()))
-                    .transpose()?
-                    .ok_or_else(|| anyhow!("History tool index is missing"))?;
-                if let Some(index) = links.projection {
-                    message
-                        .tool_calls
-                        .push(read(vec!["tool_calls".into(), index.to_string()])?);
-                } else {
-                    let mut group = Vec::new();
-                    for index in [links.call, links.result].into_iter().flatten() {
-                        group.push(read(vec![
-                            "turn".into(),
-                            "parts".into(),
-                            index.to_string(),
-                        ])?);
+        let mut visible_parts = Vec::new();
+        let mut tools = HashSet::new();
+        for section in first_section..=section {
+            if parts > 0 {
+                let path = vec!["turn".into(), "parts".into(), section.to_string()];
+                let fields = super::content::object_fields(
+                    &tx,
+                    conversation,
+                    resolve(&tx, conversation, root.clone(), &path)?,
+                )?;
+                let mut identity = serde_json::Map::new();
+                for key in ["type", "id", "toolCallId"] {
+                    if let Some(value) = fields.get(key) {
+                        identity.insert(
+                            key.into(),
+                            super::content::load_value(
+                                &tx,
+                                conversation,
+                                value.clone(),
+                                &self.cache,
+                            )?,
+                        );
                     }
-                    message.turn = Some(serde_json::json!({"parts":group}));
                 }
-            } else {
-                message.turn = Some(serde_json::json!({"parts":[read(path)?]}));
-            }
-        } else if section == 0 {
-            message.content = read(vec!["content".into()])?
-                .as_str()
-                .ok_or_else(|| anyhow!("History text is invalid"))?
-                .to_owned();
-        } else if thinking && section == 1 {
-            message.thinking_content = Some(
-                read(vec!["thinking_content".into()])?
+                let part = Value::Object(identity);
+                let kind = part.get("type").and_then(Value::as_str).unwrap_or_default();
+                if matches!(kind, "tool_call" | "tool_result") {
+                    let id = part
+                        .get("id")
+                        .or_else(|| part.get("toolCallId"))
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| anyhow!("History tool identity is missing"))?;
+                    let links: ToolParts = tx
+                        .open_table(TOOL_PARTS)?
+                        .get((conversation, storage_id, id))?
+                        .map(|row| rmp_serde::from_slice(row.value()))
+                        .transpose()?
+                        .ok_or_else(|| anyhow!("History tool index is missing"))?;
+                    if !tools.insert(id.to_owned()) {
+                        continue;
+                    }
+                    if let Some(index) = links.projection {
+                        message
+                            .tool_calls
+                            .push(read(vec!["tool_calls".into(), index.to_string()])?);
+                        visible_parts.push(serde_json::json!({"type":"tool_call", "id":id}));
+                    } else {
+                        let mut group = Vec::new();
+                        for index in [links.call, links.result].into_iter().flatten() {
+                            group.push(read(vec![
+                                "turn".into(),
+                                "parts".into(),
+                                index.to_string(),
+                            ])?);
+                        }
+                        visible_parts.extend(group);
+                    }
+                } else {
+                    visible_parts.push(read(path)?);
+                }
+            } else if section == 0 {
+                message.content = read(vec!["content".into()])?
                     .as_str()
                     .ok_or_else(|| anyhow!("History text is invalid"))?
-                    .to_owned(),
-            );
-        } else {
-            message.tool_calls.push(read(vec![
-                "tool_calls".into(),
-                (section - 1 - u64::from(thinking)).to_string(),
-            ])?);
+                    .to_owned();
+            } else if thinking && section == 1 {
+                message.thinking_content = Some(
+                    read(vec!["thinking_content".into()])?
+                        .as_str()
+                        .ok_or_else(|| anyhow!("History text is invalid"))?
+                        .to_owned(),
+                );
+            } else {
+                message.tool_calls.push(read(vec![
+                    "tool_calls".into(),
+                    (section - 1 - u64::from(thinking)).to_string(),
+                ])?);
+            }
+        }
+        if !visible_parts.is_empty() {
+            message.turn = Some(serde_json::json!({"parts":visible_parts}));
         }
         message.is_streaming = false;
         normalize_interrupted_assistant_projection(&mut message);
         let view = Arc::new(HistoryMessageView {
             message,
+            first_section,
             section,
             sections,
             more,

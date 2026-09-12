@@ -23,187 +23,19 @@ impl WorkspaceApp {
         viewport: Option<AiMessageViewport>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let message_id = view.message.id.clone();
-        let mut body = div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .child(self.render_ai_history_message(
-                &view.message,
-                last_assistant,
-                viewport,
-                !matches!(
-                    owner,
-                    crate::workspace::ai_state::history::HistoryViewOwner::Main(_)
-                ),
-                cx,
-            ));
-        let mut navigation = div()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(px(self.tokens.spacing.two));
-        for (enabled, section, key, icon) in [
-            (
-                view.section > 0,
-                view.section.saturating_sub(1),
-                "ai.history.older",
-                LucideIcon::ChevronLeft,
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.retain_visible_history_body(owner.clone(), view.message.id.clone(), cx);
+        });
+        self.render_ai_history_message(
+            &view.message,
+            last_assistant,
+            viewport,
+            !matches!(
+                owner,
+                crate::workspace::ai_state::history::HistoryViewOwner::Main(_)
             ),
-            (
-                view.section + 1 < view.sections,
-                view.section + 1,
-                "ai.history.newer",
-                LucideIcon::ChevronDown,
-            ),
-        ] {
-            if enabled {
-                let owner = owner.clone();
-                let message = message_id.clone();
-                navigation = navigation.child(
-                    ai_message_action(
-                        &self.tokens,
-                        self.i18n.t(key),
-                        Self::render_lucide_icon(icon, 12.0, rgb(self.tokens.ui.text_muted)),
-                        false,
-                    )
-                    .id(gpui::SharedString::from(format!(
-                        "history-{message_id}-section-{section}"
-                    )))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.ai_entity.update(cx, |ai, _| {
-                            ai.request_history_owned_body(
-                                owner.clone(),
-                                message.clone(),
-                                Some(section),
-                                true,
-                            )
-                        });
-                        cx.notify();
-                    })),
-                );
-            }
-        }
-        if view.sections > 1 {
-            navigation = navigation.child(format!("{} / {}", view.section + 1, view.sections));
-        }
-        for (index, cursor) in view.more.iter().enumerate() {
-            let owner = owner.clone();
-            let cursor = cursor.clone();
-            let message = message_id.clone();
-            navigation = navigation.child(
-                ai_message_action(
-                    &self.tokens,
-                    self.i18n.t("ai.history.more_content"),
-                    Self::render_lucide_icon(
-                        LucideIcon::ChevronDown,
-                        12.0,
-                        rgb(self.tokens.ui.text_muted),
-                    ),
-                    false,
-                )
-                .id(gpui::SharedString::from(format!(
-                    "history-{message_id}-content-{index}"
-                )))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.ai_entity.update(cx, |ai, _| {
-                        ai.request_history_owned_content(
-                            owner.clone(),
-                            message.clone(),
-                            cursor.clone(),
-                        )
-                    });
-                    cx.notify();
-                })),
-            );
-        }
-        body = body.child(navigation);
-        let content = self
-            .ai_entity
-            .read(cx)
-            .history_view(&owner)
-            .and_then(|page| page.content.as_ref())
-            .filter(|(id, _)| id == &message_id)
-            .map(|(_, page)| (page.value.clone(), page.more.clone()));
-        if let Some((value, more)) = content {
-            let text = match value {
-                serde_json::Value::String(text) => text,
-                value => serde_json::to_string_pretty(&value)
-                    .unwrap_or_else(|_| self.i18n.t("ai.chat.load_failed_generic")),
-            };
-            body = body.child(ai_raw_block(
-                &self.tokens,
-                ("ai-history-content", ai_message_element_seed(&message_id)),
-                Some(320.0),
-                text,
-            ));
-            let target = owner.clone();
-            let message = message_id.clone();
-            let mut continuation = div()
-                .flex()
-                .flex_wrap()
-                .gap(px(self.tokens.spacing.two))
-                .child(
-                    ai_message_action(
-                        &self.tokens,
-                        self.i18n.t("ai.history.older"),
-                        Self::render_lucide_icon(
-                            LucideIcon::ChevronLeft,
-                            12.0,
-                            rgb(self.tokens.ui.text_muted),
-                        ),
-                        false,
-                    )
-                    .id(gpui::SharedString::from(format!(
-                        "history-{message_id}-previous-content"
-                    )))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.ai_entity.update(cx, |ai, _| {
-                            ai.previous_history_content(target.clone(), message.clone())
-                        });
-                        cx.notify();
-                    })),
-                );
-            for (index, cursor) in more.into_iter().enumerate() {
-                let owner = owner.clone();
-                let message = message_id.clone();
-                continuation = continuation.child(
-                    ai_message_action(
-                        &self.tokens,
-                        self.i18n.t("ai.history.more_content"),
-                        Self::render_lucide_icon(
-                            LucideIcon::ChevronDown,
-                            12.0,
-                            rgb(self.tokens.ui.text_muted),
-                        ),
-                        false,
-                    )
-                    .id(gpui::SharedString::from(format!(
-                        "history-{message_id}-continuation-{index}"
-                    )))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.ai_entity.update(cx, |ai, _| {
-                            ai.request_history_owned_content(
-                                owner.clone(),
-                                message.clone(),
-                                cursor.clone(),
-                            )
-                        });
-                        cx.notify();
-                    })),
-                );
-            }
-            body = body.child(continuation);
-        }
-        if let Some(page) = self.ai_entity.read(cx).history_view(&owner) {
-            if page.content_loading.as_deref() == Some(&message_id) {
-                body = body.child(self.i18n.t("ai.history.loading"));
-            }
-            if page.content_error.as_deref() == Some(&message_id) {
-                body = body.child(self.i18n.t("ai.chat.load_failed_generic"));
-            }
-        }
-        body.into_any_element()
+            cx,
+        )
     }
 
     pub(in crate::workspace) fn render_ai_message(
@@ -662,8 +494,10 @@ impl WorkspaceApp {
             body = body.child(self.render_ai_message_edit_body(cx));
         } else if has_structured_parts {
             body = self.render_ai_turn_parts(body, message, viewport, cx);
-        } else if !message.content.is_empty() {
-            body = body.child(self.render_ai_message_content(message, viewport, cx));
+        } else {
+            if !message.content.is_empty() {
+                body = body.child(self.render_ai_message_content(message, viewport, cx));
+            }
             if !message.tool_calls.is_empty() {
                 body = body.child(self.render_ai_tool_calls(message, cx));
             }

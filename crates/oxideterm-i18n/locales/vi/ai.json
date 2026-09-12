@@ -29,8 +29,6 @@
       "communication": "Trao đổi giữa các tác nhân",
       "received": "Đã nhận",
       "consumed": "Đã xử lý",
-      "remote_unknown": "Tác nhân đã dừng. Chưa xác nhận lệnh từ xa đã kết thúc.",
-      "return_control": "Trả quyền điều khiển terminal cho AI",
       "usage_unknown": "Chưa biết lượng token sử dụng",
       "message_not_sent": "Không thể gửi hướng dẫn bổ sung.",
       "supplement": "Hướng dẫn bổ sung",
@@ -559,8 +557,7 @@
       "cancel_quit": "Hủy thoát",
       "discard_quit": "Thoát không lưu",
       "older": "Tin nhắn trước",
-      "newer": "Tin nhắn sau",
-      "more_content": "Xem thêm nội dung"
+      "newer": "Tin nhắn sau"
     }
   }
 }

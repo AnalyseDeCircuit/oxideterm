@@ -469,7 +469,10 @@ fn migration_preserves_legacy_file_and_validates_ordered_history() {
     }
     state.conversations[0].session_metadata = Some(serde_json::json!({
         "firstUserMessage":"original metadata prompt",
-        "messageBackends":{"message-104":{"kind":"acp","backendId":"native","model":"test-model"}}
+        "messageBackends":{
+            "message-104":{"kind":"acp","backendId":"native","model":"test-model","extension":{"version":2}},
+            "message-103":{"kind":"custom-backend","backendId":"other","model":"test-model"}
+        }
     }));
     legacy.save_state(state).unwrap();
     let agent = agent_record();
@@ -533,6 +536,29 @@ fn migration_preserves_legacy_file_and_validates_ordered_history() {
     assert_eq!(
         (backend.backend_id.as_str(), backend.model.as_str()),
         ("native", "test-model")
+    );
+    assert_eq!(
+        loaded
+            .messages
+            .iter()
+            .find(|message| message.id == "message-103")
+            .unwrap()
+            .turn
+            .as_ref()
+            .unwrap()["backendProvenance"],
+        serde_json::json!({"kind":"custom-backend","backendId":"other","model":"test-model"})
+    );
+    assert!(crate::ai_message_backend_provenance(&loaded, "message-103").is_none());
+    assert_eq!(
+        loaded
+            .messages
+            .iter()
+            .find(|message| message.id == "message-104")
+            .unwrap()
+            .turn
+            .as_ref()
+            .unwrap()["backendProvenance"]["extension"],
+        serde_json::json!({"version":2})
     );
     assert_eq!(
         last.messages
@@ -1320,12 +1346,16 @@ fn content_windows_page_unicode_and_seek_tool_parts_without_decoding_other_entri
         serde_json::json!({"type":"text","text":"round 99"})
     );
     let view = store
-        .message_view("history", &description.storage_id, 2, None)
+        .message_view("history", &description.storage_id, 2, Some(99))
         .unwrap();
     assert_eq!((view.section, view.sections), (99, 100));
     assert_eq!(
         view.message.turn.as_ref().unwrap()["parts"],
-        serde_json::json!([{"type":"text","text":"round 99"}])
+        serde_json::json!(
+            (84..100)
+                .map(|index| serde_json::json!({"type":"text","text":format!("round {index}")}))
+                .collect::<Vec<_>>()
+        )
     );
     part.path = vec!["turn".into(), "payload".into(), "field-0900".into()];
     assert_eq!(
@@ -2030,13 +2060,16 @@ fn live_windows_preserve_every_unicode_byte_without_copying_unselected_tool_outp
     item.is_streaming = true;
     let text = "界🙂 line\n".repeat(30_000);
     item.content = text.clone();
-    item.turn = Some(
-        serde_json::json!({"parts":[{"type":"tool_result", "toolCallId":"huge", "output":"old output ".repeat(100_000)}, {"type":"text", "text":text}]}),
-    );
-    let view = live_message_view(&item, "history", 1, None).unwrap();
-    assert_eq!(view.section, 1);
+    let mut parts = vec![
+        serde_json::json!({"type":"tool_result", "toolCallId":"huge", "output":"old output ".repeat(100_000)}),
+    ];
+    parts.extend((0..16).map(|_| serde_json::json!({"type":"text", "text":"previous activity"})));
+    parts.push(serde_json::json!({"type":"text", "text":text}));
+    item.turn = Some(serde_json::json!({"parts":parts}));
+    let view = live_message_view(&item, "history", 1, Some(17)).unwrap();
+    assert_eq!((view.first_section, view.section), (2, 17));
     assert!(view.message.tool_calls.is_empty());
-    let mut restored = view.message.turn.as_ref().unwrap()["parts"][0]["text"]
+    let mut restored = view.message.turn.as_ref().unwrap()["parts"][15]["text"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -2090,4 +2123,211 @@ fn import_uses_bounded_byte_batches_without_reordering_equal_timestamps() {
             "message-2"
         ]
     );
+}
+
+#[test]
+fn activity_windows_keep_text_and_tool_cards_together_live_and_after_reload() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ConversationStore::open(dir.path().join("v4.redb")).unwrap();
+    let mut item = message(0);
+    item.role = AiChatRole::Assistant;
+    item.content.clear();
+    item.tool_calls = vec![serde_json::json!({
+        "id":"lookup", "name":"search", "arguments":"{}", "status":"success",
+        "result":{"data":"found"}
+    })];
+    let parts = serde_json::json!([
+        {"type":"text", "text":"I will check."},
+        {"type":"tool_call", "id":"lookup"},
+        {"type":"tool_result", "toolCallId":"lookup", "output":"found"},
+        {"type":"text", "text":"Here is the answer."}
+    ]);
+    store
+        .apply(vec![HistoryMutation::Create {
+            conversation: empty_conversation(),
+            revision: 1,
+        }])
+        .unwrap();
+    for structured in [false, true] {
+        let revision = if structured { 3 } else { 2 };
+        item.turn = structured.then(|| serde_json::json!({"parts":parts}));
+        store
+            .apply(vec![HistoryMutation::PutMessage {
+                conversation_id: "history".into(),
+                branch_id: "main".into(),
+                message: item.clone(),
+                revision,
+            }])
+            .unwrap();
+        let descriptor = store
+            .message_page("history", "main", None, 1)
+            .unwrap()
+            .messages
+            .remove(0);
+        let live = live_message_view(&item, "history", revision, None).unwrap();
+        let stored = store
+            .message_view("history", &descriptor.storage_id, revision, None)
+            .unwrap();
+        for (view, historical) in [(&live, false), (&*stored, true)] {
+            assert_eq!(view.first_section, 0);
+            let expected = if historical {
+                serde_json::json!({"id":"lookup", "name":"search", "arguments":"{}", "status":"success", "result":{"data":"found"}, "historical":true, "actionable":false})
+            } else {
+                serde_json::json!({"id":"lookup", "name":"search", "arguments":"{}", "status":"success", "result":{"data":"found"}})
+            };
+            assert_eq!(view.message.tool_calls, vec![expected]);
+            assert!(view.more.is_empty());
+            if structured {
+                assert_eq!(
+                    view.message.turn.as_ref().unwrap()["parts"],
+                    serde_json::json!([
+                        {"type":"text", "text":"I will check."},
+                        {"type":"tool_call", "id":"lookup"},
+                        {"type":"text", "text":"Here is the answer."}
+                    ])
+                );
+            } else {
+                assert_eq!(view.message.content, "");
+                assert!(view.message.turn.is_none());
+            }
+        }
+    }
+}
+
+#[test]
+fn default_message_views_include_all_activity_and_complete_tool_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ConversationStore::open(dir.path().join("v4.redb")).unwrap();
+    let mut item = message(0);
+    item.role = AiChatRole::Assistant;
+    item.content = "正文🙂".repeat(30_000);
+    let output = "完整输出🙂".repeat(30_000);
+    item.tool_calls = vec![serde_json::json!({
+        "id":"read", "name":"read_file", "arguments":"{}", "status":"success",
+        "result":{"output":output, "entries":(0..80).collect::<Vec<_>>()}
+    })];
+    let mut parts = (0..40)
+        .map(|index| serde_json::json!({"type":"text", "text":format!("activity {index}")}))
+        .collect::<Vec<_>>();
+    parts.push(serde_json::json!({"type":"tool_call", "id":"read"}));
+    parts.push(serde_json::json!({"type":"tool_result", "toolCallId":"read", "output":output}));
+    parts.push(serde_json::json!({"type":"text", "text":item.content}));
+    item.turn = Some(serde_json::json!({"parts":parts}));
+    store
+        .apply(vec![
+            HistoryMutation::Create {
+                conversation: empty_conversation(),
+                revision: 1,
+            },
+            HistoryMutation::PutMessage {
+                conversation_id: "history".into(),
+                branch_id: "main".into(),
+                message: item.clone(),
+                revision: 2,
+            },
+        ])
+        .unwrap();
+    let description = store
+        .message_page("history", "main", None, 1)
+        .unwrap()
+        .messages
+        .remove(0);
+    let live = live_message_view(&item, "history", 2, None).unwrap();
+    let stored = store
+        .message_view("history", &description.storage_id, 2, None)
+        .unwrap();
+    for view in [&live, &*stored] {
+        assert_eq!(view.first_section, 0);
+        let mut expected = (0..40)
+            .map(|index| serde_json::json!({"type":"text", "text":format!("activity {index}")}))
+            .collect::<Vec<_>>();
+        expected.push(serde_json::json!({"type":"tool_call", "id":"read"}));
+        expected.push(serde_json::json!({"type":"text", "text":"正文🙂".repeat(30_000)}));
+        assert_eq!(
+            view.message.turn.as_ref().unwrap()["parts"],
+            Value::Array(expected)
+        );
+        assert_eq!(
+            view.message.tool_calls[0]["result"],
+            serde_json::json!({"output":"完整输出🙂".repeat(30_000), "entries":(0..80).collect::<Vec<_>>()})
+        );
+        assert!(
+            view.more.is_empty(),
+            "default display must not require continuation controls"
+        );
+    }
+    item.turn = None;
+    let view = live_message_view(&item, "history", 3, None).unwrap();
+    assert_eq!(view.message.content, "正文🙂".repeat(30_000));
+}
+
+#[test]
+fn waiting_tool_progress_is_finalized_on_stop_and_history_reload() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ConversationStore::open(dir.path().join("v4.redb")).unwrap();
+    let mut item = message(0);
+    item.role = AiChatRole::Assistant;
+    item.is_streaming = true;
+    item.tool_calls = [
+        "waiting_condition",
+        "waiting_connection",
+        "waiting_user",
+        "running",
+        "pending_user_approval",
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, status)| {
+        serde_json::json!({
+            "id":format!("wait-{index}"), "name":"await_output", "arguments":"{}", "status":status,
+            "result":{"waiting":true, "waitDeadline":12345}
+        })
+    })
+    .collect();
+    let completed = serde_json::json!({"id":"done", "name":"list_targets", "arguments":"{}", "status":"completed", "result":{"ok":true, "output":"done"}});
+    item.tool_calls.push(completed.clone());
+    let live = live_message_view(&item, "history", 1, None).unwrap();
+    assert_eq!(live.message.tool_calls[0]["status"], "waiting_condition");
+    let mut conversation = empty_conversation();
+    conversation.messages.push(item.clone());
+    crate::finalize_streaming_ai_messages_on_cancel(&mut conversation);
+    for call in &conversation.messages[0].tool_calls[..5] {
+        assert_eq!(call["status"], "rejected");
+        assert_eq!(call["result"]["error"]["code"], "generation_stopped");
+        assert!(call["result"].get("waitDeadline").is_none());
+    }
+    assert_eq!(conversation.messages[0].tool_calls[5], completed);
+    store
+        .apply(vec![
+            HistoryMutation::Create {
+                conversation: empty_conversation(),
+                revision: 1,
+            },
+            HistoryMutation::PutMessage {
+                conversation_id: "history".into(),
+                branch_id: "main".into(),
+                message: item.clone(),
+                revision: 2,
+            },
+        ])
+        .unwrap();
+    let descriptor = store
+        .message_page("history", "main", None, 1)
+        .unwrap()
+        .messages
+        .remove(0);
+    let stored = store
+        .message_view("history", &descriptor.storage_id, 2, None)
+        .unwrap();
+    item.is_streaming = false;
+    item.turn = Some(serde_json::json!({"status":"complete"}));
+    let stopped = live_message_view(&item, "history", 2, None).unwrap();
+    for view in [&*stored, &stopped] {
+        for call in &view.message.tool_calls[..5] {
+            assert_eq!(call["status"], "rejected");
+            assert_eq!(call["result"]["error"]["code"], "generation_stopped");
+        }
+        assert_eq!(view.message.tool_calls[5]["status"], "completed");
+        assert_eq!(view.message.tool_calls[5]["result"], completed["result"]);
+    }
 }

@@ -241,7 +241,6 @@ enum Delivery {
     StreamSave,
     Page(pages::PageDelivery),
     Body(pages::BodyDelivery),
-    Content(pages::ContentDelivery),
     Agents(
         u64,
         String,
@@ -522,7 +521,6 @@ impl AiWorkspaceEntity {
                 }
                 Delivery::Page(delivery) => self.apply_history_page(delivery),
                 Delivery::Body(delivery) => self.apply_history_body(delivery),
-                Delivery::Content(delivery) => self.apply_history_content(delivery),
                 Delivery::Agents(generation, id, result)
                     if generation == self.history.generation =>
                 {

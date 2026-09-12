@@ -1,7 +1,5 @@
 use super::*;
-use oxideterm_ai::{
-    HistoryContentCursor, HistoryContentPage, HistoryMessageView, MessageDescriptor, MessagePage,
-};
+use oxideterm_ai::{HistoryMessageView, MessageDescriptor, MessagePage};
 
 const WINDOW_MESSAGES: usize = 100;
 
@@ -28,26 +26,20 @@ pub(in crate::workspace) struct HistoryPageState {
     pub loading: bool,
     pub failed: bool,
     pub bodies: HashMap<String, std::sync::Weak<HistoryMessageView>>,
+    body_leases: HashMap<String, Arc<HistoryMessageView>>,
+    visible_bodies: HashSet<String>,
+    body_cleanup_scheduled: bool,
     pub body_errors: HashSet<String>,
     pub body_revisions: HashMap<String, u64>,
     body_tokens: HashMap<String, u64>,
     sections: HashMap<String, u64>,
     body_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
     anchor: Option<(String, gpui::Pixels)>,
-    pub content: Option<(String, HistoryContentPage)>,
-    pub content_loading: Option<String>,
-    pub content_error: Option<String>,
-    content_cursors: Vec<HistoryContentCursor>,
-    content_token: u64,
-    content_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Drop for HistoryPageState {
     fn drop(&mut self) {
         for (_, task) in self.body_tasks.drain() {
-            task.abort();
-        }
-        if let Some(task) = self.content_task.take() {
             task.abort();
         }
     }
@@ -77,14 +69,6 @@ pub(super) struct BodyDelivery {
     revision: u64,
     token: u64,
     result: Result<Arc<HistoryMessageView>, ()>,
-}
-
-pub(super) struct ContentDelivery {
-    generation: u64,
-    owner: HistoryViewOwner,
-    message: String,
-    token: u64,
-    result: Result<HistoryContentPage, ()>,
 }
 
 impl AiWorkspaceEntity {
@@ -127,6 +111,30 @@ impl AiWorkspaceEntity {
                 .unwrap_or(PageDirection::Initial)
         };
         self.load_history_page(id, direction);
+    }
+
+    pub(in crate::workspace) fn request_visible_history_page(
+        &mut self,
+        conversation: String,
+        older: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let entity = cx.entity();
+        // GPUI holds ListState mutably while rendering a row; even a follow-state read must wait.
+        cx.defer(move |cx| {
+            entity.update(cx, |ai, _| {
+                if ai.conversation_state.active_conversation_id.as_deref() == Some(&conversation)
+                    && !ai.chat_ui.message_list_state.is_following_tail()
+                    && ai
+                        .history
+                        .pages
+                        .get(&conversation)
+                        .is_some_and(|page| !page.loading && !page.failed)
+                {
+                    ai.request_history_page(conversation, older);
+                }
+            });
+        });
     }
 
     pub(in crate::workspace) fn request_history_page(&mut self, id: String, older: bool) {
@@ -292,13 +300,24 @@ impl AiWorkspaceEntity {
             }
         }
         if fresh {
+            let unchanged = incoming
+                .messages
+                .iter()
+                .filter(|description| {
+                    page.descriptions.get(&description.id).is_some_and(|old| {
+                        old.storage_id == description.storage_id
+                            && old.revision == description.revision
+                    })
+                })
+                .map(|description| description.id.clone())
+                .collect::<HashSet<_>>();
+            // Refreshing descriptors must not collapse unchanged, already decoded rows.
+            page.bodies.retain(|id, _| unchanged.contains(id));
+            page.body_leases.retain(|id, _| unchanged.contains(id));
             page.descriptions.clear();
-            page.bodies.clear();
             page.sections.clear();
             page.body_revisions.clear();
             page.body_tokens.clear();
-            page.content.take();
-            page.content_cursors.clear();
         }
         let old_ids: HashSet<_> = page.descriptions.keys().cloned().collect();
         for description in incoming.messages {
@@ -343,6 +362,7 @@ impl AiWorkspaceEntity {
             .collect();
         page.descriptions.retain(|id, _| retained.contains(id));
         page.bodies.retain(|id, _| retained.contains(id));
+        page.body_leases.retain(|id, _| retained.contains(id));
         page.sections.retain(|id, _| retained.contains(id));
         page.body_errors.retain(|id| retained.contains(id));
         page.body_revisions.retain(|id, _| retained.contains(id));
@@ -447,6 +467,38 @@ impl AiWorkspaceEntity {
             .ok()
     }
 
+    pub(in crate::workspace) fn retain_visible_history_body(
+        &mut self,
+        owner: HistoryViewOwner,
+        message: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(page) = self.history_view_mut(&owner) else {
+            return;
+        };
+        if let Some(body) = page.bodies.get(&message).and_then(std::sync::Weak::upgrade) {
+            page.body_leases.insert(message.clone(), body);
+        }
+        page.visible_bodies.insert(message);
+        if page.body_cleanup_scheduled {
+            return;
+        }
+        page.body_cleanup_scheduled = true;
+        let entity = cx.entity();
+        // Visible bodies may exceed the shared cache budget. Release their UI leases after
+        // all rows have rendered so scrolling cannot retain every decoded message.
+        cx.defer(move |cx| {
+            entity.update(cx, |ai, _| {
+                if let Some(page) = ai.history_view_mut(&owner) {
+                    page.body_leases
+                        .retain(|id, _| page.visible_bodies.contains(id));
+                    page.visible_bodies.clear();
+                    page.body_cleanup_scheduled = false;
+                }
+            });
+        });
+    }
+
     pub(in crate::workspace) fn request_history_body(
         &mut self,
         conversation: String,
@@ -481,8 +533,6 @@ impl AiWorkspaceEntity {
             if let Some(section) = section {
                 page.sections.insert(message.clone(), section);
             }
-            page.content.take();
-            page.content_cursors.clear();
             *page.body_revisions.entry(message.clone()).or_default() += 1;
             self.chat_ui
                 .message_signature_cache
@@ -512,20 +562,9 @@ impl AiWorkspaceEntity {
         }
         page.body_errors.remove(&message);
         page.bodies.remove(&message);
+        page.body_leases.remove(&message);
         if retry && section.is_some() {
             page.anchor = Some((message.clone(), gpui::px(0.0)));
-            if page.content.as_ref().is_some_and(|(id, _)| id == &message)
-                || page.content_loading.as_ref() == Some(&message)
-            {
-                if let Some(task) = page.content_task.take() {
-                    task.abort();
-                }
-                page.content_token += 1;
-                page.content.take();
-                page.content_cursors.clear();
-                page.content_loading = None;
-                page.content_error = None;
-            }
         }
         let section = section.or_else(|| page.sections.get(&message).copied());
         let token = page.body_tokens.entry(message.clone()).or_default();
@@ -580,9 +619,9 @@ impl AiWorkspaceEntity {
         let header = delivery.result.as_ref().ok().cloned();
         match delivery.result {
             Ok(body) => {
-                page.sections.insert(delivery.message.clone(), body.section);
                 page.bodies
                     .insert(delivery.message.clone(), Arc::downgrade(&body));
+                page.body_leases.insert(delivery.message.clone(), body);
             }
             Err(()) => {
                 page.body_errors.insert(delivery.message.clone());
@@ -617,145 +656,6 @@ impl AiWorkspaceEntity {
             .invalidate_message(&delivery.message);
     }
 
-    pub(in crate::workspace) fn request_history_owned_content(
-        &mut self,
-        owner: HistoryViewOwner,
-        message: String,
-        cursor: HistoryContentCursor,
-    ) {
-        if cursor.conversation_id != owner.conversation() {
-            return;
-        }
-        if self.live_history_view(&owner, &message).is_some() {
-            let result = self
-                .history_message(owner.conversation(), &message)
-                .ok_or_else(|| anyhow::anyhow!("Live message is missing"))
-                .and_then(|message| oxideterm_ai::live_content_page(message, &cursor));
-            let page = match &owner {
-                HistoryViewOwner::Main(id) => self.history.pages.entry(id.clone()).or_default(),
-                _ => self
-                    .history
-                    .auxiliary_pages
-                    .entry(owner.clone())
-                    .or_default(),
-            };
-            if let Some(index) = page
-                .content_cursors
-                .iter()
-                .position(|previous| previous == &cursor)
-            {
-                page.content_cursors.truncate(index + 1);
-            } else {
-                page.content_cursors.push(cursor);
-            }
-            match result {
-                Ok(content) => {
-                    page.content = Some((message.clone(), content));
-                    page.content_error = None;
-                }
-                Err(_) => {
-                    page.content_error = Some(message.clone());
-                }
-            }
-            *page.body_revisions.entry(message).or_default() += 1;
-            return;
-        }
-        let Some(store) = self.history.store.clone() else {
-            return;
-        };
-        let generation = self.history.generation;
-        let sender = self.history.sender.clone();
-        let wake = self.history.wake.clone();
-        let runtime = self.task_runtime.clone();
-        let Some(page) = self.history_view_mut(&owner) else {
-            return;
-        };
-        if let Some(task) = page.content_task.take() {
-            task.abort();
-        }
-        if let Some((old, _)) = page.content.take() {
-            *page.body_revisions.entry(old).or_default() += 1;
-        }
-        if page.content_cursors.last().is_some_and(|previous| {
-            previous.storage_id != cursor.storage_id || previous.revision != cursor.revision
-        }) {
-            page.content_cursors.clear();
-        }
-        if let Some(index) = page
-            .content_cursors
-            .iter()
-            .position(|previous| previous == &cursor)
-        {
-            page.content_cursors.truncate(index + 1);
-        } else {
-            page.content_cursors.push(cursor.clone());
-        }
-        page.content_loading = Some(message.clone());
-        page.content_error = None;
-        page.content_token += 1;
-        let token = page.content_token;
-        page.content_task = Some(runtime.spawn(async move {
-            let result = tokio::task::spawn_blocking(move || store.content_page(&cursor))
-                .await
-                .map_err(|_| ())
-                .and_then(|result| result.map_err(|_| ()));
-            let _ = sender.send(Delivery::Content(ContentDelivery {
-                generation,
-                owner,
-                message,
-                token,
-                result,
-            }));
-            wake.notify_one();
-        }));
-    }
-
-    pub(super) fn apply_history_content(&mut self, delivery: ContentDelivery) {
-        if delivery.generation != self.history.generation {
-            return;
-        }
-        let Some(page) = self.history_view_mut(&delivery.owner) else {
-            return;
-        };
-        if page.content_token != delivery.token {
-            return;
-        }
-        page.content_task.take();
-        page.content_loading = None;
-        match delivery.result {
-            Ok(content) => page.content = Some((delivery.message.clone(), content)),
-            Err(()) => {
-                page.content_error = Some(delivery.message.clone());
-            }
-        }
-        *page
-            .body_revisions
-            .entry(delivery.message.clone())
-            .or_default() += 1;
-        self.chat_ui
-            .message_signature_cache
-            .borrow_mut()
-            .invalidate_message(&delivery.message);
-    }
-
-    pub(in crate::workspace) fn previous_history_content(
-        &mut self,
-        owner: HistoryViewOwner,
-        message: String,
-    ) {
-        let Some(page) = self.history_view_mut(&owner) else {
-            return;
-        };
-        page.content_cursors.pop();
-        let previous = page.content_cursors.last().cloned();
-        if let Some(cursor) = previous {
-            self.request_history_owned_content(owner, message, cursor);
-        } else {
-            page.content.take();
-            *page.body_revisions.entry(message).or_default() += 1;
-        }
-    }
-
     pub(in crate::workspace) fn cancel_history_page_loads(&mut self) {
         self.history.generation += 1;
         self.history.page_generation += 1;
@@ -777,14 +677,11 @@ impl AiWorkspaceEntity {
             .chain(self.history.auxiliary_pages.values_mut())
         {
             page.loading = false;
+            page.body_leases.clear();
+            page.visible_bodies.clear();
             for (_, task) in page.body_tasks.drain() {
                 task.abort();
             }
-            if let Some(task) = page.content_task.take() {
-                task.abort();
-            }
-            page.content_loading = None;
-            page.content_token += 1;
         }
     }
 }

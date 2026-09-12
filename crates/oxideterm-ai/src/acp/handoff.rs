@@ -107,10 +107,13 @@ pub(crate) fn migrate_message_backends(
         .is_none()
     {
         if let Some(value) = legacy.get(&message.id) {
-            let provenance: AiMessageBackendProvenance = serde_json::from_value(value.clone())?;
-            if !store_message_backend(message, provenance) {
-                return Err(anyhow::anyhow!("History backend provenance is invalid"));
-            }
+            // Legacy provenance is descriptive metadata, not a required backend configuration.
+            // Preserve unknown kinds and extension fields without granting them runtime meaning.
+            let turn = message.turn.get_or_insert_with(|| serde_json::json!({}));
+            let fields = turn
+                .as_object_mut()
+                .ok_or_else(|| anyhow::anyhow!("History backend provenance is invalid"))?;
+            fields.insert(MESSAGE_BACKEND_KEY.into(), value.clone());
         }
     }
     if let Some(originals) = message

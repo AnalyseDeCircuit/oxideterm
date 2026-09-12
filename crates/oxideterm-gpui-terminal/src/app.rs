@@ -1807,11 +1807,10 @@ impl TerminalPane {
             || self.preferences.line_height.to_bits() != preferences.line_height.to_bits();
         let next_settings = TerminalUiSettings::from_preferences(&preferences);
         if !next_settings.command_marks_enabled {
-            self.command_marks.clear();
+            // Hiding marks must not discard the completion facts or aliases of a running command.
             self.command_marks_render_cache_dirty = true;
             self.selected_command_mark_id = None;
             self.hovered_command_mark_id = None;
-            self.command_mark_id_aliases.clear();
         }
         if !next_settings.current_directory_awareness_enabled {
             self.pending_cwd = None;
@@ -3377,85 +3376,81 @@ impl TerminalPane {
                 if let TerminalCommandMarkEvent::Closed(mark) = &event {
                     self.observe_terminal_cwd_action_from_closed_command_mark(mark, cx);
                 }
-                if !self.settings.command_marks_enabled {
-                    self.clear_visual_command_marks();
-                } else {
-                    match event {
-                        TerminalCommandMarkEvent::Created(mut mark) => {
-                            if mark.detection_source
-                                == TerminalCommandMarkDetectionSource::ShellIntegration
-                                && let Some((index, submitted_by)) =
-                                    self.shell_integration_dedup_candidate(&mark)
-                            {
-                                let shell_command_id = mark.command_id.clone();
-                                let frontend_command_id =
-                                    self.command_marks[index].command_id.clone();
-                                mark.command_id = frontend_command_id.clone();
-                                mark.submitted_by = Some(submitted_by);
-                                self.command_marks.remove(index);
-                                self.command_mark_id_aliases
-                                    .insert(shell_command_id, frontend_command_id);
-                            }
-                            if let Some(command) = mark.command.as_deref() {
-                                // Shell integration is the terminal-owned
-                                // submitted-command source. Feed it to the
-                                // privilege tracker so bare sudo prompts do not
-                                // depend on lossy key/IME reconstruction.
-                                let previous_state_generation =
-                                    self.privilege_prompt_tracker.state_generation();
-                                self.privilege_prompt_tracker
-                                    .observe_submitted_command(command, Instant::now());
-                                self.finish_privilege_prompt_tracker_update(
-                                    previous_state_generation,
-                                    cx,
-                                );
-                            }
-                            self.command_fact_ledger.create_from_mark(&mark);
+                // Command boundaries drive AI ownership even when their visual marks are hidden.
+                match event {
+                    TerminalCommandMarkEvent::Created(mut mark) => {
+                        if mark.detection_source
+                            == TerminalCommandMarkDetectionSource::ShellIntegration
+                            && let Some((index, submitted_by)) =
+                                self.shell_integration_dedup_candidate(&mark)
+                        {
+                            let shell_command_id = mark.command_id.clone();
+                            let frontend_command_id = self.command_marks[index].command_id.clone();
+                            mark.command_id = frontend_command_id.clone();
+                            mark.submitted_by = Some(submitted_by);
+                            self.command_marks.remove(index);
+                            self.command_mark_id_aliases
+                                .insert(shell_command_id, frontend_command_id);
+                        }
+                        if let Some(command) = mark.command.as_deref() {
+                            // Shell integration is the terminal-owned
+                            // submitted-command source. Feed it to the
+                            // privilege tracker so bare sudo prompts do not
+                            // depend on lossy key/IME reconstruction.
+                            let previous_state_generation =
+                                self.privilege_prompt_tracker.state_generation();
+                            self.privilege_prompt_tracker
+                                .observe_submitted_command(command, Instant::now());
+                            self.finish_privilege_prompt_tracker_update(
+                                previous_state_generation,
+                                cx,
+                            );
+                        }
+                        self.command_fact_ledger.create_from_mark(&mark);
+                        self.command_marks.push(mark);
+                        self.trim_command_marks();
+                    }
+                    TerminalCommandMarkEvent::Closed(mut mark) => {
+                        if let Some(frontend_command_id) =
+                            self.command_mark_id_aliases.remove(&mark.command_id)
+                        {
+                            mark.command_id = frontend_command_id;
+                        }
+                        self.command_fact_ledger.close_from_mark(&mark);
+                        if let Some(existing) = self
+                            .command_marks
+                            .iter_mut()
+                            .find(|candidate| candidate.command_id == mark.command_id)
+                        {
+                            *existing = mark;
+                        } else {
                             self.command_marks.push(mark);
-                            self.trim_command_marks();
-                        }
-                        TerminalCommandMarkEvent::Closed(mut mark) => {
-                            if let Some(frontend_command_id) =
-                                self.command_mark_id_aliases.remove(&mark.command_id)
-                            {
-                                mark.command_id = frontend_command_id;
-                            }
-                            self.command_fact_ledger.close_from_mark(&mark);
-                            if let Some(existing) = self
-                                .command_marks
-                                .iter_mut()
-                                .find(|candidate| candidate.command_id == mark.command_id)
-                            {
-                                *existing = mark;
-                            } else {
-                                self.command_marks.push(mark);
-                            }
-                        }
-                        TerminalCommandMarkEvent::Reset => {
-                            self.clear_visual_command_marks();
-                        }
-                        TerminalCommandMarkEvent::HistoryTrimmed { lines } => {
-                            self.command_marks
-                                .retain_mut(|mark| mark.trim_history(lines));
-                            self.command_fact_ledger.trim_history(lines);
                         }
                     }
-                    if let Some(selected_id) = &self.selected_command_mark_id
-                        && !self
-                            .command_marks
-                            .iter()
-                            .any(|mark| mark.command_id == *selected_id)
-                    {
-                        self.selected_command_mark_id = None;
+                    TerminalCommandMarkEvent::Reset => {
+                        self.clear_visual_command_marks();
                     }
-                    if let Some(hovered_id) = &self.hovered_command_mark_id
-                        && !self
-                            .command_marks
-                            .iter()
-                            .any(|mark| mark.command_id == *hovered_id)
-                    {
-                        self.hovered_command_mark_id = None;
+                    TerminalCommandMarkEvent::HistoryTrimmed { lines } => {
+                        self.command_marks
+                            .retain_mut(|mark| mark.trim_history(lines));
+                        self.command_fact_ledger.trim_history(lines);
                     }
+                }
+                if let Some(selected_id) = &self.selected_command_mark_id
+                    && !self
+                        .command_marks
+                        .iter()
+                        .any(|mark| mark.command_id == *selected_id)
+                {
+                    self.selected_command_mark_id = None;
+                }
+                if let Some(hovered_id) = &self.hovered_command_mark_id
+                    && !self
+                        .command_marks
+                        .iter()
+                        .any(|mark| mark.command_id == *hovered_id)
+                {
+                    self.hovered_command_mark_id = None;
                 }
                 self.command_marks_render_cache_dirty = true;
                 TerminalEventEffect::notify()
@@ -4439,6 +4434,68 @@ mod tests {
             recorder.read_with(cx, |recorder, _cx| recorder.delivered.len()),
             3
         );
+    }
+
+    #[gpui::test]
+    fn hidden_command_marks_still_report_ai_command_completion(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    TerminalUiPreferences {
+                        command_marks_enabled: false,
+                        ..Default::default()
+                    },
+                    window,
+                    cx,
+                )
+                .unwrap()
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            let id = pane
+                .begin_command_mark("printf done", TerminalCommandMarkDetectionSource::Ai, cx)
+                .expect("AI completion tracking must not depend on visual marks");
+            assert_eq!(
+                pane.ai_command_status(&id),
+                Some(crate::TerminalCommandFactStatus::Open)
+            );
+            assert_eq!(pane.command_mark_gutter_width(), 0.0);
+            let mut shell = pane.command_marks.last().unwrap().clone();
+            shell.command_id = "shell-command".into();
+            shell.detection_source = TerminalCommandMarkDetectionSource::ShellIntegration;
+            pane.handle_terminal_event(
+                TerminalEvent::CommandMark(TerminalCommandMarkEvent::Created(shell.clone())),
+                cx,
+            );
+            // Reapplying hidden-mark preferences must keep the shell/frontend ID association.
+            pane.set_preferences(pane.preferences.clone(), cx);
+            shell.is_closed = true;
+            shell.closed_by = Some(TerminalCommandMarkClosedBy::ShellIntegration);
+            shell.end_line = Some(shell.start_line + 1);
+            shell.exit_code = Some(0);
+            shell.finished_at = Some(shell.started_at + 10);
+            pane.handle_terminal_event(
+                TerminalEvent::CommandMark(TerminalCommandMarkEvent::Closed(shell)),
+                cx,
+            );
+            assert_eq!(
+                pane.ai_command_status(&id),
+                Some(crate::TerminalCommandFactStatus::Closed)
+            );
+            let records = pane.ai_command_records();
+            let record = records
+                .iter()
+                .find(|record| record.command_id == id)
+                .unwrap();
+            assert_eq!(
+                (&*record.command, record.exit_code),
+                ("printf done", Some(0))
+            );
+            assert_eq!(pane.command_mark_gutter_width(), 0.0);
+        });
     }
 
     #[gpui::test]

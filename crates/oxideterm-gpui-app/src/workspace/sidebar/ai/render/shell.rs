@@ -130,7 +130,6 @@ impl WorkspaceApp {
                 .relative()
                 .bg(self.context_sidebar_content_background(self.tokens.ui.bg))
                 .child(self.render_ai_sidebar_chat_header(cx))
-                .when_some(self.render_ai_agent_resource_notice(cx), |panel, notice| panel.child(notice))
                 .when_some(self.render_ai_compaction_notice(cx), |panel, notice| {
                     panel.child(notice)
                 })
@@ -265,7 +264,8 @@ impl WorkspaceApp {
         let entity = cx.entity();
         let state = self.ai_entity.read(cx).chat_ui().message_list_state.clone();
         let viewport = self.ai_chat_list_viewport_snapshot(cx);
-        tauri_virtual_list(state, virtual_spec, move |index, _window, cx| {
+        let scrollbar = oxideterm_gpui_ui::scroll::Scrollbar::for_list(&state).id("ai-chat-scrollbar");
+        let list = tauri_virtual_list(state, virtual_spec, move |index, _window, cx| {
             let Some(item) = items.get(index).cloned() else {
                 return div().into_any_element();
             };
@@ -275,8 +275,8 @@ impl WorkspaceApp {
             })
         })
         .w_full()
-        .h_full()
-        .into_any_element()
+        .h_full();
+        div().relative().size_full().min_h_0().child(list).child(scrollbar).into_any_element()
     }
 
     pub(in crate::workspace) fn render_ai_chat_list_item(
@@ -291,10 +291,8 @@ impl WorkspaceApp {
                 let Some(id) = ai.conversation_state().active_conversation_id.clone() else { return div().into_any_element(); };
                 let loading = ai.history.pages.get(&id).is_some_and(|page| page.loading);
                 let label = self.i18n.t(if loading { "ai.history.loading" } else if older { "ai.history.older" } else { "ai.history.newer" });
-                if !loading && ai.history.pages.get(&id).is_some_and(|page| !page.failed) && !ai.chat_ui().message_list_state.is_following_tail() {
-                    let target = id.clone();
-                    let entity = cx.entity();
-                    cx.defer(move |cx| { entity.update(cx, |this, cx| { this.ai_entity.update(cx, |ai, _| ai.request_history_page(target, older)); }); });
+                if !loading && ai.history.pages.get(&id).is_some_and(|page| !page.failed) {
+                    self.ai_entity.update(cx, |ai, cx| ai.request_visible_history_page(id.clone(), older, cx));
                 }
                 ai_message_action(&self.tokens, label, Self::render_lucide_icon(if older { LucideIcon::ChevronLeft } else { LucideIcon::ChevronDown }, 14.0, rgb(self.tokens.ui.text_muted)), false)
                     .id(if older { "ai-history-older" } else { "ai-history-newer" }).on_click(cx.listener(move |this, _, _, cx| { this.ai_entity.update(cx, |ai, _| ai.request_history_page(id.clone(), older)); cx.notify(); })).into_any_element()

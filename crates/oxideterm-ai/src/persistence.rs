@@ -722,21 +722,19 @@ fn normalize_interrupted_assistant_projection(message: &mut AiChatMessage) {
     if message.role != AiChatRole::Assistant {
         return;
     }
-    let Some(turn) = message.turn.as_mut() else {
-        return;
-    };
-    if turn.get("status").and_then(Value::as_str) != Some("streaming") {
-        return;
-    }
-    if let Some(object) = turn.as_object_mut() {
-        object.insert("status".to_string(), Value::String("complete".to_string()));
-    }
-    if let Some(parts) = turn.get_mut("parts").and_then(Value::as_array_mut) {
-        for part in parts {
-            if part.get("type").and_then(Value::as_str) == Some("thinking")
-                && let Some(object) = part.as_object_mut()
-            {
-                object.insert("streaming".to_string(), Value::Bool(false));
+    if let Some(turn) = message.turn.as_mut() {
+        if turn.get("status").and_then(Value::as_str) == Some("streaming")
+            && let Some(object) = turn.as_object_mut()
+        {
+            object.insert("status".to_string(), Value::String("complete".to_string()));
+        }
+        if let Some(parts) = turn.get_mut("parts").and_then(Value::as_array_mut) {
+            for part in parts {
+                if part.get("type").and_then(Value::as_str) == Some("thinking")
+                    && let Some(object) = part.as_object_mut()
+                {
+                    object.insert("streaming".to_string(), Value::Bool(false));
+                }
             }
         }
     }
@@ -765,7 +763,12 @@ fn normalize_interrupted_assistant_projection(message: &mut AiChatMessage) {
     if rejected_tool_ids.is_empty() {
         return;
     }
-    if let Some(rounds) = turn.get_mut("toolRounds").and_then(Value::as_array_mut) {
+    if let Some(rounds) = message
+        .turn
+        .as_mut()
+        .and_then(|turn| turn.get_mut("toolRounds"))
+        .and_then(Value::as_array_mut)
+    {
         for round in rounds {
             let Some(tool_calls) = round.get_mut("toolCalls").and_then(Value::as_array_mut) else {
                 continue;
@@ -793,18 +796,21 @@ fn normalize_interrupted_assistant_projection(message: &mut AiChatMessage) {
     }
 }
 
-fn ai_tool_call_is_unfinished(call: &Value) -> bool {
-    if call.get("name").and_then(Value::as_str) == Some("ask_user")
-        && call.get("status").and_then(Value::as_str) == Some("waiting_user")
-    {
-        return true;
-    }
-    if call.get("result").is_some_and(|result| !result.is_null()) {
-        return false;
-    }
+pub(crate) fn ai_tool_call_is_unfinished(call: &Value) -> bool {
+    // Waiting tools carry progress in `result`; only the execution state is terminal evidence.
     matches!(
         call.get("status").and_then(Value::as_str),
-        Some("pending" | "approved" | "running" | "pending_user_approval")
+        Some(
+            "pending"
+                | "approved"
+                | "running"
+                | "pending_user_approval"
+                | "pending_approval"
+                | "pending_user_selection"
+                | "waiting_user"
+                | "waiting_condition"
+                | "waiting_connection"
+        )
     )
 }
 

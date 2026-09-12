@@ -1,7 +1,7 @@
 use super::records::CONTENT_CHUNK_BYTES;
 use super::*;
 
-/// A visible projection borrows the live owner and copies at most one bounded section.
+/// Default views include all display activity; explicit sections retain bounded seek support.
 pub fn live_message_view(
     message: &AiChatMessage,
     conversation: &str,
@@ -18,9 +18,15 @@ pub fn live_message_view(
         1 + usize::from(thinking) + message.tool_calls.len(),
         Vec::len,
     ) as u64;
+    let complete = section.is_none();
     let section = section
         .unwrap_or(sections.saturating_sub(1))
         .min(sections.saturating_sub(1));
+    let first_section = if complete {
+        0
+    } else {
+        section.saturating_sub(HistoryMessageView::ACTIVITY_WINDOW - 1)
+    };
     let mut output = AiChatMessage {
         id: message.id.clone(),
         role: message.role,
@@ -69,50 +75,68 @@ pub fn live_message_view(
             byte_offset: 0,
             after_key: None,
         };
-        let page = live_content_page(message, &cursor)?;
+        let page = live_content_window(message, &cursor, complete)?;
         more.extend(page.more);
         Ok::<_, anyhow::Error>(page.value)
     };
-    if let Some(part) = parts.and_then(|parts| parts.get(section as usize)) {
-        let tool_id = part
-            .get("toolCallId")
-            .or_else(|| part.get("id"))
-            .and_then(Value::as_str);
-        let call = tool_id.and_then(|id| {
-            message
-                .tool_calls
-                .iter()
-                .position(|call| call.get("id").and_then(Value::as_str) == Some(id))
-        });
-        if let Some(index) = call {
-            output
-                .tool_calls
-                .push(read(vec!["tool_calls".into(), index.to_string()])?);
-        } else {
-            output.turn = Some(
-                serde_json::json!({"parts":[read(vec!["turn".into(), "parts".into(), section.to_string()])?]}),
-            );
-        }
-    } else if section == 0 {
-        output.content = read(vec!["content".into()])?
-            .as_str()
-            .ok_or_else(|| anyhow!("Live text is invalid"))?
-            .to_owned();
-    } else if thinking && section == 1 {
-        output.thinking_content = Some(
-            read(vec!["thinking_content".into()])?
+    let tool_indices = message
+        .tool_calls
+        .iter()
+        .enumerate()
+        .filter_map(|(index, call)| call.get("id").and_then(Value::as_str).map(|id| (id, index)))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut visible_parts = Vec::new();
+    let mut tools = HashSet::new();
+    for section in first_section..=section {
+        if let Some(part) = parts.and_then(|parts| parts.get(section as usize)) {
+            let tool_id = part
+                .get("toolCallId")
+                .or_else(|| part.get("id"))
+                .and_then(Value::as_str);
+            let call = tool_id.and_then(|id| tool_indices.get(id).copied());
+            if let Some(index) = call {
+                if tools.insert(index) {
+                    output
+                        .tool_calls
+                        .push(read(vec!["tool_calls".into(), index.to_string()])?);
+                    // Keep the activity position without copying the duplicated protocol payload.
+                    visible_parts.push(serde_json::json!({"type":"tool_call", "id":tool_id}));
+                }
+            } else {
+                visible_parts.push(read(vec![
+                    "turn".into(),
+                    "parts".into(),
+                    section.to_string(),
+                ])?);
+            }
+        } else if section == 0 {
+            output.content = read(vec!["content".into()])?
                 .as_str()
-                .ok_or_else(|| anyhow!("Live thinking is invalid"))?
-                .to_owned(),
-        );
-    } else {
-        output.tool_calls.push(read(vec![
-            "tool_calls".into(),
-            (section - 1 - u64::from(thinking)).to_string(),
-        ])?);
+                .ok_or_else(|| anyhow!("Live text is invalid"))?
+                .to_owned();
+        } else if thinking && section == 1 {
+            output.thinking_content = Some(
+                read(vec!["thinking_content".into()])?
+                    .as_str()
+                    .ok_or_else(|| anyhow!("Live thinking is invalid"))?
+                    .to_owned(),
+            );
+        } else {
+            output.tool_calls.push(read(vec![
+                "tool_calls".into(),
+                (section - 1 - u64::from(thinking)).to_string(),
+            ])?);
+        }
+    }
+    if !visible_parts.is_empty() {
+        output.turn = Some(serde_json::json!({"parts":visible_parts}));
+    }
+    if !output.is_streaming {
+        normalize_interrupted_assistant_projection(&mut output);
     }
     Ok(HistoryMessageView {
         message: output,
+        first_section,
         section,
         sections,
         more,
@@ -123,12 +147,28 @@ pub fn live_content_page(
     message: &AiChatMessage,
     cursor: &HistoryContentCursor,
 ) -> Result<HistoryContentPage> {
+    live_content_window(message, cursor, false)
+}
+
+fn live_content_window(
+    message: &AiChatMessage,
+    cursor: &HistoryContentCursor,
+    complete: bool,
+) -> Result<HistoryContentPage> {
     if cursor.storage_id != message.id {
         return Err(anyhow!("Live content owner changed"));
     }
     let mut window = LiveWindow {
-        bytes: CONTENT_CHUNK_BYTES,
-        items: HISTORY_PAGE_SIZE,
+        bytes: if complete {
+            usize::MAX
+        } else {
+            CONTENT_CHUNK_BYTES
+        },
+        items: if complete {
+            usize::MAX
+        } else {
+            HISTORY_PAGE_SIZE
+        },
         more: Vec::new(),
     };
     let value = match cursor.path.first().map(String::as_str) {

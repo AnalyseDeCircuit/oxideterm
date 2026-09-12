@@ -29,8 +29,6 @@
       "communication": "에이전트 통신",
       "received": "수신됨",
       "consumed": "처리됨",
-      "remote_unknown": "에이전트가 중지되었습니다. 원격 명령의 종료 여부는 확인되지 않았습니다.",
-      "return_control": "터미널 제어를 AI에 반환",
       "usage_unknown": "토큰 사용량을 알 수 없음",
       "message_not_sent": "추가 지시를 보내지 못했습니다.",
       "supplement": "추가 지시",
@@ -559,8 +557,7 @@
       "cancel_quit": "종료 취소",
       "discard_quit": "저장하지 않고 종료",
       "older": "이전 메시지",
-      "newer": "이후 메시지",
-      "more_content": "내용 더 보기"
+      "newer": "이후 메시지"
     }
   }
 }
