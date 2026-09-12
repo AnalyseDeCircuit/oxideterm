@@ -550,6 +550,17 @@
       "waiting": "Aguardando sua resposta",
       "answer": "Enviar resposta",
       "hint": "Escolha uma opção ou digite sua resposta abaixo. A tarefa continuará após a resposta."
+    },
+    "history": {
+      "loading": "Carregando o histórico…",
+      "unsaved": "Há alterações não salvas. Novas solicitações e chamadas de ferramentas estão pausadas.",
+      "quit_title": "O histórico ainda não terminou de ser salvo",
+      "quit_detail": "Tente salvar novamente, cancele a saída ou saia descartando apenas as alterações não salvas.",
+      "cancel_quit": "Cancelar saída",
+      "discard_quit": "Sair sem salvar",
+      "older": "Mensagens anteriores",
+      "newer": "Mensagens posteriores",
+      "more_content": "Mais conteúdo"
     }
   }
 }

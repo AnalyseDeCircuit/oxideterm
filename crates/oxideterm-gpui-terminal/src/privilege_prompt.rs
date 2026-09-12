@@ -498,7 +498,9 @@ impl PrivilegePromptTracker {
 
     pub(crate) fn input_answers_prompt(&self, bytes: &[u8], now: Instant) -> bool {
         self.prompt_is_waiting_for_secret(now)
-            && !normalize_privilege_input_bytes(bytes).bytes.iter()
+            && !normalize_privilege_input_bytes(bytes)
+                .bytes
+                .iter()
                 .any(|byte| matches!(byte, 0x03 | 0x04 | 0x1a))
     }
 

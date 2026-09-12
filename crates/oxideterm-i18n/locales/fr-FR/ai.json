@@ -550,6 +550,17 @@
       "waiting": "En attente de votre réponse",
       "answer": "Envoyer la réponse",
       "hint": "Choisissez une option ou saisissez votre réponse ci-dessous. La tâche reprendra après votre réponse."
+    },
+    "history": {
+      "loading": "Chargement de l’historique…",
+      "unsaved": "Modifications non enregistrées. Les nouvelles requêtes et les appels d’outils sont suspendus.",
+      "quit_title": "L’enregistrement de l’historique n’est pas terminé",
+      "quit_detail": "Réessayez, annulez la fermeture ou quittez en abandonnant uniquement les modifications non enregistrées.",
+      "cancel_quit": "Annuler la fermeture",
+      "discard_quit": "Quitter sans enregistrer",
+      "older": "Messages précédents",
+      "newer": "Messages suivants",
+      "more_content": "Plus de contenu"
     }
   }
 }

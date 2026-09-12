@@ -550,6 +550,17 @@
       "waiting": "Waiting for your answer",
       "answer": "Send answer",
       "hint": "Choose an option, or type your answer below. The task will continue after you answer."
+    },
+    "history": {
+      "loading": "Loading chat history…",
+      "unsaved": "Unsaved changes. New requests and tool calls are paused.",
+      "quit_title": "Chat history has not finished saving",
+      "quit_detail": "Retry saving, cancel quitting, or quit and discard only the changes that have not been saved.",
+      "cancel_quit": "Cancel quit",
+      "discard_quit": "Quit without saving",
+      "older": "Earlier messages",
+      "newer": "Later messages",
+      "more_content": "More content"
     }
   }
 }

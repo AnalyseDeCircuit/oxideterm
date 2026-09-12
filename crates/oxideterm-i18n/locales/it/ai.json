@@ -550,6 +550,17 @@
       "waiting": "In attesa della tua risposta",
       "answer": "Invia risposta",
       "hint": "Scegli un’opzione o scrivi la risposta qui sotto. L’attività riprenderà dopo la risposta."
+    },
+    "history": {
+      "loading": "Caricamento della cronologia…",
+      "unsaved": "Modifiche non salvate. Le nuove richieste e chiamate agli strumenti sono in pausa.",
+      "quit_title": "Il salvataggio della cronologia non è terminato",
+      "quit_detail": "Riprova a salvare, annulla l’uscita o esci scartando solo le modifiche non salvate.",
+      "cancel_quit": "Annulla uscita",
+      "discard_quit": "Esci senza salvare",
+      "older": "Messaggi precedenti",
+      "newer": "Messaggi successivi",
+      "more_content": "Altri contenuti"
     }
   }
 }

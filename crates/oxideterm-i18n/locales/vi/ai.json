@@ -550,6 +550,17 @@
       "waiting": "Đang chờ câu trả lời",
       "answer": "Gửi câu trả lời",
       "hint": "Chọn một phương án hoặc nhập câu trả lời bên dưới. Tác vụ sẽ tiếp tục sau khi bạn trả lời."
+    },
+    "history": {
+      "loading": "Đang tải lịch sử trò chuyện…",
+      "unsaved": "Có thay đổi chưa lưu. Yêu cầu mới và lời gọi công cụ đã tạm dừng.",
+      "quit_title": "Lịch sử trò chuyện chưa được lưu xong",
+      "quit_detail": "Thử lưu lại, hủy thoát hoặc thoát và chỉ bỏ các thay đổi chưa lưu.",
+      "cancel_quit": "Hủy thoát",
+      "discard_quit": "Thoát không lưu",
+      "older": "Tin nhắn trước",
+      "newer": "Tin nhắn sau",
+      "more_content": "Xem thêm nội dung"
     }
   }
 }

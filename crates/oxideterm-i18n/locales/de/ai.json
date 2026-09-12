@@ -550,6 +550,17 @@
       "waiting": "Warten auf deine Antwort",
       "answer": "Antwort senden",
       "hint": "Wähle eine Option oder gib unten deine Antwort ein. Danach wird die Aufgabe fortgesetzt."
+    },
+    "history": {
+      "loading": "Chatverlauf wird geladen…",
+      "unsaved": "Ungespeicherte Änderungen. Neue Anfragen und Werkzeugaufrufe sind pausiert.",
+      "quit_title": "Der Chatverlauf wurde noch nicht vollständig gespeichert",
+      "quit_detail": "Speichern erneut versuchen, Beenden abbrechen oder nur ungespeicherte Änderungen verwerfen und beenden.",
+      "cancel_quit": "Beenden abbrechen",
+      "discard_quit": "Ohne Speichern beenden",
+      "older": "Frühere Nachrichten",
+      "newer": "Spätere Nachrichten",
+      "more_content": "Weitere Inhalte"
     }
   }
 }

@@ -2,12 +2,12 @@
 
 This file lists third-party Rust crates and detected licenses, including transitive dependencies.
 It is generated from `cargo deny list -f json -l crate`.
-Generated: 2026-08-25T15:28:28.815210Z
+Generated: 2026-09-12T08:46:49.502412Z
 
 ## Summary
 
-- MIT: 1074
-- Apache-2.0: 865
+- MIT: 1087
+- Apache-2.0: 876
 - Apache-2.0 WITH LLVM-exception: 59
 - Zlib: 45
 - BSD-3-Clause: 21
@@ -75,6 +75,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | alsa-sys | 0.3.1 | MIT | https://crates.io/crates/alsa-sys |
 | ambient-authority | 0.0.2 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/ambient-authority |
 | android_system_properties | 0.1.5 | MIT, Apache-2.0 | https://crates.io/crates/android_system_properties |
+| anes | 0.1.6 | MIT, Apache-2.0 | https://crates.io/crates/anes |
 | anstream | 1.0.0 | MIT, Apache-2.0 | https://crates.io/crates/anstream |
 | anstyle | 1.0.14 | MIT, Apache-2.0 | https://crates.io/crates/anstyle |
 | anstyle-parse | 1.0.0 | MIT, Apache-2.0 | https://crates.io/crates/anstyle-parse |
@@ -125,6 +126,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | aws-lc-sys | 0.40.0 | ISC, Apache-2.0, MIT, BSD-3-Clause, MIT-0 | https://crates.io/crates/aws-lc-sys |
 | backtrace | 0.3.76 | MIT, Apache-2.0 | https://crates.io/crates/backtrace |
 | base16ct | 1.0.0 | Apache-2.0, MIT | https://crates.io/crates/base16ct |
+| base64 | 0.21.7 | MIT, Apache-2.0 | https://crates.io/crates/base64 |
 | base64 | 0.22.1 | MIT, Apache-2.0 | https://crates.io/crates/base64 |
 | base64 | 0.23.1 | MIT, Apache-2.0 | https://crates.io/crates/base64 |
 | base64ct | 1.8.3 | Apache-2.0, MIT | https://crates.io/crates/base64ct |
@@ -166,6 +168,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | cap-primitives | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/cap-primitives |
 | cap-std | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/cap-std |
 | cap-time-ext | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/cap-time-ext |
+| cast | 0.3.0 | MIT, Apache-2.0 | https://crates.io/crates/cast |
 | cbc | 0.1.2 | MIT, Apache-2.0 | https://crates.io/crates/cbc |
 | cbc | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/cbc |
 | cbindgen | 0.28.0 | MPL-2.0 | https://crates.io/crates/cbindgen |
@@ -181,6 +184,9 @@ This section is a review prompt for binary distribution; it does not replace leg
 | chacha20poly1305 | 0.10.1 | Apache-2.0, MIT | https://crates.io/crates/chacha20poly1305 |
 | chardetng | 0.1.17 | Apache-2.0, MIT | https://crates.io/crates/chardetng |
 | chrono | 0.4.44 | MIT, Apache-2.0 | https://crates.io/crates/chrono |
+| ciborium | 0.2.2 | Apache-2.0 | https://crates.io/crates/ciborium |
+| ciborium-io | 0.2.2 | Apache-2.0 | https://crates.io/crates/ciborium-io |
+| ciborium-ll | 0.2.2 | Apache-2.0 | https://crates.io/crates/ciborium-ll |
 | cipher | 0.4.4 | MIT, Apache-2.0 | https://crates.io/crates/cipher |
 | cipher | 0.5.2 | MIT, Apache-2.0 | https://crates.io/crates/cipher |
 | clang-sys | 1.8.1 | Apache-2.0 | https://crates.io/crates/clang-sys |
@@ -237,6 +243,8 @@ This section is a review prompt for binary distribution; it does not replace leg
 | cranelift-native | 0.133.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/cranelift-native |
 | cranelift-srcgen | 0.133.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/cranelift-srcgen |
 | crc32fast | 1.5.0 | MIT, Apache-2.0 | https://crates.io/crates/crc32fast |
+| criterion | 0.5.1 | Apache-2.0, MIT | https://crates.io/crates/criterion |
+| criterion-plot | 0.5.0 | MIT, Apache-2.0 | https://crates.io/crates/criterion-plot |
 | critical-section | 1.2.0 | MIT, Apache-2.0 | https://crates.io/crates/critical-section |
 | crossbeam-channel | 0.5.15 | MIT, Apache-2.0 | https://crates.io/crates/crossbeam-channel |
 | crossbeam-deque | 0.8.6 | MIT, Apache-2.0 | https://crates.io/crates/crossbeam-deque |
@@ -428,6 +436,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | hashbrown | 0.15.5 | MIT, Apache-2.0 | https://crates.io/crates/hashbrown |
 | hashbrown | 0.16.1 | MIT, Apache-2.0 | https://crates.io/crates/hashbrown |
 | hashbrown | 0.17.0 | MIT, Apache-2.0 | https://crates.io/crates/hashbrown |
+| hdrhistogram | 7.5.4 | MIT, Apache-2.0 | https://crates.io/crates/hdrhistogram |
 | heapless | 0.7.17 | MIT, Apache-2.0 | https://crates.io/crates/heapless |
 | heapless | 0.9.3 | MIT, Apache-2.0 | https://crates.io/crates/heapless |
 | heck | 0.4.1 | MIT, Apache-2.0 | https://crates.io/crates/heck |
@@ -502,10 +511,12 @@ This section is a review prompt for binary distribution; it does not replace leg
 | ironrdp-tls | 0.2.2 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
 | ironrdp-tokio | 0.10.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=98a3155e9497401e447a2d88bcb2701382232c17 |
 | is-docker | 0.2.0 | MIT | https://crates.io/crates/is-docker |
+| is-terminal | 0.4.17 | MIT | https://crates.io/crates/is-terminal |
 | is-wsl | 0.4.0 | MIT | https://crates.io/crates/is-wsl |
 | is_terminal_polyfill | 1.70.2 | MIT, Apache-2.0 | https://crates.io/crates/is_terminal_polyfill |
 | iso7816 | 0.1.4 | Apache-2.0, MIT | https://crates.io/crates/iso7816 |
 | iso7816-tlv | 0.4.4 | ISC | https://crates.io/crates/iso7816-tlv |
+| itertools | 0.10.5 | MIT, Apache-2.0 | https://crates.io/crates/itertools |
 | itertools | 0.13.0 | MIT, Apache-2.0 | https://crates.io/crates/itertools |
 | itertools | 0.14.0 | MIT, Apache-2.0 | https://crates.io/crates/itertools |
 | itoa | 1.0.18 | MIT, Apache-2.0 | https://crates.io/crates/itoa |
@@ -658,6 +669,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | onig | 6.5.3 | MIT | https://crates.io/crates/onig |
 | onig_sys | 69.9.3 | MIT | https://crates.io/crates/onig_sys |
 | oo7 | 0.6.0 | MIT | https://crates.io/crates/oo7 |
+| oorandom | 11.1.5 | MIT | https://crates.io/crates/oorandom |
 | opaque-debug | 0.3.1 | MIT, Apache-2.0 | https://crates.io/crates/opaque-debug |
 | open | 5.3.4 | MIT | https://crates.io/crates/open |
 | openh264 | 0.9.7 | BSD-2-Clause | https://crates.io/crates/openh264 |
@@ -719,6 +731,9 @@ This section is a review prompt for binary distribution; it does not replace leg
 | pkcs8 | 0.11.0 | Apache-2.0, MIT | https://crates.io/crates/pkcs8 |
 | pkg-config | 0.3.33 | MIT, Apache-2.0 | https://crates.io/crates/pkg-config |
 | plain | 0.2.3 | MIT, Apache-2.0 | https://crates.io/crates/plain |
+| plotters | 0.3.7 | MIT | https://crates.io/crates/plotters |
+| plotters-backend | 0.3.7 | MIT | https://crates.io/crates/plotters-backend |
+| plotters-svg | 0.3.7 | MIT | https://crates.io/crates/plotters-svg |
 | png | 0.17.16 | MIT, Apache-2.0 | https://crates.io/crates/png |
 | png | 0.18.1 | MIT, Apache-2.0 | https://crates.io/crates/png |
 | polling | 3.11.0 | Apache-2.0, MIT | https://crates.io/crates/polling |
@@ -981,6 +996,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | tiny-skia | 0.11.4 | BSD-3-Clause | https://crates.io/crates/tiny-skia |
 | tiny-skia-path | 0.11.4 | BSD-3-Clause | https://crates.io/crates/tiny-skia-path |
 | tinystr | 0.8.3 | Unicode-3.0 | https://crates.io/crates/tinystr |
+| tinytemplate | 1.2.1 | Apache-2.0, MIT | https://crates.io/crates/tinytemplate |
 | tinyvec | 1.11.0 | Zlib, Apache-2.0, MIT | https://crates.io/crates/tinyvec |
 | tinyvec_macros | 0.1.1 | MIT, Apache-2.0, Zlib | https://crates.io/crates/tinyvec_macros |
 | tokio | 1.52.1 | MIT | https://crates.io/crates/tokio |
@@ -1242,7 +1258,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | x509-cert | 0.3.0 | Apache-2.0, MIT | https://crates.io/crates/x509-cert |
 | xattr | 1.6.1 | MIT, Apache-2.0 | https://crates.io/crates/xattr |
 | xcursor | 0.3.10 | MIT | https://crates.io/crates/xcursor |
-| xim-ctext | 0.3.0 | MIT | https://crates.io/crates/xim-ctext |
+| xim-ctext | 0.3.0 | MIT | path+file:///Users/dominical/Documents/OxideTerm/crates/gpui-ce/xim-ctext |
 | xim-parser | 0.2.2 | MIT | https://crates.io/crates/xim-parser |
 | xkbcommon | 0.8.0 | MIT | https://crates.io/crates/xkbcommon |
 | xkeysym | 0.2.1 | MIT, Apache-2.0, Zlib | https://crates.io/crates/xkeysym |
@@ -1261,7 +1277,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | zbus_names | 4.3.3 | MIT | https://crates.io/crates/zbus_names |
 | zbus_xml | 5.2.0 | MIT | https://crates.io/crates/zbus_xml |
 | zed-font-kit | 0.14.1-zed | MIT, Apache-2.0 | https://crates.io/crates/zed-font-kit |
-| zed-xim | 0.4.0-zed | MIT | https://crates.io/crates/zed-xim |
+| zed-xim | 0.4.0-zed | MIT | path+file:///Users/dominical/Documents/OxideTerm/crates/gpui-ce/zed-xim |
 | zeno | 0.3.3 | Apache-2.0, MIT | https://crates.io/crates/zeno |
 | zerocopy | 0.8.48 | BSD-2-Clause, Apache-2.0, MIT | https://crates.io/crates/zerocopy |
 | zerocopy-derive | 0.8.48 | BSD-2-Clause, Apache-2.0, MIT | https://crates.io/crates/zerocopy-derive |

@@ -433,10 +433,6 @@ pub fn set_ai_enabled_confirmed(settings: &mut PersistedSettings, value: bool) {
     settings.ai.enabled_confirmed = value;
 }
 
-
-
-
-
 pub fn set_ai_context_source_ide(settings: &mut PersistedSettings, value: bool) {
     settings.ai.context_sources.ide = value;
 }
