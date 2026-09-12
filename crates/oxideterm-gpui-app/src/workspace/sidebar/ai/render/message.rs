@@ -383,7 +383,9 @@ impl WorkspaceApp {
                         row.child(
                             ai_message_action(
                                 &self.tokens,
-                                self.i18n.t("ai.message.regenerate"),
+                                self.i18n.t(if oxideterm_ai::agent::recoverable_checkpoint(message).is_some() {
+                                    "settings_view.ai.resume_task"
+                                } else { "ai.message.regenerate" }),
                                 Self::render_lucide_icon(
                                     LucideIcon::RotateCcw,
                                     12.0,
@@ -1161,7 +1163,7 @@ window.focus(&this.focus_handle, cx);
             let recovery_code = result
                 .and_then(|value| value.pointer("/error/code"))
                 .and_then(serde_json::Value::as_str);
-            let summary = recovery_code
+            let mut summary = recovery_code
                 .and_then(ai_runtime_recovery_message_key)
                 .map(|key| self.i18n.t(key))
                 .or_else(|| {
@@ -1169,7 +1171,17 @@ window.focus(&this.focus_handle, cx);
                         .and_then(serde_json::Value::as_str)
                         .map(str::to_string)
                 })
-                .unwrap_or_else(|| self.ai_tool_status_label(status));
+                .unwrap_or_else(|| match call.get("status").and_then(serde_json::Value::as_str) {
+                    Some("waiting_condition") => self.i18n.t("settings_view.ai.waiting_condition"),
+                    Some("waiting_user") => self.i18n.t("settings_view.ai.waiting_user"),
+                    Some("waiting_connection") => self.i18n.t("settings_view.ai.waiting_connection"),
+                    _ => self.ai_tool_status_label(status),
+                });
+            if let Some(deadline) = result.and_then(|value| value.get("waitDeadline")).and_then(serde_json::Value::as_i64)
+                .and_then(chrono::DateTime::from_timestamp_millis) {
+                summary.push_str(" · ");
+                summary.push_str(&self.i18n.t("settings_view.ai.wait_until").replace("{{time}}", &deadline.with_timezone(&chrono::Local).format("%H:%M:%S").to_string()));
+            }
             let bypass_approval = result
                 .and_then(|value| value.pointer("/meta/approvalMode"))
                 .and_then(serde_json::Value::as_str)
@@ -1366,6 +1378,7 @@ window.focus(&this.focus_handle, cx);
             }
 
             if status == AiToolStatus::PendingApproval {
+                let wait_expired = result.and_then(|value| value.get("waitTimedOut")).and_then(serde_json::Value::as_bool) == Some(true);
                 let acp_options = result
                     .and_then(|value| value.get("acpPermissionOptions"))
                     .and_then(serde_json::Value::as_array)
@@ -1381,10 +1394,10 @@ window.focus(&this.focus_handle, cx);
                             .min_w_0()
                             .text_size(px(10.0))
                             .text_color(rgba((self.tokens.ui.text_muted << 8) | 0xcc))
-                            .child(self.i18n.t("ai.tool_use.approval_required")),
+                            .child(self.i18n.t(if wait_expired { "settings_view.ai.wait_expired" } else { "ai.tool_use.approval_required" })),
                         ai_tool_approval_button(
                             &self.tokens,
-                            self.i18n.t("ai.tool_use.approve"),
+                            self.i18n.t(if wait_expired { "settings_view.ai.continue_waiting" } else { "ai.tool_use.approve" }),
                             true,
                             Self::render_lucide_icon(
                                 LucideIcon::Check,
@@ -1401,7 +1414,7 @@ window.focus(&this.focus_handle, cx);
                         ),
                         ai_tool_approval_button(
                             &self.tokens,
-                            self.i18n.t("ai.tool_use.reject"),
+                            self.i18n.t(if wait_expired { "settings_view.ai.stop_waiting" } else { "ai.tool_use.reject" }),
                             false,
                             Self::render_lucide_icon(
                                 LucideIcon::X,
@@ -2074,7 +2087,7 @@ pub(in crate::workspace) fn ai_tool_status_from_value(
         "pending_user_approval" | "pending_approval" => AiToolStatus::PendingApproval,
         "pending_user_selection" => AiToolStatus::PendingSelection,
         "approved" => AiToolStatus::Approved,
-        "running" => AiToolStatus::Running,
+        "running" | "waiting_user" | "waiting_condition" | "waiting_connection" => AiToolStatus::Running,
         "completed" => AiToolStatus::Completed,
         "error" | "failed" => AiToolStatus::Error,
         "rejected" => AiToolStatus::Rejected,
@@ -2084,6 +2097,10 @@ pub(in crate::workspace) fn ai_tool_status_from_value(
 
 fn ai_runtime_recovery_message_key(code: &str) -> Option<&'static str> {
     match code {
+        "agent_direction_changed" => Some("settings_view.ai.replanning"),
+        "dependency_failed" => Some("settings_view.ai.dependency_failed"),
+        "agent_wait_paused" => Some("settings_view.ai.stop_waiting"),
+        "command_outcome_unknown" => Some("settings_view.ai.resource_unknown"),
         "runtime_handle_missing"
         | "runtime_handle_expired"
         | "runtime_owner_closed"

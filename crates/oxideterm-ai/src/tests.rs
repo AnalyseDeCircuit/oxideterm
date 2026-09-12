@@ -487,8 +487,6 @@ fn settings_provider_mutations_stay_out_of_gpui() {
         serde_json::Map::from_iter([("custom-ollama-2".into(), serde_json::json!({}))]);
     let mut user_context_windows =
         serde_json::Map::from_iter([("custom-ollama-2".into(), serde_json::json!({}))]);
-    let mut model_max_response_tokens =
-        serde_json::Map::from_iter([("custom-ollama-2".into(), serde_json::json!({}))]);
 
     active_provider_id = Some("custom-ollama-2".into());
     let removed = remove_provider_at_with_scoped_settings(
@@ -498,7 +496,6 @@ fn settings_provider_mutations_stay_out_of_gpui() {
         &mut reasoning_provider_overrides,
         &mut reasoning_model_overrides,
         &mut user_context_windows,
-        &mut model_max_response_tokens,
         1,
     );
     assert_eq!(removed.as_deref(), Some("custom-ollama-2"));
@@ -507,7 +504,6 @@ fn settings_provider_mutations_stay_out_of_gpui() {
     assert!(reasoning_provider_overrides.is_empty());
     assert!(reasoning_model_overrides.is_empty());
     assert!(user_context_windows.is_empty());
-    assert!(model_max_response_tokens.is_empty());
 }
 
 #[test]
@@ -2002,3 +1998,13 @@ fn gemini_signed_parts_round_trip_without_rebuilding() {
 
 #[path = "responses_tests.rs"]
 mod responses;
+
+#[test]
+fn provider_token_limits_are_not_reported_as_completed_turns() {
+    assert_eq!(parse_openai_data_line(r#"data: {"choices":[{"delta":{"content":"partial"},"finish_reason":"length"}]}"#).events,
+        vec![AiStreamEvent::Content("partial".into()),AiStreamEvent::Error("ai_output_incomplete".into())]);
+    let events=parse_gemini_data_line(r#"data: {"candidates":[{"content":{"parts":[{"text":"partial"}]},"finishReason":"MAX_TOKENS"}]}"#).events;
+    assert_eq!(events.last(),Some(&AiStreamEvent::Error("ai_output_incomplete".into())));
+    assert_eq!(parse_anthropic_data_line(r#"data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"}}"#).events,
+        vec![AiStreamEvent::Error("ai_output_incomplete".into())]);
+}

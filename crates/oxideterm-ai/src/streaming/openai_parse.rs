@@ -16,6 +16,7 @@ pub(crate) fn parse_openai_data_line(line: &str) -> ParsedStreamLine {
 
 #[derive(Default)]
 pub(crate) struct OpenAiToolAccumulator {
+    pub(crate) finished: bool,
     calls: BTreeMap<usize, OpenAiToolCallChunk>,
 }
 
@@ -74,6 +75,7 @@ pub(crate) fn parse_openai_data_line_with_accumulator(
             .and_then(|choices| choices.first())
             .and_then(|choice| choice.get("finish_reason"))
             .and_then(Value::as_str);
+        accumulator.finished |= finish_reason.is_some();
         if matches!(finish_reason, Some("tool_calls" | "function_call")) {
             events.extend(accumulator.complete());
         }
@@ -83,6 +85,9 @@ pub(crate) fn parse_openai_data_line_with_accumulator(
             .filter(|content| !content.is_empty())
         {
             events.push(AiStreamEvent::Content(content.to_string()));
+        }
+        if matches!(finish_reason, Some("length" | "content_filter")) {
+            events.push(AiStreamEvent::Error("ai_output_incomplete".into()));
         }
     }
     ParsedStreamLine {
@@ -184,6 +189,10 @@ pub(crate) fn parse_openai_json_events(body: &str, context: &str) -> Result<Vec<
             input_tokens: usage.get("prompt_tokens").and_then(Value::as_u64),
             output_tokens: usage.get("completion_tokens").and_then(Value::as_u64),
         });
+    }
+    if matches!(json.pointer("/choices/0/finish_reason").and_then(Value::as_str), Some("length" | "content_filter")) {
+        events.retain(|event| !matches!(event, AiStreamEvent::ToolCallComplete { .. }));
+        events.push(AiStreamEvent::Error("ai_output_incomplete".into()));
     }
     Ok(events)
 }

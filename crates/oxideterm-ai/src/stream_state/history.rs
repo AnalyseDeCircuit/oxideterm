@@ -404,7 +404,7 @@ pub fn ai_estimated_tokens(text: &str) -> usize {
 }
 
 pub fn ai_response_reserve(context_window: usize) -> usize {
-    (((context_window as f64) * 0.15).floor() as usize).min(4096)
+    ((context_window as f64) * 0.15).floor() as usize
 }
 
 pub const AI_HISTORY_BUDGET_RATIO: f32 = 0.7;

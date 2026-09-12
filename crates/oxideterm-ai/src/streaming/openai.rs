@@ -37,6 +37,7 @@ pub(crate) async fn stream_openai_completion(
         };
 
         if !response.status().is_success() {
+            super::retry::check_transient_response(&response)?;
             let status = response.status().as_u16();
             let error_text = response.text().await.unwrap_or_default();
             let parsed = parse_openai_error(status, &error_text);
@@ -52,6 +53,7 @@ pub(crate) async fn stream_openai_completion(
                     }
                     Err(error) => return Err(error),
                 };
+                super::retry::check_transient_response(&retry_response)?;
                 if retry_response.status().is_success() {
                     match stream_openai_response(retry_response, &events).await? {
                         StreamParseResult::Done | StreamParseResult::SawEvent => {
@@ -172,6 +174,7 @@ pub(crate) async fn stream_ollama_completion(
             anyhow!("Cannot connect to Ollama. Make sure Ollama is running (ollama serve).")
         })?;
     if !response.status().is_success() {
+            super::retry::check_transient_response(&response)?;
         let status = response.status().as_u16();
         let error_text = response.text().await.unwrap_or_default();
         let parsed = parse_ollama_error(status, &error_text);
@@ -183,6 +186,7 @@ pub(crate) async fn stream_ollama_completion(
                     anyhow!("Cannot connect to Ollama. Make sure Ollama is running (ollama serve).")
                 })?;
             if !response.status().is_success() {
+            super::retry::check_transient_response(&response)?;
                 let retry_status = response.status().as_u16();
                 let retry_error_text = response.text().await.unwrap_or_default();
                 return Err(anyhow!(parse_ollama_error(retry_status, &retry_error_text)));
@@ -213,7 +217,7 @@ async fn openai_stream_request(
     request
         .send()
         .await
-        .map_err(|error| anyhow!("failed to connect to AI provider: {}", error.without_url()))
+        .map_err(|error| anyhow::Error::new(error.without_url()))
 }
 
 async fn stream_openai_response(
@@ -221,10 +225,14 @@ async fn stream_openai_response(
     events: &tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
 ) -> Result<StreamParseResult> {
     let mut accumulator = OpenAiToolAccumulator::default();
-    stream_sse_response(response, events, |line| {
+    let result = stream_sse_response(response, events, |line| {
         parse_openai_data_line_with_accumulator(line, &mut accumulator)
     })
-    .await
+    .await?;
+    if matches!(result, StreamParseResult::SawEvent) && !accumulator.finished {
+        return Err(anyhow!("ai_stream_interrupted"));
+    }
+    Ok(result)
 }
 
 fn body_without_tool_choice(body: &Value) -> Value {

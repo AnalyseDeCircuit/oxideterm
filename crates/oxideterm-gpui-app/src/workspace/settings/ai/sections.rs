@@ -776,24 +776,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         settings_ai_context_controls_section(
-            AI_PROVIDER_MAX_W,
             self.ai_section_title("settings_view.ai.context_controls"),
-            vec![
-                self.ai_context_select_field(
-                    "settings_view.ai.max_context",
-                    "settings_view.ai.max_context_hint",
-                    SettingsSelect::AiContextMaxChars,
-                    self.ai_context_max_chars_label(settings.ai.context_max_chars),
-                    cx,
-                ),
-                self.ai_context_select_field(
-                    "settings_view.ai.buffer_history",
-                    "settings_view.ai.buffer_history_hint",
-                    SettingsSelect::AiContextVisibleLines,
-                    self.ai_context_visible_lines_label(settings.ai.context_visible_lines),
-                    cx,
-                ),
-            ],
+            div().text_size(px(self.tokens.metrics.ui_text_sm))
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child(self.i18n.t("settings_view.ai.context_automatic_hint")).into_any_element(),
             settings_ai_context_sources_group(
                 &self.tokens,
                 self.i18n.t("settings_view.ai.context_sources"),
@@ -814,25 +800,10 @@ impl WorkspaceApp {
                     ),
                 ],
             ),
-            self.ai_active_model_max_response_tokens_row(settings, cx),
         )
     }
 
-    pub(in crate::workspace) fn ai_context_select_field(
-        &self,
-        label_key: &str,
-        hint_key: &str,
-        select_id: SettingsSelect,
-        label: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        settings_ai_context_select_field(
-            &self.tokens,
-            self.i18n.t(label_key),
-            self.settings_select_control(select_id, label, false, None, cx),
-            self.i18n.t(hint_key),
-        )
-    }
+
 
     pub(in crate::workspace) fn ai_context_source_row(
         &self,
@@ -858,17 +829,9 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    pub(in crate::workspace) fn ai_context_max_chars_label(&self, value: i64) -> String {
-        ai_context_max_chars_label_key(value)
-            .map(|key| self.i18n.t(key))
-            .unwrap_or_else(|| value.to_string())
-    }
 
-    pub(in crate::workspace) fn ai_context_visible_lines_label(&self, value: i64) -> String {
-        ai_context_visible_lines_label_key(value)
-            .map(|key| self.i18n.t(key))
-            .unwrap_or_else(|| value.to_string())
-    }
+
+
 
     pub(in crate::workspace) fn ai_system_prompt_section(
         &self,
@@ -1701,32 +1664,7 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn ai_active_model_max_response_tokens_row(
-        &self,
-        settings: &PersistedSettings,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let Some(model) = settings.ai.active_model.clone() else {
-            return div().into_any_element();
-        };
-        settings_ai_active_model_max_response_tokens_row(
-            &self.tokens,
-            self.i18n.t("settings_view.ai.max_response_tokens"),
-            self.i18n.t("settings_view.ai.max_response_tokens_hint"),
-            format!("{model}:"),
-            self.settings_text_input_control(
-                SettingsInput::AiActiveModelMaxResponseTokens,
-                self.current_settings_input_value(
-                    SettingsInput::AiActiveModelMaxResponseTokens,
-                    cx,
-                ),
-                self.i18n.t("settings_view.ai.automatic_placeholder"),
-                128.0,
-                cx,
-            ),
-            settings_mono_font_family(settings),
-        )
-    }
+
 
     pub(in crate::workspace) fn ai_tool_expand_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let expanded = self

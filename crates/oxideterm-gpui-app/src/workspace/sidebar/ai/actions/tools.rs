@@ -4,9 +4,15 @@ include!("tools/application.rs");
 include!("tools/background.rs");
 include!("tools/snapshot.rs");
 include!("tools/loop.rs");
+include!("tools/round.rs");
+include!("tools/checkpoint.rs");
+include!("tools/local_command.rs");
 include!("tools/agents.rs");
 include!("tools/agent_resources.rs");
 include!("tools/events.rs");
 include!("tools/executor.rs");
 include!("tools/capabilities.rs");
 include!("tools/protocol.rs");
+
+#[cfg(test)]
+include!("tools/loop_tests.rs");

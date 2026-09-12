@@ -9,6 +9,7 @@ pub struct AgentExecution {
     child: bool,
     permit: Option<AgentPermit>,
     pub event_cursor: u64,
+    pub deferred_user_messages: Vec<super::AgentText>,
     pub resources: super::AgentResourceCoordinator,
 }
 
@@ -25,6 +26,7 @@ impl AgentExecution {
             child,
             permit: None,
             event_cursor: 0,
+            deferred_user_messages: Vec::new(),
             resources,
         })
     }

@@ -96,18 +96,6 @@ pub(crate) fn responses_history_tokens(message: &AiChatMessage) -> Option<usize>
     (parts > 0).then_some(parts)
 }
 
-/// An allowlist of transport categories, never remote error text.
-pub fn responses_error_label(error: &str) -> Option<&'static str> {
-    match error {
-        "responses_failed" => Some("settings_view.ai.responses_failed"),
-        "responses_incomplete_limit" => Some("settings_view.ai.responses_incomplete_limit"),
-        "responses_incomplete_filter" => Some("settings_view.ai.responses_incomplete_filter"),
-        "responses_incomplete" => Some("settings_view.ai.responses_incomplete"),
-        "responses_disconnected" => Some("settings_view.ai.responses_disconnected"),
-        _ => None,
-    }
-}
-
 /// Discard only the request copy's foreign protocol state before normalization and budgeting.
 pub fn scope_responses_history(messages: &mut [AiChatMessage], config: &crate::AiChatStreamConfig) {
     let active = config.uses_responses().then(|| config.response_state_key());

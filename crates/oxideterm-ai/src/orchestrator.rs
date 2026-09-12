@@ -119,7 +119,7 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
                     "handle_id": { "type": "string", "maxLength": 64, "description": "Current terminal handle from list_targets/select_target." },
                     "command": { "type": "string", "maxLength": MAX_COMMAND_CHARS, "description": "Shell command to run." },
                     "cwd": { "type": "string", "maxLength": MAX_PATH_CHARS, "description": "Optional working directory." },
-                    "timeout_secs": { "type": "number", "minimum": 1, "maximum": 60, "description": "Timeout for direct/local command execution. Default: 30." },
+                    "timeout_secs": { "type": "number", "minimum": 1, "maximum": 1800, "description": "Observation budget in seconds, up to 1800. The host waits for completion by default; reaching the observation deadline never proves termination." },
                     "await_output": { "type": "boolean", "description": "For terminal-session targets, wait for output. Default: true." },
                 },
                 "required": ["handle_id", "command"],
@@ -169,7 +169,7 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
                     "text": { "type": "string", "maxLength": MAX_QUERY_CHARS, "description": "Literal text required by the contains condition." },
                     "command_id": { "type": "string", "maxLength": 128, "description": "Command identifier returned by run_command." },
                     "case_sensitive": { "type": "boolean", "description": "Whether contains matching is case-sensitive. Default: true." },
-                    "timeout_secs": { "type": "integer", "minimum": 1, "maximum": 120, "description": "Maximum wait duration. Default: 30." },
+                    "timeout_secs": { "type": "integer", "minimum": 1, "maximum": 1800, "description": "Observation deadline. Command completion defaults to 1800 seconds; other conditions default to 30 seconds." },
                     "max_chars": { "type": "integer", "minimum": 200, "maximum": 12000, "description": "Maximum returned terminal text. Default: 4000." }
                 },
                 "required": ["handle_id", "condition"],
@@ -535,7 +535,7 @@ fn validate_run_command(object: &Map<String, Value>) -> Result<(), OrchestratorA
     required_non_empty_string(object, "handle_id", Some(64))?;
     required_non_empty_string(object, "command", Some(MAX_COMMAND_CHARS))?;
     optional_string(object, "cwd", Some(MAX_PATH_CHARS))?;
-    optional_u64_in_range(object, "timeout_secs", 1, 60)?;
+    optional_u64_in_range(object, "timeout_secs", 1, 1800)?;
     optional_bool(object, "await_output")
 }
 
@@ -617,7 +617,7 @@ fn validate_wait_terminal_output(
         ],
     )?;
     optional_bool(object, "case_sensitive")?;
-    optional_u64_in_range(object, "timeout_secs", 1, 120)?;
+    optional_u64_in_range(object, "timeout_secs", 1, 1800)?;
     optional_u64_in_range(object, "max_chars", 200, 12_000)?;
     match condition {
         "contains" => {

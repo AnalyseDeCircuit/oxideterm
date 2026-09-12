@@ -25,7 +25,7 @@ use oxideterm_terminal_semantic::SEMANTIC_CLASSES;
 
 use crate::{
     SettingsInput, ai_update_provider, edit_custom_semantic_scheme,
-    parse_focus_handoff_command_list, set_ai_model_max_response_tokens, set_ai_user_context_window,
+    parse_focus_handoff_command_list, set_ai_user_context_window,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -308,21 +308,6 @@ pub fn persisted_settings_input_value(
                     })
                     .map(|value| value.to_string())
             })
-            .unwrap_or_default(),
-        SettingsInput::AiActiveModelMaxResponseTokens => settings
-            .ai
-            .active_provider_id
-            .as_ref()
-            .zip(settings.ai.active_model.as_ref())
-            .and_then(|(provider_id, model)| {
-                settings
-                    .ai
-                    .model_max_response_tokens
-                    .get(provider_id)
-                    .and_then(|models| models.get(model))
-                    .and_then(serde_json::Value::as_i64)
-            })
-            .map(|value| value.to_string())
             .unwrap_or_default(),
         SettingsInput::AiEmbeddingModel => settings
             .ai
@@ -692,21 +677,6 @@ pub fn apply_persisted_settings_input_draft(
                 return SettingsInputDraftApply::Applied;
             };
             set_ai_user_context_window(settings, &provider_id, &model, draft.trim().parse().ok());
-            SettingsInputDraftApply::Applied
-        }
-        SettingsInput::AiActiveModelMaxResponseTokens => {
-            let Some(provider_id) = settings.ai.active_provider_id.clone() else {
-                return SettingsInputDraftApply::Applied;
-            };
-            let Some(model) = settings.ai.active_model.clone() else {
-                return SettingsInputDraftApply::Applied;
-            };
-            set_ai_model_max_response_tokens(
-                settings,
-                &provider_id,
-                &model,
-                draft.trim().parse().ok(),
-            );
             SettingsInputDraftApply::Applied
         }
         SettingsInput::AiEmbeddingModel => {

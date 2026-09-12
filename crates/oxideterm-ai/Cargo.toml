@@ -11,6 +11,7 @@ anyhow.workspace = true
 async-process.workspace = true
 base64.workspace = true
 chrono.workspace = true
+libc.workspace = true
 instant-distance = { version = "0.6.1", features = ["with-serde"] }
 eventsource-stream = "0.2.3"
 futures-util.workspace = true
@@ -39,3 +40,6 @@ zstd = "0.13"
 
 [dev-dependencies]
 tempfile = "3.23"
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_Security"] }

@@ -115,14 +115,12 @@ pub fn remove_provider_at_with_scoped_settings(
     reasoning_provider_overrides: &mut Map<String, Value>,
     reasoning_model_overrides: &mut Map<String, Value>,
     user_context_windows: &mut Map<String, Value>,
-    model_max_response_tokens: &mut Map<String, Value>,
     index: usize,
 ) -> Option<String> {
     let removed = remove_provider_at(providers, active_provider_id, active_model, index)?;
     reasoning_provider_overrides.remove(&removed);
     reasoning_model_overrides.remove(&removed);
     user_context_windows.remove(&removed);
-    model_max_response_tokens.remove(&removed);
     Some(removed)
 }
 
@@ -196,18 +194,6 @@ pub fn apply_provider_model_refresh(
     }
 
     true
-}
-
-pub fn model_max_response_tokens(
-    max_response_tokens: &Map<String, Value>,
-    provider_id_value: &str,
-    model: &str,
-) -> Option<i64> {
-    max_response_tokens
-        .get(provider_id_value)
-        .and_then(|value| value.get(model))
-        .and_then(Value::as_i64)
-        .or_else(|| max_response_tokens.get(model).and_then(Value::as_i64))
 }
 
 fn select_first_provider(

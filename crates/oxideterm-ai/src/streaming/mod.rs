@@ -7,6 +7,7 @@ mod openai_payload;
 mod responses;
 mod responses_parse;
 mod responses_payload;
+mod retry;
 
 use std::time::Duration;
 
@@ -48,8 +49,55 @@ pub async fn stream_chat_completion(
     messages: Vec<AiChatMessage>,
     events: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
 ) {
+    for attempt in 0.. {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut request = Box::pin(stream_once(config.clone(), messages.clone(), sender));
+        let mut delivered_output = false;
+        let result = loop {
+            tokio::select! {
+                result = &mut request => break result,
+                Some(event) = receiver.recv() => {
+                    delivered_output |= !matches!(event, AiStreamEvent::Usage { .. });
+                    let failed = matches!(event, AiStreamEvent::Error(_));
+                    if events.send(event).is_err() || failed { return; }
+                }
+            }
+        };
+        drop(request);
+        while let Ok(event) = receiver.try_recv() {
+            delivered_output |= !matches!(event, AiStreamEvent::Usage { .. });
+            let failed = matches!(event, AiStreamEvent::Error(_));
+            if events.send(event).is_err() || failed { return; }
+        }
+        match result {
+            Ok(()) => return,
+            Err(error) => {
+                if let Some(delay) = retry::retry_delay(&error, attempt, delivered_output) {
+                    // This sleep belongs to the same request future; cancellation drops it with the network stream.
+                    tokio::select! {
+                        _ = events.closed() => return,
+                        _ = tokio::time::sleep(delay) => continue,
+                    }
+                }
+                let error = error.to_string();
+                let error = if config.api_protocol == crate::AiApiProtocol::Responses
+                    && crate::stream_error_label(&error).is_none() {
+                    "responses_failed".to_string()
+                } else { error };
+                let _ = events.send(AiStreamEvent::Error(error));
+                return;
+            }
+        }
+    }
+}
+
+async fn stream_once(
+    config: AiChatStreamConfig,
+    messages: Vec<AiChatMessage>,
+    events: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
+) -> anyhow::Result<()> {
     let responses = config.api_protocol == crate::AiApiProtocol::Responses;
-    let result = if responses {
+    if responses {
         if config.uses_responses() {
             responses::stream_responses(config, messages, events.clone()).await
         } else {
@@ -70,16 +118,6 @@ pub async fn stream_chat_completion(
                 openai::stream_openai_completion(config, messages, events.clone()).await
             }
         }
-    };
-
-    if let Err(error) = result {
-        let error = error.to_string();
-        let error = if responses && crate::responses_error_label(&error).is_none() {
-            "responses_failed".to_string()
-        } else {
-            error
-        };
-        let _ = events.send(AiStreamEvent::Error(error));
     }
 }
 
@@ -104,3 +142,19 @@ mod tests {
 pub(crate) use responses_parse::ResponsesStream;
 #[cfg(test)]
 pub(crate) use responses_payload::responses_body;
+
+/// An allowlist of transport categories, never remote error text.
+pub fn stream_error_label(error: &str) -> Option<&'static str> {
+    match error {
+        "agent_compaction_failed" => Some("settings_view.ai.agent_compaction_failed"),
+        "agent_context_full" => Some("settings_view.ai.agent_context_full"),
+        "ai_stream_interrupted" => Some("settings_view.ai.stream_interrupted"),
+        "ai_output_incomplete" => Some("settings_view.ai.output_incomplete"),
+        "responses_failed" => Some("settings_view.ai.responses_failed"),
+        "responses_incomplete_limit" => Some("settings_view.ai.responses_incomplete_limit"),
+        "responses_incomplete_filter" => Some("settings_view.ai.responses_incomplete_filter"),
+        "responses_incomplete" => Some("settings_view.ai.responses_incomplete"),
+        "responses_disconnected" => Some("settings_view.ai.responses_disconnected"),
+        _ => None,
+    }
+}

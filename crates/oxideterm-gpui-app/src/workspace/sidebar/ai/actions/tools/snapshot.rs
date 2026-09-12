@@ -690,7 +690,7 @@ impl WorkspaceApp {
             agent_model_limits: ai_provider_views(&settings.ai.providers).into_iter().flat_map(|provider| {
                 provider.models.into_iter().map(move |model| {
                     let context = ai_context_window_from_maps(&settings.ai.user_context_windows, &settings.ai.model_context_windows, &provider.id, &model).unwrap_or(AI_COMPACTION_DEFAULT_CONTEXT_WINDOW);
-                    let response = ai_chat_request_max_response_tokens(settings, &provider.id, &model);
+                    let response: Option<i64> = None;
                     let reasoning = settings.ai.reasoning_model_overrides.get(&provider.id).and_then(|models| models.get(&model)).and_then(serde_json::Value::as_str).unwrap_or("auto");
                     let reasoning = oxideterm_ai::normalize_reasoning_level_for_model(&provider.provider_type, &model, reasoning).as_str().to_owned();
                     ((provider.id.clone(), model), (context, response, reasoning))
@@ -1625,7 +1625,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn start_ai_ui_orchestrator_tool_execution(
         &mut self,
-        conversation_id: String,
+        owner: AiToolRunContext,
         tool_session_id: ToolSessionId,
         tool_call_id: String,
         tool_name: String,
@@ -1636,6 +1636,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let conversation_id = owner.conversation_id.clone();
         let args = match self.prepare_ai_runtime_authority(&tool_session_id, &tool_name, args, cx) {
             Ok(args) => args,
             Err(error) => {
@@ -1686,6 +1687,7 @@ impl WorkspaceApp {
         }
         if tool_name == "run_command" {
             self.start_ai_terminal_run_command_execution(
+                owner,
                 tool_session_id,
                 tool_call_id,
                 tool_name,
@@ -1700,6 +1702,7 @@ impl WorkspaceApp {
         }
         if tool_name == "wait_terminal_output" {
             self.start_ai_wait_terminal_output_execution(
+                owner,
                 tool_session_id,
                 tool_call_id,
                 tool_name,
@@ -2528,6 +2531,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn start_ai_terminal_run_command_execution(
         &mut self,
+        owner: AiToolRunContext,
         tool_session_id: ToolSessionId,
         tool_call_id: String,
         tool_name: String,
@@ -2542,9 +2546,9 @@ impl WorkspaceApp {
         let started = std::time::Instant::now();
         let snapshot = self.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
         let raw_handle_id = args.get("handle_id").and_then(serde_json::Value::as_str);
-        let handle_id = raw_handle_id
+        let mut handle_id = raw_handle_id
             .and_then(|value| oxideterm_ai::RuntimeHandleId::parse(value.to_string()).ok());
-        let owner = match self
+        let command_owner = match self
             .ai_runtime_context
             .read(cx)
             .validate_run_command_handle(
@@ -2589,42 +2593,23 @@ impl WorkspaceApp {
             let _ = sender.send(result);
             return;
         };
-        if owner == crate::workspace::ai_runtime_context::AiRunCommandOwner::LocalShell {
+        let wait_timeout = Duration::from_secs(args.get("timeout_secs").and_then(serde_json::Value::as_u64).unwrap_or(1800).clamp(1, 1800));
+        if command_owner == crate::workspace::ai_runtime_context::AiRunCommandOwner::LocalShell {
             for lease in &execution_leases { lease.dispatched(); }
             let cwd = args
                 .get("cwd")
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_string);
-            let timeout_secs = args
-                .get("timeout_secs")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(30);
-            self.forwarding_runtime.spawn(async move {
-                let mut sender = sender;
-                let action = tokio::select! {
-                    action = run_local_ai_command(
-                        &command,
-                        cwd.as_deref(),
-                        timeout_secs,
-                        dangerous_command_approved,
-                    ) => Some(action),
-                    _ = sender.closed() => None,
-                };
-                if let Some(action) = action {
-                    let _ = sender.send(snapshot.to_executed_tool_result(
-                        tool_call_id,
-                        tool_name,
-                        action,
-                        started.elapsed().as_millis(),
-                    ));
-                }
-            });
+            self.start_ai_owned_local_command(owner, tool_call_id, tool_name, command, cwd,
+                dangerous_command_approved, wait_timeout, snapshot, sender, cx);
             return;
         }
-        let crate::workspace::ai_runtime_context::AiRunCommandOwner::Terminal(session_id) = owner
+        let crate::workspace::ai_runtime_context::AiRunCommandOwner::Terminal(session_id) = command_owner
         else {
             unreachable!("local shell command returned before terminal dispatch");
         };
+        let node_id = self.workspace_runtime.read(cx).ssh_terminal_nodes().into_iter()
+            .find_map(|(id, node)| (id == session_id).then_some(node));
         let target = snapshot
             .targets
             .iter()
@@ -2675,6 +2660,16 @@ impl WorkspaceApp {
             return;
         }
         let before = pane.read(cx).ai_buffer_snapshot();
+        let (activity, mut activity_rx) = tokio::sync::watch::channel(0u64);
+        let runtime_activity = activity.clone();
+        let runtime_subscription = cx.observe(&self.workspace_runtime, move |_, _, _| {
+            runtime_activity.send_modify(|revision| *revision = revision.wrapping_add(1));
+        });
+        let subscription = cx.subscribe(&pane, move |_, _, event, _| {
+            if matches!(event, TerminalPaneEvent::OutputActivity | TerminalPaneEvent::Exited { .. } | TerminalPaneEvent::PrivilegePromptStateChanged) {
+                activity.send_modify(|revision| *revision = revision.wrapping_add(1));
+            }
+        });
         if execution_leases.iter().any(|lease| !lease.is_current()) {
             let _ = sender.send(rejected_ai_tool_result(tool_call_id, tool_name, "terminal_taken_over", "User input took control of the terminal before dispatch."));
             return;
@@ -2686,7 +2681,9 @@ impl WorkspaceApp {
             pane.send_command_line(&command, cx);
             command_id
         });
-        self.monitor_ai_terminal_command(pane.clone(), command_id.clone(), execution_leases.clone(), cx);
+        let command_resource = owner.resource(self, cx, oxideterm_ai::agent::OwnedResourceKind::TerminalCommand,
+            &self.ai_tool_display_name("run_command"));
+        self.monitor_ai_terminal_command(session_id, node_id.clone(), command_id.clone(), &before, execution_leases.clone(), command_resource, cx);
         if args.get("await_output").and_then(serde_json::Value::as_bool) == Some(false) {
             let result = snapshot.to_executed_tool_result(
                 tool_call_id,
@@ -2709,17 +2706,32 @@ impl WorkspaceApp {
             return;
         }
 
+        let observation = owner.resource(self, cx, oxideterm_ai::agent::OwnedResourceKind::Observation,
+            &self.i18n.t("settings_view.ai.waiting_condition"));
         cx.spawn(async move |weak, cx| {
+            let _observation = observation;
+            let _subscription = subscription;
+            let _runtime_subscription = runtime_subscription;
+            let mut connection_lost = false;
+            let mut outcome_unknown = false;
+            let mut paused = false;
             let mut sender = Some(sender);
+            let mut direction_changed = false;
+            let mut previous_wait_state = "";
             let mut last = before.clone();
             let mut changed_at = std::time::Instant::now();
             let mut owner_closed = false;
             let mut user_taken_over = false;
-            for _ in 0..300 {
+            let mut wait = AiTerminalCommandWait::with_timeout(std::time::Instant::now(), wait_timeout);
+            let mut last_waiting_for_secret = false;
+            loop {
                 if sender.as_ref().is_none_or(tokio::sync::oneshot::Sender::is_closed) {
                     return;
                 }
-                Timer::after(Duration::from_millis(100)).await;
+                if owner.dispatch.as_ref().is_some_and(|guard| guard.check().is_err()) {
+                    direction_changed = true;
+                    break;
+                }
                 if execution_leases.iter().any(|lease| !lease.is_current()) {
                     user_taken_over = true;
                     break;
@@ -2727,6 +2739,23 @@ impl WorkspaceApp {
                 let current = weak.update(cx, |this, cx| {
                     // Do not let the retained pane entity become authority
                     // after its terminal owner or tool session is revoked.
+                    let recovering = node_id.as_ref().and_then(|node| this.node_router.connection_id_for_node(node))
+                        .and_then(|id| this.ssh_registry.get(&id))
+                        .is_some_and(|connection| matches!(connection.state(), ConnectionState::Connecting | ConnectionState::LinkDown | ConnectionState::Reconnecting | ConnectionState::Error(_)));
+                    if recovering {
+                        connection_lost = true;
+                        return Some((last.clone(), false, None, true));
+                    }
+                    if let Some(node) = &node_id {
+                        let alive = this.node_router.connection_id_for_node(node).and_then(|id| this.ssh_registry.get(&id))
+                            .is_some_and(|connection| !matches!(connection.state(), ConnectionState::Disconnected | ConnectionState::Disconnecting));
+                        if !alive { return None; }
+                    }
+                    if connection_lost {
+                        handle_id = this.ai_runtime_context.update(cx, |runtime, _|
+                            runtime.issue_terminal_handle(&tool_session_id, session_id).ok())
+                            .map(|projection| projection.handle_id);
+                    }
                     let current_session = this
                         .ai_runtime_context
                         .read(cx)
@@ -2738,19 +2767,23 @@ impl WorkspaceApp {
                             oxideterm_ai::RuntimeCapability::TerminalRunCommand,
                         )
                         .ok();
-                    (current_session == Some(session_id)).then(|| {
-                        let pane = pane.read(cx);
+                    if current_session != Some(session_id) { return None; }
+                    let (_, current_pane) = this.ai_terminal_session(session_id, cx)?;
+                    Some({
+                        let pane = current_pane.read(cx);
                         (
                             pane.ai_buffer_snapshot(),
+                            pane.ai_waiting_for_secret(),
                             command_id.as_ref().and_then(|command_id| {
                                 pane.ai_command_records()
                                     .into_iter()
                                     .find(|record| record.command_id == *command_id)
                             }),
+                            false,
                         )
                     })
                 });
-                let (current, command_record) = match current {
+                let (current, waiting_for_secret, command_record, recovering) = match current {
                     Ok(Some(current)) => current,
                     Ok(None) => {
                         owner_closed = true;
@@ -2763,12 +2796,55 @@ impl WorkspaceApp {
                     changed_at = std::time::Instant::now();
                 }
                 let command_completed = command_record.as_ref().is_some_and(|record| {
-                    record.status != oxideterm_gpui_terminal::TerminalCommandFactStatus::Open
+                    record.status == oxideterm_gpui_terminal::TerminalCommandFactStatus::Closed
                 });
+                if !recovering && (connection_lost && command_record.is_none()
+                    || command_record.as_ref().is_some_and(|record| record.status == oxideterm_gpui_terminal::TerminalCommandFactStatus::Stale)) {
+                    outcome_unknown = true;
+                    break;
+                }
+                if !recovering { connection_lost = false; }
+                last_waiting_for_secret = waiting_for_secret;
+                let expired = wait.expired(std::time::Instant::now());
+                // Secret entry is local to the terminal. Keep this request alive without another model turn.
+                let wait_state = if recovering { "waiting_connection" } else if waiting_for_secret { "waiting_user" } else { "waiting_condition" };
+                if wait_state != previous_wait_state {
+                    let _ = weak.update(cx, |this, cx| {
+                        if let Some(run) = this.ai_entity.read(cx).agent_run(owner.generation) {
+                            let state = if recovering { AgentState::AwaitingConnection } else if waiting_for_secret { AgentState::AwaitingUser } else { AgentState::AwaitingCondition };
+                            let _ = this.ai_entity.read(cx).agents.services.runtime.set_state(&run, state);
+                        }
+                        this.apply_ai_tool_status(owner.generation,
+                        &owner.conversation_id, &owner.assistant_id, &tool_call_id, &tool_name, &owner.arguments, wait_state,
+                        Some(serde_json::json!({"commandId": command_id, "waiting": true, "waitDeadline": ai_now_ms() + wait.deadline.saturating_duration_since(std::time::Instant::now()).as_millis() as i64})), Some("interactive".into()),
+                        None, false, None, None, None, cx);
+                    });
+                    previous_wait_state = wait_state;
+                }
+                if expired && !command_completed {
+                    let (resume, resumed) = tokio::sync::oneshot::channel();
+                    let _ = weak.update(cx, |this, cx| {
+                        this.apply_ai_tool_status(owner.generation, &owner.conversation_id, &owner.assistant_id,
+                            &tool_call_id, &tool_name, &owner.arguments, "pending_user_approval",
+                            Some(serde_json::json!({"waitTimedOut": true, "commandId": command_id})), Some("read".into()),
+                            None, false, None, None, None, cx);
+                        this.ai_entity.update(cx, |ai, _| ai.register_tool_approval(owner.generation, tool_call_id.clone(), resume));
+                    });
+                    let resumed = tokio::select! {
+                        _ = sender.as_mut().unwrap().closed() => return,
+                        value = ai_pending_dispatch(owner.dispatch.as_ref(), resumed) => value,
+                    };
+                    match resumed {
+                        Ok(Ok(true)) => { wait = AiTerminalCommandWait::with_timeout(std::time::Instant::now(), wait_timeout); previous_wait_state = ""; continue; }
+                        Err(_) => { direction_changed = true; break; }
+                        _ => { paused = true; break; },
+                    }
+                }
                 let fallback_output_stable = command_id.is_none()
+                    && !looks_waiting_for_input(&current)
                     && current != before
                     && changed_at.elapsed() >= Duration::from_millis(400);
-                if command_completed || fallback_output_stable {
+                if command_completed || (fallback_output_stable && !waiting_for_secret && !recovering) {
                     let result = weak.update(cx, |this, cx| {
                         let current_snapshot = this
                             .ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
@@ -2782,7 +2858,7 @@ impl WorkspaceApp {
                                     serde_json::json!({
                                         "executionState": if command_completed { "completed" } else { "output_captured" },
                                         "visibleInTerminal": true,
-                                        "waitingForInput": looks_waiting_for_input(&current),
+                                        "waitingForInput": false,
                                         "commandId": command_id,
                                         "exitCode": command_record.as_ref().and_then(|record| record.exit_code),
                                     }),
@@ -2797,12 +2873,32 @@ impl WorkspaceApp {
                     }
                     return;
                 }
+                tokio::select! {
+                    _ = activity_rx.changed() => {},
+                    _ = Timer::after(Duration::from_millis(250)) => {},
+                    _ = sender.as_mut().unwrap().closed() => return,
+                }
             }
             let result = weak.update(cx, |this, cx| {
                 let current_snapshot =
                     this.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
                 let output = terminal_delta_output(&before, &last);
                 let output_empty = output.trim().is_empty();
+                if paused {
+                    return current_snapshot.to_executed_tool_result(tool_call_id, tool_name,
+                        current_snapshot.fail("Command observation paused.", "agent_wait_paused", "The command may still be running; observation was paused by the user.", "interactive"), started.elapsed().as_millis());
+                }
+                if outcome_unknown {
+                    return current_snapshot.to_executed_tool_result(tool_call_id, tool_name,
+                        current_snapshot.fail("Command outcome is unknown after a connection change.", "command_outcome_unknown",
+                            "Inspect the current system state before repeating this command.", "interactive"), started.elapsed().as_millis());
+                }
+                if direction_changed {
+                    return current_snapshot.to_executed_tool_result(tool_call_id, tool_name,
+                        current_snapshot.ok("Command observation yielded to new instructions.", output,
+                            serde_json::json!({"executionState":"running", "commandId":command_id, "outcomeUnknown":true}), "interactive"),
+                        started.elapsed().as_millis());
+                }
                 if user_taken_over {
                     return rejected_ai_tool_result(tool_call_id, tool_name, "terminal_taken_over", "The terminal was taken over or disconnected. Output attribution is no longer reliable; the remote command's termination is not confirmed.");
                 }
@@ -2839,7 +2935,8 @@ impl WorkspaceApp {
                         data: serde_json::json!({
                             "executionState": if output_empty { "timeout" } else { "output_captured" },
                             "visibleInTerminal": true,
-                            "waitingForInput": looks_waiting_for_input(&last),
+                            "waitingForInput": last_waiting_for_secret,
+                            "commandId": command_id,
                         }),
                         error_code: output_empty
                             .then(|| "terminal_command_wait_timeout".to_string()),
@@ -2866,6 +2963,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn start_ai_wait_terminal_output_execution(
         &mut self,
+        owner: AiToolRunContext,
         tool_session_id: ToolSessionId,
         tool_call_id: String,
         tool_name: String,
@@ -2877,7 +2975,7 @@ impl WorkspaceApp {
         let started = std::time::Instant::now();
         let snapshot = self.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
         let raw_handle_id = args.get("handle_id").and_then(serde_json::Value::as_str);
-        let handle_id = raw_handle_id
+        let mut handle_id = raw_handle_id
             .and_then(|value| oxideterm_ai::RuntimeHandleId::parse(value.to_string()).ok());
         let session_id = match self.ai_runtime_context.read(cx).validate_terminal_handle(
             &tool_session_id,
@@ -2918,26 +3016,74 @@ impl WorkspaceApp {
             let _ = sender.send(result);
             return;
         };
+        let node_id = self.workspace_runtime.read(cx).ssh_terminal_nodes().into_iter()
+            .find_map(|(id, node)| (id == session_id).then_some(node));
+        let (activity, mut activity_rx) = tokio::sync::watch::channel(0u64);
+        let runtime_activity = activity.clone();
+        let runtime_subscription = cx.observe(&self.workspace_runtime, move |_, _, _| {
+            runtime_activity.send_modify(|revision| *revision = revision.wrapping_add(1));
+        });
+        let subscription = cx.subscribe(&pane, move |_, _, event, _| {
+            if matches!(event, TerminalPaneEvent::OutputActivity | TerminalPaneEvent::Exited { .. } | TerminalPaneEvent::PrivilegePromptStateChanged) {
+                activity.send_modify(|revision| *revision = revision.wrapping_add(1));
+            }
+        });
         let initial_buffer = pane.read(cx).ai_buffer_snapshot();
         let initial_alternate_screen = pane.read(cx).ai_screen_is_alternate_buffer();
+        let command_wait = args.get("condition").and_then(serde_json::Value::as_str) == Some("command_completed");
         let timeout_secs = args
             .get("timeout_secs")
             .and_then(serde_json::Value::as_u64)
-            .unwrap_or(30);
+            .unwrap_or(if command_wait { 1800 } else { 30 }).min(1800);
         let max_chars = args
             .get("max_chars")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(4_000) as usize;
+        let observation = owner.resource(self, cx, oxideterm_ai::agent::OwnedResourceKind::Observation, &self.i18n.t("settings_view.ai.waiting_condition"));
         cx.spawn(async move |weak, cx| {
+            let _observation = observation;
+            let _subscriptions = (subscription, runtime_subscription);
+            let mut previous_wait_state = "";
+            let mut connection_lost = false;
+            let mut outcome_unknown = false;
+            let mut direction_changed = false;
+            let mut owner_closed = false;
             let mut sender = Some(sender);
-            let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
-            while std::time::Instant::now() < deadline {
+            let mut deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+            loop {
+                if std::time::Instant::now() >= deadline {
+                    if !command_wait { break; }
+                    let Ok(resumed) = weak.update(cx, |this, cx| this.ai_command_wait_extension(&owner, &tool_call_id, &tool_name,
+                        args.get("command_id").and_then(serde_json::Value::as_str), cx)) else { return; };
+                    let resumed = tokio::select! {
+                        value = ai_pending_dispatch(owner.dispatch.as_ref(), resumed) => value,
+                        _ = sender.as_mut().unwrap().closed() => return,
+                    };
+                    if resumed.is_err() { direction_changed = true; break; }
+                    if !matches!(resumed, Ok(Ok(true))) { break; }
+                    previous_wait_state = "";
+                    deadline = std::time::Instant::now() + Duration::from_secs(1800);
+                }
+                if owner.dispatch.as_ref().is_some_and(|guard| guard.check().is_err()) { direction_changed = true; break; }
                 if sender.as_ref().is_none_or(tokio::sync::oneshot::Sender::is_closed) {
                     return;
                 }
                 let observation = weak.update(cx, |this, cx| {
                     // Revalidate the opaque handle on every observation so a
                     // retained pane cannot outlive the tool session authority.
+                    let recovering = node_id.as_ref().and_then(|node| this.node_router.connection_id_for_node(node))
+                        .and_then(|id| this.ssh_registry.get(&id)).is_some_and(|connection|
+                            matches!(connection.state(), ConnectionState::Connecting | ConnectionState::LinkDown | ConnectionState::Reconnecting | ConnectionState::Error(_)));
+                    if recovering { return Some((initial_buffer.clone(), initial_alternate_screen, Vec::new(), true)); }
+                    if let Some(node) = &node_id {
+                        let alive = this.node_router.connection_id_for_node(node).and_then(|id| this.ssh_registry.get(&id))
+                            .is_some_and(|connection| !matches!(connection.state(), ConnectionState::Disconnected | ConnectionState::Disconnecting));
+                        if !alive { return None; }
+                    }
+                    if connection_lost {
+                        handle_id = this.ai_runtime_context.update(cx, |runtime, _|
+                            runtime.issue_terminal_handle(&tool_session_id, session_id).ok()).map(|projection| projection.handle_id);
+                    }
                     let current_session = this
                         .ai_runtime_context
                         .read(cx)
@@ -2952,16 +3098,44 @@ impl WorkspaceApp {
                     if current_session != Some(session_id) {
                         return None;
                     }
+                    let (_, pane) = this.ai_terminal_session(session_id, cx)?;
                     let pane = pane.read(cx);
                     Some((
                         pane.ai_buffer_snapshot(),
                         pane.ai_screen_is_alternate_buffer(),
                         pane.ai_command_records(),
+                        false,
                     ))
                 });
-                let Ok(Some((buffer, alternate_screen, records))) = observation else {
+                let Ok(Some((buffer, alternate_screen, records, recovering))) = observation else {
+                    owner_closed = true;
                     break;
                 };
+                let state = if recovering { "waiting_connection" } else { "waiting_condition" };
+                if state != previous_wait_state {
+                    let _ = weak.update(cx, |this, cx| this.apply_ai_tool_status(owner.generation, &owner.conversation_id,
+                        &owner.assistant_id, &tool_call_id, &tool_name, &owner.arguments, state,
+                        Some(serde_json::json!({"waiting":true,"waitDeadline":ai_now_ms() + deadline.saturating_duration_since(std::time::Instant::now()).as_millis() as i64})),
+                        Some("read".into()), None, false, None, None, None, cx));
+                    previous_wait_state = state;
+                }
+                if recovering {
+                    connection_lost = true;
+                    Timer::after(Duration::from_millis(250)).await;
+                    continue;
+                }
+                if command_wait && connection_lost && !records.iter().any(|record|
+                    Some(record.command_id.as_str()) == args.get("command_id").and_then(serde_json::Value::as_str)) {
+                    outcome_unknown = true;
+                    break;
+                }
+                if command_wait && records.iter().any(|record|
+                    Some(record.command_id.as_str()) == args.get("command_id").and_then(serde_json::Value::as_str)
+                        && record.status == oxideterm_gpui_terminal::TerminalCommandFactStatus::Stale) {
+                    outcome_unknown = true;
+                    break;
+                }
+                connection_lost = false;
                 if let Some(matched) = ai_terminal_wait_match(
                     &args,
                     &initial_buffer,
@@ -2996,7 +3170,11 @@ impl WorkspaceApp {
                     }
                     return;
                 }
-                Timer::after(Duration::from_millis(100)).await;
+                tokio::select! {
+                    _ = activity_rx.changed() => {},
+                    _ = Timer::after(Duration::from_millis(250)) => {},
+                    _ = sender.as_mut().unwrap().closed() => return,
+                }
             }
             let result = weak.update(cx, |this, cx| {
                 let current_snapshot =
@@ -3006,7 +3184,7 @@ impl WorkspaceApp {
                     tool_name,
                     current_snapshot.fail(
                         "Terminal wait timed out.",
-                        "terminal_wait_timeout",
+                        if direction_changed { "agent_direction_changed" } else if owner_closed { "runtime_owner_closed" } else if outcome_unknown { "command_outcome_unknown" } else if command_wait { "agent_wait_paused" } else { "terminal_wait_timeout" },
                         format!(
                             "The requested terminal condition was not observed within {timeout_secs} seconds."
                         ),

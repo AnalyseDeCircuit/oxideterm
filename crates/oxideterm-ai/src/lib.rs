@@ -131,7 +131,7 @@ pub use runtime_context::{
 };
 pub use settings::{
     AiProviderKeyDisplayState, AiProviderRefreshKeyPolicy, add_provider_from_template,
-    add_provider_model, apply_provider_model_refresh, model_max_response_tokens,
+    add_provider_model, apply_provider_model_refresh,
     provider_chat_requires_key, provider_key_display_state, provider_refresh_key_policy,
     remove_provider_at, remove_provider_at_with_scoped_settings, select_provider_model,
     set_active_provider_selection, take_provider_key_secret,
@@ -146,7 +146,7 @@ pub use slash::{
     resolve_ai_slash_command, slash_task_system_prompt,
 };
 pub use stream_state::*;
-pub use streaming::stream_chat_completion;
+pub use streaming::{stream_chat_completion, stream_error_label};
 pub use suggestions::{
     AiSuggestionParseResult, ai_has_partial_suggestions_block, ai_visible_suggestion_content,
     parse_ai_suggestions,
@@ -157,16 +157,15 @@ pub use target_projection::{
 };
 pub use tool_protocol::{ai_should_trigger_hard_deny, ai_user_explicitly_requested_json};
 pub use tool_result_protocol::{
-    AI_TOOL_CONDENSE_KEEP_RECENT, AI_TOOL_CONDENSE_SUMMARY_MAX_CHARS,
     AI_TOOL_MODEL_ERROR_MESSAGE_MAX_CHARS, AI_TOOL_MODEL_ERROR_OUTPUT_MAX_CHARS,
     AI_TOOL_MODEL_OUTPUT_MAX_CHARS, AI_TOOL_MODEL_SUMMARY_MAX_CHARS, AiExecutedToolResult,
     ai_insert_execution_shortcuts_for_model, ai_insert_non_empty_model_array,
     ai_to_usable_budget_threshold, ai_tool_result_envelope_or_legacy,
     ai_tool_result_evidence_facts_for_model, ai_tool_result_model_content,
-    ai_tool_result_model_error, condense_ai_tool_messages, truncate_ai_tool_result_for_model,
+    ai_tool_result_model_error, truncate_ai_tool_result_for_model,
 };
 pub use responses_state::{
-    append_responses_round, has_responses_history, responses_error_label, responses_round_state,
+    append_responses_round, has_responses_history, responses_round_state,
     scope_responses_history,
 };
 pub use types::{

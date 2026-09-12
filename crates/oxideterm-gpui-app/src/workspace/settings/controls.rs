@@ -1542,52 +1542,6 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
-            (SettingsTab::Ai, SettingsSelect::AiContextMaxChars) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for value in AI_CONTEXT_MAX_CHAR_OPTIONS {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            self.ai_context_max_chars_label(value),
-                            settings.ai.context_max_chars == value,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                move |settings| set_ai_context_max_chars(settings, value),
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Ai, SettingsSelect::AiContextVisibleLines) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for value in AI_CONTEXT_VISIBLE_LINE_OPTIONS {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            self.ai_context_visible_lines_label(value),
-                            settings.ai.context_visible_lines == value,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                move |settings| set_ai_context_lines(settings, value),
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
             (SettingsTab::Knowledge, SettingsSelect::AiEmbeddingProvider) => {
                 let current = settings
                     .ai

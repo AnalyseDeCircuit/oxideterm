@@ -7600,6 +7600,7 @@ dependencies = [
  "futures",
  "futures-util",
  "instant-distance",
+ "libc",
  "oxideterm-atomic-file",
  "oxideterm-network-proxy",
  "oxideterm-portable-runtime",
@@ -7620,6 +7621,7 @@ dependencies = [
  "tracing",
  "uuid",
  "whoami",
+ "windows 0.61.3",
  "zeroize",
  "zstd",
 ]
@@ -7870,6 +7872,7 @@ dependencies = [
  "chrono",
  "embed-resource",
  "fs2",
+ "futures-util",
  "gpui",
  "gstreamer",
  "gstreamer-video",

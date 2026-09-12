@@ -11,7 +11,11 @@ pub(in crate::workspace) async fn execute_ai_tool(
     post_user_approval: bool,
     dangerous_command_approved: bool,
     mut execution: Option<&mut AgentExecution>,
+    dispatch: Option<oxideterm_ai::agent::AgentDispatch>,
 ) -> AiExecutedToolResult {
+    if dispatch.as_ref().is_some_and(|guard| guard.check().is_err()) {
+        return rejected_ai_tool_result(tool_call_id, tool_name, "agent_direction_changed", "Task direction changed before dispatch.");
+    }
     let mut leases = Vec::new();
     if let Some(agent) = execution.as_mut() {
         if !agent
@@ -81,11 +85,14 @@ pub(in crate::workspace) async fn execute_ai_tool(
                 }
             };
             let acquire = resources.acquire(key, agent.run.clone(), cancellation);
-            match agent.wait(AgentState::AwaitingResource, acquire).await {
-                Ok(Ok(lease)) => leases.push(oxideterm_ai::agent::AgentToolLease::new(
+            match ai_pending_dispatch(dispatch.as_ref(), agent.wait(AgentState::AwaitingResource, acquire)).await {
+                Ok(Ok(Ok(lease))) => leases.push(oxideterm_ai::agent::AgentToolLease::new(
                     resources.clone(),
                     lease,
                 )),
+                Err(_) => {
+                    return rejected_ai_tool_result(tool_call_id, tool_name, "agent_direction_changed", "Task direction changed before dispatch.");
+                }
                 _ => {
                     return rejected_ai_tool_result(
                         tool_call_id,
@@ -103,7 +110,8 @@ pub(in crate::workspace) async fn execute_ai_tool(
             lease.dispatched();
         }
     }
-    let result = execute_ai_tool_uncoordinated(
+    let cancelled_call = (tool_call_id.clone(), tool_name.clone());
+    let future = execute_ai_tool_uncoordinated(
         services,
         ui_tx,
         generation,
@@ -116,8 +124,12 @@ pub(in crate::workspace) async fn execute_ai_tool(
         post_user_approval,
         dangerous_command_approved,
         leases.clone(),
-    )
-    .await;
+        dispatch,
+    );
+    let result = if let Some(agent) = execution {
+        agent.wait(AgentState::AwaitingCondition, future).await.unwrap_or_else(|_|
+            rejected_ai_tool_result(cancelled_call.0, cancelled_call.1, "operation_cancelled", "The task was stopped; an already dispatched remote operation may still be running."))
+    } else { future.await };
     for lease in leases {
         lease.finish_response(result.success);
     }
@@ -195,28 +207,50 @@ impl WorkspaceApp {
 
     fn monitor_ai_terminal_command(
         &mut self,
-        pane: gpui::Entity<TerminalPane>,
+        session_id: TerminalSessionId,
+        node_id: Option<NodeId>,
         command_id: Option<String>,
+        before: &str,
         leases: Vec<oxideterm_ai::agent::AgentToolLease>,
+        record: Option<oxideterm_ai::agent::AgentResourceRecord>,
         cx: &mut Context<Self>,
     ) {
         for lease in leases {
+            let before = zeroize::Zeroizing::new(before.to_owned());
+            let record = record.clone();
             lease.monitor_command();
             let key = lease.lease().resource.clone();
-            let pane = pane.downgrade();
+            let node_id = node_id.clone();
             let command_id = command_id.clone();
             let resources = self.ai_entity.read(cx).agents.services.resources.clone();
             let monitor_key = key.clone();
             let task = cx.spawn(async move |weak, cx| {
                 loop {
                     Timer::after(Duration::from_millis(250)).await;
-                    let finished = weak.update(cx, |_, cx| {
+                    let finished = weak.update(cx, |this, cx| {
                         if !lease.is_current() { return true; }
-                        let Some(pane) = pane.upgrade() else { resources.invalidate(&monitor_key); return true; };
+                        let recovering = node_id.as_ref().and_then(|node| this.node_router.connection_id_for_node(node))
+                            .and_then(|id| this.ssh_registry.get(&id)).is_some_and(|connection|
+                                matches!(connection.state(), ConnectionState::Connecting | ConnectionState::LinkDown | ConnectionState::Reconnecting | ConnectionState::Error(_)));
+                        if recovering { return false; }
+                        let Some((_, pane)) = this.ai_terminal_session(session_id, cx) else { resources.invalidate(&monitor_key); return true; };
                         let pane = pane.read(cx);
                         if !pane.ai_accepts_input() { resources.invalidate(&monitor_key); return true; }
-                        if lease.response_finished() && command_id.as_deref().and_then(|id| pane.ai_command_status(id)).is_some_and(|status| status == oxideterm_gpui_terminal::TerminalCommandFactStatus::Closed) {
+                        let status = command_id.as_deref().and_then(|id| pane.ai_command_status(id));
+                        if lease.response_finished() && status.is_none_or(|status| status == oxideterm_gpui_terminal::TerminalCommandFactStatus::Stale) {
+                            if let Some(record) = &record { record.finish(oxideterm_ai::agent::OwnedResourceState::OutcomeUnknown); }
+                            resources.invalidate(&monitor_key);
+                            return true;
+                        }
+                        if lease.response_finished() && status == Some(oxideterm_gpui_terminal::TerminalCommandFactStatus::Closed) {
                             lease.command_finished();
+                            if let Some(record) = &record {
+                                let exit_code = command_id.as_deref().and_then(|id| pane.ai_command_records().into_iter()
+                                    .find(|entry| entry.command_id == id)).and_then(|entry| entry.exit_code);
+                                record.outcome(&serde_json::json!({"exitCode":exit_code,
+                                    "output":terminal_delta_output(&before, &pane.ai_buffer_snapshot())}).to_string());
+                                record.finish(oxideterm_ai::agent::OwnedResourceState::Completed);
+                            }
                             return true;
                         }
                         false

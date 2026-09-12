@@ -109,6 +109,10 @@ pub enum AgentState {
     AwaitingApproval,
     AwaitingParent,
     AwaitingResource,
+    AwaitingCondition,
+    AwaitingUser,
+    AwaitingConnection,
+    Replanning,
     Stopping,
     Completed,
     Failed,
@@ -173,6 +177,8 @@ pub struct AgentMessage {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentSnapshot {
+    #[serde(default)]
+    pub resources: Vec<super::OwnedResource>,
     pub usage: AgentUsage,
     pub run: AgentRunRef,
     pub parent_id: Option<AgentId>,
@@ -240,6 +246,8 @@ fn restore_agent_state<'de, D: serde::Deserializer<'de>>(
 pub enum AgentError {
     #[error("agent run is no longer current")]
     StaleRun,
+    #[error("task direction changed before dispatch")]
+    DirectionChanged,
     #[error("operation is restricted to the parent agent")]
     ParentOnly,
     #[error("target or tool is outside the delegated scope")]

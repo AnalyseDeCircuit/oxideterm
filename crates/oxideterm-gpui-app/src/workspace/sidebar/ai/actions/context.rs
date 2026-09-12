@@ -320,12 +320,8 @@ impl WorkspaceApp {
         if let Some(buffer) = self.ai_terminal_pane_text(pane_id, cx) {
             let (buffer, line_count) = self.ai_limited_terminal_buffer(
                 &buffer,
-                self.settings_store
-                    .settings()
-                    .ai
-                    .context_visible_lines
-                    .max(0) as usize,
-                self.settings_store.settings().ai.context_max_chars.max(0) as usize,
+                usize::MAX,
+                self.ai_ambient_context_budget(),
             );
             if !buffer.trim().is_empty() {
                 parts.push(format!("=== Terminal Output (last {line_count} lines) ==="));
@@ -629,4 +625,13 @@ pub(in crate::workspace) fn ai_ledger_status_from_terminal_status(
         oxideterm_gpui_terminal::TerminalCommandFactStatus::Stale => "stale",
     }
     .to_string()
+}
+
+impl WorkspaceApp {
+    pub(in crate::workspace) fn ai_ambient_context_budget(&self) -> usize {
+        let settings = &self.settings_store.settings().ai;
+        let window = oxideterm_ai::model_context_window(settings.active_model.as_deref().unwrap_or_default(),
+            &settings.model_context_windows, settings.active_provider_id.as_deref(), &settings.user_context_windows);
+        oxideterm_ai::agent::ambient_context_budget(window.max(1) as usize)
+    }
 }

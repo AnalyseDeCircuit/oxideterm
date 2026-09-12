@@ -1,6 +1,6 @@
 //! Model-facing tool-result envelopes, evidence facts, condensation, and output limits.
 
-use crate::{AiChatMessage, AiChatRole, compute_ai_prompt_budget};
+use crate::compute_ai_prompt_budget;
 
 /// A runtime-neutral tool execution result ready for protocol formatting.
 #[derive(Clone, Debug)]
@@ -14,83 +14,10 @@ pub struct AiExecutedToolResult {
     pub envelope: serde_json::Value,
 }
 
-pub const AI_TOOL_CONDENSE_KEEP_RECENT: usize = 5;
-pub const AI_TOOL_CONDENSE_SUMMARY_MAX_CHARS: usize = 300;
 pub const AI_TOOL_MODEL_OUTPUT_MAX_CHARS: usize = 12_000;
 pub const AI_TOOL_MODEL_ERROR_OUTPUT_MAX_CHARS: usize = 2_000;
 pub const AI_TOOL_MODEL_SUMMARY_MAX_CHARS: usize = 1_000;
 pub const AI_TOOL_MODEL_ERROR_MESSAGE_MAX_CHARS: usize = 1_000;
-
-pub fn condense_ai_tool_messages(history: &mut [AiChatMessage]) {
-    let tool_indices = history
-        .iter()
-        .enumerate()
-        .filter_map(|(index, message)| (message.role == AiChatRole::Tool).then_some(index))
-        .collect::<Vec<_>>();
-    if tool_indices.len() <= AI_TOOL_CONDENSE_KEEP_RECENT {
-        return;
-    }
-
-    for index in tool_indices
-        .iter()
-        .take(
-            tool_indices
-                .len()
-                .saturating_sub(AI_TOOL_CONDENSE_KEEP_RECENT),
-        )
-        .copied()
-    {
-        let message = &mut history[index];
-        if message.content.starts_with("[condensed]") {
-            continue;
-        }
-        let parsed = serde_json::from_str::<serde_json::Value>(&message.content).ok();
-        let is_error = parsed.as_ref().is_some_and(|value| {
-            value
-                .get("error")
-                .is_some_and(|error| !error.is_null() && error != &serde_json::Value::Bool(false))
-        });
-        if is_error {
-            continue;
-        }
-        let tool_name = parsed
-            .as_ref()
-            .and_then(|value| value.get("meta"))
-            .and_then(|meta| meta.get("toolName"))
-            .and_then(serde_json::Value::as_str)
-            .or_else(|| {
-                parsed
-                    .as_ref()
-                    .and_then(|value| value.get("metadata"))
-                    .and_then(|meta| meta.get("toolName"))
-                    .and_then(serde_json::Value::as_str)
-            })
-            .unwrap_or("tool");
-        let lines = message
-            .content
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .collect::<Vec<_>>();
-        let mut summary = if lines.len() <= 4 {
-            lines.join("\n")
-        } else {
-            format!(
-                "{}\n... ({} lines omitted)\n{}",
-                lines[..2].join("\n"),
-                lines.len().saturating_sub(4),
-                lines[lines.len().saturating_sub(2)..].join("\n")
-            )
-        };
-        if summary.chars().count() > AI_TOOL_CONDENSE_SUMMARY_MAX_CHARS {
-            summary = summary
-                .chars()
-                .take(AI_TOOL_CONDENSE_SUMMARY_MAX_CHARS)
-                .collect::<String>();
-            summary.push_str("...");
-        }
-        message.content = format!("[condensed] {tool_name} -> ok:\n{summary}");
-    }
-}
 
 pub fn ai_to_usable_budget_threshold(
     raw_window_ratio: f32,
@@ -384,39 +311,5 @@ mod tests {
         );
     }
 
-    #[test]
-    fn condensing_preserves_recent_and_error_tool_messages() {
-        let mut messages = (0..7)
-            .map(|index| AiChatMessage {
-                id: format!("tool-{index}"),
-                role: AiChatRole::Tool,
-                content: serde_json::json!({
-                    "ok": index != 0,
-                    "output": format!("output-{index}"),
-                    "error": (index == 0).then(|| serde_json::json!({"message": "failed"})),
-                    "meta": {"toolName": "run_command"}
-                })
-                .to_string(),
-                timestamp_ms: 0,
-                model: None,
-                context: None,
-                thinking_content: None,
-                is_streaming: false,
-                metadata: None,
-                tool_call_id: None,
-                tool_calls: Vec::new(),
-                turn: None,
-                transcript_ref: None,
-                summary_ref: None,
-                branches: None,
-                suggestions: Vec::new(),
-            })
-            .collect::<Vec<_>>();
 
-        condense_ai_tool_messages(&mut messages);
-
-        assert!(!messages[0].content.starts_with("[condensed]"));
-        assert!(messages[1].content.starts_with("[condensed]"));
-        assert!(!messages[2].content.starts_with("[condensed]"));
-    }
 }

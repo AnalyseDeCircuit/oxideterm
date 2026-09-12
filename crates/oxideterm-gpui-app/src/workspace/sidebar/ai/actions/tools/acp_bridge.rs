@@ -198,6 +198,7 @@ pub(in crate::workspace) async fn handle_acp_application_tool_call(
                     call.name == "run_command"
                         && decision.risk == oxideterm_ai::AiActionRisk::Destructive,
                     None,
+                    None,
                 )
                 .await
             }
@@ -243,6 +244,7 @@ pub(in crate::workspace) async fn handle_acp_application_tool_call(
                 false,
                 call.name == "run_command"
                     && decision.risk == oxideterm_ai::AiActionRisk::Destructive,
+                None,
                 None,
             )
             .await

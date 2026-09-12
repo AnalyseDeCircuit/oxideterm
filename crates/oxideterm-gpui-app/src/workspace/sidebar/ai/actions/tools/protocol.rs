@@ -425,7 +425,7 @@ pub(in crate::workspace) fn ai_terminal_wait_match(
                 .find(|record| {
                     record.command_id == command_id
                         && record.status
-                            != oxideterm_gpui_terminal::TerminalCommandFactStatus::Open
+                            == oxideterm_gpui_terminal::TerminalCommandFactStatus::Closed
                 })
                 .map(|record| {
                     serde_json::json!({
@@ -875,5 +875,24 @@ mod tests {
             )
             .is_none()
         );
+    }
+}
+
+struct AiTerminalCommandWait {
+    deadline: std::time::Instant,
+}
+
+impl AiTerminalCommandWait {
+    #[cfg(test)]
+    fn new(now: std::time::Instant) -> Self {
+        Self::with_timeout(now, Duration::from_secs(30 * 60))
+    }
+
+    fn with_timeout(now: std::time::Instant, timeout: Duration) -> Self {
+        Self { deadline: now + timeout.min(Duration::from_secs(30 * 60)) }
+    }
+
+    fn expired(&self, now: std::time::Instant) -> bool {
+        now >= self.deadline
     }
 }

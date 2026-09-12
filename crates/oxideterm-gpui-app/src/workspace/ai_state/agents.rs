@@ -43,6 +43,7 @@ pub(in crate::workspace) struct AiAgentGroup {
 pub(in crate::workspace) struct AiAgentWorkspace {
     pub tool_leases:
         HashMap<(oxideterm_ai::ToolSessionId, String), Vec<oxideterm_ai::agent::AgentToolLease>>,
+    pub local_commands: HashMap<(String, u64, String), Task<()>>,
     pub command_monitors: HashMap<oxideterm_ai::RuntimeOwnerKey, Task<()>>,
     pub services: AiAgentServices,
     pub groups: HashMap<AgentGroupId, AiAgentGroup>,
@@ -67,6 +68,7 @@ impl AiAgentWorkspace {
             services,
             tool_leases: HashMap::new(),
             command_monitors: HashMap::new(),
+            local_commands: HashMap::new(),
             groups: HashMap::new(),
             records: HashMap::new(),
             message_runs: HashMap::new(),

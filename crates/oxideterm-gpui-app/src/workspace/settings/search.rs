@@ -620,8 +620,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
                 "settings_view.ai.context_sources",
                 "settings_view.ai.context_source_ide",
                 "settings_view.ai.context_source_sftp",
-                "settings_view.ai.buffer_history",
-                "settings_view.ai.max_response_tokens",
+                "settings_view.ai.context_automatic_hint",
             ],
         ),
         ai_search_entry(
@@ -645,7 +644,6 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             "settings_view.ai.model_context_windows",
             &[
                 "settings_view.ai.model_context_windows_hint",
-                "settings_view.ai.max_response_tokens",
             ],
         ),
         ai_search_entry(

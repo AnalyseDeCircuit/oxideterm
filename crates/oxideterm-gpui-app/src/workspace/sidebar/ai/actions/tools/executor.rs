@@ -246,12 +246,11 @@ impl AiModelBackendServices {
                 )
                 .with_verified(!truncated)
             }
-            Err(error) => snapshot.fail(
-                "MCP resource read failed.",
-                "mcp_resource_read_failed",
-                error.to_string(),
-                "read",
-            ),
+            Err(error) => {
+                let mut result = snapshot.fail("MCP resource read failed.", "mcp_resource_read_failed", error.to_string(), "read");
+                result.data = serde_json::json!({"recovery":error.recovery()});
+                result
+            },
         }
     }
 
@@ -2102,7 +2101,11 @@ async fn execute_ai_tool_uncoordinated(
     post_user_approval: bool,
     dangerous_command_approved: bool,
     leases: Vec<oxideterm_ai::agent::AgentToolLease>,
+    dispatch: Option<oxideterm_ai::agent::AgentDispatch>,
 ) -> AiExecutedToolResult {
+    if dispatch.as_ref().is_some_and(|guard| guard.check().is_err()) {
+        return rejected_ai_tool_result(tool_call_id, tool_name, "agent_direction_changed", "Task direction changed before dispatch.");
+    }
     if ai_rejects_legacy_live_target_argument(&tool_name, &args) {
         return rejected_ai_tool_result(
             tool_call_id,
@@ -2119,6 +2122,7 @@ async fn execute_ai_tool_uncoordinated(
             conversation_id,
             assistant_id,
             AiStreamDeliveryEvent::ToolExecutionRequested {
+                dispatch,
                 leases,
                 tool_session_id: tool_session_id.clone(),
                 tool_call_id: tool_call_id.clone(),

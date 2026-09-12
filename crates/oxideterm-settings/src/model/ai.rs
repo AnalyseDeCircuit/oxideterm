@@ -363,8 +363,6 @@ pub struct AiSettings {
     pub active_backend: AiActiveBackend,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_acp_agent_id: Option<String>,
-    pub context_max_chars: i64,
-    pub context_visible_lines: i64,
     pub thinking_style: AiThinkingStyle,
     pub reasoning_effort: AiReasoningEffort,
     pub reasoning_provider_overrides: Map<String, Value>,
@@ -378,8 +376,6 @@ pub struct AiSettings {
     pub memory: AiMemorySettings,
     #[serde(default)]
     pub skills: AiSkillsSettings,
-    #[serde(default)]
-    pub model_max_response_tokens: Map<String, Value>,
     pub tool_use: AiToolUseSettings,
     pub context_sources: AiContextSources,
     #[serde(default)]
@@ -390,7 +386,7 @@ pub struct AiSettings {
     pub embedding_config: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_roles: Option<Value>,
-    #[serde(flatten)]
+    #[serde(flatten, deserialize_with = "deserialize_ai_extra")]
     pub extra: ExtraFields,
 }
 
@@ -406,8 +402,6 @@ impl Default for AiSettings {
             active_model: None,
             active_backend: AiActiveBackend::Provider,
             active_acp_agent_id: None,
-            context_max_chars: 8000,
-            context_visible_lines: 120,
             thinking_style: AiThinkingStyle::Detailed,
             reasoning_effort: AiReasoningEffort::Auto,
             reasoning_provider_overrides: Map::new(),
@@ -418,7 +412,6 @@ impl Default for AiSettings {
             custom_system_prompt: String::new(),
             memory: AiMemorySettings::default(),
             skills: AiSkillsSettings::default(),
-            model_max_response_tokens: Map::new(),
             tool_use: AiToolUseSettings::default(),
             context_sources: AiContextSources::default(),
             mcp_servers: Vec::new(),
@@ -549,4 +542,13 @@ mod ai_model_tests {
         assert!(!serialized.contains("auth-secret"));
         assert!(!serialized.contains("stderr-secret"));
     }
+}
+
+fn deserialize_ai_extra<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<ExtraFields, D::Error> {
+    let mut extra = ExtraFields::deserialize(deserializer)?;
+    // Retired published controls must not reappear through the unknown-field preservation path.
+    for key in ["contextMaxChars", "contextVisibleLines", "modelMaxResponseTokens"] {
+        extra.remove(key);
+    }
+    Ok(extra)
 }

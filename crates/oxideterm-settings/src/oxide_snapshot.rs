@@ -111,8 +111,6 @@ const AI_KEYS: &[&str] = &[
     "activeModel",
     "activeBackend",
     "activeAcpAgentId",
-    "contextMaxChars",
-    "contextVisibleLines",
     "thinkingStyle",
     "reasoningEffort",
     "reasoningProviderOverrides",
@@ -122,7 +120,6 @@ const AI_KEYS: &[&str] = &[
     "userContextWindows",
     "customSystemPrompt",
     "memory",
-    "modelMaxResponseTokens",
     "toolUse",
     "contextSources",
     "mcpServers",
@@ -426,6 +423,25 @@ mod tests {
         assert_eq!(merged.terminal.font_size, current.terminal.font_size);
         assert!(!merged.terminal.highlight_tab_on_new_output);
         assert!(merged.ai.enabled);
+    }
+
+    #[test]
+    fn retired_ai_size_controls_are_ignored_without_losing_sources_or_model_windows() {
+        let mut source = PersistedSettings::default().to_value();
+        source["ai"]["contextMaxChars"] = json!(8000);
+        source["ai"]["contextVisibleLines"] = json!(50);
+        source["ai"]["modelMaxResponseTokens"] = json!({"provider":{"model":256}});
+        source["ai"]["contextSources"] = json!({"ide":false,"sftp":true});
+        source["ai"]["userContextWindows"] = json!({"provider":{"model":128000}});
+        let loaded: PersistedSettings = serde_json::from_value(source).unwrap();
+        let exported = export_oxide_settings_snapshot_json(&loaded, Some(&HashSet::from(["ai".into()])), false).unwrap();
+        let restored = merge_oxide_settings_snapshot(&PersistedSettings::default(), &exported, None).unwrap();
+        let ai = &restored.to_value()["ai"];
+        for retired in ["contextMaxChars","contextVisibleLines","modelMaxResponseTokens"] {
+            assert_eq!(ai.get(retired), None);
+        }
+        assert_eq!(ai["contextSources"], json!({"ide":false,"sftp":true}));
+        assert_eq!(ai["userContextWindows"], json!({"provider":{"model":128000}}));
     }
 
     #[test]

@@ -999,7 +999,7 @@ impl WorkspaceApp {
             }
         };
 
-        let context_max_chars = self.settings_store.settings().ai.context_max_chars.max(0) as usize;
+        let context_max_chars = self.ai_ambient_context_budget();
         let request = TerminalGitAiCommitRequest {
             provider_id: config.provider_id.clone(),
             requires_key: ai_provider_chat_requires_key(&config.provider_type),

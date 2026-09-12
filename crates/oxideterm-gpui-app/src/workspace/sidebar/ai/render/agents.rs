@@ -68,6 +68,10 @@ impl WorkspaceApp {
             AgentState::AwaitingApproval => "ai.agents.approval",
             AgentState::AwaitingParent => "ai.agents.reply",
             AgentState::AwaitingResource => "ai.agents.resource",
+            AgentState::AwaitingCondition => "settings_view.ai.waiting_condition",
+            AgentState::AwaitingUser => "settings_view.ai.waiting_user",
+            AgentState::AwaitingConnection => "settings_view.ai.waiting_connection",
+            AgentState::Replanning => "settings_view.ai.replanning",
             AgentState::Stopping => "ai.agents.stopping",
             AgentState::Completed => "ai.agents.completed",
             AgentState::Failed => "ai.agents.failed",
@@ -571,7 +575,21 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(11.0))
                             .child(summary.to_owned()),
-                    );
+                    )
+                    .children(snapshot.resources.iter().filter(|resource|
+                        resource.kind != oxideterm_ai::agent::OwnedResourceKind::Observation
+                            || resource.state == oxideterm_ai::agent::OwnedResourceState::Running).map(|resource| {
+                        use oxideterm_ai::agent::{OwnedResourceKind, OwnedResourceState};
+                        let key = match resource.state {
+                            OwnedResourceState::Running if resource.kind == OwnedResourceKind::TerminalCommand => "settings_view.ai.remote_running",
+                            OwnedResourceState::Running => "settings_view.ai.waiting_condition",
+                            OwnedResourceState::Completed => "settings_view.ai.resource_completed",
+                            OwnedResourceState::Stopped => "settings_view.ai.resource_stopped",
+                            OwnedResourceState::OutcomeUnknown => "settings_view.ai.resource_unknown",
+                        };
+                        div().text_size(px(11.0)).text_color(rgb(self.tokens.ui.text_muted))
+                            .child(format!("{} · {}", resource.label.as_str(), self.i18n.t(key)))
+                    }));
                 let task_row = self
                     .agent_control(
                         format!("agent-task-{id}"),

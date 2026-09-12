@@ -664,7 +664,6 @@ impl WorkspaceApp {
                     &mut settings.ai.reasoning_provider_overrides,
                     &mut settings.ai.reasoning_model_overrides,
                     &mut settings.ai.user_context_windows,
-                    &mut settings.ai.model_max_response_tokens,
                     index,
                 );
             },

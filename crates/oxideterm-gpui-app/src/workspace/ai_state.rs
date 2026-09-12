@@ -3452,6 +3452,7 @@ impl AiWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn cancel_chat_stream_for(&mut self, conversation_id: &str) {
+        self.agents.local_commands.retain(|(id, _, _), _| id != conversation_id);
         self.chat_launches.remove(conversation_id);
         let mut runs: Vec<_> = self
             .chat_stream_runs
@@ -4714,12 +4715,12 @@ impl AiModelWorkspaceState {
 }
 
 #[cfg(test)]
-mod entity_tests {
+pub(in crate::workspace) mod entity_tests {
     use super::*;
     use gpui::TestAppContext;
     use std::sync::atomic::AtomicUsize;
 
-    fn queued_turn(id: &str) -> AiQueuedChatTurn {
+    pub(in crate::workspace) fn queued_turn(id: &str) -> AiQueuedChatTurn {
         AiQueuedChatTurn {
             id: id.into(),
             content: zeroize::Zeroizing::new(id.into()),

@@ -89,6 +89,7 @@ pub(in crate::workspace) enum AiSftpTransferError {
 }
 
 pub(in crate::workspace) enum AiStreamDeliveryEvent {
+    Checkpoint(oxideterm_ai::agent::AgentCheckpoint),
     ToolResourcesRequested {
         tool_session_id: ToolSessionId,
         name: String,
@@ -96,6 +97,7 @@ pub(in crate::workspace) enum AiStreamDeliveryEvent {
         sender: tokio::sync::oneshot::Sender<Result<Vec<oxideterm_ai::RuntimeOwnerKey>, String>>,
     },
     AgentCommandRequested {
+        dispatch: Option<oxideterm_ai::agent::AgentDispatch>,
         tool_session_id: ToolSessionId,
         call: AiToolCall,
         sender: tokio::sync::oneshot::Sender<AiExecutedToolResult>,
@@ -192,6 +194,7 @@ pub(in crate::workspace) enum AiStreamDeliveryEvent {
         sender: tokio::sync::oneshot::Sender<Option<String>>,
     },
     ToolExecutionRequested {
+        dispatch: Option<oxideterm_ai::agent::AgentDispatch>,
         leases: Vec<oxideterm_ai::agent::AgentToolLease>,
         tool_session_id: ToolSessionId,
         tool_call_id: String,
@@ -201,4 +204,22 @@ pub(in crate::workspace) enum AiStreamDeliveryEvent {
         dangerous_command_approved: bool,
         sender: tokio::sync::oneshot::Sender<AiExecutedToolResult>,
     },
+}
+
+#[derive(Clone)]
+pub(in crate::workspace) struct AiToolRunContext {
+    arguments: zeroize::Zeroizing<String>,
+    generation: u64,
+    conversation_id: String,
+    assistant_id: String,
+    dispatch: Option<oxideterm_ai::agent::AgentDispatch>,
+}
+
+impl AiToolRunContext {
+    fn resource(&self, workspace: &WorkspaceApp, cx: &App, kind: oxideterm_ai::agent::OwnedResourceKind,
+        label: &str) -> Option<oxideterm_ai::agent::AgentResourceRecord> {
+        let ai = workspace.ai_entity.read(cx);
+        let run = ai.agent_run(self.generation)?;
+        ai.agents.services.runtime.register_resource(&run, kind, AgentText::new(label)).ok()
+    }
 }

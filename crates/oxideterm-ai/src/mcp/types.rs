@@ -218,6 +218,18 @@ pub enum McpError {
 }
 
 impl McpError {
+    pub fn recovery(&self) -> crate::agent::Recovery {
+        use crate::agent::Recovery;
+        match self {
+            Self::Timeout(_) => Recovery::Transient,
+            Self::NotConnected(_) => Recovery::NeedsUser,
+            Self::HttpStatus(status, _) | Self::Rpc { status: Some(status), .. }
+                if status.as_u16() == 401 || status.as_u16() == 403 => Recovery::NeedsUser,
+            Self::Rpc { code: -32602, .. } => Recovery::InvalidCall,
+            _ => Recovery::OutcomeUnknown,
+        }
+    }
+
     fn is_connection_failure(&self) -> bool {
         match self {
             Self::Timeout(_) | Self::NotConnected(_) => true,

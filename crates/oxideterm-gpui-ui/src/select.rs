@@ -94,8 +94,6 @@ pub enum SelectAnchorId {
     SettingsNetworkProxyProtocol,
     SettingsNetworkProxyAuth,
     SettingsAiProviderTemplate,
-    SettingsAiContextMaxChars,
-    SettingsAiContextVisibleLines,
     SettingsAiEmbeddingProvider,
     SettingsKnowledgeCollectionScope,
     SettingsKnowledgeDocumentFormat,
@@ -215,8 +213,6 @@ impl SelectAnchorId {
                 | Self::SettingsNetworkProxyProtocol
                 | Self::SettingsNetworkProxyAuth
                 | Self::SettingsAiProviderTemplate
-                | Self::SettingsAiContextMaxChars
-                | Self::SettingsAiContextVisibleLines
                 | Self::SettingsAiEmbeddingProvider
                 | Self::SettingsKnowledgeCollectionScope
                 | Self::SettingsKnowledgeDocumentFormat

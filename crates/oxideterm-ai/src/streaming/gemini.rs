@@ -11,7 +11,7 @@ use crate::{
 };
 
 use super::CHAT_STREAM_TIMEOUT;
-use super::common::{ParsedStreamLine, stream_sse_response};
+use super::common::{ParsedStreamLine, StreamParseResult, stream_sse_response};
 
 static GEMINI_TOOL_CALL_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -39,18 +39,15 @@ pub(crate) async fn stream_gemini_completion(
         .json(&body)
         .send()
         .await
-        .map_err(|error| {
-            anyhow!(
-                "failed to connect to Gemini provider: {}",
-                error.without_url()
-            )
-        })?;
+        .map_err(|error| anyhow::Error::new(error.without_url()))?;
     if !response.status().is_success() {
+            super::retry::check_transient_response(&response)?;
         let status = response.status().as_u16();
         let error_text = response.text().await.unwrap_or_default();
         return Err(anyhow!(parse_gemini_error(status, &error_text)));
     }
-    let _ = stream_sse_response(response, &events, parse_gemini_data_line).await?;
+    let result = stream_sse_response(response, &events, parse_gemini_data_line).await?;
+    if !matches!(result, StreamParseResult::Done) { return Err(anyhow!("ai_stream_interrupted")); }
     let _ = events.send(AiStreamEvent::Done);
     Ok(())
 }
@@ -341,6 +338,9 @@ pub(crate) fn parse_gemini_data_line(line: &str) -> ParsedStreamLine {
                     });
                 }
             }
+        }
+        if let Some(reason) = json.pointer("/candidates/0/finishReason").and_then(Value::as_str) {
+            events.push(if reason == "STOP" { AiStreamEvent::Done } else { AiStreamEvent::Error("ai_output_incomplete".into()) });
         }
     }
     ParsedStreamLine {

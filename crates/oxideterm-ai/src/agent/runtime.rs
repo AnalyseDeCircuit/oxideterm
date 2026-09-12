@@ -11,6 +11,7 @@ use super::*;
 pub(super) const MAX_MAILBOX_MESSAGES: usize = 64;
 
 struct Run {
+    direction: u64,
     closing: bool,
     requests: Vec<AgentUsage>,
     model_locked: bool,
@@ -19,6 +20,7 @@ struct Run {
     cancellation: watch::Sender<bool>,
 }
 struct Group {
+    direction: u64,
     parent: AgentId,
     remaining_rounds: usize,
     summary_used: bool,
@@ -62,6 +64,105 @@ impl AgentRuntime {
         self.changes.subscribe()
     }
 
+    pub fn register_resource(
+        &self,
+        run: &AgentRunRef,
+        kind: OwnedResourceKind,
+        label: AgentText,
+    ) -> Result<AgentResourceRecord, AgentError> {
+        let mut state = self.state.lock();
+        let group = current_group(&mut state, run)?;
+        ensure_active(group, run)?;
+        let id = uuid::Uuid::new_v4().to_string();
+        group
+            .runs
+            .get_mut(&run.agent_id)
+            .unwrap()
+            .snapshot
+            .resources
+            .push(OwnedResource {
+                id: id.clone(),
+                kind,
+                label,
+                outcome: None,
+                state: OwnedResourceState::Running,
+            });
+        drop(state);
+        self.changed();
+        Ok(AgentResourceRecord::new(
+            self.clone(),
+            run.clone(),
+            id,
+            kind,
+        ))
+    }
+
+    pub(super) fn record_resource_outcome(&self, run: &AgentRunRef, id: &str, outcome: AgentText) {
+        let mut state = self.state.lock();
+        let Ok(group) = current_group(&mut state, run) else {
+            return;
+        };
+        let Some(resource) = group
+            .runs
+            .get_mut(&run.agent_id)
+            .unwrap()
+            .snapshot
+            .resources
+            .iter_mut()
+            .find(|resource| resource.id == id)
+        else {
+            return;
+        };
+        resource.outcome = Some(outcome);
+        drop(state);
+        self.changed();
+    }
+
+    pub(super) fn finish_resource(
+        &self,
+        run: &AgentRunRef,
+        id: &str,
+        next: OwnedResourceState,
+        only_running: bool,
+    ) {
+        let mut state = self.state.lock();
+        let Ok(group) = current_group(&mut state, run) else {
+            return;
+        };
+        let Some(resource) = group
+            .runs
+            .get_mut(&run.agent_id)
+            .unwrap()
+            .snapshot
+            .resources
+            .iter_mut()
+            .find(|resource| resource.id == id)
+        else {
+            return;
+        };
+        if only_running && resource.state != OwnedResourceState::Running {
+            return;
+        }
+        resource.state = next;
+        drop(state);
+        self.changed();
+    }
+
+    pub fn dispatch(&self, run: &AgentRunRef) -> Result<AgentDispatch, AgentError> {
+        let mut state = self.state.lock();
+        let group = current_group(&mut state, run)?;
+        ensure_active(group, run)?;
+        let direction = group.runs[&run.agent_id].direction;
+        if direction != group.direction {
+            return Err(AgentError::DirectionChanged);
+        }
+        Ok(AgentDispatch {
+            runtime: self.clone(),
+            run: run.clone(),
+            direction,
+        })
+    }
+
     pub fn create_group(
         &self,
         conversation_id: String,
@@ -75,6 +176,7 @@ impl AgentRuntime {
             run_id: AgentRunId::new(),
         };
         let snapshot = AgentSnapshot {
+            resources: Vec::new(),
             usage: AgentUsage::default(),
             run: run.clone(),
             parent_id: None,
@@ -90,6 +192,7 @@ impl AgentRuntime {
         self.state.lock().groups.insert(
             run.group_id.clone(),
             Group {
+                direction: 0,
                 parent: run.agent_id.clone(),
                 remaining_rounds: rounds,
                 summary_used: false,
@@ -101,6 +204,7 @@ impl AgentRuntime {
                 runs: HashMap::from([(
                     run.agent_id.clone(),
                     Run {
+                        direction: 0,
                         closing: false,
                         requests: Vec::new(),
                         model_locked: false,
@@ -142,6 +246,7 @@ impl AgentRuntime {
             run_id: AgentRunId::new(),
         };
         let snapshot = AgentSnapshot {
+            resources: Vec::new(),
             run: run.clone(),
             parent_id: Some(parent.agent_id.clone()),
             conversation_id: parent_snapshot.conversation_id.clone(),
@@ -157,6 +262,7 @@ impl AgentRuntime {
         group.runs.insert(
             run.agent_id.clone(),
             Run {
+                direction: group.direction,
                 closing: false,
                 requests: Vec::new(),
                 model_locked: false,
@@ -354,6 +460,19 @@ impl AgentRuntime {
             consumed: false,
         };
         let group = state.groups.get_mut(&to.group_id).unwrap();
+        if kind == AgentMessageKind::UserSupplement && from.agent_id == group.parent {
+            group.direction = group
+                .direction
+                .checked_add(1)
+                .expect("direction counter exhausted");
+            for run in group
+                .runs
+                .values_mut()
+                .filter(|run| !run.snapshot.state.is_terminal())
+            {
+                run.snapshot.state = AgentState::Replanning;
+            }
+        }
         group.communication.push(message.clone());
         group
             .runs
@@ -392,6 +511,18 @@ impl AgentRuntime {
                 message
             })
             .collect();
+        if !messages.is_empty()
+            && (run.agent_id == group.parent
+                || messages.iter().any(|message| {
+                    message.from.agent_id == group.parent
+                        && matches!(
+                            message.kind,
+                            AgentMessageKind::FollowUp | AgentMessageKind::Assignment
+                        )
+                }))
+        {
+            group.runs.get_mut(&run.agent_id).unwrap().direction = group.direction;
+        }
         for update in &mut group.updates {
             if let Some(message) = update.message.as_mut() {
                 if messages
@@ -866,4 +997,43 @@ fn ensure_active(group: &Group, run: &AgentRunRef) -> Result<(), AgentError> {
         return Err(AgentError::InvalidState);
     }
     Ok(())
+}
+
+/// Captured before a model round; never refreshed by an old pending tool call.
+#[derive(Clone)]
+pub struct AgentDispatch {
+    runtime: AgentRuntime,
+    run: AgentRunRef,
+    direction: u64,
+}
+
+impl AgentDispatch {
+    pub fn check(&self) -> Result<(), AgentError> {
+        let current = self.runtime.dispatch(&self.run)?;
+        if current.direction != self.direction {
+            return Err(AgentError::DirectionChanged);
+        }
+        Ok(())
+    }
+
+    pub async fn cancelled(&self) {
+        let Ok(mut cancellation) = self.runtime.cancellation(&self.run) else {
+            return;
+        };
+        if !*cancellation.borrow() {
+            let _ = cancellation.changed().await;
+        }
+    }
+
+    pub async fn invalidated(&self) {
+        let mut changes = self.runtime.subscribe();
+        loop {
+            if self.check().is_err() {
+                return;
+            }
+            if changes.changed().await.is_err() {
+                return;
+            }
+        }
+    }
 }

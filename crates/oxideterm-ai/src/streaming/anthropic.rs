@@ -8,7 +8,7 @@ use crate::{
 };
 
 use super::CHAT_STREAM_TIMEOUT;
-use super::common::{ParsedStreamLine, stream_sse_response};
+use super::common::{ParsedStreamLine, StreamParseResult, stream_sse_response};
 
 pub(crate) async fn stream_anthropic_completion(
     config: AiChatStreamConfig,
@@ -36,22 +36,19 @@ pub(crate) async fn stream_anthropic_completion(
         .json(&body)
         .send()
         .await
-        .map_err(|error| {
-            anyhow!(
-                "failed to connect to Anthropic provider: {}",
-                error.without_url()
-            )
-        })?;
+        .map_err(|error| anyhow::Error::new(error.without_url()))?;
     if !response.status().is_success() {
+            super::retry::check_transient_response(&response)?;
         let status = response.status().as_u16();
         let error_text = response.text().await.unwrap_or_default();
         return Err(anyhow!(parse_anthropic_error(status, &error_text)));
     }
     let mut accumulator = AnthropicToolAccumulator::default();
-    let _ = stream_sse_response(response, &events, |line| {
+    let result = stream_sse_response(response, &events, |line| {
         parse_anthropic_data_line_with_accumulator(line, &mut accumulator)
     })
     .await?;
+    if !matches!(result, StreamParseResult::Done) { return Err(anyhow!("ai_stream_interrupted")); }
     let _ = events.send(AiStreamEvent::Done);
     Ok(())
 }
@@ -410,6 +407,9 @@ pub(crate) fn parse_anthropic_data_line_with_accumulator(
                         arguments: active.arguments,
                     });
                 }
+            }
+            Some("message_delta") if json.pointer("/delta/stop_reason").and_then(Value::as_str) == Some("max_tokens") => {
+                events.push(AiStreamEvent::Error("ai_output_incomplete".into()));
             }
             Some("message_stop") => events.push(AiStreamEvent::Done),
             Some("error") => {

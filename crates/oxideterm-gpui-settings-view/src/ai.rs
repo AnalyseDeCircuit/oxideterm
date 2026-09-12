@@ -50,44 +50,11 @@ pub fn settings_ai_tool_number_input_row(tokens: &ThemeTokens, row: AnyElement) 
         .into_any_element()
 }
 
-pub fn settings_ai_context_select_field(
-    tokens: &ThemeTokens,
-    label: String,
-    control: AnyElement,
-    hint: String,
-) -> AnyElement {
-    // Context select rows are pure form layout; the select trigger remains
-    // app-owned because it is anchored to WorkspaceApp select state.
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(8.0))
-        .child(
-            div()
-                .text_size(px(tokens.metrics.ui_text_sm))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(rgb(tokens.ui.text))
-                .child(label),
-        )
-        .child(control)
-        .child(
-            div()
-                .text_size(px(tokens.metrics.ui_text_xs))
-                .text_color(rgb(tokens.ui.text_muted))
-                .child(hint),
-        )
-        .into_any_element()
-}
-
 pub fn settings_ai_context_controls_section(
-    _max_width: f32,
     title: AnyElement,
-    fields: Vec<AnyElement>,
+    description: AnyElement,
     sources: AnyElement,
-    max_response_tokens: AnyElement,
 ) -> AnyElement {
-    // Context controls are a two-column form followed by source toggles. The
-    // controls themselves stay app-owned because select/list state lives there.
     div()
         .w_full()
         .min_w(px(0.0))
@@ -95,9 +62,8 @@ pub fn settings_ai_context_controls_section(
         .flex_col()
         .gap(px(16.0))
         .child(title)
-        .child(div().grid().grid_cols(2).gap(px(24.0)).children(fields))
+        .child(description)
         .child(sources)
-        .child(max_response_tokens)
         .into_any_element()
 }
 
@@ -694,50 +660,6 @@ fn settings_ai_context_source_badge_colors(
             rgba((tokens.ui.border << 8) | AI_CONTEXT_SOURCE_DEFAULT_BG_ALPHA),
         ),
     }
-}
-
-pub fn settings_ai_active_model_max_response_tokens_row(
-    tokens: &ThemeTokens,
-    title: String,
-    hint: String,
-    model_label: String,
-    input: AnyElement,
-    mono_font_family: SharedString,
-) -> AnyElement {
-    // Active-model token override keeps its input outside the view crate but
-    // no longer needs custom layout in the app monolith.
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(8.0))
-        .child(
-            div()
-                .text_size(px(tokens.metrics.ui_text_sm))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(rgb(tokens.ui.text))
-                .child(title),
-        )
-        .child(
-            div()
-                .text_size(px(tokens.metrics.ui_text_xs))
-                .text_color(rgb(tokens.ui.text_muted))
-                .child(hint),
-        )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(12.0))
-                .child(
-                    div()
-                        .text_size(px(tokens.metrics.ui_text_xs))
-                        .text_color(rgb(tokens.ui.text_muted))
-                        .font_family(mono_font_family)
-                        .child(model_label),
-                )
-                .child(input),
-        )
-        .into_any_element()
 }
 
 pub fn settings_ai_tool_collapsed_summary(tokens: &ThemeTokens, summary: String) -> AnyElement {

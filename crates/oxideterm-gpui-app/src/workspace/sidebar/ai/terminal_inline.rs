@@ -66,7 +66,7 @@ impl WorkspaceApp {
             .unwrap_or_default();
         let sanitized_selection = truncate_ai_inline_context(
             oxideterm_ai::sanitize_for_ai(&selection),
-            self.settings_store.settings().ai.context_max_chars,
+            self.ai_ambient_context_budget() as i64,
         );
         self.ai_entity.update(cx, |ai, _cx| {
             ai.open_terminal_inline_panel(sanitized_selection);
@@ -804,11 +804,7 @@ window.focus(&this.focus_handle, cx);
             base_url: provider.base_url,
             model: model.clone(),
             api_key: None,
-            max_response_tokens: ai_model_max_response_tokens(
-                &settings.ai.model_max_response_tokens,
-                &provider.id,
-                &model,
-            ),
+            max_response_tokens: None,
             reasoning_effort: Some(reasoning_effort),
             safety_mode: AiPolicySafetyMode::Default,
             profile_id: None,

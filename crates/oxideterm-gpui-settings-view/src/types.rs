@@ -96,8 +96,6 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::NetworkProxyProtocol => SelectAnchorId::SettingsNetworkProxyProtocol,
             Self::NetworkProxyAuth => SelectAnchorId::SettingsNetworkProxyAuth,
             Self::AiProviderTemplate => SelectAnchorId::SettingsAiProviderTemplate,
-            Self::AiContextMaxChars => SelectAnchorId::SettingsAiContextMaxChars,
-            Self::AiContextVisibleLines => SelectAnchorId::SettingsAiContextVisibleLines,
             Self::AiEmbeddingProvider => SelectAnchorId::SettingsAiEmbeddingProvider,
             Self::KnowledgeCollectionScope => SelectAnchorId::SettingsKnowledgeCollectionScope,
             Self::KnowledgeDocumentFormat => SelectAnchorId::SettingsKnowledgeDocumentFormat,

@@ -449,7 +449,7 @@ impl WorkspaceApp {
     ) {
         let safe_error = match &event {
             AiStreamEvent::Error(error) => Some(
-                self.i18n.t(oxideterm_ai::responses_error_label(error)
+                self.i18n.t(oxideterm_ai::stream_error_label(error)
                     .unwrap_or("settings_view.ai.acp_agent_error_unknown")),
             ),
             _ => None,

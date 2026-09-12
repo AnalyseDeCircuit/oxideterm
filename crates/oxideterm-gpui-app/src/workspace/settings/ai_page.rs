@@ -5,9 +5,6 @@ pub(in crate::workspace) const AI_PROVIDER_MODEL_BORDER_ALPHA: u32 = 0x80; // Ta
 pub(in crate::workspace) const AI_PROVIDER_SELECT_W: f32 = 224.0; // Tauri w-56.
 pub(in crate::workspace) const AI_PROVIDER_MAX_W: f32 = 768.0; // Tauri max-w-3xl.
 pub(in crate::workspace) const AI_PROVIDER_VISIBLE_MODEL_LIMIT: usize = 8;
-pub(in crate::workspace) const AI_CONTEXT_MAX_CHAR_OPTIONS: [i64; 5] =
-    [2_000, 4_000, 8_000, 16_000, 32_000];
-pub(in crate::workspace) const AI_CONTEXT_VISIBLE_LINE_OPTIONS: [i64; 4] = [50, 100, 200, 400];
 pub(in crate::workspace) const AI_CONTEXT_NUMBER_W: f32 = 112.0; // Tauri w-28.
 pub(in crate::workspace) const AI_CONFIRM_DIALOG_WIDTH: f32 = 448.0; // Tauri DialogContent max-w-md.
 pub(in crate::workspace) const AI_KEY_REMOVE_DIALOG_WIDTH: f32 = 384.0; // Tauri useConfirm max-w-sm.

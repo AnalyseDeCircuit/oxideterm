@@ -465,26 +465,9 @@ pub fn ai_tool_policy_groups(settings: &PersistedSettings) -> Vec<AiToolPolicyGr
     ]
 }
 
-pub fn ai_context_max_chars_label_key(value: i64) -> Option<&'static str> {
-    match value {
-        2_000 => Some("settings_view.ai.chars_2000"),
-        4_000 => Some("settings_view.ai.chars_4000"),
-        8_000 => Some("settings_view.ai.chars_8000"),
-        16_000 => Some("settings_view.ai.chars_16000"),
-        32_000 => Some("settings_view.ai.chars_32000"),
-        _ => None,
-    }
-}
 
-pub fn ai_context_visible_lines_label_key(value: i64) -> Option<&'static str> {
-    match value {
-        50 => Some("settings_view.ai.lines_50"),
-        100 => Some("settings_view.ai.lines_100"),
-        200 => Some("settings_view.ai.lines_200"),
-        400 => Some("settings_view.ai.lines_400"),
-        _ => None,
-    }
-}
+
+
 
 pub fn ai_model_context_window_panels(
     settings: &PersistedSettings,
@@ -724,32 +707,7 @@ pub fn set_ai_user_context_window(
     }
 }
 
-pub fn set_ai_model_max_response_tokens(
-    settings: &mut PersistedSettings,
-    provider_id: &str,
-    model: &str,
-    value: Option<i64>,
-) {
-    let provider_entry = settings
-        .ai
-        .model_max_response_tokens
-        .entry(provider_id.to_string())
-        .or_insert_with(|| serde_json::json!({}));
-    let Some(model_tokens) = provider_entry.as_object_mut() else {
-        return;
-    };
-    match value.filter(|value| (256..=65_536).contains(value)) {
-        Some(value) => {
-            model_tokens.insert(model.to_string(), serde_json::json!(value));
-        }
-        None => {
-            model_tokens.remove(model);
-        }
-    }
-    if model_tokens.is_empty() {
-        settings.ai.model_max_response_tokens.remove(provider_id);
-    }
-}
+
 
 #[cfg(test)]
 mod tests {

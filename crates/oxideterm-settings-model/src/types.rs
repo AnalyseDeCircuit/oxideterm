@@ -119,8 +119,6 @@ pub enum SettingsSelect {
     NetworkProxyProtocol,
     NetworkProxyAuth,
     AiProviderTemplate,
-    AiContextMaxChars,
-    AiContextVisibleLines,
     AiEmbeddingProvider,
     KnowledgeCollectionScope,
     KnowledgeDocumentFormat,
@@ -224,7 +222,6 @@ pub enum SettingsInput {
     AiToolUseMaxRounds,
     AiToolUseMaxCallsPerRound,
     AiModelContextWindow(usize, usize),
-    AiActiveModelMaxResponseTokens,
     AiEmbeddingModel,
     AiMcpName,
     AiMcpCommand,
@@ -622,7 +619,6 @@ impl SettingsInput {
             Self::AiModelContextWindow(provider_index, model_index) => {
                 23_000 + provider_index as u64 * 1_000 + model_index as u64
             }
-            Self::AiActiveModelMaxResponseTokens => 24_000,
             Self::AiEmbeddingModel => 24_001,
             Self::AiMcpName => 25_000,
             Self::AiMcpCommand => 25_001,

@@ -924,19 +924,19 @@ impl WorkspaceApp {
             }
         };
         self.record_ai_memory_usage(&stream_config.memory_entry_ids, cx);
-        let conversation_id = self.ai_entity.update(cx, |ai, _cx| {
-            ai.truncate_active_conversation_after_last_user(ai_now_ms())
-        });
-        let Some(conversation_id) = conversation_id else {
-            return;
+        let recovery = self.ai_entity.read(cx).conversation_state().active_conversation()
+            .and_then(|conversation| {
+                let message = conversation.messages.last()?;
+                let checkpoint = oxideterm_ai::agent::recoverable_checkpoint(message)?;
+                Some((conversation.id.clone(), checkpoint.resume_prompt()))
+            });
+        let (conversation_id, task_prompt) = if let Some((id, prompt)) = recovery {
+            (Some(id), Some(prompt))
+        } else {
+            (self.ai_entity.update(cx, |ai, _cx| ai.truncate_active_conversation_after_last_user(ai_now_ms())), None)
         };
-        self.start_ai_chat_stream_after_api_key_lookup(
-            conversation_id,
-            stream_config,
-            None,
-            None,
-            cx,
-        );
+        let Some(conversation_id) = conversation_id else { return; };
+        self.start_ai_chat_stream_after_api_key_lookup(conversation_id, stream_config, None, task_prompt, cx);
         cx.notify();
     }
 

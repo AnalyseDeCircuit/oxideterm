@@ -35,9 +35,24 @@ impl WorkspaceApp {
                     let result = self.ai_tool_resource_keys(delivery.generation, &tool_session_id, &name, &args, cx);
                     let _ = sender.send(result);
                 }
-                AiStreamDeliveryEvent::AgentCommandRequested { tool_session_id, call, sender } => {
+                AiStreamDeliveryEvent::AgentCommandRequested { dispatch, tool_session_id, call, sender } => {
+                    if dispatch.as_ref().is_some_and(|guard| guard.check().is_err()) {
+                        let _ = sender.send(ai_direction_changed_result(&call));
+                        continue;
+                    }
                     self.flush_pending_ai_stream_text(&mut pending_text, cx);
                     self.handle_ai_agent_command(delivery.generation, &delivery.conversation_id, &tool_session_id, call, sender, cx);
+                }
+                AiStreamDeliveryEvent::Checkpoint(checkpoint) => {
+                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai_entity.update(cx, |ai, _| {
+                        if ai.chat_stream_matches(delivery.generation, &delivery.conversation_id, &delivery.assistant_id) {
+                            ai.update_chat_message(&delivery.conversation_id, &delivery.assistant_id, |message| {
+                                oxideterm_ai::agent::set_message_checkpoint(message, &checkpoint);
+                            });
+                            ai.persist_chat_state();
+                        }
+                    });
                 }
                 AiStreamDeliveryEvent::PromptUsage {
                     last_user_message_id,
@@ -920,6 +935,7 @@ impl WorkspaceApp {
                     let _ = sender.send(context);
                 }
                 AiStreamDeliveryEvent::ToolExecutionRequested {
+                    dispatch,
                     leases,
                     tool_session_id,
                     tool_call_id,
@@ -930,6 +946,10 @@ impl WorkspaceApp {
                     sender,
                 } => {
                     self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    if dispatch.as_ref().is_some_and(|guard| guard.check().is_err()) {
+                        let _ = sender.send(rejected_ai_tool_result(tool_call_id, name, "agent_direction_changed", "Task direction changed before dispatch."));
+                        continue;
+                    }
                     let session_is_active = self.ai_runtime_context.read(cx).is_active_tool_session(
                         delivery.generation,
                         &tool_session_id,
@@ -947,8 +967,10 @@ impl WorkspaceApp {
                     if !leases.is_empty() {
                         self.ai_entity.update(cx, |ai, _cx| { ai.agents.tool_leases.insert((tool_session_id.clone(), tool_call_id.clone()), leases); });
                     }
+                    let raw_arguments = zeroize::Zeroizing::new(args.to_string());
                     self.start_ai_ui_orchestrator_tool_execution(
-                        delivery.conversation_id.clone(),
+                        AiToolRunContext { arguments: zeroize::Zeroizing::new(sanitize_ai_tool_arguments_for_approval(&raw_arguments)), generation: delivery.generation, conversation_id: delivery.conversation_id.clone(),
+                            assistant_id: delivery.assistant_id.clone(), dispatch },
                         tool_session_id,
                         tool_call_id,
                         name,
