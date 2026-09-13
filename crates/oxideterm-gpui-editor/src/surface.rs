@@ -6,8 +6,8 @@ use std::{cell::RefCell, collections::HashMap, ops::Range, sync::Arc, time::Dura
 use gpui::{
     AnyElement, App, Bounds, Context, Div, Element, ElementId, ElementInputHandler, Entity,
     FocusHandle, Focusable, GlobalElementId, InspectorElementId, IntoColor, IntoElement, LayoutId,
-    ParentElement, Pixels, Point, ScrollWheelEvent, SharedString, Task, TextRun, Timer, Window,
-    div, point, prelude::*, px, rgb,
+    ParentElement, Pixels, Point, ScrollWheelEvent, SharedString, Task, TextRun, Window, div,
+    point, prelude::*, px, rgb,
 };
 use oxideterm_editor_core::{
     BufferOffset, Cursor, EditTransaction, FindMatch, LineCol, Selection, TextBuffer, TextEdit,
@@ -412,9 +412,11 @@ impl TextEditorView {
         self.caret_blink_task = None;
         self.caret_visible = true;
         let generation = self.caret_blink_generation;
+        // Use the owning GPUI scheduler so tests can control time and local task wakeups.
+        let executor = cx.background_executor().clone();
         self.caret_blink_task = Some(cx.spawn(async move |editor, cx| {
             loop {
-                Timer::after(EDITOR_CARET_BLINK_INTERVAL).await;
+                executor.timer(EDITOR_CARET_BLINK_INTERVAL).await;
                 let should_continue = editor
                     .update(cx, |editor, cx| {
                         if editor.caret_blink_generation != generation
@@ -1254,6 +1256,35 @@ mod tests {
     use std::sync::Arc;
 
     use super::{HighlightChunkCache, HighlightChunkCacheKey, LineChunkSpec};
+
+    #[gpui::test]
+    fn editor_caret_blink_uses_scheduled_time_and_stops_when_released(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use super::{EDITOR_CARET_BLINK_INTERVAL, TextEditorView};
+        let editor =
+            cx.new(|cx| TextEditorView::new("text", &oxideterm_theme::default_tokens(), cx));
+        editor.update(cx, |editor, cx| editor.sync_caret_blink_focus(true, cx));
+        cx.run_until_parked();
+        cx.executor().advance_clock(EDITOR_CARET_BLINK_INTERVAL);
+        cx.run_until_parked();
+        editor.read_with(cx, |editor, _| assert!(!editor.caret_visible));
+        editor.update(cx, |editor, cx| editor.sync_caret_blink_focus(false, cx));
+        cx.executor().advance_clock(EDITOR_CARET_BLINK_INTERVAL * 2);
+        cx.run_until_parked();
+        editor.read_with(cx, |editor, _| {
+            assert!(editor.caret_visible);
+            assert!(editor.caret_blink_task.is_none());
+        });
+        editor.update(cx, |editor, cx| editor.sync_caret_blink_focus(true, cx));
+        cx.run_until_parked();
+        let weak = editor.downgrade();
+        drop(editor);
+        cx.update(|_| {});
+        cx.executor().advance_clock(EDITOR_CARET_BLINK_INTERVAL * 2);
+        cx.run_until_parked();
+        assert!(weak.upgrade().is_none());
+    }
 
     #[gpui::test]
     fn folds_and_guides_follow_newlines_and_history(cx: &mut gpui::TestAppContext) {
