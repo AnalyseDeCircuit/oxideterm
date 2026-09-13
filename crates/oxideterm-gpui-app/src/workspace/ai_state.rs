@@ -6057,7 +6057,9 @@ pub(in crate::workspace) mod entity_tests {
             std::thread::sleep(Duration::from_millis(1));
         }
         let cached_main = entity.read_with(cx, |ai, _| {
-            ai.history.pages["paged"].bodies["message-999"].upgrade().unwrap()
+            ai.history.pages["paged"].bodies["message-999"]
+                .upgrade()
+                .unwrap()
         });
         let archive_owner = history::HistoryViewOwner::Archive("paged".into(), "archive".into());
         entity.update(cx, |ai, _| {
@@ -6096,8 +6098,13 @@ pub(in crate::workspace) mod entity_tests {
         }
         settle(cx, "message-950", 50);
         entity.read_with(cx, |ai, _| {
-            let refreshed = ai.history.pages["paged"].bodies["message-999"].upgrade().unwrap();
-            assert!(Arc::ptr_eq(&cached_main, &refreshed), "unchanged history refresh must retain the decoded row");
+            let refreshed = ai.history.pages["paged"].bodies["message-999"]
+                .upgrade()
+                .unwrap();
+            assert!(
+                Arc::ptr_eq(&cached_main, &refreshed),
+                "unchanged history refresh must retain the decoded row"
+            );
         });
         struct HistoryPageRow {
             ai: Entity<AiWorkspaceEntity>,
@@ -6113,9 +6120,11 @@ pub(in crate::workspace) mod entity_tests {
                     div().h(gpui::px(20.0)).w_full().into_any_element()
                 })
                 .size_full();
-                div().relative().size_full().child(list).child(
-                    oxideterm_gpui_ui::scroll::Scrollbar::for_list(&self.state)
-                )
+                div()
+                    .relative()
+                    .size_full()
+                    .child(list)
+                    .child(oxideterm_gpui_ui::scroll::Scrollbar::for_list(&self.state))
             }
         }
         let list_state = entity.read_with(cx, |ai, _| ai.chat_ui.message_list_state.clone());
@@ -6156,7 +6165,11 @@ pub(in crate::workspace) mod entity_tests {
             body.content = "visible payload".into();
             let body = Arc::new(oxideterm_ai::live_message_view(&body, "paged", 1, None).unwrap());
             let weak = Arc::downgrade(&body);
-            ai.history.pages.get_mut("paged").unwrap().bodies
+            ai.history
+                .pages
+                .get_mut("paged")
+                .unwrap()
+                .bodies
                 .insert("message-999".into(), weak.clone());
             ai.retain_visible_history_body(owner.clone(), "message-999".into(), cx);
             weak
