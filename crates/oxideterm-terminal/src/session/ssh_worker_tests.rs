@@ -247,6 +247,25 @@ fn ssh_busy_snapshot_retries_after_the_final_output_without_another_packet() {
         .try_render_snapshot(&previous, false)
         .unwrap();
     assert_eq!(snapshot.lines[0].text().trim_end(), "last frame");
+    fixture.terminal.set_focused(false).unwrap();
+    fixture.barrier();
+    let presented = fixture
+        .terminal
+        .read_pending_with_budget(TerminalDrainBudget::unlimited());
+    assert!(
+        presented.output_presented,
+        "focus delivery must not reclassify the rendered output as unread"
+    );
+    assert_eq!(presented.drained_bytes, b"last frame\r\n".len());
+    fixture.terminal.set_output_processor(None);
+    fixture.barrier();
+    fixture.send(b"new output\r\n");
+    wait_until(|| fixture.terminal.buffer_text().contains("new output"));
+    let unread = fixture
+        .terminal
+        .read_pending_with_budget(TerminalDrainBudget::unlimited());
+    assert!(!unread.output_presented);
+    assert_eq!(unread.drained_bytes, b"new output\r\n".len());
 }
 
 #[test]

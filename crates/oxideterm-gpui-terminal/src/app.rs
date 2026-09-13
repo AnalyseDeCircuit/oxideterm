@@ -2790,6 +2790,23 @@ impl TerminalPane {
         }
     }
 
+    fn apply_terminal_drain_activity(
+        &mut self,
+        report: &TerminalDrainReport,
+        now: Instant,
+        cx: &mut Context<Self>,
+    ) {
+        if report.changed {
+            self.last_terminal_activity = now;
+            self.snapshot_dirty = true;
+            self.mark_terminal_content_changed(cx);
+        }
+        // Focus, resize, and cursor changes invalidate rendering without receiving output.
+        if report.drained_bytes > 0 && !report.output_presented {
+            cx.emit(TerminalPaneEvent::OutputActivity);
+        }
+    }
+
     fn tick(&mut self, cx: &mut Context<Self>) {
         let now = Instant::now();
         let budget = self.next_drain_budget();
@@ -2801,14 +2818,7 @@ impl TerminalPane {
             (report, events, mode)
         };
         self.last_drain_budget_exhausted = report.budget_exhausted;
-        if report.changed {
-            self.last_terminal_activity = now;
-            // Parsing stays current for every terminal, but the expensive immutable snapshot is
-            // built only when GPUI actually renders this pane.
-            self.snapshot_dirty = true;
-            self.mark_terminal_content_changed(cx);
-            cx.emit(TerminalPaneEvent::OutputActivity);
-        }
+        self.apply_terminal_drain_activity(&report, now, cx);
         let render_stats_changed = self.update_render_stats(&report, now);
 
         let mut event_effect = TerminalEventEffect::default();
@@ -4433,6 +4443,77 @@ mod tests {
         assert_eq!(
             recorder.read_with(cx, |recorder, _cx| recorder.delivered.len()),
             3
+        );
+    }
+
+    #[gpui::test]
+    fn redraw_only_reports_do_not_emit_unread_output_activity(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .unwrap()
+            })
+        });
+        let events = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let received = events.clone();
+        let _subscription = cx.update(|_, cx| {
+            cx.subscribe(&pane, move |_, event, _| {
+                received.borrow_mut().push(event.clone());
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            pane.apply_terminal_drain_activity(
+                &TerminalDrainReport {
+                    changed: true,
+                    ..Default::default()
+                },
+                Instant::now(),
+                cx,
+            );
+            assert!(pane.snapshot_dirty);
+        });
+        cx.run_until_parked();
+        assert!(!events.borrow().contains(&TerminalPaneEvent::OutputActivity));
+        pane.update(cx, |pane, cx| {
+            pane.apply_terminal_drain_activity(
+                &TerminalDrainReport {
+                    changed: true,
+                    drained_bytes: 12,
+                    output_presented: true,
+                    ..Default::default()
+                },
+                Instant::now(),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        assert!(!events.borrow().contains(&TerminalPaneEvent::OutputActivity));
+        pane.update(cx, |pane, cx| {
+            pane.apply_terminal_drain_activity(
+                &TerminalDrainReport {
+                    changed: true,
+                    drained_bytes: 12,
+                    ..Default::default()
+                },
+                Instant::now(),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            events
+                .borrow()
+                .iter()
+                .filter(|event| **event == TerminalPaneEvent::OutputActivity)
+                .count(),
+            1
         );
     }
 

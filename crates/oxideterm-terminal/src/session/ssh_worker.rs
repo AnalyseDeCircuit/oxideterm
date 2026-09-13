@@ -982,11 +982,19 @@ impl TerminalSessionBackend for SshPtySession {
         };
         // The parser and its graphics placements cannot advance while these
         // three parts of the render snapshot are captured together.
-        Some((
+        let snapshot = (
             core.snapshot_incremental(previous),
             core.selection(),
             core.mode(),
-        ))
+        );
+        // The visible frame acknowledges these bytes before a delayed activity delivery
+        // can classify them against a different active tab. The core lock excludes new output.
+        self.shared
+            .report
+            .lock()
+            .expect("SSH parser report")
+            .output_presented = true;
+        Some(snapshot)
     }
 
     fn shutdown(&mut self) {

@@ -77,6 +77,8 @@ impl TerminalDrainBudget {
 pub struct TerminalDrainReport {
     pub changed: bool,
     pub drained_bytes: usize,
+    /// All accumulated output bytes are already represented by a rendered snapshot.
+    pub output_presented: bool,
     pub pending_bytes: usize,
     pub events_drained: usize,
     pub drain_duration: Duration,
@@ -92,12 +94,19 @@ impl TerminalDrainReport {
     }
 
     pub fn record_data_chunk(&mut self, byte_len: usize, processing_duration: Duration) {
+        if byte_len > 0 {
+            self.output_presented = false;
+        }
         self.drained_bytes = self.drained_bytes.saturating_add(byte_len);
         self.max_data_chunk_bytes = self.max_data_chunk_bytes.max(byte_len);
         self.output_processing_duration += processing_duration;
     }
 
     pub fn combine(&mut self, other: TerminalDrainReport) {
+        if other.drained_bytes > 0 {
+            self.output_presented =
+                (self.drained_bytes == 0 || self.output_presented) && other.output_presented;
+        }
         self.changed |= other.changed;
         self.drained_bytes = self.drained_bytes.saturating_add(other.drained_bytes);
         self.pending_bytes = self.pending_bytes.saturating_add(other.pending_bytes);
