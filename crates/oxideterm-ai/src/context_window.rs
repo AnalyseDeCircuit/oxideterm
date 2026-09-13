@@ -59,7 +59,7 @@ static MODEL_CONTEXT_WINDOWS: LazyLock<Vec<(Regex, i64)>> = LazyLock::new(|| {
         (r"mistral", 32_000),
         (r"qwen-?3|qwen3|qwen-?2\.5|qwen2\.5|qwen-max", 128_000),
         (r"qwen", 32_000),
-        (r"deepseek-v4", 1_048_576),
+        (r"deepseek-v4|^deepseek-flash$", 1_048_576),
         (r"deepseek-v3|deepseek-r1", 128_000),
         (r"deepseek", 128_000),
         (r"kimi-k3", 1_000_000),

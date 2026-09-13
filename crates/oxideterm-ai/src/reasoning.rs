@@ -300,6 +300,12 @@ const CAPABILITY_ROWS: &[CapabilityRow] = &[
     // https://api-docs.deepseek.com/guides/thinking_mode
     CapabilityRow {
         provider_type: "deepseek",
+        model_match: ModelMatch::Exact("deepseek-flash"),
+        levels: &[None, Low, High, Max],
+        request_format: AiReasoningRequestFormat::DeepSeek,
+    },
+    CapabilityRow {
+        provider_type: "deepseek",
         model_match: ModelMatch::Prefix("deepseek-v4"),
         levels: NONE_LOW_HIGH_XHIGH_MAX,
         request_format: AiReasoningRequestFormat::DeepSeek,

@@ -2089,3 +2089,47 @@ async fn xai_template_discovers_language_models_with_the_stored_key() {
         500_000
     );
 }
+
+#[test]
+fn deepseek_flash_template_has_current_name_and_capabilities() {
+    let provider = new_provider_from_template(
+        provider_template_by_type("deepseek"),
+        "deepseek-provider".into(),
+        "DeepSeek".into(),
+        1,
+    );
+    assert_eq!(
+        provider["models"],
+        serde_json::json!(["deepseek-flash", "deepseek-v4-pro"])
+    );
+    for model in [
+        "deepseek-flash",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+    ] {
+        assert_eq!(
+            model_context_window(
+                model,
+                &serde_json::Map::new(),
+                None,
+                &serde_json::Map::new()
+            ),
+            1_048_576
+        );
+    }
+    let capability = model_reasoning_capability("deepseek", "deepseek-flash");
+    assert!(capability.known_model);
+    assert_eq!(
+        capability.request_format,
+        AiReasoningRequestFormat::DeepSeek
+    );
+    assert_eq!(
+        capability.levels,
+        vec![
+            AiReasoningLevel::None,
+            AiReasoningLevel::Low,
+            AiReasoningLevel::High,
+            AiReasoningLevel::Max
+        ]
+    );
+}
