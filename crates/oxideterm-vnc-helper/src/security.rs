@@ -605,6 +605,14 @@ fn negotiate_vencrypt(
         password_available,
     );
     let Some((subtype, security)) = selected else {
+        if !password_available
+            && select_vencrypt_subtype(&subtypes, security_policy, username_available, true)
+                .is_some()
+        {
+            return Err(VncError::authentication(
+                "VNC server requires a password, but this connection has no password configured.",
+            ));
+        }
         return Err(VncError::security(format!(
             "VNC server does not offer an allowed VeNCrypt subtype: {subtypes:?}."
         )));

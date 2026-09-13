@@ -615,7 +615,7 @@ fn count_sensitive_credentials_for_auth(
     // This reports only presence/count metadata; secret values stay in their
     // zeroizing archive owners and are never cloned into UI-facing summaries.
     match auth {
-        EncryptedAuth::Password { password } => {
+        EncryptedAuth::Password { password, .. } => {
             if !password.is_empty() {
                 counts.restored_connection_passwords += 1;
             }
@@ -862,7 +862,12 @@ fn import_auth(
     import_options: &OxideImportOptions,
 ) -> Result<SavedAuth, OxideFileError> {
     Ok(match auth {
-        EncryptedAuth::Password { password } => SavedAuth::Password {
+        EncryptedAuth::Password {
+            password,
+            empty_password,
+        } => SavedAuth::Password {
+            empty_password,
+
             keychain_id: None,
             plaintext_password: (!password.is_empty()).then(|| SecretString::from(password)),
         },
@@ -1131,6 +1136,8 @@ fn merge_auth(existing: SavedAuth, imported: SavedAuth) -> SavedAuth {
                 ..
             },
             SavedAuth::Password {
+                empty_password: false,
+
                 plaintext_password: None,
                 keychain_id: None,
             },

@@ -845,6 +845,8 @@ fn make_standalone_sftp_endpoint_portable(endpoint: &mut StandaloneSftpEndpoint)
 fn portable_mosh_auth(auth: &SavedAuth) -> SavedAuth {
     match auth {
         SavedAuth::Password { .. } => SavedAuth::Password {
+            empty_password: auth.uses_empty_password(),
+
             keychain_id: None,
             plaintext_password: None,
         },
@@ -930,10 +932,14 @@ fn preserve_local_auth_secret(incoming: &mut SavedAuth, existing: &SavedAuth) {
     match (incoming, existing) {
         (
             SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: incoming_keychain_id,
                 plaintext_password: incoming_plaintext,
             },
             SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: existing_keychain_id,
                 plaintext_password: existing_plaintext,
             },
@@ -1174,6 +1180,8 @@ fn parse_connection_sync_timestamp(value: &str, field_name: &str) -> Result<Date
 fn saved_auth_from_connection_info(payload: &ConnectionInfo) -> SavedAuth {
     let fallback = match payload.auth_type {
         AuthType::Password => SavedAuth::Password {
+            empty_password: payload.empty_password,
+
             keychain_id: None,
             plaintext_password: None,
         },
@@ -1212,6 +1220,8 @@ fn saved_auth_from_connection_info(payload: &ConnectionInfo) -> SavedAuth {
 fn saved_auth_from_proxy_hop_info(hop: &ProxyHopInfo) -> SavedAuth {
     let fallback = match hop.auth_type {
         AuthType::Password => SavedAuth::Password {
+            empty_password: hop.empty_password,
+
             keychain_id: None,
             plaintext_password: None,
         },
@@ -1383,6 +1393,8 @@ mod mosh_tests {
             22,
             "alice",
             SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: keychain_id.map(str::to_string),
                 plaintext_password: None,
             },
@@ -1397,6 +1409,8 @@ mod mosh_tests {
             port: 22,
             username: "jump".to_string(),
             auth: SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: Some("local-proxy-keychain-entry".to_string()),
                 plaintext_password: None,
             },
@@ -1418,7 +1432,8 @@ mod mosh_tests {
             snapshot.records[0].auth,
             SavedAuth::Password {
                 keychain_id: None,
-                plaintext_password: None
+                plaintext_password: None,
+                ..
             }
         ));
         let json = serde_json::to_string(&snapshot).expect("snapshot must serialize");
@@ -1439,6 +1454,8 @@ mod mosh_tests {
             port: 22,
             username: "jump".to_string(),
             auth: SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: Some("local-proxy-keychain-entry".to_string()),
                 plaintext_password: None,
             },
@@ -1477,35 +1494,39 @@ mod mosh_tests {
         let profile = &store.mosh_profiles()[0];
         assert_eq!(profile.name, "Renamed mobile shell");
         assert!(matches!(
-            &profile.auth,
-            SavedAuth::KerberosPreferred {
-                server_identity: Some(server_identity),
-                delegate_credentials: true,
-                fallback,
-            } if server_identity == "host/mosh.example.test"
-                && matches!(
-                    fallback.as_ref(),
-                    SavedAuth::Password {
-                        keychain_id: Some(keychain_id),
-                        plaintext_password: None,
-                    } if keychain_id == "local-keychain-entry"
-                )
-        ));
+                    &profile.auth,
+                    SavedAuth::KerberosPreferred {
+                        server_identity: Some(server_identity),
+                        delegate_credentials: true,
+                        fallback,
+                    } if server_identity == "host/mosh.example.test"
+                        && matches!(
+                            fallback.as_ref(),
+                            SavedAuth::Password {
+                                keychain_id: Some(keychain_id),
+                                plaintext_password: None,
+
+                    ..
+        } if keychain_id == "local-keychain-entry"
+                        )
+                ));
         assert!(matches!(
-            &profile.proxy_chain[0].auth,
-            SavedAuth::KerberosPreferred {
-                server_identity: Some(server_identity),
-                delegate_credentials: false,
-                fallback,
-            } if server_identity == "host/jump.example.test"
-                && matches!(
-                    fallback.as_ref(),
-                    SavedAuth::Password {
-                        keychain_id: Some(keychain_id),
-                        plaintext_password: None,
-                    } if keychain_id == "local-proxy-keychain-entry"
-                )
-        ));
+                    &profile.proxy_chain[0].auth,
+                    SavedAuth::KerberosPreferred {
+                        server_identity: Some(server_identity),
+                        delegate_credentials: false,
+                        fallback,
+                    } if server_identity == "host/jump.example.test"
+                        && matches!(
+                            fallback.as_ref(),
+                            SavedAuth::Password {
+                                keychain_id: Some(keychain_id),
+                                plaintext_password: None,
+
+                    ..
+        } if keychain_id == "local-proxy-keychain-entry"
+                        )
+                ));
         let _ = std::fs::remove_file(path);
     }
 

@@ -18,6 +18,7 @@
       "port": "포트",
       "username": "대상 사용자 이름 *",
       "password": "비밀번호",
+      "use_empty_password": "빈 비밀번호 사용",
       "save_password": "비밀번호를 키체인에 저장",
       "group": "그룹",
       "notes": "메모",

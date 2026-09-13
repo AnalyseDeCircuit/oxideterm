@@ -14,6 +14,8 @@ fn password_auth(store: &ConnectionStore, value: &str) -> SavedAuth {
         .store(&reference, &SecretString::from(value))
         .unwrap();
     SavedAuth::Password {
+        empty_password: false,
+
         keychain_id: Some(reference),
         plaintext_password: None,
     }

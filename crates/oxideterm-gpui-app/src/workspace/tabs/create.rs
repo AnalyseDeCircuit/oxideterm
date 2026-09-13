@@ -1904,7 +1904,7 @@ mod create_tests {
             Some("SHA256:test")
         );
         match config.auth {
-            AuthMethod::Password { password } => {
+            AuthMethod::Password { password, .. } => {
                 assert_eq!(password.as_str(), "runtime-secret");
             }
             _ => panic!("proxy hop password authentication was not preserved"),

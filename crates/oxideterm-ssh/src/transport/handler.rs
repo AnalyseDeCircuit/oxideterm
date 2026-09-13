@@ -558,7 +558,36 @@ async fn authenticate_with_options(
     };
 
     let result = match auth {
-        AuthMethod::Password { password } => {
+        AuthMethod::Password { password, prompt } => {
+            let prompted;
+            let password = if *prompt {
+                let handler = prompt_handler.ok_or(SshTransportError::UnsupportedAuth(
+                    "password authentication requires a prompt handler",
+                ))?;
+                let request = KeyboardInteractivePromptRequest {
+                    flow_id: uuid::Uuid::new_v4().to_string(),
+                    name: format!("{}@{}:{}", config.username, config.host, config.port),
+                    instructions: String::new(),
+                    prompts: vec![KeyboardInteractivePrompt {
+                        prompt: "ssh.form.password".into(),
+                        echo: false,
+                    }],
+                    chained: false,
+                };
+                let mut replies = handler
+                    .keyboard_interactive(request)
+                    .await
+                    .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))?;
+                if replies.len() != 1 {
+                    return Err(SshTransportError::AuthenticationFailed(
+                        "Invalid password response".into(),
+                    ));
+                }
+                prompted = Zeroizing::new(std::mem::take(&mut replies[0]));
+                &prompted
+            } else {
+                password
+            };
             tracing::debug!("SSH password authentication starting");
             let result = authenticate_password(handle, config, password).await?;
             log_auth_result("password", &result);

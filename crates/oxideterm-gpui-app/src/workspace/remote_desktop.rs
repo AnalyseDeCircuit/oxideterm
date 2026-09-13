@@ -169,6 +169,7 @@ pub(super) enum RemoteDesktopWorkerDelivery {
 }
 
 pub(super) enum RemoteDesktopDeliveryIntent {
+    CredentialsRequired { generation: u64 },
     ClipboardTransferFailed,
     VncFileTransferCompleted,
     VncFileTransferFailed(RemoteDesktopFileTransferFailureKind),
@@ -536,6 +537,8 @@ pub(in crate::workspace) struct RemoteDesktopSessionEntity {
     profile: RemoteDesktopConnectionProfile,
     provider: RemoteDesktopProviderManifest,
     password: Option<RemoteDesktopSecret>,
+    credential_prompt_task: Option<gpui::Task<()>>,
+    credential_prompt_generation: Option<u64>,
     certificate_store_path: PathBuf,
     certificate_challenge: Option<RemoteDesktopCertificateChallengeState>,
     session_trusted_certificate_fingerprint: Option<String>,
@@ -608,6 +611,8 @@ impl RemoteDesktopSessionEntity {
             // The tab retains one zeroizing credential owner so a reconnect
             // can answer a fresh certificate-gated authentication request.
             password,
+            credential_prompt_task: None,
+            credential_prompt_generation: None,
             certificate_store_path,
             certificate_challenge: None,
             session_trusted_certificate_fingerprint: None,
@@ -695,6 +700,7 @@ impl RemoteDesktopSessionEntity {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum RemoteDesktopSessionEvent {
+    CredentialsRequired { generation: u64 },
     DeliveryReady { generation: u64 },
     FrameApplyReady { generation: u64 },
     ClipboardTransferFailed,

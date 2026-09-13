@@ -148,7 +148,14 @@ impl WorkspaceApp {
             };
             let fallback_auth = match form.auth_tab {
                 SshAuthTab::Password => {
-                    AuthMethod::password_secret(secret_handoff.zeroizing(&mut form.password))
+                    if form.empty_password {
+                        form.password.zeroize();
+                        AuthMethod::password("")
+                    } else if form.password.is_empty() {
+                        AuthMethod::password_prompt()
+                    } else {
+                        AuthMethod::password_secret(secret_handoff.zeroizing(&mut form.password))
+                    }
                 }
                 SshAuthTab::Agent => AuthMethod::Agent,
                 SshAuthTab::DefaultKey => AuthMethod::key_secret(

@@ -2211,6 +2211,9 @@ impl ConnectionStore {
 
     pub fn get_saved_auth_password(&self, auth: &SavedAuth) -> Result<SecretString> {
         let auth = auth.conventional_fallback();
+        if auth.uses_empty_password() {
+            return Ok(SecretString::default());
+        }
         match auth {
             SavedAuth::Password {
                 keychain_id: Some(keychain_id),
@@ -2314,10 +2317,15 @@ impl ConnectionStore {
     }
 
     pub fn copy_saved_auth_for_new_owner(&self, auth: &SavedAuth) -> Result<SavedAuth> {
+        if auth.uses_empty_password() {
+            return Ok(auth.clone());
+        }
         // The destination receives a temporary zeroizing secret and creates its own keychain
         // entry during upsert; sharing the source keychain id would couple deletion lifetimes.
         match auth {
             SavedAuth::Password { .. } => Ok(SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: None,
                 plaintext_password: Some(self.get_saved_auth_password(auth)?),
             }),
@@ -2640,10 +2648,27 @@ impl ConnectionStore {
         auth: SavedAuth,
         existing_auth: Option<&SavedAuth>,
     ) -> Result<(SavedAuth, Option<SecretString>)> {
+        if matches!(
+            &auth,
+            SavedAuth::Password {
+                empty_password: true,
+                ..
+            }
+        ) {
+            return Ok((
+                SavedAuth::Password {
+                    empty_password: true,
+                    keychain_id: None,
+                    plaintext_password: None,
+                },
+                Some(SecretString::default()),
+            ));
+        }
         match auth {
             SavedAuth::Password {
                 keychain_id,
                 plaintext_password,
+                ..
             } => {
                 if let Some(password) = plaintext_password {
                     let keychain_id = existing_password_keychain_id(existing_auth)
@@ -2652,6 +2677,8 @@ impl ConnectionStore {
                     self.keychain.store(&keychain_id, &password)?;
                     Ok((
                         SavedAuth::Password {
+                            empty_password: false,
+
                             keychain_id: Some(keychain_id),
                             plaintext_password: None,
                         },
@@ -2660,6 +2687,8 @@ impl ConnectionStore {
                 } else {
                     Ok((
                         SavedAuth::Password {
+                            empty_password: false,
+
                             keychain_id,
                             plaintext_password: None,
                         },
@@ -3274,6 +3303,9 @@ impl ConnectionStore {
     }
 
     fn clone_auth_secret(&self, auth: &SavedAuth) -> Result<SavedAuth> {
+        if auth.uses_empty_password() {
+            return Ok(auth.clone());
+        }
         match auth {
             SavedAuth::Password {
                 keychain_id: Some(keychain_id),
@@ -3283,6 +3315,8 @@ impl ConnectionStore {
                 let next_keychain_id = new_password_keychain_id();
                 self.keychain.store(&next_keychain_id, &password)?;
                 Ok(SavedAuth::Password {
+                    empty_password: false,
+
                     keychain_id: Some(next_keychain_id),
                     plaintext_password: None,
                 })
@@ -3292,6 +3326,8 @@ impl ConnectionStore {
             } => Ok(SavedAuth::Password {
                 keychain_id: None,
                 plaintext_password: None,
+
+                empty_password: false,
             }),
             SavedAuth::Key {
                 key_path,

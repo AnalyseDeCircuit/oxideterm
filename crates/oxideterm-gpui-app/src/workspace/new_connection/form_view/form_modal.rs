@@ -24,6 +24,7 @@ struct ConnectionFormModalSnapshot {
     managed_key_id: String,
     cert_path: String,
     save_password: bool,
+    empty_password: bool,
     group: String,
     notes: String,
     post_connect_command: String,
@@ -77,6 +78,7 @@ impl ConnectionFormModalSnapshot {
             managed_key_id: form.managed_key_id.clone(),
             cert_path: form.cert_path.clone(),
             save_password: form.save_password,
+            empty_password: form.empty_password,
             group: form.group.clone(),
             notes: form.notes.clone(),
             post_connect_command: form.post_connect_command.clone(),
@@ -782,6 +784,20 @@ impl WorkspaceApp {
                                                 cx,
                                             ))
                                     }
+                                })
+                                .when(form.auth_tab == SshAuthTab::Password && !prompt_mode, |content| {
+                                    content.child(self.render_connection_checkbox(
+                                        self.i18n.t("ssh.form.use_empty_password"),
+                                        form.empty_password,
+                                        |form| {
+                                            form.empty_password = !form.empty_password;
+                                            form.field_focused = false;
+                                            form.saved_password_keychain_id = None;
+                                            form.password_from_store = false;
+                                            form.password_loaded = true;
+                                            if form.empty_password { form.password.zeroize(); }
+                                        }, cx,
+                                    ))
                                 })
                                 .when(
                                     form.auth_tab == SshAuthTab::DefaultKey

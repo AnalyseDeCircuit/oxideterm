@@ -33,6 +33,7 @@ pub enum ConnectionAuthDraftKind {
 pub struct ConnectionAuthDraft {
     pub kind: ConnectionAuthDraftKind,
     pub password: SecretString,
+    pub empty_password: bool,
     pub password_keychain_id: Option<String>,
     pub password_loaded: bool,
     pub save_password: bool,
@@ -76,6 +77,7 @@ impl Default for ConnectionAuthDraft {
         Self {
             kind: ConnectionAuthDraftKind::Password,
             password: SecretString::default(),
+            empty_password: false,
             password_keychain_id: None,
             password_loaded: true,
             save_password: false,
@@ -299,8 +301,12 @@ pub fn saved_auth_from_draft(draft: ConnectionAuthDraft) -> SavedAuth {
     let kerberos_delegate_credentials = draft.gssapi_delegate_credentials;
     let fallback = match draft.kind {
         ConnectionAuthDraftKind::Password => SavedAuth::Password {
+            empty_password: draft.empty_password,
             keychain_id: None,
-            plaintext_password: draft.save_password.then_some(draft.password),
+            plaintext_password: (draft.save_password
+                && !draft.empty_password
+                && !draft.password.is_empty())
+            .then_some(draft.password),
         },
         ConnectionAuthDraftKind::DefaultKey => SavedAuth::Key {
             key_path: String::new(),
@@ -363,14 +369,19 @@ fn saved_auth_from_draft_for_update(
     draft: ConnectionAuthDraft,
     existing_auth: Option<&SavedAuth>,
 ) -> Result<SavedAuth> {
+    if draft.kind == ConnectionAuthDraftKind::Password && draft.empty_password {
+        return Ok(saved_auth_from_draft(draft));
+    }
     if draft.kind == ConnectionAuthDraftKind::Password {
         let kerberos_enabled = draft.gssapi_authentication;
         let kerberos_server_identity = (!draft.gssapi_server_identity.trim().is_empty())
             .then(|| draft.gssapi_server_identity.trim().to_string());
         let fallback = if draft.password_loaded {
             SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: draft.password_keychain_id,
-                plaintext_password: Some(draft.password),
+                plaintext_password: (!draft.password.is_empty()).then_some(draft.password),
             }
         } else {
             existing_auth
@@ -379,7 +390,10 @@ fn saved_auth_from_draft_for_update(
                     SavedAuth::Password {
                         keychain_id,
                         plaintext_password,
+                        ..
                     } => Some(SavedAuth::Password {
+                        empty_password: auth.uses_empty_password(),
+
                         keychain_id: keychain_id.clone(),
                         plaintext_password: plaintext_password.clone(),
                     }),
@@ -388,6 +402,8 @@ fn saved_auth_from_draft_for_update(
                 .unwrap_or(SavedAuth::Password {
                     keychain_id: None,
                     plaintext_password: None,
+
+                    empty_password: false,
                 })
         };
         return Ok(apply_kerberos_preference(
@@ -590,7 +606,8 @@ mod tests {
             saved_auth_from_draft(draft),
             SavedAuth::Password {
                 keychain_id: None,
-                plaintext_password: None
+                plaintext_password: None,
+                ..
             }
         ));
     }
@@ -598,6 +615,8 @@ mod tests {
     #[test]
     fn edit_password_unloaded_preserves_existing_auth() {
         let existing = SavedAuth::Password {
+            empty_password: false,
+
             keychain_id: Some("password-key".to_string()),
             plaintext_password: None,
         };
@@ -605,17 +624,21 @@ mod tests {
         draft.password_loaded = false;
         let auth = saved_auth_from_draft_for_update(draft, Some(&existing)).unwrap();
         assert!(matches!(
-            auth,
-            SavedAuth::Password {
-                keychain_id: Some(ref keychain_id),
-                plaintext_password: None
-            } if keychain_id == "password-key"
-        ));
+                    auth,
+                    SavedAuth::Password {
+                        keychain_id: Some(ref keychain_id),
+                        plaintext_password: None
+                    ,
+                    ..
+        } if keychain_id == "password-key"
+                ));
     }
 
     #[test]
     fn edit_password_loaded_saves_explicit_value() {
         let existing = SavedAuth::Password {
+            empty_password: false,
+
             keychain_id: Some("password-key".to_string()),
             plaintext_password: None,
         };
@@ -623,17 +646,21 @@ mod tests {
         draft.password_keychain_id = Some("password-key".to_string());
         let auth = saved_auth_from_draft_for_update(draft, Some(&existing)).unwrap();
         assert!(matches!(
-            auth,
-            SavedAuth::Password {
-                keychain_id: Some(ref keychain_id),
-                plaintext_password: Some(ref password)
-            } if keychain_id == "password-key" && password == "secret"
-        ));
+                    auth,
+                    SavedAuth::Password {
+                        keychain_id: Some(ref keychain_id),
+                        plaintext_password: Some(ref password)
+                    ,
+                    ..
+        } if keychain_id == "password-key" && password == "secret"
+                ));
     }
 
     #[test]
     fn kerberos_preference_preserves_the_conventional_fallback() {
         let existing = SavedAuth::Password {
+            empty_password: false,
+
             keychain_id: Some("password-key".to_string()),
             plaintext_password: None,
         };
@@ -646,17 +673,19 @@ mod tests {
         let auth = saved_auth_from_draft_for_update(draft, Some(&existing)).unwrap();
 
         assert!(matches!(
-            auth,
-            SavedAuth::KerberosPreferred {
-                server_identity: Some(ref identity),
-                delegate_credentials: true,
-                fallback,
-            } if identity == "host/server.example.com"
-                && matches!(*fallback, SavedAuth::Password {
-                    keychain_id: Some(ref keychain_id),
-                    plaintext_password: None,
-                } if keychain_id == "password-key")
-        ));
+                    auth,
+                    SavedAuth::KerberosPreferred {
+                        server_identity: Some(ref identity),
+                        delegate_credentials: true,
+                        fallback,
+                    } if identity == "host/server.example.com"
+                        && matches!(*fallback, SavedAuth::Password {
+                            keychain_id: Some(ref keychain_id),
+                            plaintext_password: None,
+
+                    ..
+        } if keychain_id == "password-key")
+                ));
     }
 
     #[test]

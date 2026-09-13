@@ -18,6 +18,7 @@
       "port": "Porta",
       "username": "Nome utente di destinazione *",
       "password": "Password",
+      "use_empty_password": "Usa una password vuota",
       "save_password": "Salva password nel portachiavi",
       "group": "Gruppo",
       "notes": "Note",

@@ -46,6 +46,79 @@ mod tests {
     }
 
     #[test]
+    fn explicit_empty_password_survives_sync_without_credentials() {
+        let mut source = load_empty_store("empty-password-sync-source");
+        let mut target = load_empty_store("empty-password-sync-target");
+        let mut old = request(
+            "empty",
+            SavedAuth::Password {
+                empty_password: false,
+                keychain_id: None,
+                plaintext_password: Some(SecretString::from("old-test-password")),
+            },
+        );
+        old.name = "empty".into();
+        target.upsert(old).unwrap();
+        for empty in [false, true] {
+            let id = if empty { "empty" } else { "missing" };
+            let mut entry = request(
+                id,
+                SavedAuth::Password {
+                    empty_password: empty,
+                    keychain_id: None,
+                    plaintext_password: None,
+                },
+            );
+            entry.name = id.into();
+            entry.proxy_chain.push(
+                serde_json::from_value(serde_json::json!({
+                    "host": "jump.example.test", "username": "jump",
+                    "auth": { "type": "password", "empty_password": empty }
+                }))
+                .unwrap(),
+            );
+            source.upsert(entry).unwrap();
+        }
+        let snapshot = source.export_saved_connections_snapshot().unwrap();
+        let snapshot = serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
+        target
+            .apply_saved_connections_snapshot(snapshot, SavedConnectionsConflictStrategy::Merge)
+            .unwrap();
+        assert!(target.get("empty").unwrap().auth.uses_empty_password());
+        assert!(!target.get("missing").unwrap().auth.uses_empty_password());
+        assert!(
+            target.get("empty").unwrap().proxy_chain[0]
+                .auth
+                .uses_empty_password()
+        );
+        assert!(
+            !target.get("missing").unwrap().proxy_chain[0]
+                .auth
+                .uses_empty_password()
+        );
+        assert!(matches!(
+            target.get("empty").unwrap().auth,
+            SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: None,
+                ..
+            }
+        ));
+        assert_eq!(
+            target
+                .get_saved_auth_password(&target.get("empty").unwrap().auth)
+                .unwrap()
+                .expose_secret(),
+            ""
+        );
+        assert!(
+            target
+                .get_saved_auth_password(&target.get("missing").unwrap().auth)
+                .is_err()
+        );
+    }
+
+    #[test]
     fn connection_notes_are_optional_multiline_metadata_and_not_searchable() {
         let mut store = load_empty_store("connection-notes");
         let mut with_notes = request("conn-notes", SavedAuth::Agent);
@@ -149,6 +222,8 @@ mod tests {
         let mut invalid = standalone_sftp_request(
             "sftp-invalid",
             SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: Some("standalone-invalid-keychain-id".to_string()),
                 plaintext_password: Some(SecretString::from(PRIMARY_SECRET)),
             },
@@ -165,6 +240,8 @@ mod tests {
         let mut request = standalone_sftp_request(
             "sftp-1",
             SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: None,
                 plaintext_password: Some(SecretString::from(PRIMARY_SECRET)),
             },
@@ -174,6 +251,8 @@ mod tests {
             port: 22,
             username: "jump".to_string(),
             auth: SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: None,
                 plaintext_password: Some(SecretString::from(HOP_SECRET)),
             },
@@ -207,6 +286,8 @@ mod tests {
             port: 2200,
             username: "mirror".to_string(),
             auth: SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: None,
                 plaintext_password: Some(SecretString::from(SECONDARY_SECRET)),
             },
@@ -654,6 +735,8 @@ mod tests {
         let mut request = request(
             "conn-runtime-handoff",
             SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: None,
                 plaintext_password: Some(target_secret),
             },
@@ -663,6 +746,8 @@ mod tests {
             port: 22,
             username: "ops".to_string(),
             auth: SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: None,
                 plaintext_password: Some(proxy_secret),
             },
@@ -766,6 +851,8 @@ mod tests {
             .upsert(request(
                 "conn-1",
                 SavedAuth::Password {
+                    empty_password: false,
+
                     keychain_id: None,
                     plaintext_password: Some(SecretString::from("secret")),
                 },
@@ -777,6 +864,7 @@ mod tests {
             SavedAuth::Password {
                 keychain_id: Some(_),
                 plaintext_password: None,
+                ..
             } => {}
             other => panic!("unexpected auth: {other:?}"),
         }
@@ -852,6 +940,8 @@ mod tests {
             .upsert_mosh_profile(mosh_request(
                 "mosh-1",
                 SavedAuth::Password {
+                    empty_password: false,
+
                     keychain_id: None,
                     plaintext_password: Some(SecretString::from(secret)),
                 },
@@ -862,6 +952,8 @@ mod tests {
         assert!(matches!(
             profile.auth,
             SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: Some(_),
                 plaintext_password: None,
             }
@@ -892,6 +984,8 @@ mod tests {
             .upsert(request(
                 "conn-1",
                 SavedAuth::Password {
+                    empty_password: false,
+
                     keychain_id: None,
                     plaintext_password: Some(SecretString::default()),
                 },
@@ -902,6 +996,7 @@ mod tests {
             SavedAuth::Password {
                 keychain_id: Some(_),
                 plaintext_password: None,
+                ..
             } => {}
             other => panic!("unexpected auth: {other:?}"),
         }
@@ -916,6 +1011,8 @@ mod tests {
             .upsert(request(
                 "conn-1",
                 SavedAuth::Password {
+                    empty_password: false,
+
                     keychain_id: None,
                     plaintext_password: None,
                 },
@@ -926,6 +1023,7 @@ mod tests {
             SavedAuth::Password {
                 keychain_id: None,
                 plaintext_password: None,
+                ..
             } => {}
             other => panic!("unexpected auth: {other:?}"),
         }
@@ -939,6 +1037,8 @@ mod tests {
             .upsert(request(
                 "conn-1",
                 SavedAuth::Password {
+                    empty_password: false,
+
                     keychain_id: None,
                     plaintext_password: Some(SecretString::from("secret")),
                 },
@@ -956,6 +1056,8 @@ mod tests {
             .upsert(request(
                 "conn-1",
                 SavedAuth::Password {
+                    empty_password: false,
+
                     keychain_id: Some(previous_keychain_id.clone()),
                     plaintext_password: Some(SecretString::default()),
                 },
@@ -966,6 +1068,7 @@ mod tests {
             SavedAuth::Password {
                 keychain_id: Some(keychain_id),
                 plaintext_password: None,
+                ..
             } => assert_eq!(keychain_id, &previous_keychain_id),
             other => panic!("unexpected auth: {other:?}"),
         }
@@ -979,6 +1082,8 @@ mod tests {
             .upsert(request(
                 "conn-1",
                 SavedAuth::Password {
+                    empty_password: false,
+
                     keychain_id: None,
                     plaintext_password: Some(SecretString::from("secret")),
                 },
@@ -1195,6 +1300,8 @@ mod tests {
             port: 2222,
             username: "ops".to_string(),
             auth: SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: None,
                 plaintext_password: Some(SecretString::from("jump-secret")),
             },
@@ -1214,6 +1321,7 @@ mod tests {
             SavedAuth::Password {
                 keychain_id: Some(keychain_id),
                 plaintext_password: None,
+                ..
             } => assert_eq!(store.keychain.get(keychain_id).unwrap(), "jump-secret"),
             other => panic!("unexpected proxy auth: {other:?}"),
         }
@@ -1226,6 +1334,8 @@ mod tests {
             .upsert(request(
                 "source-hop",
                 SavedAuth::Password {
+                    empty_password: false,
+
                     keychain_id: None,
                     plaintext_password: Some(SecretString::from("source-hop-secret")),
                 },
@@ -1245,6 +1355,8 @@ mod tests {
         assert!(matches!(
             &copied_auth,
             SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: None,
                 plaintext_password: Some(_),
             }
@@ -1272,14 +1384,15 @@ mod tests {
                 .expect("copied proxy runtime secret"),
             &SecretString::from("source-hop-secret")
         );
-        let destination_keychain_id = match &store.get("target-with-hop").unwrap().proxy_chain[0].auth
-        {
-            SavedAuth::Password {
-                keychain_id: Some(keychain_id),
-                plaintext_password: None,
-            } => keychain_id.clone(),
-            other => panic!("unexpected destination auth: {other:?}"),
-        };
+        let destination_keychain_id =
+            match &store.get("target-with-hop").unwrap().proxy_chain[0].auth {
+                SavedAuth::Password {
+                    keychain_id: Some(keychain_id),
+                    plaintext_password: None,
+                    ..
+                } => keychain_id.clone(),
+                other => panic!("unexpected destination auth: {other:?}"),
+            };
         assert_ne!(source_keychain_id, destination_keychain_id);
 
         assert!(store.delete("source-hop").unwrap());
@@ -1343,6 +1456,8 @@ mod tests {
         let mut req = request(
             "conn-1",
             SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: None,
                 plaintext_password: Some(SecretString::from("target-secret")),
             },
@@ -1352,6 +1467,8 @@ mod tests {
             port: 22,
             username: "ops".to_string(),
             auth: SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: None,
                 plaintext_password: Some(SecretString::from("jump-secret")),
             },
@@ -1731,6 +1848,8 @@ mod tests {
             port: 22,
             username: "me".to_string(),
             auth: SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: None,
                 plaintext_password: Some(SecretString::from("secret")),
             },
@@ -1860,6 +1979,8 @@ mod tests {
             .upsert(request(
                 "conn-1",
                 SavedAuth::Password {
+                    empty_password: false,
+
                     keychain_id: None,
                     plaintext_password: Some(SecretString::from("local-fallback-secret")),
                 },
@@ -1879,6 +2000,8 @@ mod tests {
                 "conn-1",
                 SavedAuth::with_kerberos_preferred(
                     SavedAuth::Password {
+                        empty_password: false,
+
                         keychain_id: None,
                         plaintext_password: None,
                     },
@@ -1896,17 +2019,19 @@ mod tests {
             .unwrap();
 
         assert!(matches!(
-            &target.get("conn-1").unwrap().auth,
-            SavedAuth::KerberosPreferred {
-                server_identity: Some(identity),
-                delegate_credentials: true,
-                fallback,
-            } if identity == "host/server.example.test"
-                && matches!(fallback.as_ref(), SavedAuth::Password {
-                    keychain_id: Some(keychain_id),
-                    plaintext_password: None,
-                } if keychain_id == &local_keychain_id)
-        ));
+                    &target.get("conn-1").unwrap().auth,
+                    SavedAuth::KerberosPreferred {
+                        server_identity: Some(identity),
+                        delegate_credentials: true,
+                        fallback,
+                    } if identity == "host/server.example.test"
+                        && matches!(fallback.as_ref(), SavedAuth::Password {
+                            keychain_id: Some(keychain_id),
+                            plaintext_password: None,
+
+                    ..
+        } if keychain_id == &local_keychain_id)
+                ));
         assert_eq!(
             target.keychain.get(&local_keychain_id).unwrap(),
             "local-fallback-secret"
@@ -1921,6 +2046,8 @@ mod tests {
             .upsert(request(
                 "conn-1",
                 SavedAuth::Password {
+                    empty_password: false,
+
                     keychain_id: None,
                     plaintext_password: Some(SecretString::from("rollback-secret-marker")),
                 },
@@ -2050,6 +2177,8 @@ mod tests {
             .upsert(request(
                 "conn-1",
                 SavedAuth::Password {
+                    empty_password: false,
+
                     keychain_id: None,
                     plaintext_password: Some(SecretString::from("deferred-secret")),
                 },
@@ -2118,6 +2247,8 @@ mod tests {
             .upsert(request(
                 "conn-1",
                 SavedAuth::Password {
+                    empty_password: false,
+
                     keychain_id: None,
                     plaintext_password: Some(SecretString::from("prepared-drop-secret")),
                 },

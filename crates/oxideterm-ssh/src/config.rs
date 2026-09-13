@@ -391,6 +391,8 @@ pub struct ProxyHopConfig {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AuthMethod {
     Password {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        prompt: bool,
         password: Zeroizing<String>,
     },
     Key {
@@ -476,7 +478,7 @@ impl AuthMethod {
     /// Passwords and supplied passphrases are retained only for the active connection attempt.
     pub fn has_runtime_secret(&self) -> bool {
         match self {
-            Self::Password { .. } => true,
+            Self::Password { prompt, .. } => !prompt,
             Self::Key { passphrase, .. }
             | Self::ManagedKey { passphrase, .. }
             | Self::Certificate { passphrase, .. } => passphrase.is_some(),
@@ -488,11 +490,22 @@ impl AuthMethod {
     pub fn password(password: impl Into<String>) -> Self {
         Self::Password {
             password: Zeroizing::new(password.into()),
+            prompt: false,
+        }
+    }
+
+    pub fn password_prompt() -> Self {
+        Self::Password {
+            password: Zeroizing::new(String::new()),
+            prompt: true,
         }
     }
 
     pub fn password_secret(password: Zeroizing<String>) -> Self {
-        Self::Password { password }
+        Self::Password {
+            password,
+            prompt: false,
+        }
     }
 
     pub fn key(key_path: impl Into<String>, passphrase: Option<String>) -> Self {

@@ -18,6 +18,7 @@
       "port": "Port",
       "username": "Nom d'utilisateur cible *",
       "password": "Mot de passe",
+      "use_empty_password": "Utiliser un mot de passe vide",
       "save_password": "Enregistrer le mot de passe dans le trousseau",
       "group": "Groupe",
       "notes": "Notes",

@@ -30,10 +30,14 @@ pub fn is_profile_credential(secret: &EncryptedPortableSecret) -> bool {
 }
 
 fn set_auth_reference(auth: &mut SavedAuth, reference: Option<String>) -> Result<()> {
+    if auth.uses_empty_password() {
+        return Ok(());
+    }
     match auth {
         SavedAuth::Password {
             keychain_id,
             plaintext_password,
+            ..
         } => {
             *keychain_id = reference;
             *plaintext_password = None;

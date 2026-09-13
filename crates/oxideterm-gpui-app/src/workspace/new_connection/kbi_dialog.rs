@@ -212,7 +212,11 @@ impl WorkspaceApp {
                 .unwrap_or_default();
             prompt_list = prompt_list.child(form_field(
                 &self.tokens,
-                prompt.prompt.clone(),
+                if prompt.prompt == "ssh.form.password" {
+                    self.i18n.t("ssh.form.password")
+                } else {
+                    prompt.prompt.clone()
+                },
                 text_input_anchor_probe(
                     target.anchor_id(),
                     text_input(

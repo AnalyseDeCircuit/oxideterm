@@ -572,6 +572,7 @@ fn saved_auth(
 ) -> Result<SavedAuth, String> {
     match input {
         PublicConnectionAuth::Password => Ok(SavedAuth::Password {
+            empty_password: false,
             keychain_id: match existing {
                 Some(SavedAuth::Password { keychain_id, .. }) => keychain_id.clone(),
                 _ => None,

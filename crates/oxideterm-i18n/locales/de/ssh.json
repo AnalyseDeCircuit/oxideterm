@@ -18,6 +18,7 @@
       "port": "Port",
       "username": "Ziel-Benutzername *",
       "password": "Passwort",
+      "use_empty_password": "Leeres Passwort verwenden",
       "save_password": "Passwort im Schlüsselbund speichern",
       "group": "Gruppe",
       "notes": "Notizen",

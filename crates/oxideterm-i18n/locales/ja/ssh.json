@@ -18,6 +18,7 @@
       "port": "ポート",
       "username": "対象ユーザー名 *",
       "password": "パスワード",
+      "use_empty_password": "空のパスワードを使用",
       "save_password": "パスワードをキーチェーンに保存",
       "group": "グループ",
       "notes": "メモ",

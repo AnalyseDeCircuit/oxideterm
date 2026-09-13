@@ -33,6 +33,8 @@ impl AuthType {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SavedAuth {
     Password {
+        #[serde(default, skip_serializing_if = "is_false")]
+        empty_password: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         keychain_id: Option<String>,
         #[serde(default, rename = "password", skip_serializing)]
@@ -77,6 +79,16 @@ pub enum SavedAuth {
 }
 
 impl SavedAuth {
+    pub fn uses_empty_password(&self) -> bool {
+        matches!(
+            self.conventional_fallback(),
+            Self::Password {
+                empty_password: true,
+                ..
+            }
+        )
+    }
+
     pub fn auth_type(&self) -> AuthType {
         match self {
             Self::Password { .. } => AuthType::Password,
@@ -537,6 +549,8 @@ pub struct ProxyHopInfo {
     pub port: u16,
     pub username: String,
     pub auth_type: AuthType,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub empty_password: bool,
     pub key_path: Option<String>,
     pub cert_path: Option<String>,
     pub managed_key_id: Option<String>,
@@ -564,6 +578,7 @@ impl From<&SavedProxyHop> for ProxyHopInfo {
             port: hop.port,
             username: hop.username.clone(),
             auth_type: hop.auth.auth_type(),
+            empty_password: hop.auth.uses_empty_password(),
             key_path: hop.auth.key_path().map(ToOwned::to_owned),
             cert_path: hop.auth.cert_path().map(ToOwned::to_owned),
             managed_key_id: hop.auth.managed_key_id().map(ToOwned::to_owned),
@@ -682,6 +697,8 @@ pub struct ConnectionInfo {
     pub port: u16,
     pub username: String,
     pub auth_type: AuthType,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub empty_password: bool,
     pub key_path: Option<String>,
     pub cert_path: Option<String>,
     pub managed_key_id: Option<String>,
@@ -797,6 +814,7 @@ impl From<&SavedConnection> for ConnectionInfo {
             port: conn.port,
             username: conn.username.clone(),
             auth_type: conn.auth.auth_type(),
+            empty_password: conn.auth.uses_empty_password(),
             key_path: conn.auth.key_path().map(ToOwned::to_owned),
             cert_path: conn.auth.cert_path().map(ToOwned::to_owned),
             managed_key_id: conn.auth.managed_key_id().map(ToOwned::to_owned),

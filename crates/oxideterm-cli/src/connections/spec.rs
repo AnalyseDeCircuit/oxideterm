@@ -271,6 +271,8 @@ fn saved_auth_from_connection_spec(
                 }
             }
             SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: None,
                 // Inline CLI secrets are wrapped immediately, then moved into the
                 // connection store/keychain path instead of being formatted for output.

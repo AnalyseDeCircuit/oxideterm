@@ -18,6 +18,7 @@
       "port": "Cổng",
       "username": "Tên người dùng đích *",
       "password": "Mật khẩu",
+      "use_empty_password": "Sử dụng mật khẩu trống",
       "save_password": "Lưu mật khẩu vào keychain",
       "group": "Nhóm",
       "notes": "Ghi chú",

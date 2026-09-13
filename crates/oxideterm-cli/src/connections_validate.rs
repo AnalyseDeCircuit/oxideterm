@@ -342,6 +342,7 @@ mod tests {
 
     fn sample_connection(id: &str, name: &str) -> ConnectionInfo {
         ConnectionInfo {
+            empty_password: false,
             id: id.to_string(),
             name: name.to_string(),
             group: Some("prod".to_string()),
@@ -379,6 +380,7 @@ mod tests {
         let connections = vec![
             sample_connection("id-1", "Prod"),
             ConnectionInfo {
+                empty_password: false,
                 id: "id-2".to_string(),
                 auth_type: AuthType::Key,
                 key_path: None,

@@ -455,6 +455,8 @@ fn write_connection_secret(
     let secret = value.map(SecretString::from);
     let auth = match (key, connection.auth.clone(), secret) {
         ("password", _, Some(secret)) => SavedAuth::Password {
+            empty_password: false,
+
             keychain_id: None,
             plaintext_password: Some(secret),
         },

@@ -319,6 +319,23 @@ fn connection_secret_field_value(
     }
 }
 
+fn toggle_primary_sftp_empty_password(form: &mut NewConnectionForm) {
+    form.empty_password = !form.empty_password;
+    form.field_focused = false;
+    form.saved_password_keychain_id = None;
+    form.password_from_store = false;
+    form.password_loaded = true;
+    form.password.zeroize();
+}
+
+fn toggle_secondary_sftp_empty_password(form: &mut NewConnectionForm) {
+    let endpoint = &mut form.standalone_sftp_secondary;
+    endpoint.empty_password = !endpoint.empty_password;
+    endpoint.password_keychain_id = None;
+    endpoint.password.zeroize();
+    form.field_focused = false;
+}
+
 fn toggle_primary_sftp_password_persistence(form: &mut NewConnectionForm) {
     form.save_password = !form.save_password;
 }
@@ -895,6 +912,35 @@ impl WorkspaceApp {
         let caret_visible = self.input_caret.visible();
         let (input, secret_visible) = {
             let form = self.connection_form_state(cx).form.as_ref()?;
+            let use_empty = match field {
+                NewConnectionField::Password => {
+                    form.empty_password && form.auth_tab == SshAuthTab::Password
+                }
+                NewConnectionField::StandaloneSftpSecondaryPassword => {
+                    form.standalone_sftp_secondary.empty_password
+                }
+                NewConnectionField::JumpPassword => form
+                    .jump_server_form
+                    .as_ref()
+                    .is_some_and(|jump| jump.empty_password),
+                _ => false,
+            };
+            if use_empty {
+                let input = text_input(
+                    &self.tokens,
+                    TextInputView {
+                        value: "",
+                        placeholder,
+                        focused: false,
+                        caret_visible: false,
+                        secret: true,
+                        selected_all: false,
+                        selected_range: None,
+                        marked_text: None,
+                    },
+                );
+                return Some((div().opacity(0.5).child(input).into_any_element(), None));
+            }
             let value = connection_secret_field_value(form, field)?;
             let secret_visible = connection_secret_field_visible(form, field);
             let focused = form.field_focused && form.focused_field == field;
@@ -1065,6 +1111,8 @@ impl WorkspaceApp {
                             // Native credential access may prompt or block; never run it on the UI thread.
                             store
                                 .get_saved_auth_password(&SavedAuth::Password {
+                                    empty_password: false,
+
                                     keychain_id: Some(keychain_id),
                                     plaintext_password: None,
                                 })
@@ -1813,6 +1861,7 @@ impl WorkspaceApp {
         agent_available: Option<bool>,
         saved_credential_present: bool,
         save_password: bool,
+        empty_password: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let context = if secondary {
@@ -1912,6 +1961,16 @@ impl WorkspaceApp {
             .child(self.render_auth_selector(active_tab, context, false, cx))
             .when(active_tab == SshAuthTab::Password, |content| {
                 content
+                    .child(self.render_connection_checkbox(
+                        self.i18n.t("ssh.form.use_empty_password"),
+                        empty_password,
+                        if secondary {
+                            toggle_secondary_sftp_empty_password
+                        } else {
+                            toggle_primary_sftp_empty_password
+                        },
+                        cx,
+                    ))
                     .child(self.render_connection_secret_field(
                         self.i18n.t("ssh.form.password"),
                         String::new(),

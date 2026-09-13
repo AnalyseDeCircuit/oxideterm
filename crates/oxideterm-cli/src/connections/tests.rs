@@ -7,6 +7,7 @@ use super::*;
 
 fn sample_connection(id: &str, name: &str) -> ConnectionInfo {
     ConnectionInfo {
+        empty_password: false,
         id: id.to_string(),
         name: name.to_string(),
         group: Some("prod".to_string()),
@@ -53,6 +54,7 @@ fn filters_connections_by_common_fields() {
     let connections = vec![
         sample_connection("id-1", "Prod"),
         ConnectionInfo {
+            empty_password: false,
             host: "staging.example.com".to_string(),
             group: Some("stage".to_string()),
             tags: vec!["preview".to_string()],

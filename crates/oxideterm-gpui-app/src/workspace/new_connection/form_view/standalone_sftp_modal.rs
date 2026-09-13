@@ -50,6 +50,7 @@ struct StandaloneSftpModalSnapshot {
     agent_available: Option<bool>,
     saved_credential_present: bool,
     save_password: bool,
+    empty_password: bool,
     initial_remote_path: String,
     connect_timeout_seconds_text: String,
     proxy_command_enabled: bool,
@@ -69,6 +70,7 @@ struct StandaloneSftpModalSnapshot {
     secondary_agent_available: Option<bool>,
     secondary_saved_credential_present: bool,
     secondary_save_password: bool,
+    secondary_empty_password: bool,
     secondary_initial_remote_path: String,
     secondary_connect_timeout_seconds_text: String,
     secondary_proxy_command_enabled: bool,
@@ -102,6 +104,7 @@ impl StandaloneSftpModalSnapshot {
             agent_available: form.agent_available,
             saved_credential_present: form.saved_password_keychain_id.is_some(),
             save_password: form.save_password,
+            empty_password: form.empty_password,
             initial_remote_path: form.sftp_initial_remote_path.clone(),
             connect_timeout_seconds_text: form.connect_timeout_seconds_text.clone(),
             proxy_command_enabled: form.proxy_command_enabled,
@@ -130,6 +133,7 @@ impl StandaloneSftpModalSnapshot {
                 .password_keychain_id
                 .is_some(),
             secondary_save_password: form.standalone_sftp_secondary.save_password,
+            secondary_empty_password: form.standalone_sftp_secondary.empty_password,
             secondary_initial_remote_path: form
                 .standalone_sftp_secondary
                 .initial_remote_path
@@ -624,6 +628,11 @@ impl WorkspaceApp {
                         agent_available,
                         saved_credential_present,
                         save_password,
+                        if secondary {
+                            form.secondary_empty_password
+                        } else {
+                            form.empty_password
+                        },
                         cx,
                     ))
                     .child(options)

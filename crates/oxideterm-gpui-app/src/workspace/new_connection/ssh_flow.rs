@@ -2,6 +2,7 @@ use std::{
     collections::HashMap, future::Future, pin::Pin, result::Result as StdResult, sync::Arc,
     time::Duration,
 };
+use zeroize::Zeroize;
 
 use gpui::{App, Context, Window};
 use oxideterm_connections::{

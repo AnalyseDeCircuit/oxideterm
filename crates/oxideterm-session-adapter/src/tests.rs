@@ -135,6 +135,8 @@ fn manual_proxy_command_uses_runtime_secret_and_overrides_other_routes() {
         port: 22,
         username: "jump".to_string(),
         auth: SavedAuth::Password {
+            empty_password: false,
+
             keychain_id: None,
             plaintext_password: None,
         },

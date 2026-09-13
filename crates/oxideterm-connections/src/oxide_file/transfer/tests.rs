@@ -93,6 +93,38 @@ mod tests {
     }
 
     #[test]
+    fn explicit_empty_password_survives_oxide_without_password_export() {
+        let store = temp_store("empty-password-export");
+        for empty in [false, true] {
+            let auth = SavedAuth::Password {
+                empty_password: empty,
+                keychain_id: None,
+                plaintext_password: None,
+            };
+            let exported = export_auth(&store, &auth, &OxideExportOptions::default()).unwrap();
+            let bytes = serde_json::to_vec(&exported).unwrap();
+            let decoded = serde_json::from_slice(&bytes).unwrap();
+            let restored = import_auth(
+                &store,
+                decoded,
+                &mut HashMap::new(),
+                &mut Vec::new(),
+                &OxideImportOptions::default(),
+            )
+            .unwrap();
+            assert_eq!(restored.uses_empty_password(), empty);
+            assert!(matches!(
+                restored,
+                SavedAuth::Password {
+                    plaintext_password: None,
+                    keychain_id: None,
+                    ..
+                }
+            ));
+        }
+    }
+
+    #[test]
     fn export_import_roundtrip_preserves_connections_and_payload_sections() {
         let mut source = temp_store("source");
         source
@@ -243,6 +275,8 @@ mod tests {
         let mut source = temp_store("transaction-source");
         let mut imported_connection = saved_connection("conn-import", "Imported");
         imported_connection.auth = SavedAuth::Password {
+            empty_password: false,
+
             keychain_id: None,
             plaintext_password: Some(SecretString::from(CONNECTION_SECRET)),
         };
@@ -527,6 +561,8 @@ mod tests {
             port: 2222,
             username: "backup".to_string(),
             auth: SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: None,
                 plaintext_password: Some(SecretString::from(PASSWORD)),
             },

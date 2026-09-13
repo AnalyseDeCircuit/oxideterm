@@ -173,8 +173,10 @@ fn saved_standalone_sftp_proxy_hop_from_form(
         .ok_or_else(|| anyhow::anyhow!("Proxy port is invalid"))?;
     let fallback = match hop.auth_tab {
         SshAuthTab::Password => SavedAuth::Password {
+            empty_password: hop.empty_password,
             keychain_id: None,
-            plaintext_password: Some(SecretString::from(std::mem::take(&mut hop.password))),
+            plaintext_password: (!hop.empty_password && !hop.password.is_empty())
+                .then(|| SecretString::from(std::mem::take(&mut hop.password))),
         },
         SshAuthTab::Agent => SavedAuth::Agent,
         SshAuthTab::DefaultKey => SavedAuth::Key {
@@ -342,7 +344,8 @@ fn saved_standalone_sftp_secondary_endpoint_from_form(
         .filter(|port| *port > 0)
         .ok_or_else(|| anyhow::anyhow!("Second SFTP port is invalid"))?;
     let can_preserve_auth = existing.is_some_and(|endpoint| {
-        standalone_sftp_secondary_target_matches(form, endpoint)
+        form.empty_password == endpoint.auth.uses_empty_password()
+            && standalone_sftp_secondary_target_matches(form, endpoint)
             && standalone_sftp_secondary_auth_matches(form, &endpoint.auth)
             && form.password.is_empty()
             && form.passphrase.is_empty()
@@ -352,6 +355,8 @@ fn saved_standalone_sftp_secondary_endpoint_from_form(
     } else {
         let fallback = match form.auth_tab {
             SshAuthTab::Password => SavedAuth::Password {
+                empty_password: form.empty_password,
+
                 keychain_id: None,
                 plaintext_password: (form.save_password && !form.password.is_empty())
                     .then(|| SecretString::from(std::mem::take(&mut form.password))),
@@ -424,6 +429,8 @@ fn saved_mosh_auth_from_form(form: &mut NewConnectionForm) -> SavedAuth {
             let plaintext_password = (persist_password && !form.password.is_empty())
                 .then(|| SecretString::from(std::mem::take(&mut form.password)));
             SavedAuth::Password {
+                empty_password: form.empty_password,
+
                 // An unchanged edit keeps the protected value by reference; a replacement
                 // reuses that same owner while new profiles honor the save-password choice.
                 keychain_id: persist_password
@@ -474,7 +481,14 @@ fn saved_mosh_auth_from_form(form: &mut NewConnectionForm) -> SavedAuth {
 fn runtime_mosh_auth_from_form(form: &mut NewConnectionForm) -> AuthMethod {
     let fallback = match form.auth_tab {
         SshAuthTab::Password => {
-            AuthMethod::password_secret(take_zeroizing_secret(&mut form.password))
+            if form.empty_password {
+                form.password.zeroize();
+                AuthMethod::password("")
+            } else if form.password.is_empty() {
+                AuthMethod::password_prompt()
+            } else {
+                AuthMethod::password_secret(take_zeroizing_secret(&mut form.password))
+            }
         }
         SshAuthTab::Agent => AuthMethod::Agent,
         SshAuthTab::DefaultKey => AuthMethod::key_secret(
@@ -696,13 +710,17 @@ fn auth_for_duplicate_owner(
         SavedAuth::Password {
             keychain_id: _,
             plaintext_password: Some(password),
+            ..
         } => Ok(SavedAuth::Password {
+            empty_password: false,
+
             keychain_id: None,
             plaintext_password: Some(password),
         }),
         SavedAuth::Password {
             keychain_id: Some(_),
             plaintext_password: None,
+            ..
         } => connection_store.copy_saved_auth_for_new_owner(&auth),
         SavedAuth::Key {
             key_path,
@@ -794,6 +812,7 @@ fn proxy_hop_auth_target_matches(left: &SavedProxyHop, right: &SavedProxyHop) ->
         && left.port == right.port
         && left.username == right.username
         && left.auth.gssapi_options() == right.auth.gssapi_options()
+        && left.auth.uses_empty_password() == right.auth.uses_empty_password()
         && match (
             left.auth.conventional_fallback(),
             right.auth.conventional_fallback(),
@@ -1225,8 +1244,16 @@ impl WorkspaceApp {
         };
         let auth_override = self.with_connection_form_mut(cx, |_this, form, _cx| {
             let form = form?;
-            (form.auth_tab == SshAuthTab::Password && !form.save_password)
-                .then(|| AuthMethod::password_secret(take_zeroizing_secret(&mut form.password)))
+            (form.auth_tab == SshAuthTab::Password && !form.save_password).then(|| {
+                if form.empty_password {
+                    form.password.zeroize();
+                    AuthMethod::password("")
+                } else if form.password.is_empty() {
+                    AuthMethod::password_prompt()
+                } else {
+                    AuthMethod::password_secret(take_zeroizing_secret(&mut form.password))
+                }
+            })
         });
 
         // The Save and Save & Connect buttons mean "persist this draft now",
@@ -2075,7 +2102,16 @@ impl WorkspaceApp {
             let auth_override = (action == NewConnectionSubmitAction::SaveAndConnect
                 && form.auth_tab == SshAuthTab::Password
                 && !form.save_password)
-                .then(|| AuthMethod::password_secret(take_zeroizing_secret(&mut form.password)));
+                .then(|| {
+                    if form.empty_password {
+                        form.password.zeroize();
+                        AuthMethod::password("")
+                    } else if form.password.is_empty() {
+                        AuthMethod::password_prompt()
+                    } else {
+                        AuthMethod::password_secret(take_zeroizing_secret(&mut form.password))
+                    }
+                });
             let secondary_endpoint =
                 if form.standalone_sftp_transfer_mode == StandaloneSftpTransferMode::RemoteRemote {
                     match saved_standalone_sftp_secondary_endpoint_from_form(
@@ -2101,9 +2137,15 @@ impl WorkspaceApp {
                 && form.standalone_sftp_secondary.auth_tab == SshAuthTab::Password
                 && !form.standalone_sftp_secondary.save_password)
                 .then(|| {
-                    AuthMethod::password_secret(take_zeroizing_secret(
-                        &mut form.standalone_sftp_secondary.password,
-                    ))
+                    let endpoint = &mut form.standalone_sftp_secondary;
+                    if endpoint.empty_password {
+                        endpoint.password.zeroize();
+                        AuthMethod::password("")
+                    } else if endpoint.password.is_empty() {
+                        AuthMethod::password_prompt()
+                    } else {
+                        AuthMethod::password_secret(take_zeroizing_secret(&mut endpoint.password))
+                    }
                 });
             let request = SaveStandaloneSftpProfileRequest {
                 id: base_request.id,
@@ -3450,12 +3492,14 @@ mod saved_connection_open_tests {
         let auth = saved_mosh_auth_from_form(&mut form);
 
         assert!(matches!(
-            auth,
-            SavedAuth::Password {
-                keychain_id: Some(keychain_id),
-                plaintext_password: None,
-            } if keychain_id == "mosh-password-owner"
-        ));
+                    auth,
+                    SavedAuth::Password {
+                        keychain_id: Some(keychain_id),
+                        plaintext_password: None,
+
+                    ..
+        } if keychain_id == "mosh-password-owner"
+                ));
         assert!(form.password.is_empty());
     }
 
@@ -3470,12 +3514,14 @@ mod saved_connection_open_tests {
         let auth = saved_mosh_auth_from_form(&mut form);
 
         assert!(matches!(
-            auth,
-            SavedAuth::Password {
-                keychain_id: Some(keychain_id),
-                plaintext_password: Some(password),
-            } if keychain_id == "mosh-password-owner" && password == "replacement-secret"
-        ));
+                    auth,
+                    SavedAuth::Password {
+                        keychain_id: Some(keychain_id),
+                        plaintext_password: Some(password),
+
+                    ..
+        } if keychain_id == "mosh-password-owner" && password == "replacement-secret"
+                ));
         assert!(form.password.is_empty());
     }
 
@@ -3491,12 +3537,14 @@ mod saved_connection_open_tests {
         let auth = saved_mosh_auth_from_form(&mut form);
 
         assert!(matches!(
-            auth,
-            SavedAuth::Password {
-                keychain_id: None,
-                plaintext_password: Some(password),
-            } if password == "replacement-secret"
-        ));
+                    auth,
+                    SavedAuth::Password {
+                        keychain_id: None,
+                        plaintext_password: Some(password),
+
+                    ..
+        } if password == "replacement-secret"
+                ));
         assert!(form.password.is_empty());
     }
 
@@ -3510,6 +3558,8 @@ mod saved_connection_open_tests {
             SavedAuth::Agent,
         );
         profile.proxy_chain = vec![password_proxy_hop(SavedAuth::Password {
+            empty_password: false,
+
             keychain_id: Some("jump-password-owner".to_string()),
             plaintext_password: None,
         })];
@@ -3546,10 +3596,14 @@ mod saved_connection_open_tests {
     #[test]
     fn unchanged_edited_proxy_hop_preserves_its_keychain_reference() {
         let persisted_proxy_chain = vec![password_proxy_hop(SavedAuth::Password {
+            empty_password: false,
+
             keychain_id: Some("persisted-proxy-password".to_string()),
             plaintext_password: None,
         })];
         let mut edited_proxy_chain = vec![password_proxy_hop(SavedAuth::Password {
+            empty_password: false,
+
             keychain_id: None,
             plaintext_password: Some(SecretString::default()),
         })];
@@ -3567,17 +3621,21 @@ mod saved_connection_open_tests {
         .unwrap();
 
         assert!(matches!(
-            &edited_proxy_chain[0].auth,
-            SavedAuth::Password {
-                keychain_id: Some(keychain_id),
-                plaintext_password: None,
-            } if keychain_id == "persisted-proxy-password"
-        ));
+                    &edited_proxy_chain[0].auth,
+                    SavedAuth::Password {
+                        keychain_id: Some(keychain_id),
+                        plaintext_password: None,
+
+                    ..
+        } if keychain_id == "persisted-proxy-password"
+                ));
     }
 
     #[test]
     fn saved_proxy_hop_added_during_edit_uses_its_independent_auth_copy() {
         let mut edited_proxy_chain = vec![password_proxy_hop(SavedAuth::Password {
+            empty_password: false,
+
             keychain_id: None,
             plaintext_password: Some(SecretString::default()),
         })];
@@ -3590,6 +3648,8 @@ mod saved_connection_open_tests {
                 has_explicit_secret_draft: false,
             }],
             vec![Some(SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: None,
                 plaintext_password: Some(SecretString::from("copied-proxy-secret")),
             })],
@@ -3598,21 +3658,27 @@ mod saved_connection_open_tests {
         .unwrap();
 
         assert!(matches!(
-            &edited_proxy_chain[0].auth,
-            SavedAuth::Password {
-                keychain_id: None,
-                plaintext_password: Some(password),
-            } if password == "copied-proxy-secret"
-        ));
+                    &edited_proxy_chain[0].auth,
+                    SavedAuth::Password {
+                        keychain_id: None,
+                        plaintext_password: Some(password),
+
+                    ..
+        } if password == "copied-proxy-secret"
+                ));
     }
 
     #[test]
     fn edited_proxy_hop_never_reuses_credentials_for_another_host() {
         let persisted_proxy_chain = vec![password_proxy_hop(SavedAuth::Password {
+            empty_password: false,
+
             keychain_id: Some("persisted-proxy-password".to_string()),
             plaintext_password: None,
         })];
         let mut edited_hop = password_proxy_hop(SavedAuth::Password {
+            empty_password: false,
+
             keychain_id: None,
             plaintext_password: Some(SecretString::default()),
         });

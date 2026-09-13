@@ -103,31 +103,48 @@ pub(super) fn new_connection_save_password_false_does_not_request_keychain_stora
         SavedAuth::Password {
             keychain_id: None,
             plaintext_password: None,
+            ..
         } => {}
         other => panic!("unexpected auth: {other:?}"),
     }
 }
 
 #[test]
-pub(super) fn new_connection_save_password_true_keeps_empty_password_as_submitted_secret() {
-    let mut form = base_form();
-    form.password = String::new();
-    form.save_password = true;
-
-    let request = save_request_from_form(&mut form, None).unwrap();
-
-    match request.auth {
-        SavedAuth::Password {
-            keychain_id: None,
-            plaintext_password: Some(password),
-        } => assert_eq!(password, ""),
-        other => panic!("unexpected auth: {other:?}"),
+pub(super) fn password_form_distinguishes_missing_from_explicit_empty_password() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ConnectionStore::load(dir.path().join("connections.json")).unwrap();
+    for empty_password in [false, true] {
+        let mut form = base_form();
+        form.password.clear();
+        form.save_password = true;
+        form.empty_password = empty_password;
+        let request = save_request_from_form(&mut form, None).unwrap();
+        assert_eq!(request.auth.uses_empty_password(), empty_password);
+        let auth =
+            oxideterm_session_adapter::auth_method_from_saved_auth(&store, &request.auth).unwrap();
+        match auth {
+            oxideterm_ssh::AuthMethod::Password { password, prompt } => {
+                assert_eq!(prompt, !empty_password);
+                assert_eq!(password.as_str(), "");
+            }
+            _ => panic!("expected password authentication"),
+        }
+        assert!(matches!(
+            request.auth,
+            SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: None,
+                ..
+            }
+        ));
     }
 }
 
 #[test]
 pub(super) fn edit_properties_optional_name_preserves_connection_identity_and_saved_password() {
     let existing = SavedAuth::Password {
+        empty_password: false,
+
         keychain_id: Some("kc-password".to_string()),
         plaintext_password: None,
     };
@@ -157,6 +174,7 @@ pub(super) fn edit_properties_optional_name_preserves_connection_identity_and_sa
             SavedAuth::Password {
                 keychain_id: Some(keychain_id),
                 plaintext_password: None,
+                ..
             } => {
                 assert_eq!(keychain_id, "kc-password");
             }
@@ -187,6 +205,7 @@ pub(super) fn edit_properties_switch_from_agent_to_password_submits_new_password
         SavedAuth::Password {
             keychain_id: None,
             plaintext_password: Some(password),
+            ..
         } => assert_eq!(password, "new-secret"),
         other => panic!("unexpected auth: {other:?}"),
     }
@@ -195,6 +214,8 @@ pub(super) fn edit_properties_switch_from_agent_to_password_submits_new_password
 #[test]
 pub(super) fn edit_properties_saved_keychain_password_starts_unloaded() {
     let saved_connection = saved_connection_fixture(SavedAuth::Password {
+        empty_password: false,
+
         keychain_id: Some("kc-password".to_string()),
         plaintext_password: None,
     });
@@ -216,6 +237,8 @@ pub(super) fn edit_properties_restores_proxy_chain_without_loading_secrets() {
         port: 2222,
         username: "ops".to_string(),
         auth: SavedAuth::Password {
+            empty_password: false,
+
             keychain_id: Some("proxy-password-keychain-id".to_string()),
             plaintext_password: None,
         },
@@ -355,6 +378,7 @@ pub(super) fn new_connection_request_carries_proxy_chain() {
     form.agent_forwarding_socket = Some("/tmp/target-forward.sock".to_string());
     form.proxy_hops
         .push(crate::workspace::new_connection::NewConnectionProxyHop {
+            empty_password: false,
             saved_connection_id: String::new(),
             persisted_proxy_hop_index: None,
             host: "jump.example.com".to_string(),
@@ -402,6 +426,7 @@ pub(super) fn new_connection_request_carries_proxy_chain() {
         SavedAuth::Password {
             keychain_id: None,
             plaintext_password: Some(password),
+            ..
         } => assert_eq!(password, "jump-secret"),
         other => panic!("unexpected proxy auth: {other:?}"),
     }
@@ -537,6 +562,7 @@ pub(super) fn proxy_hop_two_factor_is_saved_as_keyboard_interactive() {
     form.auth_tab = SshAuthTab::Agent;
     form.proxy_hops
         .push(crate::workspace::new_connection::NewConnectionProxyHop {
+            empty_password: false,
             saved_connection_id: String::new(),
             persisted_proxy_hop_index: None,
             host: "jump.example.com".to_string(),
@@ -593,6 +619,8 @@ pub(super) fn runtime_proxy_hops_are_prepended_without_cloning_the_connection_fo
 #[test]
 fn viewing_saved_password_does_not_replace_stored_credential() {
     let existing = SavedAuth::Password {
+        empty_password: false,
+
         keychain_id: Some("stored-owner".into()),
         plaintext_password: None,
     };
@@ -608,7 +636,9 @@ fn viewing_saved_password_does_not_replace_stored_credential() {
     )
     .unwrap();
     assert!(
-        matches!(request.auth, SavedAuth::Password { keychain_id: Some(ref id), plaintext_password: None } if id == "stored-owner")
+        matches!(request.auth, SavedAuth::Password { keychain_id: Some(ref id), plaintext_password: None ,
+            ..
+} if id == "stored-owner")
     );
     crate::workspace::new_connection::password_draft_mut(&mut form).push_str("-edited");
     let edited = save_request_from_form_with_existing_auth(
@@ -621,4 +651,32 @@ fn viewing_saved_password_does_not_replace_stored_credential() {
         matches!(edited.auth, SavedAuth::Password { plaintext_password: Some(ref password), .. } if password.expose_secret() == "revealed-test-value-edited")
     );
     assert!(form.password.is_empty());
+}
+
+#[test]
+fn standalone_sftp_empty_password_roundtrip_keeps_both_endpoints_independent() {
+    for empty in [false, true] {
+        let auth = |empty_password| SavedAuth::Password {
+            empty_password,
+            keychain_id: None,
+            plaintext_password: None,
+        };
+        let mut profile = oxideterm_connections::StandaloneSftpProfile::new(
+            "pair",
+            "first.test",
+            22,
+            "first",
+            auth(!empty),
+        );
+        profile.transfer_mode = oxideterm_connections::StandaloneSftpTransferMode::RemoteRemote;
+        profile.secondary_endpoint = Some(oxideterm_connections::StandaloneSftpEndpoint::new(
+            "second.test",
+            22,
+            "second",
+            auth(empty),
+        ));
+        let form = form_from_standalone_sftp_profile(&profile);
+        assert_eq!(form.empty_password, !empty);
+        assert_eq!(form.standalone_sftp_secondary.empty_password, empty);
+    }
 }

@@ -459,6 +459,8 @@ impl fmt::Debug for EncryptedManagedKeyMetadata {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EncryptedAuth {
     Password {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        empty_password: bool,
         password: Zeroizing<String>,
     },
     Key {

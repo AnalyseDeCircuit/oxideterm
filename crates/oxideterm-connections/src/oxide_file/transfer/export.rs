@@ -496,6 +496,7 @@ fn export_auth(
 ) -> Result<EncryptedAuth, OxideFileError> {
     match auth {
         SavedAuth::Password { .. } => Ok(EncryptedAuth::Password {
+            empty_password: auth.uses_empty_password(),
             password: if options.include_passwords {
                 store
                     .get_saved_auth_password(auth)

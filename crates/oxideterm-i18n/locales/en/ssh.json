@@ -31,6 +31,7 @@
       "gssapi_delegate_credentials": "Delegate Kerberos credentials to this server",
       "gssapi_delegation_warning": "Only delegate to a trusted server. The remote host may use delegated credentials to access other Kerberos services as you.",
       "password": "Password",
+      "use_empty_password": "Use an empty password",
       "save_password": "Save password to keychain",
       "group": "Group",
       "notes": "Notes",

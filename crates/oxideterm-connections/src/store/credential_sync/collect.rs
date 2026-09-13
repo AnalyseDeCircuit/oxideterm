@@ -12,6 +12,7 @@ fn auth_binding<'a>(
         SavedAuth::Password {
             keychain_id,
             plaintext_password,
+            ..
         } => (keychain_id.as_deref(), plaintext_password.as_ref()),
         SavedAuth::Key {
             passphrase_keychain_id,

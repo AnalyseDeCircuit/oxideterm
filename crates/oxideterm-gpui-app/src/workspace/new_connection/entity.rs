@@ -534,6 +534,7 @@ impl ConnectionFlowEntity {
                     Ok(password) => {
                         let mut password = password.into_zeroizing();
                         zeroize::Zeroize::zeroize(&mut form.password);
+                        form.empty_password = password.is_empty();
                         form.password = std::mem::take(&mut *password);
                         form.password_loaded = true;
                         form.password_from_store = true;

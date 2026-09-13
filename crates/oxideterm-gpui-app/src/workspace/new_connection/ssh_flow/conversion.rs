@@ -153,7 +153,14 @@ pub(super) fn auth_method_from_proxy_hop(
 ) -> AuthMethod {
     let fallback = match hop.auth_tab {
         SshAuthTab::Password => {
-            AuthMethod::password_secret(secret_handoff.zeroizing(&mut hop.password))
+            if hop.empty_password {
+                hop.password.zeroize();
+                AuthMethod::password("")
+            } else if hop.password.is_empty() {
+                AuthMethod::password_prompt()
+            } else {
+                AuthMethod::password_secret(secret_handoff.zeroizing(&mut hop.password))
+            }
         }
         SshAuthTab::DefaultKey => {
             AuthMethod::key_secret("", secret_handoff.zeroizing_non_empty(&mut hop.passphrase))
@@ -202,6 +209,7 @@ pub(super) fn form_from_runtime_config(
     form.username = config.username.clone();
     form.auth_tab = auth_fields.auth_tab;
     form.password = auth_fields.password;
+    form.empty_password = auth_fields.empty_password;
     form.key_path = auth_fields.key_path;
     form.managed_key_id = auth_fields.managed_key_id;
     form.cert_path = auth_fields.cert_path;
@@ -254,6 +262,7 @@ pub(super) fn form_from_runtime_config(
 pub(super) fn proxy_hop_form_from_runtime_config(config: ProxyHopConfig) -> NewConnectionProxyHop {
     let auth_fields = runtime_auth_form_fields(config.auth);
     NewConnectionProxyHop {
+        empty_password: auth_fields.empty_password,
         saved_connection_id: String::new(),
         persisted_proxy_hop_index: None,
         host: config.host,
@@ -282,6 +291,7 @@ pub(super) fn proxy_hop_form_from_runtime_config(config: ProxyHopConfig) -> NewC
 struct RuntimeAuthFormFields {
     auth_tab: SshAuthTab,
     password: String,
+    empty_password: bool,
     key_path: String,
     managed_key_id: String,
     cert_path: String,
@@ -294,7 +304,11 @@ struct RuntimeAuthFormFields {
 
 fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
     match auth {
-        AuthMethod::Password { mut password } => RuntimeAuthFormFields {
+        AuthMethod::Password {
+            mut password,
+            prompt,
+        } => RuntimeAuthFormFields {
+            empty_password: !prompt && password.is_empty(),
             auth_tab: SshAuthTab::Password,
             password: std::mem::take(&mut *password),
             key_path: String::new(),
@@ -310,6 +324,7 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
             key_path,
             mut passphrase,
         } if key_path.trim().is_empty() => RuntimeAuthFormFields {
+            empty_password: false,
             auth_tab: SshAuthTab::DefaultKey,
             password: String::new(),
             key_path: String::new(),
@@ -328,6 +343,7 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
             key_path,
             mut passphrase,
         } => RuntimeAuthFormFields {
+            empty_password: false,
             auth_tab: SshAuthTab::SshKey,
             password: String::new(),
             key_path,
@@ -346,6 +362,7 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
             key_id,
             mut passphrase,
         } => RuntimeAuthFormFields {
+            empty_password: false,
             auth_tab: SshAuthTab::ManagedKey,
             password: String::new(),
             key_path: String::new(),
@@ -365,6 +382,7 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
             cert_path,
             mut passphrase,
         } => RuntimeAuthFormFields {
+            empty_password: false,
             auth_tab: SshAuthTab::Certificate,
             password: String::new(),
             key_path: key_path.clone(),
@@ -380,6 +398,7 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
             gssapi_delegate_credentials: false,
         },
         AuthMethod::Agent => RuntimeAuthFormFields {
+            empty_password: false,
             auth_tab: SshAuthTab::Agent,
             password: String::new(),
             key_path: String::new(),
@@ -392,6 +411,7 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
             gssapi_delegate_credentials: false,
         },
         AuthMethod::KeyboardInteractive => RuntimeAuthFormFields {
+            empty_password: false,
             auth_tab: SshAuthTab::TwoFactor,
             password: String::new(),
             key_path: String::new(),
@@ -457,7 +477,7 @@ mod runtime_save_tests {
 
         assert!(matches!(
             auth,
-            AuthMethod::Password { ref password } if password.as_str() == "jump-secret"
+            AuthMethod::Password { ref password, .. } if password.as_str() == "jump-secret"
         ));
         assert_eq!(hop.password, "jump-secret");
     }
@@ -521,11 +541,11 @@ mod runtime_save_tests {
 
         assert!(matches!(
             &proxy_chain[0].auth,
-            AuthMethod::Password { password } if password.as_str() == "public-proxy-secret"
+            AuthMethod::Password { password, .. } if password.as_str() == "public-proxy-secret"
         ));
         assert!(matches!(
             &proxy_chain[1].auth,
-            AuthMethod::Password { password } if password.as_str() == "gateway-secret"
+            AuthMethod::Password { password, .. } if password.as_str() == "gateway-secret"
         ));
         assert!(form.proxy_hops.iter().all(|hop| hop.password.is_empty()));
         let debug_output = format!("{proxy_chain:?}");

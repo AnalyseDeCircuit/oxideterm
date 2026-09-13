@@ -319,6 +319,8 @@ impl LaunchSnapshot {
 fn auth_metadata(auth: &AuthMethod) -> SavedAuth {
     match auth {
         AuthMethod::Password { .. } => SavedAuth::Password {
+            empty_password: false,
+
             keychain_id: None,
             plaintext_password: None,
         },

@@ -1776,6 +1776,8 @@ fn imported_auth_to_saved(
                 plaintext_passphrase: None,
             },
             _ => SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: None,
                 plaintext_password: None,
             },
@@ -1788,12 +1790,16 @@ fn imported_auth_to_saved(
                 plaintext_passphrase: None,
             },
             None => SavedAuth::Password {
+                empty_password: false,
+
                 keychain_id: None,
                 plaintext_password: None,
             },
         },
         ImportedConnectionAuthType::Agent => SavedAuth::Agent,
         ImportedConnectionAuthType::Password => SavedAuth::Password {
+            empty_password: false,
+
             keychain_id: None,
             plaintext_password: None,
         },

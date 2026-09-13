@@ -12,6 +12,10 @@ pub fn auth_method_from_saved_auth(
 ) -> Option<AuthMethod> {
     Some(match auth {
         SavedAuth::Password {
+            empty_password: true,
+            ..
+        } => AuthMethod::password(""),
+        SavedAuth::Password {
             plaintext_password: Some(password),
             ..
         } => AuthMethod::password_secret(password.clone().into_zeroizing()),
@@ -24,7 +28,8 @@ pub fn auth_method_from_saved_auth(
         SavedAuth::Password {
             keychain_id: None,
             plaintext_password: None,
-        } => return None,
+            ..
+        } => AuthMethod::password_prompt(),
         SavedAuth::Key {
             key_path,
             plaintext_passphrase,

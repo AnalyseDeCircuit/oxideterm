@@ -253,7 +253,8 @@ pub(super) fn remote_desktop_error_category_from_message(
     if normalized.contains("standard_rdp_security") || message.contains(LEGACY_RDP_SECURITY_MESSAGE)
     {
         RemoteDesktopErrorCategory::LegacySecurity
-    } else if normalized.contains("authentication")
+    } else if normalized.contains("credentials are incomplete")
+        || normalized.contains("authentication")
         || normalized.contains("access denied")
         || normalized.contains("password")
         || normalized.contains("credssp")
