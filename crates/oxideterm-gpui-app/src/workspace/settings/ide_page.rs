@@ -74,6 +74,72 @@ impl WorkspaceApp {
                 self.ide_card_description(self.i18n.t("settings_view.ide.editor_typography_hint")),
             )
             .child(
+                self.select_setting_row(
+                    "settings_view.ide.font_family",
+                    "settings_view.ide.font_family_hint",
+                    SettingsSelect::IdeFontFamily,
+                    settings
+                        .ide
+                        .font_family
+                        .map(font_family_label)
+                        .unwrap_or_else(|| self.i18n.t("settings_view.ide.follow_terminal")),
+                    self.tokens.metrics.settings_select_width,
+                    cx,
+                ),
+            )
+            .when(
+                settings.ide.font_family == Some(oxideterm_settings::FontFamily::Custom),
+                |card| {
+                    card.child(self.setting_row(
+                        "settings_view.terminal.custom_font_stack",
+                        "settings_view.terminal.custom_font_stack_hint",
+                        self.settings_text_input_control(
+                            SettingsInput::IdeCustomFontFamily,
+                            settings.ide.custom_font_family.clone(),
+                            "'Sarasa Fixed SC', 'Fira Code', monospace".to_string(),
+                            SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH,
+                            cx,
+                        ),
+                        cx,
+                    ))
+                },
+            )
+            .child(self.card_separator())
+            .child(
+                self.select_setting_row(
+                    "settings_view.ide.cjk_font_family",
+                    "settings_view.ide.cjk_font_family_hint",
+                    SettingsSelect::IdeCjkFontFamily,
+                    settings
+                        .ide
+                        .cjk_font_family
+                        .as_deref()
+                        .map(|family| terminal_cjk_font_label(family, &self.i18n))
+                        .unwrap_or_else(|| self.i18n.t("settings_view.ide.follow_terminal")),
+                    self.tokens.metrics.settings_select_width,
+                    cx,
+                ),
+            )
+            .child(self.card_separator())
+            .child(
+                self.ide_setting_row(
+                    "settings_view.ide.font_weight",
+                    "settings_view.ide.font_weight_hint",
+                    self.ide_number_input_with_suffix(
+                        SettingsInput::IdeFontWeight,
+                        settings
+                            .ide
+                            .font_weight
+                            .map(|value| value.to_string())
+                            .unwrap_or_default(),
+                        settings.terminal.font_weight.to_string(),
+                        None,
+                        cx,
+                    ),
+                ),
+            )
+            .child(self.card_separator())
+            .child(
                 self.ide_setting_row(
                     "settings_view.ide.font_size",
                     "settings_view.ide.font_size_hint",

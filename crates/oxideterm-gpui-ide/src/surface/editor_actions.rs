@@ -1204,7 +1204,9 @@ impl IdeSurface {
             });
             editor.apply_ide_runtime_settings(
                 &tokens,
-                runtime_settings.editor_font_fallback.clone(),
+                runtime_settings.editor_font_family.clone(),
+            runtime_settings.editor_font_weight,
+            runtime_settings.editor_font_fallback.clone(),
                 runtime_settings.editor_font_size,
                 runtime_settings.editor_line_height,
                 runtime_settings.word_wrap,

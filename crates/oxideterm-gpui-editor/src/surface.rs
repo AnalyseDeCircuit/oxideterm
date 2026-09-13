@@ -553,6 +553,8 @@ impl TextEditorView {
     pub fn apply_ide_runtime_settings(
         &mut self,
         tokens: &ThemeTokens,
+        font_family: String,
+        font_weight: f32,
         font_fallback_family: Option<String>,
         font_size: f32,
         line_height: f32,
@@ -562,7 +564,7 @@ impl TextEditorView {
     ) {
         self.apply_runtime_settings_with_fallback(
             tokens,
-            tokens.metrics.markdown_code_font_family.to_string(),
+            font_family,
             font_fallback_family,
             font_size,
             line_height,
@@ -570,6 +572,7 @@ impl TextEditorView {
             background_active,
             cx,
         );
+        self.appearance.font_weight = font_weight.clamp(100.0, 900.0);
     }
 
     pub fn apply_runtime_settings(
@@ -1001,6 +1004,7 @@ impl TextEditorView {
             window,
             &self.appearance.font_family,
             self.appearance.font_fallback_family.as_deref(),
+            self.appearance.font_weight,
         ) {
             self.viewport
                 .clamp(self.document_row_count(), self.metrics.line_height);
@@ -1185,6 +1189,7 @@ impl TextEditorView {
             font: editor_code_font(
                 &self.appearance.font_family,
                 self.appearance.font_fallback_family.as_deref(),
+                self.appearance.font_weight,
             ),
             color: rgb(self.appearance.text_hex).into_color(),
             background_color: None,

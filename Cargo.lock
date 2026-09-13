@@ -7993,6 +7993,7 @@ dependencies = [
  "gpui",
  "oxideterm-editor-core",
  "oxideterm-editor-syntax",
+ "oxideterm-gpui-ui",
  "oxideterm-theme",
  "tracing",
  "unicode-segmentation",

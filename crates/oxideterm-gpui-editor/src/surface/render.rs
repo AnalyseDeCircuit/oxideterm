@@ -188,6 +188,7 @@ impl Render for TextEditorView {
             .font(editor_code_font(
                 &self.appearance.font_family,
                 self.appearance.font_fallback_family.as_deref(),
+                self.appearance.font_weight,
             ))
             .text_size(px(self.metrics.font_size))
             .line_height(px(self.metrics.line_height))

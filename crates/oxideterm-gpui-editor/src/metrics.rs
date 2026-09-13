@@ -28,6 +28,7 @@ pub struct EditorAppearance {
     pub syntax_type_hex: u32,
     pub syntax_variable_hex: u32,
     pub font_family: String,
+    pub font_weight: f32,
     pub font_fallback_family: Option<String>,
 }
 
@@ -53,6 +54,7 @@ impl EditorAppearance {
             syntax_variable_hex: tokens.ui.text,
             font_family: tokens.metrics.markdown_code_font_family.to_string(),
             font_fallback_family: None,
+            font_weight: 400.0,
         }
     }
 }
@@ -101,8 +103,9 @@ impl EditorMetrics {
         window: &mut Window,
         font_family: &str,
         font_fallback_family: Option<&str>,
+        font_weight: f32,
     ) -> bool {
-        let font = editor_code_font(font_family, font_fallback_family);
+        let font = editor_code_font(font_family, font_fallback_family, font_weight);
         let font_size = px(self.font_size);
         let font_id = window.text_system().resolve_font(&font);
         let measured = window
@@ -133,16 +136,26 @@ const EDITOR_CODE_FONT_FALLBACKS: &[&str] = &[
     "Courier New",
 ];
 
-pub(crate) fn editor_code_font(family: &str, preferred_fallback: Option<&str>) -> Font {
-    let mut fallbacks = Vec::with_capacity(EDITOR_CODE_FONT_FALLBACKS.len() + 1);
+pub(crate) fn editor_code_font(
+    family: &str,
+    preferred_fallback: Option<&str>,
+    weight: f32,
+) -> Font {
+    let configured = oxideterm_gpui_ui::css_font_family_stack(family);
+    let family = configured
+        .first()
+        .map(|family| family.as_ref())
+        .unwrap_or("monospace");
+    let mut fallbacks = Vec::with_capacity(EDITOR_CODE_FONT_FALLBACKS.len() + configured.len());
     if let Some(preferred_fallback) = preferred_fallback
         .map(str::trim)
         .filter(|fallback| !fallback.is_empty() && *fallback != family)
     {
         // The primary code font keeps Latin glyphs monospaced while the user's
-        // terminal family supplies CJK glyphs before platform fallback takes over.
+        // configured fallback supplies CJK glyphs before platform fallback takes over.
         fallbacks.push(preferred_fallback.to_string());
     }
+    fallbacks.extend(configured.iter().skip(1).map(|family| family.to_string()));
     fallbacks.extend(
         EDITOR_CODE_FONT_FALLBACKS
             .iter()
@@ -153,7 +166,7 @@ pub(crate) fn editor_code_font(family: &str, preferred_fallback: Option<&str>) -
         family: SharedString::from(family.to_string()),
         features: FontFeatures::disable_ligatures(),
         fallbacks: Some(FontFallbacks::from_fonts(fallbacks)),
-        weight: FontWeight::default(),
+        weight: FontWeight(weight.clamp(100.0, 900.0)),
         style: FontStyle::Normal,
     }
 }
@@ -164,12 +177,23 @@ mod tests {
 
     #[test]
     fn configured_editor_fallback_precedes_platform_fallbacks() {
-        let font = editor_code_font("JetBrains Mono", Some("DengXian"));
+        let font = editor_code_font(
+            "'JetBrains Mono', Consolas, monospace",
+            Some("DengXian"),
+            600.0,
+        );
+        assert_eq!(font.family.as_ref(), "JetBrains Mono");
+        assert_eq!(font.weight, FontWeight(600.0));
         let fallbacks = font.fallbacks.expect("editor font fallbacks");
 
         assert_eq!(
-            fallbacks.fallback_list().first().map(String::as_str),
-            Some("DengXian")
+            fallbacks
+                .fallback_list()
+                .iter()
+                .take(3)
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["DengXian", "Consolas", "monospace"]
         );
     }
 }

@@ -1727,6 +1727,7 @@ impl WorkspaceApp {
                 | SettingsInput::TerminalLineHeight
                 | SettingsInput::TerminalPaddingHorizontal
                 | SettingsInput::TerminalPaddingVertical
+                | SettingsInput::IdeFontWeight
                 | SettingsInput::IdeFontSize
                 | SettingsInput::IdeLineHeight,
             ) => TextInputContentAlign::Center,

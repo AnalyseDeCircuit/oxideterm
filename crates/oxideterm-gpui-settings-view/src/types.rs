@@ -64,6 +64,8 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::AppearanceFrostedGlass => SelectAnchorId::SettingsAppearanceFrostedGlass,
             Self::AppearanceBackgroundFit => SelectAnchorId::SettingsAppearanceBackgroundFit,
             Self::CustomThemeDuplicate => SelectAnchorId::SettingsCustomThemeDuplicate,
+            Self::IdeFontFamily => SelectAnchorId::SettingsIdeFontFamily,
+            Self::IdeCjkFontFamily => SelectAnchorId::SettingsIdeCjkFontFamily,
             Self::TerminalFontFamily => SelectAnchorId::SettingsTerminalFontFamily,
             Self::TerminalCjkFontFamily => SelectAnchorId::SettingsTerminalCjkFontFamily,
             Self::TerminalEncoding => SelectAnchorId::SettingsTerminalEncoding,

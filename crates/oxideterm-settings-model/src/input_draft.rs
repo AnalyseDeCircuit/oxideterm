@@ -49,6 +49,12 @@ pub fn persisted_settings_input_value(
             settings.terminal.padding_horizontal.to_string()
         }
         SettingsInput::TerminalPaddingVertical => settings.terminal.padding_vertical.to_string(),
+        SettingsInput::IdeCustomFontFamily => settings.ide.custom_font_family.clone(),
+        SettingsInput::IdeFontWeight => settings
+            .ide
+            .font_weight
+            .map(|value| value.to_string())
+            .unwrap_or_default(),
         SettingsInput::IdeFontSize => settings
             .ide
             .font_size
@@ -355,6 +361,20 @@ pub fn apply_persisted_settings_input_draft(
         SettingsInput::TerminalPaddingVertical => parse_i64(draft)
             .map(|value| settings.terminal.padding_vertical = value.clamp(0, MAX_TERMINAL_PADDING))
             .into(),
+        SettingsInput::IdeCustomFontFamily => {
+            settings.ide.custom_font_family = draft.trim().to_string();
+            SettingsInputDraftApply::Applied
+        }
+        SettingsInput::IdeFontWeight => {
+            if draft.trim().is_empty() {
+                settings.ide.font_weight = None;
+                SettingsInputDraftApply::Applied
+            } else {
+                parse_i64(draft)
+                    .map(|value| settings.ide.font_weight = Some(value.clamp(100, 900)))
+                    .into()
+            }
+        }
         SettingsInput::IdeFontSize => {
             let value = draft.trim();
             if value.is_empty() {
@@ -853,6 +873,65 @@ pub fn settings_multiline_line_selection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ide_font_preferences_persist_and_legacy_settings_inherit() {
+        let old = serde_json::json!({"autoSave":false,"fontSize":14,"lineHeight":1.2,"agentMode":"ask","wordWrap":false});
+        let inherited: oxideterm_settings::IdeSettings = serde_json::from_value(old).unwrap();
+        assert_eq!(
+            (
+                inherited.font_family,
+                inherited.cjk_font_family,
+                inherited.font_weight
+            ),
+            (None, None, None)
+        );
+        let settings = oxideterm_settings::IdeSettings {
+            font_family: Some(oxideterm_settings::FontFamily::Maple),
+            cjk_font_family: Some("PingFang SC".into()),
+            font_weight: Some(600),
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_value(settings).unwrap(),
+            serde_json::json!({
+                "autoSave":false,"fontFamily":"maple","customFontFamily":"","cjkFontFamily":"PingFang SC","fontWeight":600,
+                "fontSize":null,"lineHeight":null,"agentMode":"ask","wordWrap":false
+            })
+        );
+    }
+
+    #[test]
+    fn ide_font_weight_supports_independent_values_and_inheritance() {
+        let mut settings = PersistedSettings::default();
+        settings.terminal.font_weight = 400;
+        for (draft, expected) in [
+            ("650", Some(650)),
+            ("950", Some(900)),
+            ("50", Some(100)),
+            ("", None),
+        ] {
+            assert_eq!(
+                apply_persisted_settings_input_draft(
+                    &mut settings,
+                    SettingsInput::IdeFontWeight,
+                    draft
+                ),
+                SettingsInputDraftApply::Applied
+            );
+            assert_eq!(settings.ide.font_weight, expected);
+            assert_eq!(settings.terminal.font_weight, 400);
+        }
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::IdeFontWeight,
+                "invalid"
+            ),
+            SettingsInputDraftApply::Invalid
+        );
+        assert_eq!(settings.ide.font_weight, None);
+    }
 
     #[test]
     fn terminal_padding_inputs_preserve_the_other_axis_and_reject_invalid_text() {

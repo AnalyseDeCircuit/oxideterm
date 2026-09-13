@@ -558,6 +558,9 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             1,
             "settings_view.ide.editor_typography",
             &[
+                "settings_view.ide.font_family",
+                "settings_view.ide.cjk_font_family",
+                "settings_view.ide.font_weight",
                 "settings_view.ide.font_size",
                 "settings_view.ide.line_height",
             ],

@@ -408,6 +408,62 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Ide, SettingsSelect::IdeFontFamily) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for family in
+                    std::iter::once(None).chain(font_family_options().iter().copied().map(Some))
+                {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            family.map(font_family_label).unwrap_or_else(|| {
+                                self.i18n.t("settings_view.ide.follow_terminal")
+                            }),
+                            family == settings.ide.font_family,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_settings_select();
+                            this.edit_settings(|settings| settings.ide.font_family = family, cx);
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Ide, SettingsSelect::IdeCjkFontFamily) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                let current_family = settings.ide.cjk_font_family.as_deref().map(str::trim);
+                for family in std::iter::once(None)
+                    .chain(terminal_cjk_font_options().iter().copied().map(Some))
+                {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            family
+                                .map(|family| terminal_cjk_font_label(family, &self.i18n))
+                                .unwrap_or_else(|| {
+                                    self.i18n.t("settings_view.ide.follow_terminal")
+                                }),
+                            family == current_family,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_settings_select();
+                            this.edit_settings(
+                                |settings| {
+                                    settings.ide.cjk_font_family = family.map(str::to_string)
+                                },
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
             (SettingsTab::Terminal, SettingsSelect::TerminalFontFamily) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &family in font_family_options() {

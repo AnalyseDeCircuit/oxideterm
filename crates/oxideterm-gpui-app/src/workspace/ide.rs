@@ -992,6 +992,12 @@ impl WorkspaceApp {
         let settings = self.settings_store.settings();
         IdeRuntimeSettings {
             auto_save: settings.ide.auto_save,
+            editor_font_family: ide_editor_font_family(settings),
+            editor_font_weight: settings
+                .ide
+                .font_weight
+                .unwrap_or(settings.terminal.font_weight)
+                .clamp(100, 900) as f32,
             editor_font_fallback: ide_editor_font_fallback(settings),
             editor_font_size: settings
                 .ide
@@ -1138,16 +1144,30 @@ pub(super) fn node_agent_mode_from_settings(settings: &PersistedSettings) -> Nod
     }
 }
 
-fn ide_editor_font_fallback(settings: &PersistedSettings) -> Option<String> {
-    let terminal_family = settings
-        .terminal
+fn ide_editor_font_family(settings: &PersistedSettings) -> String {
+    let family = settings
+        .ide
         .font_family
-        .terminal_family_name(&settings.terminal.custom_font_family);
-    let configured_cjk_family = settings.terminal.cjk_font_family.trim();
-    // Code glyphs keep the editor's monospace primary while CJK glyphs follow
-    // the same explicit family preference as terminal content.
+        .unwrap_or(settings.terminal.font_family);
+    let custom = if settings.ide.font_family.is_some() {
+        &settings.ide.custom_font_family
+    } else {
+        &settings.terminal.custom_font_family
+    };
+    family.terminal_family_name(custom)
+}
+
+fn ide_editor_font_fallback(settings: &PersistedSettings) -> Option<String> {
+    let primary_family = ide_editor_font_family(settings);
+    let configured_cjk_family = settings
+        .ide
+        .cjk_font_family
+        .as_deref()
+        .unwrap_or(&settings.terminal.cjk_font_family)
+        .trim();
+    // An empty CJK override uses the primary font and the editor's platform fallback chain.
     let preferred_family = if configured_cjk_family.is_empty() {
-        terminal_family.as_str()
+        primary_family.as_str()
     } else {
         configured_cjk_family
     };
@@ -1220,7 +1240,7 @@ mod tests {
     }
 
     #[test]
-    fn ide_editor_font_fallback_follows_terminal_font_preferences() {
+    fn ide_editor_font_preferences_follow_terminal_or_use_independent_overrides() {
         let mut settings = PersistedSettings::default();
         assert_eq!(
             oxideterm_theme::default_tokens()
@@ -1246,6 +1266,31 @@ mod tests {
         assert_eq!(
             ide_editor_font_fallback(&settings).as_deref(),
             Some("DengXian")
+        );
+        settings.ide.font_family = Some(oxideterm_settings::FontFamily::Maple);
+        settings.ide.cjk_font_family = Some("PingFang SC".into());
+        assert_eq!(
+            ide_editor_font_family(&settings),
+            oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY
+        );
+        assert_eq!(
+            ide_editor_font_fallback(&settings).as_deref(),
+            Some("PingFang SC")
+        );
+        settings.terminal.font_family = oxideterm_settings::FontFamily::Menlo;
+        settings.terminal.cjk_font_family = "other".into();
+        assert_eq!(
+            ide_editor_font_family(&settings),
+            oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY
+        );
+        assert_eq!(
+            ide_editor_font_fallback(&settings).as_deref(),
+            Some("PingFang SC")
+        );
+        settings.ide.cjk_font_family = Some(String::new());
+        assert_eq!(
+            ide_editor_font_fallback(&settings).as_deref(),
+            Some(oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY)
         );
     }
 

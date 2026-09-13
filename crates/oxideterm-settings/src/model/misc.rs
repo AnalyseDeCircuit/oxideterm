@@ -104,6 +104,11 @@ pub enum FileTransferProtocolPreference {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IdeSettings {
+    pub font_family: Option<FontFamily>,
+    #[serde(default)]
+    pub custom_font_family: String,
+    pub cjk_font_family: Option<String>,
+    pub font_weight: Option<i64>,
     pub auto_save: bool,
     pub font_size: Option<i64>,
     pub line_height: Option<f64>,
@@ -116,6 +121,10 @@ pub struct IdeSettings {
 impl Default for IdeSettings {
     fn default() -> Self {
         Self {
+            font_family: None,
+            custom_font_family: String::new(),
+            cjk_font_family: None,
+            font_weight: None,
             auto_save: false,
             font_size: None,
             line_height: None,

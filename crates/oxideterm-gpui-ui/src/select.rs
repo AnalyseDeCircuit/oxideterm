@@ -67,6 +67,8 @@ pub enum SelectAnchorId {
     SettingsCustomThemeDuplicate,
     SettingsUpdateProxyMode,
     SettingsUpdateProxyProtocol,
+    SettingsIdeFontFamily,
+    SettingsIdeCjkFontFamily,
     SettingsTerminalFontFamily,
     SettingsTerminalCjkFontFamily,
     SettingsTerminalFontSizeSlider,
@@ -189,6 +191,8 @@ impl SelectAnchorId {
                 | Self::SettingsAppearanceBackgroundFit
                 | Self::SettingsCustomThemeDuplicate
                 | Self::SettingsTerminalFontFamily
+                | Self::SettingsIdeFontFamily
+                | Self::SettingsIdeCjkFontFamily
                 | Self::SettingsTerminalCjkFontFamily
                 | Self::SettingsTerminalEncoding
                 | Self::SettingsTerminalBackspaceSequence
