@@ -606,6 +606,7 @@ fn ide_file_maps_detect_open_close_and_active_changes() {
 fn ai_host_calls_return_sanitized_messages_and_provider_info() {
     let chat = oxideterm_ai::AiChatState {
         conversations: vec![oxideterm_ai::AiConversation {
+            archived: false,
             id: "conversation-1".to_string(),
             title: "Deploy help".to_string(),
             messages: vec![

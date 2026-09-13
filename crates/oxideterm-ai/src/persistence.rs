@@ -123,7 +123,10 @@ impl AiChatPersistenceStore {
                 meta.turn_count = Some(conversation.turn_count);
             }
         }
-        let active_conversation_id = metas.first().map(|meta| meta.id.clone());
+        let active_conversation_id = metas
+            .iter()
+            .find(|meta| !meta.archived)
+            .map(|meta| meta.id.clone());
         let mut conversations = metas
             .into_iter()
             .map(conversation_from_meta)
@@ -619,6 +622,7 @@ fn conversation_from_meta(meta: ConversationMeta) -> AiConversation {
         .and_then(Value::as_str)
         .map(str::to_string);
     AiConversation {
+        archived: meta.archived,
         id: meta.id,
         title: meta.title,
         messages: Vec::new(),
@@ -651,6 +655,7 @@ fn meta_from_conversation(conversation: &AiConversation) -> ConversationMeta {
         Some(Value::Object(metadata))
     });
     ConversationMeta {
+        archived: conversation.archived,
         id: conversation.id.clone(),
         title: conversation.title.clone(),
         created_at: conversation.created_at_ms,
@@ -1466,6 +1471,8 @@ pub struct ConversationMeta {
     // Keep additive fields at the end because MessagePack stores structs positionally.
     #[serde(default)]
     pub turn_count: Option<usize>,
+    #[serde(default)]
+    pub archived: bool,
 }
 
 #[allow(dead_code)]

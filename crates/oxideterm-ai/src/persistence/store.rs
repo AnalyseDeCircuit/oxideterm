@@ -79,6 +79,7 @@ impl ConversationStore {
         } else {
             super::records::initialize(&db)?;
         }
+        super::records::ensure_conversation_index(&db)?;
         let store = Self::from_database(path.clone(), db);
         stores.insert(
             path,
@@ -215,6 +216,57 @@ impl ConversationStore {
         {
             let (key, _) = row?;
             if let Some(head) = super::records::head(&tx, key.value().1)? {
+                output.push(head);
+            }
+        }
+        Ok(output)
+    }
+
+    pub fn max_revision(&self) -> Result<u64> {
+        let guard = self.db.read();
+        let tx = guard
+            .as_ref()
+            .ok_or_else(|| anyhow!("History database is unavailable"))?
+            .begin_read()?;
+        Ok(tx
+            .open_table(STATE)?
+            .get("max_revision")?
+            .map(|row| row.value())
+            .unwrap_or_default())
+    }
+
+    pub fn conversation_ids(&self) -> Result<Vec<String>> {
+        let guard = self.db.read();
+        let tx = guard
+            .as_ref()
+            .ok_or_else(|| anyhow!("History database is unavailable"))?
+            .begin_read()?;
+        tx.open_table(HEADS)?
+            .iter()?
+            .map(|row| Ok(row?.0.value().to_owned()))
+            .collect()
+    }
+
+    pub fn list_conversation_heads(
+        &self,
+        archived: bool,
+        before: Option<(i64, String)>,
+        limit: usize,
+    ) -> Result<Vec<ConversationHead>> {
+        let guard = self.db.read();
+        let tx = guard
+            .as_ref()
+            .ok_or_else(|| anyhow!("History database is unavailable"))?
+            .begin_read()?;
+        let index = tx.open_table(ARCHIVED_UPDATED)?;
+        let group = u8::from(archived);
+        let end = before
+            .as_ref()
+            .map(|(time, id)| (group, *time, id.as_str()))
+            .unwrap_or((group, i64::MAX, "\u{10ffff}"));
+        let mut output = Vec::new();
+        for row in index.range((group, i64::MIN, "")..end)?.rev().take(limit) {
+            if let Some(head) = super::records::head(&tx, row?.0.value().2)? {
                 output.push(head);
             }
         }

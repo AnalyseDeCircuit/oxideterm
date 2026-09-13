@@ -48,6 +48,57 @@ pub(super) const EVENT_NEXT: TableDefinition<(&str, &str), u64> =
     TableDefinition::new("v4_event_next");
 pub(super) const UPDATED: TableDefinition<(i64, &str), ()> = TableDefinition::new("v4_updated");
 
+pub(super) const ARCHIVED_UPDATED: TableDefinition<(u8, i64, &str), ()> =
+    TableDefinition::new("v4_archived_updated");
+
+pub(super) fn ensure_conversation_index(db: &Database) -> Result<()> {
+    if db
+        .begin_read()?
+        .open_table(STATE)?
+        .get("conversation_index")?
+        .is_some()
+    {
+        return Ok(());
+    }
+    let tx = db.begin_write()?;
+    let mut revision = 0;
+    {
+        let mut index = tx.open_table(ARCHIVED_UPDATED)?;
+        for row in tx.open_table(HEADS)?.iter()? {
+            let (_, value) = row?;
+            let head: ConversationHead = rmp_serde::from_slice(value.value())?;
+            index.insert(
+                (
+                    u8::from(head.conversation.archived),
+                    head.conversation.updated_at_ms,
+                    head.conversation.id.as_str(),
+                ),
+                (),
+            )?;
+            revision = revision.max(head.revision);
+        }
+        for row in tx.open_table(DELETED)?.iter()? {
+            revision = revision.max(row?.1.value());
+        }
+    }
+    tx.open_table(STATE)?.insert("max_revision", revision)?;
+    tx.open_table(STATE)?.insert("conversation_index", 1)?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub(super) fn record_revision(tx: &redb::WriteTransaction, revision: u64) -> Result<()> {
+    let mut state = tx.open_table(STATE)?;
+    let previous = state
+        .get("max_revision")?
+        .map(|v| v.value())
+        .unwrap_or_default();
+    if revision > previous {
+        state.insert("max_revision", revision)?;
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConversationHead {
     pub conversation: AiConversation,
@@ -157,6 +208,9 @@ pub(super) fn initialize(db: &Database) -> Result<()> {
     tx.open_table(EVENT_IDS)?;
     tx.open_table(EVENT_NEXT)?;
     tx.open_table(UPDATED)?;
+    tx.open_table(ARCHIVED_UPDATED)?;
+    tx.open_table(STATE)?.insert("conversation_index", 1)?;
+    tx.open_table(STATE)?.insert("max_revision", 0)?;
     tx.commit()?;
     Ok(())
 }

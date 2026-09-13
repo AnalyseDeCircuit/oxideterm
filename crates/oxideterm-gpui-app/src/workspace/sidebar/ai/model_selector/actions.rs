@@ -989,6 +989,7 @@ mod acp_model_selection_tests {
     #[test]
     fn discovered_model_choice_is_stored_for_the_next_real_session() {
         let mut conversation = AiConversation {
+        archived: false,
             id: "conversation-1".to_string(),
             title: "Conversation".to_string(),
             messages: Vec::new(),
@@ -1043,6 +1044,7 @@ mod acp_model_selection_tests {
     #[test]
     fn reasoning_level_is_scoped_to_the_conversation_without_erasing_other_metadata() {
         let mut conversation = AiConversation {
+        archived: false,
             id: "conversation-1".to_string(),
             title: "Conversation".to_string(),
             messages: Vec::new(),

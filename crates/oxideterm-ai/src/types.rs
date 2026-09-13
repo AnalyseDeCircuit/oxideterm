@@ -178,6 +178,8 @@ pub struct AiConversation {
     // Keep additive fields at the end because MessagePack stores structs positionally.
     #[serde(default)]
     pub turn_count: usize,
+    #[serde(default)]
+    pub archived: bool,
 }
 
 fn default_messages_loaded() -> bool {

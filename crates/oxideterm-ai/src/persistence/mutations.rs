@@ -149,13 +149,28 @@ pub(super) fn write_head(tx: &redb::WriteTransaction, mut head: ConversationHead
         .get(id)?
         .map(|row| rmp_serde::from_slice::<ConversationHead>(row.value()))
         .transpose()?;
+    record_revision(tx, head.revision)?;
+    let mut grouped = tx.open_table(ARCHIVED_UPDATED)?;
     let mut updated = tx.open_table(UPDATED)?;
     if let Some(previous) = previous {
         updated.remove((previous.conversation.updated_at_ms, id))?;
+        grouped.remove((
+            u8::from(previous.conversation.archived),
+            previous.conversation.updated_at_ms,
+            id,
+        ))?;
     }
     let bytes = rmp_serde::to_vec_named(&head)?;
     table.insert(id, bytes.as_slice())?;
     updated.insert((head.conversation.updated_at_ms, id), ())?;
+    grouped.insert(
+        (
+            u8::from(head.conversation.archived),
+            head.conversation.updated_at_ms,
+            id,
+        ),
+        (),
+    )?;
     Ok(())
 }
 
@@ -853,6 +868,12 @@ pub(super) fn apply_mutation(tx: &redb::WriteTransaction, mutation: HistoryMutat
             tx.open_table(HEADS)?.remove(conversation_id.as_str())?;
             tx.open_table(UPDATED)?
                 .remove((head.conversation.updated_at_ms, conversation_id.as_str()))?;
+            tx.open_table(ARCHIVED_UPDATED)?.remove((
+                u8::from(head.conversation.archived),
+                head.conversation.updated_at_ms,
+                conversation_id.as_str(),
+            ))?;
+            record_revision(tx, revision)?;
             delete_rows(tx, &conversation_id)?;
         }
     }

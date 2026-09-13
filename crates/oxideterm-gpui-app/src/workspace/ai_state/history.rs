@@ -329,6 +329,7 @@ impl Drop for AiHistoryState {
 
 fn metadata(conversation: &AiConversation) -> AiConversation {
     AiConversation {
+        archived: conversation.archived,
         id: conversation.id.clone(),
         title: conversation.title.clone(),
         messages: Vec::new(),

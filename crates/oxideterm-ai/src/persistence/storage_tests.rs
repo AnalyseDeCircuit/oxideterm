@@ -2335,3 +2335,225 @@ fn waiting_tool_progress_is_finalized_on_stop_and_history_reload() {
         assert_eq!(view.message.tool_calls[5]["result"], completed["result"]);
     }
 }
+
+#[test]
+fn conversation_archive_survives_reopen_and_preserves_messages() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("archive.redb");
+    let store = ConversationStore::open(&path).unwrap();
+    store
+        .apply(vec![
+            HistoryMutation::Create {
+                conversation: empty_conversation(),
+                revision: 1,
+            },
+            put(0, 2),
+        ])
+        .unwrap();
+    let mut conversation = empty_conversation();
+    conversation.archived = true;
+    store
+        .apply(vec![HistoryMutation::Metadata {
+            conversation,
+            revision: 3,
+        }])
+        .unwrap();
+    drop(store);
+    let store = ConversationStore::open(&path).unwrap();
+    let mut conversation = store
+        .conversation_head("history")
+        .unwrap()
+        .unwrap()
+        .conversation;
+    assert!(conversation.archived);
+    assert_eq!(
+        store
+            .message_by_id("history", "main", "message-0")
+            .unwrap()
+            .content,
+        "text-0"
+    );
+    conversation.archived = false;
+    store
+        .apply(vec![HistoryMutation::Metadata {
+            conversation,
+            revision: 4,
+        }])
+        .unwrap();
+    drop(store);
+    let store = ConversationStore::open(&path).unwrap();
+    assert!(
+        !store
+            .conversation_head("history")
+            .unwrap()
+            .unwrap()
+            .conversation
+            .archived
+    );
+    assert_eq!(
+        store
+            .message_by_id("history", "main", "message-0")
+            .unwrap()
+            .content,
+        "text-0"
+    );
+}
+
+#[test]
+fn conversation_list_pages_filter_before_loading_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ConversationStore::open(dir.path().join("lists.redb")).unwrap();
+    let mutations = (0..2000)
+        .map(|index| {
+            let mut conversation = empty_conversation();
+            conversation.id = format!("chat-{index:04}");
+            conversation.archived = index % 2 == 0;
+            conversation.updated_at_ms = index / 2;
+            HistoryMutation::Create {
+                conversation,
+                revision: index as u64 + 1,
+            }
+        })
+        .collect();
+    store.apply(mutations).unwrap();
+    let start = std::time::Instant::now();
+    let mut heads = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = store.list_heads(cursor, 100).unwrap();
+        cursor = page
+            .last()
+            .map(|h| (h.conversation.updated_at_ms, h.conversation.id.clone()));
+        let done = page.len() < 100;
+        heads.extend(page);
+        if done {
+            break;
+        }
+    }
+    eprintln!(
+        "conversation list baseline: {:?}, {} metadata records",
+        start.elapsed(),
+        heads.len()
+    );
+    assert_eq!(heads.first().unwrap().conversation.id, "chat-1999");
+    assert_eq!(heads.last().unwrap().conversation.id, "chat-0000");
+    let start = std::time::Instant::now();
+    let first = store.list_conversation_heads(false, None, 51).unwrap();
+    eprintln!(
+        "conversation list first page: {:?}, {} metadata records",
+        start.elapsed(),
+        first.len()
+    );
+    assert_eq!(
+        first
+            .iter()
+            .map(|h| h.conversation.id.clone())
+            .collect::<Vec<_>>(),
+        (0..51)
+            .map(|i| format!("chat-{:04}", 1999 - i * 2))
+            .collect::<Vec<_>>()
+    );
+    for archived in [false, true] {
+        let mut ids = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = store.list_conversation_heads(archived, cursor, 50).unwrap();
+            cursor = page
+                .last()
+                .map(|h| (h.conversation.updated_at_ms, h.conversation.id.clone()));
+            let done = page.len() < 50;
+            ids.extend(page.into_iter().map(|h| h.conversation.id));
+            if done {
+                break;
+            }
+        }
+        let last = if archived { 1998 } else { 1999 };
+        assert_eq!(
+            ids,
+            (0..1000)
+                .map(|i| format!("chat-{:04}", last - i * 2))
+                .collect::<Vec<_>>()
+        );
+    }
+    let mut changed = store
+        .conversation_head("chat-1999")
+        .unwrap()
+        .unwrap()
+        .conversation;
+    changed.archived = true;
+    store
+        .apply(vec![HistoryMutation::Metadata {
+            conversation: changed,
+            revision: 3000,
+        }])
+        .unwrap();
+    assert_eq!(
+        store.list_conversation_heads(false, None, 1).unwrap()[0]
+            .conversation
+            .id,
+        "chat-1997"
+    );
+    let archived = store.list_conversation_heads(true, None, 2).unwrap();
+    assert_eq!(
+        archived
+            .iter()
+            .map(|h| h.conversation.id.as_str())
+            .collect::<Vec<_>>(),
+        ["chat-1999", "chat-1998"]
+    );
+    let after = (
+        archived[0].conversation.updated_at_ms,
+        archived[0].conversation.id.clone(),
+    );
+    assert_eq!(
+        store.list_conversation_heads(true, Some(after), 1).unwrap()[0]
+            .conversation
+            .id,
+        "chat-1998"
+    );
+    assert_eq!(store.max_revision().unwrap(), 3000);
+    assert_eq!(
+        store.conversation_ids().unwrap(),
+        (0..2000)
+            .map(|i| format!("chat-{i:04}"))
+            .collect::<Vec<_>>()
+    );
+    store
+        .apply(vec![HistoryMutation::DeleteConversation {
+            conversation_id: "chat-1999".into(),
+            revision: 4000,
+        }])
+        .unwrap();
+    assert_eq!(
+        store.list_conversation_heads(true, None, 1).unwrap()[0]
+            .conversation
+            .id,
+        "chat-1998"
+    );
+    // Existing databases build the derived index once, without rewriting messages.
+    {
+        let guard = store.db.read();
+        let tx = guard.as_ref().unwrap().begin_write().unwrap();
+        tx.delete_table(super::records::ARCHIVED_UPDATED).unwrap();
+        tx.open_table(super::records::STATE)
+            .unwrap()
+            .remove("conversation_index")
+            .unwrap();
+        tx.commit().unwrap();
+    }
+    drop(store);
+    let store = ConversationStore::open(dir.path().join("lists.redb")).unwrap();
+    assert_eq!(
+        store.list_conversation_heads(false, None, 1).unwrap()[0]
+            .conversation
+            .id,
+        "chat-1997"
+    );
+    assert_eq!(
+        store.list_conversation_heads(true, None, 1).unwrap()[0]
+            .conversation
+            .id,
+        "chat-1998"
+    );
+    assert_eq!(store.max_revision().unwrap(), 4000);
+}

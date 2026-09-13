@@ -121,6 +121,7 @@ fn cancellation_retains_partial_text_and_completes_rejected_tool_results() {
             "status": status, "result": null,
         }));
         let mut conversation = AiConversation {
+            archived: false,
             id: "conversation".to_string(),
             title: "Conversation".to_string(),
             messages: vec![assistant],

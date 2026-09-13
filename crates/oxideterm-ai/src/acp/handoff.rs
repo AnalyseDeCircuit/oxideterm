@@ -290,6 +290,7 @@ mod tests {
 
     fn conversation(messages: Vec<AiChatMessage>) -> AiConversation {
         AiConversation {
+            archived: false,
             id: "conversation-1".to_string(),
             title: "Conversation".to_string(),
             messages,

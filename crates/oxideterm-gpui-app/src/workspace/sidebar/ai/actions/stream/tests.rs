@@ -391,6 +391,7 @@ mod ai_turn_order_tests {
     #[test]
     fn acp_session_started_ignores_stale_generation_and_persists_current_metadata() {
         let mut conversations = vec![AiConversation {
+        archived: false,
             id: "conv-1".to_string(),
             title: "Conversation".to_string(),
             messages: Vec::new(),
@@ -512,6 +513,7 @@ mod ai_turn_order_tests {
     #[test]
     fn acp_handoff_cursor_advances_only_for_the_matching_agent() {
         let mut conversation = AiConversation {
+        archived: false,
             id: "conv-1".to_string(),
             title: "Conversation".to_string(),
             messages: vec![AiChatMessage {

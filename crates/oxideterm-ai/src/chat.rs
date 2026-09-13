@@ -68,6 +68,7 @@ impl AiChatState {
             .filter(|title| !title.trim().is_empty())
             .unwrap_or_else(|| "New Chat".to_string());
         let conversation = AiConversation {
+            archived: false,
             id: id.clone(),
             title,
             messages: Vec::new(),
@@ -116,7 +117,8 @@ impl AiChatState {
         if self.active_conversation_id.as_deref() == Some(id) {
             self.active_conversation_id = self
                 .conversations
-                .first()
+                .iter()
+                .find(|conversation| !conversation.archived)
                 .map(|conversation| conversation.id.clone());
         }
     }
