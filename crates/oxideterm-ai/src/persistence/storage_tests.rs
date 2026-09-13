@@ -1,6 +1,10 @@
 use super::*;
 use redb::ReadableTableMetadata;
 
+// These guards detect deadlocks, not throughput regressions. Debug sanitization and
+// durable writes of oversized messages share CPU and disk with other CI tests.
+const WRITER_TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 fn empty_conversation() -> AiConversation {
     let mut state = AiChatState::default();
     state.create_conversation("history".into(), Some("Original".into()), 1, None);
@@ -768,7 +772,7 @@ async fn failed_disk_write_retains_the_batch_until_storage_retry_commits_it() {
                 }])
                 .await
         });
-        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        tokio::time::timeout(WRITER_TEST_TIMEOUT, async {
             while *status.borrow_and_update() != HistoryWriteState::Failed {
                 status.changed().await.unwrap();
             }
@@ -794,7 +798,7 @@ async fn failed_disk_write_retains_the_batch_until_storage_retry_commits_it() {
         assert!(!retry.is_finished());
         assert!(!closing.is_finished());
         drop(database);
-        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        tokio::time::timeout(WRITER_TEST_TIMEOUT, async {
             retry.await.unwrap().unwrap();
             later.await.unwrap().unwrap();
             closing.await.unwrap().unwrap();
@@ -1416,7 +1420,7 @@ async fn large_messages_stream_through_the_writer_without_a_storage_size_cap() {
             }])
             .await
     });
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    tokio::time::timeout(WRITER_TEST_TIMEOUT, async {
         while writer.pending_bytes() != HISTORY_PENDING_BYTES {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
