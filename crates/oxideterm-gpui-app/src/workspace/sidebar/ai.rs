@@ -128,6 +128,7 @@ pub(in crate::workspace) fn ai_message_backend_for_stream(
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum AiHeaderAction {
+    ArchivedConversations,
     NewChat,
     Settings,
 }

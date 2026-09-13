@@ -18,6 +18,7 @@ struct AiConversationListRow {
     turn_count: usize,
     updated_at_ms: i64,
     active: bool,
+    archived: bool,
 }
 
 impl WorkspaceApp {
@@ -274,13 +275,13 @@ impl WorkspaceApp {
         dropdown_width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let dropdown_height = if self.ai_entity.read(cx).conversation_state().conversations.is_empty() {
-            AI_CONVERSATION_EMPTY_HEIGHT
-        } else {
-            (self.ai_entity.read(cx).conversation_state().conversations.len() as f32
-                * AI_CONVERSATION_ROW_HEIGHT)
-                .min(AI_CONVERSATION_MAX_HEIGHT)
-        };
+        let show_archived = self.ai_entity.read(cx).chat_ui().show_archived_conversations;
+        let page = self.ai_entity.read(cx).conversation_list_page(show_archived);
+        let loading = page.loading();
+        let failed = page.failed;
+        let has_more = page.has_more;
+        let count = self.ai_entity.read(cx).conversation_state().conversations.iter().filter(|item| item.archived == show_archived).count();
+        let dropdown_height = (count as f32 * AI_CONVERSATION_ROW_HEIGHT + 36.0 + if loading || failed || has_more { 36.0 } else { 0.0 }).max(AI_CONVERSATION_EMPTY_HEIGHT + 36.0).min(AI_CONVERSATION_MAX_HEIGHT);
         let scroll_handle =
             self.selectable_text_scroll_handle("ai-conversation-dropdown-scroll");
         let mut list = div()
@@ -294,13 +295,15 @@ impl WorkspaceApp {
             // stays with the overlay and cannot scroll the message/sidebar body.
             .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
 
-        let conversation_rows = {
+        let mut conversation_rows = {
             let ai = self.ai_entity.read(cx);
             let state = ai.conversation_state();
             state
                 .conversations
                 .iter()
+                .filter(|conversation| conversation.archived == show_archived)
                 .map(|conversation| AiConversationListRow {
+                    archived: conversation.archived,
                     id: Arc::from(conversation.id.as_str()),
                     title: conversation.title.clone(),
                     cli_origin: conversation.origin == "cli",
@@ -311,7 +314,19 @@ impl WorkspaceApp {
                 })
                 .collect::<Vec<_>>()
         };
-        if conversation_rows.is_empty() {
+        conversation_rows.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms).then_with(|| b.id.cmp(&a.id)));
+        list = list.child(
+            div().flex_none().h(px(36.0)).px(px(12.0)).flex().items_center().justify_between()
+                .child(div().text_size(px(11.0)).text_color(rgb(self.tokens.ui.text_muted)).child(self.i18n.t(if show_archived { "ai.chat.archived_conversations" } else { "ai.chat.conversations" })))
+                .child(div().cursor_pointer().text_size(px(11.0)).text_color(rgb(self.tokens.ui.accent))
+                    .child(self.i18n.t(if show_archived { "ai.chat.show_active" } else { "ai.chat.archived_conversations" }))
+                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                        this.ai_entity.update(cx, |ai, _| ai.show_archived_conversations(!show_archived));
+                        cx.stop_propagation();
+                        cx.notify();
+                    })))
+        );
+        if conversation_rows.is_empty() && !loading && !failed {
             list = list.child(
                 div()
                     .p(px(16.0))
@@ -322,7 +337,7 @@ impl WorkspaceApp {
                         SelectableTextRole::PlainDocument,
                         "ai-conversation-list",
                         "empty",
-                        self.i18n.t("ai.chat.no_conversations"),
+                        self.i18n.t(if show_archived { "ai.chat.no_archived_conversations" } else { "ai.chat.no_conversations" }),
                         self.tokens.ui.text_muted,
                         cx,
                     )),
@@ -332,11 +347,19 @@ impl WorkspaceApp {
             for (index, conversation) in conversation_rows.into_iter().enumerate() {
                 list = list.child(self.render_ai_conversation_item(
                     conversation,
-                    index == 0,
-                    index + 1 == conversation_count,
+                    index + 1 == conversation_count && !loading && !failed && !has_more,
                     cx,
                 ));
             }
+        }
+        if loading || failed || has_more {
+            list = list.child(div().id("ai-conversation-list-next").flex_none().h(px(36.0)).flex().items_center().justify_center()
+                .text_size(px(12.0)).text_color(rgb(self.tokens.ui.accent))
+                .child(self.i18n.t(if loading { "ai.chat.context_loading" } else if failed { "ai.chat.list_retry" } else { "ai.chat.list_more" }))
+                .when(!loading, |row| row.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
+                    this.ai_entity.update(cx, |ai, _| ai.request_conversation_list_page(show_archived));
+                    cx.notify();
+                }))));
         }
         div()
             .w(px(dropdown_width))
@@ -361,7 +384,6 @@ impl WorkspaceApp {
     fn render_ai_conversation_item(
         &self,
         conversation: AiConversationListRow,
-        is_first: bool,
         is_last: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -382,6 +404,10 @@ impl WorkspaceApp {
         let title = conversation.title;
         let rename_id = conversation.id.clone();
         let rename_title = title.clone();
+        let archive_id = conversation.id.clone();
+        let archived = conversation.archived;
+        let archive_label = self.i18n.t(if archived { "ai.chat.restore_conversation" } else { "ai.chat.archive_conversation" });
+        let archive_tokens = self.tokens;
         let delete_id = conversation.id.clone();
         let id = conversation.id;
         let is_active = conversation.active;
@@ -539,12 +565,7 @@ impl WorkspaceApp {
             } else {
                 rgba(0x00000000)
             })
-            // Tauri relies on the rounded overflow-y-auto popover to clip the
-            // active row background and border-left. GPUI needs the edge rows to
-            // own matching corners so the highlight follows the popover radius.
-            .when(is_first, |row| {
-                row.rounded_t(px(rounded_shell_child_radius(self.tokens.radii.md)))
-            })
+            // Only the bottom row meets the rounded outer shell.
             .when(is_last, |row| {
                 row.rounded_b(px(rounded_shell_child_radius(self.tokens.radii.md)))
             })
@@ -601,6 +622,16 @@ impl WorkspaceApp {
                     .items_center()
                     .gap(px(2.0))
                     .child(rename_button)
+                    .child(div().id(SharedString::from(format!("ai-conversation-archive-{archive_id}"))).size(px(24.0)).flex().items_center().justify_center()
+                        .rounded(px(self.tokens.radii.md)).cursor_pointer()
+                        .hover(|style| style.bg(rgba((self.tokens.ui.accent << 8) | 0x1a)))
+                        .child(Self::render_lucide_icon(if archived { LucideIcon::RotateCcw } else { LucideIcon::Archive }, 13.0, rgb(self.tokens.ui.text_muted)))
+                        .tooltip(move |_, cx| oxideterm_gpui_ui::tooltip::tooltip_view(archive_tokens, archive_label.clone(), None, cx))
+                        .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                            this.set_ai_conversation_archived(&archive_id, !archived, cx);
+                            cx.stop_propagation();
+                            cx.notify();
+                        })))
                     .child(
                         div()
                             .flex_none()
@@ -650,6 +681,13 @@ impl WorkspaceApp {
             .border_color(rgb(self.tokens.ui.border))
             .bg(rgb(self.tokens.ui.bg_elevated))
             .shadow_lg()
+            .child(self.render_ai_chat_menu_item(
+                LucideIcon::Archive,
+                self.i18n.t("ai.chat.archived_conversations"),
+                false,
+                AiHeaderAction::ArchivedConversations,
+                cx,
+            ))
             .child(self.render_ai_chat_menu_item(
                 LucideIcon::Settings,
                 self.i18n.t("ai.chat.settings"),
@@ -725,6 +763,12 @@ impl WorkspaceApp {
                 rgba((self.tokens.ui.border << 8) | 0x1a)
             }),
             move |this, _event, window, cx| match action {
+                AiHeaderAction::ArchivedConversations => {
+                    this.ai_entity.update(cx, |ai, _| {
+                        ai.show_archived_conversations(true);
+                    });
+                    cx.notify();
+                }
                 AiHeaderAction::Settings => this.open_ai_settings(window, cx),
                 AiHeaderAction::NewChat => {
                     this.ai_entity.update(cx, |ai, cx| {

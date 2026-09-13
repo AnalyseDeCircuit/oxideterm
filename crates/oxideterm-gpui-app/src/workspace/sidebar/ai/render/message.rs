@@ -2305,6 +2305,9 @@ impl WorkspaceApp {
                 false,
                 cx.listener(move |this, _event, window, cx| {
                     match action {
+                        Some(AiHeaderAction::ArchivedConversations) => {
+                            this.ai_entity.update(cx, |ai, _| ai.show_archived_conversations(true));
+                        }
                         Some(AiHeaderAction::NewChat) => {
                             this.create_ai_sidebar_conversation(None, cx);
                         }

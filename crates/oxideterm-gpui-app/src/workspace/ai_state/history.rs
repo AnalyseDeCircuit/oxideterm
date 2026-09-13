@@ -5,6 +5,7 @@ use oxideterm_ai::{
 };
 use std::cell::RefCell;
 mod archives;
+mod conversations;
 mod pages;
 pub(in crate::workspace) use pages::HistoryViewOwner;
 static NEXT_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -190,6 +191,9 @@ pub(in crate::workspace) enum HistoryStatus {
 
 pub(in crate::workspace) struct AiHistoryState {
     pub store: Option<ConversationStore>,
+    conversation_lists: [conversations::ConversationListPage; 2],
+    conversation_list_epoch: u64,
+    pub(super) deleted_conversations: HashSet<String>,
     pub writer: Option<HistoryWriter>,
     pub status: HistoryStatus,
     pub quitting: bool,
@@ -230,7 +234,13 @@ pub(in crate::workspace) struct AiHistoryState {
 enum Delivery {
     Initialized(
         u64,
-        Result<(ConversationStore, Vec<oxideterm_ai::ConversationHead>), String>,
+        Result<(ConversationStore, Vec<oxideterm_ai::ConversationHead>, u64), String>,
+    ),
+    Conversations(
+        u64,
+        u64,
+        bool,
+        Result<Vec<oxideterm_ai::ConversationHead>, ()>,
     ),
     Progress(u64, usize, usize),
     Written(u64, StreamBases),
@@ -253,6 +263,9 @@ impl Default for AiHistoryState {
         let (sender, receiver) = std::sync::mpsc::channel();
         Self {
             store: None,
+            conversation_lists: Default::default(),
+            conversation_list_epoch: 0,
+            deleted_conversations: HashSet::new(),
             writer: None,
             status: HistoryStatus::Idle,
             quitting: false,
@@ -414,23 +427,13 @@ impl AiWorkspaceEntity {
                     },
                     &cancelled,
                 )?;
-                let mut heads = Vec::new();
-                let mut cursor = None;
-                loop {
-                    let page = store.list_heads(cursor, 100)?;
-                    cursor = page.last().map(|head| {
-                        (
-                            head.conversation.updated_at_ms,
-                            head.conversation.id.clone(),
-                        )
-                    });
-                    let done = page.len() < 100;
-                    heads.extend(page);
-                    if done {
-                        break;
-                    }
-                }
-                Ok::<_, anyhow::Error>((store, heads))
+                let heads = store.list_conversation_heads(
+                    false,
+                    None,
+                    conversations::CONVERSATION_PAGE_SIZE + 1,
+                )?;
+                let revision = store.max_revision()?;
+                Ok::<_, anyhow::Error>((store, heads, revision))
             })
             .await;
             let result = result
@@ -445,6 +448,12 @@ impl AiWorkspaceEntity {
     fn drain_history(&mut self, cx: &mut Context<Self>) {
         while let Ok(delivery) = self.history.receiver.try_recv() {
             match delivery {
+                Delivery::Conversations(generation, epoch, archived, result)
+                    if generation == self.history.generation
+                        && epoch == self.history.conversation_list_epoch =>
+                {
+                    self.apply_conversation_list(archived, result);
+                }
                 Delivery::Archive(delivery) => self.apply_history_archive(delivery),
                 Delivery::Progress(generation, done, total)
                     if generation == self.history.generation =>
@@ -456,9 +465,9 @@ impl AiWorkspaceEntity {
                 {
                     self.history.load.take();
                     match result {
-                        Ok((store, heads)) => {
-                            self.history.changes.borrow_mut().revision =
-                                heads.iter().map(|head| head.revision).max().unwrap_or(0);
+                        Ok((store, mut heads, revision)) => {
+                            self.initialize_conversation_list(&mut heads);
+                            self.history.changes.borrow_mut().revision = revision;
                             self.history.committed = self.history.changes.borrow().revision;
                             NEXT_REVISION.fetch_max(
                                 self.history.committed,
@@ -475,7 +484,8 @@ impl AiWorkspaceEntity {
                             self.conversation_state.active_conversation_id = self
                                 .conversation_state
                                 .conversations
-                                .first()
+                                .iter()
+                                .find(|conversation| !conversation.archived)
                                 .map(|conversation| conversation.id.clone());
                             match HistoryWriter::new(store.clone()) {
                                 Ok(writer) => {
@@ -494,6 +504,9 @@ impl AiWorkspaceEntity {
                                     self.history.writer = Some(writer);
                                     self.history.store = Some(store);
                                     self.history.status = HistoryStatus::Ready;
+                                    if self.chat_ui.show_archived_conversations {
+                                        self.request_conversation_list_page(true);
+                                    }
                                     self.chat_initialization_error = None;
                                     if let Some(id) =
                                         self.conversation_state.active_conversation_id.clone()

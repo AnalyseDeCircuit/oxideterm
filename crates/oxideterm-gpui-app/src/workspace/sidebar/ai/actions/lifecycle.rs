@@ -123,6 +123,10 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(in crate::workspace) fn set_ai_conversation_archived(&mut self, id: &str, archived: bool, cx: &mut App) {
+        self.ai_entity.update(cx, |ai, _| ai.set_conversation_archived(id, archived));
+    }
+
     pub(in crate::workspace) fn delete_ai_conversation(&mut self, id: &str, cx: &mut App) {
         let generations = self.ai_entity.read(cx).conversation_stream_generations(id);
         self.ai_entity.update(cx, |ai, _cx| ai.cancel_chat_stream_for(id));
@@ -148,9 +152,17 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn clear_ai_conversations(&mut self, cx: &mut App) {
+        let mut ids: std::collections::HashSet<String> = match self.ai_entity.read(cx).history.store.as_ref().map(|store| store.conversation_ids()).transpose() {
+            Ok(ids) => ids.unwrap_or_default().into_iter().collect(),
+            Err(_) => {
+                self.ai_entity.update(cx, |ai, _| ai.history_load_failed());
+                return;
+            }
+        };
+        ids.extend(self.ai_entity.read(cx).conversation_state().conversations.iter().map(|conversation| conversation.id.clone()));
         // Cancel the live generation before clearing its routing identifier.
         self.cancel_ai_chat_stream_without_notify(cx);
-        let ids: Vec<_> = self.ai_entity.read(cx).conversation_state().conversations.iter().map(|conversation| conversation.id.clone()).collect();
+        self.ai_entity.update(cx, |ai, _| ai.reset_conversation_lists_after_clear());
         for id in ids { self.delete_ai_conversation(&id, cx); }
         self.acp_entity.update(cx, |entity, _cx| {
             entity.close_all_threads(false);

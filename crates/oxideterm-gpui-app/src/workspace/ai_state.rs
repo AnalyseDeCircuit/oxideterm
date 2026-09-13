@@ -1696,6 +1696,32 @@ impl AiWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn select_conversation(&mut self, id: String) {
+        if !self
+            .conversation_state
+            .conversations
+            .iter()
+            .any(|item| item.id == id)
+        {
+            match self
+                .history
+                .store
+                .as_ref()
+                .map(|store| store.conversation_head(&id))
+                .transpose()
+            {
+                Ok(Some(Some(head))) => {
+                    self.history.branches.insert(id.clone(), head.active_branch);
+                    self.conversation_state
+                        .conversations
+                        .push(head.conversation);
+                }
+                Err(_) => {
+                    self.history_load_failed();
+                    return;
+                }
+                _ => return,
+            }
+        }
         if self.conversation_state.active_conversation_id.as_ref() != Some(&id) {
             self.cancel_history_page_loads();
             if self.history.edit_load.take().is_some() {
@@ -1756,6 +1782,7 @@ impl AiWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn delete_conversation(&mut self, id: &str) -> bool {
+        self.history.deleted_conversations.insert(id.to_owned());
         self.history_deleted(id);
         self.queued_chat_turns.remove(id);
         self.chat_launches.remove(id);
@@ -1811,6 +1838,46 @@ impl AiWorkspaceEntity {
             self.clear_conversation_rename();
         }
         !self.conversation_state.conversations.is_empty()
+    }
+
+    pub(in crate::workspace) fn show_archived_conversations(&mut self, archived: bool) {
+        self.close_chat_popovers();
+        if !self.conversation_list_page(archived).initialized {
+            self.request_conversation_list_page(archived);
+        }
+        self.chat_ui.show_archived_conversations = archived;
+        self.chat_ui.conversation_list_open = true;
+    }
+
+    pub(in crate::workspace) fn set_conversation_archived(&mut self, id: &str, archived: bool) {
+        let Some(conversation) = self
+            .conversation_state
+            .conversations
+            .iter_mut()
+            .find(|item| item.id == id)
+        else {
+            return;
+        };
+        conversation.archived = archived;
+        self.history_metadata_changed(id);
+        if archived && self.conversation_state.active_conversation_id.as_deref() == Some(id) {
+            let next = self
+                .conversation_state
+                .conversations
+                .iter()
+                .find(|item| !item.archived)
+                .map(|item| item.id.clone());
+            if let Some(next) = next {
+                self.select_conversation(next);
+            } else {
+                self.stash_active_chat_draft();
+                self.cancel_history_page_loads();
+                self.conversation_state.active_conversation_id = None;
+                self.set_chat_draft(String::new());
+            }
+            self.reset_chat_for_conversation_selection();
+        }
+        self.persist_chat_state();
     }
 
     pub(in crate::workspace) fn rename_conversation(
@@ -4697,6 +4764,7 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) context_token_cache: RefCell<AiContextTokenBreakdownCache>,
     pub(super) prepared_prompt_usage: Option<AiPreparedPromptUsage>,
     pub(super) conversation_list_open: bool,
+    pub(super) show_archived_conversations: bool,
     pub(super) menu_open: bool,
     pub(super) reasoning_menu_open: bool,
     pub(super) safety_menu_open: bool,
@@ -4763,6 +4831,7 @@ impl AiChatWorkspaceState {
             context_token_cache: RefCell::new(AiContextTokenBreakdownCache::default()),
             prepared_prompt_usage: None,
             conversation_list_open: false,
+            show_archived_conversations: false,
             menu_open: false,
             reasoning_menu_open: false,
             safety_menu_open: false,
@@ -4872,6 +4941,151 @@ pub(in crate::workspace) mod entity_tests {
             participant: None,
             skill: None,
         }
+    }
+
+    #[gpui::test]
+    fn conversation_lists_load_active_first_and_archived_on_demand(cx: &mut TestAppContext) {
+        use oxideterm_ai::{AiChatState, ConversationStore, HistoryMutation};
+        let directory = tempfile::tempdir().unwrap();
+        let store = ConversationStore::open(directory.path().join("chat_history.v4.redb")).unwrap();
+        let mut state = AiChatState::default();
+        for index in 0..120 {
+            let id = format!("chat-{index:03}");
+            state.create_conversation(id, None, index, None);
+            let mut conversation = state.conversations.remove(0);
+            conversation.archived = index % 2 == 0;
+            store
+                .apply(vec![HistoryMutation::Create {
+                    conversation,
+                    revision: index as u64 + 1,
+                }])
+                .unwrap();
+        }
+        let runtime = test_runtime();
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(runtime.clone(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |ai, cx| {
+            ai.initialize_history(directory.path().join("chat_history.redb"), cx)
+        });
+        let settle = |cx: &mut TestAppContext, archived: bool| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                runtime.block_on(tokio::task::yield_now());
+                cx.run_until_parked();
+                if entity.read_with(cx, |ai, _| {
+                    let page = ai.conversation_list_page(archived);
+                    page.initialized && !page.loading()
+                }) {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "conversation list did not arrive"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        settle(cx, false);
+        entity.update(cx, |ai, _| {
+            assert_eq!(
+                ai.conversation_state
+                    .conversations
+                    .iter()
+                    .map(|c| c.id.clone())
+                    .collect::<Vec<_>>(),
+                (0..50)
+                    .map(|i| format!("chat-{:03}", 119 - i * 2))
+                    .collect::<Vec<_>>()
+            );
+            assert!(!ai.conversation_list_page(true).initialized);
+            assert!(!ai.conversation_list_page(true).loading());
+            ai.request_conversation_list_page(false);
+        });
+        settle(cx, false);
+        entity.update(cx, |ai, _| {
+            assert_eq!(
+                ai.conversation_state
+                    .conversations
+                    .iter()
+                    .map(|c| c.id.clone())
+                    .collect::<Vec<_>>(),
+                (0..60)
+                    .map(|i| format!("chat-{:03}", 119 - i * 2))
+                    .collect::<Vec<_>>()
+            );
+            assert!(!ai.conversation_list_page(false).has_more);
+            ai.show_archived_conversations(true);
+        });
+        settle(cx, true);
+        entity.update(cx, |ai, _| {
+            assert_eq!(
+                ai.conversation_state
+                    .conversations
+                    .iter()
+                    .filter(|c| c.archived)
+                    .map(|c| c.id.clone())
+                    .collect::<Vec<_>>(),
+                (0..50)
+                    .map(|i| format!("chat-{:03}", 118 - i * 2))
+                    .collect::<Vec<_>>()
+            );
+            assert!(ai.conversation_list_page(true).has_more);
+            ai.request_conversation_list_page(true);
+        });
+        settle(cx, true);
+        entity.read_with(cx, |ai, _| {
+            assert_eq!(
+                ai.conversation_state
+                    .conversations
+                    .iter()
+                    .filter(|c| c.archived)
+                    .map(|c| c.id.clone())
+                    .collect::<Vec<_>>(),
+                (0..60)
+                    .map(|i| format!("chat-{:03}", 118 - i * 2))
+                    .collect::<Vec<_>>()
+            );
+            assert!(!ai.conversation_list_page(true).has_more);
+        });
+    }
+
+    #[gpui::test]
+    fn archiving_switches_active_chat_and_restoring_retains_draft(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |ai, _| {
+            ai.conversation_state
+                .create_conversation("a".into(), None, 1, None);
+            ai.conversation_state
+                .create_conversation("b".into(), None, 2, None);
+            ai.set_chat_draft("unfinished draft".into());
+            ai.set_conversation_archived("b", true);
+            assert_eq!(
+                ai.conversation_state.active_conversation_id.as_deref(),
+                Some("a")
+            );
+            assert!(
+                ai.conversation_state
+                    .conversations
+                    .iter()
+                    .find(|c| c.id == "b")
+                    .unwrap()
+                    .archived
+            );
+            ai.set_conversation_archived("a", true);
+            assert_eq!(ai.conversation_state.active_conversation_id, None);
+            ai.set_conversation_archived("b", false);
+            ai.select_conversation("b".into());
+            assert!(
+                !ai.conversation_state
+                    .active_conversation()
+                    .unwrap()
+                    .archived
+            );
+            assert_eq!(ai.chat_ui.draft.as_str(), "unfinished draft");
+        });
     }
 
     #[gpui::test]
