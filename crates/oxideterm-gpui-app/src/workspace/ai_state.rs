@@ -4944,6 +4944,45 @@ pub(in crate::workspace) mod entity_tests {
     }
 
     #[gpui::test]
+    fn quitting_flushes_history_without_a_foreground_tokio_runtime(cx: &mut TestAppContext) {
+        use oxideterm_ai::{ConversationStore, HistoryWriter};
+        let directory = tempfile::tempdir().unwrap();
+        let store = ConversationStore::open(directory.path().join("history.redb")).unwrap();
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(
+                test_worker_runtime(),
+                oxideterm_ai::AiProviderKeyStore::new(),
+                cx,
+            )
+        });
+        entity.update(cx, |ai, _| {
+            ai.history.writer = Some(HistoryWriter::new(store.clone()).unwrap());
+            ai.history.store = Some(store.clone());
+            ai.conversation_state.create_conversation(
+                "quit-test".into(),
+                Some("Saved at quit".into()),
+                1,
+                None,
+            );
+            ai.history_created("quit-test");
+        });
+        assert!(tokio::runtime::Handle::try_current().is_err());
+        // Quit must wait for a real writer thread rather than exhaust simulated ticks.
+        cx.background_executor.allow_parking();
+        cx.background_executor.set_block_on_ticks(100_000..=100_000);
+        cx.update(|app| app.shutdown());
+        assert_eq!(
+            store
+                .conversation_head("quit-test")
+                .unwrap()
+                .unwrap()
+                .conversation
+                .title,
+            "Saved at quit"
+        );
+    }
+
+    #[gpui::test]
     fn conversation_lists_load_active_first_and_archived_on_demand(cx: &mut TestAppContext) {
         use oxideterm_ai::{AiChatState, ConversationStore, HistoryMutation};
         let directory = tempfile::tempdir().unwrap();

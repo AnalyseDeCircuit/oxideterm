@@ -365,23 +365,31 @@ impl AiWorkspaceEntity {
             let operations = this.history_operations();
             let writer = this.history.writer.clone();
             let pending = this.history.write.take();
+            let runtime = this.task_runtime.clone();
             async move {
-                if let Some(pending) = pending {
-                    let _ = pending.await;
-                }
-                if let Some(writer) = writer {
-                    let Ok(batch) = operations else {
-                        return;
-                    };
-                    let Ok(batch) = tokio::task::spawn_blocking(move || batch.prepare()).await
-                    else {
-                        return;
-                    };
-                    if !batch.operations.is_empty() {
-                        let _ = writer.submit(batch.operations).await;
-                    }
-                    let _ = writer.flush().await;
-                }
+                // GPUI polls quit futures without a Tokio context; the entire flush
+                // must run on its owner, including large-batch writer admission.
+                let _ = runtime
+                    .spawn(async move {
+                        if let Some(pending) = pending {
+                            let _ = pending.await;
+                        }
+                        if let Some(writer) = writer {
+                            let Ok(batch) = operations else {
+                                return;
+                            };
+                            let Ok(batch) =
+                                tokio::task::spawn_blocking(move || batch.prepare()).await
+                            else {
+                                return;
+                            };
+                            if !batch.operations.is_empty() {
+                                let _ = writer.submit(batch.operations).await;
+                            }
+                            let _ = writer.flush().await;
+                        }
+                    })
+                    .await;
             }
         })
         .detach();
