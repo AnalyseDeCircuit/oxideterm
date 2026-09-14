@@ -369,6 +369,18 @@ enum TerminalSchedulerWake {
     Maintenance,
 }
 
+fn terminal_output_coalescing_delay(
+    kind: TerminalSessionKind,
+    wake: TerminalSchedulerWake,
+    since_last_tick: Duration,
+) -> Duration {
+    if kind == TerminalSessionKind::Serial && wake == TerminalSchedulerWake::BackendActivity {
+        TERMINAL_ANIMATION_INTERVAL.saturating_sub(since_last_tick)
+    } else {
+        Duration::ZERO
+    }
+}
+
 fn viewport_needs_live_output_restore(
     display_offset: usize,
     smooth_scroll_offset_px: Pixels,
@@ -1031,6 +1043,7 @@ impl TerminalPane {
             let mut activity_receiver = terminal_activity;
             let mut maintenance_interval = Some(TERMINAL_ANIMATION_INTERVAL);
             let mut backend_activity_closed = false;
+            let mut last_tick = Instant::now();
             loop {
                 let activity = Box::pin(async {
                     match activity_receiver.as_ref() {
@@ -1053,10 +1066,26 @@ impl TerminalPane {
                         None => pending::<()>().await,
                     }
                 });
-                let wake = match select(terminal_wake, maintenance).await {
+                let mut wake = match select(terminal_wake, maintenance).await {
                     Either::Left((wake, _)) => wake,
                     Either::Right(((), _)) => TerminalSchedulerWake::Maintenance,
                 };
+                let delay =
+                    terminal_output_coalescing_delay(session_kind, wake, last_tick.elapsed());
+                if !delay.is_zero() {
+                    // Keep serial bytes in the bounded backend queue until the next
+                    // frame. User input and pane closure interrupt this wait.
+                    wake = match select(
+                        Box::pin(scheduler_wake_receiver.recv()),
+                        Box::pin(cx.background_executor().timer(delay)),
+                    )
+                    .await
+                    {
+                        Either::Left((Ok(()), _)) => TerminalSchedulerWake::PaneActivity,
+                        Either::Left((Err(_), _)) => TerminalSchedulerWake::PaneClosed,
+                        Either::Right(((), _)) => wake,
+                    };
+                }
                 if wake == TerminalSchedulerWake::PaneClosed {
                     break;
                 }
@@ -1082,6 +1111,7 @@ impl TerminalPane {
                 else {
                     break;
                 };
+                last_tick = Instant::now();
                 maintenance_interval = next_maintenance_interval;
                 activity_receiver = next_activity_receiver;
             }
@@ -4155,6 +4185,46 @@ mod tests {
 
     use gpui::{AppContext, IntoElement, Render, TestAppContext, div};
     use oxideterm_terminal::{TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape};
+
+    #[test]
+    fn serial_output_is_coalesced_without_delaying_input_or_other_backends() {
+        let elapsed = Duration::from_millis(5);
+        assert_eq!(
+            terminal_output_coalescing_delay(
+                TerminalSessionKind::Serial,
+                TerminalSchedulerWake::BackendActivity,
+                elapsed
+            ),
+            Duration::from_millis(11)
+        );
+        assert_eq!(
+            terminal_output_coalescing_delay(
+                TerminalSessionKind::Serial,
+                TerminalSchedulerWake::BackendActivity,
+                Duration::from_millis(20)
+            ),
+            Duration::ZERO
+        );
+        for wake in [
+            TerminalSchedulerWake::PaneActivity,
+            TerminalSchedulerWake::PaneClosed,
+            TerminalSchedulerWake::BackendClosed,
+            TerminalSchedulerWake::Maintenance,
+        ] {
+            assert_eq!(
+                terminal_output_coalescing_delay(TerminalSessionKind::Serial, wake, elapsed),
+                Duration::ZERO
+            );
+        }
+        assert_eq!(
+            terminal_output_coalescing_delay(
+                TerminalSessionKind::SshPty,
+                TerminalSchedulerWake::BackendActivity,
+                elapsed
+            ),
+            Duration::ZERO
+        );
+    }
 
     #[test]
     fn idle_terminal_has_no_maintenance_deadline() {

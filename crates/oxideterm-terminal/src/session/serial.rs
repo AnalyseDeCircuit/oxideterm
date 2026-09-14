@@ -1761,6 +1761,59 @@ mod serial_tests {
     }
 
     #[test]
+    #[ignore = "timed serial parsing and snapshot probe"]
+    fn serial_frequent_output_ui_cadence_probe() {
+        let frame_ms = std::env::var("OXIDE_SERIAL_PROBE_FRAME_MS")
+            .unwrap_or_else(|_| "0".into()).parse::<u64>().unwrap();
+        let mut session = test_serial_session();
+        session.output_events_enabled = true;
+        let (sender, receiver) = crate::backpressure::byte_bounded_channel(
+            crate::backpressure::TRANSPORT_OUTPUT_BACKLOG_BYTES,
+        );
+        session.worker_rx = receiver;
+        let packets = (0..200).map(|index| format!("serial packet {index:04}: abcdef0123456789\r\n").into_bytes()).collect::<Vec<_>>();
+        let expected = packets.concat();
+        let producer = std::thread::spawn(move || {
+            let start = Instant::now();
+            for (index, packet) in packets.into_iter().enumerate() {
+                std::thread::sleep((start + Duration::from_millis(index as u64 * 5)).saturating_duration_since(Instant::now()));
+                let len = packet.len();
+                sender.send(SerialWorkerEvent::Output(packet), len).unwrap();
+            }
+        });
+        let start = Instant::now();
+        let mut last_tick = start;
+        let mut ticks = 0;
+        let mut drained = 0;
+        let mut output = Vec::new();
+        let mut parse_time = Duration::ZERO;
+        let mut snapshot_time = Duration::ZERO;
+        while drained < expected.len() && start.elapsed() < Duration::from_secs(10) {
+            if session.worker_rx.is_empty() || last_tick.elapsed() < Duration::from_millis(frame_ms) {
+                std::thread::sleep(Duration::from_millis(1));
+                continue;
+            }
+            last_tick = Instant::now();
+            let report = session.read_pending_with_budget(TerminalDrainBudget::normal().with_max_duration(Duration::from_millis(2)));
+            parse_time += last_tick.elapsed();
+            drained += report.drained_bytes;
+            for event in session.take_events() {
+                if let TerminalEvent::Output(bytes) = event { output.extend(bytes); }
+            }
+            if report.changed {
+                ticks += 1;
+                let snapshot_start = Instant::now();
+                std::hint::black_box(session.snapshot());
+                snapshot_time += snapshot_start.elapsed();
+            }
+        }
+        producer.join().unwrap();
+        assert_eq!(drained, expected.len());
+        assert_eq!(output, expected);
+        eprintln!("serial probe frame_ms={frame_ms} ticks={ticks} bytes={drained} parse_ms={:.3} snapshot_ms={:.3}", parse_time.as_secs_f64() * 1000.0, snapshot_time.as_secs_f64() * 1000.0);
+    }
+
+    #[test]
     fn serial_duplicate_reservation_returns_port_busy() {
         let first = reserve_serial_port("/tmp/oxideterm-test-serial").unwrap();
         let error = reserve_serial_port("/tmp/oxideterm-test-serial").unwrap_err();
