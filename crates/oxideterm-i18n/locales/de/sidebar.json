@@ -1,5 +1,12 @@
 {
   "sidebar": {
+    "sort": {
+      "title": "Sitzungen sortieren",
+      "default": "Standardreihenfolge",
+      "name_ascending": "Name: A–Z",
+      "name_descending": "Name: Z–A",
+      "connected_first": "Verbundene zuerst"
+    },
     "actions": {
       "expand": "Seitenleiste erweitern",
       "collapse": "Seitenleiste einklappen",

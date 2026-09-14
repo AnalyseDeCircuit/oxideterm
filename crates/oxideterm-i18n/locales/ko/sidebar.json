@@ -1,5 +1,12 @@
 {
   "sidebar": {
+    "sort": {
+      "title": "세션 정렬",
+      "default": "기본 순서",
+      "name_ascending": "이름 오름차순",
+      "name_descending": "이름 내림차순",
+      "connected_first": "연결된 세션 우선"
+    },
     "actions": {
       "expand": "사이드바 펼치기",
       "collapse": "사이드바 접기",

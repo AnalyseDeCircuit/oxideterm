@@ -1,5 +1,12 @@
 {
   "sidebar": {
+    "sort": {
+      "title": "セッションの並べ替え",
+      "default": "既定の順序",
+      "name_ascending": "名前の昇順",
+      "name_descending": "名前の降順",
+      "connected_first": "接続中を優先"
+    },
     "actions": {
       "expand": "サイドバーを展開",
       "collapse": "サイドバーを折りたたむ",

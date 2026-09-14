@@ -618,6 +618,15 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.session_sort_menu_open {
+            if event.keystroke.key == "escape" {
+                self.session_sort_menu_open = false;
+                cx.notify();
+            }
+            cx.stop_propagation();
+            return;
+        }
+
         if self.terminal_command_sender_editor_focused(window, cx) {
             // Child editor handlers own the bubble path while focused.
             return;

@@ -994,6 +994,9 @@ impl WorkspaceApp {
                     .is_some_and(browser_behavior::pointer_capture_needs_workspace_overlay),
                 |root| root.child(self.render_workspace_pointer_capture_overlay(cx)),
             )
+            .when_some(self.render_session_sort_menu(cx), |root, menu| {
+                root.child(menu)
+            })
             .when(self.connection_form_state(cx).form.is_some(), |root| {
                 root.child(self.render_new_connection_modal(window, cx))
             })

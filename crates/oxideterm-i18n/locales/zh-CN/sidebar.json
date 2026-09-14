@@ -1,5 +1,12 @@
 {
   "sidebar": {
+    "sort": {
+      "title": "会话排序",
+      "default": "默认顺序",
+      "name_ascending": "名称升序",
+      "name_descending": "名称降序",
+      "connected_first": "已连接优先"
+    },
     "actions": {
       "expand": "展开侧边栏",
       "collapse": "折叠侧边栏",

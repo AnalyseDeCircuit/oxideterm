@@ -1,5 +1,12 @@
 {
   "sidebar": {
+    "sort": {
+      "title": "Trier les sessions",
+      "default": "Ordre par défaut",
+      "name_ascending": "Nom : A–Z",
+      "name_descending": "Nom : Z–A",
+      "connected_first": "Connectées en premier"
+    },
     "actions": {
       "expand": "Développer la barre latérale",
       "collapse": "Réduire la barre latérale",

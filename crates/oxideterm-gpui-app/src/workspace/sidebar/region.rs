@@ -469,6 +469,7 @@ impl WorkspaceApp {
                 }
             };
             header = header
+                .child(self.render_session_sort_button(cx))
                 .child(self.render_sidebar_action(view_icon, view_action, cx))
                 .child(self.render_sidebar_action(
                     LucideIcon::Plus,

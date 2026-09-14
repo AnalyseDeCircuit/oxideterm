@@ -594,6 +594,7 @@ impl WorkspaceApp {
                 && self.terminal.read(cx).project_panel_open())
             || (anchor.id == SelectAnchorId::SessionManagerViewMode
                 && self.session_manager.read(cx).view_mode_menu_open)
+            || (anchor.id == SelectAnchorId::ActiveSessionSort && self.session_sort_menu_open)
             || (anchor.id == SelectAnchorId::SessionManagerSort
                 && self.session_manager.read(cx).sort_menu_open)
             || (anchor.id == SelectAnchorId::SessionManagerBatchMove
@@ -1623,7 +1624,8 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
     // can open or drag them.
     matches!(
         anchor_id,
-        SelectAnchorId::SettingsAppearanceUiFontSizeSlider
+        SelectAnchorId::ActiveSessionSort
+            | SelectAnchorId::SettingsAppearanceUiFontSizeSlider
             | SelectAnchorId::SettingsAppearanceBorderRadiusSlider
             | SelectAnchorId::OnboardingBorderRadiusSlider
             | SelectAnchorId::SettingsAppearanceWindowOpacitySlider
