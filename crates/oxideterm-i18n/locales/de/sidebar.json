@@ -1,5 +1,10 @@
 {
   "sidebar": {
+    "search": {
+      "title": "Sitzungen suchen",
+      "placeholder": "Sitzungen suchen…",
+      "empty": "Keine passenden Sitzungen"
+    },
     "sort": {
       "title": "Sitzungen sortieren",
       "default": "Standardreihenfolge",

@@ -1,5 +1,10 @@
 {
   "sidebar": {
+    "search": {
+      "title": "セッションを検索",
+      "placeholder": "セッションを検索…",
+      "empty": "一致するセッションはありません"
+    },
     "sort": {
       "title": "セッションの並べ替え",
       "default": "既定の順序",

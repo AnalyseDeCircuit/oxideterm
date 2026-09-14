@@ -165,6 +165,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.handle_ssh_algorithm_key(event, cx) {
+            return true;
+        }
         let saved_connection_form_uses_unloaded_secret =
             self.saved_connection_form_uses_unloaded_secret(cx);
         let key = event.keystroke.key.as_str();

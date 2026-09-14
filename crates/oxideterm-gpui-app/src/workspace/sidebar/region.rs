@@ -376,6 +376,11 @@ impl WorkspaceApp {
             .border_r_1()
             .border_color(rgb(theme.border))
             .child(self.render_sidebar_header(cx))
+            .when(
+                self.effective_sidebar_panel_section() == SidebarSection::Sessions
+                    && self.session_search_open,
+                |panel| panel.child(self.render_session_search_input(cx)),
+            )
             .child(
                 div()
                     .flex_1()
@@ -469,6 +474,7 @@ impl WorkspaceApp {
                 }
             };
             header = header
+                .child(self.render_session_search_button(cx))
                 .child(self.render_session_sort_button(cx))
                 .child(self.render_sidebar_action(view_icon, view_action, cx))
                 .child(self.render_sidebar_action(

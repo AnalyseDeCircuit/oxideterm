@@ -150,7 +150,119 @@ fn sort_active_session_rows(
     output
 }
 
+fn filter_active_session_rows(
+    mut rows: Vec<ActiveSessionSidebarRow>,
+    query: &str,
+) -> Vec<ActiveSessionSidebarRow> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return rows;
+    }
+    let parents: HashMap<_, _> = rows
+        .iter()
+        .map(|row| (row.node_id.clone(), row.parent_id.clone()))
+        .collect();
+    let mut retained = HashSet::new();
+    for row in &rows {
+        let protocol = row
+            .standalone_session
+            .as_ref()
+            .map(|session| format!("{:?}", session.kind))
+            .unwrap_or_else(|| "ssh".into());
+        let text = format!(
+            "{} {} {} {} {}",
+            row.title, row.host, row.username, row.port, protocol
+        )
+        .to_lowercase();
+        if query.split_whitespace().all(|term| text.contains(term)) {
+            let mut next = Some(row.node_id.clone());
+            while let Some(id) = next {
+                if !retained.insert(id.clone()) {
+                    break;
+                }
+                next = parents.get(&id).cloned().flatten();
+            }
+        }
+    }
+    rows.retain(|row| retained.contains(&row.node_id));
+    let last_children: HashMap<_, _> = rows
+        .iter()
+        .map(|row| (row.parent_id.clone(), row.node_id.clone()))
+        .collect();
+    for row in &mut rows {
+        row.is_last = last_children.get(&row.parent_id) == Some(&row.node_id);
+        row.has_children = last_children.contains_key(&Some(row.node_id.clone()));
+    }
+    rows
+}
+
 impl WorkspaceApp {
+    pub(in crate::workspace) fn render_session_search_button(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.workspace_tooltip_icon_button(
+            LucideIcon::Search,
+            self.tokens.metrics.sidebar_action_icon_size,
+            rgb(self.tokens.ui.text),
+            IconButtonOptions {
+                has_background: self.session_search_open,
+                background: self
+                    .session_search_open
+                    .then_some(rgb(self.tokens.ui.bg_hover)),
+                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                ..IconButtonOptions::opaque_toolbar(
+                    self.tokens.metrics.sidebar_action_size,
+                    ButtonRadius::Md,
+                )
+            },
+            self.i18n.t("sidebar.search.title"),
+            "session-search",
+            false,
+            cx.listener(|this, _, window, cx| {
+                this.prepare_modal_interaction_boundary(cx);
+                this.session_search_open = !this.session_search_open;
+                this.clear_ime_selection();
+                if this.session_search_open {
+                    this.selected_ime_target = Some(ime::WorkspaceImeTarget::ActiveSessionSearch);
+                    window.focus(&this.focus_handle, cx);
+                    this.show_active_input_caret(cx);
+                } else {
+                    this.session_search_query.clear();
+                }
+                cx.stop_propagation();
+                cx.notify();
+            }),
+            cx.entity(),
+        )
+        .into_any_element()
+    }
+
+    pub(in crate::workspace) fn render_session_search_input(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .w_full()
+            .flex_none()
+            .h(px(36.0))
+            .px_3()
+            .flex()
+            .items_center()
+            .border_b_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(rgb(self.tokens.ui.bg))
+            .child(self.render_overlay_query_input(
+                ime::WorkspaceImeTarget::ActiveSessionSearch,
+                self.session_search_query.clone(),
+                self.i18n.t("sidebar.search.placeholder"),
+                self.tokens.metrics.sidebar_title_font_size,
+                20.0,
+                cx,
+            ))
+            .into_any_element()
+    }
+
     pub(in crate::workspace) fn render_session_sort_button(
         &self,
         cx: &mut Context<Self>,
@@ -326,12 +438,22 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if self.active_session_sidebar_view_mode == ActiveSessionSidebarViewMode::Focus {
+        if self.active_session_sidebar_view_mode == ActiveSessionSidebarViewMode::Focus
+            && self.session_search_query.trim().is_empty()
+        {
             return self.render_active_sessions_focus_sidebar_content(cx);
         }
 
         let rows = self.active_session_sidebar_rows(cx);
         if rows.is_empty() {
+            if !self.session_search_query.trim().is_empty() {
+                return div()
+                    .p_4()
+                    .text_size(px(self.tokens.metrics.sidebar_title_font_size))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("sidebar.search.empty"))
+                    .into_any_element();
+            }
             return self.render_empty_sessions_sidebar_content(cx);
         }
 
@@ -462,9 +584,12 @@ impl WorkspaceApp {
                 .iter()
                 .map(|record| self.standalone_active_session_sidebar_row(record, cx)),
         );
-        sort_active_session_rows(
-            rows,
-            self.settings_store.settings().sidebar_ui.session_sort_order,
+        filter_active_session_rows(
+            sort_active_session_rows(
+                rows,
+                self.settings_store.settings().sidebar_ui.session_sort_order,
+            ),
+            &self.session_search_query,
         )
     }
 
@@ -2340,6 +2465,47 @@ mod sorting_tests {
             has_children: false,
             standalone_session: None,
         }
+    }
+
+    #[test]
+    fn session_search_retains_ancestors_and_respects_sort_order() {
+        let mut a = row("a", "Alpha", Some("parent"), true);
+        a.host = "prod.example".into();
+        a.username = "ops".into();
+        let mut z = row("z", "Zulu", Some("parent"), false);
+        z.host = "prod.example".into();
+        z.username = "ops".into();
+        let rows = vec![
+            row("parent", "Gateway", None, true),
+            z,
+            a,
+            row("other", "Unrelated", None, true),
+        ];
+        for (order, expected) in [
+            (SessionSortOrder::NameAscending, vec!["parent", "a", "z"]),
+            (SessionSortOrder::NameDescending, vec!["parent", "z", "a"]),
+        ] {
+            let sorted = sort_active_session_rows(rows.clone(), order);
+            let filtered = filter_active_session_rows(sorted, " PROD ops ");
+            assert_eq!(
+                filtered
+                    .iter()
+                    .map(|row| row.node_id.0.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert!(filtered[0].has_children);
+            assert!(!filtered[1].is_last);
+            assert!(filtered[2].is_last);
+        }
+        assert_eq!(
+            filter_active_session_rows(rows.clone(), " ")
+                .iter()
+                .map(|row| row.node_id.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["parent", "z", "a", "other"]
+        );
+        assert!(filter_active_session_rows(rows, "missing").is_empty());
     }
 
     #[test]

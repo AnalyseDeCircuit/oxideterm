@@ -642,6 +642,17 @@ impl WorkspaceApp {
             return;
         }
 
+        if self.active_ime_target(cx) == Some(ime::WorkspaceImeTarget::ActiveSessionSearch) {
+            if event.keystroke.key == "escape" {
+                self.session_search_query.clear();
+                self.session_search_open = false;
+                self.clear_ime_selection();
+                cx.notify();
+            }
+            cx.stop_propagation();
+            return;
+        }
+
         if self.connection_form_state(cx).form.is_some() {
             let _ = self.handle_new_connection_key(event, window, cx);
             return;

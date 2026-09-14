@@ -1,5 +1,10 @@
 {
   "sidebar": {
+    "search": {
+      "title": "Pesquisar sessões",
+      "placeholder": "Pesquisar sessões…",
+      "empty": "Nenhuma sessão correspondente"
+    },
     "sort": {
       "title": "Ordenar sessões",
       "default": "Ordem padrão",

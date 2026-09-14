@@ -1,5 +1,10 @@
 {
   "sidebar": {
+    "search": {
+      "title": "세션 검색",
+      "placeholder": "세션 검색…",
+      "empty": "일치하는 세션이 없습니다"
+    },
     "sort": {
       "title": "세션 정렬",
       "default": "기본 순서",

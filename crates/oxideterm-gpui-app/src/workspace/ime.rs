@@ -116,6 +116,7 @@ pub(super) enum WorkspaceImeTarget {
     ReadOnlyText(u64),
     CommandPalette,
     ShortcutsModalSearch,
+    ActiveSessionSearch,
     Search,
     TerminalCommandSenderCompact,
     TerminalCwdSearch,
@@ -488,6 +489,7 @@ impl WorkspaceImeTarget {
             Self::ReadOnlyText(id) => id.wrapping_add(50_000),
             Self::CommandPalette => 4,
             Self::ShortcutsModalSearch => 5,
+            Self::ActiveSessionSearch => 22,
             Self::Search => 1,
             Self::TerminalCommandSenderCompact => 2,
             Self::TerminalCwdSearch => 18,
@@ -1009,6 +1011,18 @@ impl WorkspaceApp {
             if let Some(input) = self.ai_entity.read(cx).focused_settings_input() {
                 return Some(WorkspaceImeTarget::Settings(input));
             }
+        }
+
+        if self.session_search_open
+            && !self.sidebar_collapsed
+            && !self.session_sort_menu_open
+            && self.effective_sidebar_panel_section() == super::SidebarSection::Sessions
+            && (self.selected_ime_target == Some(WorkspaceImeTarget::ActiveSessionSearch)
+                || self.selected_ime_range.as_ref().is_some_and(|selection| {
+                    selection.target == WorkspaceImeTarget::ActiveSessionSearch
+                }))
+        {
+            return Some(WorkspaceImeTarget::ActiveSessionSearch);
         }
 
         let legacy_settings_input_visible = settings_tab_visible
@@ -1887,9 +1901,14 @@ impl WorkspaceApp {
             strikethrough: None,
             letter_spacing: None,
         };
+        let text_size = if target == WorkspaceImeTarget::ActiveSessionSearch {
+            self.tokens.metrics.sidebar_title_font_size
+        } else {
+            self.tokens.metrics.ui_text_sm
+        };
         window
             .text_system()
-            .shape_line(shared, px(self.tokens.metrics.ui_text_sm), &[run], None)
+            .shape_line(shared, px(text_size), &[run], None)
     }
 
     fn ime_target_font_family(&self, target: WorkspaceImeTarget) -> SharedString {
@@ -1928,6 +1947,7 @@ impl WorkspaceApp {
                 Some(self.command_palette.read(cx).query().to_string())
             }
             WorkspaceImeTarget::ShortcutsModalSearch => Some(self.shortcuts_modal.query.clone()),
+            WorkspaceImeTarget::ActiveSessionSearch => Some(self.session_search_query.clone()),
             WorkspaceImeTarget::Search => Some(self.search.query.clone()),
             WorkspaceImeTarget::TerminalCommandSenderCompact => self
                 .terminal_command_sender
@@ -2712,6 +2732,11 @@ impl WorkspaceApp {
                 self.command_palette.update(cx, |palette, cx| {
                     palette.replace_query_utf16(replacement_range, text, cx);
                 });
+                self.show_active_input_caret(cx);
+                cx.notify();
+            }
+            WorkspaceImeTarget::ActiveSessionSearch => {
+                replace_utf16(&mut self.session_search_query, replacement_range, text);
                 self.show_active_input_caret(cx);
                 cx.notify();
             }

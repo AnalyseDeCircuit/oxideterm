@@ -306,7 +306,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn render_overlay_query_input(
+    pub(super) fn render_overlay_query_input(
         &self,
         target: WorkspaceImeTarget,
         value: String,

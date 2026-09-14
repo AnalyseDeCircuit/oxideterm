@@ -1,5 +1,10 @@
 {
   "sidebar": {
+    "search": {
+      "title": "搜索会话",
+      "placeholder": "搜索会话…",
+      "empty": "没有匹配的会话"
+    },
     "sort": {
       "title": "会话排序",
       "default": "默认顺序",

@@ -698,6 +698,8 @@ impl WorkspaceApp {
             active_surface: ActiveSurface::Terminal,
             active_session_sidebar_view_mode: ActiveSessionSidebarViewMode::Tree,
             session_sort_menu_open: false,
+            session_search_open: false,
+            session_search_query: String::new(),
             active_session_sidebar_focused_node_id: settings
                 .tree_ui
                 .focused_node_id

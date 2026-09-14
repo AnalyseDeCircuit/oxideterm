@@ -817,6 +817,8 @@ pub(crate) struct WorkspaceApp {
     active_surface: ActiveSurface,
     active_session_sidebar_view_mode: ActiveSessionSidebarViewMode,
     session_sort_menu_open: bool,
+    session_search_open: bool,
+    session_search_query: String,
     active_session_sidebar_focused_node_id: Option<NodeId>,
     active_session_sidebar_list_state: ListState,
     active_session_sidebar_list_cache: RefCell<VirtualListSignatureCache>,

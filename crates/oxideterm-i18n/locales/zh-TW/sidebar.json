@@ -1,5 +1,10 @@
 {
   "sidebar": {
+    "search": {
+      "title": "搜尋工作階段",
+      "placeholder": "搜尋工作階段…",
+      "empty": "沒有相符的工作階段"
+    },
     "sort": {
       "title": "工作階段排序",
       "default": "預設順序",

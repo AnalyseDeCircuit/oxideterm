@@ -1,5 +1,10 @@
 {
   "sidebar": {
+    "search": {
+      "title": "Tìm phiên",
+      "placeholder": "Tìm phiên…",
+      "empty": "Không có phiên phù hợp"
+    },
     "sort": {
       "title": "Sắp xếp phiên",
       "default": "Thứ tự mặc định",

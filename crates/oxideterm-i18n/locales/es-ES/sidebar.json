@@ -1,5 +1,10 @@
 {
   "sidebar": {
+    "search": {
+      "title": "Buscar sesiones",
+      "placeholder": "Buscar sesiones…",
+      "empty": "No hay sesiones coincidentes"
+    },
     "sort": {
       "title": "Ordenar sesiones",
       "default": "Orden predeterminado",

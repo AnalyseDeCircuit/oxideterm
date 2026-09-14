@@ -860,6 +860,8 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) legacy_ssh_compatibility: bool,
     pub(in crate::workspace) ssh_algorithms: SshAlgorithmPreferences,
     pub(in crate::workspace) ssh_algorithm_editor_open: bool,
+    pub(in crate::workspace) ssh_algorithm_selected: Option<String>,
+    pub(in crate::workspace) ssh_algorithm_menu: Option<(String, gpui::Point<gpui::Pixels>)>,
     pub(in crate::workspace) ssh_algorithm_editor_category: oxideterm_ssh::SshAlgorithmCategory,
     pub(in crate::workspace) connect_timeout_seconds: u64,
     /// Preserves transient invalid input while the numeric value fails closed at zero.
@@ -1154,6 +1156,8 @@ impl Default for NewConnectionForm {
             legacy_ssh_compatibility: false,
             ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
             ssh_algorithm_editor_open: false,
+            ssh_algorithm_selected: None,
+            ssh_algorithm_menu: None,
             ssh_algorithm_editor_category: oxideterm_ssh::SshAlgorithmCategory::Kex,
             connect_timeout_seconds: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
             connect_timeout_seconds_text: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS.to_string(),

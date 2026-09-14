@@ -1,4 +1,5 @@
 use super::*;
+use gpui::StatefulInteractiveElement;
 
 use oxideterm_connections::SshAlgorithmPreferences;
 use oxideterm_ssh::{SshAlgorithmCategory, SshAlgorithmOffer};
@@ -81,6 +82,37 @@ fn available_algorithms(
         }
     }
     available
+}
+
+#[derive(Clone)]
+struct AlgorithmDrag {
+    category: SshAlgorithmCategory,
+    name: String,
+    background: gpui::Rgba,
+    foreground: gpui::Rgba,
+}
+
+impl Render for AlgorithmDrag {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_3()
+            .py_1()
+            .bg(self.background)
+            .text_color(self.foreground)
+            .text_size(px(12.0))
+            .child(self.name.clone())
+    }
+}
+
+fn reorder_algorithm(algorithms: &mut Vec<String>, name: &str, destination: usize) {
+    let Some(index) = algorithms.iter().position(|entry| entry == name) else {
+        return;
+    };
+    if destination >= algorithms.len() || destination == index {
+        return;
+    }
+    let algorithm = algorithms.remove(index);
+    algorithms.insert(destination, algorithm);
 }
 
 impl WorkspaceApp {
@@ -269,6 +301,8 @@ impl WorkspaceApp {
                             this.update_connection_form_state(cx, |state| {
                                 if let Some(form) = state.form.as_mut() {
                                     form.ssh_algorithm_editor_category = category;
+                                    form.ssh_algorithm_selected = None;
+                                    form.ssh_algorithm_menu = None;
                                 }
                             });
                             cx.stop_propagation();
@@ -301,194 +335,210 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_ssh_algorithm_detail_column(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some((category, legacy_compatibility, preferences)) =
-            self.connection_form_state(cx).form.as_ref().map(|form| {
-                (
-                    form.ssh_algorithm_editor_category,
-                    form.legacy_ssh_compatibility,
-                    form.ssh_algorithms.clone(),
-                )
-            })
-        else {
+        let Some(form) = self.connection_form_state(cx).form.as_ref() else {
             return div().into_any_element();
         };
-        let report = oxideterm_ssh::ssh_capability_report();
-        let custom = preference_algorithms(&preferences, category);
+        let category = form.ssh_algorithm_editor_category;
+        let custom = preference_algorithms(&form.ssh_algorithms, category);
         let inherited = custom.is_empty();
         let enabled = if inherited {
-            baseline_algorithms(legacy_compatibility, category)
+            baseline_algorithms(form.legacy_ssh_compatibility, category)
         } else {
             custom.to_vec()
         };
+        let selected = form.ssh_algorithm_selected.clone();
+        let report = oxideterm_ssh::ssh_capability_report();
         let available = available_algorithms(&report, category, &enabled);
         let modern = offer_algorithms(&report.default_offer, category);
-
-        let mut enabled_list = div().flex().flex_col().gap(px(self.tokens.spacing.one));
-        let enabled_count = enabled.len();
-        for (index, algorithm) in enabled.iter().enumerate() {
-            let algorithm_for_up = algorithm.clone();
-            let algorithm_for_down = algorithm.clone();
-            let algorithm_for_remove = algorithm.clone();
-            let weak = !modern.contains(algorithm);
-            enabled_list = enabled_list.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(self.tokens.spacing.two))
-                    .rounded(px(self.tokens.radii.sm))
-                    .border_1()
-                    .border_color(rgb(self.tokens.ui.border))
-                    .bg(rgb(self.tokens.ui.bg_sunken))
-                    .px(px(self.tokens.spacing.two))
-                    .py(px(self.tokens.spacing.two))
-                    .child(
-                        div()
-                            .w(px(22.0))
-                            .flex_none()
-                            .text_align(gpui::TextAlign::Center)
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child((index + 1).to_string()),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(algorithm.clone()),
-                    )
-                    .when(weak, |row| {
-                        row.child(status_pill(
-                            &self.tokens,
-                            self.i18n.t("ssh.form.ssh_algorithms_legacy"),
-                            StatusPillOptions::new(StatusTone::Warning).compact(),
+        let mut list = div().flex().flex_col();
+        for (index, name) in enabled.iter().chain(available.iter()).enumerate() {
+            let checked = index < enabled.len();
+            if index == enabled.len() && !available.is_empty() {
+                list = list.child(
+                    div()
+                        .pt_3()
+                        .pb_1()
+                        .text_size(px(12.0))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(self.i18n.t("ssh.form.ssh_algorithms_disabled")),
+                );
+            }
+            let disabled = inherited || (checked && enabled.len() == 1);
+            let toggle_name = name.clone();
+            let select_name = name.clone();
+            let menu_name = name.clone();
+            let drop_name = name.clone();
+            let drag = AlgorithmDrag {
+                category,
+                name: name.clone(),
+                background: rgb(self.tokens.ui.bg_panel),
+                foreground: rgb(self.tokens.ui.text),
+            };
+            let accent = self.tokens.ui.accent;
+            let mut row = div()
+                .id(("ssh-algorithm-row", index))
+                .min_h(px(30.0))
+                .flex()
+                .items_center()
+                .gap_2()
+                .px_1()
+                .py_1()
+                .border_b_1()
+                .border_color(rgb(self.tokens.ui.border))
+                .when(selected.as_ref() == Some(name), |row| {
+                    row.bg(rgb(self.tokens.ui.bg_hover))
+                })
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        this.update_connection_form_state(cx, |state| {
+                            if let Some(form) = state.form.as_mut() {
+                                form.ssh_algorithm_selected = Some(select_name.clone());
+                                form.field_focused = false;
+                            }
+                        });
+                        window.focus(&this.focus_handle, cx);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
+                .child(
+                    div()
+                        .id(("ssh-algorithm-grip", index))
+                        .flex_none()
+                        .w(px(18.0))
+                        .cursor(if checked && !inherited {
+                            gpui::CursorStyle::OpenHand
+                        } else {
+                            gpui::CursorStyle::Arrow
+                        })
+                        .child(div().w(px(6.0)).flex().flex_wrap().gap(px(2.0)).children(
+                            (0..6).map(|_| div().size(px(2.0)).bg(rgb(self.tokens.ui.text_muted))),
                         ))
-                    })
-                    .child(self.ssh_algorithm_icon_action(
-                        self.i18n.t("ssh.form.ssh_algorithms_move_up"),
-                        LucideIcon::ArrowUp,
-                        index == 0,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.move_ssh_algorithm(category, algorithm_for_up.clone(), -1, cx);
-                            cx.stop_propagation();
+                        .when(checked && !inherited, |grip| {
+                            grip.on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
                         }),
-                    ))
-                    .child(self.ssh_algorithm_icon_action(
-                        self.i18n.t("ssh.form.ssh_algorithms_move_down"),
-                        LucideIcon::ArrowDown,
-                        index + 1 == enabled_count,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.move_ssh_algorithm(category, algorithm_for_down.clone(), 1, cx);
-                            cx.stop_propagation();
-                        }),
-                    ))
-                    .child(self.ssh_algorithm_icon_action(
-                        self.i18n.t("ssh.form.ssh_algorithms_remove"),
-                        LucideIcon::X,
-                        enabled_count <= 1,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.remove_ssh_algorithm(category, algorithm_for_remove.clone(), cx);
-                            cx.stop_propagation();
-                        }),
-                    )),
-            );
-        }
-
-        let has_available = !available.is_empty();
-        let mut available_list = div().flex().flex_col().gap(px(self.tokens.spacing.one));
-        for algorithm in available {
-            let algorithm_for_add = algorithm.clone();
-            let weak = !modern.contains(&algorithm);
-            available_list = available_list.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(self.tokens.spacing.two))
-                    .rounded(px(self.tokens.radii.sm))
-                    .px(px(self.tokens.spacing.two))
-                    .py(px(self.tokens.spacing.two))
-                    .hover(|row| row.bg(rgb(self.tokens.ui.bg_hover)))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.text_secondary))
-                            .child(algorithm),
+                )
+                .child(
+                    oxideterm_gpui_ui::checkbox::checkbox_with(
+                        &self.tokens,
+                        String::new(),
+                        checked,
+                        oxideterm_gpui_ui::checkbox::CheckboxOptions {
+                            disabled,
+                            ..Default::default()
+                        },
                     )
-                    .when(weak, |row| {
-                        row.child(status_pill(
-                            &self.tokens,
-                            self.i18n.t("ssh.form.ssh_algorithms_legacy"),
-                            StatusPillOptions::new(StatusTone::Warning).compact(),
-                        ))
-                    })
-                    .child(self.ssh_algorithm_icon_action(
-                        self.i18n.t("ssh.form.ssh_algorithms_add"),
-                        LucideIcon::Plus,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.add_ssh_algorithm(category, algorithm_for_add.clone(), cx);
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, _, cx| {
+                            if !disabled {
+                                if checked {
+                                    this.remove_ssh_algorithm(category, toggle_name.clone(), cx);
+                                } else {
+                                    this.add_ssh_algorithm(category, toggle_name.clone(), cx);
+                                }
+                            }
                             cx.stop_propagation();
                         }),
-                    )),
-            );
+                    ),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .text_size(px(12.0))
+                        .text_color(rgb(if checked {
+                            self.tokens.ui.text
+                        } else {
+                            self.tokens.ui.text_muted
+                        }))
+                        .child(name.clone()),
+                )
+                .when(!modern.contains(name), |row| {
+                    row.child(status_pill(
+                        &self.tokens,
+                        self.i18n.t("ssh.form.ssh_algorithms_legacy"),
+                        StatusPillOptions::new(StatusTone::Warning).compact(),
+                    ))
+                });
+            if checked && !inherited {
+                row = row
+                    .drag_over::<AlgorithmDrag>(move |row, drag, _, _| {
+                        if drag.category == category {
+                            row.bg(rgba((accent << 8) | 0x22))
+                        } else {
+                            row
+                        }
+                    })
+                    .on_drop(cx.listener(move |this, drag: &AlgorithmDrag, _, cx| {
+                        if drag.category != category {
+                            return;
+                        }
+                        this.update_connection_form_state(cx, |state| {
+                            if let Some(form) = state.form.as_mut() {
+                                let algorithms =
+                                    preference_algorithms_mut(&mut form.ssh_algorithms, category);
+                                if let Some(destination) =
+                                    algorithms.iter().position(|name| name == &drop_name)
+                                {
+                                    reorder_algorithm(algorithms, &drag.name, destination);
+                                }
+                                form.ssh_algorithm_selected = Some(drag.name.clone());
+                            }
+                        });
+                        cx.notify();
+                    }))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                            this.update_connection_form_state(cx, |state| {
+                                if let Some(form) = state.form.as_mut() {
+                                    form.ssh_algorithm_menu =
+                                        Some((menu_name.clone(), event.position));
+                                    form.ssh_algorithm_selected = Some(menu_name.clone());
+                                    form.field_focused = false;
+                                }
+                            });
+                            window.focus(&this.focus_handle, cx);
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    );
+            }
+            list = list.child(row);
         }
-
         div()
             .w(px(SSH_ALGORITHM_DETAIL_COLUMN_WIDTH))
             .h_full()
-            .min_h(px(0.0))
+            .min_h_0()
             .flex_none()
             .flex()
             .flex_col()
             .border_l_1()
             .border_color(rgb(self.tokens.ui.border))
-            .pl(px(self.tokens.metrics.modal_section_gap))
-            .pr(px(self.tokens.metrics.modal_section_gap))
+            .px(px(self.tokens.metrics.modal_section_gap))
             .child(
                 div()
-                    .flex_none()
                     .flex()
-                    .items_start()
+                    .items_center()
                     .justify_between()
-                    .gap(px(self.tokens.spacing.three))
-                    .pb(px(self.tokens.spacing.three))
+                    .pb_2()
                     .child(
                         div()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap(px(self.tokens.spacing.one))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_base))
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .child(self.i18n.t(category_i18n_key(category))),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                    .child(self.i18n.t(if inherited {
-                                        "ssh.form.ssh_algorithms_inherited_hint"
-                                    } else {
-                                        "ssh.form.ssh_algorithms_custom_hint"
-                                    })),
-                            ),
+                            .text_size(px(14.0))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(self.i18n.t(category_i18n_key(category))),
                     )
                     .child(self.ssh_algorithm_icon_action(
                         self.i18n.t("ssh.form.ssh_algorithms_close"),
                         LucideIcon::X,
                         false,
-                        cx.listener(|this, _event, _window, cx| {
+                        cx.listener(|this, _, _, cx| {
                             this.update_connection_form_state(cx, |state| {
                                 if let Some(form) = state.form.as_mut() {
                                     form.ssh_algorithm_editor_open = false;
+                                    form.ssh_algorithm_menu = None;
                                 }
                             });
                             cx.stop_propagation();
@@ -498,77 +548,203 @@ impl WorkspaceApp {
             )
             .child(
                 div()
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .overflow_y_scrollbar()
-                    .pr(px(self.tokens.spacing.one))
+                    .flex()
+                    .gap_2()
+                    .pb_2()
+                    .children([true, false].into_iter().map(|follow| {
+                        action_chip(
+                            &self.tokens,
+                            self.i18n.t(if follow {
+                                "ssh.form.ssh_algorithms_follow_preset"
+                            } else {
+                                "ssh.form.ssh_algorithms_custom"
+                            }),
+                            None,
+                            ActionChipOptions::new().active(inherited == follow),
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, _, cx| {
+                                this.update_connection_form_state(cx, |state| {
+                                    if let Some(form) = state.form.as_mut() {
+                                        let baseline = baseline_algorithms(
+                                            form.legacy_ssh_compatibility,
+                                            category,
+                                        );
+                                        let algorithms = preference_algorithms_mut(
+                                            &mut form.ssh_algorithms,
+                                            category,
+                                        );
+                                        if follow {
+                                            algorithms.clear();
+                                        } else if algorithms.is_empty() {
+                                            *algorithms = baseline;
+                                        }
+                                        form.field_focused = false;
+                                        form.ssh_algorithm_menu = None;
+                                    }
+                                });
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        )
+                    })),
+            )
+            .child(
+                div()
+                    .pb_2()
+                    .text_size(px(12.0))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t(if inherited {
+                        "ssh.form.ssh_algorithms_inherited_hint"
+                    } else {
+                        "ssh.form.ssh_algorithms_edit_hint"
+                    })),
+            )
+            .child(div().flex_1().min_h_0().overflow_y_scrollbar().child(list))
+            .into_any_element()
+    }
+
+    pub(in crate::workspace) fn render_ssh_algorithm_context_menu(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        use oxideterm_gpui_ui::context_menu::*;
+        let form_state = self.connection_form_state(cx);
+        let form = form_state.form.as_ref()?;
+        if !form.ssh_algorithm_editor_open {
+            return None;
+        }
+        let (name, position) = form.ssh_algorithm_menu.clone()?;
+        let category = form.ssh_algorithm_editor_category;
+        let algorithms = preference_algorithms(&form.ssh_algorithms, category);
+        let index = algorithms.iter().position(|algorithm| algorithm == &name)?;
+        let mut menu = context_menu_content(&self.tokens);
+        for (offset, key, disabled) in [
+            (-1, "ssh.form.ssh_algorithms_move_up", index == 0),
+            (
+                1,
+                "ssh.form.ssh_algorithms_move_down",
+                index + 1 == algorithms.len(),
+            ),
+        ] {
+            let name = name.clone();
+            menu = menu.child(context_menu_action(
+                context_menu_item(
+                    &self.tokens,
+                    self.i18n.t(key),
+                    ContextMenuItemKind::Plain,
+                    false,
+                    disabled,
+                ),
+                disabled,
+                false,
+                cx.listener(move |this, _, _, cx| {
+                    this.move_ssh_algorithm(category, name.clone(), offset, cx);
+                    this.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.ssh_algorithm_menu = None;
+                        }
+                    });
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            ));
+        }
+        Some(
+            gpui::deferred(
+                context_menu_backdrop()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, _, cx| {
+                            this.update_connection_form_state(cx, |state| {
+                                if let Some(form) = state.form.as_mut() {
+                                    form.ssh_algorithm_menu = None;
+                                }
+                            });
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    )
                     .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(self.tokens.spacing.three))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .child(
-                                        div()
-                                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                                            .font_weight(gpui::FontWeight::MEDIUM)
-                                            .text_color(rgb(self.tokens.ui.text))
-                                            .child(self.i18n.t("ssh.form.ssh_algorithms_enabled")),
-                                    )
-                                    .child(
-                                        action_chip(
-                                            &self.tokens,
-                                            self.i18n.t("ssh.form.ssh_algorithms_reset"),
-                                            Some(Self::render_lucide_icon(
-                                                LucideIcon::RotateCcw,
-                                                13.0,
-                                                rgb(self.tokens.ui.text_muted),
-                                            )),
-                                            ActionChipOptions::new().disabled(inherited),
-                                        )
-                                        .on_mouse_down(
-                                            MouseButton::Left,
-                                            cx.listener(move |this, _event, _window, cx| {
-                                                if !inherited {
-                                                    this.reset_ssh_algorithm_category(category, cx);
-                                                }
-                                                cx.stop_propagation();
-                                            }),
-                                        ),
-                                    ),
-                            )
-                            .child(enabled_list)
-                            .when(has_available, |content| {
-                                content
-                                    .child(
-                                        div()
-                                            .pt(px(self.tokens.spacing.two))
-                                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                                            .font_weight(gpui::FontWeight::MEDIUM)
-                                            .text_color(rgb(self.tokens.ui.text))
-                                            .child(
-                                                self.i18n.t("ssh.form.ssh_algorithms_available"),
-                                            ),
-                                    )
-                                    .child(available_list)
-                            })
-                            .child(
-                                div()
-                                    .pt(px(self.tokens.spacing.two))
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                    .child(
-                                        self.i18n
-                                            .t("ssh.form.ssh_algorithms_negotiation_order_hint"),
-                                    ),
-                            ),
+                        gpui::anchored()
+                            .position(position)
+                            .child(context_menu_event_boundary(menu)),
                     ),
             )
-            .into_any_element()
+            .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY)
+            .into_any_element(),
+        )
+    }
+
+    pub(super) fn handle_ssh_algorithm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(form) = self.connection_form_state(cx).form.as_ref() else {
+            return false;
+        };
+        if !form.ssh_algorithm_editor_open || form.field_focused {
+            return false;
+        }
+        let category = form.ssh_algorithm_editor_category;
+        let inherited = preference_algorithms(&form.ssh_algorithms, category).is_empty();
+        let enabled = if inherited {
+            baseline_algorithms(form.legacy_ssh_compatibility, category)
+        } else {
+            preference_algorithms(&form.ssh_algorithms, category).to_vec()
+        };
+        let report = oxideterm_ssh::ssh_capability_report();
+        let mut names = enabled.clone();
+        names.extend(available_algorithms(&report, category, &enabled));
+        let index = form
+            .ssh_algorithm_selected
+            .as_ref()
+            .and_then(|name| names.iter().position(|entry| entry == name))
+            .unwrap_or(0);
+        let menu_open = form.ssh_algorithm_menu.is_some();
+        match event.keystroke.key.as_str() {
+            "escape" => {
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        if menu_open {
+                            form.ssh_algorithm_menu = None;
+                        } else {
+                            form.ssh_algorithm_editor_open = false;
+                        }
+                    }
+                });
+            }
+            "up" | "down" => {
+                let offset = if event.keystroke.key == "up" { -1 } else { 1 };
+                if event.keystroke.modifiers.alt && !inherited {
+                    if let Some(name) = names.get(index) {
+                        self.move_ssh_algorithm(category, name.clone(), offset, cx);
+                    }
+                } else if !names.is_empty() {
+                    let next =
+                        (index as isize + offset).clamp(0, names.len() as isize - 1) as usize;
+                    self.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.ssh_algorithm_selected = Some(names[next].clone());
+                        }
+                    });
+                }
+            }
+            "space" if !inherited => {
+                if let Some(name) = names.get(index) {
+                    if enabled.contains(name) {
+                        self.remove_ssh_algorithm(category, name.clone(), cx);
+                    } else {
+                        self.add_ssh_algorithm(category, name.clone(), cx);
+                    }
+                }
+            }
+            _ => return false,
+        }
+        cx.notify();
+        true
     }
 
     fn ssh_algorithm_icon_action(
@@ -688,17 +864,18 @@ impl WorkspaceApp {
         });
         cx.notify();
     }
+}
 
-    fn reset_ssh_algorithm_category(
-        &mut self,
-        category: SshAlgorithmCategory,
-        cx: &mut Context<Self>,
-    ) {
-        self.update_connection_form_state(cx, |state| {
-            if let Some(form) = state.form.as_mut() {
-                preference_algorithms_mut(&mut form.ssh_algorithms, category).clear();
-            }
-        });
-        cx.notify();
+#[cfg(test)]
+mod tests {
+    use super::reorder_algorithm;
+
+    #[test]
+    fn drag_reordering_moves_one_algorithm_without_swapping_neighbors() {
+        let mut algorithms = vec!["a".into(), "b".into(), "c".into(), "d".into()];
+        reorder_algorithm(&mut algorithms, "a", 2);
+        assert_eq!(algorithms, ["b", "c", "a", "d"]);
+        reorder_algorithm(&mut algorithms, "d", 0);
+        assert_eq!(algorithms, ["d", "b", "c", "a"]);
     }
 }
