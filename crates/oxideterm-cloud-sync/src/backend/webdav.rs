@@ -135,7 +135,12 @@ impl CloudSyncBackend {
         config: &CloudSyncSettings,
         secrets: &CloudSyncSecrets,
     ) -> Result<()> {
-        self.ensure_webdav_collection(&webdav_namespace_url(config), config, secrets)
+        let endpoint = trim_trailing_slash(&config.endpoint);
+        if webdav_namespace_url(config) == endpoint {
+            // A supplied WebDAV endpoint is an existing collection, not ours to create.
+            return Ok(());
+        }
+        self.ensure_webdav_child_collections(&endpoint, &config.namespace, config, secrets)
             .await
     }
 
@@ -148,8 +153,36 @@ impl CloudSyncBackend {
         let Some(parent) = webdav_parent_object_path(relative_path) else {
             return Ok(());
         };
-        self.ensure_webdav_collection(&webdav_object_url(config, &parent), config, secrets)
-            .await
+        self.ensure_webdav_child_collections(
+            &webdav_namespace_url(config),
+            &parent,
+            config,
+            secrets,
+        )
+        .await
+    }
+
+    async fn ensure_webdav_child_collections(
+        &self,
+        base: &str,
+        relative_path: &str,
+        config: &CloudSyncSettings,
+        secrets: &CloudSyncSecrets,
+    ) -> Result<()> {
+        let mut url = trim_trailing_slash(base);
+        // MKCOL cannot create missing ancestors. Stay below the configured base
+        // and create parents first instead of retrying from the server root.
+        for segment in relative_path
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+        {
+            if matches!(segment, "." | "..") {
+                bail!("namespace_create_failed: Invalid relative WebDAV collection path");
+            }
+            url = join_url(&url, &encode_component(segment));
+            self.ensure_webdav_collection(&url, config, secrets).await?;
+        }
+        Ok(())
     }
 
     async fn ensure_webdav_collection(
@@ -163,56 +196,13 @@ impl CloudSyncBackend {
         if matches!(response.status().as_u16(), 200 | 201 | 204 | 301 | 405) {
             return Ok(());
         }
-        if response.status() == StatusCode::CONFLICT {
-            if self
+        if response.status() == StatusCode::CONFLICT
+            && self
                 .webdav_collection_exists(url, headers.clone())
                 .await
                 .unwrap_or(false)
-            {
-                return Ok(());
-            }
-
-            let chain = webdav_collection_chain(url);
-            if chain.len() > 1 {
-                for parent in chain.iter().take(chain.len() - 1) {
-                    let parent_response = self
-                        .mkcol_webdav_collection(parent, headers.clone())
-                        .await?;
-                    if matches!(
-                        parent_response.status().as_u16(),
-                        200 | 201 | 204 | 301 | 405
-                    ) {
-                        continue;
-                    }
-                    if parent_response.status() == StatusCode::CONFLICT
-                        && self
-                            .webdav_collection_exists(parent, headers.clone())
-                            .await
-                            .unwrap_or(false)
-                    {
-                        continue;
-                    }
-                    bail!(
-                        "namespace_create_failed: Failed to prepare WebDAV namespace ({})",
-                        parent_response.status().as_u16()
-                    );
-                }
-            }
-
-            let retry = self.mkcol_webdav_collection(url, headers.clone()).await?;
-            if matches!(retry.status().as_u16(), 200 | 201 | 204 | 301 | 405)
-                || (retry.status() == StatusCode::CONFLICT
-                    && self
-                        .webdav_collection_exists(url, headers)
-                        .await
-                        .unwrap_or(false))
-            {
-                return Ok(());
-            }
-            bail!(
-                "namespace_create_failed: Failed to prepare WebDAV namespace ({})",
-                retry.status().as_u16()
-            );
+        {
+            return Ok(());
         }
         bail!(
             "namespace_create_failed: Failed to prepare WebDAV namespace ({})",
@@ -374,34 +364,173 @@ fn webdav_parent_object_path(relative_path: &str) -> Option<String> {
     Some(segments.join("/"))
 }
 
-fn webdav_collection_chain(url: &str) -> Vec<String> {
-    let Ok(mut parsed) = Url::parse(url) else {
-        return vec![trim_trailing_slash(url)];
-    };
-    let path_segments = parsed
-        .path_segments()
-        .map(|segments| {
-            segments
-                .filter(|segment| !segment.is_empty())
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    if path_segments.is_empty() {
-        return vec![trim_trailing_slash(url)];
-    }
-
-    let mut urls = Vec::with_capacity(path_segments.len());
-    for index in 0..path_segments.len() {
-        parsed.set_path(&path_segments[..=index].join("/"));
-        urls.push(trim_trailing_slash(parsed.as_str()));
-    }
-    urls
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{collections::HashSet, sync::Mutex};
+
+    struct ScopedWebdav {
+        collections: Mutex<HashSet<String>>,
+        requests: Mutex<Vec<(String, String)>>,
+    }
+
+    impl HttpExecutor for ScopedWebdav {
+        fn execute(&self, request: HttpRequestSpec) -> HttpExecuteFuture<'_> {
+            Box::pin(async move {
+                let path = request.url.path().to_string();
+                self.requests
+                    .lock()
+                    .unwrap()
+                    .push((request.method.to_string(), path.clone()));
+                let mut collections = self.collections.lock().unwrap();
+                let parent = path
+                    .rsplit_once('/')
+                    .map(|(parent, _)| parent)
+                    .unwrap_or("");
+                let status = match request.method.as_str() {
+                    "MKCOL" if path == "/dav" || path == "/dav/forbidden" => StatusCode::FORBIDDEN,
+                    "MKCOL" if collections.contains(&path) => StatusCode::METHOD_NOT_ALLOWED,
+                    "MKCOL" if !collections.contains(parent) => StatusCode::CONFLICT,
+                    "MKCOL" => {
+                        collections.insert(path);
+                        StatusCode::CREATED
+                    }
+                    "PROPFIND" if collections.contains(&path) => StatusCode::MULTI_STATUS,
+                    "PROPFIND" => StatusCode::NOT_FOUND,
+                    "PUT" if collections.contains(parent) => {
+                        let HttpRequestBody::Bytes(bytes) = request.body else {
+                            panic!("expected object bytes")
+                        };
+                        assert_eq!(bytes.as_slice(), b"connection snapshot");
+                        StatusCode::CREATED
+                    }
+                    _ => StatusCode::FORBIDDEN,
+                };
+                Ok(HttpResponseSnapshot::new(
+                    status,
+                    HeaderMap::new(),
+                    Vec::new(),
+                ))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn webdav_upload_creates_nested_collections_without_touching_service_root() {
+        let executor = Arc::new(ScopedWebdav {
+            collections: Mutex::new(
+                ["/dav".into(), "/dav/oxideterm-sync".into()]
+                    .into_iter()
+                    .collect(),
+            ),
+            requests: Mutex::new(Vec::new()),
+        });
+        let backend = CloudSyncBackend::with_http_executor(executor.clone());
+        let config = CloudSyncSettings {
+            backend_type: BackendType::Webdav,
+            auth_mode: crate::AuthMode::None,
+            endpoint: "https://example.test/dav".into(),
+            namespace: "oxideterm-sync".into(),
+            ..Default::default()
+        };
+        backend
+            .write_remote_object(
+                &config,
+                &CloudSyncSecrets::default(),
+                "structured/connections/revision.json",
+                b"connection snapshot".to_vec(),
+                Some("application/json"),
+            )
+            .await
+            .expect("nested upload should work when MKCOL on the service root is forbidden");
+        assert_eq!(
+            *executor.requests.lock().unwrap(),
+            [
+                ("MKCOL".into(), "/dav/oxideterm-sync".into()),
+                ("MKCOL".into(), "/dav/oxideterm-sync/structured".into()),
+                (
+                    "MKCOL".into(),
+                    "/dav/oxideterm-sync/structured/connections".into()
+                ),
+                (
+                    "PUT".into(),
+                    "/dav/oxideterm-sync/structured/connections/revision.json".into()
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn webdav_namespace_respects_endpoint_boundary() {
+        for (endpoint, namespace, expected_paths) in [
+            (
+                "https://example.test/dav",
+                "team/nested",
+                vec!["/dav/team", "/dav/team/nested"],
+            ),
+            ("https://example.test/dav", "", vec![]),
+            ("https://dav.jianguoyun.com/dav/team", "team", vec![]),
+        ] {
+            let executor = Arc::new(ScopedWebdav {
+                collections: Mutex::new(["/dav".into(), "/dav/team".into()].into_iter().collect()),
+                requests: Mutex::new(Vec::new()),
+            });
+            let backend = CloudSyncBackend::with_http_executor(executor.clone());
+            let config = CloudSyncSettings {
+                backend_type: BackendType::Webdav,
+                auth_mode: crate::AuthMode::None,
+                endpoint: endpoint.into(),
+                namespace: namespace.into(),
+                ..Default::default()
+            };
+            backend
+                .ensure_webdav_namespace(&config, &CloudSyncSecrets::default())
+                .await
+                .unwrap();
+            assert_eq!(
+                *executor.requests.lock().unwrap(),
+                expected_paths
+                    .into_iter()
+                    .map(|path| ("MKCOL".into(), path.to_string()))
+                    .collect::<Vec<_>>(),
+                "{endpoint}, {namespace}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn webdav_upload_stops_on_real_namespace_permission_error() {
+        let executor = Arc::new(ScopedWebdav {
+            collections: Mutex::new(["/dav".into()].into_iter().collect()),
+            requests: Mutex::new(Vec::new()),
+        });
+        let backend = CloudSyncBackend::with_http_executor(executor.clone());
+        let config = CloudSyncSettings {
+            backend_type: BackendType::Webdav,
+            auth_mode: crate::AuthMode::None,
+            endpoint: "https://example.test/dav".into(),
+            namespace: "forbidden".into(),
+            ..Default::default()
+        };
+        let error = backend
+            .write_remote_object(
+                &config,
+                &CloudSyncSecrets::default(),
+                "structured/connections/revision.json",
+                b"connection snapshot".to_vec(),
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "namespace_create_failed: Failed to prepare WebDAV namespace (403)"
+        );
+        assert_eq!(
+            *executor.requests.lock().unwrap(),
+            [("MKCOL".into(), "/dav/forbidden".into())]
+        );
+    }
 
     #[test]
     fn webdav_namespace_url_appends_namespace_for_regular_endpoints() {
@@ -415,18 +544,6 @@ mod tests {
         assert_eq!(
             webdav_namespace_url(&settings),
             "https://example.com/dav/team/default"
-        );
-    }
-
-    #[test]
-    fn webdav_collection_chain_builds_parent_first_paths() {
-        assert_eq!(
-            webdav_collection_chain("https://example.com/dav/team/default"),
-            vec![
-                "https://example.com/dav",
-                "https://example.com/dav/team",
-                "https://example.com/dav/team/default"
-            ]
         );
     }
 }
