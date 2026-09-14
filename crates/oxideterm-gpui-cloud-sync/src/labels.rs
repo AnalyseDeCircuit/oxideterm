@@ -148,6 +148,9 @@ pub fn cloud_sync_error_message_spec(error: &str) -> CloudSyncErrorMessageSpec {
         "network_request_failed" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.network_request_failed")
         }
+        "local_forward_requires_connection" => CloudSyncErrorMessageSpec::Key(
+            "plugin.cloud_sync.errors.local_forward_requires_connection",
+        ),
         "missing_git_repository" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.missing_git_repository")
         }

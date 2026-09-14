@@ -206,6 +206,7 @@
     "cloud_sync": {
       "panel_title": "Oxide 클라우드 동기화",
       "backend": {
+        "local_file": "로컬 파일",
         "webdav": "WebDAV",
         "http_json": "HTTP JSON",
         "dropbox": "Dropbox",
@@ -278,6 +279,7 @@
         "sync_scope": "동기화 범위",
         "conflict_recovery": "충돌 복구",
         "import_preview": "가져오기 미리보기",
+        "export_preview": "내보내기 미리보기",
         "upload_preview": "업로드 미리보기",
         "rollback_preview": "롤백 미리보기",
         "rollback_backups": "롤백 백업",
@@ -336,6 +338,7 @@
         "google_drive_permission_warning": "Google이 access_denied, admin_policy_enforced, invalid_client 또는 Drive API 미활성화를 보고하면 동의 화면, 데스크톱 클라이언트 유형, API 상태, 관리자 정책, 테스트 사용자를 확인하세요."
       },
       "settings": {
+        "sync_method": "동기화 방식",
         "backend_type": "백엔드 유형",
         "auth_mode": "인증 방식",
         "endpoint": "Endpoint",
@@ -438,6 +441,7 @@
         "summary_line": "연결 {{connections}}개, 포워딩 {{forwards}}개, 빠른 명령 {{quickCommands}}개, 시리얼 프로필 {{serialProfiles}}개, Telnet 프로필 {{telnetProfiles}}개, 플러그인 설정 {{pluginSettingsCount}}개, 민감한 자격 증명 {{sensitiveCredentials}}개"
       },
       "errors": {
+        "local_forward_requires_connection": "로컬 파일로 내보내려면 선택한 포워딩 규칙의 연결도 선택하세요.",
         "operation_in_progress": "다른 클라우드 동기화 작업이 실행 중입니다. 잠시 후 다시 시도하세요.",
         "missing_endpoint": "동기화를 실행하기 전에 백엔드 Endpoint를 설정하세요.",
         "missing_namespace": "동기화를 실행하기 전에 Namespace 또는 경로 접두사를 설정하세요.",
@@ -568,6 +572,7 @@
         "downloading": "Downloading objects"
       },
       "preview": {
+        "standalone_sftp_profiles": "독립 SFTP 프로필 ({{count}})",
         "summary_header": "원격 미리보기 요약",
         "apply_plan_title": "적용 계획",
         "upload_scope_title": "업로드 범위",

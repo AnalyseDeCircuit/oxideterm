@@ -479,6 +479,10 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
                 })
                 .unwrap_or(0);
             CloudSyncPreviewSummary {
+                standalone_sftp_profiles: preview
+                    .standalone_sftp_profiles_snapshot
+                    .as_ref()
+                    .map_or(0, |snapshot| snapshot.records.len()),
                 connections,
                 forwards,
                 quick_commands,
@@ -531,6 +535,7 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
             }
         }
         CloudSyncPendingPreview::Legacy { preview, .. } => CloudSyncPreviewSummary {
+            standalone_sftp_profiles: preview.metadata.standalone_sftp_profiles_count.unwrap_or(0),
             connections: preview.metadata.num_connections,
             forwards: preview.preview.total_forwards,
             quick_commands: preview.metadata.quick_commands_count.unwrap_or(0),

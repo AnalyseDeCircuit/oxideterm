@@ -475,6 +475,32 @@ impl CloudSyncOperationService {
         conflict_strategy: ConflictStrategy,
         progress: Option<&mut dyn CloudSyncProgressSink>,
     ) -> Result<Option<ApplyLegacyPreviewOutcome>> {
+        self.apply_legacy_preview_with_options(
+            connection_store,
+            preview,
+            sync_password,
+            OxideImportOptions {
+                selected_names: legacy_preview_selected_names(
+                    import_connections,
+                    selected_connection_names,
+                ),
+                conflict_strategy: import_strategy_from_cloud(conflict_strategy),
+                import_forwards,
+                import_portable_secrets,
+                ..OxideImportOptions::default()
+            },
+            progress,
+        )
+    }
+
+    pub fn apply_legacy_preview_with_options(
+        &self,
+        connection_store: &mut ConnectionStore,
+        preview: &LegacyPreview,
+        sync_password: Option<&str>,
+        options: OxideImportOptions,
+        progress: Option<&mut dyn CloudSyncProgressSink>,
+    ) -> Result<Option<ApplyLegacyPreviewOutcome>> {
         let Some(_permit) = self
             .guard
             .begin(CloudSyncOperationKind::ApplyPreview, false)?
@@ -498,16 +524,7 @@ impl CloudSyncOperationService {
             connection_store,
             &preview.bytes,
             password,
-            OxideImportOptions {
-                selected_names: legacy_preview_selected_names(
-                    import_connections,
-                    selected_connection_names,
-                ),
-                conflict_strategy: import_strategy_from_cloud(conflict_strategy),
-                import_forwards,
-                import_portable_secrets,
-                ..OxideImportOptions::default()
-            },
+            options,
             &mut import_progress,
         )
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;

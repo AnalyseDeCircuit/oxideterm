@@ -39,6 +39,7 @@ pub fn cloud_sync_settings_from_form(form: &CloudSyncFormDraft) -> (CloudSyncSet
         BackendType::Webdav | BackendType::HttpJson => form.auth_mode.clone(),
     };
     let settings = CloudSyncSettings {
+        local_file_mode: false,
         backend_type: form.backend_type.clone(),
         auth_mode,
         endpoint: if matches!(

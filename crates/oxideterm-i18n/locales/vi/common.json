@@ -206,6 +206,7 @@
     "cloud_sync": {
       "panel_title": "Đồng bộ đám mây Oxide",
       "backend": {
+        "local_file": "Tệp cục bộ",
         "webdav": "WebDAV",
         "http_json": "HTTP JSON",
         "dropbox": "Dropbox",
@@ -278,6 +279,7 @@
         "sync_scope": "Phạm vi đồng bộ",
         "conflict_recovery": "Xử lý xung đột",
         "import_preview": "Xem trước nhập",
+        "export_preview": "Xem trước xuất tệp",
         "upload_preview": "Xem trước tải lên",
         "rollback_preview": "Xem trước hoàn tác",
         "rollback_backups": "Bản sao lưu hoàn tác",
@@ -336,6 +338,7 @@
         "google_drive_permission_warning": "Nếu Google báo access_denied, admin_policy_enforced, invalid_client hoặc Drive API chưa bật, hãy kiểm tra màn hình đồng ý, loại khách desktop, trạng thái API, chính sách quản trị và người dùng thử nghiệm."
       },
       "settings": {
+        "sync_method": "Phương thức đồng bộ",
         "backend_type": "Loại backend",
         "auth_mode": "Xác thực",
         "endpoint": "Endpoint",
@@ -438,6 +441,7 @@
         "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{telnetProfiles}} hồ sơ Telnet, {{pluginSettingsCount}} cài đặt plugin, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
       },
       "errors": {
+        "local_forward_requires_connection": "Để xuất tệp cục bộ, hãy chọn cả các kết nối sở hữu quy tắc chuyển tiếp đã chọn.",
         "operation_in_progress": "Một thao tác đồng bộ đám mây khác đang chạy.",
         "missing_endpoint": "Cấu hình endpoint backend trước khi đồng bộ.",
         "missing_namespace": "Cấu hình namespace hoặc tiền tố đường dẫn trước khi đồng bộ.",
@@ -568,6 +572,7 @@
         "downloading": "Downloading objects"
       },
       "preview": {
+        "standalone_sftp_profiles": "Hồ sơ SFTP độc lập ({{count}})",
         "summary_header": "Tóm tắt xem trước từ xa",
         "apply_plan_title": "Kế hoạch áp dụng",
         "upload_scope_title": "Phạm vi tải lên",

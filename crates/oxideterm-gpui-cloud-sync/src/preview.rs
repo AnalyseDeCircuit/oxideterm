@@ -47,6 +47,7 @@ impl CloudSyncPendingPreview {
 
 #[derive(Clone, Debug)]
 pub enum CloudSyncPreviewSource {
+    LocalFile,
     Remote,
     Backup { id: String, created_at: String },
 }
@@ -59,6 +60,7 @@ impl CloudSyncPreviewSource {
 
 #[derive(Clone, Debug, Default)]
 pub struct CloudSyncPreviewSummary {
+    pub standalone_sftp_profiles: usize,
     pub connections: usize,
     pub forwards: usize,
     pub quick_commands: usize,

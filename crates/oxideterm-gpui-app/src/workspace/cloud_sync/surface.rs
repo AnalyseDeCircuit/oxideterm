@@ -242,7 +242,7 @@ impl CloudSyncPageRenderer {
         let (busy, active_tab, backend_type) = {
             let cloud_sync = self.cloud_sync.read(cx);
             (
-                cloud_sync.controller.delivery_rx.is_some(),
+                cloud_sync.operation_in_flight(),
                 cloud_sync.view.active_tab,
                 cloud_sync.view.form.backend_type.clone(),
             )
@@ -648,9 +648,12 @@ impl CloudSyncPageRenderer {
         let theme = self.tokens.ui;
         let settings = &state.settings;
         let local_snapshot = self.local_snapshot.as_ref().ok().map(Arc::as_ref);
-        let backend_label = self
-            .i18n
-            .t(cloud_sync_backend_label_key(&settings.backend_type));
+        let local_file = cloud_sync.view.local_file_mode;
+        let backend_label = self.i18n.t(if local_file {
+            "plugin.cloud_sync.backend.local_file"
+        } else {
+            cloud_sync_backend_label_key(&settings.backend_type)
+        });
         let local_dirty = local_snapshot
             .map(|snapshot| {
                 if snapshot.dirty.has_dirty {
@@ -666,11 +669,14 @@ impl CloudSyncPageRenderer {
             .map(cloud_sync_format_timestamp)
             .unwrap_or_else(|| "—".to_string());
         let has_rollback_backup = !state.rollback_backups.is_empty();
-        let show_github_oauth = matches!(settings.backend_type, BackendType::GithubGist);
+        let show_github_oauth =
+            !local_file && matches!(settings.backend_type, BackendType::GithubGist);
         let github_oauth_disabled = busy || settings.github_oauth_client_id.trim().is_empty();
-        let show_microsoft_oauth = matches!(settings.backend_type, BackendType::OneDrive);
+        let show_microsoft_oauth =
+            !local_file && matches!(settings.backend_type, BackendType::OneDrive);
         let microsoft_oauth_disabled = busy || settings.microsoft_oauth_client_id.trim().is_empty();
-        let show_google_oauth = matches!(settings.backend_type, BackendType::GoogleDrive);
+        let show_google_oauth =
+            !local_file && matches!(settings.backend_type, BackendType::GoogleDrive);
         let google_oauth_disabled = busy || settings.google_oauth_client_id.trim().is_empty();
 
         let mut card = self
@@ -719,24 +725,30 @@ impl CloudSyncPageRenderer {
                                 backend_label,
                                 cx,
                             ))
-                            .child(self.render_cloud_sync_overview_fact(
-                                LucideIcon::Hash,
-                                "plugin.cloud_sync.fields.namespace",
-                                settings.namespace.clone(),
-                                cx,
-                            ))
-                            .child(self.render_cloud_sync_overview_fact(
-                                LucideIcon::Activity,
-                                "plugin.cloud_sync.fields.local_dirty",
-                                local_dirty,
-                                cx,
-                            ))
-                            .child(self.render_cloud_sync_overview_fact(
-                                LucideIcon::Clock,
-                                "plugin.cloud_sync.fields.last_sync",
-                                last_sync,
-                                cx,
-                            )),
+                            .when(!local_file, |facts| {
+                                facts.child(self.render_cloud_sync_overview_fact(
+                                    LucideIcon::Hash,
+                                    "plugin.cloud_sync.fields.namespace",
+                                    settings.namespace.clone(),
+                                    cx,
+                                ))
+                            })
+                            .when(!local_file, |facts| {
+                                facts.child(self.render_cloud_sync_overview_fact(
+                                    LucideIcon::Activity,
+                                    "plugin.cloud_sync.fields.local_dirty",
+                                    local_dirty,
+                                    cx,
+                                ))
+                            })
+                            .when(!local_file, |facts| {
+                                facts.child(self.render_cloud_sync_overview_fact(
+                                    LucideIcon::Clock,
+                                    "plugin.cloud_sync.fields.last_sync",
+                                    last_sync,
+                                    cx,
+                                ))
+                            }),
                     )
                     .child(
                         div()
@@ -776,21 +788,31 @@ impl CloudSyncPageRenderer {
                             })
                             .child(self.render_cloud_sync_toolbar_button(
                                 LucideIcon::Upload,
-                                "plugin.cloud_sync.actions.upload_now",
+                                if local_file {
+                                    "plugin.cloud_sync.actions.export_local"
+                                } else {
+                                    "plugin.cloud_sync.actions.upload_now"
+                                },
                                 CloudSyncActionTone::Accent,
                                 busy,
                                 self.intent_listener(CloudSyncUiIntent::StartUploadPreview),
                             ))
-                            .child(self.render_cloud_sync_toolbar_button(
-                                LucideIcon::RefreshCw,
-                                "plugin.cloud_sync.actions.check_remote",
-                                CloudSyncActionTone::Muted,
-                                busy,
-                                self.intent_listener(CloudSyncUiIntent::CheckRemote),
-                            ))
+                            .when(!local_file, |toolbar| {
+                                toolbar.child(self.render_cloud_sync_toolbar_button(
+                                    LucideIcon::RefreshCw,
+                                    "plugin.cloud_sync.actions.check_remote",
+                                    CloudSyncActionTone::Muted,
+                                    busy,
+                                    self.intent_listener(CloudSyncUiIntent::CheckRemote),
+                                ))
+                            })
                             .child(self.render_cloud_sync_toolbar_button(
                                 LucideIcon::Download,
-                                "plugin.cloud_sync.actions.pull_preview",
+                                if local_file {
+                                    "plugin.cloud_sync.actions.import_local"
+                                } else {
+                                    "plugin.cloud_sync.actions.pull_preview"
+                                },
                                 CloudSyncActionTone::Muted,
                                 busy,
                                 self.intent_listener(CloudSyncUiIntent::PullPreview),
@@ -810,59 +832,6 @@ impl CloudSyncPageRenderer {
                                 self.intent_listener(CloudSyncUiIntent::SaveConfiguration),
                             )),
                     ),
-            )
-            .child(
-                div()
-                    .pt(px(12.0))
-                    .border_t_1()
-                    .border_color(rgb(theme.border))
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .min_w(px(240.0))
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap(px(2.0))
-                            .child(
-                                div()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(rgb(theme.text))
-                                    .child(self.i18n.t("plugin.cloud_sync.sections.local_backup")),
-                            )
-                            .child(
-                                div().text_color(rgb(theme.text_muted)).child(
-                                    self.i18n
-                                        .t("plugin.cloud_sync.sections.local_backup_description"),
-                                ),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_wrap()
-                            .items_center()
-                            .justify_end()
-                            .gap(px(8.0))
-                            .child(self.render_cloud_sync_toolbar_button(
-                                LucideIcon::Upload,
-                                "plugin.cloud_sync.actions.import_local",
-                                CloudSyncActionTone::Muted,
-                                busy,
-                                self.intent_listener(CloudSyncUiIntent::ImportLocalBackup),
-                            ))
-                            .child(self.render_cloud_sync_toolbar_button(
-                                LucideIcon::Download,
-                                "plugin.cloud_sync.actions.export_local",
-                                CloudSyncActionTone::Muted,
-                                busy,
-                                self.intent_listener(CloudSyncUiIntent::ExportLocalBackup),
-                            )),
-                    ),
             );
 
         if let Some(progress) = cloud_sync.controller.progress.as_ref() {
@@ -871,8 +840,10 @@ impl CloudSyncPageRenderer {
         if let Some(error) = state.last_error.as_ref() {
             card = card.child(self.render_cloud_sync_error(error));
         }
-        card.child(self.render_cloud_sync_meta(state, local_snapshot, cx))
-            .into_any_element()
+        card.when(!local_file, |card| {
+            card.child(self.render_cloud_sync_meta(state, local_snapshot, cx))
+        })
+        .into_any_element()
     }
 
     pub(super) fn render_cloud_sync_overview_fact(

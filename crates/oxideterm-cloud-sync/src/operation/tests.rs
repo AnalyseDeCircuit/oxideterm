@@ -17,6 +17,7 @@ fn connection_sync_record(
             port: 22,
             username: "ops".to_string(),
             auth_type: oxideterm_connections::AuthType::Agent,
+            empty_password: false,
             key_path: None,
             cert_path: None,
             managed_key_id: None,

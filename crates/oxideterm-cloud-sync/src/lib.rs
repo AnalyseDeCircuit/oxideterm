@@ -164,6 +164,8 @@ impl Default for AuthMode {
 #[serde(rename_all = "camelCase")]
 pub struct CloudSyncSettings {
     #[serde(default)]
+    pub local_file_mode: bool,
+    #[serde(default)]
     pub backend_type: BackendType,
     #[serde(default)]
     pub auth_mode: AuthMode,
@@ -196,6 +198,7 @@ pub struct CloudSyncSettings {
 impl Default for CloudSyncSettings {
     fn default() -> Self {
         Self {
+            local_file_mode: false,
             backend_type: BackendType::default(),
             auth_mode: AuthMode::default(),
             endpoint: String::new(),

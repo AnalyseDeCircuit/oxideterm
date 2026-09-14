@@ -88,7 +88,7 @@ pub fn finish_cloud_sync_pull_preview_state(
             persist_remote_metadata(state, &preview.remote_metadata);
         }
         CloudSyncPendingPreview::Legacy {
-            source: CloudSyncPreviewSource::Backup { .. },
+            source: CloudSyncPreviewSource::Backup { .. } | CloudSyncPreviewSource::LocalFile,
             ..
         } => {}
     }

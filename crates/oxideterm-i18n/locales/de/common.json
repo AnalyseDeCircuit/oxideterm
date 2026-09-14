@@ -206,6 +206,7 @@
     "cloud_sync": {
       "panel_title": "Oxide Cloud-Synchronisierung",
       "backend": {
+        "local_file": "Lokale Datei",
         "webdav": "WebDAV",
         "http_json": "HTTP JSON",
         "dropbox": "Dropbox",
@@ -278,6 +279,7 @@
         "sync_scope": "Synchronisierungsumfang",
         "conflict_recovery": "Konfliktbehebung",
         "import_preview": "Importvorschau",
+        "export_preview": "Exportvorschau",
         "upload_preview": "Uploadvorschau",
         "rollback_preview": "Rollback-Vorschau",
         "rollback_backups": "Rollback-Sicherungen",
@@ -336,6 +338,7 @@
         "google_drive_permission_warning": "Wenn Google access_denied, admin_policy_enforced, invalid_client oder eine deaktivierte Drive API meldet, prüfe Zustimmungsbildschirm, Desktop-Client-Typ, API-Status, Administratorrichtlinie und Testnutzer."
       },
       "settings": {
+        "sync_method": "Synchronisierungsmethode",
         "backend_type": "Backend-Typ",
         "auth_mode": "Authentifizierung",
         "endpoint": "Endpoint",
@@ -438,6 +441,7 @@
         "summary_line": "{{connections}} Verbindungen, {{forwards}} Weiterleitungen, {{quickCommands}} Schnellbefehle, {{serialProfiles}} serielle Profile, {{telnetProfiles}} Telnet-Profile, {{pluginSettingsCount}} Plugin-Einstellungen, {{sensitiveCredentials}} sensible Anmeldedaten"
       },
       "errors": {
+        "local_forward_requires_connection": "Wählen Sie für den lokalen Export auch die Verbindungen der ausgewählten Weiterleitungsregeln aus.",
         "operation_in_progress": "Ein anderer Cloud-Sync-Vorgang wird bereits ausgeführt.",
         "missing_endpoint": "Konfigurieren Sie den Backend-Endpoint vor der Synchronisierung.",
         "missing_namespace": "Konfigurieren Sie den Namespace oder das Pfadpräfix vor der Synchronisierung.",
@@ -568,6 +572,7 @@
         "downloading": "Downloading objects"
       },
       "preview": {
+        "standalone_sftp_profiles": "Eigenständige SFTP-Profile ({{count}})",
         "summary_header": "Remote-Vorschau Zusammenfassung",
         "apply_plan_title": "Anwendungsplan",
         "upload_scope_title": "Uploadumfang",

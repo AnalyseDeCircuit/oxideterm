@@ -12,6 +12,7 @@ use oxideterm_cloud_sync::{
         UploadOutcome,
     },
     progress::CloudSyncProgress,
+    secret_keys,
     secrets::{CloudSyncKeychainSecretProvider, backend_uses_auth_mode},
     service::{CloudSyncLocalSnapshot, build_local_snapshot},
     state::{CloudSyncHistoryEntry, CloudSyncHistorySummary, CloudSyncPersistedState},
@@ -90,6 +91,7 @@ mod config;
 mod confirm_dialog;
 mod delivery;
 mod history;
+mod local_file;
 mod maintenance;
 mod preview;
 mod surface;
@@ -180,6 +182,8 @@ impl CloudSyncControllerState {
 /// Owns Cloud Sync form drafts, navigation, dialogs, previews, and virtual-list caches.
 pub(super) struct CloudSyncViewState {
     pub(super) form: CloudSyncFormDraft,
+    pub(super) local_file_mode: bool,
+    pub(super) local_file_task: Option<Task<()>>,
     section_rows: Vec<CloudSyncSection>,
     pub(super) section_list_state: ListState,
     pub(super) section_list_cache: RefCell<VirtualListSignatureCache>,
@@ -247,6 +251,8 @@ impl CloudSyncViewState {
 
         Self {
             form: CloudSyncFormDraft::from_settings(settings),
+            local_file_mode: settings.local_file_mode,
+            local_file_task: None,
             section_rows: Vec::new(),
             section_list_state,
             section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
@@ -301,8 +307,6 @@ pub(super) enum CloudSyncUiIntent {
     StartGithubOauth,
     StartMicrosoftOauth,
     StartGoogleOauth,
-    ImportLocalBackup,
-    ExportLocalBackup,
     StartUploadPreview,
     CheckRemote,
     PullPreview,
@@ -357,7 +361,9 @@ impl EventEmitter<CloudSyncWorkspaceEvent> for CloudSyncWorkspaceEntity {}
 
 impl CloudSyncWorkspaceEntity {
     pub(in crate::workspace) fn operation_in_flight(&self) -> bool {
-        self.controller.delivery_rx.is_some() || self.controller.active_action.is_some()
+        self.controller.delivery_rx.is_some()
+            || self.controller.active_action.is_some()
+            || self.view.local_file_task.is_some()
     }
 
     pub(in crate::workspace) fn ai_snapshot(&self) -> serde_json::Value {
@@ -480,26 +486,38 @@ impl CloudSyncWorkspaceEntity {
     }
 
     fn sections(&self) -> Vec<CloudSyncSection> {
-        cloud_sync_sections(
+        let mut sections = cloud_sync_sections(
             self.controller.store.state(),
             self.has_pending_preview(),
             self.view.active_tab,
-        )
+        );
+        if self.view.local_file_mode {
+            sections.retain(|section| {
+                !matches!(
+                    section,
+                    CloudSyncSection::Guide
+                        | CloudSyncSection::ConfigHealth
+                        | CloudSyncSection::ConfigNotes
+                )
+            });
+        }
+        sections
     }
 
     fn section_signature(&self, section: CloudSyncSection) -> u64 {
-        cloud_sync_section_signature(
+        let signature = cloud_sync_section_signature(
             section,
             self.controller.store.state(),
             &self.view.form.backend_type,
             &self.view.form.auth_mode,
             &self.view.form.default_conflict_strategy,
-            self.controller.delivery_rx.is_some(),
+            self.operation_in_flight(),
             self.has_pending_preview(),
             self.view.preview_selection.is_some(),
             self.controller.progress.is_some(),
             self.view.active_tab,
-        )
+        );
+        signature ^ u64::from(self.view.local_file_mode)
     }
 
     fn sync_section_rows(&mut self) {
@@ -569,7 +587,8 @@ impl CloudSyncWorkspaceEntity {
         self.controller.auto_upload_generation =
             self.controller.auto_upload_generation.wrapping_add(1);
         self.auto_upload_task.take();
-        if !self.controller.store.state().settings.auto_upload_enabled {
+        if self.view.local_file_mode || !self.controller.store.state().settings.auto_upload_enabled
+        {
             return;
         }
         let generation = self.controller.auto_upload_generation;

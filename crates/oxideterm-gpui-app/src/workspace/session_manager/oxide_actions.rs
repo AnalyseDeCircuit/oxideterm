@@ -508,15 +508,6 @@ impl WorkspaceApp {
         })
     }
 
-    pub(in crate::workspace) fn open_oxide_import_dialog(&mut self, cx: &mut Context<Self>) {
-        self.session_manager.update(cx, |session_manager, cx| {
-            session_manager.oxide_import_dialog = Some(OxideImportDialogState::default());
-            session_manager.focused_input = None;
-            session_manager.status = None;
-            cx.notify();
-        });
-    }
-
     pub(in crate::workspace) fn open_oxide_import_portable_migration_dialog(
         &mut self,
         cx: &mut Context<Self>,
@@ -532,10 +523,6 @@ impl WorkspaceApp {
             session_manager.status = None;
             cx.notify();
         });
-    }
-
-    pub(in crate::workspace) fn open_oxide_export_dialog(&mut self, cx: &mut Context<Self>) {
-        self.open_oxide_export_dialog_with_portable_mode(false, cx);
     }
 
     pub(in crate::workspace) fn active_session_manager_input(

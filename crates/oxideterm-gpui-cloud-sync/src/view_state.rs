@@ -41,6 +41,7 @@ pub enum CloudSyncSelect {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CloudSyncSelectAction {
+    LocalFile,
     Backend(BackendType),
     AuthMode(AuthMode),
     ConflictStrategy(ConflictStrategy),

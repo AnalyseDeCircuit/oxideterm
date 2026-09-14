@@ -274,6 +274,7 @@ impl StructuredPreview {
 }
 
 mod apply;
+mod local_file;
 mod merge;
 mod objects;
 mod preview;

@@ -198,6 +198,7 @@
     "cloud_sync": {
       "panel_title": "Oxide 云同步",
       "backend": {
+        "local_file": "本地文件",
         "webdav": "WebDAV",
         "http_json": "HTTP JSON",
         "dropbox": "Dropbox",
@@ -270,6 +271,7 @@
         "sync_scope": "同步范围",
         "conflict_recovery": "冲突恢复",
         "import_preview": "导入预览",
+        "export_preview": "导出预览",
         "upload_preview": "上传预览",
         "rollback_preview": "回滚预览",
         "rollback_backups": "回滚备份",
@@ -328,6 +330,7 @@
         "google_drive_permission_warning": "如果 Google 报 access_denied、admin_policy_enforced、invalid_client 或 Drive API 未启用，请检查同意屏幕、桌面客户端类型、API 状态、管理员策略和测试用户。"
       },
       "settings": {
+        "sync_method": "同步方式",
         "backend_type": "后端类型",
         "auth_mode": "鉴权方式",
         "endpoint": "Endpoint",
@@ -430,6 +433,7 @@
         "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{telnetProfiles}} 个 Telnet 配置，{{pluginSettingsCount}} 项插件设置，{{sensitiveCredentials}} 个敏感凭据"
       },
       "errors": {
+        "local_forward_requires_connection": "导出本地文件时，请同时选中所选转发规则所属的连接。",
         "operation_in_progress": "另一个云同步操作正在运行，请稍后再试。",
         "missing_endpoint": "请先配置后端 Endpoint，再执行同步。",
         "missing_namespace": "请先配置命名空间或路径前缀，再执行同步。",
@@ -560,6 +564,7 @@
         "downloading": "下载对象"
       },
       "preview": {
+        "standalone_sftp_profiles": "独立 SFTP 配置（{{count}}）",
         "summary_header": "远端预览摘要",
         "apply_plan_title": "本次应用计划",
         "upload_scope_title": "上传范围",

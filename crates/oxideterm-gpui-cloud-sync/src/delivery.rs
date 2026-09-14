@@ -669,17 +669,13 @@ pub async fn deliver_cloud_sync_apply_preview(
                 preview: preview.clone(),
                 source: source.clone(),
             });
+            let options = crate::cloud_sync_legacy_import_options(&summary, &selection);
             service
-                .apply_legacy_preview(
+                .apply_legacy_preview_with_options(
                     &mut connection_store,
-                    &settings,
                     &preview,
                     sync_password.as_ref().map(|password| password.as_str()),
-                    selection.effective_import_connections(&summary),
-                    selection.selected_connection_names_for_import(&summary),
-                    selection.import_forwards,
-                    selection.import_sensitive_credentials,
-                    selection.conflict_strategy.clone(),
+                    options.oxide_options,
                     Some(&mut apply_progress),
                 )
                 .map(|outcome| CloudSyncApplyOutcome::Legacy {
@@ -777,12 +773,30 @@ fn read_apply_sync_password(
         CloudSyncPendingPreview::Legacy { .. } => true,
     };
     let needs_sync_password = apply_requires_password || create_rollback_backup;
-    let secret_result = get_action_secrets(
-        settings,
-        provider,
-        needs_sync_password,
-        SecretReadMode::Prompt,
-    );
+    let secret_result = if matches!(
+        preview,
+        CloudSyncPendingPreview::Legacy {
+            source: CloudSyncPreviewSource::LocalFile,
+            ..
+        }
+    ) {
+        use oxideterm_cloud_sync::secrets::CloudSyncSecretProvider;
+        provider
+            .get_secret(secret_keys::SYNC_PASSWORD, SecretReadMode::Prompt)
+            .map(
+                |sync_password| oxideterm_cloud_sync::secrets::CloudSyncSecrets {
+                    sync_password,
+                    ..Default::default()
+                },
+            )
+    } else {
+        get_action_secrets(
+            settings,
+            provider,
+            needs_sync_password,
+            SecretReadMode::Prompt,
+        )
+    };
     match (secret_result, needs_sync_password) {
         (Ok(secrets), true) => {
             let password = secrets.sync_password.unwrap_or_default();

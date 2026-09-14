@@ -179,9 +179,10 @@ impl CloudSyncPageRenderer {
                 }
             });
         }
-        let force_upload_available = state.auto_upload_blocked_by_conflict
-            || state.conflict_details.is_some()
-            || state.status == CloudSyncStatus::Conflict;
+        let force_upload_available = !self.cloud_sync.read(cx).view.local_file_mode
+            && (state.auto_upload_blocked_by_conflict
+                || state.conflict_details.is_some()
+                || state.status == CloudSyncStatus::Conflict);
         let mut actions = vec![self.render_cloud_sync_action_button(
             model.copy.apply_label_key,
             ButtonVariant::Default,
@@ -237,7 +238,12 @@ impl CloudSyncPageRenderer {
             SelectableTextRole::NonSelectable,
             "cloud-sync-upload-preview-title",
             "upload",
-            self.i18n.t("plugin.cloud_sync.sections.upload_preview"),
+            self.i18n
+                .t(if self.cloud_sync.read(cx).view.local_file_mode {
+                    "plugin.cloud_sync.sections.export_preview"
+                } else {
+                    "plugin.cloud_sync.sections.upload_preview"
+                }),
             theme.text_heading,
             cx,
         );
@@ -287,11 +293,16 @@ impl CloudSyncPageRenderer {
                 ),
             ])]
         };
-        let force_upload_available = state.auto_upload_blocked_by_conflict
-            || state.conflict_details.is_some()
-            || state.status == CloudSyncStatus::Conflict;
+        let force_upload_available = !self.cloud_sync.read(cx).view.local_file_mode
+            && (state.auto_upload_blocked_by_conflict
+                || state.conflict_details.is_some()
+                || state.status == CloudSyncStatus::Conflict);
         let mut actions = vec![self.render_cloud_sync_action_button(
-            "plugin.cloud_sync.actions.upload_now",
+            if self.cloud_sync.read(cx).view.local_file_mode {
+                "plugin.cloud_sync.actions.export_local"
+            } else {
+                "plugin.cloud_sync.actions.upload_now"
+            },
             ButtonVariant::Default,
             busy,
             self.intent_listener(CloudSyncUiIntent::StartUpload),

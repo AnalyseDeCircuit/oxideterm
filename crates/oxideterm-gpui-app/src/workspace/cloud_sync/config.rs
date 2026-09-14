@@ -18,6 +18,15 @@ impl CloudSyncPageRenderer {
         };
         let mut connection_rows = Vec::with_capacity(config_rows.len());
         for row in config_rows {
+            if self.cloud_sync.read(cx).view.local_file_mode
+                && !matches!(
+                    &row,
+                    CloudSyncConfigRow::BackendSelect | CloudSyncConfigRow::ConflictSelect
+                )
+                && !matches!(&row, CloudSyncConfigRow::Secret(field) if field.secret_key == secret_keys::SYNC_PASSWORD)
+            {
+                continue;
+            }
             connection_rows.push(match row {
                 CloudSyncConfigRow::BackendSelect => self.render_backend_select(cx),
                 CloudSyncConfigRow::AuthModeSelect => self.render_auth_mode_select(cx),
@@ -421,15 +430,19 @@ impl CloudSyncPageRenderer {
         )
     }
 
-    fn render_backend_select(&self, cx: &mut App) -> AnyElement {
+    pub(super) fn render_backend_select(&self, cx: &mut App) -> AnyElement {
         let label = {
             let cloud_sync = self.cloud_sync.read(cx);
-            self.i18n.t(cloud_sync_backend_label_key(
-                &cloud_sync.view.form.backend_type,
-            ))
+            if cloud_sync.view.local_file_mode {
+                self.i18n.t("plugin.cloud_sync.backend.local_file")
+            } else {
+                self.i18n.t(cloud_sync_backend_label_key(
+                    &cloud_sync.view.form.backend_type,
+                ))
+            }
         };
         self.render_select_field(
-            "plugin.cloud_sync.settings.backend_type",
+            "plugin.cloud_sync.settings.sync_method",
             CloudSyncSelect::Backend,
             label,
             cx,
@@ -473,7 +486,11 @@ impl CloudSyncPageRenderer {
             default_conflict_strategy: cloud_sync.view.form.default_conflict_strategy.clone(),
             ..CloudSyncSettings::default()
         };
-        cloud_sync_selected_option_spec_index(&settings, select)
+        if select == CloudSyncSelect::Backend && self.cloud_sync.read(cx).view.local_file_mode {
+            cloud_sync_select_option_specs(&settings, select).len()
+        } else {
+            cloud_sync_selected_option_spec_index(&settings, select)
+        }
     }
 
     fn render_select_field(
@@ -661,14 +678,23 @@ impl WorkspaceApp {
                 .clone(),
             ..CloudSyncSettings::default()
         };
-        cloud_sync_select_option_specs(&settings, select)
+        let local_file = self.cloud_sync.read(cx).view.local_file_mode;
+        let mut options: Vec<_> = cloud_sync_select_option_specs(&settings, select)
             .into_iter()
             .map(|option| CloudSyncSelectOption {
                 label: self.i18n.t(cloud_sync_select_label_key(option.label_key)),
-                selected: option.selected,
+                selected: option.selected && !(select == CloudSyncSelect::Backend && local_file),
                 action: option.action,
             })
-            .collect()
+            .collect();
+        if select == CloudSyncSelect::Backend {
+            options.push(CloudSyncSelectOption {
+                label: self.i18n.t("plugin.cloud_sync.backend.local_file"),
+                selected: local_file,
+                action: CloudSyncSelectAction::LocalFile,
+            });
+        }
+        options
     }
 
     pub(super) fn cloud_sync_selected_option_index(
@@ -688,7 +714,11 @@ impl WorkspaceApp {
                 .clone(),
             ..CloudSyncSettings::default()
         };
-        cloud_sync_selected_option_spec_index(&settings, select)
+        if select == CloudSyncSelect::Backend && self.cloud_sync.read(cx).view.local_file_mode {
+            cloud_sync_select_option_specs(&settings, select).len()
+        } else {
+            cloud_sync_selected_option_spec_index(&settings, select)
+        }
     }
 
     pub(super) fn cloud_sync_focusable_selects(&self, cx: &App) -> Vec<CloudSyncSelect> {
@@ -704,7 +734,13 @@ impl WorkspaceApp {
                 .clone(),
             ..CloudSyncSettings::default()
         };
-        cloud_sync_focusable_selects(&settings)
+        if self.cloud_sync.read(cx).view.active_tab != CloudSyncTab::Configure {
+            vec![]
+        } else if self.cloud_sync.read(cx).view.local_file_mode {
+            vec![CloudSyncSelect::Backend, CloudSyncSelect::ConflictStrategy]
+        } else {
+            cloud_sync_focusable_selects(&settings)
+        }
     }
 
     pub(super) fn cloud_sync_select_anchor_id(select: CloudSyncSelect) -> SelectAnchorId {
@@ -739,11 +775,32 @@ impl WorkspaceApp {
         action: CloudSyncSelectAction,
         cx: &mut Context<Self>,
     ) {
+        if self.cloud_sync.read(cx).operation_in_flight() {
+            return;
+        }
         // Tauri's Radix Select uses the same onValueChange path for mouse and
         // keyboard selection. Keep native mutations centralized so Enter and
         // pointer clicks cannot drift apart.
         let trigger_select = self.cloud_sync.update(cx, |cloud_sync, _cx| match action {
+            CloudSyncSelectAction::LocalFile => {
+                cloud_sync.view.local_file_mode = true;
+                cloud_sync.view.pending_preview = None;
+                cloud_sync.view.upload_preview = None;
+                cloud_sync.view.preview_selection = None;
+                cloud_sync.view.upload_selection = None;
+                CloudSyncSelect::Backend
+            }
             CloudSyncSelectAction::Backend(backend) => {
+                if cloud_sync.view.local_file_mode {
+                    cloud_sync.view.pending_preview = None;
+                    cloud_sync.view.upload_preview = None;
+                    cloud_sync.view.preview_selection = None;
+                    cloud_sync.view.upload_selection = None;
+                }
+                cloud_sync.view.local_file_mode = false;
+                if cloud_sync.view.form.backend_type != backend {
+                    cloud_sync.view.set_active_tab(CloudSyncTab::Configure);
+                }
                 cloud_sync.view.form.backend_type = backend.clone();
                 if matches!(backend, BackendType::Dropbox) {
                     cloud_sync.view.form.auth_mode = AuthMode::Bearer;
@@ -764,6 +821,7 @@ impl WorkspaceApp {
                 CloudSyncSelect::ConflictStrategy
             }
         });
+        self.reschedule_cloud_sync_auto_upload(cx);
         self.close_cloud_sync_select(cx);
         self.cloud_sync.update(cx, |cloud_sync, _cx| {
             cloud_sync.view.focused_select = Some(trigger_select);
@@ -939,10 +997,11 @@ impl WorkspaceApp {
     ) -> bool {
         self.apply_focused_cloud_sync_input_draft(cx);
         self.invalidate_cloud_sync_snapshot_caches(cx);
-        let (settings, interval) = {
+        let (mut settings, interval) = {
             let cloud_sync = self.cloud_sync.read(cx);
             cloud_sync_settings_from_form(&cloud_sync.view.form)
         };
+        settings.local_file_mode = self.cloud_sync.read(cx).view.local_file_mode;
         let mut provider = CloudSyncKeychainSecretProvider::new(
             self.cloud_sync
                 .read(cx)

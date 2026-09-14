@@ -206,6 +206,7 @@
     "cloud_sync": {
       "panel_title": "Oxide クラウド同期",
       "backend": {
+        "local_file": "ローカルファイル",
         "webdav": "WebDAV",
         "http_json": "HTTP JSON",
         "dropbox": "Dropbox",
@@ -278,6 +279,7 @@
         "sync_scope": "同期範囲",
         "conflict_recovery": "コンフリクト復旧",
         "import_preview": "インポートプレビュー",
+        "export_preview": "エクスポートのプレビュー",
         "upload_preview": "アップロードプレビュー",
         "rollback_preview": "ロールバックプレビュー",
         "rollback_backups": "ロールバックバックアップ",
@@ -336,6 +338,7 @@
         "google_drive_permission_warning": "Google が access_denied、admin_policy_enforced、invalid_client、または Drive API 未有効を返す場合は、同意画面、デスクトップ クライアント種別、API 状態、管理者ポリシー、テストユーザーを確認してください。"
       },
       "settings": {
+        "sync_method": "同期方法",
         "backend_type": "バックエンドタイプ",
         "auth_mode": "認証方式",
         "endpoint": "Endpoint",
@@ -438,6 +441,7 @@
         "summary_line": "{{connections}} 件の接続、{{forwards}} 件のフォワード、{{quickCommands}} 件のクイックコマンド、{{serialProfiles}} 件のシリアルプロファイル、{{telnetProfiles}} 件の Telnet プロファイル、{{pluginSettingsCount}} 件のプラグイン設定、{{sensitiveCredentials}} 件の機密資格情報"
       },
       "errors": {
+        "local_forward_requires_connection": "ローカルファイルにエクスポートするには、選択した転送ルールの接続も選択してください。",
         "operation_in_progress": "別のクラウド同期操作が実行中です。しばらくしてから再試行してください。",
         "missing_endpoint": "同期を実行する前に、バックエンドの Endpoint を設定してください。",
         "missing_namespace": "同期を実行する前に、Namespace またはパスプレフィックスを設定してください。",
@@ -568,6 +572,7 @@
         "downloading": "Downloading objects"
       },
       "preview": {
+        "standalone_sftp_profiles": "独立した SFTP 設定（{{count}}）",
         "summary_header": "リモートプレビュー概要",
         "apply_plan_title": "適用計画",
         "upload_scope_title": "アップロード範囲",

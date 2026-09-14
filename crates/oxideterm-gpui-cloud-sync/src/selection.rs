@@ -442,6 +442,9 @@ pub fn cloud_sync_legacy_import_options(
             import_serial_profiles: selection.import_serial_profiles,
             import_telnet_profiles: selection.import_telnet_profiles,
             import_mosh_profiles: selection.import_mosh_profiles,
+            import_standalone_sftp_profiles: selection.import_connections,
+            import_remote_desktop_profiles: selection.import_remote_desktop_profiles,
+            restore_managed_key_passphrases: import_portable_secrets,
             import_portable_secrets,
             ..OxideImportOptions::default()
         },
@@ -470,9 +473,10 @@ impl CloudSyncPreviewSelection {
             CloudSyncPendingPreview::Legacy { .. } => None,
         };
         Self {
-            import_connections: structured_full_selection
-                .as_ref()
-                .map_or(summary.connections > 0, |selection| selection.connections),
+            import_connections: structured_full_selection.as_ref().map_or(
+                summary.connections > 0 || summary.standalone_sftp_profiles > 0,
+                |selection| selection.connections,
+            ),
             selected_connection_names: summary.connection_record_names(),
             selected_connection_ids: preview_connection_ids(preview),
             import_quick_commands: structured_full_selection
@@ -533,6 +537,9 @@ impl CloudSyncPreviewSelection {
     pub fn effective_import_connections(&self, summary: &CloudSyncPreviewSummary) -> bool {
         if !self.import_connections {
             return false;
+        }
+        if summary.standalone_sftp_profiles > 0 {
+            return true;
         }
         if summary.records.is_empty() && summary.connections > 0 {
             return !self.selected_connection_ids.is_empty();
@@ -737,6 +744,19 @@ impl CloudSyncPreviewSelection {
         summary: &CloudSyncPreviewSummary,
     ) -> Vec<CloudSyncPreviewSelectionRow> {
         let mut rows = Vec::new();
+        if summary.standalone_sftp_profiles > 0 {
+            rows.push(CloudSyncPreviewSelectionRow {
+                label: CloudSyncPreviewSelectionLabel::I18nCount {
+                    key: "plugin.cloud_sync.preview.standalone_sftp_profiles",
+                    count_name: "count",
+                    count: summary.standalone_sftp_profiles,
+                },
+                meta: None,
+                checked: self.import_connections,
+                disabled: false,
+                action: CloudSyncPreviewSelectionAction::ToggleConnections,
+            });
+        }
         if summary.connections > 0 {
             rows.push(CloudSyncPreviewSelectionRow {
                 label: CloudSyncPreviewSelectionLabel::I18nCount {
@@ -1489,7 +1509,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_import_options_bind_portable_secrets_to_sensitive_credentials() {
+    fn legacy_import_options_preserve_selected_scope() {
         let summary = CloudSyncPreviewSummary {
             connections: 1,
             sensitive_credentials: 1,
@@ -1509,5 +1529,12 @@ mod tests {
         selection.import_sensitive_credentials = false;
         let options = cloud_sync_legacy_import_options(&summary, &selection);
         assert!(!options.oxide_options.import_portable_secrets);
+        assert!(!options.oxide_options.import_remote_desktop_profiles);
+        assert!(!options.oxide_options.import_standalone_sftp_profiles);
+        selection.import_connections = true;
+        selection.import_remote_desktop_profiles = true;
+        let options = cloud_sync_legacy_import_options(&summary, &selection);
+        assert!(options.oxide_options.import_remote_desktop_profiles);
+        assert!(options.oxide_options.import_standalone_sftp_profiles);
     }
 }

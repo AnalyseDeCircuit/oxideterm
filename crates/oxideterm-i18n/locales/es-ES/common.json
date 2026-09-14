@@ -206,6 +206,7 @@
     "cloud_sync": {
       "panel_title": "Oxide sincronización en la nube",
       "backend": {
+        "local_file": "Archivo local",
         "webdav": "WebDAV",
         "http_json": "HTTP JSON",
         "dropbox": "Dropbox",
@@ -278,6 +279,7 @@
         "sync_scope": "Alcance de sincronización",
         "conflict_recovery": "Recuperación ante conflictos",
         "import_preview": "Vista previa de importación",
+        "export_preview": "Vista previa de exportación",
         "upload_preview": "Vista previa de subida",
         "rollback_preview": "Vista previa de reversión",
         "rollback_backups": "Copias de reversión",
@@ -336,6 +338,7 @@
         "google_drive_permission_warning": "Si Google informa access_denied, admin_policy_enforced, invalid_client o que la API de Drive no está habilitada, revisa la pantalla de consentimiento, el tipo de cliente de escritorio, el estado de la API, la política de administrador y los usuarios de prueba."
       },
       "settings": {
+        "sync_method": "Método de sincronización",
         "backend_type": "Tipo de backend",
         "auth_mode": "Autenticación",
         "endpoint": "Endpoint",
@@ -438,6 +441,7 @@
         "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfiles serie, {{telnetProfiles}} perfiles Telnet, {{pluginSettingsCount}} ajustes de plugins, {{sensitiveCredentials}} credenciales sensibles"
       },
       "errors": {
+        "local_forward_requires_connection": "Para exportar un archivo local, seleccione también las conexiones de las reglas de reenvío seleccionadas.",
         "operation_in_progress": "Ya se está ejecutando otra operación de Cloud Sync.",
         "missing_endpoint": "Configure el Endpoint del backend antes de sincronizar.",
         "missing_namespace": "Configure el Namespace o el prefijo de ruta antes de sincronizar.",
@@ -568,6 +572,7 @@
         "downloading": "Downloading objects"
       },
       "preview": {
+        "standalone_sftp_profiles": "Perfiles SFTP independientes ({{count}})",
         "summary_header": "Resumen de la vista previa remota",
         "apply_plan_title": "Plan de aplicación",
         "upload_scope_title": "Alcance de subida",

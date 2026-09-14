@@ -37,7 +37,8 @@ impl WorkspaceApp {
             .state()
             .settings
             .clone();
-        if backend_uses_auth_mode(&settings.backend_type)
+        if !settings.local_file_mode
+            && backend_uses_auth_mode(&settings.backend_type)
             && !settings.endpoint.trim().is_empty()
             && matches!(settings.auth_mode, AuthMode::None)
         {
@@ -78,7 +79,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn start_cloud_sync_check(&mut self, cx: &mut Context<Self>) {
-        if self.cloud_sync.read(cx).controller.delivery_rx.is_some() {
+        if self.cloud_sync.read(cx).operation_in_flight() {
             self.mark_cloud_sync_operation_in_progress(cx);
             return;
         }
@@ -89,7 +90,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn start_cloud_sync_github_oauth(&mut self, cx: &mut Context<Self>) {
-        if self.cloud_sync.read(cx).controller.delivery_rx.is_some() {
+        if self.cloud_sync.read(cx).operation_in_flight() {
             self.mark_cloud_sync_operation_in_progress(cx);
             return;
         }
@@ -134,7 +135,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn start_cloud_sync_microsoft_oauth(&mut self, cx: &mut Context<Self>) {
-        if self.cloud_sync.read(cx).controller.delivery_rx.is_some() {
+        if self.cloud_sync.read(cx).operation_in_flight() {
             self.mark_cloud_sync_operation_in_progress(cx);
             return;
         }
@@ -179,7 +180,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn start_cloud_sync_google_oauth(&mut self, cx: &mut Context<Self>) {
-        if self.cloud_sync.read(cx).controller.delivery_rx.is_some() {
+        if self.cloud_sync.read(cx).operation_in_flight() {
             self.mark_cloud_sync_operation_in_progress(cx);
             return;
         }
@@ -228,7 +229,7 @@ impl WorkspaceApp {
         skip_if_busy: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.cloud_sync.read(cx).controller.delivery_rx.is_some() {
+        if self.cloud_sync.read(cx).operation_in_flight() {
             if !skip_if_busy {
                 self.mark_cloud_sync_operation_in_progress(cx);
             }
@@ -275,7 +276,13 @@ impl WorkspaceApp {
         skip_if_busy: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.cloud_sync.read(cx).controller.delivery_rx.is_some() {
+        if self.cloud_sync.read(cx).view.local_file_mode {
+            if !automatic {
+                self.start_cloud_sync_local_file(true, false, cx);
+            }
+            return;
+        }
+        if self.cloud_sync.read(cx).operation_in_flight() {
             if !skip_if_busy {
                 self.mark_cloud_sync_operation_in_progress(cx);
             }
@@ -397,7 +404,11 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn start_cloud_sync_upload_preview(&mut self, cx: &mut Context<Self>) {
-        if self.cloud_sync.read(cx).controller.delivery_rx.is_some() {
+        if self.cloud_sync.read(cx).view.local_file_mode {
+            self.start_cloud_sync_local_file(true, true, cx);
+            return;
+        }
+        if self.cloud_sync.read(cx).operation_in_flight() {
             self.mark_cloud_sync_operation_in_progress(cx);
             return;
         }
@@ -516,6 +527,10 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn start_cloud_sync_pull_preview(&mut self, cx: &mut Context<Self>) {
+        if self.cloud_sync.read(cx).view.local_file_mode {
+            self.start_cloud_sync_local_file(false, false, cx);
+            return;
+        }
         self.start_cloud_sync_pull_preview_with_options(true, cx);
     }
 
@@ -525,7 +540,7 @@ impl WorkspaceApp {
         persist_configuration: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.cloud_sync.read(cx).controller.delivery_rx.is_some() {
+        if self.cloud_sync.read(cx).operation_in_flight() {
             self.mark_cloud_sync_operation_in_progress(cx);
             return;
         }
@@ -586,7 +601,7 @@ impl WorkspaceApp {
         backup_id: String,
         cx: &mut Context<Self>,
     ) {
-        if self.cloud_sync.read(cx).controller.delivery_rx.is_some() {
+        if self.cloud_sync.read(cx).operation_in_flight() {
             self.mark_cloud_sync_operation_in_progress(cx);
             return;
         }
@@ -650,7 +665,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn start_cloud_sync_apply_preview(&mut self, cx: &mut Context<Self>) {
-        if self.cloud_sync.read(cx).controller.delivery_rx.is_some() {
+        if self.cloud_sync.read(cx).operation_in_flight() {
             self.mark_cloud_sync_operation_in_progress(cx);
             return;
         }
@@ -826,10 +841,6 @@ impl WorkspaceApp {
             CloudSyncUiIntent::StartGithubOauth => self.start_cloud_sync_github_oauth(cx),
             CloudSyncUiIntent::StartMicrosoftOauth => self.start_cloud_sync_microsoft_oauth(cx),
             CloudSyncUiIntent::StartGoogleOauth => self.start_cloud_sync_google_oauth(cx),
-            // Local .oxide transfers reuse the workspace-owned encrypted file flow and
-            // remain available without configuring a cloud backend.
-            CloudSyncUiIntent::ImportLocalBackup => self.open_oxide_import_dialog(cx),
-            CloudSyncUiIntent::ExportLocalBackup => self.open_oxide_export_dialog(cx),
             CloudSyncUiIntent::StartUploadPreview => self.start_cloud_sync_upload_preview(cx),
             CloudSyncUiIntent::CheckRemote => self.start_cloud_sync_check(cx),
             CloudSyncUiIntent::PullPreview => self.start_cloud_sync_pull_preview(cx),
@@ -840,7 +851,9 @@ impl WorkspaceApp {
             CloudSyncUiIntent::ApplyPreview => self.open_cloud_sync_import_confirm(cx),
             CloudSyncUiIntent::StartUpload => {
                 self.cloud_sync.update(cx, |cloud_sync, cx| {
-                    cloud_sync.view.upload_preview = None;
+                    if !cloud_sync.view.local_file_mode {
+                        cloud_sync.view.upload_preview = None;
+                    }
                     cloud_sync.clear_select_focus();
                     cx.notify();
                 });

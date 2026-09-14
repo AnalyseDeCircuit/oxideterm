@@ -198,6 +198,7 @@
     "cloud_sync": {
       "panel_title": "Oxide Cloud Sync",
       "backend": {
+        "local_file": "Local file",
         "webdav": "WebDAV",
         "http_json": "HTTP JSON",
         "dropbox": "Dropbox",
@@ -270,6 +271,7 @@
         "sync_scope": "Sync Scope",
         "conflict_recovery": "Conflict Recovery",
         "import_preview": "Import Preview",
+        "export_preview": "Export preview",
         "upload_preview": "Upload Preview",
         "rollback_preview": "Rollback Preview",
         "rollback_backups": "Rollback Backups",
@@ -328,6 +330,7 @@
         "google_drive_permission_warning": "If Google reports access_denied, admin_policy_enforced, invalid_client, or Drive API not enabled, recheck the consent screen, desktop client type, API status, admin policy, and test users."
       },
       "settings": {
+        "sync_method": "Sync method",
         "backend_type": "Backend Type",
         "auth_mode": "Authentication",
         "endpoint": "Endpoint",
@@ -430,6 +433,7 @@
         "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{telnetProfiles}} Telnet profiles, {{pluginSettingsCount}} plugin settings, {{sensitiveCredentials}} sensitive credentials"
       },
       "errors": {
+        "local_forward_requires_connection": "Select the connections that own the selected forwarding rules before exporting a local file.",
         "operation_in_progress": "Another cloud sync operation is already running.",
         "missing_endpoint": "Configure the backend endpoint before syncing.",
         "missing_namespace": "Configure the namespace or path prefix before syncing.",
@@ -560,6 +564,7 @@
         "downloading": "Downloading objects"
       },
       "preview": {
+        "standalone_sftp_profiles": "Standalone SFTP profiles ({{count}})",
         "summary_header": "Remote preview summary",
         "apply_plan_title": "Apply plan",
         "upload_scope_title": "Upload scope",
