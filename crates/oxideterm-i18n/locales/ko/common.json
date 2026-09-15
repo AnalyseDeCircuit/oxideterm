@@ -24,7 +24,8 @@
   },
   "markdown": {
     "mermaid_unsupported": "지원되지 않는 Mermaid 다이어그램",
-    "mermaid_expand": "확대"
+    "mermaid_expand": "확대",
+    "mermaid_loading": "다이어그램 렌더링 중…"
   },
   "layout": {
     "empty": {

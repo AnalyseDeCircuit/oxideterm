@@ -24,7 +24,8 @@
   },
   "markdown": {
     "mermaid_unsupported": "Diagramme Mermaid non pris en charge",
-    "mermaid_expand": "Agrandir"
+    "mermaid_expand": "Agrandir",
+    "mermaid_loading": "Rendu du diagramme…"
   },
   "layout": {
     "empty": {

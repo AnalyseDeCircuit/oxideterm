@@ -9,6 +9,7 @@ version.workspace = true
 
 [dependencies]
 ego-tree = "0.11"
+mermaid-rs-renderer = { version = "0.3.1", default-features = false }
 gpui.workspace = true
 url.workspace = true
 oxideterm-theme = { path = "../oxideterm-theme" }

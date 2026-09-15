@@ -24,7 +24,8 @@
   },
   "markdown": {
     "mermaid_unsupported": "Unsupported Mermaid diagram",
-    "mermaid_expand": "Expand"
+    "mermaid_expand": "Expand",
+    "mermaid_loading": "Rendering diagram…"
   },
   "layout": {
     "empty": {

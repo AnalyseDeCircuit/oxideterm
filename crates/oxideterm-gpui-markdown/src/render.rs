@@ -1033,27 +1033,16 @@ fn render_mermaid_block(
     opts: &MarkdownOptions,
     code_actions: Option<&MarkdownCodeBlockActions>,
 ) -> AnyElement {
-    let rendered = mermaid::render_mermaid_svg(code, tokens, opts);
-    div()
-        .w_full()
-        .min_w_0()
-        .overflow_hidden()
-        .border_1()
-        .border_color(style::code_block_border_color(tokens))
-        .bg(style::code_block_bg_color(tokens, opts))
-        .rounded(px(tokens.radii.md))
-        .child(render_mermaid_header(
-            code,
-            tokens,
-            opts,
-            code_actions,
-            rendered.as_ref().ok(),
-        ))
-        .child(render_mermaid_body(code, tokens, opts, rendered))
-        .into_any_element()
+    mermaid::MermaidBlock {
+        source: code.to_string(),
+        tokens: *tokens,
+        options: opts.clone(),
+        actions: code_actions.cloned(),
+    }
+    .into_any_element()
 }
 
-fn render_mermaid_header(
+pub(crate) fn render_mermaid_header(
     code: &str,
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
@@ -1134,7 +1123,7 @@ fn render_mermaid_zoom_action(
         .into_any_element()
 }
 
-fn render_mermaid_body(
+pub(crate) fn render_mermaid_body(
     code: &str,
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,

@@ -21,7 +21,7 @@
 //! - Paragraphs
 //! - Bold / italic / inline code / strikethrough
 //! - Fenced code blocks with syntax highlighting (syntect)
-//! - Mermaid subset diagrams (`graph` / `flowchart` TD/BT/LR/RL, `sequenceDiagram`, `pie`, and `gantt`)
+//! - Native Mermaid diagrams through mermaid-rs-renderer, with background rendering and theme mapping
 //! - Blockquotes
 //! - GFM tables
 //! - GFM callouts (`[!NOTE]`, `[!WARNING]`, etc.)

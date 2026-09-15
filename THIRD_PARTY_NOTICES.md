@@ -2,11 +2,11 @@
 
 This file lists third-party Rust crates and detected licenses, including transitive dependencies.
 It is generated from `cargo deny list -f json -l crate`.
-Generated: 2026-09-12T08:46:49.502412Z
+Generated: 2026-09-15T16:51:42.608010Z
 
 ## Summary
 
-- MIT: 1087
+- MIT: 1089
 - Apache-2.0: 876
 - Apache-2.0 WITH LLVM-exception: 59
 - Zlib: 45
@@ -526,6 +526,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | jni-sys-macros | 0.4.1 | MIT, Apache-2.0 | https://crates.io/crates/jni-sys-macros |
 | jobserver | 0.1.34 | MIT, Apache-2.0 | https://crates.io/crates/jobserver |
 | js-sys | 0.3.99 | MIT, Apache-2.0 | https://crates.io/crates/js-sys |
+| json5 | 1.3.1 | MIT | https://crates.io/crates/json5 |
 | keccak | 0.2.0 | Apache-2.0, MIT | https://crates.io/crates/keccak |
 | kem | 0.3.0 | Apache-2.0, MIT | https://crates.io/crates/kem |
 | keyring | 3.6.3 | MIT, Apache-2.0 | https://crates.io/crates/keyring |
@@ -585,6 +586,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | memfd | 0.6.5 | MIT, Apache-2.0 | https://crates.io/crates/memfd |
 | memmap2 | 0.9.11 | MIT, Apache-2.0 | https://crates.io/crates/memmap2 |
 | memoffset | 0.9.1 | MIT | https://crates.io/crates/memoffset |
+| mermaid-rs-renderer | 0.3.1 | MIT | https://crates.io/crates/mermaid-rs-renderer |
 | metal | 0.33.0 | MIT, Apache-2.0 | https://crates.io/crates/metal |
 | mime | 0.3.17 | MIT, Apache-2.0 | https://crates.io/crates/mime |
 | mime_guess | 2.0.5 | MIT | https://crates.io/crates/mime_guess |
@@ -629,7 +631,6 @@ This section is a review prompt for binary distribution; it does not replace leg
 | num_cpus | 1.17.0 | MIT, Apache-2.0 | https://crates.io/crates/num_cpus |
 | num_enum | 0.7.6 | BSD-3-Clause, MIT, Apache-2.0 | https://crates.io/crates/num_enum |
 | num_enum_derive | 0.7.6 | BSD-3-Clause, MIT, Apache-2.0 | https://crates.io/crates/num_enum_derive |
-| num_threads | 0.1.7 | MIT, Apache-2.0 | https://crates.io/crates/num_threads |
 | objc | 0.2.7 | MIT | https://crates.io/crates/objc |
 | objc-sys | 0.3.5 | MIT | https://crates.io/crates/objc-sys |
 | objc2 | 0.5.2 | MIT | https://crates.io/crates/objc2 |
@@ -1065,6 +1066,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | ttf-parser | 0.25.1 | MIT, Apache-2.0 | https://crates.io/crates/ttf-parser |
 | typeid | 1.0.3 | MIT, Apache-2.0 | https://crates.io/crates/typeid |
 | typenum | 1.20.0 | MIT, Apache-2.0 | https://crates.io/crates/typenum |
+| ucd-trie | 0.1.7 | MIT, Apache-2.0 | https://crates.io/crates/ucd-trie |
 | uds_windows | 1.2.1 | MIT | https://crates.io/crates/uds_windows |
 | unarray | 0.1.4 | MIT, Apache-2.0 | https://crates.io/crates/unarray |
 | unescaper | 0.1.8 | GPL-3.0, MIT | https://crates.io/crates/unescaper |

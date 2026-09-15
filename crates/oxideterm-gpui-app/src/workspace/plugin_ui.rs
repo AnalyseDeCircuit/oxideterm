@@ -1482,7 +1482,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let text = native_plugin_control_text(control);
         if !code {
-            let mut options = MarkdownOptions::from_theme(&self.tokens);
+            let mut options = self.localized_markdown_options();
             // Plugin markdown may format supplied text but cannot use the host
             // renderer to read local files or trigger background image fetches.
             options.enable_async_images = false;

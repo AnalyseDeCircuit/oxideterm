@@ -1,13 +1,16 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Self-owned Mermaid subset renderer.
+//! Native Mermaid rendering with OxideTerm theme, caching, and GPUI integration.
 
-pub mod cache;
-pub mod layout;
-pub mod model;
-pub mod parser;
-pub mod svg;
+mod cache;
+mod renderer;
+#[cfg(test)]
+mod tests;
+mod view;
+
+pub use renderer::MermaidRenderRequest;
+pub(crate) use view::MermaidBlock;
 
 pub use cache::{
     RenderedMermaidImage, render_mermaid_svg, render_mermaid_svg_image, render_mermaid_svg_scaled,
@@ -27,20 +30,64 @@ pub fn is_mermaid_language(language: Option<&str>) -> bool {
 
 /// Return true when an unlabeled/text code fence is likely a Mermaid diagram.
 pub fn is_mermaid_source_candidate(source: &str) -> bool {
-    let Some(first_line) = source.lines().map(str::trim).find(|line| !line.is_empty()) else {
-        return false;
-    };
-
-    first_line == "sequenceDiagram"
-        || first_line == "gantt"
-        || first_line
-            .split_whitespace()
+    let mut frontmatter = false;
+    for line in source.lines().map(str::trim) {
+        if line == "---" {
+            frontmatter = !frontmatter;
+            continue;
+        }
+        if frontmatter || line.is_empty() || line.starts_with("%%") {
+            continue;
+        }
+        let kind = line
+            .split(|character: char| character.is_whitespace() || character == ';')
             .next()
-            .is_some_and(|kind| matches!(kind, "graph" | "flowchart" | "pie"))
+            .unwrap_or_default();
+        return matches!(
+            kind.to_ascii_lowercase().as_str(),
+            "graph"
+                | "flowchart"
+                | "sequencediagram"
+                | "pie"
+                | "gantt"
+                | "classdiagram"
+                | "statediagram"
+                | "statediagram-v2"
+                | "erdiagram"
+                | "mindmap"
+                | "journey"
+                | "timeline"
+                | "requirementdiagram"
+                | "gitgraph"
+                | "quadrantchart"
+                | "xychart-beta"
+                | "xychart"
+                | "block-beta"
+                | "block"
+                | "sankey-beta"
+                | "sankey"
+                | "packet-beta"
+                | "packet"
+                | "kanban"
+                | "architecture-beta"
+                | "architecture"
+                | "radar-beta"
+                | "radar"
+                | "treemap-beta"
+                | "treemap"
+                | "zenuml"
+                | "c4context"
+                | "c4container"
+                | "c4component"
+                | "c4dynamic"
+                | "c4deployment"
+        );
+    }
+    false
 }
 
 #[cfg(test)]
-mod tests {
+mod detection_tests {
     use super::*;
 
     #[test]

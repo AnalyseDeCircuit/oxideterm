@@ -24,7 +24,8 @@
   },
   "markdown": {
     "mermaid_unsupported": "サポートされていない Mermaid 図",
-    "mermaid_expand": "拡大"
+    "mermaid_expand": "拡大",
+    "mermaid_loading": "図を描画中…"
   },
   "layout": {
     "empty": {

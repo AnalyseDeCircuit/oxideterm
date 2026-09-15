@@ -967,13 +967,14 @@ impl Drop for WorkspaceApp {
 
 pub(crate) use window_shell::WorkspaceWindowShell;
 
-#[derive(Clone)]
 struct MermaidZoomState {
     window_id: gpui::WindowId,
     source: String,
     image: Arc<Image>,
     width: f32,
     height: f32,
+    render_error: Option<String>,
+    _render_task: Option<Task<()>>,
 }
 
 impl WorkspaceApp {
@@ -981,6 +982,7 @@ impl WorkspaceApp {
         let mut options = MarkdownOptions::from_theme(&self.tokens);
         options.mermaid_error_prefix = self.i18n.t("markdown.mermaid_unsupported");
         options.mermaid_expand_label = self.i18n.t("markdown.mermaid_expand");
+        options.mermaid_loading_label = self.i18n.t("markdown.mermaid_loading");
         options
     }
 
@@ -994,28 +996,40 @@ impl WorkspaceApp {
             let workspace = workspace.clone();
             window.defer(cx, move |_window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
-                    let rendered = oxideterm_gpui_markdown::mermaid::render_mermaid_svg_scaled(
+                    let request = oxideterm_gpui_markdown::mermaid::MermaidRenderRequest::new(
                         &source,
                         &this.tokens,
                         &this.localized_markdown_options(),
                         MERMAID_MODAL_RASTER_SCALE,
-                    )
-                    .ok();
+                    );
+                    let task = cx.spawn(async move |workspace, cx| {
+                        let result = cx
+                            .background_executor()
+                            .spawn(async move { request.render() })
+                            .await;
+                        let _ = workspace.update(cx, |workspace, cx| {
+                            if let Some(state) = workspace.mermaid_zoom.as_mut() {
+                                match result {
+                                    Ok(rendered) => {
+                                        state.image = rendered.image;
+                                        state.width = rendered.display_width;
+                                        state.height = rendered.display_height;
+                                    }
+                                    Err(error) => state.render_error = Some(error),
+                                }
+                                state._render_task = None;
+                                cx.notify();
+                            }
+                        });
+                    });
                     this.mermaid_zoom = Some(MermaidZoomState {
                         window_id,
                         source,
-                        image: rendered
-                            .as_ref()
-                            .map(|rendered| rendered.image.clone())
-                            .unwrap_or(image),
-                        width: rendered
-                            .as_ref()
-                            .map(|rendered| rendered.display_width)
-                            .unwrap_or(width),
-                        height: rendered
-                            .as_ref()
-                            .map(|rendered| rendered.display_height)
-                            .unwrap_or(height),
+                        image,
+                        width,
+                        height,
+                        render_error: None,
+                        _render_task: Some(task),
                     });
                     cx.notify();
                 });
