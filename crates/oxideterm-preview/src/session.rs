@@ -59,8 +59,9 @@ pub enum PreviewLoadError {
     Directory,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum PreviewSessionState {
+    #[default]
     Empty,
     Loading,
     Ready {
@@ -68,12 +69,6 @@ pub enum PreviewSessionState {
         asset: Option<PreviewAssetOwner>,
     },
     Error(String),
-}
-
-impl Default for PreviewSessionState {
-    fn default() -> Self {
-        Self::Empty
-    }
 }
 
 #[derive(Clone, Debug, Default)]

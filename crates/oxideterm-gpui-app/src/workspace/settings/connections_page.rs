@@ -1349,7 +1349,7 @@ impl WorkspaceApp {
             ));
         }
         if let Some(status) = importer.status {
-            rows.push(self.connection_status_row(status.to_string()));
+            rows.push(self.connection_status_row(status));
         }
 
         self.connection_section(
@@ -2212,7 +2212,6 @@ impl WorkspaceApp {
                             ..IconButtonOptions::opaque_toolbar(30.0, ButtonRadius::Md)
                         },
                         {
-                            let key = key;
                             move |this, _event, _window, cx| {
                                 this.open_managed_key_delete_dialog(key.clone(), cx);
                                 cx.stop_propagation();

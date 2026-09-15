@@ -1,3 +1,6 @@
+[lints]
+workspace = true
+
 [package]
 name = "oxideterm-app-lock"
 edition.workspace = true

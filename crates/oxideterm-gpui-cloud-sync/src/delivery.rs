@@ -76,12 +76,12 @@ pub enum CloudSyncDelivery {
 /// completion wakes the owning Entity immediately. Tests and non-GPUI callers
 /// may continue to use a standard channel.
 pub trait CloudSyncDeliverySink: Clone + Send + Sync + 'static {
-    fn send(&self, delivery: CloudSyncDelivery) -> Result<(), CloudSyncDelivery>;
+    fn send(&self, delivery: CloudSyncDelivery) -> Result<(), Box<CloudSyncDelivery>>;
 }
 
 impl CloudSyncDeliverySink for std::sync::mpsc::Sender<CloudSyncDelivery> {
-    fn send(&self, delivery: CloudSyncDelivery) -> Result<(), CloudSyncDelivery> {
-        std::sync::mpsc::Sender::send(self, delivery).map_err(|error| error.0)
+    fn send(&self, delivery: CloudSyncDelivery) -> Result<(), Box<CloudSyncDelivery>> {
+        std::sync::mpsc::Sender::send(self, delivery).map_err(|error| Box::new(error.0))
     }
 }
 

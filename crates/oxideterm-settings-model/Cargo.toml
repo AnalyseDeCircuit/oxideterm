@@ -1,3 +1,6 @@
+[lints]
+workspace = true
+
 [package]
 name = "oxideterm-settings-model"
 edition.workspace = true

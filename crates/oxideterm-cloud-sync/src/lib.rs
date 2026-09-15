@@ -112,7 +112,9 @@ pub mod secret_keys {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[derive(Default)]
 pub enum CloudSyncStatus {
+    #[default]
     Idle,
     Uploading,
     Checking,
@@ -121,15 +123,11 @@ pub enum CloudSyncStatus {
     Error,
 }
 
-impl Default for CloudSyncStatus {
-    fn default() -> Self {
-        Self::Idle
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[derive(Default)]
 pub enum BackendType {
+    #[default]
     Webdav,
     HttpJson,
     Dropbox,
@@ -140,24 +138,14 @@ pub enum BackendType {
     Git,
 }
 
-impl Default for BackendType {
-    fn default() -> Self {
-        Self::Webdav
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[derive(Default)]
 pub enum AuthMode {
+    #[default]
     Bearer,
     Basic,
     None,
-}
-
-impl Default for AuthMode {
-    fn default() -> Self {
-        Self::Bearer
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -219,17 +207,13 @@ impl Default for CloudSyncSettings {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[derive(Default)]
 pub enum ConflictStrategy {
+    #[default]
     Merge,
     Replace,
     Skip,
     Rename,
-}
-
-impl Default for ConflictStrategy {
-    fn default() -> Self {
-        Self::Merge
-    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -976,10 +960,9 @@ pub fn format_revision_timestamp(timestamp: DateTime<Utc>) -> String {
 
 pub fn revision_id(timestamp: DateTime<Utc>, device_id: &str, sequence: u64) -> String {
     format!(
-        "{}-{}-{}",
+        "{}-{}-{sequence:03}",
         format_revision_timestamp(timestamp),
         device_id,
-        format!("{sequence:03}")
     )
 }
 

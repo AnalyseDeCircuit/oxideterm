@@ -1008,8 +1008,7 @@ impl SshTransportClient {
             client::connect_stream(Arc::new(client_config), stream, handler),
         )
         .await
-        .map_err(|_| SshTransportError::Timeout)?
-        .map_err(SshTransportError::from)?;
+        .map_err(|_| SshTransportError::Timeout)??;
         tracing::debug!(
             target_host = config.host.as_str(),
             target_port = config.port,
@@ -1165,8 +1164,7 @@ impl SshTransportClient {
             ),
         )
         .await
-        .map_err(|_| SshTransportError::Timeout)?
-        .map_err(SshTransportError::from)?;
+        .map_err(|_| SshTransportError::Timeout)??;
 
         authenticate_proxy_hop(
             &mut handle,
@@ -1532,7 +1530,7 @@ impl SshTransportClient {
                                     break;
                                 }
                             }
-                            ChannelMsg::ExtendedData { data, ext } if ext == 1 => {
+                            ChannelMsg::ExtendedData { data, ext: 1 } => {
                                 if output_batcher.push(&data)
                                     && let Some(bytes) = output_batcher.take_flush()
                                     && output_tx.send(bytes).await.is_err()

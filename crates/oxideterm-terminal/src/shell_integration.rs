@@ -422,13 +422,7 @@ impl TerminalShellIntegration {
         }
 
         if normal_start < bytes.len() {
-            self.advance_terminal_bytes(
-                parser,
-                term,
-                &bytes[normal_start..],
-                recordable.as_deref_mut(),
-                emit,
-            );
+            self.advance_terminal_bytes(parser, term, &bytes[normal_start..], recordable, emit);
         }
 
         changed
@@ -618,7 +612,7 @@ impl TerminalShellIntegration {
             .is_some_and(|capture| !capture.private && capture.raw.len() > OSC_LIMIT + 8)
             && let Some(capture) = self.pending_osc.take()
         {
-            if let Some(recordable) = recordable.as_deref_mut() {
+            if let Some(recordable) = recordable {
                 recordable.extend_from_slice(&capture.raw);
             }
             parser.advance(term, &capture.raw);

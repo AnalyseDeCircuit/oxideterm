@@ -71,7 +71,7 @@ fn decode_connection_store_data(bytes: &[u8]) -> Result<LoadedConnectionStoreDat
                 "encrypted connections require the local config key from the OS keychain"
             )
         })?;
-        let data = decrypt_connection_store_data(envelope, &*key)?;
+        let data = decrypt_connection_store_data(envelope, &key)?;
         validate_connection_store_version(&data)?;
         return Ok(LoadedConnectionStoreData {
             data,
@@ -408,7 +408,7 @@ fn get_or_create_config_encryption_key() -> Result<(ConfigEncryptionKey, bool)> 
     let mut key = zeroize::Zeroizing::new([0u8; CONFIG_ENCRYPTION_KEY_LEN]);
     let mut rng = rand::rngs::OsRng;
     rand::RngCore::fill_bytes(&mut rng, &mut key[..]);
-    store_config_key_secret(&encode_config_encryption_key(&*key)?)?;
+    store_config_key_secret(&encode_config_encryption_key(&key)?)?;
     remember_config_encryption_key(&key);
     Ok((key, true))
 }

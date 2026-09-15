@@ -438,7 +438,9 @@ pub enum SavedUpstreamProxyProtocol {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum SavedUpstreamProxyAuth {
+    #[default]
     None,
     Password {
         username: String,
@@ -449,11 +451,6 @@ pub enum SavedUpstreamProxyAuth {
     },
 }
 
-impl Default for SavedUpstreamProxyAuth {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -471,7 +468,9 @@ pub struct SavedUpstreamProxyConfig {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum SavedUpstreamProxyPolicy {
+    #[default]
     UseGlobal,
     Direct,
     Custom { proxy: SavedUpstreamProxyConfig },
@@ -483,11 +482,6 @@ impl SavedUpstreamProxyPolicy {
     }
 }
 
-impl Default for SavedUpstreamProxyPolicy {
-    fn default() -> Self {
-        Self::UseGlobal
-    }
-}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SavedProxyCommand {

@@ -471,7 +471,6 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener({
-                    let node = node;
                     move |this, event: &MouseDownEvent, window, cx| {
                         if event.click_count >= 2 {
                             let node_id =
@@ -553,7 +552,6 @@ impl WorkspaceApp {
                     false,
                     false,
                     {
-                        let node_id = node_id;
                         move |this, _event, window, _cx| {
                             if let Some(node_id) = node_id.clone() {
                                 this.open_sftp_tab(node_id, window, _cx);

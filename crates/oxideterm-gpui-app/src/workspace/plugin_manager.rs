@@ -986,7 +986,7 @@ impl WorkspaceApp {
         };
         let capabilities = native_plugin_registry_capabilities_label(&self.i18n, entry);
         let expected_id = entry.id.clone();
-        let package_for_install = package.clone();
+        let package_for_install = package;
         let homepage = entry
             .homepage
             .as_deref()

@@ -802,11 +802,11 @@ mod tests {
         ));
 
         assert_eq!(
-            ai_mcp_draft_input_value(Some(&draft), SettingsInput::AiMcpName).as_deref(),
+            ai_mcp_draft_input_value(Some(&draft), SettingsInput::AiMcpName),
             Some("demo")
         );
         assert_eq!(
-            ai_mcp_draft_input_value(Some(&draft), SettingsInput::AiMcpEnvValue(0)).as_deref(),
+            ai_mcp_draft_input_value(Some(&draft), SettingsInput::AiMcpEnvValue(0)),
             Some(" value ")
         );
     }

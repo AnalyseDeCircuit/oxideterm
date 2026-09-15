@@ -51,7 +51,7 @@ pub(in crate::workspace) fn send_ai_guardrail(
     code: impl Into<String>,
     message: impl Into<String>,
     raw_text: Option<String>,
-) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+) -> Result<(), Box<std::sync::mpsc::SendError<AiStreamDelivery>>> {
     let raw_text = raw_text
         .as_deref()
         .map(oxideterm_ai::sanitize_for_ai);
@@ -78,7 +78,7 @@ pub(in crate::workspace) fn send_ai_prompt_usage(
     model: String,
     breakdown: oxideterm_ai::AiPromptTokenBreakdown,
     max_tokens: usize,
-) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+) -> Result<(), Box<std::sync::mpsc::SendError<AiStreamDelivery>>> {
     send_ai_stream_delivery(
         ui_tx,
         generation,
@@ -107,7 +107,7 @@ pub(in crate::workspace) fn send_ai_assistant_round(
     synthetic: bool,
     retry_attempt: Option<usize>,
     hard_deny_triggered: bool,
-) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+) -> Result<(), Box<std::sync::mpsc::SendError<AiStreamDelivery>>> {
     send_ai_stream_delivery(
         ui_tx,
         generation,
@@ -133,7 +133,7 @@ pub(in crate::workspace) fn send_ai_round_summary(
     round_id: String,
     text: String,
     metadata: serde_json::Value,
-) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+) -> Result<(), Box<std::sync::mpsc::SendError<AiStreamDelivery>>> {
     let text = oxideterm_ai::sanitize_for_ai(&text);
     let metadata = oxideterm_ai::sanitize_json_for_ai(&metadata);
     send_ai_stream_delivery(
@@ -156,7 +156,7 @@ pub(in crate::workspace) fn send_ai_round_stateful_marker(
     assistant_id: &str,
     round_id: String,
     marker: Option<String>,
-) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+) -> Result<(), Box<std::sync::mpsc::SendError<AiStreamDelivery>>> {
     send_ai_stream_delivery(
         ui_tx,
         generation,
@@ -174,7 +174,7 @@ pub(in crate::workspace) fn send_ai_diagnostic(
     event_type: impl Into<String>,
     round_id: Option<String>,
     data: serde_json::Value,
-) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+) -> Result<(), Box<std::sync::mpsc::SendError<AiStreamDelivery>>> {
     send_ai_stream_delivery(
         ui_tx,
         generation,
@@ -226,7 +226,7 @@ pub(in crate::workspace) fn send_ai_stream_delivery(
     conversation_id: &str,
     assistant_id: &str,
     event: AiStreamDeliveryEvent,
-) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+) -> Result<(), Box<std::sync::mpsc::SendError<AiStreamDelivery>>> {
     let event = match event {
         // Provider and protocol errors may contain response bodies, process
         // paths, or request metadata. The UI maps this stable category to a
@@ -246,7 +246,7 @@ pub(in crate::workspace) fn send_ai_stream_delivery(
         conversation_id: conversation_id.to_string(),
         assistant_id: assistant_id.to_string(),
         event,
-    })
+    }).map_err(Box::new)
 }
 
 pub(in crate::workspace) fn send_ai_tool_status(
@@ -259,7 +259,7 @@ pub(in crate::workspace) fn send_ai_tool_status(
     result: Option<serde_json::Value>,
     risk: Option<String>,
     summary: Option<String>,
-) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+) -> Result<(), Box<std::sync::mpsc::SendError<AiStreamDelivery>>> {
     send_ai_tool_status_with_payload(
         ui_tx,
         generation,
@@ -292,7 +292,7 @@ pub(in crate::workspace) fn send_ai_tool_status_with_payload(
     _raw_text: Option<String>,
     round_id: Option<String>,
     round_number: Option<i64>,
-) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+) -> Result<(), Box<std::sync::mpsc::SendError<AiStreamDelivery>>> {
     let arguments = sanitize_ai_tool_arguments_for_persistence(&call.arguments);
     let result = result.as_ref().map(|result| {
         oxideterm_ai::sanitize_tool_result_json_for_persistence(&call.name, result)

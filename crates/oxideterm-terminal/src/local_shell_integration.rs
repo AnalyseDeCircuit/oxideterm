@@ -309,17 +309,15 @@ fn zsh_source_user_file(name: &str, integration_directory: &Path, final_user_fil
 }
 
 fn posix_prompt_hook() -> String {
-    format!(
-        r#"__oxideterm_pct_path() {{
+    r#"__oxideterm_pct_path() {
     command printf '%s' "$1" | command od -An -tx1 -v | command tr -d ' \n' | command sed 's/../%&/g; s|%2f|/|g'
-}}
-__oxideterm_emit_cwd() {{
+}
+__oxideterm_emit_cwd() {
     __oxideterm_cwd=$(pwd -P 2>/dev/null || pwd 2>/dev/null) || return
     command printf '\033]7;file://%s\007' "$(__oxideterm_pct_path "$__oxideterm_cwd")"
-}}
-PROMPT_COMMAND="__oxideterm_emit_cwd${{PROMPT_COMMAND:+;$PROMPT_COMMAND}}"
-__oxideterm_emit_cwd"#
-    )
+}
+PROMPT_COMMAND="__oxideterm_emit_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+__oxideterm_emit_cwd"#.to_string()
 }
 
 fn zsh_prompt_hook(import_history: bool) -> String {

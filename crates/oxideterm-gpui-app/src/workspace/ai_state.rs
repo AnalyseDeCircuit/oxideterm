@@ -6495,7 +6495,7 @@ pub(in crate::workspace) mod entity_tests {
             cx.add_empty_window().draw(
                 gpui::point(gpui::px(0.0), gpui::px(0.0)),
                 gpui::size(gpui::px(200.0), gpui::px(100.0)),
-                move |_, _| view.clone().into_any_element(),
+                move |_, _| view.into_any_element(),
             );
             if matches!(mode, gpui::FollowMode::Tail) {
                 cx.run_until_parked();

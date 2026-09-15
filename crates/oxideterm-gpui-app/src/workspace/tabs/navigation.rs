@@ -274,7 +274,7 @@ impl WorkspaceApp {
                 .ssh_terminal_node_id(session_id)
         {
             self.active_ssh_node_id = Some(node_id.clone());
-            self.expanded_ssh_nodes.insert(node_id.clone());
+            self.expanded_ssh_nodes.insert(node_id);
         }
         self.activate_embedded_sftp_sidebar_if_visible(cx);
     }

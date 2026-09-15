@@ -177,7 +177,6 @@ fn kitty_keyboard_protocol_encodes_modes_modifiers_and_event_types() {
                 control: true,
                 ..Default::default()
             },
-            ..Default::default()
         },
         &(TermMode::default() | TermMode::DISAMBIGUATE_ESC_CODES),
         false,
@@ -198,7 +197,6 @@ fn kitty_keyboard_protocol_encodes_modes_modifiers_and_event_types() {
                     shift: true,
                     ..Default::default()
                 },
-                ..Default::default()
             },
             &mode,
             false,
@@ -376,7 +374,6 @@ fn alt_meta_printable_keys_emit_escape_prefixed_ascii_when_enabled() {
             alt: true,
             ..Default::default()
         },
-        ..Default::default()
     };
 
     let meta_enabled =
@@ -404,7 +401,6 @@ fn alt_meta_printable_keys_emit_escape_prefixed_ascii_when_enabled() {
                 shift: true,
                 ..Default::default()
             },
-            ..Default::default()
         },
         &TermMode::default(),
         true,

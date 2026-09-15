@@ -1157,7 +1157,7 @@ impl WorkspaceApp {
                     .workspace_runtime
                     .read(cx)
                     .ssh_terminal_node_id(session_id)?;
-                GitProbeScope::ssh_node(node_id.0.clone())
+                GitProbeScope::ssh_node(node_id.0)
             }
             _ => return None,
         };
@@ -1557,8 +1557,7 @@ fn terminal_git_clean_ai_commit_subject(text: &str) -> Option<String> {
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
-        .filter(|line| !line.starts_with("```"))
-        .next()?;
+        .find(|line| !line.starts_with("```"))?;
 
     if let Some(rest) = subject.strip_prefix("- ") {
         subject = rest.trim();

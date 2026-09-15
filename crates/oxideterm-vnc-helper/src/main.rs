@@ -311,7 +311,7 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
     };
     let control = Arc::new(VncSessionControl::default());
     let (request_tx, request_rx) = std::sync::mpsc::sync_channel(128);
-    let worker_writer = writer.clone();
+    let worker_writer = writer;
     let worker_control = control.clone();
     let worker = thread::Builder::new()
         .name("oxideterm-vnc-session".to_string())

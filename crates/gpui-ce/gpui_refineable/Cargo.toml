@@ -1,3 +1,6 @@
+[lints]
+workspace = true
+
 [package]
 name = "gpui_refineable"
 version = "0.2.2"

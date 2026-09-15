@@ -20,7 +20,7 @@ impl ConversationListPage {
         self.initialized = true;
         self.failed = false;
         self.has_more = heads.len() > CONVERSATION_PAGE_SIZE;
-        if let Some(head) = heads.iter().take(CONVERSATION_PAGE_SIZE).last() {
+        if let Some(head) = heads.iter().take(CONVERSATION_PAGE_SIZE).next_back() {
             self.cursor = Some((
                 head.conversation.updated_at_ms,
                 head.conversation.id.clone(),

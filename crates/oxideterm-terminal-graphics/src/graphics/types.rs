@@ -224,6 +224,7 @@ pub struct TerminalImageFrame {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Default)]
 pub struct TerminalImageAnimationState {
     pub running: bool,
     pub loading: bool,
@@ -231,16 +232,6 @@ pub struct TerminalImageAnimationState {
     pub loop_limit: Option<u32>,
 }
 
-impl Default for TerminalImageAnimationState {
-    fn default() -> Self {
-        Self {
-            running: false,
-            loading: false,
-            current_frame: 0,
-            loop_limit: None,
-        }
-    }
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalImagePlacement {

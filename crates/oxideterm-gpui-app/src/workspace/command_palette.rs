@@ -1052,13 +1052,13 @@ impl WorkspaceApp {
                 );
                 PaletteItem {
                     id: format!("conn:{}", conn.id),
-                    label: label.clone(),
+                    label: label,
                     section: PaletteSection::Connections,
                     icon: LucideIcon::Server,
-                    detail: Some(detail.clone()),
+                    detail: Some(detail),
                     shortcut: None,
                     value: conn.search_text(),
-                    action: PaletteAction::OpenSavedConnection(conn.id.clone()),
+                    action: PaletteAction::OpenSavedConnection(conn.id),
                     disabled: false,
                 }
             })

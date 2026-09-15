@@ -65,7 +65,7 @@ impl WorkspaceApp {
         // I18n clones share the catalog Arc; no locale table or secret draft is copied.
         CloudSyncPageRenderer {
             cloud_sync: self.cloud_sync.clone(),
-            render: Arc::new(CloudSyncListRenderProjection {
+            render: std::rc::Rc::new(CloudSyncListRenderProjection {
                 tokens: self.tokens,
                 i18n: self.i18n.clone(),
                 selectable_text: self.selectable_text_render_state(cx),
@@ -842,7 +842,7 @@ impl CloudSyncWorkspaceEntity {
 
     pub(super) fn render_rollback_backup_list(
         &mut self,
-        render: Arc<CloudSyncListRenderProjection>,
+        render: std::rc::Rc<CloudSyncListRenderProjection>,
         busy: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -850,7 +850,7 @@ impl CloudSyncWorkspaceEntity {
         let row_count = self.controller.store.state().rollback_backups.len();
         let state = self.view.rollback_backup_list_state.clone();
         let cloud_sync = cx.entity();
-        let list_render = Arc::clone(&render);
+        let list_render = std::rc::Rc::clone(&render);
         let header = div()
             .flex()
             .items_center()
@@ -901,7 +901,7 @@ impl CloudSyncWorkspaceEntity {
 
     pub(super) fn render_recent_rollback_backups(
         &mut self,
-        render: Arc<CloudSyncListRenderProjection>,
+        render: std::rc::Rc<CloudSyncListRenderProjection>,
         busy: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -921,7 +921,7 @@ impl CloudSyncWorkspaceEntity {
 
     pub(super) fn render_history_list(
         &mut self,
-        render: Arc<CloudSyncListRenderProjection>,
+        render: std::rc::Rc<CloudSyncListRenderProjection>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.sync_history_rows();
@@ -942,7 +942,7 @@ impl CloudSyncWorkspaceEntity {
         } else {
             let state = self.view.history_list_state.clone();
             let cloud_sync = cx.entity();
-            let list_render = Arc::clone(&render);
+            let list_render = std::rc::Rc::clone(&render);
             div()
                 .h(px(
                     row_count as f32 * CLOUD_SYNC_HISTORY_LIST_ESTIMATED_HEIGHT

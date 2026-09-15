@@ -923,7 +923,6 @@ impl WorkspaceApp {
             let resolved_handle = match backend.resolve_connection().await {
                 Ok(handle) => handle,
                 Err(error) => {
-                    let error = error.to_string();
                     let _ = tx.send(SftpWorkerResult::TransferComplete {
                         remote_id,
                         transfer_id,
@@ -1230,8 +1229,7 @@ impl WorkspaceApp {
                         {
                             let shared = backend
                                 .acquire_sftp()
-                                .await
-                                .map_err(|error| error.to_string())?;
+                                .await?;
                             let shared = shared.lock().await;
                             for prefix in remote_directory_prefixes(&remote_path) {
                                 let _ = shared.mkdir(&prefix).await;
@@ -1270,8 +1268,7 @@ impl WorkspaceApp {
                             );
                             let sftp = backend
                                 .acquire_transfer_sftp()
-                                .await
-                                .map_err(|error| error.to_string())?;
+                                .await?;
                             sftp.upload_dir(
                                 &local_path,
                                 &remote_path,
@@ -1290,8 +1287,7 @@ impl WorkspaceApp {
                     ) => {
                         let sftp = backend
                             .acquire_transfer_sftp()
-                            .await
-                            .map_err(|error| error.to_string())?;
+                            .await?;
                         sftp.upload_dir(
                             &local_path,
                             &remote_path,
@@ -1321,8 +1317,7 @@ impl WorkspaceApp {
                             {
                                 let shared = backend
                                     .acquire_sftp()
-                                    .await
-                                    .map_err(|error| error.to_string())?;
+                                    .await?;
                                 let shared = shared.lock().await;
                                 for prefix in remote_directory_prefixes(&remote_path) {
                                     let _ = shared.mkdir(&prefix).await;
@@ -1357,8 +1352,7 @@ impl WorkspaceApp {
                                     );
                                     let sftp = backend
                                         .acquire_transfer_sftp()
-                                        .await
-                                        .map_err(|error| error.to_string())?;
+                                        .await?;
                                     sftp.upload_dir(
                                         &local_path,
                                         &remote_path,
@@ -1382,8 +1376,7 @@ impl WorkspaceApp {
                             );
                             let sftp = backend
                                 .acquire_transfer_sftp()
-                                .await
-                                .map_err(|error| error.to_string())?;
+                                .await?;
                             sftp.upload_dir(
                                 &local_path,
                                 &remote_path,
@@ -1398,8 +1391,7 @@ impl WorkspaceApp {
                     (SftpTransferDirection::Upload, false, _) => {
                         let sftp = backend
                             .acquire_transfer_sftp()
-                            .await
-                            .map_err(|error| error.to_string())?;
+                            .await?;
                         sftp.upload_with_resume(
                             &local_path,
                             &remote_path,
@@ -1426,8 +1418,7 @@ impl WorkspaceApp {
                             let profile = {
                                 let shared = backend
                                     .acquire_sftp()
-                                    .await
-                                    .map_err(|error| error.to_string())?;
+                                    .await?;
                                 let shared = shared.lock().await;
                                 shared
                                     .profile_remote_directory(
@@ -1462,8 +1453,7 @@ impl WorkspaceApp {
                             );
                             let sftp = backend
                                 .acquire_transfer_sftp()
-                                .await
-                                .map_err(|error| error.to_string())?;
+                                .await?;
                             sftp.download_dir(
                                 &remote_path,
                                 &local_path,
@@ -1482,8 +1472,7 @@ impl WorkspaceApp {
                     ) => {
                         let sftp = backend
                             .acquire_transfer_sftp()
-                            .await
-                            .map_err(|error| error.to_string())?;
+                            .await?;
                         sftp.download_dir(
                             &remote_path,
                             &local_path,
@@ -1503,8 +1492,7 @@ impl WorkspaceApp {
                         let profile = if capabilities.supports_tar {
                             let shared = backend
                                 .acquire_sftp()
-                                .await
-                                .map_err(|error| error.to_string())?;
+                                .await?;
                             let shared = shared.lock().await;
                             match shared
                                 .profile_remote_directory(
@@ -1553,8 +1541,7 @@ impl WorkspaceApp {
                                     );
                                     let sftp = backend
                                         .acquire_transfer_sftp()
-                                        .await
-                                        .map_err(|error| error.to_string())?;
+                                        .await?;
                                     sftp.download_dir(
                                         &remote_path,
                                         &local_path,
@@ -1578,8 +1565,7 @@ impl WorkspaceApp {
                             );
                             let sftp = backend
                                 .acquire_transfer_sftp()
-                                .await
-                                .map_err(|error| error.to_string())?;
+                                .await?;
                             sftp.download_dir(
                                 &remote_path,
                                 &local_path,
@@ -1594,8 +1580,7 @@ impl WorkspaceApp {
                     (SftpTransferDirection::Download, false, _) => {
                         let sftp = backend
                             .acquire_transfer_sftp()
-                            .await
-                            .map_err(|error| error.to_string())?;
+                            .await?;
                         sftp.download_with_resume(
                             &remote_path,
                             &local_path,
@@ -1613,8 +1598,7 @@ impl WorkspaceApp {
                 };
                 Ok::<u64, String>(item_count)
             }
-            .await
-            .map_err(|error| error);
+            .await;
 
             if is_directory || protocol == RemoteTransferProtocol::Scp {
                 match &result {

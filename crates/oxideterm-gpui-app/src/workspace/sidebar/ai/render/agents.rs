@@ -1008,7 +1008,7 @@ impl WorkspaceApp {
                         suggestions: Vec::new(),
                     };
                     body = body.child(self.render_ai_owned_message(
-                        owner.clone(),
+                        owner,
                         Arc::new(oxideterm_ai::HistoryMessageView {
                             first_section: 0,
                             message,

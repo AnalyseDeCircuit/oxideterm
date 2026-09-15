@@ -353,7 +353,7 @@ impl WorkspaceRuntimeEntity {
         // Node state is a latest-value stream. Its bounded mailbox may retain
         // reliable lifecycle events beyond capacity, while the shared wake
         // lets this Entity drain every runtime source without a root waiter.
-        let emitter_wake = runtime_wake.clone();
+        let emitter_wake = runtime_wake;
         let (node_event_subscription, node_event_rx) = node_router
             .emitter()
             .subscribe_bounded_with_wake(256, Some(Arc::new(move || emitter_wake.mark())));

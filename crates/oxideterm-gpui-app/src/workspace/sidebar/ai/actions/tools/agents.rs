@@ -565,7 +565,7 @@ impl WorkspaceApp {
             let parent_targets = self
                 .ai_runtime_context
                 .read(cx)
-                .agent_scope(session, snapshot.scope.tools.clone())
+                .agent_scope(session, snapshot.scope.tools)
                 .targets;
             runtime
                 .refresh_parent_targets(&run, parent_targets)

@@ -175,7 +175,7 @@ pub(super) fn read_qemu_audio_server_message(
                     "VNC QEMU Audio payload exceeds {MAX_QEMU_AUDIO_PAYLOAD_BYTES} bytes."
                 ));
             }
-            if payload_len % QEMU_AUDIO_BYTES_PER_FRAME != 0 {
+            if !payload_len.is_multiple_of(QEMU_AUDIO_BYTES_PER_FRAME) {
                 return Err(format!(
                     "VNC QEMU Audio payload length {payload_len} splits a stereo PCM frame."
                 ));

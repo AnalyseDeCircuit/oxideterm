@@ -262,7 +262,7 @@ fn chunked_unicode_is_shared_and_replacing_content_reclaims_old_chunks() {
             HistoryMutation::PutMessage {
                 conversation_id: "history".into(),
                 branch_id: "main".into(),
-                message: item.clone(),
+                message: item,
                 revision: 2,
             },
         ])
@@ -396,7 +396,7 @@ fn agent_messages_and_communication_use_independent_incremental_history() {
         .apply(vec![
             HistoryMutation::PutMessage {
                 conversation_id: "history".into(),
-                branch_id: branch.clone(),
+                branch_id: branch,
                 message: record.messages[1].clone(),
                 revision: 8,
             },
@@ -727,6 +727,10 @@ impl redb::StorageBackend for FailingDisk {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::await_holding_lock,
+    reason = "Hold the database guard deliberately while asserting that asynchronous recovery and shutdown remain blocked; release it before awaiting their completion."
+)]
 async fn failed_disk_write_retains_the_batch_until_storage_retry_commits_it() {
     for large in [false, true] {
         let dir = tempfile::tempdir().unwrap();
@@ -1343,7 +1347,7 @@ fn content_windows_page_unicode_and_seek_tool_parts_without_decoding_other_entri
         drop(arrays);
         tx.commit().unwrap();
     }
-    let mut part = cursor.clone();
+    let mut part = cursor;
     part.path = vec!["turn".into(), "parts".into(), "99".into()];
     assert_eq!(
         store.content_page(&part).unwrap().value,
@@ -1393,6 +1397,10 @@ fn history_cache_evicts_old_chunks_without_changing_live_readers() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::await_holding_lock,
+    reason = "Keep a write transaction and its database guard alive to saturate the writer queue, then release them before awaiting the producer."
+)]
 async fn large_messages_stream_through_the_writer_without_a_storage_size_cap() {
     let dir = tempfile::tempdir().unwrap();
     let store = ConversationStore::open(dir.path().join("v4.redb")).unwrap();

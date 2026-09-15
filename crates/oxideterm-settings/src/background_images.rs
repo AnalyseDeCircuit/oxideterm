@@ -317,11 +317,8 @@ mod tests {
         fs::write(&first_source, b"first image").expect("first source");
         fs::write(&second_source, b"second image").expect("second source");
 
-        let imported = import_background_images(
-            &settings_path,
-            &[first_source.clone(), second_source.clone()],
-        )
-        .expect("import images");
+        let imported = import_background_images(&settings_path, &[first_source, second_source])
+            .expect("import images");
         let listed = list_background_images(&settings_path).expect("list gallery");
 
         assert_eq!(imported.len(), 2);

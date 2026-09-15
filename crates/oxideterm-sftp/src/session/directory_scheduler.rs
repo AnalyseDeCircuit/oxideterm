@@ -116,8 +116,8 @@ fn plan_directory_transfer(
         .map(|limit| limit.saturating_sub(DIRECTORY_HANDLE_HEADROOM).max(1) as usize)
         .unwrap_or(crate::MAX_SFTP_DIRECTORY_PARALLELISM);
     let worker_count = requested_workers.min(handle_workers).max(1);
-    let channel_count = worker_count.min(DIRECTORY_AUX_CHANNEL_LIMIT).max(1);
-    let bulk_lane_workers = worker_count.min(DIRECTORY_BULK_LANE_WORKERS).max(1);
+    let channel_count = worker_count.clamp(1, DIRECTORY_AUX_CHANNEL_LIMIT);
+    let bulk_lane_workers = worker_count.clamp(1, DIRECTORY_BULK_LANE_WORKERS);
     let queue_capacity = worker_count
         .saturating_mul(DIRECTORY_QUEUE_WORKER_MULTIPLIER)
         .max(1);

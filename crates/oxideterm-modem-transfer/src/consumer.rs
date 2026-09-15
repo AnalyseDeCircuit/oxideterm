@@ -1150,7 +1150,7 @@ mod tests {
                 direction: ModemTransferDirection::Upload,
             })
             .expect("manual transfer");
-        let mut producer = transfer.clone();
+        let mut producer = transfer;
         producer.write_all(b"stale-frame").unwrap();
 
         consumer.interrupt_transfer();

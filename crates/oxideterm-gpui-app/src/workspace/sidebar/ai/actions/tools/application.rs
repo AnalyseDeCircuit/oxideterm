@@ -43,7 +43,7 @@ impl WorkspaceApp {
     fn ai_node_connection_id(&self, node_id: &NodeId) -> Result<String, String> {
         self.node_router
             .resolve_connection_now(node_id)
-            .map(|connection| connection.connection_id.to_string())
+            .map(|connection| connection.connection_id)
             .map_err(|_| "The selected SSH node is not currently connected.".to_string())
     }
 
@@ -1189,7 +1189,7 @@ impl WorkspaceApp {
             oxideterm_settings::AiMemoryScopeKind::Host => self
                 .active_ssh_terminal_node_id(cx)
                 .and_then(|node_id| self.node_router.resolve_connection_now(&node_id).ok())
-                .map(|connection| Some(connection.connection_id.to_string()))
+                .map(|connection| Some(connection.connection_id))
                 .ok_or_else(|| {
                     "No active SSH host is available for host-scoped memory.".to_string()
                 }),

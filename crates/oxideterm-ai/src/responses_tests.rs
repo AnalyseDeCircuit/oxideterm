@@ -245,7 +245,7 @@ fn responses_request_maps_tools_limits_and_legacy_provider_default() {
     assert_eq!(responses_body(&config, &[]).get("reasoning"), None);
     let legacy = json!({"id":"provider","type":"openai","baseUrl":"https://example.test"});
     assert_eq!(
-        provider_views(&[legacy.clone()])[0].api_protocol,
+        provider_views(std::slice::from_ref(&legacy))[0].api_protocol,
         AiApiProtocol::ChatCompletions
     );
     let mut current = legacy;

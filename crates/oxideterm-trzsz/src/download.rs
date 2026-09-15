@@ -26,7 +26,6 @@ pub fn prepare_download_root(
     Ok(state.prepare_download_root(owner_id, canonical_root))
 }
 
-#[expect(clippy::too_many_arguments)]
 pub fn open_save_file(
     state: &TrzszState,
     owner_id: &str,

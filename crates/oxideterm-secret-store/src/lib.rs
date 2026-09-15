@@ -40,12 +40,12 @@ impl NativeSecretStore {
     pub fn store(&self, account: &str, secret: &str) -> Result<()> {
         #[cfg(target_os = "macos")]
         {
-            return macos::store(&self.service, account, secret);
+            macos::store(&self.service, account, secret)
         }
 
         #[cfg(target_os = "windows")]
         {
-            return self.store_windows(account, secret);
+            self.store_windows(account, secret)
         }
 
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -57,12 +57,12 @@ impl NativeSecretStore {
     pub fn get(&self, account: &str) -> Result<Option<Zeroizing<String>>> {
         #[cfg(target_os = "macos")]
         {
-            return macos::get(&self.service, account);
+            macos::get(&self.service, account)
         }
 
         #[cfg(target_os = "windows")]
         {
-            return self.get_windows(account);
+            self.get_windows(account)
         }
 
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -97,7 +97,7 @@ impl NativeSecretStore {
     pub fn get_preserving_multiline(&self, account: &str) -> Result<Option<Zeroizing<String>>> {
         #[cfg(target_os = "macos")]
         {
-            return macos::get_preserving_multiline(&self.service, account);
+            macos::get_preserving_multiline(&self.service, account)
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -107,12 +107,12 @@ impl NativeSecretStore {
     pub fn delete(&self, account: &str) -> Result<()> {
         #[cfg(target_os = "macos")]
         {
-            return macos::delete(&self.service, account);
+            macos::delete(&self.service, account)
         }
 
         #[cfg(target_os = "windows")]
         {
-            return self.delete_windows(account);
+            self.delete_windows(account)
         }
 
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -127,12 +127,12 @@ impl NativeSecretStore {
     pub fn exists(&self, account: &str) -> Result<bool> {
         #[cfg(target_os = "macos")]
         {
-            return macos::exists(&self.service, account);
+            macos::exists(&self.service, account)
         }
 
         #[cfg(target_os = "windows")]
         {
-            return match self.windows_chunk_manifest_state(account)? {
+            match self.windows_chunk_manifest_state(account)? {
                 WindowsChunkManifestState::Valid(_) => Ok(true),
                 WindowsChunkManifestState::Missing => self.windows_direct_secret_exists(account),
                 WindowsChunkManifestState::Invalid => {
@@ -142,7 +142,7 @@ impl NativeSecretStore {
                         anyhow::bail!("invalid secret metadata in the OS credential manager")
                     }
                 }
-            };
+            }
         }
 
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]

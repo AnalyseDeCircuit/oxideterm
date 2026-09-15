@@ -996,7 +996,7 @@ fn encode_tight_upload_file(file: &ValidatedUploadFile) -> Result<Vec<Vec<u8>>, 
 
 fn validate_remote_file_name(name: &str) -> Result<(), String> {
     if name.is_empty()
-        || name.as_bytes().len() > MAX_VNC_FILE_NAME_BYTES
+        || name.len() > MAX_VNC_FILE_NAME_BYTES
         || name.contains('/')
         || name.contains('\\')
         || name.contains('\0')

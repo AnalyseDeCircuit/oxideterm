@@ -194,7 +194,7 @@ impl Render for TextEditorView {
             .line_height(px(self.metrics.line_height))
             .text_color(rgb(self.appearance.text_hex))
             .bg(if self.presentation == EditorPresentation::Inline {
-                rgba((self.appearance.background_hex << 8) | 0x00)
+                rgba(self.appearance.background_hex << 8)
             } else {
                 self.editor_background(self.appearance.background_hex)
             })
@@ -284,7 +284,7 @@ impl TextEditorView {
                         ))
                         .cursor(CursorStyle::OpenHand)
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_drag(drag_state.clone(), |drag, position, _window, cx| {
+                        .on_drag(drag_state, |drag, position, _window, cx| {
                             drag.grab_offset_y.set(f32::from(position.y));
                             cx.new(|_| EmptyView)
                         })
@@ -375,7 +375,7 @@ impl TextEditorView {
                         ))
                         .cursor(CursorStyle::OpenHand)
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_drag(drag_state.clone(), |drag, position, _window, cx| {
+                        .on_drag(drag_state, |drag, position, _window, cx| {
                             drag.grab_offset_x.set(f32::from(position.x));
                             cx.new(|_| EmptyView)
                         })
@@ -571,7 +571,7 @@ impl TextEditorView {
                 if is_current_line && self.presentation == EditorPresentation::Document {
                     rgba((self.appearance.accent_hex << 8) | CM_ACTIVE_LINE_ACCENT_ALPHA)
                 } else {
-                    rgba((self.appearance.background_hex << 8) | 0x00)
+                    rgba(self.appearance.background_hex << 8)
                 },
             )
             .on_mouse_down(
@@ -1218,7 +1218,7 @@ impl TextEditorView {
 
     fn editor_background(&self, color: u32) -> gpui::Rgba {
         if self.transparent_background {
-            rgba((color << 8) | 0x00)
+            rgba(color << 8)
         } else {
             rgb(color)
         }

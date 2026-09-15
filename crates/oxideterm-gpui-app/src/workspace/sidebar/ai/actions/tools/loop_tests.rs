@@ -375,7 +375,7 @@ mod agent_loop_tests {
         assert_eq!(
             history
                 .iter()
-                .map(|message| (message.role.clone(), message.content.as_str()))
+                .map(|message| (message.role, message.content.as_str()))
                 .collect::<Vec<_>>(),
             vec![(AiChatRole::User, "Only inspect; do not modify files")]
         );
@@ -862,7 +862,7 @@ mod agent_loop_tests {
                 let session = ToolSessionId::new();
                 let started = std::time::Instant::now();
                 let results = if parallel {
-                    futures_util::future::join_all(calls.iter().cloned().map(|call| {
+                    futures_util::future::join_all(calls.iter().map(|call| {
                         let config = &config;
                         let backend = &backend;
                         let available = &available;
@@ -870,7 +870,7 @@ mod agent_loop_tests {
                         let session = &session;
                         async move {
                             execute_ai_round_call(
-                                call,
+                                call.clone(),
                                 config,
                                 backend,
                                 available,

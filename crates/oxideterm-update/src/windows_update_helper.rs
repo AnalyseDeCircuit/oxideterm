@@ -182,7 +182,7 @@ fn collect_replacement_jobs(
     for entry in sorted_read_dir(staging_dir)? {
         let source = entry.path();
         let relative = entry.file_name();
-        if relative == OsString::from("tools") {
+        if relative == "tools" {
             collect_tool_replacement_jobs(install_dir, staging_dir, old_dir, &source, &mut jobs)?;
             continue;
         }

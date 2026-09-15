@@ -203,6 +203,7 @@ fn acquire_or_forward_with_paths(
 
     let lock_file = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&paths.lock_path)

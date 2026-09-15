@@ -1,3 +1,6 @@
+[lints]
+workspace = true
+
 [package]
 name = "fernomade-state"
 version = "0.0.0"

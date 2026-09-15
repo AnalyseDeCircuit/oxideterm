@@ -331,7 +331,6 @@ impl WorkspaceApp {
                 )
             })
             .on_mouse_move(cx.listener({
-                let tooltip = tooltip;
                 move |this, event: &MouseMoveEvent, _window, cx| {
                     this.queue_workspace_tooltip(
                         tooltip_id_for_move.clone(),
@@ -474,7 +473,6 @@ impl WorkspaceApp {
             .relative()
             .mb(px(self.tokens.metrics.activity_icon_gap))
             .on_mouse_move(cx.listener({
-                let tooltip = tooltip;
                 move |this, event: &MouseMoveEvent, _window, cx| {
                     this.queue_workspace_tooltip(
                         tooltip_id_for_move.clone(),

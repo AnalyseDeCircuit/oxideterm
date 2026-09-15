@@ -113,7 +113,7 @@ impl NodeRuntimeStore {
                 let route = entry.get_mut();
                 // Existing child nodes receive the new config by value so secrets are not copied.
                 route.config = config;
-                route.parent_id = Some(parent_id.clone());
+                route.parent_id = Some(parent_id);
                 route.depth = parent_depth + 1;
                 route.origin = origin;
                 route.generation += 1;

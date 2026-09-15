@@ -671,7 +671,7 @@ impl Window<'_> {
                         continue;
                     }
                     if self.items == 0 || self.bytes < key.len() {
-                        self.more.push(cursor.clone());
+                        self.more.push(cursor);
                         break;
                     }
                     self.items -= 1;

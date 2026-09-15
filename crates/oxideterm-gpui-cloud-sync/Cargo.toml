@@ -1,3 +1,6 @@
+[lints]
+workspace = true
+
 [package]
 name = "oxideterm-gpui-cloud-sync"
 edition.workspace = true

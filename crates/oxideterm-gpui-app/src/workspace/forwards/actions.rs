@@ -108,13 +108,13 @@ impl WorkspaceApp {
         };
         let rule = match forward_type {
             ForwardType::Local => ForwardRule::local(
-                bind_address.clone(),
+                bind_address,
                 bind_port,
-                target_host.clone(),
+                target_host,
                 target_port.unwrap_or(0),
             ),
             ForwardType::Remote => ForwardRule::remote(
-                bind_address.clone(),
+                bind_address,
                 bind_port,
                 target_host,
                 target_port.unwrap_or(0),

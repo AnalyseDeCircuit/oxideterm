@@ -76,7 +76,7 @@ impl X11AuthCookie {
                 "hex cookie must not be empty".to_string(),
             ));
         }
-        if hex.len() % 2 != 0 {
+        if !hex.len().is_multiple_of(2) {
             return Err(X11ForwardingError::InvalidAuthCookie(
                 "hex cookie must contain an even number of digits".to_string(),
             ));

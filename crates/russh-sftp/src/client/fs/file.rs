@@ -177,8 +177,8 @@ impl SftpWindowTuner {
         let max_requests = max_requests.max(1);
         let max_chunk_len = max_chunk_len.max(1);
         let max_inflight_bytes = max_inflight_bytes.max(max_chunk_len);
-        let min_requests = max_requests.min(4).max(1);
-        let min_chunk_len = max_chunk_len.min(WINDOW_TUNER_MIN_CHUNK).max(1);
+        let min_requests = max_requests.clamp(1, 4);
+        let min_chunk_len = max_chunk_len.clamp(1, WINDOW_TUNER_MIN_CHUNK);
         let min_inflight_bytes = max_inflight_bytes
             .min(min_chunk_len.saturating_mul(min_requests))
             .max(min_chunk_len);

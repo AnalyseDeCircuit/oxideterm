@@ -462,8 +462,8 @@ pub(in crate::workspace) fn ai_terminal_screen_snapshot_json(
 
 
 pub(in crate::workspace) fn terminal_delta_output(before: &str, after: &str) -> String {
-    if after.starts_with(before) {
-        let delta = after[before.len()..].trim();
+    if let Some(delta) = after.strip_prefix(before) {
+        let delta = delta.trim();
         if !delta.is_empty() {
             return delta.to_string();
         }

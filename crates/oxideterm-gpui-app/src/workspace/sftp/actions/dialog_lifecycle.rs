@@ -45,10 +45,7 @@ impl WorkspaceApp {
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
             let result = async {
-                let sftp = backend
-                    .acquire_transfer_sftp()
-                    .await
-                    .map_err(|error| error.to_string())?;
+                let sftp = backend.acquire_transfer_sftp().await?;
                 operation(sftp).await
             }
             .await;
@@ -422,10 +419,7 @@ impl WorkspaceApp {
                         let error_title = self.i18n.t("sftp.toast.delete_failed");
                         runtime.spawn(async move {
                             let result = async {
-                                let sftp = backend
-                                    .acquire_transfer_sftp()
-                                    .await
-                                    .map_err(|error| error.to_string())?;
+                                let sftp = backend.acquire_transfer_sftp().await?;
                                 let mut deleted = 0_u64;
                                 for path in targets {
                                     // Tauri nodeSftpDeleteRecursive returns the

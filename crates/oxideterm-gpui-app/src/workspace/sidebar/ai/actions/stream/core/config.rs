@@ -75,7 +75,7 @@ impl WorkspaceApp {
         let host_id = self
             .active_ssh_terminal_node_id(cx)
             .and_then(|node_id| self.node_router.resolve_connection_now(&node_id).ok())
-            .map(|connection| connection.connection_id.to_string());
+            .map(|connection| connection.connection_id);
         let mut entries = memory
             .entries
             .iter()
@@ -215,7 +215,7 @@ impl WorkspaceApp {
         let active_profile_id = self
             .active_ssh_terminal_node_id(cx)
             .and_then(|node_id| self.node_router.resolve_connection_now(&node_id).ok())
-            .map(|connection| connection.connection_id.to_string());
+            .map(|connection| connection.connection_id);
         if settings.ai.active_backend == AiActiveBackend::Acp {
             let acp_agent_id = settings
                 .ai

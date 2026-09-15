@@ -68,7 +68,7 @@ impl IdeSurface {
                             .bg(if self.editor_search.replace_open {
                                 rgba((tokens.ui.accent << 8) | 0x33)
                             } else {
-                                rgba((tokens.ui.bg_hover << 8) | 0x00)
+                                rgba(tokens.ui.bg_hover << 8)
                             })
                             .text_size(px(tokens.metrics.ui_text_xs))
                             .text_color(rgb(if self.editor_search.replace_open {
@@ -140,7 +140,7 @@ impl IdeSurface {
                             .bg(if self.editor_search.case_sensitive {
                                 rgba((tokens.ui.accent << 8) | 0x33)
                             } else {
-                                rgba((tokens.ui.bg_hover << 8) | 0x00)
+                                rgba(tokens.ui.bg_hover << 8)
                             })
                             .text_color(rgb(if self.editor_search.case_sensitive {
                                 tokens.ui.accent

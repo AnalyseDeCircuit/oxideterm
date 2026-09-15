@@ -1439,11 +1439,11 @@ impl WorkspaceApp {
                 let tx = self.ssh_worker_sender(cx);
                 let prompt_handler = Arc::new(NativeSshPromptHandler::new(tx.clone()));
                 let managed_key_resolver = managed_key_resolver_from_store(&self.connection_store);
-                let worker_consumer = consumer.clone();
-                let worker_endpoint_id = endpoint_id.clone();
-                let worker_title = title.clone();
-                let worker_saved_profile_id = saved_profile_id.clone();
-                let worker_initial_remote_path = initial_remote_path.clone();
+                let worker_consumer = consumer;
+                let worker_endpoint_id = endpoint_id;
+                let worker_title = title;
+                let worker_saved_profile_id = saved_profile_id;
+                let worker_initial_remote_path = initial_remote_path;
                 self.forwarding_runtime.spawn(async move {
                     let client = SshTransportClient::new(config)
                         .with_prompt_handler(prompt_handler)
@@ -1510,8 +1510,8 @@ impl WorkspaceApp {
                 let tx = self.ssh_worker_sender(cx);
                 let prompt_handler = Arc::new(NativeSshPromptHandler::new(tx.clone()));
                 let managed_key_resolver = managed_key_resolver_from_store(&self.connection_store);
-                let worker_primary_consumer = primary_consumer.clone();
-                let worker_secondary_consumer = secondary_consumer.clone();
+                let worker_primary_consumer = primary_consumer;
+                let worker_secondary_consumer = secondary_consumer;
                 self.forwarding_runtime.spawn(async move {
                     let primary_client = SshTransportClient::new(primary_config)
                         .with_prompt_handler(prompt_handler.clone())

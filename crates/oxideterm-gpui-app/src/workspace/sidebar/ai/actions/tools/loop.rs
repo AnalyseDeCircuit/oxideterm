@@ -777,7 +777,10 @@ async fn execute_ai_chat_tool_loop(
                 use futures_util::StreamExt;
                 // Each future borrows the loop's owner. Dropping the batch cancels all reads;
                 // writes, unknown MCP actions and agent coordination never enter this path.
-                futures_util::stream::iter(batch.iter().cloned().map(|call| {
+                // Own each call before building its future so the spawned loop
+                // does not retain an iterator borrowing the current batch.
+                let owned_calls = batch.iter().cloned();
+                futures_util::stream::iter(owned_calls.map(|call| {
                     let config = &config;
                     let services = &services;
                     let available = &available_tool_names;
@@ -1120,7 +1123,7 @@ pub(in crate::workspace) async fn resolve_ai_candidate_selection_if_needed(
         );
         envelope.remove("error");
         envelope.insert("recoverable".to_string(), serde_json::json!(false));
-        envelope.insert("targets".to_string(), serde_json::json!([selected.clone()]));
+        envelope.insert("targets".to_string(), serde_json::json!([selected]));
         envelope.insert("selectedTarget".to_string(), selected);
         envelope.remove("nextActions");
     }

@@ -128,8 +128,8 @@ impl BackgroundTaskRuntime {
                     arguments_json: spec.arguments_json,
                     last_fingerprint: None,
                     had_failure: false,
-                    cancelled: cancelled.clone(),
-                    cancellation: cancellation.clone(),
+                    cancelled: cancelled,
+                    cancellation: cancellation,
                     abort_handle: None,
                 },
             );

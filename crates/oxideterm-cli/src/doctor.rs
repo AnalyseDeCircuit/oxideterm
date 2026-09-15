@@ -557,7 +557,7 @@ mod tests {
                 no_proxy: String::new(),
             },
         };
-        let policies = vec![
+        let policies = [
             SavedUpstreamProxyPolicy::UseGlobal,
             SavedUpstreamProxyPolicy::Direct,
             custom,

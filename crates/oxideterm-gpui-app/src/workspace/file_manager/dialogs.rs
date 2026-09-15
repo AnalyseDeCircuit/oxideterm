@@ -28,9 +28,8 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let viewport = window.viewport_size();
-        let max_height = (f32::from(viewport.height) * 0.8)
-            .min(FILE_MANAGER_CONTEXT_MENU_MAX_HEIGHT)
-            .max(180.0);
+        let max_height =
+            (f32::from(viewport.height) * 0.8).clamp(180.0, FILE_MANAGER_CONTEXT_MENU_MAX_HEIGHT);
         let placement = browser_behavior::clamp_context_menu_position(
             menu.x,
             menu.y,
@@ -76,7 +75,6 @@ impl WorkspaceApp {
                     false,
                     has_background,
                     {
-                        let file = file;
                         move |this, _event, _window, cx| {
                             this.set_file_manager_path(file.path.clone(), cx);
                         }
@@ -111,7 +109,6 @@ impl WorkspaceApp {
                         false,
                         has_background,
                         {
-                            let file = file;
                             move |this, _event, _window, cx| {
                                 this.open_file_manager_preview(file.clone(), cx);
                             }

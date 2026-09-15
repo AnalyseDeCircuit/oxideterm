@@ -1562,7 +1562,7 @@ impl WorkspaceApp {
             .text_size(px(self.tokens.metrics.ui_text_xs))
             .line_height(px(24.0))
             .text_color(rgb(self.tokens.terminal.foreground));
-        let theme = TerminalUiTheme::from_tokens(self.tokens.clone());
+        let theme = TerminalUiTheme::from_tokens(self.tokens);
         for line in lines {
             sample = sample.child(self.semantic_scheme_preview_line(&line, scheme, &theme));
         }

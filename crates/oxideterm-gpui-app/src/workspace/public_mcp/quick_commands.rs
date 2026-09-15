@@ -382,7 +382,7 @@ impl WorkspaceApp {
             let prepared_call =
                 PublicToolCall::PreparedQuickCommandRun(PreparedQuickCommandRunArgs {
                     quickcommand_ref: args.quickcommand_ref.clone(),
-                    node_ref: node_ref.clone(),
+                    node_ref: node_ref,
                     command: prepared_target.command,
                 });
             let approval = match self

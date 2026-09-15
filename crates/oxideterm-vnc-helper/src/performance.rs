@@ -369,7 +369,7 @@ fn tight_copy_to_bgra(rect: RfbRect, rgb: &[u8]) -> Result<Vec<u8>, String> {
 
 fn tight_palette_to_bgra(rect: RfbRect, palette: &[u8], indexes: &[u8]) -> Result<Vec<u8>, String> {
     let color_count = palette.len() / 3;
-    if palette.is_empty() || palette.len() % 3 != 0 || color_count > 256 {
+    if palette.is_empty() || !palette.len().is_multiple_of(3) || color_count > 256 {
         return Err("VNC Tight palette is invalid.".to_string());
     }
     if indexes.len() != tight_palette_index_len(rect, color_count)? {
@@ -379,7 +379,7 @@ fn tight_palette_to_bgra(rect: RfbRect, palette: &[u8], indexes: &[u8]) -> Resul
     let mut bgra = vec![0; rect_byte_len(rect)?];
     let binary = color_count == 2;
     let row_bytes = if binary {
-        (usize::from(rect.width) + 7) / 8
+        usize::from(rect.width).div_ceil(8)
     } else {
         usize::from(rect.width)
     };

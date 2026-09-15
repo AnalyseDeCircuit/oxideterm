@@ -236,7 +236,7 @@ async fn native_plugin_scp_result(
                 Some(result.items),
             );
         }
-        Err(error) if matches!(error, oxideterm_sftp::SftpError::TransferCancelled) => {
+        Err(oxideterm_sftp::SftpError::TransferCancelled) => {
             manager.finish_background_transfer(
                 &transfer_id,
                 BackgroundTransferState::Cancelled,

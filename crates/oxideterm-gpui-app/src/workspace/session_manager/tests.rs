@@ -683,7 +683,7 @@ pub(super) fn edit_properties_preserves_ssh_compatibility_policy() {
 
     // Editing and saving an existing connection must round-trip its transport policy.
     let mut form = form_from_saved_connection(&saved_connection, None);
-    let request = save_request_from_form(&mut form, Some(saved_connection.id.clone())).unwrap();
+    let request = save_request_from_form(&mut form, Some(saved_connection.id)).unwrap();
 
     assert!(form.legacy_ssh_compatibility);
     assert!(request.legacy_ssh_compatibility);

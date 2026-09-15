@@ -43,43 +43,34 @@ pub enum SerialControlLine {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Default)]
 pub enum SerialLineEnding {
     Lf,
     CrLf,
     Cr,
+    #[default]
     None,
 }
 
-impl Default for SerialLineEnding {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Default)]
 pub enum SerialDisplayMode {
+    #[default]
     Text,
     Hex,
     Mixed,
 }
 
-impl Default for SerialDisplayMode {
-    fn default() -> Self {
-        Self::Text
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Default)]
 pub enum SerialSendMode {
+    #[default]
     Text,
     Hex,
 }
 
-impl Default for SerialSendMode {
-    fn default() -> Self {
-        Self::Text
-    }
-}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SerialRuntimeOptions {

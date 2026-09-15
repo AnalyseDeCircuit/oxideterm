@@ -842,7 +842,7 @@ mod tests {
 
     #[test]
     fn shell_branch_list_output_parses_branches() {
-        let output = "noise\nOXIDETERM_GIT_BRANCH_LIST_V1\0state\0ok\0branch\0main\0current\01\0branch\0feature/x\0current\00\0worktree\0feature/x\0path\0/tmp/feature-x\0";
+        let output = "noise\nOXIDETERM_GIT_BRANCH_LIST_V1\0state\0ok\0branch\0main\0current\x001\0branch\0feature/x\0current\x000\0worktree\0feature/x\0path\0/tmp/feature-x\0";
 
         assert_eq!(
             parse_shell_branch_list_output(output),
@@ -856,7 +856,7 @@ mod tests {
 
     #[test]
     fn shell_branch_list_output_ignores_submodule_git_admin_paths() {
-        let output = "OXIDETERM_GIT_BRANCH_LIST_V1\0state\0ok\0branch\0master\0current\01\0worktree\0master\0path\0/repo/.git/modules/vendor/child\0";
+        let output = "OXIDETERM_GIT_BRANCH_LIST_V1\0state\0ok\0branch\0master\0current\x001\0worktree\0master\0path\0/repo/.git/modules/vendor/child\0";
 
         assert_eq!(
             parse_shell_branch_list_output(output),

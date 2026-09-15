@@ -1903,7 +1903,7 @@ impl WorkspaceApp {
             pills.push(
                 self.background_tab_pill(
                     &key,
-                    *label_key,
+                    label_key,
                     settings_background_tab_lucide(*icon),
                     enabled,
                 )

@@ -124,20 +124,14 @@ pub struct NegotiatedCapabilities {
     pub lock_key_sync: NegotiatedCapabilityStatus,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RemoteDesktopFileConflictPolicy {
     Overwrite,
     Skip,
+    // Keep both files rather than destroying or omitting a selected file.
+    #[default]
     Rename,
-}
-
-impl Default for RemoteDesktopFileConflictPolicy {
-    fn default() -> Self {
-        // Keeping both is the only default that cannot destroy or silently
-        // omit a user-selected local file.
-        Self::Rename
-    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -708,7 +702,7 @@ impl RemoteDesktopRect {
     }
 
     fn area(self) -> Option<u64> {
-        Some(u64::from(self.width).checked_mul(u64::from(self.height))?)
+        u64::from(self.width).checked_mul(u64::from(self.height))
     }
 
     fn union_is_fully_covered_by(self, other: Self) -> bool {
@@ -738,19 +732,14 @@ impl RemoteDesktopRect {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RemoteDesktopFrameCompression {
+    #[default]
     None,
 }
 
 pub const REMOTE_DESKTOP_MAX_FRAME_UPDATE_BATCH_REGIONS: usize = 256;
-
-impl Default for RemoteDesktopFrameCompression {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

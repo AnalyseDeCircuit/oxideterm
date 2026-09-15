@@ -124,7 +124,7 @@ impl PlaybackTerminalSession {
                 AlacEvent::ClipboardLoad(_format, callback) => {
                     self.pending_events
                         .push(TerminalEvent::ClipboardLoad(Arc::new(move |text| {
-                            callback(text.into())
+                            callback(text)
                         })));
                 }
                 AlacEvent::PtyWrite(_) => {}

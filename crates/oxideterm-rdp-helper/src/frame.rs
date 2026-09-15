@@ -16,16 +16,11 @@ const RDP_GRAPHICS_ACCUMULATOR_BASE_AREA_DIVISOR: u64 = 3;
 pub(crate) const RDP_GRAPHICS_MAX_DIRTY_RECTS: usize = 16;
 const RDP_GRAPHICS_ACCUMULATOR_MERGE_INFLATION_LIMIT: u64 = 2;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
 pub(crate) enum RdpGraphicsSyncState {
+    #[default]
     NeedsBase,
     Synced,
-}
-
-impl Default for RdpGraphicsSyncState {
-    fn default() -> Self {
-        Self::NeedsBase
-    }
 }
 
 impl RdpGraphicsSyncState {

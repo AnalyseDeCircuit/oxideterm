@@ -1325,8 +1325,8 @@ window.focus(&this.focus_handle, cx);
         let cache_key = AiContextTokenBreakdownKey {
             conversation_id: conversation.map(|conversation| conversation.id.clone()),
             conversation_fingerprint,
-            provider_id: provider_id.clone(),
-            model: model.clone(),
+            provider_id: provider_id,
+            model: model,
             max_tokens,
             request_configuration_fingerprint,
         };

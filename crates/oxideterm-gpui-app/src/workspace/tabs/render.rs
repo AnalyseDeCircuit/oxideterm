@@ -797,9 +797,9 @@ impl WorkspaceApp {
                     return Some(node_id);
                 }
                 let mut session_ids = Vec::new();
-                tab.root_pane
-                    .as_ref()
-                    .map(|root| root.collect_session_ids(&mut session_ids));
+                if let Some(root) = tab.root_pane.as_ref() {
+                    root.collect_session_ids(&mut session_ids);
+                }
                 session_ids
                     .into_iter()
                     .filter_map(|session_id| {

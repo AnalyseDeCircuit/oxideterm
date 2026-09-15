@@ -229,7 +229,7 @@ pub(super) fn cursor_mask_len(rect: RfbRect) -> Result<usize, String> {
 }
 
 pub(super) fn cursor_mask_bit(mask: &[u8], width: u16, x: u16, y: u16) -> bool {
-    let row_bytes = (usize::from(width) + 7) / 8;
+    let row_bytes = usize::from(width).div_ceil(8);
     let byte_index = usize::from(y) * row_bytes + usize::from(x) / 8;
     let bit_index = 7 - usize::from(x) % 8;
     mask.get(byte_index)

@@ -4,16 +4,11 @@ use std::time::SystemTime;
 pub const DEFAULT_EVENT_LOG_CAPACITY: usize = 500;
 pub const DEFAULT_NOTIFICATION_CAPACITY: usize = 200;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
 pub enum ActivityView {
+    #[default]
     Notifications,
     EventLog,
-}
-
-impl Default for ActivityView {
-    fn default() -> Self {
-        Self::Notifications
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

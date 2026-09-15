@@ -378,6 +378,7 @@ mod tests {
     #[tokio::test]
     async fn mcp_tools_and_resources_follow_config_order() {
         let registry = McpRegistry::new(AiProviderKeyStore::new());
+        {
         let mut state = registry.state.write();
         state.server_order = vec!["b".to_string(), "a".to_string()];
         let mut server_a = connected_http_state(
@@ -404,7 +405,7 @@ mod tests {
         }];
         state.servers.insert("a".to_string(), server_a);
         state.servers.insert("b".to_string(), server_b);
-        drop(state);
+        }
 
         let tool_names = registry
             .tool_definitions()
@@ -646,6 +647,7 @@ mod tests {
     #[tokio::test]
     async fn synchronize_disconnects_removed_servers() {
         let registry = McpRegistry::new(AiProviderKeyStore::new());
+        {
         let mut state = registry.state.write();
         state.servers.insert(
             "old".to_string(),
@@ -669,7 +671,7 @@ mod tests {
                 generation: 1,
             },
         );
-        drop(state);
+        }
         registry.synchronize_configs(Vec::new()).await;
         assert!(registry.snapshots().is_empty());
     }

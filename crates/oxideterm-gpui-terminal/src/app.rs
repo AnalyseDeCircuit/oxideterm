@@ -4535,7 +4535,7 @@ mod tests {
         let received = events.clone();
         let _subscription = cx.update(|_, cx| {
             cx.subscribe(&pane, move |_, event, _| {
-                received.borrow_mut().push(event.clone());
+                received.borrow_mut().push(*event);
             })
         });
         pane.update(cx, |pane, cx| {

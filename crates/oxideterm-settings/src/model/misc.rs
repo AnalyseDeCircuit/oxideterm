@@ -184,7 +184,9 @@ pub enum SettingsUpstreamProxyProtocol {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum SettingsUpstreamProxyAuth {
+    #[default]
     None,
     Password {
         username: String,
@@ -193,11 +195,6 @@ pub enum SettingsUpstreamProxyAuth {
     },
 }
 
-impl Default for SettingsUpstreamProxyAuth {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -515,7 +515,7 @@ pub(in crate::workspace) fn view_for_ai_intent(intent: &str) -> &'static str {
         "command" | "terminal" => "live_sessions",
         "settings" | "app_surface" | "local" => "app_surfaces",
         "file" | "sftp" | "knowledge" => "files",
-        "connection" | "status" | "unknown" | _ => "connections",
+        _ => "connections",
     }
 }
 

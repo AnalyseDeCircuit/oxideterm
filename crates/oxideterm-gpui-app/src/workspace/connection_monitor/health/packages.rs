@@ -350,7 +350,7 @@ impl HostToolsEntity {
         let show_context_columns = sidebar_width >= HOST_PACKAGE_CONTEXT_COLUMNS_MIN_WIDTH;
         let row_tokens = *tokens;
         let row_i18n = i18n.clone();
-        let row_mono_font_family = mono_font_family.clone();
+        let row_mono_font_family = mono_font_family;
         div()
             .w_full()
             .min_w_0()

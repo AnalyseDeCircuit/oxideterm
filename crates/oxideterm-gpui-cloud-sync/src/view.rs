@@ -347,12 +347,12 @@ pub fn cloud_sync_tab_button(tokens: &ThemeTokens, active: bool, child: AnyEleme
         .border_color(if active {
             rgba((theme.accent << 8) | CLOUD_SYNC_ACCENT_BORDER_ALPHA)
         } else {
-            rgba((theme.border << 8) | 0x00)
+            rgba(theme.border << 8)
         })
         .bg(if active {
             rgba((theme.accent << 8) | CLOUD_SYNC_ACCENT_TINT_ALPHA)
         } else {
-            rgba((theme.bg_panel << 8) | 0x00)
+            rgba(theme.bg_panel << 8)
         })
         .px(px(12.0))
         .py(px(8.0))

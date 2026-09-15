@@ -181,11 +181,7 @@ fn parse_xauth_display_suffix(value: &str) -> Option<(u16, Option<u16>)> {
     Some((display, screen))
 }
 
-fn decode_nlist_field<'a>(
-    len_hex: &str,
-    data_hex: &'a str,
-    label: &'static str,
-) -> X11Result<String> {
+fn decode_nlist_field(len_hex: &str, data_hex: &str, label: &'static str) -> X11Result<String> {
     let bytes = checked_nlist_hex_field(len_hex, data_hex, label)?;
     let mut output = String::with_capacity(bytes.len() / 2);
     for pair in bytes.as_bytes().chunks_exact(2) {
@@ -203,7 +199,7 @@ fn checked_nlist_hex_field<'a>(
 ) -> X11Result<&'a str> {
     let len = usize::from_str_radix(len_hex, 16)
         .map_err(|_| X11ForwardingError::InvalidXauthRecord("invalid nlist length"))?;
-    if data_hex.len() != len * 2 || data_hex.len() % 2 != 0 {
+    if data_hex.len() != len * 2 || !data_hex.len().is_multiple_of(2) {
         return Err(X11ForwardingError::InvalidXauthRecord(label));
     }
     Ok(data_hex)

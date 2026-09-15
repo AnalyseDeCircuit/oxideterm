@@ -313,29 +313,27 @@ impl Drop for ClientRdpGraphicsReceiver {
     }
 }
 
+// Callers recover dropped graphics from a new base frame, never from a failed
+// send's payload. Return channel state without carrying an entire frame in Err.
 impl ClientRdpOutputSender {
-    fn send_control(
-        &self,
-        output: ClientRdpOutput,
-    ) -> Result<(), mpsc::SendError<ClientRdpOutput>> {
-        self.control_tx.send(output)
+    fn send_control(&self, output: ClientRdpOutput) -> Result<(), mpsc::SendError<()>> {
+        self.control_tx
+            .send(output)
+            .map_err(|_| mpsc::SendError(()))
     }
 
-    fn try_send_graphics(
-        &self,
-        output: ClientRdpOutput,
-    ) -> Result<(), mpsc::TrySendError<ClientRdpOutput>> {
+    fn try_send_graphics(&self, output: ClientRdpOutput) -> Result<(), mpsc::TrySendError<()>> {
         self.graphics_tx.try_send(output)
     }
 }
 
 impl ClientRdpGraphicsSender {
-    fn try_send(&self, output: ClientRdpOutput) -> Result<(), mpsc::TrySendError<ClientRdpOutput>> {
+    fn try_send(&self, output: ClientRdpOutput) -> Result<(), mpsc::TrySendError<()>> {
         if !self.inner.receiver_alive.load(Ordering::Acquire) {
-            return Err(mpsc::TrySendError::Disconnected(output));
+            return Err(mpsc::TrySendError::Disconnected(()));
         }
         let Ok(mut queue) = self.inner.queue.lock() else {
-            return Err(mpsc::TrySendError::Disconnected(output));
+            return Err(mpsc::TrySendError::Disconnected(()));
         };
         if client_rdp_output_is_base_frame(&output) {
             // A base frame supersedes every older dirty event because it
@@ -345,7 +343,7 @@ impl ClientRdpGraphicsSender {
             return Ok(());
         }
         if queue.len() >= self.inner.capacity {
-            return Err(mpsc::TrySendError::Full(output));
+            return Err(mpsc::TrySendError::Full(()));
         }
         queue.push_back(output);
         Ok(())

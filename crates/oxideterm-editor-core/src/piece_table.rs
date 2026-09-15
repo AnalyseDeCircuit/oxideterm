@@ -191,10 +191,8 @@ impl PieceTableTextBuffer {
             }
         }
 
-        if !inserted {
-            if let Some(piece) = replacement_piece {
-                push_piece(&mut next, piece);
-            }
+        if !inserted && let Some(piece) = replacement_piece {
+            push_piece(&mut next, piece);
         }
 
         self.pieces = next;

@@ -508,11 +508,7 @@ fn ps_output_roles_classify_structured_columns_without_global_sentinels() {
         );
     }
 
-    assert!(
-        !matched_texts("question ? remains generic")
-            .iter()
-            .any(|match_| *match_ == ("?", SemanticClass::Info))
-    );
+    assert!(!matched_texts("question ? remains generic").contains(&("?", SemanticClass::Info)));
 
     let full_text = "root 717098 1 0 2025 ? 0:00 fuser -o rw,nosuid";
     let full_matches = classify_line(full_text, SemanticLineRole::PsFullOutput)

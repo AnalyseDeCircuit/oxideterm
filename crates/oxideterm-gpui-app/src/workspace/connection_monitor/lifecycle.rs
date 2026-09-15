@@ -159,7 +159,7 @@ impl HostToolsEntity {
             self.stop_profiler_sampling();
         } else {
             for connection_id in self.profiler_connection_ids() {
-                self.start_profiler(connection_id, sampling_config.clone(), runtime.clone(), cx);
+                self.start_profiler(connection_id, sampling_config, runtime.clone(), cx);
             }
             self.sync_live_connections(
                 self.monitor_connections(),

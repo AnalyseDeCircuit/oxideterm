@@ -2445,7 +2445,7 @@ mod tests {
                     Fragment::parse(&plaintext).expect("datagram must contain a fragment");
                 decode_compressed_update(&fragment.body).expect("state update must decode")
             })
-            .last()
+            .next_back()
             .expect("actions must contain a datagram")
     }
 

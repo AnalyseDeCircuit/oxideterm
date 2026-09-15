@@ -416,7 +416,6 @@ impl IdeSurface {
         let fs = self.fs.clone();
         let backend_runtime = self.backend_runtime.clone();
         let watch_backend_task = backend_runtime.spawn({
-            let node_id = node_id.clone();
             let root_path = root_path.clone();
             async move { fs.watch_directory(node_id, root_path, Vec::new()).await }
         });

@@ -136,7 +136,7 @@ pub(super) fn run_client_rdp_thread(
     };
 
     runtime.block_on(async move {
-        loop {
+        'connection: {
             let (connection_result, framed, egfx_bridge) = match connect_native_rdp(
                 &config,
                 &mut input_rx,
@@ -149,7 +149,7 @@ pub(super) fn run_client_rdp_thread(
                 Err(error) => {
                     let _ =
                         client_output_tx.send_control(ClientRdpOutput::ConnectionFailure(error));
-                    break;
+                    break 'connection;
                 }
             };
             match run_native_rdp_active_session(
@@ -166,7 +166,7 @@ pub(super) fn run_client_rdp_thread(
                     let _ = client_output_tx.send_control(ClientRdpOutput::Terminated(
                         format_graceful_disconnect(reason),
                     ));
-                    break;
+                    break 'connection;
                 }
                 Err(error) => {
                     let diagnostic = format!("RDP session ended: {error}");
@@ -177,7 +177,7 @@ pub(super) fn run_client_rdp_thread(
                     // network loss without retrying protocol or auth failures.
                     let _ = client_output_tx
                         .send_control(ClientRdpOutput::SessionFailure { message, category });
-                    break;
+                    break 'connection;
                 }
             }
         }

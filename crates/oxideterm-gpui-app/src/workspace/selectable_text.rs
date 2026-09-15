@@ -543,7 +543,7 @@ impl WorkspaceApp {
             .map(|range| {
                 selected_text_runs(
                     &value,
-                    &[run.clone()],
+                    std::slice::from_ref(&run),
                     range,
                     selection_bg(self.tokens.ui.accent),
                 )

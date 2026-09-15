@@ -498,6 +498,7 @@ impl Drop for EnvVarGuard {
     }
 }
 
+#[derive(Clone, Copy)]
 enum Socks5AuthMode {
     None,
     Password(&'static str, &'static str),
@@ -518,24 +519,14 @@ impl Socks5ProxyFixture {
         let addr = listener.local_addr().expect("socks proxy addr");
         let accept_count = Arc::new(AtomicUsize::new(0));
         let accept_count_for_task = accept_count.clone();
-        let mode_for_task = match mode {
-            Socks5AuthMode::None => Socks5AuthMode::None,
-            Socks5AuthMode::Password(username, password) => {
-                Socks5AuthMode::Password(username, password)
-            }
-        };
+        let mode_for_task = mode;
         let task = tokio::spawn(async move {
             loop {
                 let Ok((stream, _)) = listener.accept().await else {
                     break;
                 };
                 accept_count_for_task.fetch_add(1, Ordering::SeqCst);
-                let mode = match mode_for_task {
-                    Socks5AuthMode::None => Socks5AuthMode::None,
-                    Socks5AuthMode::Password(username, password) => {
-                        Socks5AuthMode::Password(username, password)
-                    }
-                };
+                let mode = mode_for_task;
                 tokio::spawn(async move {
                     handle_socks5_client(stream, mode).await;
                 });

@@ -261,7 +261,6 @@ impl HostToolsEntity {
                         "host-filesystem-diagnostic",
                         true,
                         cx.listener({
-                            let selected_id = selected_id.clone();
                             let i18n = i18n.clone();
                             move |host_tools, _event, window, cx| {
                                 host_tools.dispatch_host_filesystem_diagnostic(

@@ -252,9 +252,9 @@ pub(super) fn vnc_lock_keys_from_bits(bits: u8) -> RemoteDesktopLockKeys {
 }
 
 fn vnc_lock_key_bits(keys: RemoteDesktopLockKeys) -> u8 {
-    u8::from(keys.scroll_lock) * VNC_LOCK_SCROLL
-        | u8::from(keys.num_lock) * VNC_LOCK_NUM
-        | u8::from(keys.caps_lock) * VNC_LOCK_CAPS
+    (u8::from(keys.scroll_lock) * VNC_LOCK_SCROLL)
+        | (u8::from(keys.num_lock) * VNC_LOCK_NUM)
+        | (u8::from(keys.caps_lock) * VNC_LOCK_CAPS)
 }
 
 impl VncSessionSharedState {

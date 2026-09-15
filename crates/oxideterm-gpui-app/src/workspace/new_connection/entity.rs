@@ -211,9 +211,9 @@ impl ConnectionFlowEntity {
         &mut self,
         mut run: NativeProxyConnectRun,
         cx: &mut Context<Self>,
-    ) -> Result<(), NativeProxyConnectRun> {
+    ) -> Result<(), Box<NativeProxyConnectRun>> {
         if self.active_proxy_connect_run.is_some() {
-            return Err(run);
+            return Err(Box::new(run));
         }
         self.next_proxy_connect_generation = self.next_proxy_connect_generation.wrapping_add(1);
         run.generation = self.next_proxy_connect_generation;

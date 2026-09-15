@@ -376,7 +376,6 @@ pub(crate) fn quarantine_corrupt_native_plugin_config(config_path: &Path) {
 }
 
 #[allow(dead_code)]
-
 pub(crate) fn validate_one_of(field: &str, value: &str, allowed: &[&str]) -> Result<(), String> {
     if allowed.contains(&value) {
         return Ok(());

@@ -279,7 +279,7 @@ mod tests {
         let mut store = ConnectionStore::load(store_path.clone()).unwrap();
         let original = store.connections()[0].clone();
         store
-            .move_to_group(&[original.id.clone()], Some("Custom Group"))
+            .move_to_group(std::slice::from_ref(&original.id), Some("Custom Group"))
             .unwrap();
 
         write_config(&config_path, "new.example.com");

@@ -536,7 +536,7 @@ impl RemoteDesktopSessionEntity {
         let monitor_layout = remote_desktop_monitor_layout(&profile, cx);
         let worker = self.spawn_worker(
             generation,
-            profile.clone(),
+            profile,
             provider,
             password_available,
             frame_slot.clone(),
@@ -1516,7 +1516,7 @@ impl WorkspaceApp {
             .when_some(
                 vnc_capability_presentation,
                 |footer, (capability_label, capability_tooltip)| {
-                    let tooltip_for_move = capability_tooltip.clone();
+                    let tooltip_for_move = capability_tooltip;
                     footer.child(
                         remote_desktop_capability_chip(&self.tokens, capability_label)
                             .id("remote-desktop-vnc-capabilities")

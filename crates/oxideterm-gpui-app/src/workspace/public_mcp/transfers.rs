@@ -205,7 +205,7 @@ impl WorkspaceApp {
         }
 
         let manager = self.sftp_transfer_manager.clone();
-        let guard = SftpTransferGuard::new(Some(&manager), internal_id.clone());
+        let guard = SftpTransferGuard::new(Some(&manager), internal_id);
         let router = self.node_router.clone();
         let handles = self.public_mcp.runtime_handles.clone();
         let artifact_store = self.public_mcp.state.artifacts.clone();

@@ -138,7 +138,7 @@ pub(super) struct CloudSyncInputRenderProjection {
 #[derive(Clone)]
 pub(super) struct CloudSyncPageRenderer {
     pub(super) cloud_sync: Entity<CloudSyncWorkspaceEntity>,
-    pub(super) render: Arc<CloudSyncListRenderProjection>,
+    pub(super) render: std::rc::Rc<CloudSyncListRenderProjection>,
 }
 
 impl std::ops::Deref for CloudSyncPageRenderer {
@@ -694,9 +694,9 @@ fn cloud_sync_location_for_ai(value: &str) -> String {
 }
 
 impl CloudSyncDeliverySink for crate::workspace::delivery::ActiveDeliverySender<CloudSyncDelivery> {
-    fn send(&self, delivery: CloudSyncDelivery) -> Result<(), CloudSyncDelivery> {
+    fn send(&self, delivery: CloudSyncDelivery) -> Result<(), Box<CloudSyncDelivery>> {
         crate::workspace::delivery::ActiveDeliverySender::send(self, delivery)
-            .map_err(|error| error.0)
+            .map_err(|error| Box::new(error.0))
     }
 }
 

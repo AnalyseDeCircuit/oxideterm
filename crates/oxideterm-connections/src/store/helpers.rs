@@ -209,7 +209,7 @@ fn has_supported_private_key_container(private_key: &str) -> bool {
 
 fn decode_ascii_hex_secret(secret: &str) -> Option<SecretString> {
     let encoded = secret.as_bytes();
-    if encoded.is_empty() || encoded.len() % 2 != 0 {
+    if encoded.is_empty() || !encoded.len().is_multiple_of(2) {
         return None;
     }
 

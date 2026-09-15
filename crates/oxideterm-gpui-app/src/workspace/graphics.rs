@@ -1190,59 +1190,52 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(6.0))
-            .children(
-                self.graphics
-                    .read(cx)
-                    .distros
-                    .iter()
-                    .cloned()
-                    .map(|distro| {
-                        let selected =
-                            self.graphics.read(cx).selected_distro.as_deref() == Some(&distro.name);
-                        let distro_name = distro.name.clone();
-                        div()
-                            .h(px(34.0))
-                            .px(px(10.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .rounded(px(self.tokens.radii.sm))
-                            .border_1()
-                            .border_color(rgb(if selected { theme.accent } else { theme.border }))
-                            .bg(if selected {
-                                rgba((theme.accent << 8) | GRAPHICS_ALPHA_10)
-                            } else {
-                                rgb(theme.bg)
-                            })
-                            .text_size(px(13.0))
-                            .text_color(rgb(theme.text))
-                            .cursor_pointer()
-                            .child(div().flex_1().truncate().child(format!(
-                                "{}{}{}",
-                                distro.name,
-                                if distro.is_default { " (Default)" } else { "" },
-                                if distro.is_running {
-                                    String::new()
-                                } else {
-                                    format!(" - {}", self.i18n.t("graphics.distro_stopped"))
-                                }
-                            )))
-                            .child(Self::render_lucide_icon(
-                                LucideIcon::Check,
-                                14.0,
-                                rgb(if selected { theme.accent } else { theme.bg }),
-                            ))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.graphics.update(cx, |graphics, cx| {
-                                        graphics.selected_distro = Some(distro_name.clone());
-                                        cx.notify();
-                                    });
-                                }),
-                            )
-                    }),
-            )
+            .children(self.graphics.read(cx).distros.iter().map(|distro| {
+                let selected =
+                    self.graphics.read(cx).selected_distro.as_deref() == Some(&distro.name);
+                let distro_name = distro.name.clone();
+                div()
+                    .h(px(34.0))
+                    .px(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .rounded(px(self.tokens.radii.sm))
+                    .border_1()
+                    .border_color(rgb(if selected { theme.accent } else { theme.border }))
+                    .bg(if selected {
+                        rgba((theme.accent << 8) | GRAPHICS_ALPHA_10)
+                    } else {
+                        rgb(theme.bg)
+                    })
+                    .text_size(px(13.0))
+                    .text_color(rgb(theme.text))
+                    .cursor_pointer()
+                    .child(div().flex_1().truncate().child(format!(
+                        "{}{}{}",
+                        distro.name,
+                        if distro.is_default { " (Default)" } else { "" },
+                        if distro.is_running {
+                            String::new()
+                        } else {
+                            format!(" - {}", self.i18n.t("graphics.distro_stopped"))
+                        }
+                    )))
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::Check,
+                        14.0,
+                        rgb(if selected { theme.accent } else { theme.bg }),
+                    ))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.graphics.update(cx, |graphics, cx| {
+                                graphics.selected_distro = Some(distro_name.clone());
+                                cx.notify();
+                            });
+                        }),
+                    )
+            }))
             .into_any_element()
     }
 

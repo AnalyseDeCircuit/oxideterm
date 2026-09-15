@@ -33,7 +33,10 @@ impl SessionKey {
     /// to the required 16-byte AES key.
     pub fn decode(value: &str) -> Result<Self, KeyError> {
         let mut padded_value = Zeroizing::new(value.to_owned());
-        while padded_value.len() % BASE64_PADDING_QUANTUM_BYTES != 0 {
+        while !padded_value
+            .len()
+            .is_multiple_of(BASE64_PADDING_QUANTUM_BYTES)
+        {
             padded_value.push('=');
         }
         let mut decoded = Zeroizing::new(

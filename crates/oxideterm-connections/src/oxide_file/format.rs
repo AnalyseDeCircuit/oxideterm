@@ -328,16 +328,14 @@ impl fmt::Debug for EncryptedPrivilegeCredential {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "mode", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum EncryptedUpstreamProxyPolicy {
+    #[default]
     UseGlobal,
     Direct,
-    Custom { proxy: EncryptedUpstreamProxyConfig },
-}
-
-impl Default for EncryptedUpstreamProxyPolicy {
-    fn default() -> Self {
-        Self::UseGlobal
-    }
+    Custom {
+        proxy: EncryptedUpstreamProxyConfig,
+    },
 }
 
 impl EncryptedUpstreamProxyPolicy {
@@ -362,15 +360,13 @@ pub struct EncryptedUpstreamProxyConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum EncryptedUpstreamProxyAuth {
+    #[default]
     None,
-    Password { username: String },
-}
-
-impl Default for EncryptedUpstreamProxyAuth {
-    fn default() -> Self {
-        Self::None
-    }
+    Password {
+        username: String,
+    },
 }
 
 fn default_upstream_proxy_remote_dns() -> bool {

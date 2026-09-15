@@ -436,9 +436,7 @@ fn rewrite_without_host_key(
                 .split(',')
                 .filter(|hostname| {
                     let canonical = KnownHostsStore::canonical_host_entry(hostname);
-                    !remove_hosts
-                        .iter()
-                        .any(|remove_host| canonical == *remove_host)
+                    !remove_hosts.contains(&canonical)
                 })
                 .collect::<Vec<_>>();
 

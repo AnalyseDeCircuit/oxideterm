@@ -3401,8 +3401,7 @@ impl ConnectionStore {
             .retain(|recent_id| self.data.connections.iter().any(|conn| &conn.id == recent_id));
         self.data.recent.dedup();
         self.data
-            .groups
-            .sort_by(|left, right| left.to_lowercase().cmp(&right.to_lowercase()));
+            .groups.sort_by_key(|left| left.to_lowercase());
         self.data.groups.dedup();
         let implicit_groups = self
             .data

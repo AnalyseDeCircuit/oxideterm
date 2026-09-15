@@ -1,3 +1,6 @@
+[lints]
+workspace = true
+
 [package]
 name = "oxideterm-plugin-wasm-runtime"
 edition.workspace = true

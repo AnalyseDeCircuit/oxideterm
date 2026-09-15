@@ -77,20 +77,16 @@ impl TerminalCommandContext {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub(super) enum TerminalFigArgType {
     #[serde(alias = "none")]
+    #[default]
     None,
     Path,
     File,
     Directory,
     Value,
     Command,
-}
-
-impl Default for TerminalFigArgType {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Clone)]

@@ -2833,8 +2833,7 @@ mod tests {
     #[test]
     fn batch_ascii_lines_match_scalar_without_scrollback() {
         let size = TermSize::new(6, 2);
-        let mut config = Config::default();
-        config.scrolling_history = 0;
+        let config = Config { scrolling_history: 0, ..Config::default() };
         assert_batch_line_input_matches_scalar(
             config,
             &size,

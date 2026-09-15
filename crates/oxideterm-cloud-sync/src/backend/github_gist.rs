@@ -362,7 +362,7 @@ impl CloudSyncBackend {
                 status
             );
         }
-        Ok(response.text().await?)
+        response.text().await
     }
 
     pub(super) async fn download_gist_snapshot_object(
@@ -479,8 +479,7 @@ fn parse_gist_id(config: &CloudSyncSettings) -> Result<String> {
         let path = trim_slashes(url.path());
         let id = path
             .split('/')
-            .filter(|part| !part.is_empty())
-            .next_back()
+            .rfind(|part| !part.is_empty())
             .unwrap_or_default()
             .trim_end_matches(".git")
             .to_string();

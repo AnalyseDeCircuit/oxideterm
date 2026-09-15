@@ -793,7 +793,6 @@ impl WorkspaceApp {
                         MouseButton::Left,
                         cx.listener({
                             let pane_id = *pane_id;
-                            let tab_id = tab_id;
                             move |this, _event, window, cx| {
                                 // Release logical input ownership before focusing the native pane.
                                 this.blur_text_inputs(cx);

@@ -389,7 +389,7 @@ fn render_vertical_scrollbar(
                 .on_mouse_up_out(gpui::MouseButton::Left, move |_, _, _| {
                     release_outside.end_drag()
                 })
-                .on_drag(drag_state.clone(), |drag, position, _window, cx| {
+                .on_drag(drag_state, |drag, position, _window, cx| {
                     drag.scroll_handle.begin_drag();
                     drag.grab_offset.set(f32::from(position.y));
                     cx.new(|_| EmptyView)
@@ -440,7 +440,7 @@ fn render_horizontal_scrollbar(
                 .rounded(px(SCROLLBAR_THUMB_RADIUS))
                 .bg(thumb_color)
                 .cursor(CursorStyle::OpenHand)
-                .on_drag(drag_state.clone(), |drag, position, _window, cx| {
+                .on_drag(drag_state, |drag, position, _window, cx| {
                     drag.grab_offset.set(f32::from(position.x));
                     cx.new(|_| EmptyView)
                 })

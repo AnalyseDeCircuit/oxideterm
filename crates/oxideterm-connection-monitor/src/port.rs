@@ -488,10 +488,7 @@ fn parse_lsof_line(line: &str) -> Option<ResourcePortEntry> {
         .and_then(|(_, suffix)| suffix.strip_suffix(')'))
         .unwrap_or(if protocol == "udp" { "Open" } else { "" });
     let endpoint = name.split_whitespace().next().unwrap_or_default();
-    let (local, remote) = endpoint
-        .split_once("->")
-        .map(|(local, remote)| (local, remote))
-        .unwrap_or((endpoint, ""));
+    let (local, remote) = endpoint.split_once("->").unwrap_or((endpoint, ""));
     let (local_address, local_port) = split_endpoint(local);
     let (remote_address, remote_port) = split_endpoint(remote);
     Some(ResourcePortEntry {

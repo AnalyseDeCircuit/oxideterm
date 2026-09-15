@@ -389,7 +389,7 @@ impl HostToolsEntity {
         let separate_user_column = host_process_table_uses_separate_user_column(sidebar_width);
         let row_tokens = *tokens;
         let row_i18n = i18n.clone();
-        let row_mono_font_family = mono_font_family.clone();
+        let row_mono_font_family = mono_font_family;
 
         div()
             .w_full()

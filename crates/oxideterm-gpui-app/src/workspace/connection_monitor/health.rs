@@ -132,8 +132,8 @@ impl HostToolsEntity {
         let selector_bottom_margin = if can_switch && self.selector_open() {
             let visible_options = connections
                 .len()
-                .max(1)
-                .min(HOST_TOOLS_SELECTOR_VISIBLE_OPTIONS) as f32;
+                .clamp(1, HOST_TOOLS_SELECTOR_VISIBLE_OPTIONS)
+                as f32;
             HOST_TOOLS_SELECTOR_MENU_PADDING_Y
                 + (visible_options * HOST_TOOLS_SELECTOR_OPTION_HEIGHT)
                 + (HOST_TOOLS_SELECTOR_GAP * 2.0)

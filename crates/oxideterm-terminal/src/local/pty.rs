@@ -160,7 +160,7 @@ impl LocalPtySession {
             encoding,
             crate::tmux::TmuxController::new(
                 tmux_display.clone(),
-                listener.clone(),
+                listener,
                 size,
                 encoding,
                 scrollback_lines,

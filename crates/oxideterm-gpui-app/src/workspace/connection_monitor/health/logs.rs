@@ -360,9 +360,7 @@ impl HostToolsEntity {
         };
         if command.capability == LogCommandCapability::Partial {
             cx.emit(HostToolsEvent::ShowNotice(
-                HostToolsNotice::LogPartialSupport {
-                    os_type: os_type.clone(),
-                },
+                HostToolsNotice::LogPartialSupport { os_type: os_type },
             ));
         }
         let preset_label = i18n.t(log_preset_label_key(preset));

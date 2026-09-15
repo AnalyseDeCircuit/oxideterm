@@ -145,6 +145,7 @@ impl WorkspaceApp {
             prompt.push_str(handoff.as_str());
         }
         self.ai_entity.update(cx, |ai, _| { ai.history.model_contexts.remove(&conversation_id); });
+        {
         let mut append_prompt_section = |heading: &str, value: &str| {
             let safe_value = zeroize::Zeroizing::new(oxideterm_ai::sanitize_for_ai(value));
             if !prompt.is_empty() {
@@ -176,7 +177,7 @@ impl WorkspaceApp {
             append_prompt_section("OxideTerm Current Context", context);
         }
         append_prompt_section("User Request", &user_request);
-        drop(append_prompt_section);
+        }
 
         let now = ai_now_ms();
         let assistant_id = self.next_ai_chat_id(now, cx);
@@ -430,7 +431,7 @@ impl WorkspaceApp {
                 cx,
             ) {
                 Ok(()) => return,
-                Err(Some(pending)) => pending,
+                Err(Some(pending)) => *pending,
                 Err(None) => return,
             };
 

@@ -619,7 +619,7 @@ mod tests {
             QuickCommandTemplateError::ParameterValueTooLong(parameter) if parameter == "action"
         )));
 
-        let mut amplified_command = command.clone();
+        let mut amplified_command = command;
         amplified_command.command = "{{param.action}}".repeat(9);
         let maximum_value = BTreeMap::from([(
             "action".to_string(),

@@ -198,7 +198,7 @@ impl WorkspaceApp {
             match self.expand_saved_connection_tree(
                 &ssh_gateway_connection_id,
                 config,
-                gateway.name.clone(),
+                gateway.name,
             ) {
                 Ok(expansion) => expansion.target_node_id,
                 Err(error) => {
@@ -208,7 +208,7 @@ impl WorkspaceApp {
         } else {
             self.materialize_ssh_root_node(
                 config,
-                gateway.name.clone(),
+                gateway.name,
                 Some(ssh_gateway_connection_id.clone()),
             )
         };
@@ -481,7 +481,7 @@ impl WorkspaceApp {
                 }
             };
             self.standalone_connections
-                .insert(kind, title.clone(), launch, surface);
+                .insert(kind, title, launch, surface);
         }
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;

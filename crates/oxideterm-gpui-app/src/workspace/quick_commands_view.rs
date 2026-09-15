@@ -81,9 +81,7 @@ fn quick_command_icon_label_key(icon: QuickCommandIcon) -> String {
 
 fn quick_commands_popover_width_for_bar(command_bar_width: f32) -> f32 {
     let available_width = command_bar_width - QUICK_COMMANDS_POPOVER_HORIZONTAL_MARGIN * 2.0;
-    available_width
-        .max(0.0)
-        .min(QUICK_COMMANDS_POPOVER_MAX_WIDTH)
+    available_width.clamp(0.0, QUICK_COMMANDS_POPOVER_MAX_WIDTH)
 }
 
 fn quick_command_list_height(row_count: usize) -> f32 {

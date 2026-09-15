@@ -477,9 +477,7 @@ fn ai_reasoning_profile_value(value: &str) -> &'static str {
 }
 
 fn ai_reasoning_settings_value(value: &str) -> &'static str {
-    match ai_reasoning_profile_value(value) {
-        other => other,
-    }
+    ai_reasoning_profile_value(value)
 }
 
 fn clamp_i64(

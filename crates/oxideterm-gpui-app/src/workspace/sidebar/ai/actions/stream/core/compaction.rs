@@ -44,7 +44,7 @@ impl WorkspaceApp {
         force: bool,
         resume_after: Option<AiPendingChatStream>,
         cx: &mut Context<Self>,
-    ) -> Result<(), Option<AiPendingChatStream>> {
+    ) -> Result<(), Option<Box<AiPendingChatStream>>> {
         self.load_ai_compaction_history(conversation_id, false, silent, force, resume_after, cx)
     }
 
@@ -56,16 +56,16 @@ impl WorkspaceApp {
         force: bool,
         resume_after: Option<AiPendingChatStream>,
         cx: &mut Context<Self>,
-    ) -> Result<(), Option<AiPendingChatStream>> {
+    ) -> Result<(), Option<Box<AiPendingChatStream>>> {
         let ai = self.ai_entity.read(cx);
         if ai.history.quitting
             || ai.history.compaction_loads.contains_key(&conversation_id)
             || ai.compaction_in_progress(&conversation_id)
         {
-            return Err(resume_after);
+            return Err(resume_after.map(Box::new));
         }
         let Some(store) = ai.history.store.clone() else {
-            return Err(resume_after);
+            return Err(resume_after.map(Box::new));
         };
         let branch = ai
             .history
@@ -79,13 +79,13 @@ impl WorkspaceApp {
                 if !silent {
                     self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
                 }
-                return Err(resume_after);
+                return Err(resume_after.map(Box::new));
             }
         };
         let budget = self
             .ai_active_model_context_window(&config)
             .saturating_mul(2);
-        let provider = config.provider_type.clone();
+        let provider = config.provider_type;
         let runtime = self.forwarding_runtime.clone();
         let (sender, receiver) = tokio::sync::oneshot::channel();
         self.ai_entity.update(cx, |ai, _| {
@@ -153,7 +153,7 @@ impl WorkspaceApp {
                     this.ai_entity.update(cx, |ai, _| {
                         ai.history.compaction_sources.remove(&conversation_id);
                     });
-                    this.resume_ai_chat_after_pre_send_compaction(resume, cx);
+                    this.resume_ai_chat_after_pre_send_compaction(resume.map(|pending| *pending), cx);
                 }
             });
         });
@@ -170,7 +170,7 @@ impl WorkspaceApp {
         force: bool,
         resume_after: Option<AiPendingChatStream>,
         cx: &mut Context<Self>,
-    ) -> Result<(), Option<AiPendingChatStream>> {
+    ) -> Result<(), Option<Box<AiPendingChatStream>>> {
         // Return an unconsumed pre-send request when compaction is skipped so
         // its zeroizing provider configuration never needs to be cloned.
         let mut messages = match self
@@ -184,13 +184,13 @@ impl WorkspaceApp {
             // The worker needs owned messages, but not the conversation's
             // metadata, title, session state, or branch bookkeeping.
             Some(conversation) if conversation.messages.len() >= 4 => conversation.messages.clone(),
-            _ => return Err(resume_after),
+            _ => return Err(resume_after.map(Box::new)),
         };
         if !self
             .ai_entity
             .update(cx, |ai, _cx| ai.begin_compaction(&conversation_id))
         {
-            return Err(resume_after);
+            return Err(resume_after.map(Box::new));
         }
 
         let config = match self.resolve_ai_summary_stream_config(true, cx) {
@@ -201,7 +201,7 @@ impl WorkspaceApp {
                 if !silent {
                     self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
                 }
-                return Err(resume_after);
+                return Err(resume_after.map(Box::new));
             }
         };
         oxideterm_ai::scope_responses_history(&mut messages, &config);
@@ -237,7 +237,7 @@ impl WorkspaceApp {
             if decision.level < 2 {
                 self.ai_entity
                     .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
-                return Err(resume_after);
+                return Err(resume_after.map(Box::new));
             }
         }
         let Some(plan) = ai_compaction_plan_for_provider(
@@ -248,7 +248,7 @@ impl WorkspaceApp {
         ) else {
             self.ai_entity
                 .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
-            return Err(resume_after);
+            return Err(resume_after.map(Box::new));
         };
         if silent {
             self.ai_entity.update(cx, |ai, cx| {

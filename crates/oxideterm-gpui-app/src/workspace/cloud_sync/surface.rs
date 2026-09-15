@@ -260,7 +260,7 @@ impl CloudSyncPageRenderer {
                 self.render_cloud_sync_recent_history(cx)
             }
             CloudSyncSection::Rollback => {
-                let render = Arc::clone(&self.render);
+                let render = std::rc::Rc::clone(&self.render);
                 self.cloud_sync
                     .update(cx, |cloud_sync, cx| match active_tab {
                         CloudSyncTab::Overview => {
@@ -273,7 +273,7 @@ impl CloudSyncPageRenderer {
                     })
             }
             CloudSyncSection::History if active_tab == CloudSyncTab::History => {
-                let render = Arc::clone(&self.render);
+                let render = std::rc::Rc::clone(&self.render);
                 self.cloud_sync.update(cx, |cloud_sync, cx| {
                     cloud_sync.render_history_list(render, cx)
                 })

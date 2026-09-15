@@ -576,7 +576,7 @@ pub fn settings_ai_context_window_row(
         .bg(if has_override {
             rgba((tokens.ui.accent << 8) | AI_CONTEXT_USER_OVERRIDE_BG_ALPHA)
         } else {
-            rgba((tokens.ui.bg << 8) | 0x00)
+            rgba(tokens.ui.bg << 8)
         })
         .when(!is_first, |row| {
             row.border_t_1().border_color(rgba(

@@ -18,7 +18,7 @@ impl IdeSurface {
         if self.runtime_settings.background_active {
             // Tauri IDE leaves CodeMirror's scroller transparent when the tab
             // background is active; the tab strip/status/tree keep the 40% tint.
-            rgba((color << 8) | 0x00)
+            rgba(color << 8)
         } else {
             rgb(color)
         }

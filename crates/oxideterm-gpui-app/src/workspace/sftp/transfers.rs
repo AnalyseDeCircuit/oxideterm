@@ -97,7 +97,7 @@ impl SftpTransferRowRenderer {
         action: SftpTransferRowAction,
     ) -> AnyElement {
         let tooltip_id = element_id.clone();
-        let tooltip_label = label.clone();
+        let tooltip_label = label;
         let tooltip_sftp = self.sftp.clone();
         let clear_tooltip_id = element_id.clone();
         let clear_sftp = self.sftp.clone();

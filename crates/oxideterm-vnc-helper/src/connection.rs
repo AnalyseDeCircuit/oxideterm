@@ -1065,7 +1065,6 @@ mod io_owner_tests {
         let active_generation = Arc::new(AtomicU64::new(1));
         let owner_writer = writer.clone();
         let owner = thread::spawn({
-            let active_generation = active_generation.clone();
             move || {
                 run_vnc_io_owner(
                     transport,

@@ -1525,7 +1525,6 @@ impl WorkspaceApp {
             })
             .hover(move |style| style.bg(rgb(theme.bg_hover)))
             .on_mouse_move(cx.listener({
-                let branch_name = branch_name;
                 move |this, _event: &MouseMoveEvent, _window, cx| {
                     if this.terminal.update(cx, |terminal, _cx| {
                         terminal.set_git_branch_highlight(&branch_name)
@@ -1537,7 +1536,6 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener({
-                    let branch = branch;
                     move |this, _event, _window, cx| {
                         this.select_terminal_git_branch(branch.clone(), cx);
                         cx.stop_propagation();

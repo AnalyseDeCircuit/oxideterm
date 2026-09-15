@@ -1535,7 +1535,7 @@ impl WorkspaceApp {
                 let targets = if is_selected {
                     selected_targets.iter().cloned().collect::<Vec<_>>()
                 } else {
-                    vec![target.clone()]
+                    vec![target]
                 };
                 let label = if targets.len() > 1 {
                     selected_count_label(&self.i18n, targets.len())
@@ -2385,7 +2385,7 @@ impl WorkspaceApp {
             SessionManagerRowActionTarget::GroupRoot => None,
         };
         if let Some((delete_id, delete_label)) = delete_action {
-            let delete_target = menu.target.clone();
+            let delete_target = menu.target;
             popup = popup.child(
                 self.render_session_manager_menu_action(
                     dropdown_menu_item(

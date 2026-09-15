@@ -248,7 +248,7 @@ impl LiveWindow {
                 let mut output = Vec::new();
                 for (index, value) in values.iter().enumerate().skip(cursor.offset as usize) {
                     if self.items == 0 || self.bytes == 0 {
-                        let mut next = cursor.clone();
+                        let mut next = cursor;
                         next.offset = index as u64;
                         self.more.push(next);
                         break;
@@ -268,7 +268,7 @@ impl LiveWindow {
                 for (index, (key, value)) in values.iter().enumerate().skip(cursor.offset as usize)
                 {
                     if self.items == 0 || self.bytes == 0 {
-                        let mut next = cursor.clone();
+                        let mut next = cursor;
                         next.offset = index as u64;
                         self.more.push(next);
                         break;

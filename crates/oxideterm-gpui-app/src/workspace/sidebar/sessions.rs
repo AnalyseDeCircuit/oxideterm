@@ -1734,7 +1734,7 @@ impl WorkspaceApp {
                 ));
                 let listener = cx.listener({
                     let node_id = node_id.clone();
-                    let saved_connection_id = row.saved_connection_id.clone();
+                    let saved_connection_id = row.saved_connection_id;
                     move |this, _event, window, cx| {
                         if let Some(saved_connection_id) = saved_connection_id.as_deref() {
                             this.open_saved_connection_reconnect_editor(

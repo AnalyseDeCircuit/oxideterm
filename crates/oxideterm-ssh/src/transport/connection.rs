@@ -334,7 +334,7 @@ impl SshConnectionHandle {
                     ChannelMsg::Data { data } => {
                         output.extend_from_slice(&data);
                     }
-                    ChannelMsg::ExtendedData { data, ext } if ext == 1 => {
+                    ChannelMsg::ExtendedData { data, ext: 1 } => {
                         output.extend_from_slice(&data);
                     }
                     ChannelMsg::ExitStatus {
@@ -503,7 +503,7 @@ impl SshConnectionHandle {
                             &mut truncated,
                         );
                     }
-                    ChannelMsg::ExtendedData { data, ext } if ext == 1 => {
+                    ChannelMsg::ExtendedData { data, ext: 1 } => {
                         append_limited_command_output(
                             &mut stderr,
                             &data,

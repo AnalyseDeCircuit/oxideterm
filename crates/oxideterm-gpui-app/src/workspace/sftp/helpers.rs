@@ -484,10 +484,7 @@ async fn load_remote_sftp_listing_inner(
     path: &str,
     update_ready_path: bool,
 ) -> Result<RemoteSftpListing, String> {
-    let transfer = backend
-        .acquire_transfer_sftp()
-        .await
-        .map_err(|error| error.to_string())?;
+    let transfer = backend.acquire_transfer_sftp().await?;
     match list_remote_sftp_once(&transfer, path).await {
         Ok(listing) => {
             if update_ready_path
@@ -513,10 +510,7 @@ async fn load_remote_sftp_listing_inner(
             // Retry directory listing on a new transfer channel. The shared
             // SFTP owner is not part of this path, so a slow list cannot block
             // preview/save operations that already use their own channels.
-            let transfer = backend
-                .acquire_transfer_sftp()
-                .await
-                .map_err(|route_error| route_error.to_string())?;
+            let transfer = backend.acquire_transfer_sftp().await?;
             let listing = list_remote_sftp_once(&transfer, path)
                 .await
                 .map_err(|retry_error| retry_error.to_string())?;
@@ -547,19 +541,13 @@ pub(in crate::workspace::sftp) async fn load_remote_sftp_preview(
     backend: SftpRemoteBackend,
     path: &str,
 ) -> Result<PreviewContent, String> {
-    let sftp = backend
-        .acquire_transfer_sftp()
-        .await
-        .map_err(|error| error.to_string())?;
+    let sftp = backend.acquire_transfer_sftp().await?;
     match load_remote_sftp_preview_once(&sftp, path).await {
         Ok(preview) => Ok(preview),
         Err(error) if error.is_channel_recoverable() => {
             // Preview can be slow and must not hold the shared directory-owner
             // SFTP mutex; retry once with a fresh short-lived SFTP channel.
-            let sftp = backend
-                .acquire_transfer_sftp()
-                .await
-                .map_err(|route_error| route_error.to_string())?;
+            let sftp = backend.acquire_transfer_sftp().await?;
             load_remote_sftp_preview_once(&sftp, path)
                 .await
                 .map_err(|retry_error| retry_error.to_string())
@@ -580,19 +568,13 @@ pub(in crate::workspace::sftp) async fn load_remote_sftp_preview_hex(
     path: &str,
     offset: u64,
 ) -> Result<PreviewContent, String> {
-    let sftp = backend
-        .acquire_transfer_sftp()
-        .await
-        .map_err(|error| error.to_string())?;
+    let sftp = backend.acquire_transfer_sftp().await?;
     match load_remote_sftp_preview_hex_once(&sftp, path, offset).await {
         Ok(preview) => Ok(preview),
         Err(error) if error.is_channel_recoverable() => {
             // Hex preview uses its own channel for the same reason as text
             // preview: large reads should not block directory navigation.
-            let sftp = backend
-                .acquire_transfer_sftp()
-                .await
-                .map_err(|route_error| route_error.to_string())?;
+            let sftp = backend.acquire_transfer_sftp().await?;
             load_remote_sftp_preview_hex_once(&sftp, path, offset)
                 .await
                 .map_err(|retry_error| retry_error.to_string())
@@ -623,10 +605,7 @@ pub(in crate::workspace::sftp) async fn save_remote_sftp_preview(
     };
     let remote_content = restore_text_line_endings(content, line_ending);
     let encoded = encode_to_encoding(&remote_content, target_encoding);
-    let sftp = backend
-        .acquire_transfer_sftp()
-        .await
-        .map_err(|error| error.to_string())?;
+    let sftp = backend.acquire_transfer_sftp().await?;
     // Saving uses a short-lived SFTP channel so a large write/stat round trip
     // cannot stall the shared directory listing owner.
     let write_result = sftp

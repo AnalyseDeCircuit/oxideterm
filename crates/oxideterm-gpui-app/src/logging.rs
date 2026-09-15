@@ -32,6 +32,7 @@ impl SizeLimitedLogWriter {
         }
         let file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(path)?;
@@ -252,7 +253,7 @@ mod tests {
         let log_path = directory.0.join(LOG_FILE_NAME);
         let mut writer = SizeLimitedLogWriter::open(&log_path, 64).expect("open bounded log");
 
-        writer.write_all(&vec![b'x'; 128]).unwrap();
+        writer.write_all(&[b'x'; 128]).unwrap();
         writer.flush().unwrap();
 
         let contents = std::fs::read_to_string(log_path).unwrap();

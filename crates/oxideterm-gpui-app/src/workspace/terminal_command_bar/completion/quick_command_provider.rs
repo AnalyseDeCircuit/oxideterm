@@ -15,7 +15,7 @@ pub(super) fn infer_terminal_ssh_identity_from_buffer(buffer: &str) -> Option<St
     buffer[tail_start..]
         .split_whitespace()
         .filter_map(terminal_ssh_identity_candidate)
-        .last()
+        .next_back()
 }
 
 fn terminal_ssh_identity_candidate(token: &str) -> Option<String> {

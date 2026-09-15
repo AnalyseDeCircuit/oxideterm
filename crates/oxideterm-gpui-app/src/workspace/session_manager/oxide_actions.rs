@@ -121,7 +121,7 @@ impl SessionManagerState {
             release_wake.stop();
         })
         .detach();
-        let task_wake = wake.clone();
+        let task_wake = wake;
         let delivery_task = cx.spawn(async move |session_manager, cx| {
             loop {
                 task_wake.wait().await;
@@ -1775,7 +1775,6 @@ impl WorkspaceApp {
                 .available_forwards
                 .iter()
                 .cloned()
-                .into_iter()
                 .filter_map(|forward| {
                     let owner_id = forward.owner_connection_id?;
                     (selected_ids.contains(&owner_id)

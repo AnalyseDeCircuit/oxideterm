@@ -367,7 +367,6 @@ impl WorkspaceApp {
                     LucideIcon::FolderOpen,
                     self.i18n.t("terminal.cwd.open_file_manager"),
                     {
-                        let path = path;
                         move |this, _event, window, cx| {
                             this.open_terminal_cwd_path_in_file_manager(path.clone(), window, cx);
                             cx.stop_propagation();
@@ -400,7 +399,6 @@ impl WorkspaceApp {
                     self.i18n.t("terminal.cwd.open_ide"),
                     {
                         let node_id = NodeId::new(node_id);
-                        let path = path;
                         move |this, _event, _window, cx| {
                             this.open_terminal_cwd_path_in_ide(node_id.clone(), path.clone(), cx);
                             cx.stop_propagation();
@@ -1124,7 +1122,6 @@ impl WorkspaceApp {
         )
         .cursor_pointer()
         .on_mouse_move(cx.listener({
-            let task_id = task_id;
             move |this, _event: &MouseMoveEvent, _window, cx| {
                 if this.terminal.update(cx, |terminal, _cx| {
                     terminal.set_project_task_highlight(&task_id)

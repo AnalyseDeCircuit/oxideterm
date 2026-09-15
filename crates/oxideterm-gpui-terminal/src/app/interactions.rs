@@ -1167,7 +1167,7 @@ impl TerminalPane {
 
         let available = (geometry.track_height - geometry.height).max(px(1.0));
         let y = (position.y - geometry.y - thumb_offset_y).clamp(px(0.0), available);
-        let scroll_fraction = f32::from(y / available);
+        let scroll_fraction = y / available;
         let history = self.snapshot.scrollback_lines;
         let offset = ((1.0 - scroll_fraction) * history as f32).round() as usize;
         let snapshot = {

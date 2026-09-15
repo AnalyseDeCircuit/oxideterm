@@ -354,9 +354,7 @@ impl WorkspaceApp {
             .filter(|model| !model.is_empty())
         {
             let model_label = model
-                .split('/')
-                .filter(|part| !part.is_empty())
-                .next_back()
+                .split('/').rfind(|part| !part.is_empty())
                 .unwrap_or(model)
                 .to_string();
             header = header.child(ai_message_model_badge(&self.tokens, model_label));

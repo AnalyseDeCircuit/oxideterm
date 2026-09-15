@@ -563,7 +563,7 @@ impl NativePluginRegistry {
                 &plugin_snapshot.manifest,
                 &plugin_snapshot.runtime_plan,
             )?;
-            entry.approved_for_version = Some(plugin_snapshot.manifest.version.clone());
+            entry.approved_for_version = Some(plugin_snapshot.manifest.version);
             entry.approved_runtime_kind = Some(runtime_kind);
             // Tauri reload clears the disabled/error path before trying to load
             // again. Native Phase 1 has no runtime yet, but the config state must

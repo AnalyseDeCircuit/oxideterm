@@ -443,7 +443,7 @@ impl WorkspaceApp {
                                     Some(if broadcast_enabled {
                                         rgba((theme.accent << 8) | 0x26)
                                     } else {
-                                        rgba((theme.bg_hover << 8) | 0x00)
+                                        rgba(theme.bg_hover << 8)
                                     }),
                                     "terminal-command-broadcast",
                                     self.i18n.t("terminal.broadcast.select_targets"),

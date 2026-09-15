@@ -19,8 +19,10 @@ pub const MAX_HIGHLIGHT_PATTERN_LENGTH: usize = 512;
 pub type ExtraFields = Map<String, Value>;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Default)]
 pub enum Language {
     #[serde(rename = "zh-CN")]
+    #[default]
     ZhCn,
     #[serde(rename = "en")]
     En,
@@ -44,11 +46,6 @@ pub enum Language {
     ZhTw,
 }
 
-impl Default for Language {
-    fn default() -> Self {
-        Self::ZhCn
-    }
-}
 
 impl Language {
     pub fn as_str(self) -> &'static str {

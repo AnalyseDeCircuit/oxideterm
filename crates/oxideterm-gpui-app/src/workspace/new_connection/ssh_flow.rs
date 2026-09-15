@@ -115,7 +115,7 @@ struct SavedConnectionRuntimeHandoff {
     auth_override: Option<AuthMethod>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
 pub(in crate::workspace) struct SshTerminalConnectionOptions {
     pub(in crate::workspace) terminal: ConnectionTerminalOptions,
     pub(in crate::workspace) dedicated_new_terminal_connection: bool,
@@ -129,16 +129,6 @@ impl SshTerminalConnectionOptions {
             terminal: form.terminal.clone(),
             dedicated_new_terminal_connection: form.dedicated_new_terminal_connection,
             ssh_channel_strategy: form.ssh_channel_strategy,
-        }
-    }
-}
-
-impl Default for SshTerminalConnectionOptions {
-    fn default() -> Self {
-        Self {
-            terminal: ConnectionTerminalOptions::default(),
-            dedicated_new_terminal_connection: false,
-            ssh_channel_strategy: SshChannelStrategy::default(),
         }
     }
 }

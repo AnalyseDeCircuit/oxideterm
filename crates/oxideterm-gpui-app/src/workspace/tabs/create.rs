@@ -487,7 +487,7 @@ impl WorkspaceApp {
             Tab {
                 id: tab_id,
                 kind: TabKind::LocalTerminal,
-                title: title.clone(),
+                title: title,
                 title_source: TabTitleSource::Static,
                 root_pane: Some(PaneNode::leaf(pane_id, session_id)),
                 active_pane_id: Some(pane_id),
@@ -600,14 +600,13 @@ impl WorkspaceApp {
 
         // Serial owns no SSH node and must not expose SFTP, forwarding, or ProxyJump.
         self.register_terminal_pane(pane_id, session_id, pane.clone(), window, cx);
-        self.serial_terminal_configs
-            .insert(session_id, config.clone());
+        self.serial_terminal_configs.insert(session_id, config);
         self.refresh_native_plugin_terminal_hooks(cx);
         self.insert_tab(
             Tab {
                 id: tab_id,
                 kind: TabKind::LocalTerminal,
-                title: title.clone(),
+                title: title,
                 title_source: TabTitleSource::Static,
                 root_pane: Some(PaneNode::leaf(pane_id, session_id)),
                 active_pane_id: Some(pane_id),
@@ -667,7 +666,7 @@ impl WorkspaceApp {
             Tab {
                 id: tab_id,
                 kind: TabKind::MoshTerminal,
-                title: title.clone(),
+                title: title,
                 title_source: TabTitleSource::Static,
                 root_pane: Some(PaneNode::leaf(pane_id, session_id)),
                 active_pane_id: Some(pane_id),
@@ -873,7 +872,7 @@ impl WorkspaceApp {
                 Some(saved_connection_id.clone()),
             );
             if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
-                node.terminal_options = saved_terminal_options.clone();
+                node.terminal_options = saved_terminal_options;
                 node.dedicated_new_terminal_connection = saved_dedicated_new_terminal_connection;
                 node.ssh_channel_strategy = saved_ssh_channel_strategy;
             }

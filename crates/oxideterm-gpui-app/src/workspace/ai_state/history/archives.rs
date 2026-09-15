@@ -35,10 +35,7 @@ impl AiWorkspaceEntity {
                 view.messages.clear();
                 self.history
                     .auxiliary_pages
-                    .remove(&HistoryViewOwner::Archive(
-                        conversation.clone(),
-                        message.clone(),
-                    ));
+                    .remove(&HistoryViewOwner::Archive(conversation, message));
                 view.revision += 1;
                 if let Some(task) = self.history.archive_tasks.remove(&key) {
                     task.abort();
@@ -49,7 +46,7 @@ impl AiWorkspaceEntity {
         self.history.archives.insert(
             key,
             ArchiveView {
-                range: range.clone(),
+                range: range,
                 messages: Vec::new(),
                 list: gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(500.0)),
                 before: None,

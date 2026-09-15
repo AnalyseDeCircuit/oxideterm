@@ -281,7 +281,7 @@ impl WorkspaceApp {
         let failed = page.failed;
         let has_more = page.has_more;
         let count = self.ai_entity.read(cx).conversation_state().conversations.iter().filter(|item| item.archived == show_archived).count();
-        let dropdown_height = (count as f32 * AI_CONVERSATION_ROW_HEIGHT + 36.0 + if loading || failed || has_more { 36.0 } else { 0.0 }).max(AI_CONVERSATION_EMPTY_HEIGHT + 36.0).min(AI_CONVERSATION_MAX_HEIGHT);
+        let dropdown_height = (count as f32 * AI_CONVERSATION_ROW_HEIGHT + 36.0 + if loading || failed || has_more { 36.0 } else { 0.0 }).clamp(AI_CONVERSATION_EMPTY_HEIGHT + 36.0, AI_CONVERSATION_MAX_HEIGHT);
         let scroll_handle =
             self.selectable_text_scroll_handle("ai-conversation-dropdown-scroll");
         let mut list = div()
@@ -492,7 +492,7 @@ impl WorkspaceApp {
         } else {
             self.i18n.t("ai.chat.rename_conversation")
         };
-        let rename_tooltip_label = rename_tooltip.clone();
+        let rename_tooltip_label = rename_tooltip;
         let rename_tooltip_tokens = self.tokens;
         let rename_button = div()
             .id(format!("ai-conversation-rename-{id}"))

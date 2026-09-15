@@ -146,7 +146,7 @@ impl RemoteDesktopFrameQueue {
         }
 
         if let Some(existing) = self.frames.back_mut() {
-            if let Err(incoming) = try_merge_frame_event(existing, event) {
+            if let Some(incoming) = merge_frame_event(existing, event) {
                 self.frames.push_back(incoming);
             }
         } else {
@@ -365,20 +365,21 @@ fn frame_event_bytes(event: &RemoteDesktopHelperEvent) -> usize {
     }
 }
 
-fn try_merge_frame_event(
+// Return a frame that still needs its own queue slot when merging is not possible.
+fn merge_frame_event(
     existing: &mut RemoteDesktopHelperEvent,
     incoming: RemoteDesktopHelperEvent,
-) -> Result<(), RemoteDesktopHelperEvent> {
+) -> Option<RemoteDesktopHelperEvent> {
     match existing {
         RemoteDesktopHelperEvent::Frame { frame } => match incoming {
             RemoteDesktopHelperEvent::FrameUpdate { update } => {
                 if !frame.apply_update(&update) {
-                    return Err(RemoteDesktopHelperEvent::FrameUpdate { update });
+                    return Some(RemoteDesktopHelperEvent::FrameUpdate { update });
                 }
             }
             RemoteDesktopHelperEvent::FrameUpdateBatch { batch } => {
                 if !frame.apply_update_batch(&batch) {
-                    return Err(RemoteDesktopHelperEvent::FrameUpdateBatch { batch });
+                    return Some(RemoteDesktopHelperEvent::FrameUpdateBatch { batch });
                 }
             }
             incoming => *existing = incoming,
@@ -388,13 +389,13 @@ fn try_merge_frame_event(
                 update: incoming_update,
             } => {
                 if !update.merge(&incoming_update) {
-                    return Err(RemoteDesktopHelperEvent::FrameUpdate {
+                    return Some(RemoteDesktopHelperEvent::FrameUpdate {
                         update: incoming_update,
                     });
                 }
             }
             incoming @ RemoteDesktopHelperEvent::FrameUpdateBatch { .. } => {
-                return Err(incoming);
+                return Some(incoming);
             }
             incoming => *existing = incoming,
         },
@@ -406,16 +407,16 @@ fn try_merge_frame_event(
                     incoming_batch,
                     REMOTE_DESKTOP_MAX_FRAME_UPDATE_BATCH_REGIONS,
                 ) {
-                    return Err(RemoteDesktopHelperEvent::FrameUpdateBatch {
+                    return Some(RemoteDesktopHelperEvent::FrameUpdateBatch {
                         batch: incoming_batch,
                     });
                 }
             }
-            incoming => return Err(incoming),
+            incoming => return Some(incoming),
         },
         slot => *slot = incoming,
     }
-    Ok(())
+    None
 }
 
 #[cfg(test)]

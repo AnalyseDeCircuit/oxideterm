@@ -37,8 +37,8 @@ fn validate_download_resume_progress(
         && progress.transfer_type == TransferType::Download
         && progress.protocol == TransferProtocol::Sftp
         && progress.strategy == TransferStrategy::File
-        && progress.source_path == PathBuf::from(remote_path)
-        && progress.destination_path == PathBuf::from(local_path)
+        && progress.source_path == std::path::Path::new(remote_path)
+        && progress.destination_path == std::path::Path::new(local_path)
         && progress.total_bytes == total_bytes
         && progress.is_incomplete();
     if matches_transfer {
@@ -273,8 +273,8 @@ impl SftpSession {
             .into_iter()
             .find(|progress| {
                 progress.transfer_type == TransferType::Upload
-                    && progress.source_path == PathBuf::from(local_path)
-                    && progress.destination_path == PathBuf::from(&canonical_remote)
+                    && progress.source_path == std::path::Path::new(local_path)
+                    && progress.destination_path == canonical_remote
             });
         if let Some(progress) = stored.as_ref()
             && progress.total_bytes != total_bytes

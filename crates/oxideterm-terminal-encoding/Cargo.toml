@@ -1,3 +1,6 @@
+[lints]
+workspace = true
+
 [package]
 name = "oxideterm-terminal-encoding"
 edition.workspace = true
@@ -6,4 +9,3 @@ version.workspace = true
 
 [dependencies]
 encoding_rs.workspace = true
-

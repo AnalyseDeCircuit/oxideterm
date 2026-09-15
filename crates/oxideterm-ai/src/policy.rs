@@ -25,16 +25,12 @@ pub enum AiActionRisk {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum AiPolicySafetyMode {
+    #[default]
     Default,
     ReadOnly,
     Bypass,
-}
-
-impl Default for AiPolicySafetyMode {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

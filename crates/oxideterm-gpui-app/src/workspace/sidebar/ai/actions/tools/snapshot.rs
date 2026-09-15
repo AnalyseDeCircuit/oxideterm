@@ -800,7 +800,7 @@ impl WorkspaceApp {
         // Copy token-bearing args and environment values exactly once into the
         // zeroizing launch owner that is moved to the ACP worker.
         let launch_config = oxideterm_ai::AcpLaunchConfig {
-            id: agent_id.clone(),
+            id: agent_id,
             display_name,
             command: agent.command.clone(),
             args: agent.args.clone(),

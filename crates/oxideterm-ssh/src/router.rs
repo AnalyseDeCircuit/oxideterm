@@ -65,6 +65,7 @@ pub enum NodeReadiness {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum NodeOrigin {
     ManualPreset {
         saved_connection_id: String,
@@ -80,16 +81,11 @@ pub enum NodeOrigin {
     DrillDown {
         timestamp: i64,
     },
+    #[default]
     Direct,
     Restored {
         saved_connection_id: String,
     },
-}
-
-impl Default for NodeOrigin {
-    fn default() -> Self {
-        Self::Direct
-    }
 }
 
 impl NodeOrigin {

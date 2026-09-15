@@ -366,7 +366,7 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
             auth_tab: SshAuthTab::ManagedKey,
             password: String::new(),
             key_path: String::new(),
-            managed_key_id: key_id.clone(),
+            managed_key_id: key_id,
             cert_path: String::new(),
             passphrase: passphrase
                 .as_mut()
@@ -385,9 +385,9 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
             empty_password: false,
             auth_tab: SshAuthTab::Certificate,
             password: String::new(),
-            key_path: key_path.clone(),
+            key_path: key_path,
             managed_key_id: String::new(),
-            cert_path: cert_path.clone(),
+            cert_path: cert_path,
             passphrase: passphrase
                 .as_mut()
                 .map(|value| std::mem::take(&mut **value))

@@ -814,7 +814,7 @@ impl WorkspaceApp {
                     .workspace_runtime
                     .read(cx)
                     .ssh_terminal_node_id(session_id)?;
-                CurrentDirectoryScope::ssh_node(node_id.0.clone())
+                CurrentDirectoryScope::ssh_node(node_id.0)
             }
             _ => return None,
         };

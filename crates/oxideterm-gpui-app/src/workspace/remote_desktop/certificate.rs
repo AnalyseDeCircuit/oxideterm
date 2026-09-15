@@ -395,7 +395,7 @@ impl WorkspaceApp {
             .child(method_label)
             .into_any_element();
         let challenge_id = challenge.certificate.challenge_id.clone();
-        let fingerprint = challenge.certificate.sha256_fingerprint.clone();
+        let fingerprint = challenge.certificate.sha256_fingerprint;
         let reject_challenge_id = challenge_id.clone();
 
         confirm_dialog(

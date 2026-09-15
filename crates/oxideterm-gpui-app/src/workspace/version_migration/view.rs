@@ -37,12 +37,8 @@ impl WorkspaceApp {
         let viewport = window.viewport_size();
         let available_width = f32::from(viewport.width) - VERSION_MIGRATION_VIEWPORT_MARGIN * 2.0;
         let available_height = f32::from(viewport.height) - VERSION_MIGRATION_VIEWPORT_MARGIN * 2.0;
-        let dialog_width = available_width
-            .min(VERSION_MIGRATION_DIALOG_MAX_WIDTH)
-            .max(280.0);
-        let dialog_height = available_height
-            .min(VERSION_MIGRATION_DIALOG_MAX_HEIGHT)
-            .max(320.0);
+        let dialog_width = available_width.clamp(280.0, VERSION_MIGRATION_DIALOG_MAX_WIDTH);
+        let dialog_height = available_height.clamp(320.0, VERSION_MIGRATION_DIALOG_MAX_HEIGHT);
         let compact = dialog_width < VERSION_MIGRATION_COMPACT_WIDTH;
 
         oxideterm_gpui_ui::modal::dialog_backdrop()

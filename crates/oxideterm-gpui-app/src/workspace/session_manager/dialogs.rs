@@ -256,7 +256,7 @@ impl WorkspaceApp {
         let has_background = self.background_surface_active("session_manager");
 
         let dialog = modal_backdrop(rgba(
-            (0x000000 << 8) | SESSION_MANAGER_LIGHT_DIALOG_BACKDROP_ALPHA,
+            SESSION_MANAGER_LIGHT_DIALOG_BACKDROP_ALPHA,
         ))
         .on_mouse_down(
             MouseButton::Left,
@@ -332,7 +332,7 @@ impl WorkspaceApp {
                             ),
                         ),
                 )
-                .when_some(editor.clone(), |dialog, _editor| {
+                .when_some(editor, |dialog, _editor| {
                     dialog.child(
                         div()
                             .flex()

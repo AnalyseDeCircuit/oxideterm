@@ -397,7 +397,6 @@ impl WorkspaceApp {
                 portable_secrets,
                 automatic,
                 skip_if_busy,
-                ..UploadOptions::default()
             },
             automatic,
         ));

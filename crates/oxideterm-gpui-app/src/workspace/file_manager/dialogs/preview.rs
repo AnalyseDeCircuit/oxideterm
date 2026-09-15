@@ -32,7 +32,7 @@ fn render_file_manager_archive_row(
         .flex()
         .gap(px(8.0))
         .items_center()
-        .bg(if index % 2 == 0 {
+        .bg(if index.is_multiple_of(2) {
             file_manager_panel_bg(background_panel, has_background, 0x33)
         } else {
             rgba(0)

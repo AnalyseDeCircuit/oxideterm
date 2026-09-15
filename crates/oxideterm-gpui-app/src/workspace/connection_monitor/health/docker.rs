@@ -425,7 +425,7 @@ impl HostToolsEntity {
         let host_tools = cx.entity();
         let row_tokens = *tokens;
         let row_i18n = i18n.clone();
-        let row_mono_font_family = mono_font_family.clone();
+        let row_mono_font_family = mono_font_family;
         div()
             .w_full()
             .min_w_0()

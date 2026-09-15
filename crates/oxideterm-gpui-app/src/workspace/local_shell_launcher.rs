@@ -119,12 +119,12 @@ impl WorkspaceApp {
                     .border_color(if selected {
                         rgb(theme.accent)
                     } else {
-                        rgba((theme.border << 8) | 0x00)
+                        rgba(theme.border << 8)
                     })
                     .bg(if selected {
                         rgba((theme.accent << 8) | 0x1a)
                     } else {
-                        rgba((theme.bg_hover << 8) | 0x00)
+                        rgba(theme.bg_hover << 8)
                     })
                     .hover(move |style| style.bg(rgb(theme.bg_hover)))
                     .px(px(12.0))

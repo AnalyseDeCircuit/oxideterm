@@ -42,6 +42,7 @@ pub fn acquire_portable_instance_lock() -> Result<(), PortableError> {
     })?;
     let file = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&info.instance_lock_path)

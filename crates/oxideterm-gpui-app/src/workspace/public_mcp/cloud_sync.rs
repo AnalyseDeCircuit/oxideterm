@@ -330,7 +330,7 @@ impl WorkspaceApp {
         let connection_store = self.connection_store.clone();
         let settings = state.settings.clone();
         let hints = state.secret_hints.clone();
-        let previous_remote_sections = state.last_synced_remote_sections.clone();
+        let previous_remote_sections = state.last_synced_remote_sections;
         let cancellation = request.cancellation_token();
         let worker = self.forwarding_runtime.spawn(async move {
             tokio::select! {
@@ -474,7 +474,7 @@ impl WorkspaceApp {
         let force = args.force;
         let service = self.cloud_sync.read(cx).controller.service.clone();
         let settings = state.settings.clone();
-        let hints = state.secret_hints.clone();
+        let hints = state.secret_hints;
         let cancellation = request.cancellation_token();
         let skip_remote_check = matches!(settings.backend_type, BackendType::GithubGist)
             && settings.git_repository.trim().is_empty();
@@ -684,7 +684,7 @@ impl WorkspaceApp {
         let settings_store = self.settings_store.clone();
         let settings = state.settings.clone();
         let hints = state.secret_hints.clone();
-        let source_revision = state.last_known_remote_revision.clone();
+        let source_revision = state.last_known_remote_revision;
         let cancellation = request.cancellation_token();
         let worker = self.forwarding_runtime.spawn(async move {
             run_pull_apply_worker(
@@ -833,8 +833,8 @@ impl WorkspaceApp {
             device_id,
             revision_sequence,
             previous_remote_revision: remote.revision.clone(),
-            previous_remote_sections: remote.section_revisions.clone(),
-            last_synced_structured_state: state.last_synced_structured_state.clone(),
+            previous_remote_sections: remote.section_revisions,
+            last_synced_structured_state: state.last_synced_structured_state,
             raw_sync_scope: Some(raw_scope),
             portable_secrets,
             automatic: false,
