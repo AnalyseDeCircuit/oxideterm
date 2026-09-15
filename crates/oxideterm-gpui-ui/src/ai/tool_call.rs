@@ -266,7 +266,7 @@ pub fn ai_tool_section_label(
 pub fn ai_tool_pre(
     tokens: &ThemeTokens,
     id: impl Into<ElementId>,
-    content: impl Into<String>,
+    content: impl IntoElement,
     max_height: f32,
     mono_font_family: SharedString,
     scroll_handle: &ScrollHandle,
@@ -308,13 +308,13 @@ pub fn ai_tool_pre(
                 }
             }
         })
-        .child(content.into())
+        .child(content)
 }
 
 pub fn ai_tool_args_pre(
     tokens: &ThemeTokens,
     id: impl Into<ElementId>,
-    content: impl Into<String>,
+    content: impl IntoElement,
     mono_font_family: SharedString,
     scroll_handle: &ScrollHandle,
 ) -> Stateful<Div> {
@@ -331,7 +331,7 @@ pub fn ai_tool_args_pre(
 pub fn ai_tool_structured_pre(
     tokens: &ThemeTokens,
     id: impl Into<ElementId>,
-    content: impl Into<String>,
+    content: impl IntoElement,
     mono_font_family: SharedString,
     scroll_handle: &ScrollHandle,
 ) -> Stateful<Div> {
@@ -348,7 +348,7 @@ pub fn ai_tool_structured_pre(
 pub fn ai_tool_output_pre(
     tokens: &ThemeTokens,
     id: impl Into<ElementId>,
-    content: impl Into<String>,
+    content: impl IntoElement,
     mono_font_family: SharedString,
     scroll_handle: &ScrollHandle,
 ) -> Stateful<Div> {

@@ -691,6 +691,7 @@ impl WorkspaceApp {
         let mut round_id = None;
         let mut round_number = None;
         self.ai_entity.update(cx, |ai, _cx| {
+            ai.update_tool_approval_preview(generation, message_id, tool_call_id, arguments, status);
             ai.update_chat_message(conversation_id, message_id, |message| {
                 update_ai_tool_call_status(
                     message,

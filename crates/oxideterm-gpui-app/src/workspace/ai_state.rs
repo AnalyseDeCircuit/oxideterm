@@ -362,6 +362,9 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     chat_drafts: HashMap<String, zeroize::Zeroizing<String>>,
     pub(in crate::workspace) pending_user_questions: HashMap<(u64, String), AiPendingUserQuestion>,
     pending_tool_approvals: HashMap<(u64, String), tokio::sync::oneshot::Sender<bool>>,
+    // Approval previews are runtime-only; conversation history never owns execution payloads.
+    pub(in crate::workspace) tool_approval_previews:
+        HashMap<(u64, String), zeroize::Zeroizing<String>>,
     pending_acp_permission_choices:
         HashMap<(u64, String), tokio::sync::oneshot::Sender<Option<String>>>,
     pending_tool_candidate_selections:
@@ -1136,6 +1139,7 @@ impl AiWorkspaceEntity {
             chat_drafts: HashMap::new(),
             pending_user_questions: HashMap::new(),
             pending_tool_approvals: HashMap::new(),
+            tool_approval_previews: HashMap::new(),
             pending_acp_permission_choices: HashMap::new(),
             pending_tool_candidate_selections: HashMap::new(),
             pending_tool_candidate_counts: HashMap::new(),
@@ -3642,6 +3646,8 @@ impl AiWorkspaceEntity {
     }
 
     fn reject_run_tool_interactions(&mut self, generation: u64) {
+        self.tool_approval_previews
+            .retain(|(run, _), _| *run != generation);
         self.history.answers.retain(|(run, _), task| {
             if *run == generation {
                 task.abort();
@@ -3753,6 +3759,29 @@ impl AiWorkspaceEntity {
         true
     }
 
+    pub(in crate::workspace) fn update_tool_approval_preview(
+        &mut self,
+        generation: u64,
+        message_id: &str,
+        tool_call_id: &str,
+        arguments: &str,
+        status: &str,
+    ) {
+        let key = (generation, tool_call_id.to_owned());
+        if status != "pending_user_approval" || !self.is_chat_stream_generation(generation) {
+            self.tool_approval_previews.remove(&key);
+            return;
+        }
+        let preview =
+            zeroize::Zeroizing::new(oxideterm_ai::sanitize_json_text_for_persistence(arguments));
+        if self.tool_approval_previews.insert(key, preview).is_none() {
+            // Show what is being approved immediately, while keeping the existing collapse control.
+            self.chat_ui
+                .tool_call_expansion_state
+                .insert(format!("{message_id}:{tool_call_id}"));
+        }
+    }
+
     pub(in crate::workspace) fn register_tool_approval(
         &mut self,
         generation: u64,
@@ -3786,6 +3815,8 @@ impl AiWorkspaceEntity {
         else {
             return false;
         };
+        self.tool_approval_previews
+            .remove(&(generation, tool_call_id.to_owned()));
         let _ = sender.send(approved);
         true
     }
@@ -3821,11 +3852,14 @@ impl AiWorkspaceEntity {
         else {
             return false;
         };
+        self.tool_approval_previews
+            .remove(&(generation, tool_call_id.to_owned()));
         let _ = sender.send(option_id);
         true
     }
 
     fn reject_all_tool_approvals(&mut self) {
+        self.tool_approval_previews.clear();
         self.pending_user_questions.clear();
         for (_, sender) in self.pending_tool_approvals.drain() {
             let _ = sender.send(false);
@@ -6086,6 +6120,76 @@ pub(in crate::workspace) mod entity_tests {
             assert!(entity.complete_chat_stream(generation));
             assert!(!entity.is_chat_stream_generation(generation));
             assert!(!entity.complete_chat_stream(generation));
+        });
+    }
+
+    #[gpui::test]
+    fn approval_preview_is_visible_redacted_and_cleared_after_interaction(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, _cx| {
+            let (generation, _) =
+                entity.begin_chat_stream("conversation-a".into(), "assistant-a".into());
+            let arguments = r#"{"command":"pwd\nls -la","apiKey":"private-test-key"}"#;
+            let key = (generation, "tool-a".to_string());
+            for approved in [true, false] {
+                let (sender, mut receiver) = tokio::sync::oneshot::channel();
+                entity.register_tool_approval(generation, "tool-a".into(), sender);
+                entity.update_tool_approval_preview(
+                    generation,
+                    "assistant-a",
+                    "tool-a",
+                    arguments,
+                    "pending_user_approval",
+                );
+                let preview: serde_json::Value =
+                    serde_json::from_str(entity.tool_approval_previews[&key].as_str()).unwrap();
+                assert_eq!(
+                    preview,
+                    serde_json::json!({"command": "pwd\nls -la", "apiKey": "[REDACTED]"})
+                );
+                assert!(
+                    entity
+                        .chat_ui
+                        .tool_call_expansion_state
+                        .contains("assistant-a:tool-a")
+                );
+                let persisted = oxideterm_ai::sanitize_tool_arguments_text_for_persistence(
+                    entity.tool_approval_previews[&key].as_str(),
+                );
+                assert!(!persisted.contains("pwd"));
+                assert!(!persisted.contains("private-test-key"));
+                entity.resolve_tool_approval(generation, "tool-a", approved);
+                assert_eq!(receiver.try_recv(), Ok(approved));
+                assert!(!entity.tool_approval_previews.contains_key(&key));
+            }
+            entity.update_tool_approval_preview(
+                generation,
+                "assistant-a",
+                "tool-a",
+                arguments,
+                "pending_user_approval",
+            );
+            entity.update_tool_approval_preview(generation, "assistant-a", "tool-a", "{}", "error");
+            assert!(!entity.tool_approval_previews.contains_key(&key));
+            entity.update_tool_approval_preview(
+                generation,
+                "assistant-a",
+                "tool-a",
+                arguments,
+                "pending_user_approval",
+            );
+            entity.cancel_chat_stream_for("conversation-a");
+            assert!(!entity.tool_approval_previews.contains_key(&key));
+            entity.update_tool_approval_preview(
+                generation,
+                "assistant-a",
+                "tool-a",
+                arguments,
+                "pending_user_approval",
+            );
+            assert!(!entity.tool_approval_previews.contains_key(&key));
         });
     }
 

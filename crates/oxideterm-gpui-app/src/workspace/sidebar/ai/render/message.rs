@@ -1424,6 +1424,16 @@ impl WorkspaceApp {
                 .unwrap_or_default()
                 .to_string();
             let status = ai_tool_status_from_value(call.get("status"));
+            let arguments = if status == AiToolStatus::PendingApproval {
+                self.ai_entity
+                    .read(cx)
+                    .tool_approval_previews
+                    .get(&(approval_generation, id.clone()))
+                    .map(|preview| preview.to_string())
+                    .unwrap_or(arguments)
+            } else {
+                arguments
+            };
             let risk = ai_tool_risk_from_value(call.get("risk"), &name);
             let arguments_value = serde_json::from_str::<serde_json::Value>(&arguments).ok();
             let result = call.get("result").filter(|value| !value.is_null());
@@ -1551,6 +1561,21 @@ impl WorkspaceApp {
                 ),
             );
 
+            let argument_text = pretty_tool_json_or_raw(&arguments);
+            let argument_content = if status == AiToolStatus::PendingApproval {
+                self.render_selectable_text(
+                    crate::workspace::selectable_text::selectable_text_id(
+                        "ai-tool-approval",
+                        &expansion_key,
+                    ),
+                    argument_text,
+                    self.tokens.ui.text_muted,
+                    cx,
+                )
+                .into_any_element()
+            } else {
+                div().child(argument_text).into_any_element()
+            };
             let mut details = ai_tool_details(&self.tokens).child(
                 div()
                     .child(ai_tool_section_label(
@@ -1561,7 +1586,7 @@ impl WorkspaceApp {
                     .child(ai_tool_args_pre(
                         &self.tokens,
                         ("ai-tool-args", ai_message_element_seed(&id)),
-                        pretty_tool_json_or_raw(&arguments),
+                        argument_content,
                         tool_mono_font.clone(),
                         &args_scroll,
                     )),
