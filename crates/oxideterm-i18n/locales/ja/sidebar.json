@@ -41,6 +41,7 @@
       "import_tooltip": ".oxideファイルからインポート",
       "export_tooltip": ".oxideファイルにエクスポート",
       "host_tools": "ホストツール",
+      "knowledge": "ナレッジベース",
       "host_monitor": "監視",
       "gpu": "GPU / NPU",
       "processes": "プロセス",

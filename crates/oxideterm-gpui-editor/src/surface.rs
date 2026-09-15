@@ -528,6 +528,25 @@ impl TextEditorView {
         cx.notify();
     }
 
+    pub fn set_transparent_background(
+        &mut self,
+        transparent_background: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.transparent_background == transparent_background {
+            return;
+        }
+        // The owning surface decides whether the editor participates in its
+        // background material; editor state and text rendering stay unchanged.
+        self.transparent_background = transparent_background;
+        cx.notify();
+    }
+
+    /// Returns the measured line box used by compact editor hosts.
+    pub fn line_height(&self) -> f32 {
+        self.metrics.line_height
+    }
+
     pub fn set_placeholder(&mut self, placeholder: Option<String>, cx: &mut Context<Self>) {
         if self.settings.placeholder == placeholder {
             return;
@@ -614,7 +633,7 @@ impl TextEditorView {
         self.appearance.font_fallback_family = font_fallback_family;
         self.metrics =
             EditorMetrics::from_theme_with_editor_typography(tokens, font_size, line_height);
-        self.transparent_background = background_active;
+        self.set_transparent_background(background_active, cx);
         self.highlight_chunk_cache.borrow_mut().clear();
         // Tauri wires Settings.ide.wordWrap into CodeMirror's lineWrapping
         // compartment. Keep that as editor settings, not a one-off render flag.
@@ -640,6 +659,93 @@ impl TextEditorView {
             return;
         }
         self.replace_all_selections_with_caret(normalize_editor_text(text.into()), cx);
+    }
+
+    /// Exposes undo to embedding surfaces without bypassing editor history bookkeeping.
+    pub fn undo_external(&mut self, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
+        self.undo(cx);
+    }
+
+    /// Exposes redo to embedding surfaces without bypassing editor history bookkeeping.
+    pub fn redo_external(&mut self, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
+        self.redo(cx);
+    }
+
+    /// Wraps the primary selection with Markdown-compatible delimiters.
+    ///
+    /// This public editing command keeps formatting toolbars on the same transaction, undo,
+    /// syntax, and input-method path as keyboard edits instead of rebuilding the whole buffer.
+    pub fn wrap_primary_selection_external(
+        &mut self,
+        prefix: &str,
+        suffix: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if self.read_only {
+            return;
+        }
+        let selection = self.cursor.selection();
+        let range = selection.range();
+        let selected = self.buffer.with_text(|text| {
+            text.get(range.start.0..range.end.0)
+                .unwrap_or_default()
+                .to_string()
+        });
+        let surrounding = self.buffer.with_text(|text| {
+            range.start.0 >= prefix.len()
+                && text.get(range.start.0 - prefix.len()..range.start.0) == Some(prefix)
+                && text.get(range.end.0..range.end.0 + suffix.len()) == Some(suffix)
+        });
+        let (range, replacement, selection_start) = if surrounding {
+            (
+                TextRange::new(
+                    BufferOffset(range.start.0 - prefix.len()),
+                    BufferOffset(range.end.0 + suffix.len()),
+                ),
+                selected.clone(),
+                range.start.0 - prefix.len(),
+            )
+        } else {
+            (
+                range,
+                wrapped_selection_text(&selected, prefix, suffix),
+                range.start.0 + prefix.len(),
+            )
+        };
+        let selection_end = selection_start + selected.len();
+        self.replace_range_with_caret(range, replacement, cx);
+        self.cursor.set_selection(if selected.is_empty() {
+            Selection::caret(BufferOffset(selection_start))
+        } else {
+            Selection::new(BufferOffset(selection_start), BufferOffset(selection_end))
+        });
+        cx.notify();
+    }
+
+    /// Prefixes every selected line, or the caret line, using one undoable transaction.
+    pub fn prefix_selected_lines_external(&mut self, prefix: &str, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
+        let selection = self.cursor.selection();
+        let (line_start, line_end, replacement, adjusted_selection) = self
+            .buffer
+            .with_text(|text| prefixed_line_replacement(text, selection, prefix));
+        self.replace_range_with_caret(
+            TextRange::new(BufferOffset(line_start), BufferOffset(line_end)),
+            replacement,
+            cx,
+        );
+        // Keep Markdown markers outside the restored selection so the next
+        // input replaces only the original content.
+        self.cursor.set_selection(adjusted_selection);
+        cx.notify();
     }
 
     pub fn delete_backward(&mut self, cx: &mut Context<Self>) {
@@ -1251,6 +1357,93 @@ impl Focusable for TextEditorView {
     }
 }
 
+fn wrapped_selection_text(selected: &str, prefix: &str, suffix: &str) -> String {
+    format!("{prefix}{selected}{suffix}")
+}
+
+fn prefixed_line_replacement(
+    text: &str,
+    selection: Selection,
+    prefix: &str,
+) -> (usize, usize, String, Selection) {
+    let selected_range = selection.range();
+    let selection_start = selected_range.start.0;
+    let selection_end = selected_range.end.0;
+    let line_start = text[..selection_start]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let last_selected = if selection_end > selection_start
+        && text.as_bytes().get(selection_end - 1) == Some(&b'\n')
+    {
+        selection_end - 1
+    } else {
+        selection_end
+    };
+    let line_end = text[last_selected..]
+        .find('\n')
+        .map_or(text.len(), |index| last_selected + index);
+    let lines: Vec<_> = text[line_start..line_end].split('\n').collect();
+    let toggle_off = !prefix.starts_with('#')
+        && lines
+            .iter()
+            .all(|line| line.trim_start().starts_with(prefix));
+    let mut replacements = Vec::new();
+    let mut position = line_start;
+    let replacement = lines
+        .into_iter()
+        .map(|line| {
+            let indent = line.len() - line.trim_start_matches([' ', '\t']).len();
+            let body = &line[indent..];
+            let removed = if prefix.starts_with('#') {
+                let hashes = body.bytes().take_while(|byte| *byte == b'#').count();
+                if (1..=6).contains(&hashes) && body.as_bytes().get(hashes) == Some(&b' ') {
+                    hashes + 1
+                } else {
+                    0
+                }
+            } else if prefix == "> " {
+                if body.starts_with("> ") { 2 } else { 0 }
+            } else {
+                ["- [ ] ", "- [x] ", "- [X] ", "- ", "* ", "+ "]
+                    .into_iter()
+                    .find(|marker| body.starts_with(marker))
+                    .map(str::len)
+                    .unwrap_or_else(|| {
+                        let digits = body.bytes().take_while(u8::is_ascii_digit).count();
+                        if digits > 0 && body.get(digits..digits + 2) == Some(". ") {
+                            digits + 2
+                        } else {
+                            0
+                        }
+                    })
+            };
+            let marker = if toggle_off { "" } else { prefix };
+            replacements.push((position + indent, position + indent + removed, marker.len()));
+            position += line.len() + 1;
+            format!("{}{marker}{}", &line[..indent], &body[removed..])
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let adjusted_offset = |offset: BufferOffset| {
+        let mut shift = 0isize;
+        for &(start, end, added) in &replacements {
+            if offset.0 < start {
+                break;
+            }
+            if offset.0 <= end {
+                return BufferOffset(start.saturating_add_signed(shift) + added);
+            }
+            shift += added as isize - (end - start) as isize;
+        }
+        BufferOffset(offset.0.saturating_add_signed(shift))
+    };
+    let adjusted_selection = Selection::new(
+        adjusted_offset(selection.anchor),
+        adjusted_offset(selection.head),
+    );
+    (line_start, line_end, replacement, adjusted_selection)
+}
+
 fn colored_text(text: &str, color: u32) -> Div {
     div().text_color(rgb(color)).child(text.to_string())
 }
@@ -1260,7 +1453,11 @@ mod tests {
     use gpui::AppContext;
     use std::sync::Arc;
 
-    use super::{HighlightChunkCache, HighlightChunkCacheKey, LineChunkSpec};
+    use super::{
+        HighlightChunkCache, HighlightChunkCacheKey, LineChunkSpec, prefixed_line_replacement,
+        wrapped_selection_text,
+    };
+    use oxideterm_editor_core::{BufferOffset, Selection};
 
     #[gpui::test]
     fn editor_caret_blink_uses_scheduled_time_and_stops_when_released(
@@ -1443,6 +1640,59 @@ mod tests {
             assert!(editor.find_line_matches.is_empty());
             assert_eq!(editor.buffer.line_text(0).as_deref(), Some("zfn main() {"));
         });
+    }
+
+    #[test]
+    fn formatting_wraps_unicode_selection_without_normalizing_text() {
+        assert_eq!(wrapped_selection_text("正文", "**", "**"), "**正文**");
+    }
+
+    #[test]
+    fn line_prefix_expands_partial_selection_to_complete_lines() {
+        let selection = Selection::new(BufferOffset(1), BufferOffset(9));
+        let (start, end, replacement, adjusted_selection) =
+            prefixed_line_replacement("alpha\nbeta\ngamma", selection, "- ");
+        assert_eq!((start, end), (0, 10));
+        assert_eq!(replacement, "- alpha\n- beta");
+        assert_eq!(
+            adjusted_selection,
+            Selection::new(BufferOffset(3), BufferOffset(13))
+        );
+    }
+
+    #[test]
+    fn line_prefix_places_empty_heading_caret_after_marker() {
+        let selection = Selection::caret(BufferOffset::ZERO);
+        let (_, _, replacement, adjusted_selection) =
+            prefixed_line_replacement("title", selection, "## ");
+
+        assert_eq!(replacement, "## title");
+        assert_eq!(adjusted_selection, Selection::caret(BufferOffset(3)));
+    }
+
+    #[test]
+    fn markdown_prefix_replaces_heading_and_excludes_next_line_boundary() {
+        let source = "# Title\nbody";
+        let (start, end, replacement, _) = prefixed_line_replacement(
+            source,
+            Selection::new(BufferOffset(0), BufferOffset(8)),
+            "## ",
+        );
+        assert_eq!((start, end), (0, 7));
+        assert_eq!(replacement, "## Title");
+        assert_eq!(
+            prefixed_line_replacement("## Title", Selection::caret(BufferOffset(8)), "## ").2,
+            "## Title"
+        );
+        assert_eq!(
+            prefixed_line_replacement(
+                "- first\n- second",
+                Selection::new(BufferOffset(0), BufferOffset(16)),
+                "- "
+            )
+            .2,
+            "first\nsecond"
+        );
     }
 
     fn cache_key(line: usize) -> HighlightChunkCacheKey {

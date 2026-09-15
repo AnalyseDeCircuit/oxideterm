@@ -22,6 +22,15 @@ pub(crate) fn install_for_window(
 pub(crate) fn set_keep_running_on_close(_enabled: bool) {}
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub(crate) fn install_main_window_close_guard(
+    window: &mut gpui::Window,
+    cx: &gpui::App,
+    guard: impl Fn(&mut gpui::Window, &mut gpui::App) -> bool + 'static,
+) {
+    window.on_window_should_close(cx, guard);
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub(crate) fn show_main_window() {}
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]

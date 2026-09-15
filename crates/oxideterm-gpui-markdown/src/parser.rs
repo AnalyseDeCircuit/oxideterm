@@ -12,20 +12,39 @@ use crate::model::{
     Block, CalloutKind, FootnoteDefinition, Inline, ListItem, MarkdownDocument, TableAlignment,
 };
 
-/// Parse a markdown string into an OxideTerm-owned [`MarkdownDocument`].
-pub fn parse(source: &str) -> MarkdownDocument {
-    let options = Options::ENABLE_STRIKETHROUGH
+fn markdown_options(enable_smart_punctuation: bool) -> Options {
+    let mut options = Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TABLES
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_FOOTNOTES
         | Options::ENABLE_MATH
-        | Options::ENABLE_SMART_PUNCTUATION
         | Options::ENABLE_GFM
         | Options::ENABLE_HEADING_ATTRIBUTES
         | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
         | Options::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS;
-    let parser = Parser::new_ext(source, options);
+    if enable_smart_punctuation {
+        options.insert(Options::ENABLE_SMART_PUNCTUATION);
+    }
+    options
+}
 
+/// Parse a markdown string into an OxideTerm-owned [`MarkdownDocument`].
+pub fn parse(source: &str) -> MarkdownDocument {
+    parse_with_smart_punctuation(source, true)
+}
+
+/// Parses Markdown while honoring the renderer's smart-punctuation option.
+pub fn parse_with_smart_punctuation(
+    source: &str,
+    enable_smart_punctuation: bool,
+) -> MarkdownDocument {
+    parse_events(Parser::new_ext(
+        source,
+        markdown_options(enable_smart_punctuation),
+    ))
+}
+
+fn parse_events<'input>(parser: impl Iterator<Item = Event<'input>>) -> MarkdownDocument {
     let mut ctx = ParseContext::default();
 
     for event in parser {
@@ -734,6 +753,17 @@ mod tests {
             }
             other => panic!("expected display math Paragraph, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn smart_punctuation_can_be_disabled_by_render_options() {
+        let doc = parse_with_smart_punctuation("'quoted'", false);
+
+        assert!(matches!(
+            &doc.blocks[0],
+            Block::Paragraph { inlines }
+                if inlines == &vec![Inline::Text("'quoted'".to_string())]
+        ));
     }
 
     #[test]

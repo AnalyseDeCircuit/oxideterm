@@ -41,6 +41,7 @@
       "import_tooltip": "從 .oxide 檔案匯入",
       "export_tooltip": "匯出為 .oxide 檔案",
       "host_tools": "主機工具",
+      "knowledge": "知識庫",
       "host_monitor": "監控",
       "gpu": "GPU / NPU",
       "processes": "程序",

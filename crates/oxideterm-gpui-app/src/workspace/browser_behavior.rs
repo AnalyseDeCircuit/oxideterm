@@ -434,6 +434,7 @@ pub(crate) fn modal_footer_key_moves_forward(key: &str, shift: bool) -> bool {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum BrowserPointerCaptureOwner {
+    KnowledgeResize,
     SidebarResize,
     EmbeddedSftpSidebarResize,
     AiSidebarResize,
@@ -516,6 +517,7 @@ pub(crate) fn pointer_capture_needs_workspace_overlay(owner: BrowserPointerCaptu
     matches!(
         owner,
         BrowserPointerCaptureOwner::SidebarResize
+            | BrowserPointerCaptureOwner::KnowledgeResize
             | BrowserPointerCaptureOwner::EmbeddedSftpSidebarResize
             | BrowserPointerCaptureOwner::AiSidebarResize
             | BrowserPointerCaptureOwner::SftpPaneResize
@@ -530,6 +532,9 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<BrowserPointerCaptureOwner> {
+        if self.knowledge_resize_active(cx) {
+            return Some(BrowserPointerCaptureOwner::KnowledgeResize);
+        }
         let host_tools_tab_scrollbar_dragging = self.host_tools_tab_scrollbar_drag_active(cx);
         let sftp = self.sftp_view.read(cx);
         resolve_browser_pointer_capture_owner(BrowserPointerCaptureState {

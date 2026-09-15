@@ -46,6 +46,38 @@ pub(crate) fn set_keep_running_on_close(enabled: bool) {
     KEEP_RUNNING_ON_CLOSE.store(enabled, Ordering::SeqCst);
 }
 
+pub(crate) fn install_main_window_close_guard(
+    window: &mut Window,
+    cx: &App,
+    guard: impl Fn(&mut Window, &mut App) -> bool + 'static,
+) {
+    let ns_window = main_window(window).ok();
+    window.on_window_should_close(cx, move |window, cx| {
+        if QUIT_REQUESTED.load(Ordering::SeqCst) {
+            return true;
+        }
+        if KEEP_RUNNING_ON_CLOSE.load(Ordering::SeqCst) {
+            if let Some(ns_window) = ns_window {
+                hide_ns_window(ns_window);
+            }
+            return false;
+        }
+        if !guard(window, cx) {
+            return false;
+        }
+        if let Some(ns_window) = ns_window {
+            // Clear the non-owning pointer before GPUI releases the native window.
+            let _ = MAIN_WINDOW.compare_exchange(
+                ns_window as usize,
+                0,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
+        }
+        true
+    });
+}
+
 pub(crate) fn show_main_window() {
     let ptr = MAIN_WINDOW.load(Ordering::SeqCst) as *mut NSWindow;
     if !ptr.is_null() {

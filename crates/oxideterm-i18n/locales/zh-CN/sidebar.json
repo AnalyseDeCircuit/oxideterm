@@ -41,6 +41,7 @@
       "import_tooltip": "从 .oxide 文件导入",
       "export_tooltip": "导出到 .oxide 文件",
       "host_tools": "主机工具",
+      "knowledge": "知识库",
       "host_monitor": "监控",
       "gpu": "GPU / NPU",
       "processes": "进程",
