@@ -1532,28 +1532,6 @@ impl WorkspaceApp {
         Ok(())
     }
 
-    pub(in crate::workspace) fn queue_ssh_terminal_tab_for_node(
-        &mut self,
-        node_id: NodeId,
-        config: SshConfig,
-        title: String,
-        saved_connection_id: Option<String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Result<()> {
-        self.queue_ssh_terminal_tab_for_node_with_mark_used(
-            node_id,
-            None,
-            config,
-            title,
-            saved_connection_id,
-            None,
-            None,
-            window,
-            cx,
-        )
-    }
-
     fn save_connection_after_terminal_open(
         &mut self,
         request: SaveConnectionRequest,

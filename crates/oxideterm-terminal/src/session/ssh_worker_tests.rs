@@ -695,6 +695,18 @@ fn ssh_deferred_shell_starts_after_layout_and_closes_without_stale_events() {
         peer.input.recv_timeout(Duration::from_secs(5)).unwrap().0,
         b"after-layout\r"
     );
+    terminal.set_focused(false).unwrap();
+    terminal.set_focused(true).unwrap();
+    terminal
+        .resize_with_cell_size(TerminalResize::new(120, 40, 8, 16))
+        .unwrap();
+    // A later input is an ordered barrier: focus/layout changes must not replay
+    // the startup command before this input reaches the same SSH channel.
+    terminal.write_text("manual-input").unwrap();
+    assert_eq!(
+        peer.input.recv_timeout(Duration::from_secs(5)).unwrap().0,
+        b"manual-input"
+    );
     terminal.shutdown();
     wait_until(|| terminal.shared.finished.load(Ordering::Acquire));
     assert!(terminal.take_events().is_empty());

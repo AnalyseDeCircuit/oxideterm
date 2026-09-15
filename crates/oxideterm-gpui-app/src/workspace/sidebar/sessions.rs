@@ -3,6 +3,22 @@ use gpui::point;
 use oxideterm_remote_desktop::RemoteDesktopSessionStatus;
 use oxideterm_settings::SessionSortOrder;
 
+fn sidebar_terminal_post_connect_command(
+    saved_connection: Option<&oxideterm_connections::SavedConnection>,
+    node_router: &NodeRouter,
+    node_id: &NodeId,
+) -> Option<String> {
+    if let Some(connection) = saved_connection {
+        // An explicitly cleared saved command must not fall back to an older runtime value.
+        return connection.post_connect_command().map(ToOwned::to_owned);
+    }
+    // Temporary nodes have no saved profile. Read their zeroizing config only
+    // for the explicit open action and move the command into the terminal request.
+    node_router
+        .node_runtime_snapshot(node_id)
+        .and_then(|mut snapshot| snapshot.config.post_connect_command.take())
+}
+
 impl standalone_connections::StandaloneConnectionKind {
     fn icon(self) -> LucideIcon {
         match self {
@@ -409,8 +425,25 @@ impl WorkspaceApp {
             .get(&node_id)
             .map(|node| node.title.clone())
             .ok_or_else(|| anyhow::anyhow!("SSH node {} not found", node_id.0))?;
+        let saved_connection_id = self
+            .ssh_nodes
+            .get(&node_id)
+            .and_then(|node| node.saved_connection_id.clone());
+        let post_connect_command = sidebar_terminal_post_connect_command(
+            saved_connection_id
+                .as_deref()
+                .and_then(|id| self.connection_store.get(id)),
+            &self.node_router,
+            &node_id,
+        );
         if self.node_is_ready_for_terminal(&node_id) {
-            return self.queue_ssh_terminal_tab_for_existing_node(node_id, None, title, window, cx);
+            return self.queue_ssh_terminal_tab_for_existing_node(
+                node_id,
+                post_connect_command,
+                title,
+                window,
+                cx,
+            );
         }
 
         let config = self
@@ -418,17 +451,16 @@ impl WorkspaceApp {
             .node_runtime_snapshot(&node_id)
             .map(|snapshot| snapshot.config)
             .ok_or_else(|| anyhow::anyhow!("SSH node {} has no runtime config", node_id.0))?;
-        let saved_connection_id = self
-            .ssh_nodes
-            .get(&node_id)
-            .and_then(|node| node.saved_connection_id.clone());
         // Keep secret-bearing config out of virtual rows and retained listeners.
         // A disconnected node copies it only at the explicit connect action.
-        self.queue_ssh_terminal_tab_for_node(
+        self.queue_ssh_terminal_tab_for_node_with_mark_used(
             node_id,
+            post_connect_command,
             config,
             title,
             saved_connection_id,
+            None,
+            None,
             window,
             cx,
         )
@@ -2433,6 +2465,42 @@ impl WorkspaceApp {
                 ring: false,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod terminal_open_tests {
+    use super::*;
+
+    #[test]
+    fn sidebar_terminal_uses_current_saved_command_or_temporary_node_command() {
+        let node_id = NodeId::new("temporary");
+        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
+        router.upsert_node(
+            node_id.clone(),
+            SshConfig {
+                post_connect_command: Some("cd /srv/original".into()),
+                ..Default::default()
+            },
+        );
+        let mut saved: oxideterm_connections::SavedConnection =
+            serde_json::from_value(serde_json::json!({
+                "id": "saved", "name": "Saved connection", "host": "example.com",
+                "port": 22, "username": "ops", "auth": { "type": "password" },
+                "created_at": "2026-01-01T00:00:00Z"
+            }))
+            .unwrap();
+        for command in [Some("cd /srv/updated"), None] {
+            saved.post_connect_command = command.map(str::to_owned);
+            assert_eq!(
+                sidebar_terminal_post_connect_command(Some(&saved), &router, &node_id).as_deref(),
+                command,
+            );
+        }
+        assert_eq!(
+            sidebar_terminal_post_connect_command(None, &router, &node_id).as_deref(),
+            Some("cd /srv/original"),
+        );
     }
 }
 
