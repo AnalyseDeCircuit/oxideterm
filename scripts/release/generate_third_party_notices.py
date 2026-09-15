@@ -110,7 +110,7 @@ def cargo_deny_license_data(cwd: Path) -> dict[str, dict[str, list[str]]]:
 def workspace_package_names(cwd: Path) -> set[str]:
     # `cargo deny list` includes local workspace packages. Third-party notices
     # should describe external/vendor obligations, not OxideTerm's own GPL
-    # crates. Keep vendored workspace packages such as our patched russh fork:
+    # crates. Keep vendored workspace packages such as alacritty_terminal:
     # those are local paths, but still third-party attribution obligations.
     completed = subprocess.run(
         ["cargo", "metadata", "--no-deps", "--format-version", "1"],

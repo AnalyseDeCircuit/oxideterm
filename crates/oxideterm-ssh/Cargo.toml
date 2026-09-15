@@ -1,3 +1,6 @@
+[lints]
+workspace = true
+
 [package]
 name = "oxideterm-ssh"
 edition.workspace = true
@@ -17,7 +20,7 @@ oxideterm-sftp = { path = "../oxideterm-sftp" }
 oxideterm-topology = { path = "../oxideterm-topology" }
 oxideterm-x11-forwarding = { path = "../oxideterm-x11-forwarding" }
 parking_lot.workspace = true
-russh = { path = "../russh" }
+russh.workspace = true
 serde.workspace = true
 sha2.workspace = true
 signature.workspace = true

@@ -1,3 +1,6 @@
+[lints]
+workspace = true
+
 [package]
 name = "oxideterm-gpui-terminal"
 edition.workspace = true
@@ -36,7 +39,7 @@ vte.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
-russh = { path = "../russh" }
+russh.workspace = true
 rand10.workspace = true
 tokio.workspace = true
 crossbeam-channel.workspace = true

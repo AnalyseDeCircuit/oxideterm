@@ -98,7 +98,6 @@ members = [
   "crates/gpui-ce/gpui_wgpu",
   "crates/gpui-ce/gpui_windows",
   "crates/gpui-ce/gpui_zed_util",
-  "crates/russh",
   "crates/russh-sftp",
 ]
 exclude = [
@@ -111,7 +110,8 @@ resolver = "2"
 [patch.crates-io]
 alacritty_terminal = { path = "crates/alacritty-terminal" }
 gpui = { path = "crates/gpui-ce/gpui" }
-russh = { path = "crates/russh" }
+# Keep the SSH protocol fork independent from application lint and test targets.
+russh = { git = "https://github.com/AnalyseDeCircuit/russh", rev = "01a5b773927a6cd6177c4778c19c9bf3607d3518" }
 russh-sftp = { path = "crates/russh-sftp" }
 vte = { path = "crates/vte" }
 
@@ -233,6 +233,7 @@ rand10 = { package = "rand", version = "0.10" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "socks", "stream", "system-proxy"] }
 rmcp = { version = "3.1.2", default-features = false, features = ["server", "transport-streamable-http-server"] }
 rmp-serde = "1"
+russh = "=0.63.0"
 scap = { version = "0.0.8-zed", package = "zed-scap", default-features = false }
 scheduler = { path = "crates/gpui-ce/gpui_scheduler", version = "0.2.2", package = "gpui_scheduler" }
 schemars = { version = "1.0", features = ["indexmap2"] }

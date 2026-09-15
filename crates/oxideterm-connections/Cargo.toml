@@ -1,3 +1,6 @@
+[lints]
+workspace = true
+
 [package]
 name = "oxideterm-connections"
 edition.workspace = true
@@ -21,7 +24,7 @@ oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
 oxideterm-secret-store = { path = "../oxideterm-secret-store" }
-russh = { path = "../russh" }
+russh.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 uuid.workspace = true

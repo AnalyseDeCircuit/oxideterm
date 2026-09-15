@@ -1,3 +1,6 @@
+[lints]
+workspace = true
+
 [package]
 name = "oxideterm-ide-fs"
 edition.workspace = true
@@ -12,7 +15,7 @@ oxideterm-ssh = { path = "../oxideterm-ssh" }
 base64.workspace = true
 dashmap.workspace = true
 futures-util.workspace = true
-russh = { path = "../russh" }
+russh.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
