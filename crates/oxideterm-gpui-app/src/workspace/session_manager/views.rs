@@ -2628,12 +2628,27 @@ pub(super) fn session_manager_tree_rows(
     children: &HashMap<String, Vec<String>>,
     expanded_groups: &HashSet<String>,
 ) -> Vec<SessionManagerTreeRow> {
+    // Index direct membership once; scanning every connection for each visible
+    // group makes a tree repaint quadratic as saved connections accumulate.
+    let mut grouped_items: HashMap<Option<&str>, Vec<usize>> = HashMap::new();
+    for (index, item) in items.iter().enumerate() {
+        grouped_items.entry(item.group()).or_default().push(index);
+    }
     let mut rows = Vec::new();
     for root in roots {
-        push_session_manager_tree_group_rows(&mut rows, root, 0, items, children, expanded_groups);
+        push_session_manager_tree_group_rows(
+            &mut rows,
+            root,
+            0,
+            &grouped_items,
+            children,
+            expanded_groups,
+        );
     }
     rows.extend(
-        direct_session_item_indices_for_group(items, None)
+        grouped_items
+            .remove(&None)
+            .unwrap_or_default()
             .into_iter()
             .map(|item_index| SessionManagerTreeRow::Item {
                 item_index,
@@ -2647,11 +2662,14 @@ fn push_session_manager_tree_group_rows(
     rows: &mut Vec<SessionManagerTreeRow>,
     group: &str,
     depth: usize,
-    items: &[SessionManagerDisplayItem],
+    grouped_items: &HashMap<Option<&str>, Vec<usize>>,
     children: &HashMap<String, Vec<String>>,
     expanded_groups: &HashSet<String>,
 ) {
-    let group_item_indices = direct_session_item_indices_for_group(items, Some(group));
+    let group_item_indices = grouped_items
+        .get(&Some(group))
+        .map(Vec::as_slice)
+        .unwrap_or_default();
     let child_groups = children.get(group).map(Vec::as_slice).unwrap_or_default();
     let expanded = expanded_groups.contains(group);
     rows.push(SessionManagerTreeRow::Group {
@@ -2669,14 +2687,15 @@ fn push_session_manager_tree_group_rows(
             rows,
             child_group,
             depth + 1,
-            items,
+            grouped_items,
             children,
             expanded_groups,
         );
     }
     rows.extend(
         group_item_indices
-            .into_iter()
+            .iter()
+            .copied()
             .map(|item_index| SessionManagerTreeRow::Item {
                 item_index,
                 depth: depth + 1,

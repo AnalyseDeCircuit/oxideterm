@@ -56,6 +56,105 @@ pub(super) fn ssh_config_display_projection_never_copies_proxy_command_secrets()
 }
 
 #[test]
+#[ignore = "manual session tree projection benchmark"]
+fn session_tree_projection_performance() {
+    for (group_count, item_count) in [(20, 200), (100, 1000), (500, 5000)] {
+        let roots: Vec<_> = (0..group_count).map(|i| format!("group-{i}")).collect();
+        let expanded = roots.iter().cloned().collect();
+        let children = HashMap::new();
+        let mut connection = saved_connection_fixture(SavedAuth::Agent);
+        let items: Vec<_> = (0..item_count)
+            .map(|i| {
+                connection.id = format!("connection-{i}");
+                connection.group = Some(roots[i % group_count].clone());
+                SessionManagerDisplayItem::Connection(ConnectionInfo::from(&connection))
+            })
+            .collect();
+        let expected: Vec<_> = (0..group_count)
+            .flat_map(|group| (group..item_count).step_by(group_count))
+            .collect();
+        let start = std::time::Instant::now();
+        for _ in 0..20 {
+            let rows = std::hint::black_box(session_manager_tree_rows(
+                &items, &roots, &children, &expanded,
+            ));
+            let indices: Vec<_> = rows
+                .iter()
+                .filter_map(|row| match row {
+                    SessionManagerTreeRow::Item { item_index, .. } => Some(*item_index),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(indices, expected);
+        }
+        eprintln!(
+            "groups={group_count} connections={item_count} mean_ms={:.3}",
+            start.elapsed().as_secs_f64() * 1000.0 / 20.0
+        );
+    }
+}
+
+#[test]
+fn session_tree_projection_preserves_nested_groups_and_ungrouped_items() {
+    let mut connection = saved_connection_fixture(SavedAuth::Agent);
+    let items: Vec<_> = [Some("A/nested"), Some("A"), None, Some("A/nested-extra")]
+        .into_iter()
+        .map(|group| {
+            connection.group = group.map(str::to_string);
+            SessionManagerDisplayItem::Connection(ConnectionInfo::from(&connection))
+        })
+        .collect();
+    let roots = vec!["A".into(), "Empty".into()];
+    let children = HashMap::from([("A".into(), vec!["A/nested".into()])]);
+    for nested_expanded in [false, true] {
+        let mut expanded = HashSet::from(["A".into()]);
+        if nested_expanded {
+            expanded.insert("A/nested".into());
+        }
+        let mut expected = vec![
+            SessionManagerTreeRow::Group {
+                path: "A".into(),
+                depth: 0,
+                expanded: true,
+                has_children: true,
+            },
+            SessionManagerTreeRow::Group {
+                path: "A/nested".into(),
+                depth: 1,
+                expanded: nested_expanded,
+                has_children: true,
+            },
+        ];
+        if nested_expanded {
+            expected.push(SessionManagerTreeRow::Item {
+                item_index: 0,
+                depth: 2,
+            });
+        }
+        expected.extend([
+            SessionManagerTreeRow::Item {
+                item_index: 1,
+                depth: 1,
+            },
+            SessionManagerTreeRow::Group {
+                path: "Empty".into(),
+                depth: 0,
+                expanded: false,
+                has_children: false,
+            },
+            SessionManagerTreeRow::Item {
+                item_index: 2,
+                depth: 0,
+            },
+        ]);
+        assert_eq!(
+            session_manager_tree_rows(&items, &roots, &children, &expanded),
+            expected
+        );
+    }
+}
+
+#[test]
 pub(super) fn unnamed_save_request_preserves_custom_icon_and_independent_colors() {
     let mut form = base_form();
     form.name.clear();
