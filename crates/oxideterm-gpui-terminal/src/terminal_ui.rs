@@ -776,7 +776,7 @@ pub struct TerminalBackgroundPreferences {
     pub fit: TerminalBackgroundFit,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum TerminalBackgroundFit {
     Cover,
     Contain,

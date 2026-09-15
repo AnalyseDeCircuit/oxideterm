@@ -31,6 +31,7 @@ use super::{
     TerminalContextMenu, TerminalPane, TerminalPaneEvent, TmuxPromptKind, TmuxPromptState,
     command_mark_ui_available,
 };
+use crate::background_cache::background_display_target;
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
 
@@ -294,13 +295,22 @@ impl Render for TerminalPane {
 
         let background = self.preferences.background.clone().filter(|_background| {
             // Keep terminal repaint frames off the filesystem hot path; image
-            // fallback and the blurred-image loader handle missing files.
+            // fallback and the background loader handle missing files.
             self.preferences.render_policy.allow_background_images
         });
+        let background_display = self
+            .bounds
+            .map(|bounds| background_display_target(bounds.size, window.scale_factor()))
+            .unwrap_or_else(|| {
+                // The viewport bounds are only known after the first layout pass,
+                // so fall back to the window content area.
+                background_display_target(window.bounds().size, window.scale_factor())
+            });
         let background_layer = background.as_ref().map(|background| {
             terminal_background_layer(
                 background.clone(),
-                self.background_image_cache.render_blurred_image(background),
+                self.background_image_cache
+                    .render_background_image(background, background_display),
             )
         });
         self.ensure_background_image_completion_poll(cx);
@@ -2601,21 +2611,20 @@ fn label_with_count(template: &str, count: usize) -> String {
 
 fn terminal_background_layer(
     background: TerminalBackgroundPreferences,
-    blurred_image: Option<Arc<RenderImage>>,
+    image: Option<Arc<RenderImage>>,
 ) -> AnyElement {
-    let image = if let Some(blurred_image) = blurred_image {
-        gpui::img(blurred_image)
-            .size_full()
-            .object_fit(terminal_background_object_fit(background.fit))
-            .opacity(background.opacity.clamp(0.0, 1.0))
-            .into_any_element()
+    let image = if background.fit == TerminalBackgroundFit::Tile && background.blur <= 0.01 {
+        gpui::img(background.path.clone()).with_fallback(|| div().size_full().into_any_element())
+    } else if let Some(image) = image {
+        gpui::img(image)
     } else {
-        gpui::img(background.path)
-            .size_full()
-            .object_fit(terminal_background_object_fit(background.fit))
-            .opacity(background.opacity.clamp(0.0, 1.0))
-            .with_fallback(|| div().size_full().into_any_element())
-            .into_any_element()
+        return div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .into_any_element();
     };
 
     div()
@@ -2625,7 +2634,12 @@ fn terminal_background_layer(
         .right_0()
         .bottom_0()
         .overflow_hidden()
-        .child(image)
+        .child(
+            image
+                .size_full()
+                .object_fit(terminal_background_object_fit(background.fit))
+                .opacity(background.opacity.clamp(0.0, 1.0)),
+        )
         .into_any_element()
 }
 

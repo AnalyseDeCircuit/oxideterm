@@ -1,5 +1,7 @@
 use super::super::*;
 
+use oxideterm_gpui_terminal::background_display_target;
+
 struct BundledWorkspaceBackground {
     file_name: &'static str,
     bytes: &'static [u8],
@@ -135,12 +137,13 @@ impl window_shell::WorkspaceWindowBackgroundEntity {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let blurred_image = self.cache.render_blurred_image(&background);
+        let display = background_display_target(window.bounds().size, window.scale_factor());
+        let image = self.cache.render_background_image(&background, display);
         self.drop_retired_images(Some(window), cx);
         if self.cache.has_pending() {
             self.schedule_decode_completion(cx);
         }
-        workspace_background_image_layer(background, blurred_image)
+        workspace_background_image_layer(background, image)
     }
 
     fn schedule_decode_completion(&mut self, cx: &mut Context<Self>) {
@@ -179,21 +182,20 @@ impl window_shell::WorkspaceWindowBackgroundEntity {
 
 pub(in crate::workspace) fn workspace_background_image_layer(
     background: TerminalBackgroundPreferences,
-    blurred_image: Option<Arc<RenderImage>>,
+    image: Option<Arc<RenderImage>>,
 ) -> AnyElement {
-    let image = if let Some(blurred_image) = blurred_image {
-        gpui::img(blurred_image)
-            .size_full()
-            .object_fit(workspace_background_object_fit(background.fit))
-            .opacity(background.opacity.clamp(0.0, 1.0))
-            .into_any_element()
+    let image = if background.fit == TerminalBackgroundFit::Tile && background.blur <= 0.01 {
+        gpui::img(background.path.clone()).with_fallback(|| div().size_full().into_any_element())
+    } else if let Some(image) = image {
+        gpui::img(image)
     } else {
-        gpui::img(background.path)
-            .size_full()
-            .object_fit(workspace_background_object_fit(background.fit))
-            .opacity(background.opacity.clamp(0.0, 1.0))
-            .with_fallback(|| div().size_full().into_any_element())
-            .into_any_element()
+        return div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .into_any_element();
     };
 
     div()
@@ -203,7 +205,12 @@ pub(in crate::workspace) fn workspace_background_image_layer(
         .right_0()
         .bottom_0()
         .overflow_hidden()
-        .child(image)
+        .child(
+            image
+                .size_full()
+                .object_fit(workspace_background_object_fit(background.fit))
+                .opacity(background.opacity.clamp(0.0, 1.0)),
+        )
         .into_any_element()
 }
 

@@ -18,7 +18,9 @@ pub use app::{
     TerminalSearchStatus, TerminalSerialAction, TerminalSerialStatus, TerminalShortcut,
     TerminalTelnetAction, TerminalWorkingDirectorySource,
 };
-pub use background_cache::BackgroundImageRenderCache;
+pub use background_cache::{
+    BackgroundImageRenderCache, BackgroundImageTargetSize, background_display_target,
+};
 pub use command_facts::{
     SharedTerminalCommandHistory, TerminalAiCommandRecord, TerminalAutosuggestCommandRecord,
     TerminalAutosuggestInputState, TerminalCommandFact, TerminalCommandFactStatus,
