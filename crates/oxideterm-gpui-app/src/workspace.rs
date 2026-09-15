@@ -969,6 +969,7 @@ pub(crate) use window_shell::WorkspaceWindowShell;
 
 #[derive(Clone)]
 struct MermaidZoomState {
+    window_id: gpui::WindowId,
     source: String,
     image: Arc<Image>,
     width: f32,
@@ -984,8 +985,12 @@ impl WorkspaceApp {
     }
 
     fn mermaid_zoom_handler(&self, cx: &mut Context<Self>) -> MarkdownMermaidZoomHandler {
-        let workspace = cx.entity();
+        Self::mermaid_zoom_handler_for_workspace(cx.entity())
+    }
+
+    fn mermaid_zoom_handler_for_workspace(workspace: Entity<Self>) -> MarkdownMermaidZoomHandler {
         Arc::new(move |source, image, width, height, window, cx| {
+            let window_id = window.window_handle().window_id();
             let workspace = workspace.clone();
             window.defer(cx, move |_window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
@@ -997,6 +1002,7 @@ impl WorkspaceApp {
                     )
                     .ok();
                     this.mermaid_zoom = Some(MermaidZoomState {
+                        window_id,
                         source,
                         image: rendered
                             .as_ref()

@@ -358,8 +358,14 @@ impl WorkspaceApp {
                 }),
             )
             .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                let target = ime::WorkspaceImeTarget::ActiveSessionSearch;
-                let owns_selection = this.active_ime_target(cx) == Some(target);
+                let target = this
+                    .selected_ime_target
+                    .unwrap_or(ime::WorkspaceImeTarget::ActiveSessionSearch);
+                let owns_selection = matches!(
+                    target,
+                    ime::WorkspaceImeTarget::ActiveSessionSearch
+                        | ime::WorkspaceImeTarget::KnowledgeSearch
+                ) && this.active_ime_target(cx) == Some(target);
                 if owns_selection
                     && this
                         .text_input_anchors
@@ -1428,7 +1434,11 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(state) = self.mermaid_zoom.as_ref() else {
+        let Some(state) = self
+            .mermaid_zoom
+            .as_ref()
+            .filter(|state| state.window_id == window.window_handle().window_id())
+        else {
             return div().into_any_element();
         };
         let viewport = window.viewport_size();

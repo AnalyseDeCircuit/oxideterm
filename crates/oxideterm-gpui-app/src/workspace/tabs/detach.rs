@@ -1470,6 +1470,9 @@ impl WorkspaceApp {
             .when_some(entry_handoff, |root, handoff| root.child(handoff))
             // Detached tabs use their own native window root as the modal portal.
             .children(tab_window_modals)
+            .when(self.mermaid_zoom.is_some(), |root| {
+                root.child(self.render_mermaid_zoom_modal(window, cx))
+            })
             .when_some(settings_select_overlay, |root, overlay| root.child(overlay))
             .child(WorkspaceImeElement::new(
                 cx.entity(),

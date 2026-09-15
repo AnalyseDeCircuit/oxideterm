@@ -11,6 +11,11 @@ pub(super) enum KnowledgeAction {
     CreateNotebook,
     RenameNotebook,
     RenameNote,
+    RenameDocument(oxideterm_ai::RagDocumentResponse),
+    CopyNote(String),
+    CutNote(String),
+    PasteNote,
+    DeleteNote(String, String),
     DeleteNotebook,
     Move,
     MoveTo(String),
@@ -19,11 +24,12 @@ pub(super) enum KnowledgeAction {
     Settings,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum MenuKind {
     Notebooks,
     Actions,
     Move,
+    Note(oxideterm_ai::RagDocumentResponse),
 }
 
 pub(super) struct KnowledgeMenu {
@@ -34,17 +40,97 @@ pub(super) struct KnowledgeMenu {
     pub(super) focus: FocusHandle,
 }
 
-pub(super) struct KnowledgeRename {
+pub(in crate::workspace) struct KnowledgeRename {
     notebook: bool,
     id: String,
     version: u64,
-    pub(super) editor: Entity<TextEditorView>,
-    window_id: gpui::WindowId,
+    pub(in crate::workspace) name: String,
+    pub(in crate::workspace) window_id: gpui::WindowId,
     error: Option<String>,
 }
 
 impl WorkspaceApp {
-    pub(super) fn queue_knowledge_search(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn handle_knowledge_input_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let target = self.active_ime_target_for_window(window.window_handle().window_id(), cx);
+        match target {
+            Some(ime::WorkspaceImeTarget::KnowledgeRename) => {
+                if self.knowledge_workspace.read(cx).metadata_task.is_none() {
+                    match event.keystroke.key.as_str() {
+                        "escape" => {
+                            self.knowledge_workspace
+                                .update(cx, |state, _| state.rename = None);
+                            self.clear_ime_selection();
+                            window.focus(&self.focus_handle, cx);
+                            cx.notify();
+                        }
+                        "enter" => {
+                            let name = self
+                                .knowledge_workspace
+                                .read(cx)
+                                .rename
+                                .as_ref()
+                                .map(|rename| rename.name.clone());
+                            self.save_knowledge_metadata(name, None, cx);
+                        }
+                        _ => {}
+                    }
+                }
+                true
+            }
+            Some(ime::WorkspaceImeTarget::KnowledgeSearch) => {
+                if event.keystroke.key == "escape" {
+                    self.clear_ime_selection();
+                    cx.notify();
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn toggle_knowledge_navigation(&mut self, narrow: bool, cx: &mut Context<Self>) {
+        let closing = self.knowledge_workspace.update(cx, |state, _| {
+            state.navigator_motion_task = None;
+            if narrow {
+                state.mobile_navigator_open = !state.mobile_navigator_open;
+            } else {
+                state.navigator_hidden = !state.navigator_hidden;
+            }
+            state.menu = None;
+            let closing = if narrow {
+                !state.mobile_navigator_open
+            } else {
+                state.navigator_hidden
+            };
+            state.navigator_closing = closing && self.tokens.motion.enabled;
+            state.navigator_closing
+        });
+        if closing {
+            let delay = oxideterm_gpui_ui::motion::duration(
+                &self.tokens,
+                oxideterm_gpui_ui::motion::MotionDuration::Control,
+            );
+            let task = cx.spawn(async move |workspace, cx| {
+                Timer::after(delay).await;
+                let _ = workspace.update(cx, |workspace, cx| {
+                    workspace.knowledge_workspace.update(cx, |state, _| {
+                        state.navigator_closing = false;
+                        state.navigator_motion_task = None;
+                    });
+                    cx.notify();
+                });
+            });
+            self.knowledge_workspace
+                .update(cx, |state, _| state.navigator_motion_task = Some(task));
+        }
+    }
+
+    pub(in crate::workspace) fn queue_knowledge_search(&mut self, cx: &mut Context<Self>) {
         let task = cx.spawn(async move |workspace, cx| {
             Timer::after(Duration::from_millis(180)).await;
             let _ = workspace.update(cx, |workspace, cx| {
@@ -60,6 +146,12 @@ impl WorkspaceApp {
         narrow: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let state = self.knowledge_workspace.read(cx);
+        let navigator_visible = if narrow {
+            state.mobile_navigator_open || (state.editor.is_none() && !state.loading)
+        } else {
+            !state.navigator_hidden
+        };
         div()
             .h(px(self.tokens.metrics.ui_button_lg_height))
             .flex_none()
@@ -71,19 +163,20 @@ impl WorkspaceApp {
             .border_color(rgb(self.tokens.ui.border))
             .child(self.knowledge_navigator_action(
                 "notes-toggle-navigation",
-                LucideIcon::PanelLeft,
-                self.i18n.t("settings_view.knowledge.toggle_navigation"),
+                if navigator_visible {
+                    LucideIcon::PanelLeftClose
+                } else {
+                    LucideIcon::PanelLeft
+                },
+                self.i18n.t(if navigator_visible {
+                    "sidebar.actions.collapse"
+                } else {
+                    "sidebar.actions.expand"
+                }),
                 false,
                 false,
                 move |this, _, _, cx| {
-                    this.knowledge_workspace.update(cx, |state, _| {
-                        if narrow {
-                            state.mobile_navigator_open = !state.mobile_navigator_open;
-                        } else {
-                            state.navigator_hidden = !state.navigator_hidden;
-                        }
-                        state.menu = None;
-                    });
+                    this.toggle_knowledge_navigation(narrow, cx);
                     cx.stop_propagation();
                     cx.notify();
                 },
@@ -96,6 +189,25 @@ impl WorkspaceApp {
                     .child(self.i18n.t("settings_view.knowledge.notes_title")),
             )
             .into_any_element()
+    }
+
+    pub(in crate::workspace) fn open_knowledge_note_menu(
+        &mut self,
+        note: oxideterm_ai::RagDocumentResponse,
+        position: gpui::Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_knowledge_menu(MenuKind::Note(note), position, window, cx);
+    }
+
+    pub(super) fn open_knowledge_list_menu(
+        &mut self,
+        position: gpui::Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_knowledge_menu(MenuKind::Actions, position, window, cx);
     }
 
     fn open_knowledge_menu(
@@ -141,6 +253,8 @@ impl WorkspaceApp {
             .items_center()
             .px(px(self.tokens.spacing.two))
             .gap(px(self.tokens.spacing.one))
+            .border_b_1()
+            .border_color(rgb(self.tokens.ui.border))
             .child(
                 oxideterm_gpui_ui::toolbar_button(
                     &self.tokens,
@@ -209,10 +323,14 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .justify_between()
-            .px(px(self.tokens.spacing.three))
+            .px(px(self.tokens.spacing.two))
             .text_size(px(self.tokens.metrics.ui_text_xs))
             .text_color(rgb(self.tokens.ui.text_muted))
-            .child(count.to_string())
+            .child(
+                self.i18n
+                    .t("settings_view.knowledge.note_count")
+                    .replace("{{count}}", &count.to_string()),
+            )
             .child(self.knowledge_navigator_action(
                 "notes-new",
                 LucideIcon::FilePlus,
@@ -238,15 +356,58 @@ impl WorkspaceApp {
         if menu.window_id != window.window_handle().window_id() {
             return None;
         }
-        let (position, selected, focus, kind) =
-            (menu.position, menu.selected, menu.focus.clone(), menu.kind);
+        let (position, selected, focus, kind) = (
+            menu.position,
+            menu.selected,
+            menu.focus.clone(),
+            menu.kind.clone(),
+        );
         let collection = state.navigator_snapshot.selected_collection_id.clone();
         let doc = state.editor.as_ref().map(|editor| editor.read(cx));
         let can_edit = state.metadata_task.is_none()
             && doc.is_some_and(|doc| {
                 !doc.is_dirty() && matches!(doc.save_state, KnowledgeDocumentSaveState::Saved)
             });
-        let entries: Vec<(String, KnowledgeAction, bool)> = match kind {
+        let can_paste = state.clipboard.is_some()
+            && collection.is_some()
+            && state.metadata_task.is_none()
+            && !doc.is_some_and(|doc| doc.is_dirty());
+        let entries: Vec<(String, KnowledgeAction, bool)> = match &kind {
+            MenuKind::Note(note) => {
+                let busy = state.metadata_task.is_some()
+                    || doc.is_some_and(|doc| {
+                        doc.document_id == note.id
+                            && (doc.is_dirty()
+                                || !matches!(doc.save_state, KnowledgeDocumentSaveState::Saved))
+                    });
+                vec![
+                    (
+                        self.i18n.t("settings_view.knowledge.rename_note"),
+                        KnowledgeAction::RenameDocument(note.clone()),
+                        busy,
+                    ),
+                    (
+                        self.i18n.t("fileManager.copy"),
+                        KnowledgeAction::CopyNote(note.id.clone()),
+                        busy,
+                    ),
+                    (
+                        self.i18n.t("fileManager.cut"),
+                        KnowledgeAction::CutNote(note.id.clone()),
+                        busy,
+                    ),
+                    (
+                        self.i18n.t("fileManager.paste"),
+                        KnowledgeAction::PasteNote,
+                        !can_paste,
+                    ),
+                    (
+                        self.i18n.t("fileManager.delete"),
+                        KnowledgeAction::DeleteNote(note.id.clone(), note.title.clone()),
+                        busy,
+                    ),
+                ]
+            }
             MenuKind::Notebooks => state
                 .navigator_snapshot
                 .collections
@@ -278,6 +439,11 @@ impl WorkspaceApp {
                 })
                 .collect(),
             MenuKind::Actions => vec![
+                (
+                    self.i18n.t("fileManager.paste"),
+                    KnowledgeAction::PasteNote,
+                    !can_paste,
+                ),
                 (
                     self.i18n.t("settings_view.knowledge.new_notebook"),
                     KnowledgeAction::CreateNotebook,
@@ -475,8 +641,19 @@ impl WorkspaceApp {
             }
             KnowledgeAction::Settings => self.open_knowledge_settings(window, cx),
             KnowledgeAction::Move => self.open_knowledge_menu(MenuKind::Move, position, window, cx),
-            KnowledgeAction::RenameNotebook => self.open_knowledge_rename(true, window, cx),
-            KnowledgeAction::RenameNote => self.open_knowledge_rename(false, window, cx),
+            KnowledgeAction::RenameNotebook => self.open_knowledge_rename(true, None, window, cx),
+            KnowledgeAction::RenameNote => self.open_knowledge_rename(false, None, window, cx),
+            KnowledgeAction::RenameDocument(note) => {
+                self.open_knowledge_rename(false, Some(note), window, cx)
+            }
+            KnowledgeAction::CopyNote(id) => self.copy_knowledge_note(id, false, cx),
+            KnowledgeAction::CutNote(id) => self.copy_knowledge_note(id, true, cx),
+            KnowledgeAction::PasteNote => self.paste_knowledge_note(cx),
+            KnowledgeAction::DeleteNote(id, title) => {
+                self.ai_entity
+                    .update(cx, |ai, _| ai.request_delete_knowledge_document(id, title));
+                self.reset_standard_confirm_focus();
+            }
             KnowledgeAction::MoveTo(target) => self.save_knowledge_metadata(None, Some(target), cx),
         }
         cx.notify();
@@ -485,11 +662,20 @@ impl WorkspaceApp {
     fn open_knowledge_rename(
         &mut self,
         notebook: bool,
+        target: Option<oxideterm_ai::RagDocumentResponse>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let state = self.knowledge_workspace.read(cx);
-        let data = if notebook {
+        let data = if let Some(note) = target {
+            let version = state
+                .editor
+                .as_ref()
+                .map(|editor| editor.read(cx))
+                .filter(|editor| editor.document_id == note.id)
+                .map_or(note.version, |editor| editor.version);
+            Some((note.id, note.title, version))
+        } else if notebook {
             state
                 .navigator_snapshot
                 .selected_collection
@@ -504,39 +690,16 @@ impl WorkspaceApp {
         let Some((id, name, version)) = data else {
             return;
         };
-        let editor = cx.new(|cx| {
-            let mut editor = TextEditorView::new(name, &self.tokens, cx);
-            editor.set_presentation(EditorPresentation::Inline, cx);
-            editor.apply_runtime_settings(
-                &self.tokens,
-                settings_ui_font_family(&self.settings_store.settings().appearance.ui_font_family)
-                    .to_string(),
-                self.tokens.metrics.ui_text_sm,
-                1.5,
-                false,
-                false,
-                cx,
-            );
-            editor
-        });
-        window.focus(&editor.read(cx).focus_handle(cx), cx);
-        let weak = cx.entity().downgrade();
-        editor.update(cx, |editor, _| {
-            editor.set_on_save(Box::new(move |name, _, cx| {
-                let name = name.to_string();
-                weak.update(cx, |this, cx| {
-                    this.save_knowledge_metadata(Some(name), None, cx)
-                })
-                .map_err(|_| "Workspace closed".to_owned())?;
-                Ok(())
-            }))
-        });
+        self.clear_ime_selection();
+        self.selected_ime_target = Some(ime::WorkspaceImeTarget::KnowledgeRename);
+        window.focus(&self.focus_handle, cx);
+        self.show_active_input_caret(cx);
         self.knowledge_workspace.update(cx, |state, _| {
             state.rename = Some(KnowledgeRename {
                 notebook,
                 id,
                 version,
-                editor,
+                name,
                 window_id: window.window_handle().window_id(),
                 error: None,
             })
@@ -553,7 +716,21 @@ impl WorkspaceApp {
         if rename.window_id != window.window_handle().window_id() {
             return None;
         }
-        let editor = rename.editor.clone();
+        let target = ime::WorkspaceImeTarget::KnowledgeRename;
+        let input = oxideterm_gpui_ui::text_input::text_input(
+            &self.tokens,
+            oxideterm_gpui_ui::text_input::TextInputView {
+                value: &rename.name,
+                placeholder: String::new(),
+                focused: true,
+                caret_visible: self.input_caret.visible(),
+                secret: false,
+                selected_all: false,
+                selected_range: self.ime_selected_range_for_target(target, cx),
+                marked_text: self.marked_text_for_target(target, cx),
+            },
+        );
+        let input = self.text_input_with_workspace_ime(target, input, |_, _| {}, cx);
         let error = rename.error.clone();
         let busy = state.metadata_task.is_some();
         let title = self.i18n.t(if rename.notebook {
@@ -581,13 +758,7 @@ impl WorkspaceApp {
                 div()
                     .px(px(self.tokens.spacing.three))
                     .py(px(self.tokens.spacing.three))
-                    .child(
-                        div()
-                            .h(px(32.0))
-                            .border_1()
-                            .border_color(rgb(self.tokens.ui.border))
-                            .child(editor.clone()),
-                    )
+                    .child(input)
                     .when_some(error, |body, error| {
                         body.child(self.knowledge_error_row(&error))
                     }),
@@ -615,7 +786,11 @@ impl WorkspaceApp {
                         cx.listener(move |this, _, _, cx| {
                             if !busy {
                                 this.save_knowledge_metadata(
-                                    Some(editor.read(cx).buffer().text()),
+                                    this.knowledge_workspace
+                                        .read(cx)
+                                        .rename
+                                        .as_ref()
+                                        .map(|rename| rename.name.clone()),
                                     None,
                                     cx,
                                 );
@@ -754,8 +929,6 @@ impl WorkspaceApp {
             state.pending_document_id = None;
             state.switch_after_save = false;
             state.navigator_query = Arc::from("");
-            state.navigator_search_editor = None;
-            state._navigator_search_subscription = None;
         });
         self.ai_entity
             .update(cx, |ai, _| ai.select_knowledge_collection(id));

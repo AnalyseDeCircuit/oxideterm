@@ -127,6 +127,39 @@ impl Render for DetachedTabWindow {
                 let handled = detached.session.update(cx, |session, cx| {
                     let window_id = window.window_handle().window_id();
                     if session
+                        .mermaid_zoom
+                        .as_ref()
+                        .is_some_and(|state| state.window_id == window_id)
+                    {
+                        if event.keystroke.key == "escape" {
+                            session.mermaid_zoom = None;
+                            cx.notify();
+                        }
+                        return true;
+                    }
+                    if matches!(
+                        session.active_ime_target_for_window(window_id, cx),
+                        Some(
+                            super::ime::WorkspaceImeTarget::KnowledgeSearch
+                                | super::ime::WorkspaceImeTarget::KnowledgeRename
+                                | super::ime::WorkspaceImeTarget::ReadOnlyText(_)
+                        )
+                    ) {
+                        if session.defer_active_ime_key(&event.keystroke, window, cx) {
+                            return false;
+                        }
+                        if session.handle_active_text_input_edit_shortcut(&event.keystroke, cx)
+                            || session
+                                .handle_active_text_input_delete_selection(&event.keystroke, cx)
+                            || session.handle_active_text_input_newline(&event.keystroke, cx)
+                            || session.handle_active_text_input_transpose(&event.keystroke, cx)
+                            || session.handle_active_text_input_navigation(&event.keystroke, cx)
+                        {
+                            return true;
+                        }
+                        return session.handle_knowledge_input_key(event, window, cx);
+                    }
+                    if session
                         .ai_entity
                         .read(cx)
                         .knowledge_document_dialog_owned_by(window_id)

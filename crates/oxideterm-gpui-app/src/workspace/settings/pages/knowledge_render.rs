@@ -532,6 +532,7 @@ impl WorkspaceApp {
         open_in_workspace: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let menu_document = document.clone();
         let delete_id = document.id.clone();
         let delete_name = document.title.clone();
         let edit_id = document.id.clone();
@@ -554,7 +555,13 @@ impl WorkspaceApp {
             .active(selected)
             .has_background_image(self.background_surface_active("knowledge"));
         if open_in_workspace {
-            options = options.compact();
+            options = options
+                .compact()
+                .hover_background(oxideterm_gpui_ui::color_for_background(
+                    self.tokens.ui.bg_hover,
+                    self.background_surface_active("knowledge"),
+                    0x66,
+                ));
         }
         let mut trailing = Vec::with_capacity(2);
         if !open_in_workspace {
@@ -610,23 +617,24 @@ impl WorkspaceApp {
             &self.tokens,
             options,
             Some(
-                div()
-                    .flex_none()
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::FileText,
-                        KNOWLEDGE_ROW_ICON_SIZE,
-                        rgb(if selected {
-                            self.tokens.ui.accent
+                oxideterm_gpui_ui::file_icons::file_icon(&format!("note.{}", document.format))
+                    .render(
+                        if open_in_workspace {
+                            KNOWLEDGE_INLINE_ICON_SIZE
                         } else {
-                            self.tokens.ui.text_muted
-                        }),
-                    ))
-                    .into_any_element(),
+                            KNOWLEDGE_ROW_ICON_SIZE
+                        },
+                        &self.tokens,
+                    ),
             ),
             div()
                 .min_w(px(0.0))
                 .truncate()
-                .text_size(px(self.tokens.metrics.ui_text_sm))
+                .text_size(px(if open_in_workspace {
+                    self.tokens.metrics.ui_text_xs
+                } else {
+                    self.tokens.metrics.ui_text_sm
+                }))
                 .text_color(rgb(self.tokens.ui.text))
                 .child(document.title)
                 .into_any_element(),
@@ -644,26 +652,45 @@ impl WorkspaceApp {
         )
         .id(format!("knowledge-document-row-{}", document.id))
         .when(open_in_workspace, |row| {
-            row.h(px(40.0)).cursor_pointer().on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
-                    this.open_knowledge_workspace_tab(window, cx);
-                    this.select_knowledge_document(open_id.clone(), cx);
-                    cx.stop_propagation();
-                }),
-            )
+            row.h(px(KNOWLEDGE_WORKSPACE_SECTION_ESTIMATED_HEIGHT))
+                .min_h(px(KNOWLEDGE_WORKSPACE_SECTION_ESTIMATED_HEIGHT))
+                .py_0()
+                .px(px(self.tokens.spacing.two))
+                .rounded_none()
+                .border_0()
+                .bg(if selected {
+                    rgba((self.tokens.ui.accent << 8) | 0x33)
+                } else {
+                    rgba(0x00000000)
+                })
+                .opacity(if self.knowledge_note_is_cut(&menu_document.id, cx) {
+                    0.5
+                } else {
+                    1.0
+                })
+                .cursor_pointer()
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        this.open_knowledge_note_menu(
+                            menu_document.clone(),
+                            event.position,
+                            window,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, window, cx| {
+                        this.open_knowledge_workspace_tab(window, cx);
+                        this.select_knowledge_document(open_id.clone(), cx);
+                        cx.stop_propagation();
+                    }),
+                )
         });
-        if open_in_workspace {
-            div()
-                .w_full()
-                .h(px(44.0))
-                .flex_none()
-                .px(px(4.0))
-                .child(row)
-                .into_any_element()
-        } else {
-            row.into_any_element()
-        }
+        row.into_any_element()
     }
 
     pub(in crate::workspace) fn knowledge_embedding_config_section(

@@ -117,6 +117,8 @@ pub(super) enum WorkspaceImeTarget {
     CommandPalette,
     ShortcutsModalSearch,
     ActiveSessionSearch,
+    KnowledgeSearch,
+    KnowledgeRename,
     Search,
     TerminalCommandSenderCompact,
     TerminalCwdSearch,
@@ -490,6 +492,8 @@ impl WorkspaceImeTarget {
             Self::CommandPalette => 4,
             Self::ShortcutsModalSearch => 5,
             Self::ActiveSessionSearch => 22,
+            Self::KnowledgeSearch => 23,
+            Self::KnowledgeRename => 24,
             Self::Search => 1,
             Self::TerminalCommandSenderCompact => 2,
             Self::TerminalCwdSearch => 18,
@@ -1001,6 +1005,9 @@ impl WorkspaceApp {
         {
             return Some(WorkspaceImeTarget::Settings(input));
         }
+        if self.knowledge_workspace.read(cx).rename.is_some() {
+            return Some(WorkspaceImeTarget::KnowledgeRename);
+        }
         if self.tab_rename_dialog.is_some() {
             // The blocking rename dialog owns text input ahead of background surfaces.
             return Some(WorkspaceImeTarget::TabRename);
@@ -1045,6 +1052,24 @@ impl WorkspaceApp {
             if let Some(input) = self.ai_entity.read(cx).focused_settings_input() {
                 return Some(WorkspaceImeTarget::Settings(input));
             }
+        }
+
+        if self.selected_ime_target == Some(WorkspaceImeTarget::KnowledgeSearch)
+            && self
+                .knowledge_workspace
+                .read(cx)
+                .navigator_search_window
+                .is_some_and(|owner| {
+                    let main = self
+                        .window_registry
+                        .handle_for_role(super::window_registry::WindowRole::Main);
+                    !main.is_some_and(|handle| handle.window_id() == owner)
+                        || self
+                            .active_tab(cx)
+                            .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Knowledge)
+                })
+        {
+            return Some(WorkspaceImeTarget::KnowledgeSearch);
         }
 
         if self.session_search_open
@@ -1262,6 +1287,32 @@ impl WorkspaceApp {
         cx: &App,
     ) -> Option<WorkspaceImeTarget> {
         let target = self.active_ime_target(cx)?;
+        let knowledge = self.knowledge_workspace.read(cx);
+        let owner = match target {
+            WorkspaceImeTarget::KnowledgeSearch => knowledge.navigator_search_window,
+            WorkspaceImeTarget::KnowledgeRename => {
+                knowledge.rename.as_ref().map(|rename| rename.window_id)
+            }
+            _ => None,
+        };
+        if matches!(
+            target,
+            WorkspaceImeTarget::KnowledgeSearch | WorkspaceImeTarget::KnowledgeRename
+        ) {
+            if owner != Some(window_id) {
+                return None;
+            }
+            let main_window = self
+                .window_registry
+                .handle_for_role(super::window_registry::WindowRole::Main);
+            if main_window.is_some_and(|handle| handle.window_id() == window_id)
+                && !self
+                    .active_tab(cx)
+                    .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Knowledge)
+            {
+                return None;
+            }
+        }
         if matches!(
             target,
             WorkspaceImeTarget::Settings(SettingsInput::KnowledgeDocumentTitle)
@@ -1757,6 +1808,7 @@ impl WorkspaceApp {
         match target {
             WorkspaceImeTarget::AiChatInput
             | WorkspaceImeTarget::AiConversationRename
+            | WorkspaceImeTarget::KnowledgeSearch
             | WorkspaceImeTarget::AiMessageEdit
             | WorkspaceImeTarget::Sftp(_)
             | WorkspaceImeTarget::ReadOnlyText(_) => {
@@ -1997,6 +2049,18 @@ impl WorkspaceApp {
             }
             WorkspaceImeTarget::ShortcutsModalSearch => Some(self.shortcuts_modal.query.clone()),
             WorkspaceImeTarget::ActiveSessionSearch => Some(self.session_search_query.clone()),
+            WorkspaceImeTarget::KnowledgeSearch => Some(
+                self.knowledge_workspace
+                    .read(cx)
+                    .navigator_query
+                    .to_string(),
+            ),
+            WorkspaceImeTarget::KnowledgeRename => self
+                .knowledge_workspace
+                .read(cx)
+                .rename
+                .as_ref()
+                .map(|rename| rename.name.clone()),
             WorkspaceImeTarget::Search => Some(self.search.query.clone()),
             WorkspaceImeTarget::TerminalCommandSenderCompact => self
                 .terminal_command_sender
@@ -2778,6 +2842,27 @@ impl WorkspaceApp {
             WorkspaceImeTarget::CommandPalette => {
                 self.command_palette.update(cx, |palette, cx| {
                     palette.replace_query_utf16(replacement_range, text, cx);
+                });
+                self.show_active_input_caret(cx);
+                cx.notify();
+            }
+            WorkspaceImeTarget::KnowledgeSearch => {
+                self.knowledge_workspace.update(cx, |state, _| {
+                    let mut query = state.navigator_query.to_string();
+                    replace_utf16(&mut query, replacement_range, text);
+                    state.navigator_query = query.into();
+                });
+                self.queue_knowledge_search(cx);
+                self.show_active_input_caret(cx);
+                cx.notify();
+            }
+            WorkspaceImeTarget::KnowledgeRename => {
+                self.knowledge_workspace.update(cx, |state, _| {
+                    if state.metadata_task.is_none()
+                        && let Some(rename) = state.rename.as_mut()
+                    {
+                        replace_utf16(&mut rename.name, replacement_range, text);
+                    }
                 });
                 self.show_active_input_caret(cx);
                 cx.notify();

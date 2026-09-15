@@ -8,6 +8,7 @@ pub(in crate::workspace) enum ActiveTabWindowModalKind {
     SettingsNavigationEditor,
     AiMcpServer,
     KnowledgeLeaveConfirmation,
+    KnowledgeRename,
     KnowledgeCollectionCreate,
     KnowledgeDocumentCreate,
     KnowledgeDelete,
@@ -698,7 +699,11 @@ impl WorkspaceApp {
             onboarding_open: self.onboarding.open,
             shortcuts_open: self.shortcuts_modal.open,
             app_lock_dialog_open: self.app_lock.dialog.is_some(),
-            mermaid_zoom_open: self.mermaid_zoom.is_some(),
+            mermaid_zoom_open: self.mermaid_zoom.as_ref().is_some_and(|state| {
+                self.window_registry
+                    .handle_for_role(window_registry::WindowRole::Main)
+                    .is_some_and(|handle| handle.window_id() == state.window_id)
+            }),
             native_update_toast_visible: self.native_update_notification_open,
         }
         .top_owner()
@@ -724,6 +729,12 @@ impl WorkspaceApp {
         let active_tab = self.active_tab(cx)?;
         match active_tab.kind {
             TabKind::Knowledge => {
+                if self.knowledge_workspace.read(cx).rename.is_some() {
+                    return Some(ActiveTabWindowModalSnapshot {
+                        kind: ActiveTabWindowModalKind::KnowledgeRename,
+                        phase: visible,
+                    });
+                }
                 if self.knowledge_leave_confirmation_open(cx) {
                     return Some(ActiveTabWindowModalSnapshot {
                         kind: ActiveTabWindowModalKind::KnowledgeLeaveConfirmation,
@@ -1119,6 +1130,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         match kind {
+            ActiveTabWindowModalKind::KnowledgeRename => {
+                self.handle_knowledge_input_key(event, window, cx)
+            }
             ActiveTabWindowModalKind::KnowledgeLeaveConfirmation => {
                 self.handle_knowledge_leave_confirmation_key(event, window, cx)
             }

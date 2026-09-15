@@ -642,6 +642,11 @@ impl WorkspaceApp {
             return;
         }
 
+        if self.handle_knowledge_input_key(event, window, cx) {
+            cx.stop_propagation();
+            return;
+        }
+
         if self.active_ime_target(cx) == Some(ime::WorkspaceImeTarget::ActiveSessionSearch) {
             if event.keystroke.key == "escape" {
                 self.session_search_query.clear();

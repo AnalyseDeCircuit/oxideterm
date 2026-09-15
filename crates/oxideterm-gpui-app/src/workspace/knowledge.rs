@@ -3,11 +3,12 @@
 
 use super::*;
 
-mod navigation;
+pub(in crate::workspace) mod navigation;
+mod operations;
 
 use gpui::EventEmitter;
 use oxideterm_editor_syntax::LanguageId;
-use oxideterm_gpui_editor::{EditorContextMenuLabels, EditorPresentation, TextEditorView};
+use oxideterm_gpui_editor::{EditorContextMenuLabels, TextEditorView};
 use oxideterm_gpui_ui::{
     IconButtonOptions, SegmentedControlOptions, ToolbarButtonOptions,
     button::{ButtonRadius, ButtonVariant},
@@ -15,12 +16,10 @@ use oxideterm_gpui_ui::{
 };
 
 pub(in crate::workspace) const KNOWLEDGE_WORKSPACE_SECTION_COUNT: usize = 4;
-pub(in crate::workspace) const KNOWLEDGE_WORKSPACE_SECTION_ESTIMATED_HEIGHT: f32 = 44.0;
+pub(in crate::workspace) const KNOWLEDGE_WORKSPACE_SECTION_ESTIMATED_HEIGHT: f32 = 28.0;
 pub(in crate::workspace) const KNOWLEDGE_WORKSPACE_SECTION_OVERSCAN: usize = 8;
 const KNOWLEDGE_NAVIGATOR_ACTION_SIZE: f32 = 28.0;
 const KNOWLEDGE_NAVIGATOR_ACTION_ICON_SIZE: f32 = 14.0;
-const KNOWLEDGE_NAVIGATOR_SEARCH_HEIGHT: f32 = 32.0;
-const KNOWLEDGE_NAVIGATOR_SEARCH_VERTICAL_PADDING: f32 = 12.0;
 const KNOWLEDGE_NARROW_VIEWPORT_WIDTH: f32 = 720.0;
 const KNOWLEDGE_EDITOR_MODE_SWITCHER_WIDTH: f32 = 176.0;
 const KNOWLEDGE_BACKGROUND_SURFACE_ALPHA: u32 = 0x66;
@@ -83,6 +82,8 @@ enum KnowledgeFormatAction {
     Italic,
     Strike,
     InlineCode,
+    InlineMath,
+    DisplayMath,
     CodeBlock,
     Link,
     Image,
@@ -102,6 +103,8 @@ fn knowledge_format_wrap(action: KnowledgeFormatAction) -> Option<(&'static str,
         KnowledgeFormatAction::Italic => Some(("*", "*")),
         KnowledgeFormatAction::Strike => Some(("~~", "~~")),
         KnowledgeFormatAction::InlineCode => Some(("`", "`")),
+        KnowledgeFormatAction::InlineMath => Some(("$", "$")),
+        KnowledgeFormatAction::DisplayMath => Some(("\n$$\n", "\n$$\n")),
         KnowledgeFormatAction::CodeBlock => Some(("```\n", "\n```")),
         KnowledgeFormatAction::Link => Some(("[", "](url)")),
         KnowledgeFormatAction::Image => Some(("![", "](url)")),
@@ -140,6 +143,8 @@ struct KnowledgeEditorLabels {
     format_italic: String,
     format_strike: String,
     format_inline_code: String,
+    format_inline_math: String,
+    format_display_math: String,
     format_code_block: String,
     format_link: String,
     format_image: String,
@@ -191,6 +196,8 @@ impl KnowledgeEditorLabels {
             format_italic: i18n.t("settings_view.knowledge.format_italic"),
             format_strike: i18n.t("settings_view.knowledge.format_strike"),
             format_inline_code: i18n.t("settings_view.knowledge.format_inline_code"),
+            format_inline_math: i18n.t("settings_view.knowledge.format_inline_math"),
+            format_display_math: i18n.t("settings_view.knowledge.format_display_math"),
             format_code_block: i18n.t("settings_view.knowledge.format_code_block"),
             format_link: i18n.t("settings_view.knowledge.format_link"),
             format_image: i18n.t("settings_view.knowledge.format_image"),
@@ -263,6 +270,8 @@ struct KnowledgeDocumentEditor {
     draft: Arc<str>,
     saved_draft: Arc<str>,
     mode: KnowledgeEditorMode,
+    previous_mode: KnowledgeEditorMode,
+    mode_transition: Option<Task<()>>,
     save_state: KnowledgeDocumentSaveState,
     keyword_index: oxideterm_ai::RagKeywordIndexState,
     semantic_index: oxideterm_ai::RagSemanticIndexState,
@@ -271,6 +280,9 @@ struct KnowledgeDocumentEditor {
     autosave_task: Option<Task<()>>,
     index_state_task: Option<Task<()>>,
     preview_scroll: MarkdownVirtualListScrollHandle,
+    preview_navigation: oxideterm_gpui_markdown::navigation::MarkdownNavigation,
+    preview_workspace: Option<gpui::WeakEntity<WorkspaceApp>>,
+    preview_workspace_subscription: Option<Subscription>,
     has_background_image: bool,
     source_path: Option<std::path::PathBuf>,
     is_markdown: bool,
@@ -315,9 +327,11 @@ impl KnowledgeDocumentEditor {
             let mut editor = TextEditorView::new(content.clone(), &tokens, cx);
             editor.set_context_menu_labels(editor_labels);
             editor.set_language(is_markdown.then_some(LanguageId::Markdown), cx);
+            editor.set_border_visible(false);
             editor.set_settings(
                 oxideterm_gpui_editor::EditorSettings {
                     soft_wrap: true,
+                    soft_wrap_column: None,
                     ..Default::default()
                 },
                 cx,
@@ -325,6 +339,7 @@ impl KnowledgeDocumentEditor {
             editor.set_transparent_background(has_background_image, cx);
             editor
         });
+        let preview_scroll = MarkdownVirtualListScrollHandle::new();
         let observed_buffer_version = editor.read(cx).buffer().version();
         let draft = Arc::<str>::from(content);
         let saved_draft = draft.clone();
@@ -361,6 +376,8 @@ impl KnowledgeDocumentEditor {
             draft,
             saved_draft,
             mode: KnowledgeEditorMode::Source,
+            previous_mode: KnowledgeEditorMode::Source,
+            mode_transition: None,
             save_state: KnowledgeDocumentSaveState::Saved,
             keyword_index,
             semantic_index,
@@ -368,7 +385,12 @@ impl KnowledgeDocumentEditor {
             autosave_generation: 0,
             autosave_task: None,
             index_state_task: None,
-            preview_scroll: MarkdownVirtualListScrollHandle::new(),
+            preview_navigation: oxideterm_gpui_markdown::navigation::MarkdownNavigation::new(
+                preview_scroll.clone(),
+            ),
+            preview_scroll,
+            preview_workspace: None,
+            preview_workspace_subscription: None,
             has_background_image,
             source_path,
             is_markdown,
@@ -447,7 +469,19 @@ impl KnowledgeDocumentEditor {
 
     fn set_mode(&mut self, mode: KnowledgeEditorMode, window: &mut Window, cx: &mut Context<Self>) {
         if self.mode != mode {
+            self.previous_mode = self.mode;
             self.mode = mode;
+            self.mode_transition = None;
+            if let Some(motion) = oxideterm_gpui_ui::segmented_control_motion(&self.tokens) {
+                self.mode_transition = Some(cx.spawn(async move |surface, cx| {
+                    Timer::after(motion.duration).await;
+                    let _ = surface.update(cx, |surface, cx| {
+                        surface.previous_mode = surface.mode;
+                        surface.mode_transition = None;
+                        cx.notify();
+                    });
+                }));
+            }
             self.editor.update(cx, |editor, _cx| {
                 editor.set_read_only(mode == KnowledgeEditorMode::Preview);
             });
@@ -470,6 +504,10 @@ impl KnowledgeDocumentEditor {
                 .await;
             let _ = surface.update(cx, |surface, cx| {
                 if surface.draft == source {
+                    surface.preview_navigation =
+                        oxideterm_gpui_markdown::navigation::MarkdownNavigation::new(
+                            surface.preview_scroll.clone(),
+                        );
                     surface.preview_document = Some(document);
                     cx.notify();
                 }
@@ -693,9 +731,14 @@ impl KnowledgeDocumentEditor {
         oxideterm_gpui_ui::segmented_control(
             &self.tokens,
             "knowledge-editor-mode-switcher",
-            SegmentedControlOptions::new(active_index, active_index, 2)
-                .has_background_image(self.has_background_image)
-                .compact(KNOWLEDGE_EDITOR_MODE_SWITCHER_WIDTH),
+            SegmentedControlOptions::new(
+                active_index,
+                usize::from(self.previous_mode == KnowledgeEditorMode::Preview),
+                2,
+            )
+            .user_transition_active(self.mode_transition.is_some())
+            .has_background_image(self.has_background_image)
+            .compact(KNOWLEDGE_EDITOR_MODE_SWITCHER_WIDTH),
             vec![
                 self.render_mode_button(
                     KnowledgeEditorMode::Source,
@@ -731,6 +774,8 @@ impl KnowledgeDocumentEditor {
             | KnowledgeFormatAction::Italic
             | KnowledgeFormatAction::Strike
             | KnowledgeFormatAction::InlineCode
+            | KnowledgeFormatAction::InlineMath
+            | KnowledgeFormatAction::DisplayMath
             | KnowledgeFormatAction::CodeBlock
             | KnowledgeFormatAction::Link
             | KnowledgeFormatAction::Image) => {
@@ -819,7 +864,30 @@ impl Render for KnowledgeDocumentEditor {
         let source = self.mode == KnowledgeEditorMode::Source;
         let preview = self.mode == KnowledgeEditorMode::Preview;
         let conflict = matches!(self.save_state, KnowledgeDocumentSaveState::Conflict);
-        let mut options = MarkdownOptions::from_theme(&self.tokens);
+        let workspace = self
+            .preview_workspace
+            .as_ref()
+            .and_then(gpui::WeakEntity::upgrade);
+        let mut options = workspace
+            .as_ref()
+            .map(|workspace| workspace.read(cx).localized_markdown_options())
+            .unwrap_or_else(|| MarkdownOptions::from_theme(&self.tokens));
+        let selectable = workspace.as_ref().map(|workspace| {
+            workspace
+                .read(cx)
+                .selectable_text_render_state_for_entity(workspace.clone(), cx)
+        });
+        let actions =
+            workspace.map(
+                |workspace| oxideterm_gpui_markdown::render::MarkdownCodeBlockActions {
+                    on_run: None,
+                    on_mermaid_zoom: Some(WorkspaceApp::mermaid_zoom_handler_for_workspace(
+                        workspace,
+                    )),
+                },
+            );
+        options.background_surface_active = self.has_background_image;
+        options.navigation = Some(self.preview_navigation.clone());
         if let Some(path) = self.source_path.as_ref() {
             options = options.with_source_path(path);
         }
@@ -904,6 +972,27 @@ impl Render for KnowledgeDocumentEditor {
                                     KnowledgeFormatGlyph::Text("H3"),
                                     format!("{} 3", self.labels.format_heading),
                                     KnowledgeFormatAction::Heading(3),
+                                    cx,
+                                ))
+                                .child(self.render_format_button(
+                                    "knowledge-format-heading-4",
+                                    KnowledgeFormatGlyph::Text("H4"),
+                                    format!("{} 4", self.labels.format_heading),
+                                    KnowledgeFormatAction::Heading(4),
+                                    cx,
+                                ))
+                                .child(self.render_format_button(
+                                    "knowledge-format-heading-5",
+                                    KnowledgeFormatGlyph::Text("H5"),
+                                    format!("{} 5", self.labels.format_heading),
+                                    KnowledgeFormatAction::Heading(5),
+                                    cx,
+                                ))
+                                .child(self.render_format_button(
+                                    "knowledge-format-heading-6",
+                                    KnowledgeFormatGlyph::Text("H6"),
+                                    format!("{} 6", self.labels.format_heading),
+                                    KnowledgeFormatAction::Heading(6),
                                     cx,
                                 ))
                                 .child(self.render_format_separator())
@@ -999,6 +1088,21 @@ impl Render for KnowledgeDocumentEditor {
                                     self.labels.format_horizontal_rule.clone(),
                                     KnowledgeFormatAction::HorizontalRule,
                                     cx,
+                                ))
+                                .child(self.render_format_separator())
+                                .child(self.render_format_button(
+                                    "knowledge-format-inline-math",
+                                    KnowledgeFormatGlyph::Text("$"),
+                                    self.labels.format_inline_math.clone(),
+                                    KnowledgeFormatAction::InlineMath,
+                                    cx,
+                                ))
+                                .child(self.render_format_button(
+                                    "knowledge-format-display-math",
+                                    KnowledgeFormatGlyph::Text("$$"),
+                                    self.labels.format_display_math.clone(),
+                                    KnowledgeFormatAction::DisplayMath,
+                                    cx,
                                 )),
                         ),
                 )
@@ -1022,12 +1126,29 @@ impl Render for KnowledgeDocumentEditor {
                                 .min_h_0()
                                 .p(px(KNOWLEDGE_PREVIEW_PADDING))
                                 .child(if let Some(document) = self.preview_document.as_ref() {
-                                    oxideterm_gpui_markdown::render::render_document_virtual(
+                                    let group_id = super::selectable_text::selectable_text_id("notes-preview", &self.document_id);
+                                    let mut order = 0;
+                                    oxideterm_gpui_markdown::render::render_document_virtual_selectable(
                                         preview_id,
                                         document,
                                         &self.tokens,
                                         &options,
                                         &self.preview_scroll,
+                                        actions.as_ref(),
+                                        &mut |key, text, runs, links| {
+                                            let index = order;
+                                            order += 1;
+                                            if let Some(state) = selectable.as_ref() {
+                                                state.render_styled_text_in_group(
+                                                    super::selectable_text::SelectableTextRole::PlainDocument,
+                                                    group_id,
+                                                    super::selectable_text::selectable_text_id("notes-preview-fragment", (group_id, key)),
+                                                    index, text, runs, links,
+                                                )
+                                            } else {
+                                                gpui::StyledText::new(text).with_runs(runs).into_any_element()
+                                            }
+                                        },
                                     )
                                 } else {
                                     div()
@@ -1132,10 +1253,13 @@ pub(super) struct KnowledgeWorkspaceEntity {
     mobile_navigator_open: bool,
     navigator_width: Option<f32>,
     navigator_resize: Option<(gpui::WindowId, f32, f32)>,
+    navigator_closing: bool,
+    navigator_motion_task: Option<Task<()>>,
     menu: Option<navigation::KnowledgeMenu>,
-    rename: Option<navigation::KnowledgeRename>,
-    metadata_task: Option<Task<()>>,
+    pub(in crate::workspace) rename: Option<navigation::KnowledgeRename>,
+    pub(in crate::workspace) metadata_task: Option<Task<()>>,
     metadata_error: Option<String>,
+    clipboard: Option<operations::NoteClipboard>,
     search_task: Option<Task<()>>,
     last_embedding_running: bool,
     pending_collection_id: Option<String>,
@@ -1143,9 +1267,8 @@ pub(super) struct KnowledgeWorkspaceEntity {
     navigator_refresh_running: bool,
     navigator_refresh_requested: bool,
     navigator_last_refresh: Option<Instant>,
-    navigator_query: Arc<str>,
-    navigator_search_editor: Option<Entity<TextEditorView>>,
-    _navigator_search_subscription: Option<Subscription>,
+    pub(in crate::workspace) navigator_query: Arc<str>,
+    pub(in crate::workspace) navigator_search_window: Option<gpui::WindowId>,
 }
 
 impl KnowledgeWorkspaceEntity {
@@ -1178,9 +1301,10 @@ impl KnowledgeWorkspaceEntity {
             self.metadata_error = None;
             self.search_task = None;
             self.navigator_resize = None;
+            self.navigator_closing = false;
+            self.navigator_motion_task = None;
             self.pending_collection_id = None;
-            self.navigator_search_editor = None;
-            self._navigator_search_subscription = None;
+            self.navigator_search_window = None;
         }
     }
 
@@ -1400,18 +1524,12 @@ impl WorkspaceApp {
         {
             return true;
         }
-        if knowledge
-            .rename
-            .as_ref()
-            .is_some_and(|rename| rename.editor.read(cx).focus_handle(cx).is_focused(window))
-        {
-            return true;
-        }
-        if knowledge
-            .navigator_search_editor
-            .as_ref()
-            .is_some_and(|editor| editor.read(cx).focus_handle(cx).is_focused(window))
-        {
+        if matches!(
+            self.active_ime_target_for_window(window.window_handle().window_id(), cx),
+            Some(
+                ime::WorkspaceImeTarget::KnowledgeSearch | ime::WorkspaceImeTarget::KnowledgeRename
+            )
+        ) {
             return true;
         }
         let Some(document) = knowledge.editor.as_ref() else {
@@ -1437,9 +1555,29 @@ impl WorkspaceApp {
         }
         let key = event.keystroke.key.as_str();
         let command = event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
+        if command && matches!(key, "c" | "x" | "v") {
+            if key == "v" {
+                self.paste_knowledge_note(cx);
+            } else if let Some(id) = self
+                .knowledge_workspace
+                .read(cx)
+                .selected_document_id
+                .clone()
+            {
+                self.copy_knowledge_note(id, key == "x", cx);
+            }
+            return true;
+        }
         if command && key == "f" {
-            let search = self.ensure_knowledge_navigator_search(cx);
-            window.focus(&search.read(cx).focus_handle(cx), cx);
+            self.knowledge_workspace.update(cx, |state, _| {
+                state.navigator_hidden = false;
+                state.mobile_navigator_open = true;
+            });
+            self.clear_ime_selection();
+            self.selected_ime_target = Some(ime::WorkspaceImeTarget::KnowledgeSearch);
+            window.focus(&self.focus_handle, cx);
+            self.show_active_input_caret(cx);
+            cx.notify();
             return true;
         }
         let direction = match key {
@@ -1470,93 +1608,39 @@ impl WorkspaceApp {
         true
     }
 
-    fn ensure_knowledge_navigator_search(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> Entity<TextEditorView> {
-        if let Some(editor) = self
-            .knowledge_workspace
-            .read(cx)
-            .navigator_search_editor
-            .clone()
-        {
-            return editor;
-        }
-        let placeholder = self
-            .i18n
-            .t("settings_view.knowledge.navigator_search_placeholder");
-        let has_background_image = self.background_surface_active("knowledge");
-        let editor = cx.new(|cx| {
-            let mut editor = TextEditorView::new("", &self.tokens, cx);
-            editor.set_presentation(EditorPresentation::Inline, cx);
-            editor.apply_runtime_settings(
-                &self.tokens,
-                settings_ui_font_family(&self.settings_store.settings().appearance.ui_font_family)
-                    .to_string(),
-                self.tokens.metrics.ui_text_sm,
-                1.5,
-                false,
-                has_background_image,
-                cx,
-            );
-            editor.set_transparent_background(has_background_image, cx);
-            editor.set_placeholder(Some(placeholder), cx);
-            editor
-        });
-        let weak_workspace = cx.entity().downgrade();
-        editor.update(cx, |editor, _cx| {
-            editor.set_on_save(Box::new(move |_query, _window, cx| {
-                weak_workspace
-                    .update(cx, |workspace, cx| {
-                        if let Some(document_editor) =
-                            workspace.knowledge_workspace.read(cx).editor.clone()
-                        {
-                            document_editor.update(cx, |editor, cx| editor.save_current_draft(cx));
-                        }
-                    })
-                    .map_err(|_| "knowledge workspace is no longer open".to_string())?;
-                Ok(())
-            }));
-        });
-        let observed_editor = editor.clone();
-        let subscription = cx.observe(&editor, move |workspace, editor, cx| {
-            let query: Arc<str> = Arc::from(editor.read(cx).buffer().text().trim());
-            let changed = workspace.knowledge_workspace.update(cx, |knowledge, _cx| {
-                if knowledge.navigator_query == query {
-                    return false;
-                }
-                knowledge.navigator_query = query;
-                true
-            });
-            if changed {
-                workspace.queue_knowledge_search(cx);
-                cx.notify();
-            }
-        });
-        self.knowledge_workspace.update(cx, |knowledge, _cx| {
-            knowledge.navigator_search_editor = Some(observed_editor);
-            knowledge._navigator_search_subscription = Some(subscription);
-        });
-        editor
-    }
-
-    fn knowledge_navigator_search(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let editor = self.ensure_knowledge_navigator_search(cx);
-        let editor_line_height = editor.read(cx).line_height();
-        let has_background_image = self.background_surface_active("knowledge");
-        editor.update(cx, |editor, cx| {
-            editor.set_transparent_background(has_background_image, cx);
-        });
+    fn knowledge_navigator_search(&self, cx: &mut Context<Self>) -> AnyElement {
+        let target = ime::WorkspaceImeTarget::KnowledgeSearch;
+        let query = self.knowledge_workspace.read(cx).navigator_query.clone();
+        let input = oxideterm_gpui_ui::text_input::text_input(
+            &self.tokens,
+            oxideterm_gpui_ui::text_input::TextInputView {
+                value: &query,
+                placeholder: self
+                    .i18n
+                    .t("settings_view.knowledge.navigator_search_placeholder"),
+                focused: self.active_ime_target(cx) == Some(target),
+                caret_visible: self.input_caret.visible(),
+                secret: false,
+                selected_all: false,
+                selected_range: self.ime_selected_range_for_target(target, cx),
+                marked_text: self.marked_text_for_target(target, cx),
+            },
+        )
+        .flex_1()
+        .min_w_0()
+        .px_0()
+        .border_0()
+        .rounded_none()
+        .bg(gpui::transparent_black());
+        let input = self.text_input_with_workspace_ime(target, input, |_, _| {}, cx);
         div()
-            .h(px(
-                KNOWLEDGE_NAVIGATOR_SEARCH_HEIGHT + KNOWLEDGE_NAVIGATOR_SEARCH_VERTICAL_PADDING
-            ))
+            .h(px(self.tokens.metrics.ui_button_lg_height))
             .w_full()
             .flex_none()
             .flex()
             .items_center()
-            .gap(px(6.0))
-            .px(px(8.0))
+            .gap(px(self.tokens.spacing.two))
+            .px(px(self.tokens.spacing.two))
             .border_b_1()
             .border_color(rgb(self.tokens.ui.border))
             .child(Self::render_lucide_icon(
@@ -1564,22 +1648,7 @@ impl WorkspaceApp {
                 KNOWLEDGE_NAVIGATOR_ACTION_ICON_SIZE,
                 rgb(self.tokens.ui.text_muted),
             ))
-            .child(
-                div()
-                    .h(px(KNOWLEDGE_NAVIGATOR_SEARCH_HEIGHT))
-                    .min_w_0()
-                    .flex_1()
-                    .flex()
-                    .items_center()
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .w_full()
-                            .h(px(editor_line_height))
-                            .flex_none()
-                            .child(editor),
-                    ),
-            )
+            .child(input)
             .into_any_element()
     }
 
@@ -1941,6 +2010,16 @@ impl WorkspaceApp {
                                 cx,
                             )
                         });
+                        let preview_workspace = cx.entity();
+                        editor.update(cx, |editor, cx| {
+                            editor.preview_workspace = Some(preview_workspace.downgrade());
+                            editor.preview_workspace_subscription =
+                                Some(cx.observe(&preview_workspace, |editor, _, cx| {
+                                    if editor.mode == KnowledgeEditorMode::Preview {
+                                        cx.notify();
+                                    }
+                                }));
+                        });
                         KnowledgeDocumentEditor::configure_save_callback(&editor, cx);
                         editor.update(cx, |editor, cx| editor.start_index_state_poll(cx));
                         let subscription = cx.subscribe(
@@ -2134,6 +2213,12 @@ impl WorkspaceApp {
             KnowledgeWorkspaceLayout::DetachedWindow => viewport_width,
         };
         let narrow_layout = available_width < KNOWLEDGE_NARROW_VIEWPORT_WIDTH;
+        if !self.tokens.motion.enabled {
+            self.knowledge_workspace.update(cx, |state, _| {
+                state.navigator_closing = false;
+                state.navigator_motion_task = None;
+            });
+        }
         let (show_navigator, navigator_width) = {
             let state = self.knowledge_workspace.read(cx);
             (
@@ -2166,6 +2251,14 @@ impl WorkspaceApp {
         });
         if let Some(editor) = self.knowledge_workspace.read(cx).editor.clone() {
             editor.update(cx, |editor, cx| {
+                if editor.tokens != self.tokens {
+                    editor.tokens = self.tokens;
+                    if !self.tokens.motion.enabled {
+                        editor.mode_transition = None;
+                        editor.previous_mode = editor.mode;
+                    }
+                    cx.notify();
+                }
                 editor.set_has_background_image(has_background_image, cx);
                 if embedding_finished {
                     editor.start_index_state_poll(cx);
@@ -2207,6 +2300,10 @@ impl WorkspaceApp {
                 .reset(document_row_count);
         }
         let navigator_toolbar = self.knowledge_navigator_toolbar(selected_collection.as_ref(), cx);
+        self.knowledge_workspace.update(cx, |state, _| {
+            state.navigator_search_window =
+                show_navigator.then_some(window.window_handle().window_id());
+        });
         let navigator_search = self.knowledge_navigator_search(cx);
         let spec = TauriVirtualListSpec::new(
             px(KNOWLEDGE_WORKSPACE_SECTION_ESTIMATED_HEIGHT),
@@ -2270,8 +2367,19 @@ impl WorkspaceApp {
                 .flex()
                 .flex_col()
                 .overflow_hidden()
-                .border_t_1()
-                .border_color(rgb(self.tokens.ui.border))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| {
+                        window.focus(&this.focus_handle, cx);
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                        this.open_knowledge_list_menu(event.position, window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
                 .child(documents_header)
                 .child(document_body)
                 .into_any_element()
@@ -2299,8 +2407,11 @@ impl WorkspaceApp {
             .w(px(navigator_width))
             .when(narrow_layout, |navigator| navigator.w_full())
             .h_full()
-            .border_r_1()
-            .border_color(rgb(self.tokens.ui.border))
+            .when(narrow_layout, |navigator| {
+                navigator
+                    .border_r_1()
+                    .border_color(rgb(self.tokens.ui.border))
+            })
             .bg(color_for_background(
                 self.tokens.ui.bg_secondary,
                 has_background_image,
@@ -2422,6 +2533,18 @@ impl WorkspaceApp {
             .flex_col()
             .relative()
             .overflow_hidden()
+            .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                let target = ime::WorkspaceImeTarget::KnowledgeSearch;
+                if this.selected_ime_target == Some(target)
+                    && this
+                        .text_input_anchors
+                        .get(target.anchor_id())
+                        .is_none_or(|anchor| !anchor.bounds.contains(&event.position))
+                {
+                    this.clear_ime_selection();
+                    cx.notify();
+                }
+            }))
             .child(self.knowledge_workspace_header(narrow_layout, cx))
             .child(
                 div()
@@ -2429,7 +2552,22 @@ impl WorkspaceApp {
                     .flex_1()
                     .min_h_0()
                     .flex()
-                    .when(show_navigator, |content| content.child(navigator))
+                    .when(
+                        show_navigator || self.knowledge_workspace.read(cx).navigator_closing,
+                        |content| {
+                            content.child(oxideterm_gpui_ui::motion::horizontal_reveal(
+                                &self.tokens,
+                                "notes-navigation-motion",
+                                navigator,
+                                if narrow_layout {
+                                    available_width
+                                } else {
+                                    navigator_width
+                                },
+                                show_navigator,
+                            ))
+                        },
+                    )
                     .when(!narrow_layout || !show_navigator, |content| {
                         content.child(editor_pane)
                     }),

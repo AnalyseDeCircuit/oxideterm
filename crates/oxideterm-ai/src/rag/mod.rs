@@ -710,6 +710,36 @@ pub fn rag_create_blank_document(
     Ok(document_response(metadata))
 }
 
+pub fn rag_copy_document(
+    store: &RagStore,
+    doc_id: &str,
+    collection_id: String,
+    title: String,
+) -> Result<DocumentResponse, RagError> {
+    if title.trim().is_empty() || title.len() > MAX_NAME_LENGTH {
+        return Err(RagError::InvalidInput("Invalid note title".into()));
+    }
+    let (mut metadata, content, _) = store.get_document_for_editing(doc_id)?;
+    let content = zeroize::Zeroizing::new(content);
+    metadata.id = uuid::Uuid::new_v4().to_string();
+    metadata.collection_id = collection_id;
+    metadata.title = title;
+    metadata.version = 0;
+    metadata.indexed_at = chrono::Utc::now().timestamp_millis();
+    let mut chunks = chunker::chunk_document(&metadata.id, &content, &metadata.format);
+    for chunk in &mut chunks {
+        chunk.context_prefix = Some(build_context_prefix(
+            &metadata.title,
+            chunk.section_path.as_deref(),
+        ));
+    }
+    metadata.chunk_count = chunks.len();
+    // One transaction publishes the complete copy; a failed paste cannot leave a blank note.
+    store.add_document(&metadata, &chunks, Some(&content))?;
+    let _ = store.queue_bm25_rebuild();
+    Ok(document_response(metadata))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

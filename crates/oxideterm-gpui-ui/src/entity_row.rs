@@ -1,4 +1,4 @@
-use gpui::{AnyElement, Div, ParentElement, Styled, div, prelude::*, px, rgb};
+use gpui::{AnyElement, Div, ParentElement, Rgba, Styled, div, prelude::*, px, rgb};
 use oxideterm_theme::ThemeTokens;
 
 use crate::{SurfaceKind, SurfaceOptions, SurfacePadding, semantic_surface};
@@ -15,6 +15,7 @@ pub struct EntityListRowOptions {
     pub disabled: bool,
     pub density: EntityListRowDensity,
     pub has_background_image: bool,
+    pub hover_background: Option<Rgba>,
 }
 
 impl EntityListRowOptions {
@@ -24,6 +25,7 @@ impl EntityListRowOptions {
             disabled: false,
             density: EntityListRowDensity::Normal,
             has_background_image: false,
+            hover_background: None,
         }
     }
 
@@ -44,6 +46,11 @@ impl EntityListRowOptions {
 
     pub const fn has_background_image(mut self, has_background_image: bool) -> Self {
         self.has_background_image = has_background_image;
+        self
+    }
+
+    pub const fn hover_background(mut self, color: Rgba) -> Self {
+        self.hover_background = Some(color);
         self
     }
 }
@@ -99,7 +106,11 @@ pub fn entity_list_row(
     .gap(px(tokens.spacing.two))
     .opacity(if options.disabled { 0.55 } else { 1.0 })
     .when(!options.disabled, |row| {
-        row.hover(move |style| style.bg(rgb(tokens.ui.bg_hover)))
+        row.hover(move |style| {
+            style.bg(options
+                .hover_background
+                .unwrap_or_else(|| rgb(tokens.ui.bg_hover)))
+        })
     });
 
     let mut row = row.when_some(leading, |row, leading| row.child(leading));

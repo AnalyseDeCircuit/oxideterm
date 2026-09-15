@@ -117,7 +117,7 @@ pub use rag::{
     PendingEmbeddingResponse as RagPendingEmbeddingResponse, RagError, RagStore,
     SearchRequest as RagSearchRequest, SearchResultResponse as RagSearchResultResponse,
     SemanticIndexState as RagSemanticIndexState, StatsResponse as RagStatsResponse,
-    StoreEmbeddingsRequest as RagStoreEmbeddingsRequest, rag_add_document,
+    StoreEmbeddingsRequest as RagStoreEmbeddingsRequest, rag_add_document, rag_copy_document,
     rag_create_blank_document, rag_create_collection, rag_delete_collection,
     rag_document_semantic_index_state, rag_get_collection_stats, rag_get_document,
     rag_get_document_content, rag_get_pending_embeddings, rag_keyword_index_state,
