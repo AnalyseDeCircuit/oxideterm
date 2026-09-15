@@ -393,9 +393,9 @@ pub(crate) static ACTION_DEFINITIONS: LazyLock<Vec<ActionDefinition>> = LazyLock
         def(
             "terminal.clearScreen",
             ActionScope::Terminal,
-            KeyCombo::ctrl("l"),
-            // Windows and Linux shells own Ctrl+L and use it to clear and
+            // Shells own Ctrl+L on every platform and use it to clear and
             // redraw the prompt. Keep the host-only action on a shifted chord.
+            KeyCombo::ctrl_shift("l"),
             KeyCombo::ctrl_shift("l"),
         ),
         def(
@@ -1900,13 +1900,32 @@ mod tests {
     }
 
     #[test]
-    fn windows_and_linux_ctrl_l_remains_terminal_input() {
+    fn ctrl_l_remains_terminal_input_on_all_platforms() {
         let definition = action_definition("terminal.clearScreen").unwrap();
         let overrides = Map::new();
 
+        for side in [KeybindingSide::Mac, KeybindingSide::Other] {
+            assert_eq!(
+                effective_combo(definition, &overrides, side),
+                Some(KeyCombo::ctrl_shift("l")),
+                "{side:?} must reserve Ctrl+L for the shell"
+            );
+        }
+
+        let mut keystroke = Keystroke {
+            modifiers: Modifiers {
+                control: true,
+                ..Default::default()
+            },
+            key: "l".to_string(),
+            key_char: None,
+        };
+        assert!(matched_action_for_keystroke(&keystroke, &overrides).is_none());
+        keystroke.modifiers.shift = true;
         assert_eq!(
-            effective_combo(definition, &overrides, KeybindingSide::Other),
-            Some(KeyCombo::ctrl_shift("l"))
+            matched_action_for_keystroke(&keystroke, &overrides)
+                .map(|(action, _)| action.id.as_ref()),
+            Some("terminal.clearScreen")
         );
     }
 
