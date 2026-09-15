@@ -375,6 +375,14 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> SelectableTextRenderState {
+        self.selectable_text_render_state_for_entity(cx.entity(), cx)
+    }
+
+    pub(super) fn selectable_text_render_state_for_entity(
+        &self,
+        workspace: Entity<Self>,
+        cx: &App,
+    ) -> SelectableTextRenderState {
         let active_group_selection =
             if let Some(WorkspaceImeTarget::ReadOnlyText(group_id)) = self.active_ime_target(cx) {
                 self.ime_selected_range_for_target(WorkspaceImeTarget::ReadOnlyText(group_id), cx)
@@ -394,7 +402,7 @@ impl WorkspaceApp {
             })
             .unwrap_or_default();
         SelectableTextRenderState {
-            workspace: cx.entity(),
+            workspace,
             ui_font_family: tauri_ui_font_family(
                 &self.settings_store.settings().appearance.ui_font_family,
             ),
@@ -798,11 +806,6 @@ impl WorkspaceApp {
             .filter(|update| update.group_id != selectable_document_group_id() && update.order == 0)
             .map(|update| update.group_id)
             .collect::<HashSet<_>>();
-        if !replaced_groups.is_empty() {
-            self.selectable_text_fragments
-                .retain(|_, fragment| !replaced_groups.contains(&fragment.group_id));
-        }
-
         let active_group = match self.active_ime_target(cx) {
             Some(WorkspaceImeTarget::ReadOnlyText(group_id)) => Some(group_id),
             _ => None,
@@ -838,6 +841,12 @@ impl WorkspaceApp {
                     });
             fragment_changed || fragment_removed
         });
+        // Compare against the previous frame before replacing its fragments.
+        // Removing them first makes every selected frame look like changed text.
+        if !replaced_groups.is_empty() {
+            self.selectable_text_fragments
+                .retain(|_, fragment| !replaced_groups.contains(&fragment.group_id));
+        }
         for update in updates {
             self.selectable_text_fragments.insert(
                 update.fragment_id,
@@ -1117,12 +1126,13 @@ impl SelectableTextRenderState {
                     order,
                     text.into(),
                     vec![run],
+                    Vec::new(),
                 ),
             SelectableTextRole::NonSelectable => render_non_selectable_styled_text(text, vec![run]),
         }
     }
 
-    fn render_styled_text_in_group(
+    pub(super) fn render_styled_text_in_group(
         &self,
         role: SelectableTextRole,
         group_id: u64,
@@ -1130,6 +1140,7 @@ impl SelectableTextRenderState {
         order: usize,
         text: SharedString,
         runs: Vec<TextRun>,
+        links: Vec<oxideterm_gpui_markdown::render::MarkdownTextLink>,
     ) -> AnyElement {
         debug_assert_ne!(role, SelectableTextRole::NonSelectable);
         let target = WorkspaceImeTarget::ReadOnlyText(group_id);
@@ -1153,6 +1164,8 @@ impl SelectableTextRenderState {
         let value_for_anchor = value.clone();
         let styled_text = StyledText::new(text).with_runs(display_runs);
         let layout = styled_text.layout().clone();
+        let link_layout = layout.clone();
+        let link_workspace = self.workspace.clone();
         let hit_target = selectable_text_hit_target(
             layout.clone(),
             move |event: &gpui::MouseDownEvent, window, cx| {
@@ -1181,6 +1194,24 @@ impl SelectableTextRenderState {
                 // Virtualized RowSafe cells share the same one-line browser table-cell contract.
                 .when(role == SelectableTextRole::RowSafe, |text| {
                     text.whitespace_nowrap()
+                })
+                .on_mouse_up(MouseButton::Left, move |event, window, cx| {
+                    if event.click_count != 1 || links.is_empty() {
+                        return;
+                    }
+                    let selecting = link_workspace
+                        .read(cx)
+                        .ime_selected_range_for_target(target, cx)
+                        .is_some_and(|range| range.start != range.end);
+                    if selecting {
+                        return;
+                    }
+                    if let Ok(index) = link_layout.index_for_position(event.position)
+                        && let Some(link) = links.iter().find(|link| link.range.contains(&index))
+                    {
+                        (link.open)(window, cx);
+                        cx.stop_propagation();
+                    }
                 })
                 .child(styled_text)
                 .when(role.is_interactive(), |element| element.child(hit_target))

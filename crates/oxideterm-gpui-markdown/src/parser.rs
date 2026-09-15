@@ -93,8 +93,10 @@ fn parse_events<'input>(parser: impl Iterator<Item = Event<'input>>) -> Markdown
                 ctx.push_inline_stack();
                 ctx.item_children.push(Vec::new());
                 ctx.item_checked.push(None);
+                ctx.block_containers.push(BlockContainer::ListItem);
             }
             Event::Start(Tag::BlockQuote(kind)) => {
+                ctx.block_containers.push(BlockContainer::Blockquote);
                 ctx.block_stack.push(BlockquoteState {
                     kind: kind.map(convert_callout_kind),
                     blocks: Vec::new(),
@@ -123,6 +125,7 @@ fn parse_events<'input>(parser: impl Iterator<Item = Event<'input>>) -> Markdown
                 ctx.push_inline_stack();
             }
             Event::Start(Tag::FootnoteDefinition(label)) => {
+                ctx.block_containers.push(BlockContainer::Footnote);
                 ctx.footnote_stack.push(FootnoteState {
                     label: label.to_string(),
                     blocks: Vec::new(),
@@ -210,14 +213,14 @@ fn parse_events<'input>(parser: impl Iterator<Item = Event<'input>>) -> Markdown
             Event::End(TagEnd::Paragraph) => {
                 let inlines = ctx.pop_inline_stack();
                 if !inlines.is_empty() {
-                    if ctx.list_stack.is_empty() {
-                        ctx.push_block(Block::Paragraph { inlines });
+                    let first_item_paragraph =
+                        matches!(ctx.block_containers.last(), Some(BlockContainer::ListItem))
+                            && ctx.item_children.last().is_some_and(Vec::is_empty)
+                            && ctx.inline_stack.last().is_some_and(Vec::is_empty);
+                    if first_item_paragraph {
+                        ctx.inline_stack.last_mut().unwrap().extend(inlines);
                     } else {
-                        // Paragraph inside a list item — merge inlines into the
-                        // current item's inline stack instead of emitting a block.
-                        if let Some(top) = ctx.inline_stack.last_mut() {
-                            top.extend(inlines);
-                        }
+                        ctx.push_block(Block::Paragraph { inlines });
                     }
                 }
             }
@@ -228,6 +231,7 @@ fn parse_events<'input>(parser: impl Iterator<Item = Event<'input>>) -> Markdown
                 ctx.push_block(Block::CodeBlock { language, code });
             }
             Event::End(TagEnd::Item) => {
+                ctx.block_containers.pop();
                 let inlines = ctx.pop_inline_stack();
                 let children = ctx.item_children.pop().unwrap_or_default();
                 let checked = ctx.item_checked.pop().unwrap_or(None);
@@ -248,15 +252,11 @@ fn parse_events<'input>(parser: impl Iterator<Item = Event<'input>>) -> Markdown
                         },
                         None => Block::UnorderedList { items: list.items },
                     };
-                    // If still inside a parent list item, attach as child block.
-                    if let Some(children) = ctx.item_children.last_mut() {
-                        children.push(block);
-                    } else {
-                        ctx.push_block(block);
-                    }
+                    ctx.push_block(block);
                 }
             }
             Event::End(TagEnd::BlockQuote(_)) => {
+                ctx.block_containers.pop();
                 let quote = ctx.block_stack.pop().unwrap_or_default();
                 ctx.push_block(Block::Blockquote {
                     kind: quote.kind,
@@ -290,6 +290,7 @@ fn parse_events<'input>(parser: impl Iterator<Item = Event<'input>>) -> Markdown
                 }
             }
             Event::End(TagEnd::FootnoteDefinition) => {
+                ctx.block_containers.pop();
                 if let Some(footnote) = ctx.footnote_stack.pop() {
                     ctx.footnote_definitions.push(FootnoteDefinition {
                         label: footnote.label,
@@ -363,6 +364,7 @@ struct ParseContext {
     image_url: Option<String>,
     safe_html_stack: Vec<SafeInlineHtmlFrame>,
     list_stack: Vec<ListState>,
+    block_containers: Vec<BlockContainer>,
     /// One entry per open `Item`; collects nested blocks within a list item.
     item_children: Vec<Vec<Block>>,
     /// One entry per open `Item`; tracks the task-list checkbox state.
@@ -410,6 +412,12 @@ struct SafeInlineHtmlFrame {
     source: String,
     link_url: Option<String>,
     child_stack_depth: usize,
+}
+
+enum BlockContainer {
+    ListItem,
+    Blockquote,
+    Footnote,
 }
 
 impl ParseContext {
@@ -488,15 +496,17 @@ impl ParseContext {
         }
     }
 
-    /// Push a block into the innermost open container.  If a blockquote is
-    /// open the block goes there; otherwise it lands in the top-level list.
     fn push_block(&mut self, block: Block) {
-        if let Some(bq) = self.block_stack.last_mut() {
-            bq.blocks.push(block);
-        } else if let Some(footnote) = self.footnote_stack.last_mut() {
-            footnote.blocks.push(block);
-        } else {
-            self.blocks.push(block);
+        // Container order matters when lists and blockquotes are nested both ways.
+        match self.block_containers.last() {
+            Some(BlockContainer::ListItem) => self.item_children.last_mut().unwrap().push(block),
+            Some(BlockContainer::Blockquote) => {
+                self.block_stack.last_mut().unwrap().blocks.push(block)
+            }
+            Some(BlockContainer::Footnote) => {
+                self.footnote_stack.last_mut().unwrap().blocks.push(block)
+            }
+            None => self.blocks.push(block),
         }
     }
 
@@ -729,6 +739,48 @@ fn find_url_start(text: &str) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn list_paragraphs_and_nested_blocks_keep_source_order() {
+        let doc = super::parse(
+            "- First\n\n  Second\n\n  > Quoted\n\n  ```sh\n  echo done\n  ```\n\n  - Child\n\n  Last\n",
+        );
+        let text = |value: &str| vec![super::Inline::Text(value.into())];
+        assert_eq!(
+            doc.blocks,
+            vec![super::Block::UnorderedList {
+                items: vec![super::ListItem {
+                    inlines: text("First"),
+                    checked: None,
+                    children: vec![
+                        super::Block::Paragraph {
+                            inlines: text("Second")
+                        },
+                        super::Block::Blockquote {
+                            kind: None,
+                            blocks: vec![super::Block::Paragraph {
+                                inlines: text("Quoted")
+                            }]
+                        },
+                        super::Block::CodeBlock {
+                            language: Some("sh".into()),
+                            code: "echo done\n".into()
+                        },
+                        super::Block::UnorderedList {
+                            items: vec![super::ListItem {
+                                inlines: text("Child"),
+                                checked: None,
+                                children: vec![]
+                            }]
+                        },
+                        super::Block::Paragraph {
+                            inlines: text("Last")
+                        },
+                    ],
+                }],
+            }]
+        );
+    }
+
     use super::*;
 
     #[test]

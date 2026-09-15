@@ -32,6 +32,12 @@ use crate::style;
 const WINDOWED_MARKDOWN_MIN_ITEMS: usize = 24;
 const MARKDOWN_VIRTUAL_OVERDRAW_PX: f32 = 480.0;
 
+#[derive(Clone)]
+pub struct MarkdownTextLink {
+    pub range: Range<usize>,
+    pub open: Arc<dyn Fn(&mut Window, &mut App)>,
+}
+
 pub type MarkdownCodeRunHandler = Arc<dyn Fn(String, &mut Window, &mut App) + 'static>;
 pub type MarkdownMermaidZoomHandler =
     Arc<dyn Fn(String, Arc<Image>, f32, f32, &mut Window, &mut App) + 'static>;
@@ -138,7 +144,7 @@ fn render_document_windowed_with_code_actions(
     };
     let mut rendered = Vec::new();
 
-    for (_index, item) in items
+    for (index, item) in items
         .iter()
         .enumerate()
         .skip(virtual_window.range.start)
@@ -146,12 +152,19 @@ fn render_document_windowed_with_code_actions(
     {
         match item {
             MarkdownLayoutItem::Block(block) => {
-                rendered.push(render_block_with_code_actions(
-                    block,
-                    tokens,
-                    opts,
-                    code_actions,
-                ));
+                rendered.push(
+                    div()
+                        .id(("markdown-block", index))
+                        .w_full()
+                        .min_w_0()
+                        .child(render_block_with_code_actions(
+                            block,
+                            tokens,
+                            opts,
+                            code_actions,
+                        ))
+                        .into_any_element(),
+                );
             }
             MarkdownLayoutItem::Footnotes(footnotes) => {
                 rendered.push(render_footnotes(footnotes, tokens, opts));
@@ -205,7 +218,12 @@ pub fn render_document_selectable(
     document: &MarkdownDocument,
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
     render_document_selectable_with_code_actions(document, tokens, opts, None, render_text)
 }
@@ -215,7 +233,12 @@ pub fn render_document_selectable_with_code_actions(
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
     code_actions: Option<&MarkdownCodeBlockActions>,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
     let mut content = div()
         .w_full()
@@ -253,7 +276,12 @@ pub fn render_document_windowed_selectable(
     viewport_top: f32,
     viewport_height: f32,
     overdraw: f32,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
     render_document_windowed_selectable_with_code_actions(
         document,
@@ -277,7 +305,12 @@ pub fn render_document_windowed_selectable_with_code_actions(
     viewport_height: f32,
     overdraw: f32,
     code_actions: Option<&MarkdownCodeBlockActions>,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
     let items = layout.items();
     if items.len() < WINDOWED_MARKDOWN_MIN_ITEMS || viewport_height <= 0.0 {
@@ -403,6 +436,9 @@ pub fn render_document_virtual_with_code_actions(
     scroll_handle: &MarkdownVirtualListScrollHandle,
     code_actions: Option<&MarkdownCodeBlockActions>,
 ) -> AnyElement {
+    if let Some(navigation) = &opts.navigation {
+        navigation.prepare(document, opts);
+    }
     let layout = MarkdownBlockLayout::from_document(document, opts);
     let viewport_top = markdown_scroll_top_from_gpui_offset(scroll_handle.offset().y);
     let viewport_height = f32::from(scroll_handle.bounds().size.height);
@@ -419,6 +455,44 @@ pub fn render_document_virtual_with_code_actions(
 
     // GPUI's built-in ScrollHandle keeps the same owner model without pulling
     // in an external variable-height list for markdown previews.
+    div()
+        .id(id)
+        .size_full()
+        .overflow_y_scroll()
+        .track_scroll(scroll_handle)
+        .child(content)
+        .into_any_element()
+}
+
+pub fn render_document_virtual_selectable(
+    id: impl Into<ElementId>,
+    document: &MarkdownDocument,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    scroll_handle: &MarkdownVirtualListScrollHandle,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
+) -> AnyElement {
+    if let Some(navigation) = &opts.navigation {
+        navigation.prepare(document, opts);
+    }
+    let layout = MarkdownBlockLayout::from_document(document, opts);
+    let content = render_document_windowed_selectable_with_code_actions(
+        document,
+        &layout,
+        tokens,
+        opts,
+        markdown_scroll_top_from_gpui_offset(scroll_handle.offset().y),
+        f32::from(scroll_handle.bounds().size.height),
+        MARKDOWN_VIRTUAL_OVERDRAW_PX,
+        code_actions,
+        render_text,
+    );
     div()
         .id(id)
         .size_full()
@@ -542,11 +616,18 @@ fn render_blocks_with_code_actions(
         .flex()
         .flex_col()
         .gap(px(opts.block_gap))
-        .children(
-            blocks
-                .iter()
-                .map(|block| render_block_with_code_actions(block, tokens, opts, code_actions)),
-        )
+        .children(blocks.iter().enumerate().map(|(index, block)| {
+            div()
+                .id(("markdown-block", index))
+                .w_full()
+                .min_w_0()
+                .child(render_block_with_code_actions(
+                    block,
+                    tokens,
+                    opts,
+                    code_actions,
+                ))
+        }))
         .into_any_element()
 }
 
@@ -556,7 +637,12 @@ fn render_selectable_blocks(
     opts: &MarkdownOptions,
     code_actions: Option<&MarkdownCodeBlockActions>,
     path: &str,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
     div()
         .w_full()
@@ -577,10 +663,6 @@ fn render_selectable_blocks(
         .into_any_element()
 }
 
-fn render_block(block: &Block, tokens: &ThemeTokens, opts: &MarkdownOptions) -> AnyElement {
-    render_block_with_code_actions(block, tokens, opts, None)
-}
-
 fn render_block_with_code_actions(
     block: &Block,
     tokens: &ThemeTokens,
@@ -597,8 +679,10 @@ fn render_block_with_code_actions(
         Block::CodeBlock { language, code } => {
             render_code_block(language.as_deref(), code, tokens, opts, code_actions)
         }
-        Block::UnorderedList { items } => render_unordered_list(items, tokens, opts),
-        Block::OrderedList { start, items } => render_ordered_list(*start, items, tokens, opts),
+        Block::UnorderedList { items } => render_unordered_list(items, tokens, opts, code_actions),
+        Block::OrderedList { start, items } => {
+            render_ordered_list(*start, items, tokens, opts, code_actions)
+        }
         Block::HorizontalRule => render_hr(tokens),
         Block::Blockquote { kind, blocks } => {
             render_blockquote_with_code_actions(*kind, blocks, tokens, opts, code_actions)
@@ -617,7 +701,12 @@ fn render_selectable_block(
     opts: &MarkdownOptions,
     code_actions: Option<&MarkdownCodeBlockActions>,
     path: &str,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
     match block {
         Block::Heading { level, id, inlines } => {
@@ -679,13 +768,15 @@ fn render_selectable_block(
 
 fn render_heading(
     level: u8,
-    _id: &str,
+    id: &str,
     inlines: &[Inline],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
 ) -> AnyElement {
     let font_size = style::heading_font_size(level, opts);
     div()
+        .relative()
+        .child(heading_anchor(id, opts))
         .w_full()
         .min_w_0()
         .flex()
@@ -704,15 +795,22 @@ fn render_heading(
 
 fn render_selectable_heading(
     level: u8,
-    _id: &str,
+    id: &str,
     inlines: &[Inline],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
     path: &str,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
     let font_size = style::heading_font_size(level, opts);
     div()
+        .relative()
+        .child(heading_anchor(id, opts))
         .w_full()
         .min_w_0()
         .flex()
@@ -757,7 +855,12 @@ fn render_selectable_paragraph(
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
     path: &str,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
     div()
         .w_full()
@@ -786,7 +889,12 @@ fn render_selectable_html_block(
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
     path: &str,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
     render_selectable_paragraph(
         &[Inline::Html(html.to_string())],
@@ -824,7 +932,12 @@ fn render_selectable_html_container(
     opts: &MarkdownOptions,
     code_actions: Option<&MarkdownCodeBlockActions>,
     path: &str,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
     div()
         .w_full()
@@ -878,7 +991,12 @@ fn render_selectable_code_block(
     opts: &MarkdownOptions,
     code_actions: Option<&MarkdownCodeBlockActions>,
     path: &str,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
     if should_render_mermaid_block(language, code) {
         return render_mermaid_block(code, tokens, opts, code_actions);
@@ -887,12 +1005,13 @@ fn render_selectable_code_block(
     let code_element: AnyElement = if let Some(lang) = language {
         if let Some(runs) = highlight::highlight_code(lang, code, opts) {
             let (text, text_runs) = highlight::highlighted_runs_to_text_runs(&runs);
-            render_text(format!("{path}:code"), text, text_runs)
+            render_text(format!("{path}:code"), text, text_runs, Vec::new())
         } else {
             render_text(
                 format!("{path}:code"),
                 SharedString::from(code.to_string()),
                 vec![plain_code_run(code, tokens, opts)],
+                Vec::new(),
             )
         }
     } else {
@@ -900,6 +1019,7 @@ fn render_selectable_code_block(
             format!("{path}:code"),
             SharedString::from(code.to_string()),
             vec![plain_code_run(code, tokens, opts)],
+            Vec::new(),
         )
     };
 
@@ -1307,7 +1427,12 @@ fn render_selectable_blockquote(
     opts: &MarkdownOptions,
     code_actions: Option<&MarkdownCodeBlockActions>,
     path: &str,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
     let accent = callout_color(kind, tokens);
     div()
@@ -1392,12 +1517,14 @@ fn render_table(
 ) -> AnyElement {
     let col_count = table_column_count(headers, rows);
     let column_widths = table_column_widths(headers, rows, col_count);
+    let min_width = table_min_width(headers, rows, &column_widths, tokens, opts);
 
     // Approximate Tauri/browser table auto-layout without letting one long cell
     // define the whole table width. Short label columns stay compact while
     // content-heavy columns receive a larger relative share.
     let has_body_rows = !rows.is_empty();
     let header_row = div()
+        .id("table-header")
         .w_full()
         .min_w(px(0.0))
         .flex()
@@ -1413,6 +1540,7 @@ fn render_table(
         .children((0..col_count).map(|ci| {
             let cell: &[Inline] = headers.get(ci).map(|v| v.as_slice()).unwrap_or(&[]);
             div()
+                .id(("table-cell", ci))
                 .w(relative(column_widths[ci]))
                 .flex_shrink_1()
                 .min_w(px(0.0))
@@ -1430,6 +1558,7 @@ fn render_table(
     let body_rows = rows.iter().enumerate().map(|(ri, row)| {
         let is_last = ri + 1 == rows.len();
         div()
+            .id(("table-row", ri))
             .w_full()
             .min_w(px(0.0))
             .flex()
@@ -1443,6 +1572,7 @@ fn render_table(
             .children((0..col_count).map(|ci| {
                 let cell: &[Inline] = row.get(ci).map(|v| v.as_slice()).unwrap_or(&[]);
                 div()
+                    .id(("table-cell", ci))
                     .w(relative(column_widths[ci]))
                     .flex_shrink_1()
                     .min_w(px(0.0))
@@ -1458,14 +1588,21 @@ fn render_table(
     });
 
     div()
+        .id(("markdown-table", col_count))
         .w_full()
-        .min_w(px(0.0))
-        .overflow_hidden()
-        .border_1()
-        .border_color(style::table_border_color(tokens))
-        .rounded(px(tokens.radii.sm))
-        .child(header_row)
-        .children(body_rows)
+        .min_w_0()
+        .overflow_x_scroll()
+        .child(
+            div()
+                .w_full()
+                .min_w(px(min_width))
+                .border_1()
+                .border_color(style::table_border_color(tokens))
+                .rounded(px(tokens.radii.sm))
+                .overflow_hidden()
+                .child(header_row)
+                .children(body_rows),
+        )
         .into_any_element()
 }
 
@@ -1476,15 +1613,21 @@ fn render_selectable_table(
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
     path: &str,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
     let col_count = table_column_count(headers, rows);
     let column_widths = table_column_widths(headers, rows, col_count);
+    let min_width = table_min_width(headers, rows, &column_widths, tokens, opts);
 
-    // Keep selectable markdown tables on the same shrink contract as normal
-    // tables; selection anchors should not make cells use intrinsic width.
+    // Both rendering paths share minimum widths so selection does not alter table layout.
     let has_body_rows = !rows.is_empty();
     let header_row = div()
+        .id("table-header")
         .w_full()
         .min_w(px(0.0))
         .flex()
@@ -1500,6 +1643,7 @@ fn render_selectable_table(
         .children((0..col_count).map(|ci| {
             let cell: &[Inline] = headers.get(ci).map(|v| v.as_slice()).unwrap_or(&[]);
             div()
+                .id(("table-cell", ci))
                 .w(relative(column_widths[ci]))
                 .flex_shrink_1()
                 .min_w(px(0.0))
@@ -1522,6 +1666,7 @@ fn render_selectable_table(
 
     let body_rows = rows.iter().enumerate().map(|(ri, row)| {
         div()
+            .id(("table-row", ri))
             .w_full()
             .min_w(px(0.0))
             .flex()
@@ -1537,6 +1682,7 @@ fn render_selectable_table(
             .children((0..col_count).map(|ci| {
                 let cell: &[Inline] = row.get(ci).map(|v| v.as_slice()).unwrap_or(&[]);
                 div()
+                    .id(("table-cell", ci))
                     .w(relative(column_widths[ci]))
                     .flex_shrink_1()
                     .min_w(px(0.0))
@@ -1558,15 +1704,46 @@ fn render_selectable_table(
     });
 
     div()
+        .id(SharedString::from(format!("markdown-table:{path}")))
         .w_full()
-        .min_w(px(0.0))
-        .overflow_hidden()
-        .border_1()
-        .border_color(style::table_border_color(tokens))
-        .rounded(px(tokens.radii.sm))
-        .child(header_row)
-        .children(body_rows)
+        .min_w_0()
+        .overflow_x_scroll()
+        .child(
+            div()
+                .w_full()
+                .min_w(px(min_width))
+                .border_1()
+                .border_color(style::table_border_color(tokens))
+                .rounded(px(tokens.radii.sm))
+                .overflow_hidden()
+                .child(header_row)
+                .children(body_rows),
+        )
         .into_any_element()
+}
+
+fn table_min_width(
+    headers: &[Vec<Inline>],
+    rows: &[Vec<Vec<Inline>>],
+    fractions: &[f32],
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+) -> f32 {
+    fractions
+        .iter()
+        .enumerate()
+        .map(|(index, fraction)| {
+            let width = headers
+                .get(index)
+                .into_iter()
+                .chain(rows.iter().filter_map(|row| row.get(index)))
+                .map(|cell| table_cell_text_width(cell))
+                .fold(0.0_f32, f32::max);
+            let cell_width =
+                width.clamp(8.0, 40.0) * opts.base_font_size * 0.55 + tokens.spacing.two * 2.0;
+            cell_width / fraction
+        })
+        .fold(0.0, f32::max)
 }
 
 fn table_column_count(headers: &[Vec<Inline>], rows: &[Vec<Vec<Inline>>]) -> usize {
@@ -1649,6 +1826,7 @@ fn render_unordered_list(
     items: &[ListItem],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
 ) -> AnyElement {
     div()
         .w_full()
@@ -1657,11 +1835,13 @@ fn render_unordered_list(
         .flex_col()
         .gap(px(tokens.spacing.one))
         .pl(px(opts.list_indent))
-        .children(
-            items
-                .iter()
-                .map(|item| render_list_item("•", item, tokens, opts)),
-        )
+        .children(items.iter().enumerate().map(|(index, item)| {
+            div()
+                .id(("markdown-list-item", index))
+                .w_full()
+                .min_w_0()
+                .child(render_list_item("•", item, tokens, opts, code_actions))
+        }))
         .into_any_element()
 }
 
@@ -1670,6 +1850,7 @@ fn render_ordered_list(
     items: &[ListItem],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
 ) -> AnyElement {
     div()
         .w_full()
@@ -1680,7 +1861,11 @@ fn render_ordered_list(
         .pl(px(opts.list_indent))
         .children(items.iter().enumerate().map(|(i, item)| {
             let marker = format!("{}.", start + i as u64);
-            render_list_item(&marker, item, tokens, opts)
+            div()
+                .id(("markdown-list-item", i))
+                .w_full()
+                .min_w_0()
+                .child(render_list_item(&marker, item, tokens, opts, code_actions))
         }))
         .into_any_element()
 }
@@ -1691,7 +1876,12 @@ fn render_selectable_unordered_list(
     opts: &MarkdownOptions,
     code_actions: Option<&MarkdownCodeBlockActions>,
     path: &str,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
     div()
         .w_full()
@@ -1721,7 +1911,12 @@ fn render_selectable_ordered_list(
     opts: &MarkdownOptions,
     code_actions: Option<&MarkdownCodeBlockActions>,
     path: &str,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
     div()
         .w_full()
@@ -1750,6 +1945,7 @@ fn render_list_item(
     item: &ListItem,
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
 ) -> AnyElement {
     // Task list checkbox overrides the bullet/number marker when enabled.
     let effective_marker = if opts.enable_task_lists {
@@ -1775,6 +1971,8 @@ fn render_list_item(
                 .gap(px(tokens.spacing.two))
                 .child(
                     div()
+                        .w(px(opts.list_indent))
+                        .flex_none()
                         .text_color(style::muted_color(tokens))
                         .child(SharedString::from(effective_marker.to_string())),
                 )
@@ -1791,11 +1989,15 @@ fn render_list_item(
     // Render nested child blocks if present.
     if !item.children.is_empty() {
         col = col.child(
-            div().flex().flex_col().mt(px(tokens.spacing.one)).children(
-                item.children
-                    .iter()
-                    .map(|block| render_block(block, tokens, opts)),
-            ),
+            div()
+                .mt(px(opts.block_gap))
+                .pl(px(opts.list_indent + tokens.spacing.two))
+                .child(render_blocks_with_code_actions(
+                    &item.children,
+                    tokens,
+                    opts,
+                    code_actions,
+                )),
         );
     }
 
@@ -1809,7 +2011,12 @@ fn render_selectable_list_item(
     opts: &MarkdownOptions,
     code_actions: Option<&MarkdownCodeBlockActions>,
     path: &str,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
     let effective_marker = if opts.enable_task_lists {
         match item.checked {
@@ -1834,6 +2041,8 @@ fn render_selectable_list_item(
                 .gap(px(tokens.spacing.two))
                 .child(
                     div()
+                        .w(px(opts.list_indent))
+                        .flex_none()
                         .text_color(style::muted_color(tokens))
                         .child(SharedString::from(effective_marker.to_string())),
                 )
@@ -1854,18 +2063,24 @@ fn render_selectable_list_item(
         );
 
     if !item.children.is_empty() {
-        col = col.child(div().flex().flex_col().mt(px(tokens.spacing.one)).children(
-            item.children.iter().enumerate().map(|(index, block)| {
-                render_selectable_block(
-                    block,
-                    tokens,
-                    opts,
-                    code_actions,
-                    &format!("{path}:child:{index}"),
-                    render_text,
-                )
-            }),
-        ));
+        col = col.child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(opts.block_gap))
+                .mt(px(opts.block_gap))
+                .pl(px(opts.list_indent + tokens.spacing.two))
+                .children(item.children.iter().enumerate().map(|(index, block)| {
+                    render_selectable_block(
+                        block,
+                        tokens,
+                        opts,
+                        code_actions,
+                        &format!("{path}:child:{index}"),
+                        render_text,
+                    )
+                })),
+        );
     }
 
     col.into_any_element()
@@ -1936,39 +2151,25 @@ fn render_styled_inlines(
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
 ) -> AnyElement {
-    let mut flat: Vec<FlatRun> = Vec::new();
-    collect_runs(inlines, FlatRunStyle::default(), &mut flat);
-
-    if flat.is_empty() {
-        return div().into_any_element();
-    }
-
-    // If any run contains an image, use a container with mixed children.
-    let has_images_math_or_links = flat
-        .iter()
-        .any(|r| r.image_url.is_some() || r.math_latex.is_some() || r.link_url.is_some());
-
-    if has_images_math_or_links {
-        return render_mixed_inlines(&flat, tokens, opts);
-    }
-
-    // Fast path: all text, no images — single StyledText.
-    let mut text = String::new();
-    let mut runs: Vec<TextRun> = Vec::new();
-
-    for run in &flat {
-        let start = text.len();
-        text.push_str(&run.text);
-        let len = text.len() - start;
-        if len == 0 {
-            continue;
-        }
-        runs.push(text_run_for_flat(run, len, tokens, opts));
-    }
-
-    StyledText::new(SharedString::from(text))
-        .with_runs(runs)
-        .into_any_element()
+    render_selectable_inlines(
+        "inline",
+        inlines,
+        tokens,
+        opts,
+        &mut |key, text, runs, links| {
+            let styled = StyledText::new(text).with_runs(runs);
+            if links.is_empty() {
+                styled.into_any_element()
+            } else {
+                let ranges = links.iter().map(|link| link.range.clone()).collect();
+                gpui::InteractiveText::new(SharedString::from(key), styled)
+                    .on_click(ranges, move |index, window, cx| {
+                        (links[index].open)(window, cx)
+                    })
+                    .into_any_element()
+            }
+        },
+    )
 }
 
 fn render_selectable_inlines(
@@ -1976,235 +2177,136 @@ fn render_selectable_inlines(
     inlines: &[Inline],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+    render_text: &mut impl FnMut(
+        String,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
 ) -> AnyElement {
-    let mut flat: Vec<FlatRun> = Vec::new();
+    let mut flat = Vec::new();
     collect_runs(inlines, FlatRunStyle::default(), &mut flat);
-
-    if flat.is_empty() {
-        return div().into_any_element();
-    }
-
-    let has_images_math_or_links = flat
+    if !flat
         .iter()
-        .any(|run| run.image_url.is_some() || run.math_latex.is_some() || run.link_url.is_some());
-    if has_images_math_or_links {
-        return render_selectable_mixed_inlines(key, &flat, tokens, opts, render_text);
+        .any(|run| run.image_url.is_some() || run.math_latex.is_some())
+    {
+        let (text, runs, links) = flat_text(&flat, tokens, opts);
+        return render_text(key.to_string(), text, runs, links);
     }
-
-    let mut text = String::new();
-    let mut runs: Vec<TextRun> = Vec::new();
-    for run in &flat {
-        let start = text.len();
-        text.push_str(&run.text);
-        let len = text.len() - start;
-        if len == 0 {
-            continue;
+    let display = flat.iter().any(|run| run.math_display);
+    let mut children = Vec::new();
+    let mut text = Vec::new();
+    let mut part = 0;
+    let mut flush = |text: &mut Vec<FlatRun>, children: &mut Vec<AnyElement>| {
+        if text.is_empty() {
+            return;
         }
-        runs.push(text_run_for_flat(run, len, tokens, opts));
-    }
-
-    render_text(key.to_string(), SharedString::from(text), runs)
-}
-
-/// Render a sequence of flat runs that contains at least one image or formula.
-/// Text segments are grouped into `StyledText` elements; images and RaTeX
-/// formulas are rendered as GPUI image nodes.
-fn render_mixed_inlines(
-    flat: &[FlatRun],
-    tokens: &ThemeTokens,
-    opts: &MarkdownOptions,
-) -> AnyElement {
-    if flat.iter().any(|run| run.math_display) {
-        return render_display_mixed_inlines(flat, tokens, opts);
-    }
-
-    let mut children: Vec<AnyElement> = Vec::new();
-    let mut text_buf = String::new();
-    let mut run_buf: Vec<TextRun> = Vec::new();
-
-    let flush_text =
-        |text_buf: &mut String, run_buf: &mut Vec<TextRun>, children: &mut Vec<AnyElement>| {
-            if !text_buf.is_empty() {
-                children.push(
-                    StyledText::new(SharedString::from(std::mem::take(text_buf)))
-                        .with_runs(std::mem::take(run_buf))
-                        .into_any_element(),
-                );
-            }
-        };
-
+        let (value, runs, links) = flat_text(text, tokens, opts);
+        children.push(
+            div()
+                .min_w_0()
+                .max_w_full()
+                .child(render_text(
+                    format!("{key}:text:{part}"),
+                    value,
+                    runs,
+                    links,
+                ))
+                .into_any_element(),
+        );
+        text.clear();
+        part += 1;
+    };
     for run in flat {
-        if let Some(ref url) = run.image_url {
-            flush_text(&mut text_buf, &mut run_buf, &mut children);
+        if let Some(url) = &run.image_url {
+            flush(&mut text, &mut children);
             children.push(render_image(url, opts));
-        } else if let Some(ref latex) = run.math_latex {
-            flush_text(&mut text_buf, &mut run_buf, &mut children);
-            children.push(render_math(latex, false, tokens, opts));
-        } else if let Some(ref url) = run.link_url {
-            flush_text(&mut text_buf, &mut run_buf, &mut children);
-            children.push(render_link_run(run, url, tokens, opts));
-        } else {
-            let start = text_buf.len();
-            text_buf.push_str(&run.text);
-            let len = text_buf.len() - start;
-            if len > 0 {
-                run_buf.push(text_run_for_flat(run, len, tokens, opts));
-            }
-        }
-    }
-
-    flush_text(&mut text_buf, &mut run_buf, &mut children);
-
-    div()
-        .flex()
-        .flex_row()
-        .flex_wrap()
-        .items_center()
-        .gap(px(0.0))
-        .children(children)
-        .into_any_element()
-}
-
-fn render_selectable_mixed_inlines(
-    key: &str,
-    flat: &[FlatRun],
-    tokens: &ThemeTokens,
-    opts: &MarkdownOptions,
-    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
-) -> AnyElement {
-    if flat.iter().any(|run| run.math_display) {
-        return render_mixed_inlines(flat, tokens, opts);
-    }
-
-    let mut children: Vec<AnyElement> = Vec::new();
-    let mut text_buf = String::new();
-    let mut run_buf: Vec<TextRun> = Vec::new();
-    let mut text_index = 0usize;
-
-    let mut flush_text =
-        |text_buf: &mut String, run_buf: &mut Vec<TextRun>, children: &mut Vec<AnyElement>| {
-            if !text_buf.is_empty() {
-                let text = SharedString::from(std::mem::take(text_buf));
-                let runs = std::mem::take(run_buf);
-                children.push(render_text(format!("{key}:text:{text_index}"), text, runs));
-                text_index = text_index.saturating_add(1);
-            }
-        };
-
-    for run in flat {
-        if let Some(ref url) = run.image_url {
-            flush_text(&mut text_buf, &mut run_buf, &mut children);
-            children.push(render_image(url, opts));
-        } else if let Some(ref latex) = run.math_latex {
-            flush_text(&mut text_buf, &mut run_buf, &mut children);
-            children.push(render_math(latex, false, tokens, opts));
-        } else if let Some(ref url) = run.link_url {
-            flush_text(&mut text_buf, &mut run_buf, &mut children);
-            children.push(render_link_run(run, url, tokens, opts));
-        } else {
-            let start = text_buf.len();
-            text_buf.push_str(&run.text);
-            let len = text_buf.len() - start;
-            if len > 0 {
-                run_buf.push(text_run_for_flat(run, len, tokens, opts));
-            }
-        }
-    }
-
-    flush_text(&mut text_buf, &mut run_buf, &mut children);
-
-    div()
-        .flex()
-        .flex_row()
-        .flex_wrap()
-        .items_center()
-        .gap(px(0.0))
-        .children(children)
-        .into_any_element()
-}
-
-fn render_display_mixed_inlines(
-    flat: &[FlatRun],
-    tokens: &ThemeTokens,
-    opts: &MarkdownOptions,
-) -> AnyElement {
-    let mut children: Vec<AnyElement> = Vec::new();
-    let mut text_buf = String::new();
-    let mut run_buf: Vec<TextRun> = Vec::new();
-
-    let flush_text =
-        |text_buf: &mut String, run_buf: &mut Vec<TextRun>, children: &mut Vec<AnyElement>| {
-            if !text_buf.trim().is_empty() {
-                children.push(
-                    div()
-                        .text_size(style::body_font_size(opts))
-                        .text_color(style::text_color(tokens))
-                        .child(
-                            StyledText::new(SharedString::from(std::mem::take(text_buf)))
-                                .with_runs(std::mem::take(run_buf)),
-                        )
-                        .into_any_element(),
-                );
-            } else {
-                text_buf.clear();
-                run_buf.clear();
-            }
-        };
-
-    for run in flat {
-        if let Some(ref latex) = run.math_latex {
-            flush_text(&mut text_buf, &mut run_buf, &mut children);
+        } else if let Some(latex) = &run.math_latex {
+            flush(&mut text, &mut children);
             children.push(render_math(latex, run.math_display, tokens, opts));
-        } else if let Some(ref url) = run.image_url {
-            flush_text(&mut text_buf, &mut run_buf, &mut children);
-            children.push(render_image(url, opts));
-        } else if let Some(ref url) = run.link_url {
-            flush_text(&mut text_buf, &mut run_buf, &mut children);
-            children.push(render_link_run(run, url, tokens, opts));
         } else {
-            let start = text_buf.len();
-            text_buf.push_str(&run.text);
-            let len = text_buf.len() - start;
-            if len > 0 {
-                run_buf.push(text_run_for_flat(run, len, tokens, opts));
-            }
+            text.push(run);
         }
     }
-
-    flush_text(&mut text_buf, &mut run_buf, &mut children);
-
+    flush(&mut text, &mut children);
     div()
         .w_full()
+        .min_w_0()
         .flex()
-        .flex_col()
-        .gap(px(opts.block_gap * 0.5))
+        .when(display, |row| row.flex_col().gap(px(opts.block_gap * 0.5)))
+        .when(!display, |row| row.flex_row().flex_wrap().items_baseline())
         .children(children)
         .into_any_element()
 }
 
-fn render_link_run(
-    run: &FlatRun,
-    url: &str,
+fn flat_text(
+    flat: &[FlatRun],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
-) -> AnyElement {
-    let text_len = run.text.len();
-    let text = SharedString::from(run.text.clone());
-    let link_url = url.to_string();
-    let openable = should_open_link(url, opts);
-    let run = text_run_for_flat(run, text_len, tokens, opts);
+) -> (SharedString, Vec<TextRun>, Vec<MarkdownTextLink>) {
+    let mut text = String::new();
+    let mut runs = Vec::new();
+    let mut links = Vec::new();
+    for run in flat {
+        let start = text.len();
+        text.push_str(&run.text);
+        if start == text.len() {
+            continue;
+        }
+        runs.push(text_run_for_flat(run, text.len() - start, tokens, opts));
+        if let Some(url) = &run.link_url {
+            let url = url.clone();
+            let opts = opts.clone();
+            links.push(MarkdownTextLink {
+                range: start..text.len(),
+                open: Arc::new(move |window, cx| open_markdown_link(&url, &opts, window, cx)),
+            });
+        }
+    }
+    (text.into(), runs, links)
+}
 
-    div()
-        .cursor_pointer()
-        .child(StyledText::new(text).with_runs(vec![run]))
-        .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
-            if openable {
-                cx.open_url(&link_url);
+fn heading_anchor(id: &str, opts: &MarkdownOptions) -> AnyElement {
+    let id = id.to_string();
+    let navigation = opts.navigation.clone();
+    gpui::canvas(
+        move |bounds, window, cx| {
+            if let Some(navigation) = navigation {
+                navigation.measure(&id, f32::from(bounds.origin.y), window, cx);
             }
-            cx.stop_propagation();
-        })
-        .into_any_element()
+        },
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size(px(0.0))
+    .into_any_element()
+}
+
+fn open_markdown_link(url: &str, opts: &MarkdownOptions, window: &mut Window, cx: &mut App) {
+    if url.starts_with('#') {
+        if let Some(navigation) = &opts.navigation {
+            navigation.open(url, window);
+        }
+    } else if let Some(resolved) = resolved_link_url(url, opts) {
+        cx.open_url(&resolved);
+    }
+}
+
+fn resolved_link_url(url: &str, opts: &MarkdownOptions) -> Option<String> {
+    if url.starts_with('#') {
+        return None;
+    }
+    if should_open_link(url, opts) {
+        return Some(url.to_string());
+    }
+    if url_scheme(url).is_some() || url.starts_with("//") {
+        return None;
+    }
+    let base = url::Url::from_directory_path(opts.image_base_dir.as_ref()?).ok()?;
+    let resolved = base.join(url).ok()?;
+    (resolved.scheme() == "file").then(|| resolved.to_string())
 }
 
 fn render_image(url: &str, opts: &MarkdownOptions) -> AnyElement {
@@ -2688,6 +2790,64 @@ fn collect_runs(inlines: &[Inline], run_style: FlatRunStyle, out: &mut Vec<FlatR
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn links_share_the_paragraph_text_and_keep_byte_ranges() {
+        let tokens = oxideterm_theme::default_tokens();
+        let opts = super::MarkdownOptions::default();
+        let mut flat = Vec::new();
+        super::collect_runs(
+            &[
+                super::Inline::Text("中文 ".into()),
+                super::Inline::Link {
+                    text: vec![super::Inline::Bold(vec![super::Inline::Text(
+                        "long link".into(),
+                    )])],
+                    url: "https://example.com".into(),
+                },
+                super::Inline::Text(" 后文".into()),
+            ],
+            super::FlatRunStyle::default(),
+            &mut flat,
+        );
+        let (text, runs, links) = super::flat_text(&flat, &tokens, &opts);
+        assert_eq!(text.as_ref(), "中文 long link 后文");
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| link.range.clone())
+                .collect::<Vec<_>>(),
+            vec![7..16]
+        );
+        assert_eq!(runs[1].font.weight, gpui::FontWeight::BOLD);
+    }
+
+    #[test]
+    fn relative_links_resolve_against_the_source_directory() {
+        let opts = super::MarkdownOptions::default().with_source_path("/tmp/notes/readme.md");
+        assert_eq!(
+            super::resolved_link_url("../guide%20one.md#intro", &opts).as_deref(),
+            Some("file:///tmp/guide%20one.md#intro")
+        );
+        assert_eq!(super::resolved_link_url("javascript:alert(1)", &opts), None);
+        assert_eq!(super::resolved_link_url("//other-host/file", &opts), None);
+        assert_eq!(
+            super::resolved_link_url("relative.md", &super::MarkdownOptions::default()),
+            None
+        );
+    }
+
+    #[test]
+    fn wide_tables_keep_readable_columns() {
+        let tokens = oxideterm_theme::default_tokens();
+        let opts = super::MarkdownOptions::default();
+        let headers = vec![vec![super::Inline::Text("Host".into())]; 8];
+        let rows = vec![vec![vec![super::Inline::Code("command".repeat(20))]; 8]];
+        let fractions = super::table_column_widths(&headers, &rows, 8);
+        let minimum = super::table_min_width(&headers, &rows, &fractions, &tokens, &opts);
+        assert!(minimum > 1200.0);
+        assert!(fractions.iter().all(|fraction| minimum * fraction >= 150.0));
+    }
+
     use super::*;
 
     #[test]

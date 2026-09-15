@@ -10,6 +10,7 @@ version.workspace = true
 [dependencies]
 ego-tree = "0.11"
 gpui.workspace = true
+url.workspace = true
 oxideterm-theme = { path = "../oxideterm-theme" }
 pulldown-cmark = "0.12"
 ratex-layout = "0.1.8"

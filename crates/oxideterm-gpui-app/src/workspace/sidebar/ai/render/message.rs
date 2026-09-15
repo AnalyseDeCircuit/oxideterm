@@ -354,7 +354,8 @@ impl WorkspaceApp {
             .filter(|model| !model.is_empty())
         {
             let model_label = model
-                .split('/').rfind(|part| !part.is_empty())
+                .split('/')
+                .rfind(|part| !part.is_empty())
                 .unwrap_or(model)
                 .to_string();
             header = header.child(ai_message_model_badge(&self.tokens, model_label));
@@ -817,23 +818,28 @@ impl WorkspaceApp {
                 });
             }));
         }
+        let selectable = self.selectable_text_render_state(cx);
         let mut text_order = 0usize;
-        let mut render_text =
-            |key: String, text: gpui::SharedString, runs: Vec<gpui::TextRun>| -> AnyElement {
-                let order = text_order;
-                text_order = text_order.saturating_add(1);
-                self.render_selectable_styled_text_in_group(
-                    group_id,
-                    crate::workspace::selectable_text::selectable_text_id(
-                        "ai-markdown-fragment",
-                        (group_id, order, &key),
-                    ),
-                    order,
-                    text,
-                    runs,
-                    cx,
-                )
-            };
+        let mut render_text = |key: String,
+                               text: gpui::SharedString,
+                               runs: Vec<gpui::TextRun>,
+                               links|
+         -> AnyElement {
+            let order = text_order;
+            text_order = text_order.saturating_add(1);
+            selectable.render_styled_text_in_group(
+                crate::workspace::selectable_text::SelectableTextRole::PlainDocument,
+                group_id,
+                crate::workspace::selectable_text::selectable_text_id(
+                    "ai-markdown-fragment",
+                    (group_id, order, &key),
+                ),
+                order,
+                text,
+                runs,
+                links,
+            )
+        };
         let rendered = viewport
             .filter(|_| !message.is_streaming)
             .map(|viewport| {
@@ -2329,7 +2335,8 @@ impl WorkspaceApp {
                 cx.listener(move |this, _event, window, cx| {
                     match action {
                         Some(AiHeaderAction::ArchivedConversations) => {
-                            this.ai_entity.update(cx, |ai, _| ai.show_archived_conversations(true));
+                            this.ai_entity
+                                .update(cx, |ai, _| ai.show_archived_conversations(true));
                         }
                         Some(AiHeaderAction::NewChat) => {
                             this.create_ai_sidebar_conversation(None, cx);

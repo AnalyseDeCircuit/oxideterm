@@ -7770,6 +7770,7 @@ dependencies = [
  "ratex-types",
  "scraper",
  "syntect",
+ "url",
 ]
 
 [[package]]

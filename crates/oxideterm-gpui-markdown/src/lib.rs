@@ -43,6 +43,7 @@
 pub mod highlight;
 mod html;
 pub mod layout;
+pub mod navigation;
 pub mod math;
 pub mod mermaid;
 pub mod model;
