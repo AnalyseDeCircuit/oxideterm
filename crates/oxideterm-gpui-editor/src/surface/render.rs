@@ -198,10 +198,13 @@ impl Render for TextEditorView {
             } else {
                 self.editor_background(self.appearance.background_hex)
             })
-            .when(self.presentation == EditorPresentation::Document, |root| {
-                root.border_1()
-                    .border_color(rgb(self.appearance.border_hex))
-            })
+            .when(
+                self.presentation == EditorPresentation::Document && self.border_visible,
+                |root| {
+                    root.border_1()
+                        .border_color(rgb(self.appearance.border_hex))
+                },
+            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseDownEvent, window, cx| {

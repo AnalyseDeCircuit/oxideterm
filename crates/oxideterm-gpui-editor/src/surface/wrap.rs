@@ -238,7 +238,11 @@ impl TextEditorView {
             - self.visible_gutter_width()
             - self.visible_content_padding_x() * 2.0;
         let measured = (available_width / self.metrics.char_width).floor().max(8.0) as usize;
-        Some(measured.min(self.settings.soft_wrap_column.max(8)))
+        Some(
+            self.settings
+                .soft_wrap_column
+                .map_or(measured, |limit| measured.min(limit.max(8))),
+        )
     }
 }
 
@@ -421,6 +425,35 @@ mod edit_layout_tests {
     use oxideterm_theme::default_tokens;
 
     #[gpui::test]
+    fn viewport_wrapping_uses_available_columns_and_tracks_resize(cx: &mut TestAppContext) {
+        use gpui::{Bounds, point, px, size};
+        let editor = cx.new(|cx| TextEditorView::new("中a".repeat(50), &default_tokens(), cx));
+        editor.update(cx, |editor, _| {
+            editor.settings.soft_wrap = true;
+            editor.settings.soft_wrap_column = None;
+            let padding = editor.visible_gutter_width() + editor.visible_content_padding_x() * 2.0;
+            for (columns, expected) in [
+                (180.5, vec![(0, 150)]),
+                (90.5, vec![(0, 90), (90, 150)]),
+                (180.5, vec![(0, 150)]),
+            ] {
+                editor.content_bounds = Some(Bounds::new(
+                    point(px(0.0), px(0.0)),
+                    size(px(padding + columns * editor.metrics.char_width), px(500.0)),
+                ));
+                assert_eq!(
+                    editor
+                        .display_rows()
+                        .iter()
+                        .map(|row| (row.start_col, row.end_col))
+                        .collect::<Vec<_>>(),
+                    expected,
+                );
+            }
+        });
+    }
+
+    #[gpui::test]
     fn compact_rows_transition_to_folding_and_wrapping(cx: &mut TestAppContext) {
         use gpui::{Bounds, point, px, size};
         use oxideterm_editor_syntax::LanguageId;
@@ -459,7 +492,7 @@ mod edit_layout_tests {
                 size(px(1000.0), px(500.0)),
             ));
             editor.settings.soft_wrap = true;
-            editor.settings.soft_wrap_column = 8;
+            editor.settings.soft_wrap_column = Some(8);
             let wrapped = editor.display_rows();
             let (index, row, column) = display_row_for_visual_column(&wrapped, 0, 8).unwrap();
             assert_eq!((index, row.start_col, row.end_col, column), (1, 8, 13, 0));

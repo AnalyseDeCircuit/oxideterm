@@ -317,6 +317,7 @@ pub struct TextEditorView {
     selection_drag: Option<SelectionDrag>,
     transparent_background: bool,
     presentation: EditorPresentation,
+    border_visible: bool,
     context_menu: Option<EditorContextMenu>,
     context_menu_labels: EditorContextMenuLabels,
     caret_visible: bool,
@@ -372,6 +373,7 @@ impl TextEditorView {
             selection_drag: None,
             transparent_background: false,
             presentation: EditorPresentation::Document,
+            border_visible: true,
             context_menu: None,
             context_menu_labels: EditorContextMenuLabels::default(),
             caret_visible: true,
@@ -526,6 +528,10 @@ impl TextEditorView {
         self.viewport
             .clamp(self.document_row_count(), self.metrics.line_height);
         cx.notify();
+    }
+
+    pub fn set_border_visible(&mut self, visible: bool) {
+        self.border_visible = visible;
     }
 
     pub fn set_transparent_background(
