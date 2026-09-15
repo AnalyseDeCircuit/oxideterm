@@ -846,43 +846,45 @@ impl WorkspaceApp {
             .on_action(cx.listener(|this, _: &PaletteCleanupDead, _window, cx| {
                 this.cleanup_dead_local_terminal_sessions_from_palette(cx);
             }))
-            .on_action(cx.listener(|this, _: &SwitchLocaleEnglish, window, cx| {
-                this.switch_locale(Locale::En, window, cx);
+            .on_action(cx.listener(|this, _: &SwitchLocaleEnglish, _window, cx| {
+                this.switch_locale(Locale::En, cx);
             }))
-            .on_action(cx.listener(|this, _: &SwitchLocaleChinese, window, cx| {
-                this.switch_locale(Locale::ZhCn, window, cx);
-            }))
-            .on_action(
-                cx.listener(|this, _: &SwitchLocaleTraditionalChinese, window, cx| {
-                    this.switch_locale(Locale::ZhTw, window, cx);
-                }),
-            )
-            .on_action(cx.listener(|this, _: &SwitchLocaleGerman, window, cx| {
-                this.switch_locale(Locale::De, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &SwitchLocaleSpanish, window, cx| {
-                this.switch_locale(Locale::EsEs, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &SwitchLocaleFrench, window, cx| {
-                this.switch_locale(Locale::FrFr, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &SwitchLocaleItalian, window, cx| {
-                this.switch_locale(Locale::It, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &SwitchLocaleJapanese, window, cx| {
-                this.switch_locale(Locale::Ja, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &SwitchLocaleKorean, window, cx| {
-                this.switch_locale(Locale::Ko, window, cx);
+            .on_action(cx.listener(|this, _: &SwitchLocaleChinese, _window, cx| {
+                this.switch_locale(Locale::ZhCn, cx);
             }))
             .on_action(
-                cx.listener(|this, _: &SwitchLocalePortugueseBrazil, window, cx| {
-                    this.switch_locale(Locale::PtBr, window, cx);
+                cx.listener(|this, _: &SwitchLocaleTraditionalChinese, _window, cx| {
+                    this.switch_locale(Locale::ZhTw, cx);
                 }),
             )
-            .on_action(cx.listener(|this, _: &SwitchLocaleVietnamese, window, cx| {
-                this.switch_locale(Locale::Vi, window, cx);
+            .on_action(cx.listener(|this, _: &SwitchLocaleGerman, _window, cx| {
+                this.switch_locale(Locale::De, cx);
             }))
+            .on_action(cx.listener(|this, _: &SwitchLocaleSpanish, _window, cx| {
+                this.switch_locale(Locale::EsEs, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SwitchLocaleFrench, _window, cx| {
+                this.switch_locale(Locale::FrFr, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SwitchLocaleItalian, _window, cx| {
+                this.switch_locale(Locale::It, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SwitchLocaleJapanese, _window, cx| {
+                this.switch_locale(Locale::Ja, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SwitchLocaleKorean, _window, cx| {
+                this.switch_locale(Locale::Ko, cx);
+            }))
+            .on_action(
+                cx.listener(|this, _: &SwitchLocalePortugueseBrazil, _window, cx| {
+                    this.switch_locale(Locale::PtBr, cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &SwitchLocaleVietnamese, _window, cx| {
+                    this.switch_locale(Locale::Vi, cx);
+                }),
+            )
             .on_action(cx.listener(|this, _: &GoToTab1, window, cx| {
                 this.go_to_tab(0, window, cx);
             }))

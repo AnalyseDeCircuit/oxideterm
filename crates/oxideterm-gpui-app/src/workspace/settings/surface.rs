@@ -1228,6 +1228,9 @@ impl WorkspaceApp {
         }
         self.i18n
             .set_locale(locale_from_settings(settings.general.language));
+        if previous_settings.general.language != settings.general.language {
+            cx.set_menus(crate::platform::app_menus(settings));
+        }
         oxideterm_desktop_presence::set_keep_running_on_close(
             settings.general.minimize_to_tray_on_close,
         );

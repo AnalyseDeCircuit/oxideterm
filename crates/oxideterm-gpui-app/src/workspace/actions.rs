@@ -2536,12 +2536,7 @@ impl WorkspaceApp {
             .any(|candidate| candidate == &command_name)
     }
 
-    pub(super) fn switch_locale(
-        &mut self,
-        locale: Locale,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn switch_locale(&mut self, locale: Locale, cx: &mut Context<Self>) {
         // Route language changes through the same settings mutation path as the
         // settings UI so native plugin language/settings subscriptions observe
         // menu-triggered locale switches too.
@@ -2549,12 +2544,6 @@ impl WorkspaceApp {
             |settings| settings.general.language = settings_language_from_locale(locale),
             cx,
         );
-
-        let menus = crate::platform::app_menus(&self.i18n);
-        let _ = cx.update_window(window.window_handle(), move |_root, _window, app| {
-            app.set_menus(menus);
-        });
-        cx.notify();
     }
 
     pub(super) fn sync_tab_titles(&mut self, cx: &mut App) {
