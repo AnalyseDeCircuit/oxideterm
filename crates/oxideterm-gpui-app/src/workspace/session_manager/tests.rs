@@ -56,8 +56,8 @@ pub(super) fn ssh_config_display_projection_never_copies_proxy_command_secrets()
 }
 
 #[test]
-#[ignore = "manual session tree projection benchmark"]
-fn session_tree_projection_performance() {
+#[ignore = "manual session group projection benchmark"]
+fn session_group_projection_performance() {
     for (group_count, item_count) in [(20, 200), (100, 1000), (500, 5000)] {
         let roots: Vec<_> = (0..group_count).map(|i| format!("group-{i}")).collect();
         let expanded = roots.iter().cloned().collect();
@@ -91,6 +91,285 @@ fn session_tree_projection_performance() {
             "groups={group_count} connections={item_count} mean_ms={:.3}",
             start.elapsed().as_secs_f64() * 1000.0 / 20.0
         );
+        let start = std::time::Instant::now();
+        for _ in 0..20 {
+            let rows = std::hint::black_box(session_manager_grid_rows(
+                &items,
+                &roots,
+                "Recent".into(),
+                "Hosts".into(),
+                4,
+                4,
+            ));
+            let indices: Vec<_> = rows
+                .into_iter()
+                .filter_map(|row| match row {
+                    SessionManagerGridRow::Cards { item_indices } => Some(item_indices),
+                    _ => None,
+                })
+                .flatten()
+                .collect();
+            assert_eq!(indices, expected);
+        }
+        eprintln!(
+            "groups={group_count} connections={item_count} grid_mean_ms={:.3}",
+            start.elapsed().as_secs_f64() * 1000.0 / 20.0
+        );
+    }
+}
+
+#[test]
+fn session_grid_groups_preserve_subtrees_order_and_ungrouped_cards() {
+    let mut connection = saved_connection_fixture(SavedAuth::Agent);
+    let items: Vec<_> = [
+        Some("A/sub"),
+        None,
+        Some("B/deep/sub"),
+        Some("A-other"),
+        Some("A"),
+        Some("B"),
+    ]
+    .into_iter()
+    .map(|group| {
+        connection.group = group.map(str::to_owned);
+        SessionManagerDisplayItem::Connection(ConnectionInfo::from(&connection))
+    })
+    .collect();
+    let rows = session_manager_grid_rows(
+        &items,
+        &["B".into(), "A".into(), "Empty".into()],
+        "Recent".into(),
+        "Hosts".into(),
+        1,
+        4,
+    );
+    assert_eq!(
+        rows,
+        vec![
+            SessionManagerGridRow::SectionHeader {
+                title: "B".into(),
+                item_count: 2
+            },
+            SessionManagerGridRow::Cards {
+                item_indices: vec![2]
+            },
+            SessionManagerGridRow::Cards {
+                item_indices: vec![5]
+            },
+            SessionManagerGridRow::SectionHeader {
+                title: "A".into(),
+                item_count: 2
+            },
+            SessionManagerGridRow::Cards {
+                item_indices: vec![0]
+            },
+            SessionManagerGridRow::Cards {
+                item_indices: vec![4]
+            },
+            SessionManagerGridRow::SectionHeader {
+                title: "Hosts".into(),
+                item_count: 1
+            },
+            SessionManagerGridRow::Cards {
+                item_indices: vec![1]
+            },
+        ]
+    );
+    assert_eq!(
+        session_manager_grid_rows(&items, &[], "Recent".into(), "Hosts".into(), 4, 4),
+        vec![
+            SessionManagerGridRow::SectionHeader {
+                title: "Hosts".into(),
+                item_count: 6
+            },
+            SessionManagerGridRow::Cards {
+                item_indices: vec![0, 1, 2, 3]
+            },
+            SessionManagerGridRow::Cards {
+                item_indices: vec![4, 5]
+            },
+        ]
+    );
+}
+
+#[test]
+#[ignore = "manual session display sorting benchmark"]
+fn session_display_sort_performance() {
+    for count in [200usize, 1000, 5000] {
+        let mut connection = saved_connection_fixture(SavedAuth::Agent);
+        let items: Vec<_> = (0..count)
+            .map(|index| {
+                let rank = (index * 73) % count;
+                connection.id = format!("connection-{rank:05}");
+                connection.name = format!("Production-Server-{rank:05}");
+                SessionManagerDisplayItem::Connection(ConnectionInfo::from(&connection))
+            })
+            .collect();
+        let expected: Vec<_> = (0..count)
+            .map(|rank| format!("connection-{rank:05}"))
+            .collect();
+        let mut elapsed = std::time::Duration::ZERO;
+        for _ in 0..20 {
+            let mut input = items.clone();
+            let start = std::time::Instant::now();
+            sort_session_manager_items(&mut input, SessionSortField::Name, SortDirection::Asc);
+            elapsed += start.elapsed();
+            assert_eq!(
+                input
+                    .iter()
+                    .map(SessionManagerDisplayItem::id)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+        eprintln!(
+            "connections={count} sort_mean_ms={:.3}",
+            elapsed.as_secs_f64() * 1000.0 / 20.0
+        );
+    }
+}
+
+#[test]
+fn session_display_sort_preserves_each_column_and_direction() {
+    let base = saved_connection_fixture(SavedAuth::Agent);
+    let items: Vec<_> = [
+        ("b", "Alpha", "z", 22, "zoe", Some("b"), Some(2)),
+        ("a", "alpha", "A", 2200, "Amy", None, None),
+        ("c", "Beta", "m", 220, "zoe", Some("B"), Some(1)),
+        ("d", "alpha", "a", 22, "amy", Some(""), Some(2)),
+    ]
+    .into_iter()
+    .map(|(id, name, host, port, username, group, seconds)| {
+        let mut connection = ConnectionInfo::from(&base);
+        connection.id = id.into();
+        connection.name = name.into();
+        connection.host = host.into();
+        connection.port = port;
+        connection.username = username.into();
+        connection.group = group.map(str::to_owned);
+        connection.last_used_at =
+            seconds.map(|seconds| format!("2026-01-01T00:00:0{seconds}+00:00"));
+        if id == "b" {
+            connection.auth_type = AuthType::Password;
+        }
+        SessionManagerDisplayItem::Connection(connection)
+    })
+    .collect();
+    for (field, expected) in [
+        (SessionSortField::Name, ["a", "b", "d", "c"]),
+        (SessionSortField::Host, ["a", "d", "c", "b"]),
+        (SessionSortField::Port, ["b", "d", "c", "a"]),
+        (SessionSortField::Username, ["a", "d", "b", "c"]),
+        (SessionSortField::AuthType, ["a", "d", "c", "b"]),
+        (SessionSortField::Group, ["a", "d", "b", "c"]),
+        (SessionSortField::LastUsed, ["a", "c", "b", "d"]),
+    ] {
+        for direction in [SortDirection::Asc, SortDirection::Desc] {
+            let mut input = items.clone();
+            let mut expected = expected;
+            if direction == SortDirection::Desc {
+                expected.reverse();
+            }
+            sort_session_manager_items(&mut input, field, direction);
+            assert_eq!(
+                input
+                    .iter()
+                    .map(SessionManagerDisplayItem::id)
+                    .collect::<Vec<_>>(),
+                expected,
+                "{field:?} {direction:?}"
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore = "manual recent sessions grid projection benchmark"]
+fn recent_sessions_grid_performance() {
+    for count in [200usize, 1000, 5000] {
+        let mut connection = saved_connection_fixture(SavedAuth::Agent);
+        connection.group = None;
+        let items: Vec<_> = (0..count)
+            .map(|index| {
+                connection.id = format!("connection-{index}");
+                connection.last_used_at = chrono::DateTime::from_timestamp(
+                    1_700_000_000 + ((index * 73) % count) as i64,
+                    0,
+                );
+                SessionManagerDisplayItem::Connection(ConnectionInfo::from(&connection))
+            })
+            .collect();
+        let expected: Vec<_> = (count - 8..count).rev().collect();
+        let start = std::time::Instant::now();
+        for _ in 0..30 {
+            let rows = std::hint::black_box(session_manager_grid_rows(
+                &items,
+                &[],
+                "Recent".into(),
+                "Hosts".into(),
+                4,
+                4,
+            ));
+            let ranks: Vec<_> = rows
+                .iter()
+                .filter_map(|row| match row {
+                    SessionManagerGridRow::RecentItems { item_indices, .. } => Some(item_indices),
+                    _ => None,
+                })
+                .flatten()
+                .map(|index| (index * 73) % count)
+                .collect();
+            assert_eq!(ranks, expected);
+        }
+        eprintln!(
+            "connections={count} recent_grid_mean_ms={:.3}",
+            start.elapsed().as_secs_f64() * 1000.0 / 30.0
+        );
+    }
+}
+
+#[test]
+fn recent_sessions_grid_preserves_ties_and_excludes_unused_connections() {
+    let mut connection = saved_connection_fixture(SavedAuth::Agent);
+    connection.group = None;
+    let items: Vec<_> = [
+        None,
+        Some(1),
+        Some(3),
+        Some(2),
+        Some(3),
+        Some(2),
+        Some(3),
+        Some(1),
+        Some(3),
+        Some(3),
+        Some(3),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, seconds)| {
+        connection.id = format!("connection-{index}");
+        connection.last_used_at = seconds
+            .and_then(|seconds| chrono::DateTime::from_timestamp(1_700_000_000 + seconds, 0));
+        SessionManagerDisplayItem::Connection(ConnectionInfo::from(&connection))
+    })
+    .collect();
+    for (length, expected) in [
+        (1, vec![]),
+        (5, vec![2, 4, 3, 1]),
+        (11, vec![2, 4, 6, 8, 9, 10, 3, 5]),
+    ] {
+        let rows =
+            session_manager_grid_rows(&items[..length], &[], "Recent".into(), "Hosts".into(), 4, 4);
+        let recent: Vec<_> = rows
+            .into_iter()
+            .filter_map(|row| match row {
+                SessionManagerGridRow::RecentItems { item_indices, .. } => Some(item_indices),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(recent, expected);
     }
 }
 

@@ -495,28 +495,9 @@ impl WorkspaceApp {
         cx: &App,
     ) {
         let manager = self.session_manager.read(cx);
-        let field = manager.sort_field;
-        let direction = manager.sort_direction;
         // Sort once at the display-model boundary so grid/list/tree cannot
         // drift apart and reintroduce view-specific ordering bugs.
-        items.sort_by(|left, right| {
-            let ordering = match field {
-                SessionSortField::Name => compare_lower(left.name(), right.name()),
-                SessionSortField::Host => compare_lower(left.host(), right.host()),
-                SessionSortField::Port => left.port_sort_key().cmp(&right.port_sort_key()),
-                SessionSortField::Username => compare_lower(left.username(), right.username()),
-                SessionSortField::AuthType => left.auth_sort_key().cmp(&right.auth_sort_key()),
-                SessionSortField::Group => compare_option_lower(left.group(), right.group()),
-                SessionSortField::LastUsed => left.last_used().cmp(&right.last_used()),
-            }
-            .then_with(|| compare_lower(left.name(), right.name()))
-            .then_with(|| left.id().cmp(right.id()));
-
-            match direction {
-                SortDirection::Asc => ordering,
-                SortDirection::Desc => ordering.reverse(),
-            }
-        });
+        sort_session_manager_items(items, manager.sort_field, manager.sort_direction);
     }
 
     fn session_manager_grid_columns(&self, window: &Window, cx: &App) -> (usize, usize) {
@@ -2546,12 +2527,43 @@ impl WorkspaceApp {
     }
 }
 
-pub(super) fn compare_lower(left: &str, right: &str) -> std::cmp::Ordering {
-    left.to_lowercase().cmp(&right.to_lowercase())
-}
-
-pub(super) fn compare_option_lower(left: Option<&str>, right: Option<&str>) -> std::cmp::Ordering {
-    compare_lower(left.unwrap_or_default(), right.unwrap_or_default())
+pub(super) fn sort_session_manager_items(
+    items: &mut [SessionManagerDisplayItem],
+    field: SessionSortField,
+    direction: SortDirection,
+) {
+    fn sort<K: Ord>(
+        items: &mut [SessionManagerDisplayItem],
+        direction: SortDirection,
+        primary_key: impl Fn(&SessionManagerDisplayItem) -> K,
+    ) {
+        // Cache normalized text for this sort only; display settings and item
+        // edits remain visible immediately without persistent invalidation state.
+        let key = |item: &SessionManagerDisplayItem| {
+            (
+                primary_key(item),
+                item.name().to_lowercase(),
+                item.id().to_owned(),
+            )
+        };
+        match direction {
+            SortDirection::Asc => items.sort_by_cached_key(key),
+            SortDirection::Desc => items.sort_by_cached_key(|item| std::cmp::Reverse(key(item))),
+        }
+    }
+    match field {
+        SessionSortField::Name => sort(items, direction, |_| ()),
+        SessionSortField::Host => sort(items, direction, |item| item.host().to_lowercase()),
+        SessionSortField::Port => sort(items, direction, SessionManagerDisplayItem::port_sort_key),
+        SessionSortField::Username => sort(items, direction, |item| item.username().to_lowercase()),
+        SessionSortField::AuthType => {
+            sort(items, direction, SessionManagerDisplayItem::auth_sort_key)
+        }
+        SessionSortField::Group => sort(items, direction, |item| {
+            item.group().unwrap_or_default().to_lowercase()
+        }),
+        SessionSortField::LastUsed => sort(items, direction, SessionManagerDisplayItem::last_used),
+    }
 }
 
 pub(super) fn session_manager_grid_rows(
@@ -2572,23 +2584,42 @@ pub(super) fn session_manager_grid_rows(
         true,
     );
 
+    // Route items through their ancestor paths once instead of scanning all
+    // connections separately for each root's subtree. Indices retain display order.
+    let mut grouped_items: HashMap<&str, Vec<usize>> = roots
+        .iter()
+        .map(|root| (root.as_str(), Vec::new()))
+        .collect();
+    let mut host_indices = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        let mut group = item.group();
+        if roots.is_empty() || group.is_none() {
+            host_indices.push(index);
+            continue;
+        }
+        while let Some(path) = group {
+            if let Some(indices) = grouped_items.get_mut(path) {
+                indices.push(index);
+            }
+            group = path.rsplit_once('/').map(|(parent, _)| parent);
+        }
+    }
+
     // Grid mode keeps each root group as one section containing its subtree.
     for group in roots {
-        let group_indices = session_item_indices_for_group_subtree(items, group);
+        let group_indices = grouped_items
+            .get(group.as_str())
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         push_session_manager_grid_section(
             &mut rows,
             group_display_name(group),
-            &group_indices,
+            group_indices,
             card_columns,
             false,
         );
     }
 
-    let host_indices = if roots.is_empty() {
-        (0..items.len()).collect::<Vec<_>>()
-    } else {
-        direct_session_item_indices_for_group(items, None)
-    };
     push_session_manager_grid_section(&mut rows, hosts_title, &host_indices, card_columns, false);
     rows
 }
@@ -2704,47 +2735,23 @@ fn push_session_manager_tree_group_rows(
 }
 
 fn recent_session_item_indices(items: &[SessionManagerDisplayItem]) -> Vec<usize> {
-    let mut indices = items
-        .iter()
-        .enumerate()
-        .filter_map(|(index, item)| item.last_used().is_some().then_some(index))
-        .collect::<Vec<_>>();
-    indices.sort_by(|left, right| items[*right].last_used().cmp(&items[*left].last_used()));
-    indices.truncate(8);
-    indices
-}
-
-fn direct_session_item_indices_for_group(
-    items: &[SessionManagerDisplayItem],
-    group: Option<&str>,
-) -> Vec<usize> {
-    items
-        .iter()
-        .enumerate()
-        .filter_map(|(index, item)| match (group, item.group()) {
-            (None, None) => Some(index),
-            (Some(group), Some(item_group)) if item_group == group => Some(index),
-            _ => None,
-        })
-        .collect()
-}
-
-fn session_item_indices_for_group_subtree(
-    items: &[SessionManagerDisplayItem],
-    group: &str,
-) -> Vec<usize> {
-    let child_prefix = format!("{group}/");
-    items
+    const RECENT_SESSION_LIMIT: usize = 8;
+    let mut candidates: Vec<_> = items
         .iter()
         .enumerate()
         .filter_map(|(index, item)| {
-            item.group()
-                .is_some_and(|item_group| {
-                    item_group == group || item_group.starts_with(&child_prefix)
-                })
-                .then_some(index)
+            item.last_used()
+                .map(|time| (std::cmp::Reverse(time), index))
         })
-        .collect()
+        .collect();
+    // Only the recent strip needs ordering. The original index breaks ties so
+    // partial selection preserves the display order for equal timestamps.
+    if candidates.len() > RECENT_SESSION_LIMIT {
+        candidates.select_nth_unstable(RECENT_SESSION_LIMIT);
+        candidates.truncate(RECENT_SESSION_LIMIT);
+    }
+    candidates.sort_unstable();
+    candidates.into_iter().map(|(_, index)| index).collect()
 }
 
 fn session_manager_display_item_signature(item: &SessionManagerDisplayItem) -> u64 {
