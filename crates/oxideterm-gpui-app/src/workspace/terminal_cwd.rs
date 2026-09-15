@@ -96,6 +96,7 @@ pub(in crate::workspace) struct TerminalCwdPickerState {
     entries: Vec<CurrentDirectoryEntry>,
     highlighted_path: Option<String>,
     loading: bool,
+    local_list_task: Option<Task<()>>,
     error: Option<TerminalCwdError>,
     list_state: ListState,
     list_cache: RefCell<VirtualListSignatureCache>,
@@ -113,6 +114,7 @@ impl Default for TerminalCwdPickerState {
             entries: Vec::new(),
             highlighted_path: None,
             loading: false,
+            local_list_task: None,
             error: None,
             // Keep the picker scroll owned by GPUI ListState so the visual
             // scrollbar and rendered rows stay synchronized for large folders.
@@ -126,6 +128,7 @@ impl Default for TerminalCwdPickerState {
 
 impl TerminalCwdPickerState {
     fn next_generation(&mut self) -> u64 {
+        self.local_list_task = None;
         self.generation = self.generation.saturating_add(1);
         self.generation
     }
@@ -277,13 +280,7 @@ impl WorkspaceTerminalEntity {
 
         match scope {
             CurrentDirectoryScope::Local => {
-                self.cwd_picker.loading = false;
-                let outcome = list_local_current_directory(key.path(), TERMINAL_CWD_MAX_ENTRIES)
-                    .map(TerminalCwdListOutcome::Ready)
-                    .unwrap_or(TerminalCwdListOutcome::Unavailable);
-                if self.apply_cwd_directory_list_result(key, generation, outcome) {
-                    cx.notify();
-                }
+                self.spawn_local_cwd_directory_list(key, generation, cx);
             }
             CurrentDirectoryScope::SshNode(node_id) => {
                 self.cwd_picker.loading = true;
@@ -504,6 +501,33 @@ impl WorkspaceTerminalEntity {
         delivery_batch.outcome.backlog_remaining
     }
 
+    fn spawn_local_cwd_directory_list(
+        &mut self,
+        key: CurrentDirectoryKey,
+        generation: u64,
+        cx: &mut Context<Self>,
+    ) {
+        self.cwd_picker.loading = true;
+        let path = key.path().to_owned();
+        let listing = cx.background_executor().spawn(async move {
+            list_local_current_directory(&path, TERMINAL_CWD_MAX_ENTRIES)
+                .map(TerminalCwdListOutcome::Ready)
+                .unwrap_or(TerminalCwdListOutcome::Unavailable)
+        });
+        // The picker owns result delivery. Closing or navigating drops this
+        // task; an already-running filesystem call may finish in the background.
+        self.cwd_picker.local_list_task = Some(cx.spawn(async move |terminal, cx| {
+            let outcome = listing.await;
+            let _ = terminal.update(cx, |terminal, cx| {
+                if terminal.apply_cwd_directory_list_result(key, generation, outcome) {
+                    terminal.cwd_picker.local_list_task = None;
+                    cx.notify();
+                }
+            });
+        }));
+        cx.notify();
+    }
+
     fn spawn_remote_cwd_directory_list(
         &self,
         key: CurrentDirectoryKey,
@@ -579,13 +603,7 @@ impl WorkspaceTerminalEntity {
 
         match key.scope().clone() {
             CurrentDirectoryScope::Local => {
-                self.cwd_picker.loading = false;
-                let outcome = list_local_current_directory(key.path(), TERMINAL_CWD_MAX_ENTRIES)
-                    .map(TerminalCwdListOutcome::Ready)
-                    .unwrap_or(TerminalCwdListOutcome::Unavailable);
-                if self.apply_cwd_directory_list_result(key, generation, outcome) {
-                    cx.notify();
-                }
+                self.spawn_local_cwd_directory_list(key, generation, cx);
             }
             CurrentDirectoryScope::SshNode(node_id) => {
                 self.cwd_picker.loading = true;
@@ -1078,7 +1096,106 @@ fn terminal_cwd_entry_confirms_directory(kind: TerminalCwdVisibleEntryKind) -> b
 
 #[cfg(test)]
 mod tests {
+    use super::super::terminal_entity::tests::new_terminal_entity;
     use super::*;
+
+    #[gpui::test]
+    fn local_cwd_listing_is_deferred_and_follows_picker_lifetime(cx: &mut gpui::TestAppContext) {
+        let terminal = new_terminal_entity(cx);
+        let directory = tempfile::tempdir().unwrap();
+        let next = directory.path().join("next");
+        std::fs::create_dir(&next).unwrap();
+        std::fs::write(next.join("selected.txt"), "").unwrap();
+        let snapshot = CurrentDirectorySnapshot::new(
+            CurrentDirectoryScope::Local,
+            directory.path().to_string_lossy(),
+            CurrentDirectorySource::UserAction,
+        )
+        .unwrap();
+        terminal.update(cx, |terminal, cx| {
+            terminal.open_cwd_picker_for_snapshot(snapshot.clone(), cx);
+            assert!(terminal.cwd_picker.loading);
+            assert!(terminal.cwd_picker.entries.is_empty());
+            let generation = terminal.cwd_picker.next_generation();
+            terminal.load_cwd_directory(
+                CurrentDirectoryKey::new(CurrentDirectoryScope::Local, next.to_string_lossy())
+                    .unwrap(),
+                generation,
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        terminal.update(cx, |terminal, cx| {
+            assert_eq!(
+                terminal
+                    .cwd_picker
+                    .entries
+                    .iter()
+                    .map(|entry| entry.name())
+                    .collect::<Vec<_>>(),
+                ["selected.txt"]
+            );
+            assert!(!terminal.cwd_picker.loading);
+            terminal.open_cwd_picker_for_snapshot(snapshot, cx);
+            terminal.close_cwd_picker();
+        });
+        cx.run_until_parked();
+        terminal.read_with(cx, |terminal, _| {
+            assert!(!terminal.cwd_picker.open);
+            assert!(terminal.cwd_picker.entries.is_empty());
+            assert!(terminal.cwd_picker.local_list_task.is_none());
+        });
+    }
+
+    #[gpui::test]
+    #[ignore = "manual local directory picker responsiveness benchmark"]
+    fn local_cwd_picker_performance(cx: &mut gpui::TestAppContext) {
+        let terminal = new_terminal_entity(cx);
+        for count in [1000, 10000] {
+            let directory = tempfile::tempdir().unwrap();
+            std::fs::create_dir(directory.path().join("folder")).unwrap();
+            for index in 0..count {
+                std::fs::File::create(directory.path().join(format!("file-{index:05}"))).unwrap();
+            }
+            let snapshot = CurrentDirectorySnapshot::new(
+                CurrentDirectoryScope::Local,
+                directory.path().to_string_lossy(),
+                CurrentDirectorySource::UserAction,
+            )
+            .unwrap();
+            let expected: Vec<_> = std::iter::once("folder".to_string())
+                .chain((0..159).map(|index| format!("file-{index:05}")))
+                .collect();
+            let mut foreground = Duration::ZERO;
+            let mut total = Duration::ZERO;
+            for _ in 0..5 {
+                let start = std::time::Instant::now();
+                terminal.update(cx, |terminal, cx| {
+                    terminal.open_cwd_picker_for_snapshot(snapshot.clone(), cx)
+                });
+                foreground += start.elapsed();
+                cx.run_until_parked();
+                total += start.elapsed();
+                terminal.read_with(cx, |terminal, _| {
+                    assert_eq!(
+                        terminal
+                            .cwd_picker
+                            .entries
+                            .iter()
+                            .map(|entry| entry.name())
+                            .collect::<Vec<_>>(),
+                        expected
+                    );
+                    assert!(!terminal.cwd_picker.loading);
+                });
+            }
+            eprintln!(
+                "files={count} handler_mean_ms={:.3} completion_mean_ms={:.3}",
+                foreground.as_secs_f64() * 200.0,
+                total.as_secs_f64() * 200.0
+            );
+        }
+    }
 
     #[tokio::test]
     async fn remote_cwd_acquisition_is_not_limited_by_the_list_timeout() {

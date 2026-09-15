@@ -855,7 +855,7 @@ fn terminal_project_now_ms() -> u64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use gpui::TestAppContext;
     use oxideterm_environment::{GitBranchListOutcome, GitBranchReference};
@@ -870,7 +870,9 @@ mod tests {
         _subscription: Subscription,
     }
 
-    fn new_terminal_entity(cx: &mut TestAppContext) -> Entity<WorkspaceTerminalEntity> {
+    pub(in crate::workspace) fn new_terminal_entity(
+        cx: &mut TestAppContext,
+    ) -> Entity<WorkspaceTerminalEntity> {
         let runtime = Arc::new(
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
