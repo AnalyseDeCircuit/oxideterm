@@ -1632,7 +1632,12 @@ impl WorkspaceApp {
         .border_0()
         .rounded_none()
         .bg(gpui::transparent_black());
-        let input = self.text_input_with_workspace_ime(target, input, |_, _| {}, cx);
+        let input = self.text_input_with_workspace_ime(
+            target,
+            input,
+            |this, cx| this.show_active_input_caret(cx),
+            cx,
+        );
         div()
             .h(px(self.tokens.metrics.ui_button_lg_height))
             .w_full()
@@ -2271,12 +2276,12 @@ impl WorkspaceApp {
         let documents = navigator_snapshot.documents;
         let navigator_query = self.knowledge_workspace.read(cx).navigator_query.clone();
         let filtered_documents = documents;
-        let navigator_failed = self.ai_entity.read(cx).knowledge_error().is_some()
-            || navigator_snapshot.error.is_some();
         let navigator_error =
             if let Some(error) = self.knowledge_workspace.read(cx).metadata_error.clone() {
                 Some(error)
-            } else if navigator_failed {
+            } else if let Some(error) = self.ai_entity.read(cx).knowledge_error() {
+                Some(error.to_owned())
+            } else if navigator_snapshot.error.is_some() {
                 Some(labels.navigator_load_failed.clone())
             } else {
                 (!navigator_snapshot.loaded).then(|| labels.loading.clone())
@@ -2535,7 +2540,7 @@ impl WorkspaceApp {
             .overflow_hidden()
             .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _window, cx| {
                 let target = ime::WorkspaceImeTarget::KnowledgeSearch;
-                if this.selected_ime_target == Some(target)
+                if this.active_ime_target(cx) == Some(target)
                     && this
                         .text_input_anchors
                         .get(target.anchor_id())

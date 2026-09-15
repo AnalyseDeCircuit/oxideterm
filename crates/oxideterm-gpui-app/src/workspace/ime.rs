@@ -1054,7 +1054,11 @@ impl WorkspaceApp {
             }
         }
 
-        if self.selected_ime_target == Some(WorkspaceImeTarget::KnowledgeSearch)
+        if (self.selected_ime_target == Some(WorkspaceImeTarget::KnowledgeSearch)
+            || self
+                .selected_ime_range
+                .as_ref()
+                .is_some_and(|selection| selection.target == WorkspaceImeTarget::KnowledgeSearch))
             && self
                 .knowledge_workspace
                 .read(cx)

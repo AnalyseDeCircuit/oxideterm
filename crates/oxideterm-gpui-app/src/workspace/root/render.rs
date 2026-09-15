@@ -358,14 +358,14 @@ impl WorkspaceApp {
                 }),
             )
             .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                let target = this
-                    .selected_ime_target
-                    .unwrap_or(ime::WorkspaceImeTarget::ActiveSessionSearch);
+                let Some(target) = this.active_ime_target(cx) else {
+                    return;
+                };
                 let owns_selection = matches!(
                     target,
                     ime::WorkspaceImeTarget::ActiveSessionSearch
                         | ime::WorkspaceImeTarget::KnowledgeSearch
-                ) && this.active_ime_target(cx) == Some(target);
+                );
                 if owns_selection
                     && this
                         .text_input_anchors
@@ -1476,6 +1476,18 @@ impl WorkspaceApp {
                             title,
                             subtitle,
                         ))
+                        .when_some(state.render_error.as_ref(), |modal, error| {
+                            modal.child(
+                                div()
+                                    .px_3()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .text_color(rgb(self.tokens.ui.error))
+                                    .child(format!(
+                                        "{}: {error}",
+                                        self.i18n.t("markdown.mermaid_unsupported")
+                                    )),
+                            )
+                        })
                         .child(
                             oxideterm_gpui_ui::modal_body(&self.tokens)
                                 .id("mermaid-zoom-modal-body-scroll")

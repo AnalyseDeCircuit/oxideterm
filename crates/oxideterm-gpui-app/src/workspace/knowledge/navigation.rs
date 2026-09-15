@@ -245,6 +245,7 @@ impl WorkspaceApp {
             self.tokens.metrics.ui_text_sm,
         );
         options.show_label = false;
+        options.icon_gap = Some(self.tokens.spacing.two);
         div()
             .h(px(self.tokens.metrics.ui_button_lg_height))
             .w_full()
@@ -272,6 +273,8 @@ impl WorkspaceApp {
                 .id("notes-notebooks")
                 .flex_1()
                 .min_w_0()
+                .pl_0()
+                .border_0()
                 .justify_start()
                 .child(
                     div()

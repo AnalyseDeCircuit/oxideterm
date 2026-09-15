@@ -700,6 +700,7 @@ impl AiWorkspaceEntity {
         if self.knowledge_embedding_task.is_some() {
             return false;
         }
+        self.knowledge_page.error = None;
         let store = self.rag_store();
         let key_store = self.key_store.clone();
         let provider_id = provider.id.clone();
