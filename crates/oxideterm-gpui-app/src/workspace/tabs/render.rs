@@ -43,6 +43,7 @@ fn tab_kind_icon(
             .map(|contribution| LucideIcon::from_plugin_name(&contribution.definition.icon))
             .unwrap_or(LucideIcon::Puzzle),
         TabKind::CloudSync => LucideIcon::Cloud,
+        TabKind::Knowledge => LucideIcon::BookOpen,
         TabKind::Settings => LucideIcon::Settings,
     }
 }

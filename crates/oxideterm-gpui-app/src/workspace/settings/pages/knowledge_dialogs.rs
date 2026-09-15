@@ -87,7 +87,7 @@ impl WorkspaceApp {
                             )
                             .child(self.ai_settings_select_control(
                                 SettingsSelect::KnowledgeCollectionScope,
-                                self.i18n.t("settings_view.knowledge.scope_global"),
+                                self.knowledge_collection_scope_label(cx),
                                 420.0,
                                 cx,
                             )),
@@ -138,6 +138,11 @@ impl WorkspaceApp {
             .read(cx)
             .knowledge_new_document_title()
             .to_string();
+        let creation_error = self
+            .ai_entity
+            .read(cx)
+            .knowledge_new_document_error()
+            .map(str::to_string);
         let can_create = !document_title.trim().is_empty();
         let backdrop = dismissible_dialog_backdrop().on_mouse_down(
             MouseButton::Left,
@@ -220,7 +225,10 @@ impl WorkspaceApp {
                                 420.0,
                                 cx,
                             )),
-                    ),
+                    )
+                    .when_some(creation_error, |content, error| {
+                        content.child(self.knowledge_error_row(&error))
+                    }),
             )
             .child(
                 dialog_footer(&self.tokens)
@@ -240,8 +248,9 @@ impl WorkspaceApp {
                         ConfirmDialogAction::Confirm,
                         !can_create,
                         |this, _event, _window, cx| {
-                            this.knowledge_create_blank_document(cx);
-                            this.close_knowledge_document_dialog(cx);
+                            if this.knowledge_create_blank_document(cx) {
+                                this.close_knowledge_document_dialog(cx);
+                            }
                         },
                         cx,
                     )),
@@ -266,6 +275,17 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn knowledge_collection_scope_label(&self, cx: &App) -> String {
+        let selected_connection_id = self
+            .ai_entity
+            .read(cx)
+            .knowledge_new_collection_connection_id();
+        selected_connection_id
+            .and_then(|connection_id| self.connection_store.get(connection_id))
+            .map(|connection| connection.name.clone())
+            .unwrap_or_else(|| self.i18n.t("settings_view.knowledge.scope_global"))
+    }
+
     pub(in crate::workspace) fn close_knowledge_create_dialog(&mut self, cx: &mut Context<Self>) {
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
@@ -277,9 +297,20 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn open_knowledge_document_dialog(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn open_knowledge_document_dialog(
+        &mut self,
+        collection_id: String,
+        open_in_workspace: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let owner_window_id = window.window_handle().window_id();
         self.ai_entity.update(cx, |entity, cx| {
-            entity.open_knowledge_document_dialog();
+            entity.open_knowledge_document_dialog(
+                collection_id,
+                owner_window_id,
+                open_in_workspace,
+            );
             cx.notify();
         });
         cx.notify();

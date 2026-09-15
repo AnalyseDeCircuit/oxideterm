@@ -76,7 +76,7 @@ pub fn markdown_with_options(
     source: &str,
     opts: &MarkdownOptions,
 ) -> AnyElement {
-    let document = parser::parse(source);
+    let document = parser::parse_with_smart_punctuation(source, opts.enable_smart_punctuation);
     render::render_document(&document, tokens, opts)
 }
 
@@ -88,7 +88,7 @@ pub fn markdown_virtual_with_options(
     opts: &MarkdownOptions,
     scroll_handle: &MarkdownVirtualListScrollHandle,
 ) -> AnyElement {
-    let document = parser::parse(source);
+    let document = parser::parse_with_smart_punctuation(source, opts.enable_smart_punctuation);
     render::render_document_virtual(id, &document, tokens, opts, scroll_handle)
 }
 
@@ -101,7 +101,7 @@ pub fn markdown_virtual_with_code_actions(
     scroll_handle: &MarkdownVirtualListScrollHandle,
     code_actions: &render::MarkdownCodeBlockActions,
 ) -> AnyElement {
-    let document = parser::parse(source);
+    let document = parser::parse_with_smart_punctuation(source, opts.enable_smart_punctuation);
     render::render_document_virtual_with_code_actions(
         id,
         &document,

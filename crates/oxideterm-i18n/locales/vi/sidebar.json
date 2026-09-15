@@ -41,6 +41,7 @@
       "import_tooltip": "Nhập từ file .oxide",
       "export_tooltip": "Xuất sang file .oxide",
       "host_tools": "Công cụ máy chủ",
+      "knowledge": "Cơ sở tri thức",
       "host_monitor": "Giám sát",
       "gpu": "GPU / NPU",
       "processes": "Tiến trình",

@@ -41,6 +41,7 @@
       "import_tooltip": "Importer depuis un fichier .oxide",
       "export_tooltip": "Exporter vers un fichier .oxide",
       "host_tools": "Outils d’hôte",
+      "knowledge": "Base de connaissances",
       "host_monitor": "Surveillance",
       "gpu": "GPU / NPU",
       "processes": "Processus",

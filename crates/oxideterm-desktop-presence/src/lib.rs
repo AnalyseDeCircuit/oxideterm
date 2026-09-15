@@ -103,6 +103,14 @@ pub fn set_keep_running_on_close(enabled: bool) {
     platform::set_keep_running_on_close(enabled);
 }
 
+pub fn install_main_window_close_guard(
+    window: &mut Window,
+    cx: &App,
+    guard: impl Fn(&mut Window, &mut App) -> bool + 'static,
+) {
+    platform::install_main_window_close_guard(window, cx, guard);
+}
+
 pub fn show_main_window() {
     platform::show_main_window();
 }

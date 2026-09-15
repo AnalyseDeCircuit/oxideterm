@@ -138,6 +138,17 @@ Never paste secrets into AI prompts. Use the app's provider key and secret stora
 
 OxideSens can discover bounded `SKILL.md` workflows from the workspace, user data directories, and enabled native plugins. Open **Settings → OxideSens → Tools → Agent Skills** to review discovered skills, enable or disable them, and refresh the catalog. Loading a skill provides instructions only; it does not grant terminal, file, credential, or network permissions. Every resulting action still goes through the existing tool policy and approval mode. See the [Agent Skills reference](../../agent-skills.md) for discovery precedence and resource limits.
 
+## Knowledge
+
+Open Knowledge from the activity bar. OxideTerm opens or focuses one central Knowledge tab instead of placing the browser in the global companion sidebar.
+
+- The left navigator manages collections and the documents in the selected collection. Create a collection from the workspace header; create a document from the document-section header so it is bound to the visible collection. Collections can be global or scoped to a saved connection.
+- The right editor opens in Source mode with Markdown syntax highlighting. Read-only Preview renders the same draft. Switching modes preserves the editor buffer and undo history.
+- The formatting toolbar inserts standard Markdown for headings, emphasis, lists, quotes, code, links, images, tables, and horizontal rules. Fenced code blocks use three backticks.
+- Save state and conflicts are shown in the editor header. Leaving a dirty document, closing its tab, or quitting requires the draft to be saved or explicitly discarded.
+
+Use the Knowledge settings page for embedding and retrieval configuration. Document browsing and editing belong to the Knowledge workspace tab.
+
 ## External MCP Clients
 
 External editors, command-line AI tools, and other MCP clients can use saved SSH connections through OxideTerm when diagnosing a server. Open **Settings → Network & Proxy → External MCP Control**, then:
@@ -200,7 +211,7 @@ Use Settings for interactive configuration:
 - Terminal renderer, shell, font, encoding, background images, transfer helpers, and local terminal behavior.
 - Privilege credentials and their prompt/scope settings.
 - SSH, reconnect, SFTP, and IDE behavior.
-- AI providers, model selection, memory, tool use, and knowledge settings.
+- AI providers, model selection, memory, tool use, and Knowledge embedding or retrieval settings.
 - Keybindings, help, and update information.
 
 Use the desktop UI when you are making exploratory or visual changes. Use the CLI only when the change must be scripted or repeated across environments.
