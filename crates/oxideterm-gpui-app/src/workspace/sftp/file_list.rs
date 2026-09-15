@@ -61,7 +61,8 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
+        let tokens = self.tokens;
+        let theme = tokens.ui;
         let compact = self.sftp_view.read(cx).current_surface_id == Some(SftpSurfaceId::Sidebar);
         let drag_over = self.sftp_view.read(cx).drag_over_pane == Some(pane);
         let list = div()
@@ -293,23 +294,17 @@ impl WorkspaceApp {
                                     .flex_row()
                                     .items_center()
                                     .gap(px(8.0))
-                                    .child(Self::render_lucide_icon(
-                                        if file.is_symlink {
-                                            LucideIcon::Link2
-                                        } else if file.file_type == SftpFileType::Directory {
-                                            LucideIcon::Folder
+                                    .child({
+                                        let icon = if file.file_type == SftpFileType::Directory {
+                                            oxideterm_gpui_ui::file_icons::folder_icon(
+                                                &file.name, false,
+                                            )
                                         } else {
-                                            LucideIcon::File
-                                        },
-                                        SFTP_ICON_MD,
-                                        if file.file_type == SftpFileType::Directory {
-                                            rgb(SFTP_FOLDER_BLUE)
-                                        } else if file.is_symlink {
-                                            rgb(theme.accent)
-                                        } else {
-                                            rgb(theme.text_muted)
-                                        },
-                                    ))
+                                            oxideterm_gpui_ui::file_icons::file_icon(&file.name)
+                                        };
+                                        icon.with_symlink(file.is_symlink)
+                                            .render(SFTP_ICON_MD, &tokens)
+                                    })
                                     // Tauri file rows are select-none. Plain
                                     // display text also prevents retaining the
                                     // root selectable-text adapter here.

@@ -1306,7 +1306,8 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
+        let tokens = self.tokens;
+        let theme = tokens.ui;
         let list = div()
             .id("file-manager-list-scroll")
             .flex_1()
@@ -1427,11 +1428,6 @@ impl WorkspaceApp {
                             // Selection remains page-owned and is sampled only
                             // for rows requested by the virtual-list viewport.
                             let selected = file_manager.read(_cx).selected.contains(&file.name);
-                            let icon_color = if row.icon_color == 0 {
-                                theme.text_muted
-                            } else {
-                                row.icon_color
-                            };
                             div()
                                 .w_full()
                                 .h(px(FILE_MANAGER_ROW_HEIGHT))
@@ -1464,11 +1460,7 @@ impl WorkspaceApp {
                                         .flex()
                                         .items_center()
                                         .gap(px(8.0))
-                                        .child(Self::render_lucide_icon(
-                                            row.icon,
-                                            FILE_MANAGER_ICON_MD,
-                                            rgb(icon_color),
-                                        ))
+                                        .child(row.icon.render(FILE_MANAGER_ICON_MD, &tokens))
                                         // Tauri marks file rows as `select-none`. Plain text keeps
                                         // virtual-list scrolling free of per-cell anchor probes.
                                         .child(div().truncate().child(row.display_name.clone())),

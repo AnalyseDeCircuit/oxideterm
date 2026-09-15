@@ -1,11 +1,3 @@
-fn tree_svg_icon(path: &'static str, size: f32, color: u32) -> AnyElement {
-    svg()
-        .path(path)
-        .size(px(size))
-        .text_color(rgb(color))
-        .into_any_element()
-}
-
 fn tree_spinner_icon(
     tokens: &ThemeTokens,
     id: impl Into<gpui::ElementId>,

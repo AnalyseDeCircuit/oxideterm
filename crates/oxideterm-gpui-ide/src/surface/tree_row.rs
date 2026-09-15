@@ -11,10 +11,10 @@ fn render_tree_row_virtual(
     let path_key = entry.location.stable_key();
     let loading = loading_paths.contains(&path_key);
     let icon = if is_dir {
-        file_icons::folder_icon(row.expanded, entry.name == ".git", tokens)
+        file_icons::folder_icon(&entry.name, row.expanded)
     } else {
-        file_icons::file_icon(&entry.name, tokens)
-    };
+        file_icons::file_icon(&entry.name)
+    }.with_symlink(matches!(entry.kind, FileKind::Symlink));
     let row_bg = if selected {
         rgba((tokens.ui.accent << 8) | IDE_TREE_SELECTED_ALPHA)
     } else {
@@ -80,10 +80,8 @@ fn render_tree_row_virtual(
                 IDE_ICON_SIZE,
                 tokens.ui.accent,
             )
-        } else if is_dir {
-            tree_svg_icon(icon.path, IDE_ICON_SIZE, icon.color)
         } else {
-            tree_svg_icon(icon.path, IDE_FILE_ICON_SIZE, icon.color)
+            icon.render(if is_dir { IDE_ICON_SIZE } else { IDE_FILE_ICON_SIZE }, tokens)
         })
         .child(
             div()

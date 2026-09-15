@@ -8,7 +8,6 @@
 //! restore surface. It is deliberately transport-agnostic except for the
 //! node-first IDE file-system adapter passed in from the app layer.
 
-mod file_icons;
 mod labels;
 mod surface;
 

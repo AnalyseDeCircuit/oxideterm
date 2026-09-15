@@ -41,6 +41,15 @@ Copyright (c) 2020, Lucide Contributors.
 Licensed under the ISC License.
 Used for the native workspace sidebar and toolbar SVG icons.
 
+Material Icon Theme
+Copyright (c) 2025 Material Extensions.
+Licensed under the MIT License.
+Version 5.38.1 SVG assets and file/folder associations are used across native
+file lists. Full license text is in
+licenses/third-party/MATERIAL-ICON-THEME-LICENSE-MIT and is shipped with binaries.
+Source hashes and SVG sizing adjustments are recorded in
+crates/oxideterm-gpui-ui/resources/material-icons/SOURCE.md.
+
 GPUI / GPUI-CE
 Copyright 2022-2025 Zed Industries, Inc.
 Additional GPUI-CE contributions are included under the same license.

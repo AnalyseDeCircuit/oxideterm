@@ -381,6 +381,9 @@ pub(crate) struct NativeAssets;
 
 impl AssetSource for NativeAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        if let Some(bytes) = oxideterm_gpui_ui::file_icons::load_asset(path) {
+            return Ok(Some(Cow::Borrowed(bytes)));
+        }
         let svg = match path {
             "window-controls/minimize.svg" => WINDOW_CONTROL_MINIMIZE,
             "window-controls/maximize.svg" => WINDOW_CONTROL_MAXIMIZE,

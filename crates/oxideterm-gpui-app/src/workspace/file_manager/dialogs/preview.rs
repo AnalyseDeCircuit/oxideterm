@@ -17,10 +17,11 @@ fn render_file_manager_archive_row(
     entry: &LocalArchiveEntry,
     index: usize,
     has_background: bool,
-    background_panel: u32,
-    text_color: u32,
-    muted_text_color: u32,
+    tokens: &ThemeTokens,
 ) -> AnyElement {
+    let background_panel = tokens.ui.bg_panel;
+    let text_color = tokens.ui.text;
+    let muted_text_color = tokens.ui.text_muted;
     let depth = entry
         .path
         .matches('/')
@@ -44,19 +45,14 @@ fn render_file_manager_archive_row(
                 .items_center()
                 .gap(px(6.0))
                 .pl(px((depth * 16) as f32))
-                .child(WorkspaceApp::render_lucide_icon(
-                    if entry.is_dir {
-                        LucideIcon::Folder
+                .child({
+                    let icon = if entry.is_dir {
+                        oxideterm_gpui_ui::file_icons::folder_icon(&entry.name, false)
                     } else {
-                        LucideIcon::File
-                    },
-                    FILE_MANAGER_ICON_SM,
-                    rgb(if entry.is_dir {
-                        FILE_MANAGER_ORANGE
-                    } else {
-                        muted_text_color
-                    }),
-                ))
+                        oxideterm_gpui_ui::file_icons::file_icon(&entry.name)
+                    };
+                    icon.render(FILE_MANAGER_ICON_SM, tokens)
+                })
                 // Archive rows are plain display text so the virtual-list
                 // closure does not retain WorkspaceApp through selection state.
                 .child(
@@ -1484,7 +1480,7 @@ impl WorkspaceApp {
             .preview_archive_list_state
             .clone();
         let spec = self.file_manager_archive_entry_list_spec();
-        let theme = self.tokens.ui;
+        let tokens = self.tokens;
         let has_background_for_rows = has_background;
         let entries = info.entries.clone();
         let list_height = entries.len() as f32 * FILE_MANAGER_ARCHIVE_ROW_HEIGHT;
@@ -1495,14 +1491,7 @@ impl WorkspaceApp {
                 let Some(entry) = entries.get(index).cloned() else {
                     return div().into_any_element();
                 };
-                render_file_manager_archive_row(
-                    &entry,
-                    index,
-                    has_background_for_rows,
-                    theme.bg_panel,
-                    theme.text,
-                    theme.text_muted,
-                )
+                render_file_manager_archive_row(&entry, index, has_background_for_rows, &tokens)
             },
         )));
         body.into_any_element()

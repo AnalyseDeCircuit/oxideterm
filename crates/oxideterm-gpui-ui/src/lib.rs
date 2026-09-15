@@ -12,6 +12,7 @@ pub mod context_menu;
 pub mod dialog;
 pub mod dropdown_menu;
 pub mod entity_row;
+pub mod file_icons;
 pub mod font_size_hud;
 pub mod form_field;
 pub mod input;

@@ -47,7 +47,8 @@ use oxideterm_ssh::ReconnectIdeSnapshot;
 use oxideterm_theme::ThemeTokens;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::{file_icons, labels::IdeLabels};
+use crate::labels::IdeLabels;
+use oxideterm_gpui_ui::file_icons;
 
 // Tauri IdeWorkspace.tsx uses a 280px default with 200px/500px resize bounds.
 const IDE_TREE_DEFAULT_WIDTH: f32 = 280.0;

@@ -58,7 +58,7 @@ impl IdeSurface {
             let is_dragging = self
                 .tab_drag
                 .is_some_and(|drag| drag.activated && drag.tab_id == tab_id);
-            let file_icon = file_icons::file_icon(&tab.title, &self.tokens);
+            let file_icon = file_icons::file_icon(&tab.title);
             scroll_viewport = scroll_viewport.child(
                 div()
                     .h_full()
@@ -129,7 +129,7 @@ impl IdeSurface {
                     .when(tab.is_pinned, |this| {
                         this.child(self.icon("lucide/pin.svg", 12.0, self.tokens.ui.accent))
                     })
-                    .child(self.icon(file_icon.path, IDE_FILE_ICON_SIZE, file_icon.color))
+                    .child(file_icon.render(IDE_FILE_ICON_SIZE, &self.tokens))
                     .child(
                         div()
                             .max_w(px(120.0))

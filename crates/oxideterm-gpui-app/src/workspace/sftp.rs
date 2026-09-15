@@ -120,7 +120,6 @@ const SFTP_DRAG_RING_ALPHA: u32 = 0x4d; // Tauri ring-oxide-accent/30
 const SFTP_SELECTED_BG_ALPHA: u32 = 0x33; // Tauri bg-theme-accent/20
 const SFTP_BREADCRUMB_ACTIVE_ALPHA: u32 = 0x4d; // Tauri bg-theme-bg-hover/30
 const SFTP_BREADCRUMB_HOVER_ALPHA: u32 = 0x80; // Tauri hover:bg-theme-bg-hover/50
-const SFTP_FOLDER_BLUE: u32 = 0x60a5fa; // Tauri text-blue-400
 const SFTP_GREEN: u32 = 0x22c55e; // Tauri text-green-500
 const SFTP_YELLOW: u32 = 0xeab308; // Tauri text-yellow-500
 const SFTP_ORANGE: u32 = 0xfb923c; // Tauri text-orange-400

@@ -263,8 +263,7 @@ struct FileManagerListRow {
     display_name: SharedString,
     size_text: SharedString,
     modified_text: SharedString,
-    icon: LucideIcon,
-    icon_color: u32,
+    icon: oxideterm_gpui_ui::file_icons::FileIcon,
 }
 
 impl FileManagerListRow {
@@ -282,13 +281,12 @@ impl FileManagerListRow {
             format_file_size(file.size)
         };
         let modified_text = format_modified(file.modified);
-        let (icon, icon_color) = file_icon_for_entry(file);
+        let icon = file_icon_for_entry(file);
         Self {
             display_name: display_name.into(),
             size_text: size_text.into(),
             modified_text: modified_text.into(),
             icon,
-            icon_color,
         }
     }
 }

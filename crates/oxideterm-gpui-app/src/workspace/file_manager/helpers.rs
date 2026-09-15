@@ -11,43 +11,15 @@ pub(super) use oxideterm_local_files::{
     validate_local_name, would_move_directory_into_itself,
 };
 
-pub(super) fn file_icon_for_entry(entry: &LocalFileEntry) -> (LucideIcon, u32) {
-    if entry.file_type == LocalFileType::Directory {
-        return (LucideIcon::Folder, FILE_MANAGER_BLUE);
-    }
-    if entry.file_type == LocalFileType::Symlink {
-        return (LucideIcon::Link2, FILE_MANAGER_GREEN);
-    }
-    let ext = std::path::Path::new(&entry.name)
-        .extension()
-        .map(|ext| ext.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-    match ext.as_str() {
-        "zip" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "7z" | "rar" | "jar" | "war" | "ear"
-        | "apk" | "xpi" | "crx" | "epub" => (LucideIcon::FileArchive, FILE_MANAGER_ORANGE),
-        "mp3" | "wav" | "ogg" | "flac" | "aac" | "m4a" | "wma" | "opus" => {
-            (LucideIcon::FileAudio, FILE_MANAGER_PURPLE)
-        }
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "ico" | "bmp" => {
-            (LucideIcon::FileImage, FILE_MANAGER_GREEN)
-        }
-        "mp4" | "webm" | "ogv" | "mov" | "mkv" | "avi" | "m4v" => {
-            (LucideIcon::FileVideo, FILE_MANAGER_PURPLE)
-        }
-        "json" => (LucideIcon::FileJson, FILE_MANAGER_ORANGE),
-        "md" | "markdown" | "mdx" | "txt" | "log" | "ini" | "conf" | "cfg" | "env" => {
-            (LucideIcon::FileText, FILE_MANAGER_BLUE)
-        }
-        "sh" | "bash" | "zsh" | "fish" | "ps1" => (LucideIcon::FileTerminal, FILE_MANAGER_GREEN),
-        "js" | "jsx" | "ts" | "tsx" | "py" | "rs" | "go" | "java" | "c" | "cpp" | "h" | "hpp"
-        | "cs" | "rb" | "php" | "swift" | "kt" | "scala" | "sql" | "html" | "htm" | "css"
-        | "scss" | "sass" | "less" | "yaml" | "yml" | "toml" | "xml" | "vue" | "svelte" => {
-            (LucideIcon::FileCode, FILE_MANAGER_BLUE)
-        }
-        "xlsx" | "xls" | "ods" | "csv" => (LucideIcon::FileSpreadsheet, FILE_MANAGER_GREEN),
-        "lock" => (LucideIcon::FileLock, FILE_MANAGER_ORANGE),
-        _ => (LucideIcon::File, 0),
-    }
+pub(super) fn file_icon_for_entry(
+    entry: &LocalFileEntry,
+) -> oxideterm_gpui_ui::file_icons::FileIcon {
+    let icon = if entry.file_type == LocalFileType::Directory {
+        oxideterm_gpui_ui::file_icons::folder_icon(&entry.name, false)
+    } else {
+        oxideterm_gpui_ui::file_icons::file_icon(&entry.name)
+    };
+    icon.with_symlink(entry.file_type == LocalFileType::Symlink || entry.symlink_target.is_some())
 }
 
 pub(super) fn local_file_properties(entry: &LocalFileEntry) -> FileManagerProperties {
