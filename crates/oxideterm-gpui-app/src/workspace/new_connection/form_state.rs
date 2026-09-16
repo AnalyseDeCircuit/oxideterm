@@ -1598,6 +1598,7 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::TelnetProfileName,
             NewConnectionField::Host,
             NewConnectionField::Port,
+            NewConnectionField::Notes,
         ];
         let index = fields
             .iter()
@@ -1621,6 +1622,7 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::Group,
             NewConnectionField::Host,
             NewConnectionField::Port,
+            NewConnectionField::Notes,
             NewConnectionField::Username,
             NewConnectionField::Password,
         ];

@@ -21,6 +21,7 @@ pub(in crate::workspace) const KNOWLEDGE_WORKSPACE_SECTION_ESTIMATED_HEIGHT: f32
 pub(in crate::workspace) const KNOWLEDGE_WORKSPACE_SECTION_OVERSCAN: usize = 8;
 const KNOWLEDGE_NAVIGATOR_ACTION_SIZE: f32 = 28.0;
 const KNOWLEDGE_NAVIGATOR_ACTION_ICON_SIZE: f32 = 14.0;
+const KNOWLEDGE_NAVIGATOR_DEFAULT_WIDTH: f32 = 200.0;
 const KNOWLEDGE_NARROW_VIEWPORT_WIDTH: f32 = 720.0;
 const KNOWLEDGE_EDITOR_MODE_SWITCHER_WIDTH: f32 = 176.0;
 const KNOWLEDGE_BACKGROUND_SURFACE_ALPHA: u32 = 0x66;
@@ -2101,7 +2102,7 @@ impl WorkspaceApp {
                 },
                 state
                     .navigator_width
-                    .unwrap_or(self.tokens.metrics.sidebar_default_width)
+                    .unwrap_or(KNOWLEDGE_NAVIGATOR_DEFAULT_WIDTH)
                     .clamp(
                         self.tokens.metrics.sidebar_min_width,
                         available_width

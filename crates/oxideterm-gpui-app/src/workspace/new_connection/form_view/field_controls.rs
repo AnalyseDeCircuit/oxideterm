@@ -3184,7 +3184,6 @@ impl WorkspaceApp {
                 cx,
             ))
             .child(self.render_connection_group_select(self.i18n.t("ssh.form.group"), &group, cx))
-            .child(self.render_connection_notes_fields(&notes, cx))
             .child(
                 div()
                     .flex()
@@ -3218,6 +3217,7 @@ impl WorkspaceApp {
                     ),
                 )
             })
+            .child(self.render_connection_notes_fields(&notes, cx))
             .into_any_element();
         let username_placeholder =
             if protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp {
@@ -3645,7 +3645,6 @@ impl WorkspaceApp {
                     cx,
                 ),
             )
-            .child(self.render_connection_notes_fields(&notes, cx))
             .child(
                 div()
                     .flex()
@@ -3676,6 +3675,7 @@ impl WorkspaceApp {
                     self.tokens.ui.error,
                 ))
             })
+            .child(self.render_connection_notes_fields(&notes, cx))
             .into_any_element();
         div()
             .flex()

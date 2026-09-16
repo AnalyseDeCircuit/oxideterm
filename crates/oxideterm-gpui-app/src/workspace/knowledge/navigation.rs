@@ -257,31 +257,33 @@ impl WorkspaceApp {
             .border_b_1()
             .border_color(rgb(self.tokens.ui.border))
             .child(
-                oxideterm_gpui_ui::toolbar_button(
-                    &self.tokens,
-                    String::new(),
-                    Some(
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(px(self.tokens.spacing.two))
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(
                         svg()
                             .path(LucideIcon::BookOpen.path())
                             .size(px(KNOWLEDGE_NAVIGATOR_ACTION_ICON_SIZE))
-                            .flex_none()
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .into_any_element(),
-                    ),
+                            .flex_none(),
+                    )
+                    .child(self.i18n.t("settings_view.knowledge.notebooks")),
+            )
+            .child(
+                oxideterm_gpui_ui::toolbar_button(
+                    &self.tokens,
+                    String::new(),
+                    None,
                     options,
                 )
                 .id("notes-notebooks")
                 .flex_1()
                 .min_w_0()
-                .pl_0()
                 .border_0()
                 .justify_start()
-                .child(
-                    div()
-                        .flex_none()
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(self.i18n.t("settings_view.knowledge.notebooks")),
-                )
                 .child(div().flex_1().min_w_0().truncate().child(label))
                 .child(
                     svg()
