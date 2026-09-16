@@ -503,6 +503,7 @@ pub struct TerminalPane {
     search_generation: Arc<AtomicU64>,
     search_task: Option<gpui::Task<()>>,
     selected_search_match: Option<usize>,
+    pending_search_reveal: bool,
     hovered_link: Option<TerminalLinkRange>,
     hovered_command_mark_id: Option<String>,
     selecting: bool,
@@ -1196,6 +1197,7 @@ impl TerminalPane {
             search_generation: Arc::new(AtomicU64::new(0)),
             search_task: None,
             selected_search_match: None,
+            pending_search_reveal: false,
             hovered_link: None,
             hovered_command_mark_id: None,
             selecting: false,
@@ -2265,18 +2267,9 @@ impl TerminalPane {
     ) -> TerminalSearchStatus {
         self.search_query = query;
         self.search_cache = None;
+        self.selected_search_match = selected_match.or(Some(0));
+        self.pending_search_reveal = true;
         self.schedule_search_refresh(cx);
-        let match_count = self.search_match_count();
-        self.selected_search_match = if match_count == 0 {
-            None
-        } else {
-            selected_match
-                .or(Some(0))
-                .filter(|index| *index < match_count)
-        };
-        if self.selected_search_match.is_some() {
-            self.scroll_to_selected_search_match(cx);
-        }
         cx.notify();
         self.search_status()
     }
@@ -2334,6 +2327,7 @@ impl TerminalPane {
         else {
             self.search_cache = None;
             self.selected_search_match = None;
+            self.pending_search_reveal = false;
             return;
         };
         let Some(search_source) = self.terminal.lock().search_source() else {
@@ -2379,7 +2373,9 @@ impl TerminalPane {
                         .or(Some(0))
                         .filter(|index| *index < matches.len())
                 };
-                if this.selected_search_match.is_some() {
+                // Refreshing highlights must not override a user's viewport. Only a new
+                // query requests a reveal, and manual scrolling cancels that request.
+                if std::mem::take(&mut this.pending_search_reveal) {
                     this.scroll_to_selected_search_match(cx);
                 }
                 cx.emit(TerminalPaneEvent::SearchStatusChanged);
