@@ -7,10 +7,11 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, App, Context, CursorStyle, KeyDownEvent, MouseButton, PathPromptOptions,
+    AnyElement, App, Context, Focusable, KeyDownEvent, MouseButton, PathPromptOptions,
     SharedString, div, prelude::*, px, rgb, rgba,
 };
 use oxideterm_editor_core::utf16::replace_utf16;
+use oxideterm_gpui_editor::{EditorContextMenuLabels, EditorSettings, TextEditorView};
 use oxideterm_gpui_ui::{
     CommandPanelOptions, ConfirmDialogVariant, ConfirmDialogView, StatusPillOptions, StatusTone,
     SurfacePadding, command_panel,
@@ -19,10 +20,7 @@ use oxideterm_gpui_ui::{
     scroll::ScrollableElement,
     select::SelectAnchorId,
     status_pill,
-    text_input::{
-        TextInputView, text_caret, text_input_value_segments,
-        text_input_value_segments_with_marked_range, text_input_with_viewport,
-    },
+    text_input::{TextInputView, text_input_with_viewport},
 };
 use oxideterm_i18n::I18n;
 use oxideterm_quick_commands::{
@@ -50,7 +48,6 @@ use super::{
     quick_command_icon_source_id,
 };
 use crate::assets::LucideIcon;
-use oxideterm_settings_model::{settings_multiline_line_ranges, settings_multiline_line_selection};
 
 fn quick_command_lucide_icon(icon: QuickCommandIcon) -> LucideIcon {
     match icon {
@@ -92,6 +89,46 @@ fn quick_command_list_height(row_count: usize) -> f32 {
 fn quick_commands_content_height(row_count: usize) -> f32 {
     (QUICK_COMMANDS_BODY_HEADER_HEIGHT + quick_command_list_height(row_count))
         .max(QUICK_COMMANDS_CONTENT_MIN_HEIGHT)
+}
+
+fn quick_command_editor_frame(
+    form: AnyElement,
+    footer: AnyElement,
+    scroll: &gpui::ScrollHandle,
+    tokens: &oxideterm_theme::ThemeTokens,
+) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id("quick-command-editor")
+        .h_full()
+        .min_h_0()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .bg(rgba((tokens.ui.bg << 8) | 0x59))
+        .child(
+            div()
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .min_w_0()
+                .child(
+                    div()
+                        .id("quick-command-editor-scroll")
+                        .size_full()
+                        .overflow_y_scroll()
+                        .track_scroll(scroll)
+                        .child(form),
+                )
+                .vertical_scrollbar(scroll),
+        )
+        .child(
+            div()
+                .id("quick-command-editor-footer")
+                .flex_none()
+                .border_t_1()
+                .border_color(rgb(tokens.ui.border))
+                .child(footer),
+        )
 }
 
 fn quick_commands_export_directory() -> PathBuf {
@@ -487,6 +524,8 @@ impl TerminalQuickCommandsState {
         self.pending_category_delete = None;
         self.manager_open = true;
         self.store.command_editor = None;
+        self.command_input = None;
+        self.command_input_subscription = None;
         self.store.category_editor = None;
         self.store.focused_input = Some(QuickCommandInput::Search);
         self.store.highlighted_command = None;
@@ -501,6 +540,8 @@ impl TerminalQuickCommandsState {
         self.manager_open = false;
         self.pending_category_delete = None;
         self.store.command_editor = None;
+        self.command_input = None;
+        self.command_input_subscription = None;
         self.store.category_editor = None;
         self.store.focused_input = None;
         self.store.highlighted_command = None;
@@ -508,6 +549,8 @@ impl TerminalQuickCommandsState {
     }
 
     fn select_category(&mut self, category_id: &str) {
+        self.command_input = None;
+        self.command_input_subscription = None;
         select_quick_command_category_state(
             &mut self.store.active_category,
             &mut self.store.command_editor,
@@ -868,6 +911,8 @@ impl TerminalQuickCommandsState {
 
     fn start_category_create(&mut self) {
         self.store.command_editor = None;
+        self.command_input = None;
+        self.command_input_subscription = None;
         self.store.category_editor = Some(QuickCommandCategoryDraft {
             id: None,
             name: String::new(),
@@ -879,6 +924,8 @@ impl TerminalQuickCommandsState {
 
     fn start_category_edit(&mut self, category: QuickCommandCategory) {
         self.store.command_editor = None;
+        self.command_input = None;
+        self.command_input_subscription = None;
         self.store.category_editor = Some(QuickCommandCategoryDraft {
             id: Some(category.id),
             name: category.name,
@@ -989,6 +1036,8 @@ impl TerminalQuickCommandsState {
 
     fn cancel_editor(&mut self) {
         self.store.command_editor = None;
+        self.command_input = None;
+        self.command_input_subscription = None;
         self.store.category_editor = None;
         self.store.focused_input = None;
         self.store.highlighted_command = None;
@@ -1008,6 +1057,8 @@ impl TerminalQuickCommandsState {
             self.store.command_editor = Some(draft);
             return false;
         }
+        self.command_input = None;
+        self.command_input_subscription = None;
         self.store.focused_input = None;
         self.store.highlighted_command = None;
         true
@@ -1190,6 +1241,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn handle_quick_commands_key(
         &mut self,
         event: &KeyDownEvent,
+        window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
         let Some(input) = self.terminal.read(cx).quick_commands.focused_input() else {
@@ -1281,6 +1333,14 @@ impl WorkspaceApp {
                 }) {
                     self.clear_ime_selection();
                     self.ime_marked_text = None;
+                    let commands = &self.terminal.read(cx).quick_commands;
+                    if commands.focused_input() == Some(QuickCommandInput::CommandText)
+                        && let Some(editor) = commands.command_input.as_ref()
+                    {
+                        window.focus(&editor.read(cx).focus_handle(cx), cx);
+                    } else {
+                        window.focus(&self.focus_handle, cx);
+                    }
                     cx.notify();
                 }
             }
@@ -1290,6 +1350,7 @@ impl WorkspaceApp {
                     .update(cx, |terminal, _cx| terminal.quick_commands.blur_input())
                 {
                     self.ime_marked_text = None;
+                    window.focus(&self.focus_handle, cx);
                     cx.notify();
                 }
             }
@@ -1309,11 +1370,7 @@ impl WorkspaceApp {
                         | QuickCommandInput::CommandHostPattern
                 ) =>
             {
-                if self.terminal.update(cx, |terminal, _cx| {
-                    terminal.quick_commands.save_command_editor()
-                }) {
-                    cx.notify();
-                }
+                self.save_quick_command_editor(cx);
             }
             "space" | " "
                 if quick_command_space_inserts_literal(
@@ -1853,8 +1910,9 @@ impl WorkspaceApp {
                             .when(snapshot.managing, |actions| {
                                 actions.child(self.quick_command_icon_button(
                                     LucideIcon::Plus,
-                                    |this, _event, _window, cx| {
+                                    |this, _event, window, cx| {
                                         this.start_quick_command_category_create(cx);
+                                        window.focus(&this.focus_handle, cx);
                                         cx.stop_propagation();
                                     },
                                     cx,
@@ -1967,8 +2025,9 @@ impl WorkspaceApp {
                             LucideIcon::Pencil,
                             {
                                 let category = category.clone();
-                                move |this, _event, _window, cx| {
+                                move |this, _event, window, cx| {
                                     this.start_quick_command_category_edit(category.clone(), cx);
+                                    window.focus(&this.focus_handle, cx);
                                     cx.stop_propagation();
                                 }
                             },
@@ -2097,6 +2156,7 @@ impl WorkspaceApp {
                         cx.listener(|this, _event, window, cx| {
                             if this.terminal.read(cx).quick_commands.manager_open() {
                                 this.start_quick_command_create(cx);
+                                window.focus(&this.focus_handle, cx);
                             } else {
                                 this.open_quick_commands_manager(window, cx);
                             }
@@ -2954,23 +3014,17 @@ impl WorkspaceApp {
         }
         let parameters = self.render_quick_command_parameter_editor(draft, snapshot, cx);
         let confirmation_always = draft.confirmation == QuickCommandConfirmationPolicy::Always;
+        let scroll = self.terminal.read(cx).quick_commands.editor_scroll.clone();
+        let padding = if snapshot.managing { 16.0 } else { 8.0 };
 
-        div()
-            .bg(rgba((theme.bg << 8) | 0x59))
+        let form = div()
+            .w_full()
+            .min_w_0()
+            .flex_none()
             .flex()
             .flex_col()
             .gap(px(8.0))
-            .when(snapshot.managing, |editor| {
-                editor.h_full().min_h(px(0.0)).p(px(16.0))
-            })
-            .when(!snapshot.managing, |editor| {
-                editor
-                    .border_b_1()
-                    .border_color(rgba((theme.border << 8) | 0x99))
-                    .p(px(8.0))
-                    .max_h(px(420.0))
-            })
-            .overflow_y_scrollbar()
+            .p(px(padding))
             .when(snapshot.managing, |editor| {
                 editor.child(
                     div()
@@ -3072,14 +3126,24 @@ impl WorkspaceApp {
                             rgba((theme.border << 8) | 0x99)
                         }),
                     ),
-            )
-            .child(self.render_quick_editor_buttons(
-                can_save,
-                "terminal.quick_commands.save",
-                |this, cx| this.save_quick_command_editor(cx),
-                cx,
-            ))
-            .into_any_element()
+            );
+
+        quick_command_editor_frame(
+            form.into_any_element(),
+            div()
+                .p(px(padding))
+                .child(self.render_quick_editor_buttons(
+                    can_save,
+                    "terminal.quick_commands.save",
+                    |this, cx| this.save_quick_command_editor(cx),
+                    cx,
+                ))
+                .into_any_element(),
+            &scroll,
+            &self.tokens,
+        )
+        .when(!snapshot.managing, |editor| editor.max_h(px(420.0)))
+        .into_any_element()
     }
 
     fn render_quick_command_parameter_editor(
@@ -3289,13 +3353,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if input == QuickCommandInput::CommandText {
-            return self.render_quick_command_multiline_input(
-                input,
-                &value,
-                focused_input,
-                placeholder,
-                cx,
-            );
+            return self.render_quick_command_multiline_input(input, focused_input, cx);
         }
         self.render_quick_command_input(input, &value, focused_input, placeholder, false, cx)
     }
@@ -3303,112 +3361,42 @@ impl WorkspaceApp {
     fn render_quick_command_multiline_input(
         &self,
         input: QuickCommandInput,
-        value: &str,
         focused_input: Option<QuickCommandInput>,
-        placeholder: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let focused = focused_input == Some(input);
-        let target = WorkspaceImeTarget::QuickCommand(input);
-        let marked_range = self.ime_marked_virtual_range_for_target(target, cx);
-        let selection = self.ime_selected_range_for_target(target, cx);
-        let showing_placeholder = value.is_empty() && marked_range.is_none();
-        let display = if showing_placeholder {
-            placeholder
-        } else {
-            self.ime_text_with_marked_text_for_target(target, cx)
-                .unwrap_or_else(|| value.to_string())
-        };
-        let theme = self.tokens.ui;
-        let lines = settings_multiline_line_ranges(&display);
-        let mut textarea = div()
+        let editor = self.terminal.read(cx).quick_commands.command_input.clone();
+        let focus = editor
+            .as_ref()
+            .map(|editor| editor.read(cx).focus_handle(cx));
+        div()
+            .id("quick-command-text-editor")
             .w_full()
-            .min_h(px(QUICK_COMMAND_TEXTAREA_MIN_HEIGHT))
-            .px(px(self.tokens.metrics.ui_control_padding_x))
-            .py(px(QUICK_COMMAND_TEXTAREA_VERTICAL_PADDING))
-            .flex()
-            .flex_col()
-            .items_start()
+            .min_w_0()
+            .h(px(QUICK_COMMAND_TEXTAREA_MIN_HEIGHT))
+            .flex_none()
+            .p(px(QUICK_COMMAND_TEXTAREA_VERTICAL_PADDING))
             .rounded(px(self.tokens.radii.md))
             .border_1()
-            .border_color(if focused {
-                rgb(theme.accent)
+            .border_color(rgb(if focused_input == Some(input) {
+                self.tokens.ui.accent
             } else {
-                rgb(theme.border)
-            })
-            .bg(rgba((theme.bg << 8) | 0x80))
-            .cursor(CursorStyle::IBeam)
+                self.tokens.ui.border
+            }))
+            .bg(rgba((self.tokens.ui.bg << 8) | 0x80))
             .overflow_hidden()
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .line_height(px(QUICK_COMMAND_TEXTAREA_LINE_HEIGHT))
-            .font_family(settings_mono_font_family(self.settings_store.settings()))
-            .text_color(if showing_placeholder {
-                rgb(theme.text_muted)
-            } else {
-                rgb(theme.text)
-            });
-
-        for (index, (line_range, line_text)) in lines.iter().enumerate() {
-            let is_last_line = index + 1 == lines.len();
-            let local_marked_range = marked_range.as_ref().and_then(|marked| {
-                let start = marked.start.max(line_range.start);
-                let end = marked.end.min(line_range.end);
-                (start < end).then_some(start - line_range.start..end - line_range.start)
-            });
-            let (line_selection, line_caret) = if showing_placeholder || marked_range.is_some() {
-                (None, None)
-            } else {
-                settings_multiline_line_selection(selection.as_ref(), line_range)
-            };
-            let segments = if showing_placeholder {
-                div().child(line_text.as_str().to_string())
-            } else if let Some(marked_range) = local_marked_range {
-                text_input_value_segments_with_marked_range(&self.tokens, line_text, marked_range)
-            } else {
-                text_input_value_segments(
-                    &self.tokens,
-                    line_text,
-                    false,
-                    line_selection,
-                    line_caret,
-                    self.input_caret.visible(),
-                )
-            };
-            textarea = textarea.child(
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .h(px(QUICK_COMMAND_TEXTAREA_LINE_HEIGHT))
-                    .min_h(px(QUICK_COMMAND_TEXTAREA_LINE_HEIGHT))
-                    .flex()
-                    .items_center()
-                    .whitespace_nowrap()
-                    .when(focused && showing_placeholder && index == 0, |line| {
-                        line.child(text_caret(&self.tokens, self.input_caret.visible()))
-                    })
-                    .child(segments)
-                    .when(
-                        focused
-                            && is_last_line
-                            && !showing_placeholder
-                            && selection.is_none()
-                            && marked_range.is_none(),
-                        |line| line.child(text_caret(&self.tokens, self.input_caret.visible())),
-                    ),
-            );
-        }
-
-        self.text_input_with_workspace_ime(
-            target,
-            textarea,
-            move |this, cx| {
-                this.terminal.update(cx, |terminal, _cx| {
-                    terminal.quick_commands.set_focused_input(input)
+            .capture_any_mouse_down(cx.listener(move |this, _, window, cx| {
+                this.terminal.update(cx, |terminal, _| {
+                    terminal.quick_commands.set_focused_input(input);
                 });
-            },
-            cx,
-        )
-        .into_any_element()
+                this.clear_ime_selection();
+                this.ime_marked_text = None;
+                if let Some(focus) = focus.as_ref() {
+                    window.focus(focus, cx);
+                }
+                cx.notify();
+            }))
+            .children(editor)
+            .into_any_element()
     }
 
     fn render_quick_command_secret_input(
@@ -3466,10 +3454,114 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
+    pub(in crate::workspace) fn quick_command_text_editor_focused(
+        &self,
+        window: &gpui::Window,
+        cx: &App,
+    ) -> bool {
+        let commands = &self.terminal.read(cx).quick_commands;
+        commands.manager_open()
+            && !commands.category_delete_pending()
+            && commands
+                .command_input
+                .as_ref()
+                .is_some_and(|editor| editor.read(cx).focus_handle(cx).is_focused(window))
+    }
+
+    fn initialize_quick_command_text_editor(&mut self, cx: &mut Context<Self>) {
+        let value = self
+            .terminal
+            .read(cx)
+            .quick_commands
+            .store
+            .command_editor
+            .as_ref()
+            .map(|draft| draft.command.clone())
+            .unwrap_or_default();
+        let tokens = self.tokens;
+        let font_family = settings_mono_font_family(self.settings_store.settings()).to_string();
+        let placeholder = self.i18n.t("terminal.quick_commands.command_placeholder");
+        let labels = EditorContextMenuLabels {
+            copy: self.i18n.t("menu.copy"),
+            cut: self.i18n.t("fileManager.cut"),
+            paste: self.i18n.t("menu.paste"),
+            select_all: self.i18n.t("fileManager.selectAll"),
+        };
+        let workspace = cx.weak_entity();
+        let editor = cx.new(|cx| {
+            let mut editor = TextEditorView::new(value, &tokens, cx);
+            editor.set_settings(
+                EditorSettings {
+                    soft_wrap: false,
+                    indentation_markers: false,
+                    highlight_special_chars: false,
+                    placeholder: Some(placeholder),
+                    ..EditorSettings::default()
+                },
+                cx,
+            );
+            editor.set_border_visible(false);
+            editor.apply_runtime_settings(
+                &tokens,
+                font_family,
+                tokens.metrics.ui_text_sm,
+                QUICK_COMMAND_TEXTAREA_LINE_HEIGHT / tokens.metrics.ui_text_sm,
+                false,
+                true,
+                cx,
+            );
+            editor.set_context_menu_labels(labels);
+            editor.set_on_save(Box::new(move |_, _, cx| {
+                let workspace = workspace.clone();
+                let editor_id = cx.entity_id();
+                // Save after the editor update so the workspace can read its current buffer.
+                cx.defer(move |cx| {
+                    let _ = workspace.update(cx, |this, cx| {
+                        if this
+                            .terminal
+                            .read(cx)
+                            .quick_commands
+                            .command_input
+                            .as_ref()
+                            .is_some_and(|editor| editor.entity_id() == editor_id)
+                        {
+                            this.save_quick_command_editor(cx);
+                        }
+                    });
+                });
+                Ok(())
+            }));
+            editor
+        });
+        let mut version = editor.read(cx).buffer().version();
+        let subscription = cx.observe(&editor, move |this, editor, cx| {
+            let buffer = editor.read(cx).buffer();
+            if buffer.version() == version {
+                return;
+            }
+            version = buffer.version();
+            let text = buffer.text();
+            this.terminal.update(cx, |terminal, _| {
+                if terminal.quick_commands.command_input.as_ref() == Some(&editor)
+                    && let Some(draft) = terminal.quick_commands.store.command_editor.as_mut()
+                {
+                    draft.command = text;
+                }
+            });
+            cx.notify();
+        });
+        self.terminal.update(cx, |terminal, _| {
+            terminal.quick_commands.command_input = Some(editor);
+            terminal.quick_commands.command_input_subscription = Some(subscription);
+            terminal.quick_commands.editor_scroll = gpui::ScrollHandle::new();
+        });
+    }
+
     fn start_quick_command_create(&mut self, cx: &mut Context<Self>) {
         self.terminal.update(cx, |terminal, _cx| {
             terminal.quick_commands.start_command_create()
         });
+        self.initialize_quick_command_text_editor(cx);
         cx.notify();
     }
 
@@ -3477,6 +3569,7 @@ impl WorkspaceApp {
         self.terminal.update(cx, |terminal, _cx| {
             terminal.quick_commands.start_command_edit(command)
         });
+        self.initialize_quick_command_text_editor(cx);
         cx.notify();
     }
 
@@ -3499,6 +3592,14 @@ impl WorkspaceApp {
     }
 
     fn save_quick_command_editor(&mut self, cx: &mut Context<Self>) {
+        if let Some(editor) = self.terminal.read(cx).quick_commands.command_input.clone() {
+            let text = editor.read(cx).buffer().text();
+            self.terminal.update(cx, |terminal, _| {
+                if let Some(draft) = terminal.quick_commands.store.command_editor.as_mut() {
+                    draft.command = text;
+                }
+            });
+        }
         if self.terminal.update(cx, |terminal, _cx| {
             terminal.quick_commands.save_command_editor()
         }) {
@@ -3522,6 +3623,79 @@ mod terminal_command_bar_quick_command_tests {
         QuickCommandParameterKind, QuickCommandRiskBadge, quick_command_editor_can_save,
         quick_command_risk_badge, quick_command_space_inserts_literal,
     };
+    use gpui::{
+        Context, InteractiveElement, IntoElement, ParentElement, Render, ScrollHandle, Styled, div,
+        px,
+    };
+
+    struct EditorFormFixture {
+        scroll: ScrollHandle,
+        rows: usize,
+    }
+
+    impl Render for EditorFormFixture {
+        fn render(&mut self, _: &mut gpui::Window, _: &mut Context<Self>) -> impl IntoElement {
+            let rows = self.rows;
+            let form = div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .flex_none()
+                .children((0..self.rows).map(|index| {
+                    div()
+                        .h(px(64.0))
+                        .flex_none()
+                        .debug_selector(move || {
+                            if index + 1 == rows {
+                                "last-field".into()
+                            } else {
+                                format!("field-{index}")
+                            }
+                        })
+                        .child(format!("Parameter {index}"))
+                }));
+            super::quick_command_editor_frame(
+                form.into_any_element(),
+                div()
+                    .h(px(48.0))
+                    .debug_selector(|| "footer".into())
+                    .into_any_element(),
+                &self.scroll,
+                &oxideterm_theme::default_tokens(),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn long_command_form_reaches_last_field_without_moving_footer(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| EditorFormFixture {
+            scroll: ScrollHandle::new(),
+            rows: 20,
+        });
+        for height in [300.0, 180.0] {
+            cx.simulate_resize(gpui::size(px(480.0), px(height)));
+            cx.update(|window, app| {
+                window.draw(app).clear(app);
+            });
+            let footer = cx.debug_bounds("footer").unwrap();
+            assert_eq!(footer.bottom(), px(height));
+            let scroll = view.read_with(cx, |view, _| view.scroll.clone());
+            let max_offset = scroll.max_offset();
+            assert!(max_offset.y > px(64.0 * 15.0));
+            scroll.set_offset(gpui::point(px(0.0), -max_offset.y));
+            for _ in 0..3 {
+                cx.update(|window, app| {
+                    window.refresh();
+                    window.draw(app).clear(app);
+                });
+                assert_eq!(scroll.max_offset(), max_offset);
+                assert_eq!(cx.debug_bounds("footer").unwrap(), footer);
+                let last = cx.debug_bounds("last-field").unwrap();
+                assert!(last.top() >= scroll.bounds().top());
+                assert!((last.bottom() - scroll.bounds().bottom()).abs() < px(1.0));
+            }
+        }
+    }
 
     #[test]
     fn quick_command_plain_space_is_literal_text() {

@@ -384,7 +384,9 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                     return;
                 }
-                if this.active_sftp_editor_owns_key(event.keystroke.key.as_str(), cx) {
+                if this.active_sftp_editor_owns_key(event.keystroke.key.as_str(), cx)
+                    || this.quick_command_text_editor_focused(window, cx)
+                {
                     // Windows emits committed characters only after an unhandled
                     // keydown. Do not let pane-level capture override the modal
                     // route that gives document keys to the focused editor.
@@ -494,7 +496,7 @@ impl WorkspaceApp {
                     let quick_commands = &this.terminal.read(cx).quick_commands;
                     quick_commands.is_open() && quick_commands.focused_input().is_some()
                 } {
-                    this.handle_quick_commands_key(event, cx);
+                    this.handle_quick_commands_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_terminal_git_branch_picker_key(event, cx) {

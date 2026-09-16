@@ -886,6 +886,12 @@ impl WorkspaceApp {
         let Some(owner) = self.active_window_modal_owner(cx) else {
             return false;
         };
+        if owner == ActiveWindowModalOwner::QuickCommandsManager
+            && self.quick_command_text_editor_focused(window, cx)
+            && !matches!(event.keystroke.key.as_str(), "escape" | "tab")
+        {
+            return false;
+        }
         let route = owner.key_route(event.keystroke.key.as_str());
         if route.dispatch_owner.is_some() && owner.allows_modal_ime() {
             if self.defer_active_ime_key(&event.keystroke, window, cx) {
@@ -1075,7 +1081,7 @@ impl WorkspaceApp {
                     .focused_input()
                     .is_some()
                 {
-                    self.handle_quick_commands_key(event, cx);
+                    self.handle_quick_commands_key(event, window, cx);
                 } else if event.keystroke.key.as_str() == "escape" {
                     self.close_quick_commands_manager(cx);
                 }

@@ -627,7 +627,9 @@ impl WorkspaceApp {
             return;
         }
 
-        if self.terminal_command_sender_editor_focused(window, cx) {
+        if self.terminal_command_sender_editor_focused(window, cx)
+            || self.quick_command_text_editor_focused(window, cx)
+        {
             // Child editor handlers own the bubble path while focused.
             return;
         }
@@ -796,7 +798,7 @@ impl WorkspaceApp {
             quick_commands.is_open() && quick_commands.focused_input().is_some()
         };
         if quick_commands_focused {
-            self.handle_quick_commands_key(event, cx);
+            self.handle_quick_commands_key(event, window, cx);
             return;
         }
 

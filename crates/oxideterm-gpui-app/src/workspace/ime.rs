@@ -1115,7 +1115,9 @@ impl WorkspaceApp {
         if let Some(input) = quick_command_manager_input {
             // The workspace manager owns IME independently from the compact
             // terminal launcher, which deliberately keeps `open` false.
-            return Some(WorkspaceImeTarget::QuickCommand(input));
+            // Command text uses an entity editor with its own platform input handler.
+            return (input != QuickCommandInput::CommandText)
+                .then_some(WorkspaceImeTarget::QuickCommand(input));
         }
 
         if self.host_tools_visibility(cx).main_window_is_visible()

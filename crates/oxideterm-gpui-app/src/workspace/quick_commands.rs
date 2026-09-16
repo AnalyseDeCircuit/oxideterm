@@ -7,7 +7,8 @@ pub(super) use oxideterm_quick_commands::{
 };
 use std::{cell::RefCell, collections::HashMap, path::Path, path::PathBuf};
 
-use gpui::{ListAlignment, ListState, px};
+use gpui::{Entity, ListAlignment, ListState, ScrollHandle, Subscription, px};
+use oxideterm_gpui_editor::TextEditorView;
 use oxideterm_gpui_ui::text_input::TextInputViewport;
 use zeroize::Zeroizing;
 
@@ -128,6 +129,9 @@ pub(in crate::workspace) struct TerminalQuickCommandsState {
     pub(super) list_state: ListState,
     pub(super) list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) input_viewports: RefCell<HashMap<QuickCommandInput, TextInputViewport>>,
+    pub(super) command_input: Option<Entity<TextEditorView>>,
+    pub(super) command_input_subscription: Option<Subscription>,
+    pub(super) editor_scroll: ScrollHandle,
 }
 
 impl TerminalQuickCommandsState {
@@ -154,6 +158,9 @@ impl TerminalQuickCommandsState {
             list_cache: RefCell::new(VirtualListSignatureCache::default()),
             // Each editor field keeps browser-like horizontal position across redraws.
             input_viewports: RefCell::new(HashMap::new()),
+            command_input: None,
+            command_input_subscription: None,
+            editor_scroll: ScrollHandle::new(),
         }
     }
 
