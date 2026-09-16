@@ -101,6 +101,8 @@ pub enum TerminalShortcut {
     Paste,
     Terminate,
     Kill,
+    WordBackward,
+    WordForward,
     PageUp,
     PageDown,
     LineUp,

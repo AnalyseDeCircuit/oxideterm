@@ -1768,6 +1768,8 @@
         "preview.rotate": "이미지 회전",
         "remoteDesktop.copy": "원격 데스크톱에서 복사",
         "remoteDesktop.paste": "원격 데스크톱에 붙여넣기",
+        "terminal.wordBackward": "한 단어 왼쪽으로 이동",
+        "terminal.wordForward": "한 단어 오른쪽으로 이동",
         "terminal.scrollPageUp": "한 페이지 위로 스크롤",
         "terminal.scrollPageDown": "한 페이지 아래로 스크롤",
         "terminal.scrollLineUp": "한 줄 위로 스크롤",

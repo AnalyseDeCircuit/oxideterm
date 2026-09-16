@@ -1768,6 +1768,8 @@
         "preview.rotate": "Girar imagem",
         "remoteDesktop.copy": "Copiar da área de trabalho remota",
         "remoteDesktop.paste": "Colar na área de trabalho remota",
+        "terminal.wordBackward": "Mover uma palavra para trás",
+        "terminal.wordForward": "Mover uma palavra para frente",
         "terminal.scrollPageUp": "Rolar uma página para cima",
         "terminal.scrollPageDown": "Rolar uma página para baixo",
         "terminal.scrollLineUp": "Rolar uma linha para cima",

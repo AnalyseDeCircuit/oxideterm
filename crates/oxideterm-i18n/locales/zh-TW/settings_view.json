@@ -1768,6 +1768,8 @@
         "preview.rotate": "旋轉圖片",
         "remoteDesktop.copy": "從遠端桌面複製",
         "remoteDesktop.paste": "貼上至遠端桌面",
+        "terminal.wordBackward": "向左移動一個單字",
+        "terminal.wordForward": "向右移動一個單字",
         "terminal.scrollPageUp": "向上捲動一頁",
         "terminal.scrollPageDown": "向下捲動一頁",
         "terminal.scrollLineUp": "向上捲動一行",

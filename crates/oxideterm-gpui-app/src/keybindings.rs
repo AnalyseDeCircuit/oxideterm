@@ -710,6 +710,30 @@ pub(crate) static ACTION_DEFINITIONS: LazyLock<Vec<ActionDefinition>> = LazyLock
     ]);
     actions.extend([
         def(
+            "terminal.wordBackward",
+            ActionScope::Terminal,
+            KeyCombo {
+                alt: true,
+                ..KeyCombo::plain("arrowleft")
+            },
+            KeyCombo {
+                alt: true,
+                ..KeyCombo::plain("b")
+            },
+        ),
+        def(
+            "terminal.wordForward",
+            ActionScope::Terminal,
+            KeyCombo {
+                alt: true,
+                ..KeyCombo::plain("arrowright")
+            },
+            KeyCombo {
+                alt: true,
+                ..KeyCombo::plain("f")
+            },
+        ),
+        def(
             "terminal.scrollPageUp",
             ActionScope::Terminal,
             KeyCombo {
@@ -1502,6 +1526,58 @@ mod tests {
     use gpui::{Keystroke, Modifiers};
 
     #[gpui::test]
+    fn terminal_word_shortcuts_can_be_rebound_and_disabled(cx: &mut gpui::TestAppContext) {
+        use oxideterm_gpui_terminal::{TerminalKeybindings, TerminalShortcut};
+        let side = KeybindingSide::current();
+        let default_backward = if cfg!(target_os = "macos") {
+            "alt-left"
+        } else {
+            "alt-b"
+        };
+        let default_forward = if cfg!(target_os = "macos") {
+            "alt-right"
+        } else {
+            "alt-f"
+        };
+        let mut overrides = Map::new();
+        cx.update(|cx| install_context_keybindings(&overrides, cx));
+        cx.read(|cx| {
+            let bindings = cx.global::<TerminalKeybindings>();
+            assert_eq!(
+                bindings.resolve(&Keystroke::parse(default_backward).unwrap()),
+                Some(TerminalShortcut::WordBackward)
+            );
+            assert_eq!(
+                bindings.resolve(&Keystroke::parse(default_forward).unwrap()),
+                Some(TerminalShortcut::WordForward)
+            );
+        });
+        set_override(
+            &mut overrides,
+            "terminal.wordBackward",
+            side,
+            KeyCombo::ctrl("h"),
+        );
+        set_unbound_override(&mut overrides, "terminal.wordForward", side);
+        cx.update(|cx| install_context_keybindings(&overrides, cx));
+        cx.read(|cx| {
+            let bindings = cx.global::<TerminalKeybindings>();
+            assert_eq!(
+                bindings.resolve(&Keystroke::parse("ctrl-h").unwrap()),
+                Some(TerminalShortcut::WordBackward)
+            );
+            assert_eq!(
+                bindings.resolve(&Keystroke::parse(default_backward).unwrap()),
+                None
+            );
+            assert_eq!(
+                bindings.resolve(&Keystroke::parse(default_forward).unwrap()),
+                None
+            );
+        });
+    }
+
+    #[gpui::test]
     fn terminal_keybindings_disable_primary_and_alternate_chords_independently(
         cx: &mut gpui::TestAppContext,
     ) {
@@ -2002,6 +2078,8 @@ pub(crate) fn install_context_keybindings(overrides: &Map<String, Value>, cx: &m
         ("terminal.pasteAlternate", TerminalShortcut::Paste),
         ("terminal.terminateTask", TerminalShortcut::Terminate),
         ("terminal.killTask", TerminalShortcut::Kill),
+        ("terminal.wordBackward", TerminalShortcut::WordBackward),
+        ("terminal.wordForward", TerminalShortcut::WordForward),
         ("terminal.scrollPageUp", TerminalShortcut::PageUp),
         ("terminal.scrollPageDown", TerminalShortcut::PageDown),
         ("terminal.scrollLineUp", TerminalShortcut::LineUp),
@@ -2111,6 +2189,8 @@ fn terminal_leaf_action(id: &str) -> bool {
             id,
             "terminal.copyAlternate"
                 | "terminal.pasteAlternate"
+                | "terminal.wordBackward"
+                | "terminal.wordForward"
                 | "terminal.terminateTask"
                 | "terminal.killTask"
         )

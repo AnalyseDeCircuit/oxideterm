@@ -1768,6 +1768,8 @@
         "preview.rotate": "Rotate image",
         "remoteDesktop.copy": "Copy from remote desktop",
         "remoteDesktop.paste": "Paste to remote desktop",
+        "terminal.wordBackward": "Move backward one word",
+        "terminal.wordForward": "Move forward one word",
         "terminal.scrollPageUp": "Scroll up one page",
         "terminal.scrollPageDown": "Scroll down one page",
         "terminal.scrollLineUp": "Scroll up one line",

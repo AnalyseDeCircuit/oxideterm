@@ -1768,6 +1768,8 @@
         "preview.rotate": "Xoay ảnh",
         "remoteDesktop.copy": "Sao chép từ máy tính từ xa",
         "remoteDesktop.paste": "Dán vào máy tính từ xa",
+        "terminal.wordBackward": "Di chuyển sang trái một từ",
+        "terminal.wordForward": "Di chuyển sang phải một từ",
         "terminal.scrollPageUp": "Cuộn lên một trang",
         "terminal.scrollPageDown": "Cuộn xuống một trang",
         "terminal.scrollLineUp": "Cuộn lên một dòng",

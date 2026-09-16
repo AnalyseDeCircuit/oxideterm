@@ -1768,6 +1768,8 @@
         "preview.rotate": "画像を回転",
         "remoteDesktop.copy": "リモートデスクトップからコピー",
         "remoteDesktop.paste": "リモートデスクトップへ貼り付け",
+        "terminal.wordBackward": "1 単語左に移動",
+        "terminal.wordForward": "1 単語右に移動",
         "terminal.scrollPageUp": "1 ページ上にスクロール",
         "terminal.scrollPageDown": "1 ページ下にスクロール",
         "terminal.scrollLineUp": "1 行上にスクロール",

@@ -1768,6 +1768,8 @@
         "preview.rotate": "Bild drehen",
         "remoteDesktop.copy": "Vom Remotedesktop kopieren",
         "remoteDesktop.paste": "In Remotedesktop einfügen",
+        "terminal.wordBackward": "Ein Wort zurück bewegen",
+        "terminal.wordForward": "Ein Wort vorwärts bewegen",
         "terminal.scrollPageUp": "Eine Seite nach oben scrollen",
         "terminal.scrollPageDown": "Eine Seite nach unten scrollen",
         "terminal.scrollLineUp": "Eine Zeile nach oben scrollen",

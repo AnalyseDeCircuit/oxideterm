@@ -1768,6 +1768,8 @@
         "preview.rotate": "Faire pivoter l’image",
         "remoteDesktop.copy": "Copier depuis le bureau distant",
         "remoteDesktop.paste": "Coller dans le bureau distant",
+        "terminal.wordBackward": "Reculer d’un mot",
+        "terminal.wordForward": "Avancer d’un mot",
         "terminal.scrollPageUp": "Défiler d’une page vers le haut",
         "terminal.scrollPageDown": "Défiler d’une page vers le bas",
         "terminal.scrollLineUp": "Défiler d’une ligne vers le haut",
