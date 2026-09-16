@@ -16,6 +16,7 @@ pub use metrics::{EditorAppearance, EditorMetrics};
 pub use settings::EditorSettings;
 pub use surface::{
     EditorCommand, EditorContextMenuLabels, EditorKeybindings, EditorPresentation,
-    EditorSaveStatus, EditorShortcut, SaveCallback, TextEditorView,
+    EditorSaveStatus, EditorScrollAnchor, EditorScrollOrigin, EditorShortcut,
+    EditorViewportChanged, SaveCallback, TextEditorView,
 };
 pub use viewport::{EditorViewport, VisibleRows};

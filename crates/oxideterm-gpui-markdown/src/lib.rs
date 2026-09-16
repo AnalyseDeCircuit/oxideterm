@@ -51,6 +51,7 @@ pub mod navigation;
 pub mod options;
 pub mod parser;
 pub mod render;
+pub mod scroll_sync;
 pub mod style;
 
 pub use layout::{MarkdownBlockLayout, MarkdownLayoutItem};
@@ -66,6 +67,7 @@ pub struct MarkdownVirtualListScrollHandle {
     scroll: ScrollHandle,
     measurements: layout::MarkdownMeasurements,
     navigation: navigation::MarkdownNavigation,
+    pub scroll_sync: scroll_sync::MarkdownScrollSync,
 }
 
 impl Default for MarkdownVirtualListScrollHandle {
@@ -75,6 +77,7 @@ impl Default for MarkdownVirtualListScrollHandle {
             navigation: navigation::MarkdownNavigation::new(scroll.clone()),
             scroll,
             measurements: Default::default(),
+            scroll_sync: Default::default(),
         }
     }
 }

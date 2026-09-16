@@ -16,7 +16,7 @@ pub(crate) fn block_top_padding(
     index: usize,
     opts: &MarkdownOptions,
 ) -> f32 {
-    if index > 0 && matches!(block, crate::model::Block::Heading { .. }) {
+    if index > 0 && matches!(block.unlocated(), crate::model::Block::Heading { .. }) {
         opts.block_gap * 0.5
     } else {
         0.0

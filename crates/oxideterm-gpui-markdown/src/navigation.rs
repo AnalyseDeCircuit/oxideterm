@@ -136,6 +136,7 @@ fn register_inlines(inlines: &[Inline], top: f32, parents: &[String], state: &mu
 
 fn register_targets(block: &Block, top: f32, parents: &[String], state: &mut NavigationState) {
     match block {
+        Block::Located { block, .. } => register_targets(block, top, parents, state),
         Block::Heading { id, inlines, .. } => {
             register_target(id.clone(), top, parents, state);
             register_inlines(inlines, top, parents, state);

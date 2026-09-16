@@ -488,10 +488,13 @@ pub fn render_document_virtual_with_code_actions(
         .navigation
         .get_or_insert_with(|| scroll_handle.navigation.clone());
     let opts = &options;
+    let viewport_top = opts.scroll_sync.as_ref().map_or_else(
+        || markdown_scroll_top_from_gpui_offset(scroll_handle.offset().y),
+        |sync| sync.begin(&layout, opts.block_gap, scroll_handle),
+    );
     if let Some(navigation) = &opts.navigation {
         navigation.prepare(document, opts);
     }
-    let viewport_top = markdown_scroll_top_from_gpui_offset(scroll_handle.offset().y);
     let viewport_height = f32::from(scroll_handle.bounds().size.height);
     let content = render_document_windowed_with_code_actions(
         document,
@@ -519,7 +522,17 @@ pub fn render_document_virtual_with_code_actions(
                 .track_scroll(scroll_handle)
                 .child(content),
         )
-        .child(Scrollbar::new(scroll_handle))
+        .child(
+            Scrollbar::new(scroll_handle).when_some(opts.scroll_sync.as_ref(), |bar, sync| {
+                let sync = sync.clone();
+                bar.on_vertical_scroll(move || sync.user_input())
+            }),
+        )
+        .when_some(opts.scroll_sync.as_ref(), |root, sync| {
+            let input = sync.clone();
+            root.on_scroll_wheel(move |_, _, _| input.user_input())
+                .child(sync.finish_probe(scroll_handle))
+        })
         .into_any_element()
 }
 
@@ -548,6 +561,10 @@ pub fn render_document_virtual_selectable(
         .navigation
         .get_or_insert_with(|| scroll_handle.navigation.clone());
     let opts = &options;
+    let viewport_top = opts.scroll_sync.as_ref().map_or_else(
+        || markdown_scroll_top_from_gpui_offset(scroll_handle.offset().y),
+        |sync| sync.begin(&layout, opts.block_gap, scroll_handle),
+    );
     if let Some(navigation) = &opts.navigation {
         navigation.prepare(document, opts);
     }
@@ -556,7 +573,7 @@ pub fn render_document_virtual_selectable(
         &layout,
         tokens,
         opts,
-        markdown_scroll_top_from_gpui_offset(scroll_handle.offset().y),
+        viewport_top,
         f32::from(scroll_handle.bounds().size.height),
         MARKDOWN_VIRTUAL_OVERDRAW_PX,
         code_actions,
@@ -575,7 +592,17 @@ pub fn render_document_virtual_selectable(
                 .track_scroll(scroll_handle)
                 .child(content),
         )
-        .child(Scrollbar::new(scroll_handle))
+        .child(
+            Scrollbar::new(scroll_handle).when_some(opts.scroll_sync.as_ref(), |bar, sync| {
+                let sync = sync.clone();
+                bar.on_vertical_scroll(move || sync.user_input())
+            }),
+        )
+        .when_some(opts.scroll_sync.as_ref(), |root, sync| {
+            let input = sync.clone();
+            root.on_scroll_wheel(move |_, _, _| input.user_input())
+                .child(sync.finish_probe(scroll_handle))
+        })
         .into_any_element()
 }
 
@@ -747,6 +774,26 @@ fn render_selectable_blocks(
         .into_any_element()
 }
 
+fn wrap_source_block(
+    span: crate::model::SourceSpan,
+    block: &Block,
+    child: AnyElement,
+    opts: &MarkdownOptions,
+) -> AnyElement {
+    let Some(sync) = &opts.scroll_sync else {
+        return child;
+    };
+    if let Block::CodeBlock { language, code } = block
+        && !should_render_mermaid_block(language.as_deref(), code)
+    {
+        // The code body's own probe excludes the action bar and padding.
+        return child;
+    }
+    let collapsed =
+        matches!(block, Block::Details { id, open, .. } if !opts.disclosures.is_open(id, *open));
+    sync.wrap_visibility(span, child, collapsed)
+}
+
 fn render_block_with_code_actions(
     block: &Block,
     tokens: &ThemeTokens,
@@ -754,6 +801,14 @@ fn render_block_with_code_actions(
     code_actions: Option<&MarkdownCodeBlockActions>,
 ) -> AnyElement {
     match block {
+        Block::Located { span, block } => {
+            let mut options = opts.clone();
+            if matches!(block.as_ref(), Block::CodeBlock { .. }) {
+                options.code_source = Some(*span);
+            }
+            let child = render_block_with_code_actions(block, tokens, &options, code_actions);
+            wrap_source_block(*span, block, child, opts)
+        }
         Block::Heading { level, id, inlines } => render_heading(*level, id, inlines, tokens, opts),
         Block::Paragraph { inlines } => render_paragraph(inlines, tokens, opts),
         Block::Html(html) => render_html_block(html, tokens, opts),
@@ -807,6 +862,15 @@ fn render_selectable_block(
     ) -> AnyElement,
 ) -> AnyElement {
     match block {
+        Block::Located { span, block } => {
+            let mut options = opts.clone();
+            if matches!(block.as_ref(), Block::CodeBlock { .. }) {
+                options.code_source = Some(*span);
+            }
+            let child =
+                render_selectable_block(block, tokens, &options, code_actions, path, render_text);
+            wrap_source_block(*span, block, child, opts)
+        }
         Block::Heading { level, id, inlines } => {
             render_selectable_heading(*level, id, inlines, tokens, opts, path, render_text)
         }
@@ -1365,7 +1429,13 @@ fn render_code_block_shell(
                 .line_height(relative(1.5))
                 .text_color(style::text_color(tokens))
                 .font(style::code_font(opts))
-                .child(code_element),
+                .child(
+                    if let (Some(sync), Some(span)) = (&opts.scroll_sync, opts.code_source) {
+                        sync.wrap(span, code_element)
+                    } else {
+                        code_element
+                    },
+                ),
         )
 }
 
@@ -1709,7 +1779,7 @@ fn render_table_cell(
             div()
                 .id(SharedString::from(key.clone()))
                 .min_w_0()
-                .child(match block {
+                .child(match block.unlocated() {
                     Block::Paragraph { inlines } => render_selectable_inlines_with_style(
                         &key,
                         inlines,
@@ -1787,8 +1857,20 @@ fn render_selectable_table(
                 ))
         }));
 
+    let header_row = header_row.into_any_element();
+    let header_row = if let (Some(sync), Some(span)) = (
+        &opts.scroll_sync,
+        headers
+            .first()
+            .and_then(|cell| cell.first())
+            .and_then(Block::source_span),
+    ) {
+        sync.wrap(span, header_row)
+    } else {
+        header_row
+    };
     let body_rows = rows.iter().enumerate().map(|(ri, row)| {
-        div()
+        let element = div()
             .id(("table-row", ri))
             .w_full()
             .min_w(px(0.0))
@@ -1826,6 +1908,17 @@ fn render_selectable_table(
                         render_text,
                     ))
             }))
+            .into_any_element();
+        if let (Some(sync), Some(span)) = (
+            &opts.scroll_sync,
+            row.first()
+                .and_then(|cell| cell.first())
+                .and_then(Block::source_span),
+        ) {
+            sync.wrap(span, element)
+        } else {
+            element
+        }
     });
 
     div()
@@ -1907,6 +2000,9 @@ fn table_cell_text_width(blocks: &[Block]) -> f32 {
     blocks
         .iter()
         .map(|block| match block {
+            Block::Located { block, .. } => {
+                table_cell_text_width(std::slice::from_ref(block.as_ref()))
+            }
             Block::Heading { inlines, .. } | Block::Paragraph { inlines } => {
                 inlines.iter().map(inline_text_width).sum::<usize>() as f32
             }
@@ -2122,8 +2218,8 @@ fn render_list_item(
         .flex()
         .flex_col()
         .text_size(style::body_font_size(opts))
-        .child(
-            div()
+        .child({
+            let header = div()
                 .flex()
                 .flex_row()
                 .gap(px(tokens.spacing.two))
@@ -2141,8 +2237,14 @@ fn render_list_item(
                         .whitespace_normal()
                         .text_color(style::text_color(tokens))
                         .child(render_styled_inlines(&item.inlines, tokens, opts)),
-                ),
-        );
+                )
+                .into_any_element();
+            if let (Some(sync), Some(span)) = (&opts.scroll_sync, item.source) {
+                sync.wrap(span, header)
+            } else {
+                header
+            }
+        });
 
     // Render nested child blocks if present.
     if !item.children.is_empty() {
@@ -2192,8 +2294,8 @@ fn render_selectable_list_item(
         .flex()
         .flex_col()
         .text_size(style::body_font_size(opts))
-        .child(
-            div()
+        .child({
+            let header = div()
                 .flex()
                 .flex_row()
                 .gap(px(tokens.spacing.two))
@@ -2217,8 +2319,14 @@ fn render_selectable_list_item(
                             opts,
                             render_text,
                         )),
-                ),
-        );
+                )
+                .into_any_element();
+            if let (Some(sync), Some(span)) = (&opts.scroll_sync, item.source) {
+                sync.wrap(span, header)
+            } else {
+                header
+            }
+        });
 
     if !item.children.is_empty() {
         col = col.child(

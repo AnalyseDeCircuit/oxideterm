@@ -1611,6 +1611,7 @@
       "delete_notebook": "删除笔记本",
       "new_notebook": "新建笔记本",
       "editor_preview": "预览",
+      "editor_split": "源码｜预览",
       "editor_save": "保存",
       "editor_saved": "已保存",
       "editor_saving": "正在保存…",

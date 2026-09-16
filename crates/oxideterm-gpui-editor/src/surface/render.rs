@@ -326,6 +326,7 @@ impl TextEditorView {
         let thumb_top = f32::from(pointer_y - bounds.origin.y) - grab_offset_y;
         let scroll_y = editor_scroll_y_for_thumb_top(thumb_top, geometry);
         if (self.viewport.scroll_y_px - scroll_y).abs() > f32::EPSILON {
+            self.scroll_origin = super::EditorScrollOrigin::User;
             self.viewport.scroll_y_px = scroll_y;
             cx.notify();
         }

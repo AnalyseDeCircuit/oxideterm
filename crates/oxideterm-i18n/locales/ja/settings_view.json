@@ -1611,6 +1611,7 @@
       "delete_notebook": "ノートブックを削除",
       "new_notebook": "新しいノートブック",
       "editor_preview": "プレビュー",
+      "editor_split": "ソース｜プレビュー",
       "editor_save": "保存",
       "editor_saved": "保存済み",
       "editor_saving": "保存中…",

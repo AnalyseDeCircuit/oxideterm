@@ -1611,6 +1611,7 @@
       "delete_notebook": "Delete notebook",
       "new_notebook": "New notebook",
       "editor_preview": "Preview",
+      "editor_split": "Source | Preview",
       "editor_save": "Save",
       "editor_saved": "Saved",
       "editor_saving": "Saving…",

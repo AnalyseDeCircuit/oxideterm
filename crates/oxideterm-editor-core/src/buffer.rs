@@ -30,9 +30,80 @@ pub struct TextBuffer {
     next_content_revision: u64,
     undo_stack: Vec<HistoryEntry>,
     redo_stack: Vec<HistoryEntry>,
+    changes: Option<Vec<BufferChange>>,
+}
+
+/// Coordinate changes only; readers do not need another copy of edited text.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BufferChange {
+    pub before_version: u64,
+    pub after_version: u64,
+    pub replacements: Vec<(std::ops::Range<usize>, usize)>,
+}
+
+impl BufferChange {
+    pub fn map_position(&self, position: f64) -> f64 {
+        let mut shift = 0.0;
+        for (range, length) in &self.replacements {
+            if position < range.start as f64 {
+                break;
+            }
+            if position <= range.end as f64 {
+                return range.start as f64 + shift + *length as f64;
+            }
+            shift += *length as f64 - range.len() as f64;
+        }
+        (position + shift).max(0.0)
+    }
+}
+
+#[cfg(test)]
+mod change_tests {
+    use super::*;
+    #[test]
+    fn anchors_follow_insert_undo_and_redo_without_retaining_text() {
+        let mut buffer = TextBuffer::new("甲乙\nend");
+        buffer.track_changes(true);
+        buffer
+            .apply_transaction(EditTransaction::single(TextEdit::insert(
+                BufferOffset(0),
+                "x\n",
+            )))
+            .unwrap();
+        buffer.undo().unwrap();
+        buffer.redo().unwrap();
+        let changes = buffer.take_changes();
+        assert_eq!(
+            changes
+                .iter()
+                .map(|c| (c.before_version, c.after_version, c.replacements.clone()))
+                .collect::<Vec<_>>(),
+            [
+                (0, 1, vec![(0..0, 2)]),
+                (1, 2, vec![(0..2, 0)]),
+                (2, 3, vec![(0..0, 2)])
+            ]
+        );
+        assert_eq!(changes[0].map_position(6.0), 8.0);
+        assert_eq!(changes[1].map_position(8.0), 6.0);
+        assert_eq!(changes[2].map_position(6.0), 8.0);
+        assert_eq!(buffer.text(), "x\n甲乙\nend");
+    }
 }
 
 impl TextBuffer {
+    /// The subscribing editor must drain changes after observing a new version.
+    pub fn track_changes(&mut self, enabled: bool) {
+        self.changes = enabled.then(Vec::new);
+    }
+
+    pub fn take_changes(&mut self) -> Vec<BufferChange> {
+        self.changes
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
     pub fn new(text: impl Into<Arc<str>>) -> Self {
         let text = text.into();
         let line_starts = compute_line_starts(&text);
@@ -48,6 +119,7 @@ impl TextBuffer {
             next_content_revision: 1,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            changes: None,
         }
     }
 
@@ -296,6 +368,16 @@ impl TextBuffer {
 
     fn apply_edits_internal(&mut self, edits: Vec<TextEdit>) -> Result<Vec<TextEdit>, EditorError> {
         let edits = normalize_edits_for_storage(edits, &self.storage)?;
+        if let Some(changes) = &mut self.changes {
+            changes.push(BufferChange {
+                before_version: self.version,
+                after_version: self.version.saturating_add(1),
+                replacements: edits
+                    .iter()
+                    .map(|edit| (edit.range.as_range(), edit.replacement.len()))
+                    .collect(),
+            });
+        }
         let mut inverse = Vec::with_capacity(edits.len());
         let mut delta: isize = 0;
 

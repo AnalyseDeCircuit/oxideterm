@@ -9,7 +9,8 @@ use pulldown_cmark::{BlockQuoteKind, Event, HeadingLevel, Options, Parser, Tag, 
 
 use crate::html::{self, InlineHtmlEvent, InlineHtmlKind};
 use crate::model::{
-    Block, CalloutKind, FootnoteDefinition, Inline, ListItem, MarkdownDocument, TableAlignment,
+    Block, CalloutKind, FootnoteDefinition, Inline, ListItem, MarkdownDocument, SourceSpan,
+    TableAlignment,
 };
 
 fn markdown_options(enable_smart_punctuation: bool) -> Options {
@@ -41,20 +42,57 @@ pub fn parse_with_smart_punctuation(
     parse_events(
         Parser::new_ext(source, markdown_options(enable_smart_punctuation)),
         enable_smart_punctuation,
+        false,
     )
 }
 
+pub fn parse_with_source_ranges(source: &str) -> MarkdownDocument {
+    parse_events(Parser::new_ext(source, markdown_options(true)), true, true)
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+    #[test]
+    fn ranges_preserve_nested_list_code_and_table_source() {
+        let source = "# 中\n\n- outer\n  - 内层\n\n```rs\nlet x = 1;\n```\n\n|h|\n|-|\n|v|\n";
+        let doc = parse_with_source_ranges(source);
+        let slice = |span: SourceSpan| &source[span.start..span.end];
+        assert_eq!(slice(doc.blocks[0].source_span().unwrap()), "# 中\n");
+        let Block::UnorderedList { items } = doc.blocks[1].unlocated() else {
+            panic!("list");
+        };
+        assert_eq!(slice(items[0].source.unwrap()), "- outer");
+        let Block::UnorderedList { items } = items[0].children[0].unlocated() else {
+            panic!("nested list");
+        };
+        assert_eq!(slice(items[0].source.unwrap()), "- 内层");
+        assert_eq!(slice(doc.blocks[2].source_span().unwrap()), "let x = 1;\n");
+        let Block::Table { headers, rows, .. } = doc.blocks[3].unlocated() else {
+            panic!("table");
+        };
+        assert_eq!(slice(headers[0][0].source_span().unwrap()), "|h|\n");
+        assert_eq!(slice(rows[0][0][0].source_span().unwrap()), "|v|\n");
+    }
+}
+
 fn parse_events<'input>(
-    parser: impl Iterator<Item = Event<'input>>,
+    parser: Parser<'input>,
     smart_punctuation: bool,
+    source_ranges: bool,
 ) -> MarkdownDocument {
     let mut ctx = ParseContext {
         smart_punctuation,
+        source_ranges,
         ..Default::default()
     };
     let mut html_block = String::new();
 
-    for event in parser {
+    for (event, range) in parser.into_offset_iter() {
+        ctx.source_span = SourceSpan {
+            start: range.start,
+            end: range.end,
+        };
         match &event {
             Event::Start(Tag::MetadataBlock(_)) => {
                 ctx.in_metadata_block = true;
@@ -84,6 +122,7 @@ fn parse_events<'input>(
                 ctx.push_inline_stack();
             }
             Event::Start(Tag::CodeBlock(kind)) => {
+                ctx.code_source = None;
                 let language = match kind {
                     pulldown_cmark::CodeBlockKind::Fenced(lang) => {
                         let lang = lang.trim().to_string();
@@ -102,6 +141,7 @@ fn parse_events<'input>(
                 });
             }
             Event::Start(Tag::Item) => {
+                ctx.item_sources.push(ctx.source_span);
                 ctx.push_inline_stack();
                 ctx.item_children.push(Vec::new());
                 ctx.item_checked.push(None);
@@ -123,12 +163,14 @@ fn parse_events<'input>(
                 });
             }
             Event::Start(Tag::TableHead) => {
+                ctx.table_row_span = ctx.source_span;
                 // The current_row will collect header cells.
                 if let Some(ref mut table) = ctx.table_state {
                     table.current_row.clear();
                 }
             }
             Event::Start(Tag::TableRow) => {
+                ctx.table_row_span = ctx.source_span;
                 if let Some(ref mut table) = ctx.table_state {
                     table.current_row.clear();
                 }
@@ -139,6 +181,7 @@ fn parse_events<'input>(
             Event::Start(Tag::FootnoteDefinition(label)) => {
                 ctx.block_containers.push(BlockContainer::Footnote);
                 ctx.footnote_stack.push(FootnoteState {
+                    source_start: range.start,
                     label: label.to_string(),
                     blocks: Vec::new(),
                 });
@@ -159,7 +202,16 @@ fn parse_events<'input>(
 
             // ── text / code / breaks ────────────────────────────────
             Event::Text(text) => {
+                if !ctx.in_code_block
+                    && matches!(ctx.block_containers.last(), Some(BlockContainer::ListItem))
+                    && ctx.item_children.last().is_some_and(Vec::is_empty)
+                    && let Some(source) = ctx.item_sources.last_mut()
+                {
+                    source.end = range.end;
+                }
                 if ctx.in_code_block {
+                    let source = ctx.code_source.get_or_insert(ctx.source_span);
+                    source.end = range.end;
                     ctx.code_block_buf.push_str(&text);
                 } else if ctx.link_url.is_some() {
                     ctx.push_inline(Inline::Text(text.to_string()));
@@ -229,6 +281,9 @@ fn parse_events<'input>(
                             && ctx.item_children.last().is_some_and(Vec::is_empty)
                             && ctx.inline_stack.last().is_some_and(Vec::is_empty);
                     if first_item_paragraph {
+                        if let Some(source) = ctx.item_sources.last_mut() {
+                            source.end = range.end;
+                        }
                         ctx.inline_stack.last_mut().unwrap().extend(inlines);
                     } else {
                         ctx.push_block(Block::Paragraph { inlines });
@@ -236,18 +291,23 @@ fn parse_events<'input>(
                 }
             }
             Event::End(TagEnd::CodeBlock) => {
+                if let Some(source) = ctx.code_source.take() {
+                    ctx.source_span = source;
+                }
                 let code = std::mem::take(&mut ctx.code_block_buf);
                 let language = ctx.code_block_lang.take();
                 ctx.in_code_block = false;
                 ctx.push_block(Block::CodeBlock { language, code });
             }
             Event::End(TagEnd::Item) => {
+                let source = ctx.item_sources.pop();
                 ctx.block_containers.pop();
                 let inlines = ctx.pop_inline_stack();
                 let children = ctx.item_children.pop().unwrap_or_default();
                 let checked = ctx.item_checked.pop().unwrap_or(None);
                 if let Some(list) = ctx.list_stack.last_mut() {
                     list.items.push(ListItem {
+                        source: source.filter(|_| ctx.source_ranges),
                         inlines,
                         children,
                         checked,
@@ -288,7 +348,16 @@ fn parse_events<'input>(
             Event::End(TagEnd::TableCell) => {
                 let inlines = ctx.pop_inline_stack();
                 if let Some(ref mut table) = ctx.table_state {
-                    table.current_row.push(vec![Block::Paragraph { inlines }]);
+                    let block = Block::Paragraph { inlines };
+                    let block = if ctx.source_ranges && table.current_row.is_empty() {
+                        Block::Located {
+                            span: ctx.table_row_span,
+                            block: Box::new(block),
+                        }
+                    } else {
+                        block
+                    };
+                    table.current_row.push(vec![block]);
                 }
             }
             Event::End(TagEnd::Table) => {
@@ -302,7 +371,10 @@ fn parse_events<'input>(
             }
             Event::End(TagEnd::FootnoteDefinition) => {
                 ctx.block_containers.pop();
-                if let Some(footnote) = ctx.footnote_stack.pop() {
+                if let Some(mut footnote) = ctx.footnote_stack.pop() {
+                    if let Some(Block::Located { span, .. }) = footnote.blocks.first_mut() {
+                        span.start = footnote.source_start;
+                    }
                     ctx.footnote_definitions.push(FootnoteDefinition {
                         label: footnote.label,
                         blocks: footnote.blocks,
@@ -363,6 +435,11 @@ fn parse_events<'input>(
 
 #[derive(Default)]
 struct ParseContext {
+    source_ranges: bool,
+    source_span: SourceSpan,
+    table_row_span: SourceSpan,
+    item_sources: Vec<SourceSpan>,
+    code_source: Option<SourceSpan>,
     smart_punctuation: bool,
     details: Vec<DetailsFrame>,
     summary_html: Option<String>,
@@ -426,6 +503,7 @@ struct BlockquoteState {
 }
 
 struct FootnoteState {
+    source_start: usize,
     label: String,
     blocks: Vec<Block>,
 }
@@ -445,6 +523,7 @@ enum BlockContainer {
 }
 
 struct DetailsFrame {
+    source_start: usize,
     id: String,
     summary: Vec<Inline>,
     blocks: Vec<Block>,
@@ -466,9 +545,8 @@ impl ParseContext {
         if !boundaries.is_empty() && balance == 0 && html::has_enclosing_html_container(source) {
             let mut heading_id_for =
                 |inlines: &[Inline], id: Option<&str>| self.unique_heading_id(inlines, id);
-            for block in html::parse_block_fragment(source, &mut heading_id_for) {
-                self.push_block(block);
-            }
+            let blocks = html::parse_block_fragment(source, &mut heading_id_for);
+            self.push_html_blocks(blocks);
             return;
         }
         for (range, boundary) in boundaries {
@@ -492,6 +570,7 @@ impl ParseContext {
                 html::DisclosureBoundary::Open(open) => {
                     let id = self.unique_heading_id(&[], Some("html-details"));
                     self.details.push(DetailsFrame {
+                        source_start: self.source_span.start,
                         id,
                         summary: Vec::new(),
                         blocks: Vec::new(),
@@ -531,10 +610,11 @@ impl ParseContext {
         }
         if matches!(self.block_containers.last(), Some(BlockContainer::Details)) {
             let document = parse_with_smart_punctuation(source, self.smart_punctuation);
-            for mut block in document.blocks {
-                self.import_block(&mut block);
-                self.push_block(block);
+            let mut blocks = document.blocks;
+            for block in &mut blocks {
+                self.import_block(block);
             }
+            self.push_html_blocks(blocks);
             for mut footnote in document.footnotes {
                 for block in &mut footnote.blocks {
                     self.import_block(block);
@@ -544,14 +624,14 @@ impl ParseContext {
         } else {
             let mut heading_id_for =
                 |inlines: &[Inline], id: Option<&str>| self.unique_heading_id(inlines, id);
-            for block in html::parse_block_fragment(source, &mut heading_id_for) {
-                self.push_block(block);
-            }
+            let blocks = html::parse_block_fragment(source, &mut heading_id_for);
+            self.push_html_blocks(blocks);
         }
     }
 
     fn import_block(&mut self, block: &mut Block) {
         match block {
+            Block::Located { block, .. } => self.import_block(block),
             Block::Heading { id, inlines, .. } => {
                 *id = self.unique_heading_id(inlines, Some(id));
                 self.import_inlines(inlines);
@@ -593,16 +673,34 @@ impl ParseContext {
         }
     }
 
+    fn push_html_blocks(&mut self, blocks: Vec<Block>) {
+        if self.source_ranges && blocks.len() > 1 {
+            // HTML repair can change the tree. Keep one honest source range for
+            // the fragment rather than assigning its range to unrelated children.
+            self.push_block(Block::HtmlContainer {
+                alignment: crate::model::BlockAlignment::Left,
+                blocks,
+            });
+        } else {
+            for block in blocks {
+                self.push_block(block);
+            }
+        }
+    }
+
     fn close_details(&mut self) {
         if matches!(self.block_containers.last(), Some(BlockContainer::Details)) {
             self.block_containers.pop();
             if let Some(frame) = self.details.pop() {
+                let source = self.source_span;
+                self.source_span.start = frame.source_start;
                 self.push_block(Block::Details {
                     id: frame.id,
                     summary: frame.summary,
                     blocks: frame.blocks,
                     open: frame.open,
                 });
+                self.source_span = source;
             }
         }
     }
@@ -710,6 +808,14 @@ impl ParseContext {
     }
 
     fn push_block(&mut self, block: Block) {
+        let block = if self.source_ranges {
+            Block::Located {
+                span: self.source_span,
+                block: Box::new(block),
+            }
+        } else {
+            block
+        };
         // Container order matters when lists and blockquotes are nested both ways.
         match self.block_containers.last() {
             Some(BlockContainer::ListItem) => self.item_children.last_mut().unwrap().push(block),
@@ -963,6 +1069,7 @@ mod tests {
             doc.blocks,
             vec![super::Block::UnorderedList {
                 items: vec![super::ListItem {
+                    source: None,
                     inlines: text("First"),
                     checked: None,
                     children: vec![
@@ -981,6 +1088,7 @@ mod tests {
                         },
                         super::Block::UnorderedList {
                             items: vec![super::ListItem {
+                                source: None,
                                 inlines: text("Child"),
                                 checked: None,
                                 children: vec![]
@@ -1209,6 +1317,7 @@ mod tests {
             list.blocks,
             vec![Block::UnorderedList {
                 items: vec![ListItem {
+                    source: None,
                     inlines: vec![Inline::Text("First".into())],
                     children: vec![
                         Block::Paragraph {
@@ -1294,6 +1403,7 @@ mod tests {
                     },
                     Block::UnorderedList {
                         items: vec![ListItem {
+                            source: None,
                             inlines: vec![Inline::Text("C".into())],
                             children: Vec::new(),
                             checked: None
@@ -1321,6 +1431,7 @@ mod tests {
                     open: false,
                     blocks: vec![Block::UnorderedList {
                         items: vec![ListItem {
+                            source: None,
                             inlines: vec![Inline::Text("Item".into())],
                             children: Vec::new(),
                             checked: None,

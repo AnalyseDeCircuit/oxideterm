@@ -1611,6 +1611,7 @@
       "delete_notebook": "Eliminar cuaderno",
       "new_notebook": "Nuevo cuaderno",
       "editor_preview": "Vista previa",
+      "editor_split": "Código | Vista previa",
       "editor_save": "Guardar",
       "editor_saved": "Guardado",
       "editor_saving": "Guardando…",

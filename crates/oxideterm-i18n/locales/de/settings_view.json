@@ -1611,6 +1611,7 @@
       "delete_notebook": "Notizbuch löschen",
       "new_notebook": "Neues Notizbuch",
       "editor_preview": "Vorschau",
+      "editor_split": "Quelltext | Vorschau",
       "editor_save": "Speichern",
       "editor_saved": "Gespeichert",
       "editor_saving": "Wird gespeichert…",

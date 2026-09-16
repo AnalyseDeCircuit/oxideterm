@@ -49,6 +49,7 @@ struct MeasurementState {
     layout: MarkdownBlockLayout,
     width: f32,
     fonts: (String, String),
+    geometry_style: Vec<f32>,
 }
 
 impl MarkdownMeasurements {
@@ -60,6 +61,27 @@ impl MarkdownMeasurements {
     ) -> MarkdownBlockLayout {
         let mut state = self.0.borrow_mut();
         let fonts = (opts.body_font_family.clone(), opts.code_font_family.clone());
+        let geometry_style = vec![
+            opts.base_font_size,
+            opts.code_font_scale,
+            opts.code_label_font_scale,
+            opts.footnote_font_scale,
+            opts.block_gap,
+            opts.list_indent,
+            opts.code_block_padding,
+            opts.blockquote_border_width,
+            opts.max_image_width,
+            opts.math_inline_scale,
+            opts.math_display_scale,
+            opts.math_inline_padding,
+            opts.math_display_padding,
+            opts.heading_font_scales[0],
+            opts.heading_font_scales[1],
+            opts.heading_font_scales[2],
+            opts.heading_font_scales[3],
+            opts.heading_font_scales[4],
+            opts.heading_font_scales[5],
+        ];
         if let Some(previous) = state.as_ref()
             && previous.layout.items == layout.items
         {
@@ -68,6 +90,7 @@ impl MarkdownMeasurements {
         if let Some(previous) = state.as_ref()
             && previous.width == width
             && previous.fonts == fonts
+            && previous.geometry_style == geometry_style
             && previous.layout.items == layout.items
             && previous.layout.item_sizes == layout.item_sizes
         {
@@ -75,17 +98,71 @@ impl MarkdownMeasurements {
             layout.disclosures = previous.layout.disclosures.clone();
             return layout;
         }
-        layout.measured = Some(Rc::new(RefCell::new(vec![None; layout.items.len()])));
+        let mut measured = vec![None; layout.items.len()];
+        if let Some(previous) = state.as_ref() {
+            if opts.scroll_sync.is_some() {
+                // A synchronized handle belongs to one document across edits.
+                layout.disclosures = previous.layout.disclosures.clone();
+            }
+            if previous.width == width
+                && previous.fonts == fonts
+                && previous.geometry_style == geometry_style
+            {
+                let clean = |item: &MarkdownLayoutItem| match item {
+                    MarkdownLayoutItem::Block(block) => {
+                        MarkdownLayoutItem::Block(block.without_sources())
+                    }
+                    MarkdownLayoutItem::Footnotes(notes) => MarkdownLayoutItem::Footnotes(
+                        notes
+                            .iter()
+                            .map(|note| FootnoteDefinition {
+                                label: note.label.clone(),
+                                blocks: note.blocks.iter().map(Block::without_sources).collect(),
+                            })
+                            .collect(),
+                    ),
+                };
+                let old = previous.layout.items.iter().map(clean).collect::<Vec<_>>();
+                let new = layout.items.iter().map(clean).collect::<Vec<_>>();
+                if let Some(heights) = &previous.layout.measured {
+                    let heights = heights.borrow();
+                    for index in 0..old.len().min(new.len()) {
+                        if old[index] == new[index]
+                            && previous.layout.item_sizes[index] == layout.item_sizes[index]
+                        {
+                            measured[index] = heights[index];
+                        }
+                    }
+                    for offset in 0..old.len().min(new.len()) {
+                        let a = old.len() - 1 - offset;
+                        let b = new.len() - 1 - offset;
+                        if old[a] != new[b] {
+                            break;
+                        }
+                        if previous.layout.item_sizes[a] == layout.item_sizes[b] {
+                            measured[b] = heights[a];
+                        }
+                    }
+                }
+            }
+        }
+        layout.measured = Some(Rc::new(RefCell::new(measured)));
         *state = Some(MeasurementState {
             layout: layout.clone(),
             width,
             fonts,
+            geometry_style,
         });
         layout
     }
 }
 
 impl MarkdownBlockLayout {
+    pub(crate) fn measurement_id(&self) -> usize {
+        self.measured
+            .as_ref()
+            .map_or(0, |value| Rc::as_ptr(value) as usize)
+    }
     /// Build virtual-list layout items from a parsed markdown document.
     pub fn from_document(document: &MarkdownDocument, opts: &MarkdownOptions) -> Self {
         let mut items: Vec<MarkdownLayoutItem> = document
@@ -218,6 +295,7 @@ fn estimate_blocks_height(blocks: &[Block], opts: &MarkdownOptions) -> f32 {
 
 fn estimate_block_height(block: &Block, opts: &MarkdownOptions) -> f32 {
     match block {
+        Block::Located { block, .. } => estimate_block_height(block, opts),
         Block::Heading { level, inlines, .. } => {
             let font_size = opts.base_font_size
                 * opts
@@ -350,6 +428,50 @@ fn inline_text_len(inline: &Inline) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unchanged_blocks_keep_measured_heights_after_source_offsets_shift() {
+        let opts = MarkdownOptions::default();
+        let measurements = MarkdownMeasurements::default();
+        let document = crate::parser::parse_with_source_ranges("first\n\nsecond\n\nthird");
+        let layout = measurements.prepare(
+            MarkdownBlockLayout::from_document(&document, &opts),
+            640.0,
+            &opts,
+        );
+        layout.record_height(0, 40.0);
+        layout.record_height(1, 80.0);
+        layout.record_height(2, 60.0);
+        let document = crate::parser::parse_with_source_ranges("new\n\nfirst\n\nsecond\n\nthird");
+        let changed = measurements.prepare(
+            MarkdownBlockLayout::from_document(&document, &opts),
+            640.0,
+            &opts,
+        );
+        assert_eq!(
+            changed
+                .item_sizes()
+                .iter()
+                .map(|size| f32::from(size.height))
+                .collect::<Vec<_>>(),
+            [22.0, 40.0, 80.0, 60.0]
+        );
+        let document =
+            crate::parser::parse_with_source_ranges("new\n\nfirst\n\nreplacement\n\nthird");
+        let changed = measurements.prepare(
+            MarkdownBlockLayout::from_document(&document, &opts),
+            640.0,
+            &opts,
+        );
+        assert_eq!(
+            changed
+                .item_sizes()
+                .iter()
+                .map(|size| f32::from(size.height))
+                .collect::<Vec<_>>(),
+            [22.0, 40.0, 22.0, 60.0]
+        );
+    }
 
     #[test]
     fn disclosure_state_survives_relayout_but_not_replacement_documents() {

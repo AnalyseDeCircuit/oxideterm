@@ -343,6 +343,7 @@ fn list_item_from_element(
         Vec::new()
     };
     ListItem {
+        source: None,
         inlines,
         children,
         checked: None,

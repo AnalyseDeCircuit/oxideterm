@@ -1611,6 +1611,7 @@
       "delete_notebook": "Elimina quaderno",
       "new_notebook": "Nuovo quaderno",
       "editor_preview": "Anteprima",
+      "editor_split": "Sorgente | Anteprima",
       "editor_save": "Salva",
       "editor_saved": "Salvato",
       "editor_saving": "Salvataggio…",

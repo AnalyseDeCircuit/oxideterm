@@ -1611,6 +1611,7 @@
       "delete_notebook": "Supprimer le carnet",
       "new_notebook": "Nouveau carnet",
       "editor_preview": "Aperçu",
+      "editor_split": "Source | Aperçu",
       "editor_save": "Enregistrer",
       "editor_saved": "Enregistré",
       "editor_saving": "Enregistrement…",

@@ -12,6 +12,8 @@ pub const MARKDOWN_IMAGE_CACHE_ID: &str = "oxideterm-markdown-images";
 /// Options that control markdown rendering behaviour.
 #[derive(Clone, Debug)]
 pub struct MarkdownOptions {
+    pub scroll_sync: Option<crate::scroll_sync::MarkdownScrollSync>,
+    pub(crate) code_source: Option<crate::model::SourceSpan>,
     pub(crate) disclosures: crate::disclosure::DisclosureState,
     pub html_details_label: String,
     pub navigation: Option<crate::navigation::MarkdownNavigation>,
@@ -120,6 +122,8 @@ impl MarkdownOptions {
     /// Build markdown renderer options from UI metrics.
     pub fn from_metrics(metrics: UiMetrics) -> Self {
         Self {
+            scroll_sync: None,
+            code_source: None,
             disclosures: Default::default(),
             html_details_label: "Details".into(),
             navigation: None,

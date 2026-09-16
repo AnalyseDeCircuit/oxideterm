@@ -28,7 +28,9 @@ mod coords;
 mod fold;
 mod input;
 mod render;
+mod scroll;
 mod search;
+pub use scroll::{EditorScrollAnchor, EditorScrollOrigin, EditorViewportChanged};
 mod syntax_task;
 mod wrap;
 
@@ -284,6 +286,9 @@ pub struct TextEditorView {
     cursor: Cursor,
     focus_handle: FocusHandle,
     viewport: EditorViewport,
+    scroll_origin: EditorScrollOrigin,
+    last_published_scroll: Option<(u64, f32, f32, f32)>,
+    pending_layout_anchor: Option<EditorScrollAnchor>,
     metrics: EditorMetrics,
     configured_line_height: f32,
     text_system: Arc<gpui::TextSystem>,
@@ -344,6 +349,9 @@ impl TextEditorView {
             cursor: Cursor::new(BufferOffset::ZERO),
             focus_handle: cx.focus_handle(),
             viewport: EditorViewport::new(metrics.overscan_rows),
+            scroll_origin: EditorScrollOrigin::Layout,
+            last_published_scroll: None,
+            pending_layout_anchor: None,
             configured_line_height: metrics.line_height,
             text_system: cx.text_system().clone(),
             metrics,
@@ -637,6 +645,7 @@ impl TextEditorView {
         background_active: bool,
         cx: &mut Context<Self>,
     ) {
+        self.pending_layout_anchor = Some(self.scroll_anchor());
         self.appearance = EditorAppearance::from_theme(tokens);
         // Embedded editors can follow the typography of their owning surface.
         self.appearance.font_family = font_family;
@@ -1043,6 +1052,7 @@ impl TextEditorView {
     }
 
     fn handle_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        self.scroll_origin = EditorScrollOrigin::User;
         let delta = event.delta.pixel_delta(px(self.metrics.line_height));
         let dx = if event.modifiers.shift {
             -f32::from(delta.y)
@@ -1087,6 +1097,7 @@ impl TextEditorView {
     }
 
     pub(super) fn reveal_display_row(&mut self, display_index: usize) {
+        self.scroll_origin = EditorScrollOrigin::User;
         self.viewport.reveal_line(
             display_index,
             self.document_row_count(),
@@ -1102,16 +1113,26 @@ impl TextEditorView {
     ) {
         // Bounds are captured during the same frame's prepaint pass so the
         // editor does not render one-frame-stale virtual rows after resizing.
+        let pending_layout = self.pending_layout_anchor.take();
+        let anchor = pending_layout.or_else(|| {
+            self.content_bounds
+                .filter(|old| old.size != bounds.size)
+                .map(|_| self.scroll_anchor())
+        });
         self.content_bounds = Some(bounds);
         let width_changed = self.viewport.set_width(f32::from(bounds.size.width));
         let height_changed = self.viewport.set_height(f32::from(bounds.size.height));
-        if width_changed || height_changed {
+        if width_changed || height_changed || pending_layout.is_some() {
+            if let Some(anchor) = anchor {
+                self.restore_scroll_anchor(anchor);
+            }
             self.viewport
                 .clamp_horizontal(self.max_horizontal_scroll_px());
             self.viewport
                 .clamp(self.document_row_count(), self.metrics.line_height);
             cx.notify();
         }
+        self.publish_viewport(cx);
     }
 
     fn measure_code_metrics(&mut self, window: &mut Window, cx: &mut Context<Self>) {

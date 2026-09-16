@@ -5,6 +5,7 @@ use super::*;
 
 pub(in crate::workspace) mod navigation;
 mod operations;
+mod preview;
 
 use gpui::EventEmitter;
 use oxideterm_editor_syntax::LanguageId;
@@ -67,11 +68,7 @@ fn knowledge_workspace_available_width(
     (viewport_width - left_width - right_width).max(0.0)
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum KnowledgeEditorMode {
-    Source,
-    Preview,
-}
+use oxideterm_settings::KnowledgeEditorMode;
 
 #[derive(Clone, Copy)]
 enum KnowledgeFormatAction {
@@ -122,6 +119,7 @@ enum KnowledgeFormatGlyph {
 struct KnowledgeEditorLabels {
     source: String,
     preview: String,
+    split: String,
     save: String,
     saved: String,
     saving: String,
@@ -175,6 +173,7 @@ impl KnowledgeEditorLabels {
         KnowledgeEditorLabels {
             source: i18n.t("settings_view.knowledge.editor_source"),
             preview: i18n.t("settings_view.knowledge.editor_preview"),
+            split: i18n.t("settings_view.knowledge.editor_split"),
             save: i18n.t("settings_view.knowledge.editor_save"),
             saved: i18n.t("settings_view.knowledge.editor_saved"),
             saving: i18n.t("settings_view.knowledge.editor_saving"),
@@ -243,6 +242,7 @@ fn knowledge_save_state_allows_autosave(state: &KnowledgeDocumentSaveState) -> b
 
 enum KnowledgeDocumentEditorEvent {
     Saved,
+    PreferencesChanged(oxideterm_settings::KnowledgeEditorUiState),
 }
 
 #[derive(Clone, Default)]
@@ -288,6 +288,15 @@ struct KnowledgeDocumentEditor {
     is_markdown: bool,
     preview_document: Option<oxideterm_gpui_markdown::MarkdownDocument>,
     preview_task: Option<Task<()>>,
+    preview_timer: Option<Task<()>>,
+    preview_version: u64,
+    preview_running: bool,
+    source_ratio: f32,
+    split_bounds: Option<gpui::Bounds<gpui::Pixels>>,
+    split_dragging: bool,
+    preview_leads: bool,
+    pending_preview_anchor: Option<oxideterm_gpui_markdown::scroll_sync::SourceAnchor>,
+    _viewport_subscription: Option<Subscription>,
 }
 
 impl KnowledgeDocumentEditor {
@@ -339,22 +348,27 @@ impl KnowledgeDocumentEditor {
             editor.set_transparent_background(has_background_image, cx);
             editor
         });
+        editor.update(cx, |editor, _| editor.track_edit_changes());
         let preview_scroll = MarkdownVirtualListScrollHandle::new();
         let observed_buffer_version = editor.read(cx).buffer().version();
         let draft = Arc::<str>::from(content);
         let saved_draft = draft.clone();
         let editor_observer = cx.observe(&editor, |surface, editor, cx| {
-            let editor = editor.read(cx);
-            let buffer_version = editor.buffer().version();
+            let buffer_version = editor.read(cx).buffer().version();
             if buffer_version == surface.observed_buffer_version {
                 return;
             }
             surface.observed_buffer_version = buffer_version;
-            surface.draft = Arc::from(editor.buffer().text());
-            surface.preview_document = None;
-            surface.preview_task = None;
-            if surface.mode == KnowledgeEditorMode::Preview && surface.is_markdown {
-                surface.load_preview(cx);
+            let (draft, changes) = editor.update(cx, |editor, _| {
+                (
+                    Arc::from(editor.buffer().text()),
+                    editor.take_edit_changes(),
+                )
+            });
+            surface.draft = draft;
+            surface.remap_preview_anchor(&changes);
+            if surface.mode != KnowledgeEditorMode::Source && surface.is_markdown {
+                surface.schedule_preview(cx);
             }
             if knowledge_save_state_allows_autosave(&surface.save_state) {
                 surface.save_state = KnowledgeDocumentSaveState::Dirty;
@@ -396,6 +410,15 @@ impl KnowledgeDocumentEditor {
             is_markdown,
             preview_document: None,
             preview_task: None,
+            preview_timer: None,
+            preview_version: 0,
+            preview_running: false,
+            source_ratio: 0.5,
+            split_bounds: None,
+            split_dragging: false,
+            preview_leads: false,
+            pending_preview_anchor: None,
+            _viewport_subscription: None,
         }
     }
 
@@ -485,34 +508,22 @@ impl KnowledgeDocumentEditor {
             self.editor.update(cx, |editor, _cx| {
                 editor.set_read_only(mode == KnowledgeEditorMode::Preview);
             });
-            if mode == KnowledgeEditorMode::Source {
+            if mode != KnowledgeEditorMode::Preview {
                 window.focus(&self.editor.read(cx).focus_handle(cx), cx);
-            } else if self.is_markdown && self.preview_document.is_none() {
+            }
+            if mode != KnowledgeEditorMode::Source
+                && self.is_markdown
+                && (self.preview_document.is_none()
+                    || self.preview_version != self.observed_buffer_version)
+            {
                 self.load_preview(cx);
             }
+            if mode == KnowledgeEditorMode::Split {
+                self.sync_from_editor(cx);
+            }
+            self.emit_preferences(cx);
             cx.notify();
         }
-    }
-
-    fn load_preview(&mut self, cx: &mut Context<Self>) {
-        let source = self.draft.clone();
-        self.preview_task = Some(cx.spawn(async move |surface, cx| {
-            let input = source.clone();
-            let document = cx
-                .background_executor()
-                .spawn(async move { oxideterm_gpui_markdown::parser::parse(&input) })
-                .await;
-            let _ = surface.update(cx, |surface, cx| {
-                if surface.draft == source {
-                    surface.preview_navigation =
-                        oxideterm_gpui_markdown::navigation::MarkdownNavigation::new(
-                            surface.preview_scroll.scroll_handle().clone(),
-                        );
-                    surface.preview_document = Some(document);
-                    cx.notify();
-                }
-            });
-        }));
     }
 
     fn schedule_autosave(&mut self, cx: &mut Context<Self>) {
@@ -656,7 +667,7 @@ impl KnowledgeDocumentEditor {
                             oxideterm_ai::rag_keyword_index_state(&surface.store);
                         surface.start_index_state_poll(cx);
                         surface.save_state = KnowledgeDocumentSaveState::Saved;
-                        if surface.mode == KnowledgeEditorMode::Preview && surface.is_markdown {
+                        if surface.mode != KnowledgeEditorMode::Source && surface.is_markdown {
                             surface.load_preview(cx);
                         }
                     }
@@ -711,6 +722,7 @@ impl KnowledgeDocumentEditor {
             .id(match mode {
                 KnowledgeEditorMode::Source => "knowledge-editor-mode-source",
                 KnowledgeEditorMode::Preview => "knowledge-editor-mode-preview",
+                KnowledgeEditorMode::Split => "knowledge-editor-mode-split",
             })
             .cursor_pointer()
             .on_mouse_down(
@@ -727,18 +739,27 @@ impl KnowledgeDocumentEditor {
         let active_index = match self.mode {
             KnowledgeEditorMode::Source => 0,
             KnowledgeEditorMode::Preview => 1,
+            KnowledgeEditorMode::Split => 2,
         };
         oxideterm_gpui_ui::segmented_control(
             &self.tokens,
             "knowledge-editor-mode-switcher",
             SegmentedControlOptions::new(
                 active_index,
-                usize::from(self.previous_mode == KnowledgeEditorMode::Preview),
-                2,
+                match self.previous_mode {
+                    KnowledgeEditorMode::Source => 0,
+                    KnowledgeEditorMode::Preview => 1,
+                    KnowledgeEditorMode::Split => 2,
+                },
+                if self.is_markdown { 3 } else { 2 },
             )
             .user_transition_active(self.mode_transition.is_some())
             .has_background_image(self.has_background_image)
-            .compact(KNOWLEDGE_EDITOR_MODE_SWITCHER_WIDTH),
+            .compact(if self.is_markdown {
+                KNOWLEDGE_EDITOR_MODE_SWITCHER_WIDTH * 1.5
+            } else {
+                KNOWLEDGE_EDITOR_MODE_SWITCHER_WIDTH
+            }),
             vec![
                 self.render_mode_button(
                     KnowledgeEditorMode::Source,
@@ -750,14 +771,19 @@ impl KnowledgeDocumentEditor {
                     self.labels.preview.clone(),
                     cx,
                 ),
-            ],
+            ]
+            .into_iter()
+            .chain(self.is_markdown.then(|| {
+                self.render_mode_button(KnowledgeEditorMode::Split, self.labels.split.clone(), cx)
+            }))
+            .collect(),
         )
         .into_any_element()
     }
 
     fn apply_format_action(&mut self, action: KnowledgeFormatAction, cx: &mut Context<Self>) {
         let editor = match self.mode {
-            KnowledgeEditorMode::Source => Some(self.editor.clone()),
+            KnowledgeEditorMode::Source | KnowledgeEditorMode::Split => Some(self.editor.clone()),
             KnowledgeEditorMode::Preview => None,
         };
         let Some(editor) = editor else {
@@ -861,8 +887,8 @@ impl EventEmitter<KnowledgeDocumentEditorEvent> for KnowledgeDocumentEditor {}
 
 impl Render for KnowledgeDocumentEditor {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let source = self.mode == KnowledgeEditorMode::Source;
-        let preview = self.mode == KnowledgeEditorMode::Preview;
+        let source = self.mode != KnowledgeEditorMode::Preview;
+        let preview = self.mode != KnowledgeEditorMode::Source;
         let conflict = matches!(self.save_state, KnowledgeDocumentSaveState::Conflict);
         let workspace = self
             .preview_workspace
@@ -888,6 +914,7 @@ impl Render for KnowledgeDocumentEditor {
             );
         options.background_surface_active = self.has_background_image;
         options.navigation = Some(self.preview_navigation.clone());
+        options.scroll_sync = Some(self.preview_scroll.scroll_sync.clone());
         options.code_block_padding = self.tokens.spacing.two;
         if let Some(path) = self.source_path.as_ref() {
             options = options.with_source_path(path);
@@ -921,208 +948,12 @@ impl Render for KnowledgeDocumentEditor {
                     )
                     .child(self.render_mode_switcher(cx)),
             )
-            .when(source && self.is_markdown, |surface| {
-                surface.child(
+            .child({
+                let source_pane = div().size_full().min_w_0().min_h_0().flex().flex_col()
+                    .when(source && self.is_markdown, |pane| pane.child(self.render_source_toolbar(cx)))
+                    .child(div().flex_1().min_h_0().child(self.editor.clone()));
+                let preview_pane = if preview && self.is_markdown {
                     div()
-                        .w_full()
-                        .h(px(self.tokens.metrics.ui_button_lg_height))
-                        .flex_none()
-                        .min_w_0()
-                        .overflow_x_scrollbar()
-                        .border_b_1()
-                        .border_color(rgb(self.tokens.ui.border))
-                        .child(
-                            div()
-                                .h_full()
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap(px(4.0))
-                                .px(px(16.0))
-                                .child(self.render_format_button(
-                                    "knowledge-format-undo",
-                                    KnowledgeFormatGlyph::Icon(LucideIcon::RotateCcw),
-                                    self.labels.format_undo.clone(),
-                                    KnowledgeFormatAction::Undo,
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-redo",
-                                    KnowledgeFormatGlyph::Icon(LucideIcon::RefreshCw),
-                                    self.labels.format_redo.clone(),
-                                    KnowledgeFormatAction::Redo,
-                                    cx,
-                                ))
-                                .child(self.render_format_separator())
-                                .child(self.render_format_button(
-                                    "knowledge-format-heading-1",
-                                    KnowledgeFormatGlyph::Text("H1"),
-                                    format!("{} 1", self.labels.format_heading),
-                                    KnowledgeFormatAction::Heading(1),
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-heading-2",
-                                    KnowledgeFormatGlyph::Text("H2"),
-                                    format!("{} 2", self.labels.format_heading),
-                                    KnowledgeFormatAction::Heading(2),
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-heading-3",
-                                    KnowledgeFormatGlyph::Text("H3"),
-                                    format!("{} 3", self.labels.format_heading),
-                                    KnowledgeFormatAction::Heading(3),
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-heading-4",
-                                    KnowledgeFormatGlyph::Text("H4"),
-                                    format!("{} 4", self.labels.format_heading),
-                                    KnowledgeFormatAction::Heading(4),
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-heading-5",
-                                    KnowledgeFormatGlyph::Text("H5"),
-                                    format!("{} 5", self.labels.format_heading),
-                                    KnowledgeFormatAction::Heading(5),
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-heading-6",
-                                    KnowledgeFormatGlyph::Text("H6"),
-                                    format!("{} 6", self.labels.format_heading),
-                                    KnowledgeFormatAction::Heading(6),
-                                    cx,
-                                ))
-                                .child(self.render_format_separator())
-                                .child(self.render_format_button(
-                                    "knowledge-format-bold",
-                                    KnowledgeFormatGlyph::Text("B"),
-                                    self.labels.format_bold.clone(),
-                                    KnowledgeFormatAction::Bold,
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-italic",
-                                    KnowledgeFormatGlyph::Text("I"),
-                                    self.labels.format_italic.clone(),
-                                    KnowledgeFormatAction::Italic,
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-strike",
-                                    KnowledgeFormatGlyph::Text("S"),
-                                    self.labels.format_strike.clone(),
-                                    KnowledgeFormatAction::Strike,
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-code",
-                                    KnowledgeFormatGlyph::Text("<>"),
-                                    self.labels.format_inline_code.clone(),
-                                    KnowledgeFormatAction::InlineCode,
-                                    cx,
-                                ))
-                                .child(self.render_format_separator())
-                                .child(self.render_format_button(
-                                    "knowledge-format-quote",
-                                    KnowledgeFormatGlyph::Text("”"),
-                                    self.labels.format_quote.clone(),
-                                    KnowledgeFormatAction::Quote,
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-bullets",
-                                    KnowledgeFormatGlyph::Text("•"),
-                                    self.labels.format_bullet_list.clone(),
-                                    KnowledgeFormatAction::BulletList,
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-ordered",
-                                    KnowledgeFormatGlyph::Text("1."),
-                                    self.labels.format_ordered_list.clone(),
-                                    KnowledgeFormatAction::OrderedList,
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-task",
-                                    KnowledgeFormatGlyph::Icon(LucideIcon::ListChecks),
-                                    self.labels.format_task_list.clone(),
-                                    KnowledgeFormatAction::TaskList,
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-code-block",
-                                    KnowledgeFormatGlyph::Icon(LucideIcon::Code2),
-                                    self.labels.format_code_block.clone(),
-                                    KnowledgeFormatAction::CodeBlock,
-                                    cx,
-                                ))
-                                .child(self.render_format_separator())
-                                .child(self.render_format_button(
-                                    "knowledge-format-link",
-                                    KnowledgeFormatGlyph::Icon(LucideIcon::Link2),
-                                    self.labels.format_link.clone(),
-                                    KnowledgeFormatAction::Link,
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-image",
-                                    KnowledgeFormatGlyph::Icon(LucideIcon::Image),
-                                    self.labels.format_image.clone(),
-                                    KnowledgeFormatAction::Image,
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-table",
-                                    KnowledgeFormatGlyph::Icon(LucideIcon::FileSpreadsheet),
-                                    self.labels.format_table.clone(),
-                                    KnowledgeFormatAction::Table,
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-horizontal-rule",
-                                    KnowledgeFormatGlyph::Text("—"),
-                                    self.labels.format_horizontal_rule.clone(),
-                                    KnowledgeFormatAction::HorizontalRule,
-                                    cx,
-                                ))
-                                .child(self.render_format_separator())
-                                .child(self.render_format_button(
-                                    "knowledge-format-inline-math",
-                                    KnowledgeFormatGlyph::Text("$"),
-                                    self.labels.format_inline_math.clone(),
-                                    KnowledgeFormatAction::InlineMath,
-                                    cx,
-                                ))
-                                .child(self.render_format_button(
-                                    "knowledge-format-display-math",
-                                    KnowledgeFormatGlyph::Text("$$"),
-                                    self.labels.format_display_math.clone(),
-                                    KnowledgeFormatAction::DisplayMath,
-                                    cx,
-                                )),
-                        ),
-                )
-            })
-            .child(
-                div()
-                    .w_full()
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_hidden()
-                    .when(source, |content| {
-                        content.child(div().size_full().child(self.editor.clone()))
-                    })
-                    .when(preview && !self.is_markdown, |content| {
-                        content.child(div().size_full().child(self.editor.clone()))
-                    })
-                    .when(preview && self.is_markdown, |content| {
-                        content.child(
-                            div()
                                 .size_full()
                                 .min_h_0()
                                 .p(px(KNOWLEDGE_PREVIEW_PADDING))
@@ -1158,10 +989,33 @@ impl Render for KnowledgeDocumentEditor {
                                         .text_color(rgb(self.tokens.ui.text_muted))
                                         .child(self.labels.loading.clone())
                                         .into_any_element()
-                                }),
-                        )
-                    }),
-            )
+                                })
+                } else { div() };
+                if self.mode == KnowledgeEditorMode::Split && self.is_markdown {
+                    let view = cx.entity();
+                    div().id("knowledge-split").relative().w_full().flex_1().min_h_0().flex().overflow_hidden()
+                        .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| this.resize_split(f32::from(event.position.x), cx)))
+                        .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| this.finish_split_resize(cx)))
+                        .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _, _, cx| this.finish_split_resize(cx)))
+                        .child(div().id("knowledge-source-pane").relative().w(gpui::relative(self.source_ratio)).h_full().min_w_0().flex_none()
+                            .child(source_pane)
+                            .child(super::sidebar::sidebar_resize_hotzone_chrome("knowledge-split-divider", rgb(self.tokens.ui.border), true)
+                                .right_0().top_0().bottom_0()
+                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                                    this.split_dragging = true;
+                                    window.prevent_default();
+                                    cx.stop_propagation();
+                                }))))
+                        .child(div().id("knowledge-preview-pane").flex_1().min_w_0().h_full().child(preview_pane))
+                        .child(gpui::canvas(move |bounds, _, app| {
+                            view.update(app, |this, _| this.split_bounds = Some(bounds));
+                        }, |_, _, _, _| {}).absolute().top_0().left_0().size_full()).into_any_element()
+                } else {
+                    div().w_full().flex_1().min_h_0().overflow_hidden()
+                        .child(if source || !self.is_markdown { source_pane } else { preview_pane })
+                        .into_any_element()
+                }
+            })
             .child(
                 div()
                     .min_h(px(32.0))
@@ -1538,7 +1392,7 @@ impl WorkspaceApp {
             return false;
         };
         let document = document.read(cx);
-        document.mode == KnowledgeEditorMode::Source
+        document.mode != KnowledgeEditorMode::Preview
             && document.editor.read(cx).focus_handle(cx).is_focused(window)
     }
 
@@ -2018,11 +1872,13 @@ impl WorkspaceApp {
                             )
                         });
                         let preview_workspace = cx.entity();
+                        let preferences = workspace.settings_store.settings().window_ui.knowledge_editor.clone();
                         editor.update(cx, |editor, cx| {
                             editor.preview_workspace = Some(preview_workspace.downgrade());
+                            editor.initialize_preview(preferences, cx);
                             editor.preview_workspace_subscription =
                                 Some(cx.observe(&preview_workspace, |editor, _, cx| {
-                                    if editor.mode == KnowledgeEditorMode::Preview {
+                                    if editor.mode != KnowledgeEditorMode::Source {
                                         cx.notify();
                                     }
                                 }));
@@ -2031,7 +1887,16 @@ impl WorkspaceApp {
                         editor.update(cx, |editor, cx| editor.start_index_state_poll(cx));
                         let subscription = cx.subscribe(
                             &editor,
-                            |workspace, _editor, _event: &KnowledgeDocumentEditorEvent, cx| {
+                            |workspace, _editor, event: &KnowledgeDocumentEditorEvent, cx| {
+                                if let KnowledgeDocumentEditorEvent::PreferencesChanged(preferences) = event {
+                                    workspace.settings_store.settings_mut().window_ui.knowledge_editor = preferences.clone();
+                                    if let Err(error) = workspace.settings_store.save() {
+                                        tracing::warn!(%error, "failed to save local note editor preferences");
+                                    } else {
+                                        workspace.settings_workspace.update(cx, |settings, _| settings.acknowledge_external_store_state());
+                                    }
+                                    return;
+                                }
                                 workspace.refresh_knowledge_navigator(true, cx);
                                 let notebook =
                                     workspace.knowledge_workspace.update(cx, |state, _| {

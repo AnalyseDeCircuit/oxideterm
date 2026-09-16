@@ -30,6 +30,7 @@ impl WorkspaceApp {
         };
         let current = self.settings_store.settings().window_ui.clone();
         let next = WindowUiState {
+            knowledge_editor: current.knowledge_editor.clone(),
             normal_bounds,
             maximized,
             fullscreen,
@@ -60,9 +61,15 @@ impl WorkspaceApp {
     }
 
     fn commit_main_window_state(&mut self, cx: &mut App) {
-        let Some(state) = self.pending_window_ui_state.take() else {
+        let Some(mut state) = self.pending_window_ui_state.take() else {
             return;
         };
+        state.knowledge_editor = self
+            .settings_store
+            .settings()
+            .window_ui
+            .knowledge_editor
+            .clone();
         if self.settings_store.settings().window_ui != state {
             self.settings_store.settings_mut().window_ui = state;
             self.persist_main_window_state(cx);

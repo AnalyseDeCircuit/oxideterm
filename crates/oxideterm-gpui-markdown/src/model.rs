@@ -25,6 +25,8 @@ pub struct FootnoteDefinition {
 /// Block-level markdown node.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Block {
+    /// Source coordinates belong to one parse result, never to persisted notes.
+    Located { span: SourceSpan, block: Box<Block> },
     /// `# … ######`  heading with a 1-based level (1 = h1, 6 = h6).
     Heading {
         level: u8,
@@ -110,6 +112,7 @@ pub enum CalloutKind {
 /// A single item inside an ordered or unordered list.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ListItem {
+    pub source: Option<SourceSpan>,
     pub inlines: Vec<Inline>,
     /// Remaining blocks after the initial paragraph, in source order.
     pub children: Vec<Block>,
@@ -190,6 +193,50 @@ pub enum ImageLength {
     Percent(f32),
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct SourceSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl Block {
+    pub(crate) fn without_sources(&self) -> Block {
+        let mut block = self.unlocated().clone();
+        match &mut block {
+            Block::HtmlContainer { blocks, .. }
+            | Block::Blockquote { blocks, .. }
+            | Block::Details { blocks, .. } => {
+                *blocks = blocks.iter().map(Block::without_sources).collect();
+            }
+            Block::OrderedList { items, .. } | Block::UnorderedList { items } => {
+                for item in items {
+                    item.source = None;
+                    item.children = item.children.iter().map(Block::without_sources).collect();
+                }
+            }
+            Block::Table { headers, rows, .. } => {
+                for cell in headers.iter_mut().chain(rows.iter_mut().flatten()) {
+                    *cell = cell.iter().map(Block::without_sources).collect();
+                }
+            }
+            _ => {}
+        }
+        block
+    }
+    pub fn unlocated(&self) -> &Block {
+        match self {
+            Self::Located { block, .. } => block.unlocated(),
+            _ => self,
+        }
+    }
+    pub fn source_span(&self) -> Option<SourceSpan> {
+        match self {
+            Self::Located { span, .. } => Some(*span),
+            _ => None,
+        }
+    }
+}
+
 impl MarkdownDocument {
     /// Allocation capacities retained by the parsed tree, excluding the document value itself.
     pub fn retained_bytes(&self) -> usize {
@@ -230,54 +277,52 @@ fn inlines_bytes(inlines: &Vec<Inline>) -> usize {
 
 fn blocks_bytes(blocks: &Vec<Block>) -> usize {
     blocks.capacity() * std::mem::size_of::<Block>()
-        + blocks
-            .iter()
-            .map(|block| {
-                (match block {
-                    Block::Heading { id, inlines, .. } => id.capacity() + inlines_bytes(inlines),
-                    Block::Paragraph { inlines } => inlines_bytes(inlines),
-                    Block::Html(text) => text.capacity(),
-                    Block::HtmlContainer { blocks, .. } | Block::Blockquote { blocks, .. } => {
-                        blocks_bytes(blocks)
-                    }
-                    Block::Details {
-                        id,
-                        summary,
-                        blocks,
-                        ..
-                    } => id.capacity() + inlines_bytes(summary) + blocks_bytes(blocks),
-                    Block::CodeBlock { language, code } => {
-                        language.as_ref().map_or(0, String::capacity) + code.capacity()
-                    }
-                    Block::UnorderedList { items } | Block::OrderedList { items, .. } => {
-                        items.capacity() * std::mem::size_of::<ListItem>()
-                            + items
-                                .iter()
-                                .map(|item| {
-                                    inlines_bytes(&item.inlines) + blocks_bytes(&item.children) + 32
-                                })
-                                .sum::<usize>()
-                    }
-                    Block::Table {
-                        headers,
-                        alignments,
-                        rows,
-                    } => {
-                        headers.capacity() * std::mem::size_of::<Vec<Block>>()
-                            + headers.iter().map(blocks_bytes).sum::<usize>()
-                            + alignments.capacity() * std::mem::size_of::<TableAlignment>()
-                            + rows.capacity() * std::mem::size_of::<Vec<Vec<Block>>>()
-                            + rows
-                                .iter()
-                                .map(|row| {
-                                    row.capacity() * std::mem::size_of::<Vec<Block>>()
-                                        + row.iter().map(blocks_bytes).sum::<usize>()
-                                        + 32
-                                })
-                                .sum::<usize>()
-                    }
-                    Block::HorizontalRule => 0,
-                }) + 32
-            })
-            .sum::<usize>()
+        + blocks.iter().map(block_payload_bytes).sum::<usize>()
+}
+
+fn block_payload_bytes(block: &Block) -> usize {
+    (match block {
+        Block::Located { block, .. } => std::mem::size_of::<Block>() + block_payload_bytes(block),
+        Block::Heading { id, inlines, .. } => id.capacity() + inlines_bytes(inlines),
+        Block::Paragraph { inlines } => inlines_bytes(inlines),
+        Block::Html(text) => text.capacity(),
+        Block::HtmlContainer { blocks, .. } | Block::Blockquote { blocks, .. } => {
+            blocks_bytes(blocks)
+        }
+        Block::Details {
+            id,
+            summary,
+            blocks,
+            ..
+        } => id.capacity() + inlines_bytes(summary) + blocks_bytes(blocks),
+        Block::CodeBlock { language, code } => {
+            language.as_ref().map_or(0, String::capacity) + code.capacity()
+        }
+        Block::UnorderedList { items } | Block::OrderedList { items, .. } => {
+            items.capacity() * std::mem::size_of::<ListItem>()
+                + items
+                    .iter()
+                    .map(|item| inlines_bytes(&item.inlines) + blocks_bytes(&item.children) + 32)
+                    .sum::<usize>()
+        }
+        Block::Table {
+            headers,
+            alignments,
+            rows,
+        } => {
+            headers.capacity() * std::mem::size_of::<Vec<Block>>()
+                + headers.iter().map(blocks_bytes).sum::<usize>()
+                + alignments.capacity() * std::mem::size_of::<TableAlignment>()
+                + rows.capacity() * std::mem::size_of::<Vec<Vec<Block>>>()
+                + rows
+                    .iter()
+                    .map(|row| {
+                        row.capacity() * std::mem::size_of::<Vec<Block>>()
+                            + row.iter().map(blocks_bytes).sum::<usize>()
+                            + 32
+                    })
+                    .sum::<usize>()
+        }
+        Block::HorizontalRule => 0,
+    }) + 32
 }

@@ -1611,6 +1611,7 @@
       "delete_notebook": "Excluir caderno",
       "new_notebook": "Novo caderno",
       "editor_preview": "Visualização",
+      "editor_split": "Código | Prévia",
       "editor_save": "Salvar",
       "editor_saved": "Salvo",
       "editor_saving": "Salvando…",
