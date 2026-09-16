@@ -408,6 +408,7 @@ class ReleaseDocumentTests(unittest.TestCase):
                     "BACKGROUND-ASSETS-LICENSE.md",
                     "GPUI-CE-LICENSE-APACHE",
                     "LICENSE",
+                    "MATERIAL-ICON-THEME-LICENSE-MIT",
                     "MICROSOFT-TERMINAL-LICENSE-MIT",
                     "NOTICE",
                     "README.md",
