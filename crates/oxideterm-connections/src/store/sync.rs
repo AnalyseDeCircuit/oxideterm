@@ -487,7 +487,8 @@ impl ConnectionStore {
             profile.validate()?;
         }
         let mut applied = 0usize;
-        for profile in snapshot.records {
+        for mut profile in snapshot.records {
+            profile.upstream_proxy = portable_upstream_proxy(&profile.upstream_proxy);
             if let Some(existing) = self
                 .data
                 .telnet_profiles
@@ -495,6 +496,10 @@ impl ConnectionStore {
                 .find(|existing| existing.id == profile.id)
             {
                 if profile.updated_at >= existing.updated_at {
+                    preserve_standalone_sftp_upstream_proxy_secret(
+                        &mut profile.upstream_proxy,
+                        &existing.upstream_proxy,
+                    );
                     *existing = profile;
                     applied += 1;
                 }
@@ -751,6 +756,9 @@ fn build_telnet_profiles_sync_snapshot(
     data: &ConnectionStoreData,
 ) -> Result<TelnetProfilesSyncSnapshot> {
     let mut records = data.telnet_profiles.clone();
+    for profile in &mut records {
+        profile.upstream_proxy = portable_upstream_proxy(&profile.upstream_proxy);
+    }
     records.sort_by(|left, right| left.id.cmp(&right.id));
     let revision = sha256_hex(
         &records

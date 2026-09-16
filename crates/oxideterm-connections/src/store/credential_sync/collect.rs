@@ -184,6 +184,15 @@ impl ConnectionStore {
                 plaintext: None,
             });
         }
+        for profile in &self.data.telnet_profiles {
+            if let SavedUpstreamProxyPolicy::Custom { proxy } = &profile.upstream_proxy {
+                bindings.extend(proxy_binding(
+                    CredentialOwner::Telnet(profile.id.clone()),
+                    CredentialSlot::UpstreamProxy,
+                    proxy,
+                ));
+            }
+        }
         if let Some(proxy) = global_proxy {
             bindings.extend(proxy_binding(
                 CredentialOwner::GlobalProxy,

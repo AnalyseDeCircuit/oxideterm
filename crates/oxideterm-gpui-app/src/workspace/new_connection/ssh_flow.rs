@@ -48,7 +48,8 @@ use crate::workspace::{
     session_manager::{
         RuntimeSecretHandoff, duplicate_connection_template_name, form_from_saved_connection,
         restore_legacy_jump_host_in_form, save_request_from_form_with_existing_auth,
-        save_request_from_form_with_proxy_hop_prefix, upstream_proxy_config_from_form,
+        save_request_from_form_with_proxy_hop_prefix, saved_upstream_proxy_policy_from_form,
+        upstream_proxy_config_from_form,
     },
 };
 use oxideterm_session_adapter::{
@@ -450,6 +451,7 @@ impl WorkspaceApp {
         self.update_connection_form_state(cx, |state| {
             if let Some(form) = state.form.as_mut() {
                 form.transport = NewConnectionTransport::Telnet;
+                form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::Direct;
                 form.port = super::form_state::TELNET_DEFAULT_PORT_TEXT.to_string();
                 form.focused_field = super::form_state::NewConnectionField::Host;
                 form.field_focused = false;

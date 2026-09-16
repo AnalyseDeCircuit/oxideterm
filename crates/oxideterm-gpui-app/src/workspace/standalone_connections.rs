@@ -1,4 +1,5 @@
 use super::*;
+use oxideterm_connections::SavedUpstreamProxyPolicy;
 mod persistence;
 use crate::workspace::new_connection::MoshConnectionOptions;
 use oxideterm_remote_desktop::{
@@ -34,11 +35,13 @@ pub(super) enum StandaloneConnectionLaunch {
     },
     Telnet {
         config: TelnetSessionConfig,
+        upstream_proxy: SavedUpstreamProxyPolicy,
         terminal_options: ConnectionTerminalOptions,
     },
     SavedTelnet {
         profile_id: String,
         config: TelnetSessionConfig,
+        upstream_proxy: SavedUpstreamProxyPolicy,
         terminal_options: ConnectionTerminalOptions,
     },
     MoshPreflight {
@@ -85,6 +88,7 @@ enum StandaloneReconnectPlan {
     },
     Telnet {
         config: TelnetSessionConfig,
+        upstream_proxy: SavedUpstreamProxyPolicy,
         terminal_options: ConnectionTerminalOptions,
         saved_profile_id: Option<String>,
     },
@@ -181,11 +185,13 @@ impl WorkspaceApp {
                 }),
             StandaloneReconnectPlan::Telnet {
                 config,
+                upstream_proxy,
                 terminal_options,
                 saved_profile_id,
             } => self
                 .create_telnet_terminal_tab_for_connection(
                     config,
+                    upstream_proxy,
                     None,
                     terminal_options,
                     title,
@@ -361,15 +367,18 @@ impl WorkspaceApp {
             }
             StandaloneConnectionLaunch::Telnet {
                 config,
+                upstream_proxy,
                 terminal_options,
             } => StandaloneReconnectPlan::Telnet {
                 config: config.clone(),
+                upstream_proxy: upstream_proxy.clone(),
                 terminal_options: terminal_options.clone(),
                 saved_profile_id: None,
             },
             StandaloneConnectionLaunch::SavedTelnet {
                 profile_id,
                 config,
+                upstream_proxy,
                 terminal_options,
             } => {
                 let current_profile = self
@@ -378,6 +387,10 @@ impl WorkspaceApp {
                     .iter()
                     .find(|profile| profile.id == *profile_id);
                 StandaloneReconnectPlan::Telnet {
+                    upstream_proxy: current_profile.map_or_else(
+                        || upstream_proxy.clone(),
+                        |profile| profile.upstream_proxy.clone(),
+                    ),
                     config: current_profile.map_or_else(
                         || config.clone(),
                         |profile| TelnetSessionConfig {
@@ -671,6 +684,7 @@ impl StandaloneConnectionRegistry {
         &mut self,
         surface: StandaloneConnectionSurface,
         profile_id: String,
+        store: &ConnectionStore,
     ) {
         let Some(record) = self
             .records
@@ -694,15 +708,20 @@ impl StandaloneConnectionRegistry {
                 }
             }
             StandaloneConnectionKind::Telnet => {
-                if let StandaloneConnectionLaunch::Telnet {
-                    config,
-                    terminal_options,
-                } = &record.launch
-                {
+                let Some(profile) = store
+                    .telnet_profiles()
+                    .iter()
+                    .find(|profile| profile.id == profile_id)
+                else {
+                    return;
+                };
+                if let StandaloneConnectionLaunch::Telnet { config, .. } = &record.launch {
                     record.launch = StandaloneConnectionLaunch::SavedTelnet {
                         profile_id,
                         config: config.clone(),
-                        terminal_options: terminal_options.clone(),
+                        // Saving transfers retry credentials to the protected store.
+                        upstream_proxy: profile.upstream_proxy.clone(),
+                        terminal_options: profile.terminal.clone(),
                     };
                 }
             }

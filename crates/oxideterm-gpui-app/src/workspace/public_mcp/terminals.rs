@@ -583,6 +583,7 @@ impl WorkspaceApp {
             };
             match self.create_telnet_terminal_tab_with_title(
                 config,
+                profile.upstream_proxy,
                 profile.terminal,
                 title.clone(),
                 window,

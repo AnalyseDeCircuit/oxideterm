@@ -306,6 +306,15 @@ impl CloudSyncOperationService {
                 .map(|p| p.id.clone())
                 .collect();
         }
+        if selection.telnet_profiles {
+            credential_selection.telnet_ids = preview
+                .telnet_profiles_snapshot
+                .as_ref()
+                .into_iter()
+                .flat_map(|s| &s.records)
+                .map(|p| p.id.clone())
+                .collect();
+        }
         if selection.remote_desktop_profiles {
             credential_selection.remote_desktop_ids = preview
                 .remote_desktop_profiles_snapshot

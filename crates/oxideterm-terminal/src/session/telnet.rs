@@ -223,6 +223,7 @@ impl TelnetSession {
     pub fn new_with_login(
         config: TelnetSessionConfig,
         login: Option<TelnetLoginCredentials>,
+        upstream_proxy: Option<oxideterm_network_proxy::tcp::UpstreamProxyConfig>,
         cols: usize,
         rows: usize,
         graphics_options: GraphicsOptions,
@@ -251,6 +252,7 @@ impl TelnetSession {
             runtime.spawn(run_telnet_worker(
                 worker_config,
                 login,
+                upstream_proxy,
                 encoding,
                 resize,
                 command_rx,
@@ -1034,28 +1036,25 @@ fn login_line(value: &[u8]) -> zeroize::Zeroizing<Vec<u8>> {
 async fn run_telnet_worker(
     config: TelnetSessionConfig,
     login: Option<TelnetLoginCredentials>,
+    upstream_proxy: Option<oxideterm_network_proxy::tcp::UpstreamProxyConfig>,
     encoding: TerminalEncoding,
     initial_resize: TerminalResize,
     mut command_rx: tokio::sync::mpsc::Receiver<TelnetCommand>,
     worker_tx: crate::backpressure::ByteBoundedSender<TelnetWorkerEvent>,
 ) {
-    let endpoint = (config.host.as_str(), config.port);
-    let stream = match tokio::time::timeout(
-        TELNET_DEFAULT_CONNECT_TIMEOUT,
-        TcpStream::connect(endpoint),
+    let dial = oxideterm_network_proxy::tcp::dial_initial_tcp(
+        &config.host,
+        config.port,
+        TELNET_DEFAULT_CONNECT_TIMEOUT.as_secs(),
+        upstream_proxy.as_ref(),
     )
-    .await
-    {
-        Ok(Ok(stream)) => stream,
-        Ok(Err(error)) => {
+    .await;
+    // Only the handshake needs this credential copy; retries belong to the session registry.
+    drop(upstream_proxy);
+    let stream = match dial {
+        Ok(stream) => stream,
+        Err(error) => {
             let _ = worker_tx.send_control(TelnetWorkerEvent::Failed(error.to_string()));
-            return;
-        }
-        Err(_) => {
-            let _ = worker_tx.send_control(TelnetWorkerEvent::Failed(format!(
-                "timed out connecting to {}",
-                config.endpoint_label()
-            )));
             return;
         }
     };

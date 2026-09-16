@@ -1,12 +1,13 @@
 use super::*;
 use crate::workspace::new_connection::{MoshConnectionOptions, SshTerminalConnectionOptions};
 use crate::workspace::root::init::terminal_preference_overrides;
-use oxideterm_connections::SshChannelStrategy;
+use oxideterm_connections::{SavedUpstreamProxyPolicy, SshChannelStrategy};
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopProtocol,
     RemoteDesktopSecret,
 };
 use oxideterm_session_adapter::managed_key_resolver_from_store;
+use oxideterm_session_adapter::upstream_proxy_config_from_saved_policy;
 use oxideterm_ssh_launch::{RemoteDesktopLaunchProtocol, TemporaryRemoteDesktopLaunch};
 
 const SSH_ROOT_NODE_ID_PREFIX: &str = "ssh";
@@ -382,17 +383,26 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn create_telnet_terminal_tab(
         &mut self,
         config: TelnetSessionConfig,
+        upstream_proxy: SavedUpstreamProxyPolicy,
         terminal_options: ConnectionTerminalOptions,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
         let title = format!("Telnet {}", config.endpoint_label());
-        self.create_telnet_terminal_tab_with_title(config, terminal_options, title, window, cx)
+        self.create_telnet_terminal_tab_with_title(
+            config,
+            upstream_proxy,
+            terminal_options,
+            title,
+            window,
+            cx,
+        )
     }
 
     pub(in crate::workspace) fn create_telnet_terminal_tab_with_title(
         &mut self,
         config: TelnetSessionConfig,
+        upstream_proxy: SavedUpstreamProxyPolicy,
         terminal_options: ConnectionTerminalOptions,
         title: String,
         window: &mut Window,
@@ -400,6 +410,7 @@ impl WorkspaceApp {
     ) -> Result<TerminalSessionId> {
         self.create_telnet_terminal_tab_with_login(
             config,
+            upstream_proxy,
             None,
             terminal_options,
             title,
@@ -411,6 +422,7 @@ impl WorkspaceApp {
     fn create_telnet_terminal_tab_with_login(
         &mut self,
         config: TelnetSessionConfig,
+        upstream_proxy: SavedUpstreamProxyPolicy,
         login: Option<oxideterm_terminal::TelnetLoginCredentials>,
         terminal_options: ConnectionTerminalOptions,
         title: String,
@@ -419,6 +431,7 @@ impl WorkspaceApp {
     ) -> Result<TerminalSessionId> {
         self.create_telnet_terminal_tab_for_connection(
             config,
+            upstream_proxy,
             login,
             terminal_options,
             title,
@@ -431,6 +444,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn create_telnet_terminal_tab_for_connection(
         &mut self,
         config: TelnetSessionConfig,
+        upstream_proxy: SavedUpstreamProxyPolicy,
         login: Option<oxideterm_terminal::TelnetLoginCredentials>,
         terminal_options: ConnectionTerminalOptions,
         title: String,
@@ -438,6 +452,12 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
+        let runtime_proxy = upstream_proxy_config_from_saved_policy(
+            &self.connection_store,
+            self.settings_store.settings(),
+            &upstream_proxy,
+        )
+        .map_err(anyhow::Error::msg)?;
         let tab_id = self.alloc_tab_id(cx);
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
@@ -449,6 +469,7 @@ impl WorkspaceApp {
                 title.clone(),
                 standalone_connections::StandaloneConnectionLaunch::Telnet {
                     config: reconnect_config,
+                    upstream_proxy,
                     terminal_options: reconnect_terminal_options,
                 },
             )
@@ -471,6 +492,7 @@ impl WorkspaceApp {
             TerminalPane::new_telnet_with_login_preferences(
                 pane_config,
                 login,
+                runtime_proxy,
                 preferences,
                 window,
                 cx,
@@ -1151,6 +1173,7 @@ impl WorkspaceApp {
         });
         self.create_telnet_terminal_tab_with_login(
             config,
+            SavedUpstreamProxyPolicy::Direct,
             login,
             ConnectionTerminalOptions::default(),
             title,

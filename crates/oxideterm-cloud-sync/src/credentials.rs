@@ -52,6 +52,19 @@ pub(crate) fn credential_selection(
             .map(|p| p.id.clone())
             .collect();
     }
+    if scope.sync_telnet_profiles {
+        result.telnet_ids = store
+            .telnet_profiles()
+            .iter()
+            .filter(|p| {
+                filter
+                    .telnet_profile_ids
+                    .as_ref()
+                    .is_none_or(|ids| ids.contains(&p.id))
+            })
+            .map(|p| p.id.clone())
+            .collect();
+    }
     if scope.sync_remote_desktop_profiles {
         result.remote_desktop_ids = store
             .remote_desktop_profiles()

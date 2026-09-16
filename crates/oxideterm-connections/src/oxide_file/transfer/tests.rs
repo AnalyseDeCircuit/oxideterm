@@ -395,6 +395,16 @@ mod tests {
         let telnet_profile = source
             .upsert_telnet_profile(SaveTelnetProfileRequest {
                 id: Some("telnet-1".to_string()),
+                upstream_proxy: Some(SavedUpstreamProxyPolicy::Custom {
+                    proxy: SavedUpstreamProxyConfig {
+                        protocol: SavedUpstreamProxyProtocol::Socks5,
+                        host: "proxy.example.test".into(),
+                        port: 1080,
+                        auth: SavedUpstreamProxyAuth::None,
+                        remote_dns: true,
+                        no_proxy: "*.internal".into(),
+                    },
+                }),
                 name: "Router console".to_string(),
                 host: "router.example.test".to_string(),
                 port: 2323,

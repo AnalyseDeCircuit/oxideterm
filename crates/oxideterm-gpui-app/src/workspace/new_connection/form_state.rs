@@ -1245,36 +1245,7 @@ pub(in crate::workspace) fn form_from_remote_desktop_profile(
     form.remote_desktop_session_options = profile.session_options;
     form.remote_desktop_profile_id = Some(profile.id.clone());
     form.remote_desktop_ssh_gateway_connection_id = profile.ssh_gateway_connection_id.clone();
-    match &profile.upstream_proxy {
-        oxideterm_connections::SavedUpstreamProxyPolicy::Direct => {
-            form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::Direct
-        }
-        oxideterm_connections::SavedUpstreamProxyPolicy::UseGlobal => {
-            form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::UseGlobal
-        }
-        oxideterm_connections::SavedUpstreamProxyPolicy::Custom { proxy } => {
-            form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::Custom;
-            form.upstream_proxy_protocol = proxy.protocol;
-            form.upstream_proxy_host = proxy.host.clone();
-            form.upstream_proxy_port = proxy.port.to_string();
-            form.upstream_proxy_remote_dns = proxy.remote_dns;
-            form.upstream_proxy_no_proxy = proxy.no_proxy.clone();
-            match &proxy.auth {
-                oxideterm_connections::SavedUpstreamProxyAuth::None => {
-                    form.upstream_proxy_auth = NewConnectionUpstreamProxyAuth::None
-                }
-                oxideterm_connections::SavedUpstreamProxyAuth::Password {
-                    username,
-                    keychain_id,
-                    ..
-                } => {
-                    form.upstream_proxy_auth = NewConnectionUpstreamProxyAuth::Password;
-                    form.upstream_proxy_username = username.clone();
-                    form.upstream_proxy_password_keychain_id = keychain_id.clone();
-                }
-            }
-        }
-    }
+    apply_saved_upstream_proxy_to_form(&mut form, &profile.upstream_proxy);
     form.saved_password_keychain_id = profile.credential_ref.clone();
     form.save_password = profile.credential_ref.is_some();
     form.group = profile.group.clone().unwrap_or(ungrouped_label);
@@ -1430,6 +1401,42 @@ pub(in crate::workspace) fn form_from_serial_profile(
     form
 }
 
+fn apply_saved_upstream_proxy_to_form(
+    form: &mut NewConnectionForm,
+    policy: &oxideterm_connections::SavedUpstreamProxyPolicy,
+) {
+    match policy {
+        oxideterm_connections::SavedUpstreamProxyPolicy::Direct => {
+            form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::Direct
+        }
+        oxideterm_connections::SavedUpstreamProxyPolicy::UseGlobal => {
+            form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::UseGlobal
+        }
+        oxideterm_connections::SavedUpstreamProxyPolicy::Custom { proxy } => {
+            form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::Custom;
+            form.upstream_proxy_protocol = proxy.protocol;
+            form.upstream_proxy_host = proxy.host.clone();
+            form.upstream_proxy_port = proxy.port.to_string();
+            form.upstream_proxy_remote_dns = proxy.remote_dns;
+            form.upstream_proxy_no_proxy = proxy.no_proxy.clone();
+            match &proxy.auth {
+                oxideterm_connections::SavedUpstreamProxyAuth::None => {
+                    form.upstream_proxy_auth = NewConnectionUpstreamProxyAuth::None
+                }
+                oxideterm_connections::SavedUpstreamProxyAuth::Password {
+                    username,
+                    keychain_id,
+                    ..
+                } => {
+                    form.upstream_proxy_auth = NewConnectionUpstreamProxyAuth::Password;
+                    form.upstream_proxy_username = username.clone();
+                    form.upstream_proxy_password_keychain_id = keychain_id.clone();
+                }
+            }
+        }
+    }
+}
+
 pub(in crate::workspace) fn form_from_telnet_profile(
     profile: &TelnetProfile,
     ungrouped_label: String,
@@ -1438,6 +1445,7 @@ pub(in crate::workspace) fn form_from_telnet_profile(
     let mut form = NewConnectionForm::default();
     form.transport = NewConnectionTransport::Telnet;
     form.telnet_profile_id = Some(profile.id.clone());
+    apply_saved_upstream_proxy_to_form(&mut form, &profile.upstream_proxy);
     form.telnet_profile_name = profile.name.clone();
     form.group = profile.group.clone().unwrap_or(ungrouped_label);
     form.notes = profile.notes.clone().unwrap_or_default();
@@ -1594,12 +1602,25 @@ pub(in crate::workspace) fn next_connection_field(
         return fields[next];
     }
     if transport == NewConnectionTransport::Telnet {
-        let fields = [
+        let mut fields = vec![
             NewConnectionField::TelnetProfileName,
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::Notes,
         ];
+        if upstream_proxy_policy == NewConnectionUpstreamProxyPolicy::Custom {
+            fields.extend([
+                NewConnectionField::UpstreamProxyHost,
+                NewConnectionField::UpstreamProxyPort,
+                NewConnectionField::UpstreamProxyNoProxy,
+            ]);
+            if upstream_proxy_auth == NewConnectionUpstreamProxyAuth::Password {
+                fields.extend([
+                    NewConnectionField::UpstreamProxyUsername,
+                    NewConnectionField::UpstreamProxyPassword,
+                ]);
+            }
+        }
         let index = fields
             .iter()
             .position(|candidate| *candidate == field)
@@ -2733,6 +2754,20 @@ mod tests {
     #[test]
     fn telnet_profile_form_restores_endpoint_and_terminal_settings_for_editing() {
         let mut profile = TelnetProfile::new("Router console", "router.example.com", 2323);
+        profile.upstream_proxy = SavedUpstreamProxyPolicy::Custom {
+            proxy: oxideterm_connections::SavedUpstreamProxyConfig {
+                protocol: oxideterm_connections::SavedUpstreamProxyProtocol::HttpConnect,
+                host: "proxy.test".into(),
+                port: 8080,
+                remote_dns: false,
+                no_proxy: "router.local".into(),
+                auth: oxideterm_connections::SavedUpstreamProxyAuth::Password {
+                    username: "proxy-user".into(),
+                    keychain_id: Some("protected-proxy".into()),
+                    plaintext_password: None,
+                },
+            },
+        };
         profile.id = "telnet-1".to_string();
         profile.group = Some("Lab".to_string());
         profile.notes = Some("Legacy management plane".to_string());
@@ -2744,6 +2779,18 @@ mod tests {
             Some(oxideterm_connections::ConnectionTerminalBackspaceSequence::Delete);
 
         let form = form_from_telnet_profile(&profile, "Ungrouped".to_string());
+        assert_eq!(
+            form.upstream_proxy_policy,
+            super::NewConnectionUpstreamProxyPolicy::Custom
+        );
+        assert_eq!(form.upstream_proxy_host, "proxy.test");
+        assert_eq!(form.upstream_proxy_port, "8080");
+        assert_eq!(form.upstream_proxy_no_proxy, "router.local");
+        assert!(!form.upstream_proxy_remote_dns);
+        assert_eq!(
+            form.upstream_proxy_password_keychain_id.as_deref(),
+            Some("protected-proxy")
+        );
 
         assert_eq!(form.telnet_profile_id.as_deref(), Some("telnet-1"));
         assert_eq!(form.transport, NewConnectionTransport::Telnet);

@@ -140,6 +140,22 @@ fn temporary_sessions_persist_metadata_and_reauthenticate_into_the_same_record()
         StandaloneConnectionKind::Telnet,
         "switch".into(),
         StandaloneConnectionLaunch::Telnet {
+            upstream_proxy: SavedUpstreamProxyPolicy::Custom {
+                proxy: SavedUpstreamProxyConfig {
+                    protocol: SavedUpstreamProxyProtocol::Socks5,
+                    host: "telnet-proxy.test".into(),
+                    port: 1080,
+                    remote_dns: true,
+                    no_proxy: "*.local".into(),
+                    auth: SavedUpstreamProxyAuth::Password {
+                        username: "proxy-user".into(),
+                        keychain_id: None,
+                        plaintext_password: Some(oxideterm_connections::SecretString::from(
+                            "telnet-runtime-secret",
+                        )),
+                    },
+                },
+            },
             config: TelnetSessionConfig {
                 host: "switch.test".into(),
                 port: 2323,
@@ -258,12 +274,33 @@ fn temporary_sessions_persist_metadata_and_reauthenticate_into_the_same_record()
         panic!("temporary serial");
     };
     assert_eq!(config, &serial);
-    let StandaloneConnectionLaunch::Telnet { config, .. } =
-        &restored.record(&telnet_id).unwrap().launch
+    let StandaloneConnectionLaunch::Telnet {
+        config,
+        upstream_proxy,
+        ..
+    } = &restored.record(&telnet_id).unwrap().launch
     else {
         panic!("temporary Telnet");
     };
     assert_eq!((config.host.as_str(), config.port), ("switch.test", 2323));
+    assert!(!persisted.contains("telnet-runtime-secret"));
+    assert_eq!(
+        upstream_proxy,
+        &SavedUpstreamProxyPolicy::Custom {
+            proxy: SavedUpstreamProxyConfig {
+                protocol: SavedUpstreamProxyProtocol::Socks5,
+                host: "telnet-proxy.test".into(),
+                port: 1080,
+                remote_dns: true,
+                no_proxy: "*.local".into(),
+                auth: SavedUpstreamProxyAuth::Password {
+                    username: "proxy-user".into(),
+                    keychain_id: None,
+                    plaintext_password: None
+                },
+            }
+        }
+    );
     let record = restored.record(&mosh_id).unwrap();
     let form = record.reauthentication_form().unwrap();
     assert_eq!(

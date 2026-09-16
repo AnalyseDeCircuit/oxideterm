@@ -344,7 +344,9 @@ fn legacy_preview_selection_respects_connection_scope() {
 #[tokio::test]
 async fn profile_credentials_upload_obeys_resource_selection_without_ssh_sync() {
     use oxideterm_connections::oxide_file::decrypt_oxide_file;
-    use oxideterm_connections::{CredentialOwner, CredentialTarget, MoshProfile, SavedAuth};
+    use oxideterm_connections::{
+        CredentialOwner, CredentialTarget, MoshProfile, SavedAuth, TelnetProfile,
+    };
     let directory = std::env::temp_dir().join(format!(
         "cloud-profile-credentials-{}",
         uuid::Uuid::new_v4()
@@ -356,9 +358,20 @@ async fn profile_credentials_upload_obeys_resource_selection_without_ssh_sync() 
         profile.id = id.into();
         data.mosh_profiles.push(profile);
     }
+    for id in ["selected-telnet", "excluded-telnet"] {
+        let mut profile = TelnetProfile::new(id, "router.test", 23);
+        profile.id = id.into();
+        data.telnet_profiles.push(profile);
+    }
     let mut raw = serde_json::to_value(data).unwrap();
     for profile in raw["mosh_profiles"].as_array_mut().unwrap() {
         profile["auth"] = serde_json::json!({"type":"password", "password":"synthetic-password"});
+    }
+    for profile in raw["telnet_profiles"].as_array_mut().unwrap() {
+        profile["upstream_proxy"] = serde_json::json!({"mode":"custom", "proxy":{
+            "protocol":"socks5", "host":"proxy.test", "port":1080,
+            "auth":{"type":"password", "username":"proxy-user", "password":"telnet-secret"}
+        }});
     }
     let path = directory.join("connections.json");
     std::fs::write(&path, serde_json::to_vec(&raw).unwrap()).unwrap();
@@ -369,6 +382,7 @@ async fn profile_credentials_upload_obeys_resource_selection_without_ssh_sync() 
     let service = CloudSyncOperationService::new();
     let filter = StructuredUploadItemFilter {
         mosh_profile_ids: Some(BTreeSet::from(["selected-mosh".into()])),
+        telnet_profile_ids: Some(BTreeSet::from(["selected-telnet".into()])),
         ..Default::default()
     };
     for enabled in [true, false] {
@@ -376,6 +390,7 @@ async fn profile_credentials_upload_obeys_resource_selection_without_ssh_sync() 
             sync_connections: Some(false),
             sync_sensitive_credentials: Some(enabled),
             sync_mosh_profiles: Some(true),
+            sync_telnet_profiles: Some(true),
             sync_app_settings: Some(false),
             sync_plugin_settings: Some(false),
             ..Default::default()
@@ -406,7 +421,7 @@ async fn profile_credentials_upload_obeys_resource_selection_without_ssh_sync() 
                 .sensitive_credentials
                 .as_ref()
                 .unwrap();
-            assert_eq!(entry.record_count, Some(1));
+            assert_eq!(entry.record_count, Some(2));
             let object = plan
                 .objects
                 .iter()
@@ -418,10 +433,27 @@ async fn profile_credentials_upload_obeys_resource_selection_without_ssh_sync() 
             )
             .unwrap();
             assert!(payload.connections.is_empty());
-            assert_eq!(payload.portable_secrets.len(), 1);
-            let target: CredentialTarget =
-                serde_json::from_str(&payload.portable_secrets[0].id).unwrap();
-            assert_eq!(target.owner, CredentialOwner::Mosh("selected-mosh".into()));
+            let targets = payload
+                .portable_secrets
+                .iter()
+                .map(|secret| {
+                    let target: CredentialTarget = serde_json::from_str(&secret.id).unwrap();
+                    (target.owner, secret.secret.as_str())
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                targets,
+                vec![
+                    (
+                        CredentialOwner::Mosh("selected-mosh".into()),
+                        "synthetic-password"
+                    ),
+                    (
+                        CredentialOwner::Telnet("selected-telnet".into()),
+                        "telnet-secret"
+                    ),
+                ]
+            );
         } else {
             assert!(plan.manifest.sections.sensitive_credentials.is_none());
         }

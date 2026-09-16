@@ -217,7 +217,13 @@ impl WorkspaceApp {
             host: host.clone(),
             port,
         };
-        match self.create_telnet_terminal_tab(config, Default::default(), window, cx) {
+        match self.create_telnet_terminal_tab(
+            config,
+            oxideterm_connections::SavedUpstreamProxyPolicy::Direct,
+            Default::default(),
+            window,
+            cx,
+        ) {
             Ok(session_id) => {
                 let label = format!("Telnet {host}:{port}");
                 plugin_runtime::PluginResponse::ok(

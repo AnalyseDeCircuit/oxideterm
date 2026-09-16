@@ -193,6 +193,19 @@ fn update_reference(
                 _ => bail!("Invalid remote desktop credential slot"),
             }
         }
+        CredentialOwner::Telnet(id) => {
+            let profile = data
+                .telnet_profiles
+                .iter_mut()
+                .find(|p| &p.id == id)
+                .context("Telnet profile is unavailable")?;
+            match target.slot {
+                CredentialSlot::UpstreamProxy => {
+                    set_policy_reference(&mut profile.upstream_proxy, reference)?
+                }
+                _ => bail!("Invalid Telnet credential slot"),
+            }
+        }
         CredentialOwner::GlobalProxy => {
             data.synced_global_proxy_reference = reference.clone();
             data.global_proxy_credential_cleared = reference.is_none();

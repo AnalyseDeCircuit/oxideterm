@@ -986,7 +986,13 @@ impl WorkspaceApp {
             host: profile.host.clone(),
             port: profile.port,
         };
-        match self.create_telnet_terminal_tab(config, profile.terminal, window, cx) {
+        match self.create_telnet_terminal_tab(
+            config,
+            profile.upstream_proxy,
+            profile.terminal,
+            window,
+            cx,
+        ) {
             Ok(session_id) => {
                 self.telnet_terminal_profile_ids
                     .insert(session_id, profile.id.clone());

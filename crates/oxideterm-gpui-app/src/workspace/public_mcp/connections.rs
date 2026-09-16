@@ -408,6 +408,7 @@ fn save_profile(
                 typed_existing_id(existing_key, CONNECTION_KEY_TELNET_PREFIX, "telnet")?;
             let saved = store
                 .upsert_telnet_profile(SaveTelnetProfileRequest {
+                    upstream_proxy: None,
                     id: existing_id.map(ToOwned::to_owned),
                     name: profile.name.clone(),
                     group: profile.group.clone(),

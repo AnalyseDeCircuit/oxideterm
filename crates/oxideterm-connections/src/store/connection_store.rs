@@ -1002,6 +1002,8 @@ impl ConnectionStore {
         let group = normalize_optional_group_name(request.group.as_deref())?;
         let now = Utc::now();
         let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let previous_credentials =
+            self.stored_credential_targets(&CredentialOwner::Telnet(id.clone()));
         let mut profile = self
             .data
             .telnet_profiles
@@ -1014,7 +1016,7 @@ impl ConnectionStore {
                 profile.id = id.clone();
                 profile
             });
-
+        let old_proxy_ids = collect_keychain_ids_for_upstream_proxy(&profile.upstream_proxy);
         profile.name = request.name.trim().to_string();
         profile.group = group;
         profile.notes = normalize_optional_text(request.notes);
@@ -1023,6 +1025,13 @@ impl ConnectionStore {
         profile.icon_background_color = normalize_optional_text(request.icon_background_color);
         profile.host = request.host.trim().to_string();
         profile.port = request.port;
+        profile.upstream_proxy = self.materialize_upstream_proxy_policy(
+            request
+                .upstream_proxy
+                .unwrap_or_else(|| profile.upstream_proxy.clone()),
+            Some(&profile.upstream_proxy),
+        )?;
+        let next_proxy_ids = collect_keychain_ids_for_upstream_proxy(&profile.upstream_proxy);
         profile.terminal = request.terminal;
         profile.connect_on_open = request.connect_on_open.unwrap_or(false);
         if !self
@@ -1046,17 +1055,34 @@ impl ConnectionStore {
         } else {
             self.data.telnet_profiles.push(profile.clone());
         }
+        self.record_cleared_credentials(previous_credentials);
         self.normalize();
         self.save()?;
+        for id in old_proxy_ids
+            .into_iter()
+            .filter(|id| !next_proxy_ids.contains(id))
+        {
+            self.delete_or_queue_connection_keychain_entry(id)?;
+        }
         Ok(profile)
     }
 
     pub fn delete_telnet_profile(&mut self, id: &str) -> Result<bool> {
+        let proxy_ids = self
+            .data
+            .telnet_profiles
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| collect_keychain_ids_for_upstream_proxy(&p.upstream_proxy))
+            .unwrap_or_default();
         let before = self.data.telnet_profiles.len();
         self.data.telnet_profiles.retain(|profile| profile.id != id);
         let deleted = self.data.telnet_profiles.len() != before;
         if deleted {
             self.save()?;
+            for reference in proxy_ids {
+                self.delete_or_queue_connection_keychain_entry(reference)?;
+            }
         }
         Ok(deleted)
     }

@@ -7,6 +7,105 @@ fn store() -> ConnectionStore {
     .unwrap()
 }
 
+#[test]
+fn telnet_proxy_preserves_legacy_direct_routes_and_restores_selected_credentials() {
+    let mut legacy = serde_json::to_value(TelnetProfile::new("router", "router.test", 23)).unwrap();
+    legacy.as_object_mut().unwrap().remove("upstream_proxy");
+    let restored: TelnetProfile = serde_json::from_value(legacy).unwrap();
+    assert_eq!(restored.upstream_proxy, SavedUpstreamProxyPolicy::Direct);
+
+    let mut source = store();
+    let mut request = SaveTelnetProfileRequest {
+        name: "router".into(),
+        host: "router.test".into(),
+        port: 23,
+        upstream_proxy: Some(SavedUpstreamProxyPolicy::Custom {
+            proxy: SavedUpstreamProxyConfig {
+                protocol: SavedUpstreamProxyProtocol::Socks5,
+                host: "proxy.test".into(),
+                port: 1080,
+                remote_dns: true,
+                no_proxy: "*.internal".into(),
+                auth: SavedUpstreamProxyAuth::Password {
+                    username: "proxy-user".into(),
+                    keychain_id: None,
+                    plaintext_password: Some(SecretString::from("telnet-proxy-secret")),
+                },
+            },
+        }),
+        ..Default::default()
+    };
+    let saved = source.upsert_telnet_profile(request.clone()).unwrap();
+    let SavedUpstreamProxyPolicy::Custom { proxy } = &saved.upstream_proxy else {
+        panic!("proxy missing")
+    };
+    assert_eq!(
+        source
+            .get_saved_upstream_proxy_password(&proxy.auth)
+            .unwrap(),
+        "telnet-proxy-secret"
+    );
+    assert!(
+        !fs::read_to_string(source.path())
+            .unwrap()
+            .contains("telnet-proxy-secret")
+    );
+    request.id = Some(saved.id.clone());
+    request.upstream_proxy = None;
+    assert_eq!(
+        source
+            .upsert_telnet_profile(request)
+            .unwrap()
+            .upstream_proxy,
+        saved.upstream_proxy
+    );
+
+    let selection = CredentialSyncSelection {
+        telnet_ids: BTreeSet::from([saved.id.clone()]),
+        ..Default::default()
+    };
+    let snapshot = source.export_telnet_profiles_snapshot().unwrap();
+    let json = serde_json::to_value(&snapshot).unwrap();
+    assert_eq!(
+        json["records"][0]["upstream_proxy"]["proxy"]["auth"],
+        serde_json::json!({"type":"password", "username":"proxy-user"})
+    );
+    let secrets = source.export_profile_credentials(&selection, None).unwrap();
+    let mut target = store();
+    target
+        .apply_telnet_profiles_snapshot(snapshot.clone())
+        .unwrap();
+    let mut prepared = target
+        .prepare_profile_credentials(&secrets, &selection, &mut None)
+        .unwrap();
+    target.save().unwrap();
+    target.commit_profile_credentials(&mut prepared).unwrap();
+    // Metadata-only updates must retain this device's restored credential reference.
+    target.apply_telnet_profiles_snapshot(snapshot).unwrap();
+    let SavedUpstreamProxyPolicy::Custom { proxy } = &target.telnet_profiles()[0].upstream_proxy
+    else {
+        panic!("restored proxy missing")
+    };
+    assert_eq!(
+        (&proxy.host, proxy.port, proxy.remote_dns, &proxy.no_proxy),
+        (
+            &"proxy.test".to_string(),
+            1080,
+            true,
+            &"*.internal".to_string()
+        )
+    );
+    assert_eq!(
+        target
+            .get_saved_upstream_proxy_password(&proxy.auth)
+            .unwrap(),
+        "telnet-proxy-secret"
+    );
+    let auth = proxy.auth.clone();
+    target.delete_telnet_profile(&saved.id).unwrap();
+    assert!(target.get_saved_upstream_proxy_password(&auth).is_err());
+}
+
 fn password_auth(store: &ConnectionStore, value: &str) -> SavedAuth {
     let reference = Uuid::new_v4().to_string();
     store

@@ -1605,8 +1605,8 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((config, terminal_options, mut save_request)) =
-            self.with_connection_form_mut(cx, |this, form, cx| {
+        let Some((config, upstream_proxy, terminal_options, mut save_request)) = self
+            .with_connection_form_mut(cx, |this, form, cx| {
                 let form = form?;
                 let host = form.host.trim().to_string();
                 let port = form.port.trim().parse::<u16>().ok();
@@ -1621,6 +1621,25 @@ impl WorkspaceApp {
                     return None;
                 };
                 let editing_profile_id = form.telnet_profile_id.clone();
+                let mut upstream_proxy = match saved_upstream_proxy_policy_from_form(form) {
+                    Ok(policy) => policy,
+                    Err(error) => {
+                        form.error = Some(error.to_string());
+                        cx.notify();
+                        return None;
+                    }
+                };
+                if let SavedUpstreamProxyPolicy::Custom { proxy } = &mut upstream_proxy
+                    && let SavedUpstreamProxyAuth::Password {
+                        keychain_id,
+                        plaintext_password,
+                        ..
+                    } = &mut proxy.auth
+                    && plaintext_password.is_some()
+                {
+                    // An explicitly edited password overrides the old protected-store reference.
+                    *keychain_id = None;
+                }
                 let existing_connect_on_open = editing_profile_id.as_deref().and_then(|id| {
                     this.connection_store
                         .telnet_profiles()
@@ -1632,6 +1651,7 @@ impl WorkspaceApp {
                 let should_save_profile =
                     editing_profile_id.is_some() || action != NewConnectionSubmitAction::Connect;
                 let save_request = should_save_profile.then(|| SaveTelnetProfileRequest {
+                    upstream_proxy: Some(upstream_proxy.clone()),
                     id: editing_profile_id,
                     name: telnet_profile_name_or_endpoint(&form.telnet_profile_name, &host, port),
                     group: serial_profile_group_from_form(&form.group, &this.i18n),
@@ -1648,7 +1668,7 @@ impl WorkspaceApp {
                 let terminal_options = form.terminal.clone();
                 form.pending = true;
                 form.error = None;
-                Some((config, terminal_options, save_request))
+                Some((config, upstream_proxy, terminal_options, save_request))
             })
         else {
             return;
@@ -1706,7 +1726,8 @@ impl WorkspaceApp {
 
         // Telnet is opened as a native local terminal transport. It does not
         // create an SSH node, so SSH-only saved-connection/test flows stay out.
-        match self.create_telnet_terminal_tab(config, terminal_options, window, cx) {
+        match self.create_telnet_terminal_tab(config, upstream_proxy, terminal_options, window, cx)
+        {
             Ok(session_id) => {
                 if let Some(request) = save_request {
                     match self.connection_store.upsert_telnet_profile(request) {

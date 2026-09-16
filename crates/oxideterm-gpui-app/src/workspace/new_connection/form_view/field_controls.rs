@@ -2860,7 +2860,7 @@ impl WorkspaceApp {
                             }
                             apply_transport_default_port(form, previous_transport, transport);
                             apply_transport_default_username(form, previous_transport, transport);
-                            if transport == NewConnectionTransport::Rdp && previous_transport != transport {
+                            if matches!(transport, NewConnectionTransport::Rdp | NewConnectionTransport::Telnet) && previous_transport != transport {
                                 form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::Direct;
                                 form.upstream_proxy_protocol = SavedUpstreamProxyProtocol::Socks5;
                             }
@@ -3682,6 +3682,7 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(self.tokens.metrics.modal_section_gap))
             .child(self.render_connection_form_section(ConnectionFormSection::Basic, basic, cx))
+            .child(self.render_upstream_proxy_policy_section(false, cx))
             .child(self.render_connection_form_section(
                 ConnectionFormSection::Terminal,
                 self.render_connection_terminal_options(cx),

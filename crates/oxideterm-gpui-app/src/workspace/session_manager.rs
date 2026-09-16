@@ -1055,7 +1055,8 @@ pub(in crate::workspace) use self::helpers::save_request_from_form;
 pub(in crate::workspace) use self::helpers::{
     RuntimeSecretHandoff, duplicate_connection_template_name, form_from_saved_connection,
     restore_legacy_jump_host_in_form, save_request_from_form_with_existing_auth,
-    save_request_from_form_with_proxy_hop_prefix, upstream_proxy_config_from_form,
+    save_request_from_form_with_proxy_hop_prefix, saved_upstream_proxy_policy_from_form,
+    upstream_proxy_config_from_form,
 };
 
 #[cfg(test)]

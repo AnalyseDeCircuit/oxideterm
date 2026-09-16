@@ -892,12 +892,13 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Self> {
-        Self::new_telnet_with_login_preferences(config, None, preferences, window, cx)
+        Self::new_telnet_with_login_preferences(config, None, None, preferences, window, cx)
     }
 
     pub fn new_telnet_with_login_preferences(
         config: TelnetSessionConfig,
         login: Option<oxideterm_terminal::TelnetLoginCredentials>,
+        upstream_proxy: Option<oxideterm_ssh::UpstreamProxyConfig>,
         preferences: TerminalUiPreferences,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -905,6 +906,7 @@ impl TerminalPane {
         let terminal = Arc::new(Mutex::new(TerminalSession::telnet_with_login_and_encoding(
             config,
             login,
+            upstream_proxy,
             DEFAULT_COLS,
             DEFAULT_ROWS,
             graphics_options_from_preferences(&preferences),

@@ -8367,6 +8367,7 @@ dependencies = [
  "memchr",
  "oxideterm-modem-transfer",
  "oxideterm-mosh",
+ "oxideterm-network-proxy",
  "oxideterm-ssh",
  "oxideterm-terminal-encoding",
  "oxideterm-terminal-graphics",

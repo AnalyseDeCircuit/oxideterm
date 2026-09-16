@@ -301,6 +301,7 @@ impl WorkspaceApp {
                     session_id,
                 ),
                 saved_profile_id,
+                &self.connection_store,
             );
         }
         if let Some(location) = self.tab_host.read(cx).terminal_location(session_id) {

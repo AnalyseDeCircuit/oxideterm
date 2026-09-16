@@ -435,7 +435,8 @@ impl CloudSyncPageRenderer {
                 CredentialOwner::Connection(id)
                 | CredentialOwner::StandaloneSftp(id)
                 | CredentialOwner::Mosh(id)
-                | CredentialOwner::RemoteDesktop(id) => id.clone(),
+                | CredentialOwner::RemoteDesktop(id)
+                | CredentialOwner::Telnet(id) => id.clone(),
                 CredentialOwner::GlobalProxy => self.i18n.t("modals.upstream_proxy.policy"),
             };
             let name = if let CloudSyncPendingPreview::Structured(preview) = preview {
@@ -460,6 +461,11 @@ impl CloudSyncPageRenderer {
                         .remote_desktop_profiles_snapshot
                         .as_ref()
                         .and_then(|s| s.records.iter().find(|p| &p.id == id))
+                        .map(|p| p.name.clone()),
+                    CredentialOwner::Telnet(id) => preview
+                        .telnet_profiles_snapshot
+                        .as_ref()
+                        .and_then(|snapshot| snapshot.records.iter().find(|p| &p.id == id))
                         .map(|p| p.name.clone()),
                     CredentialOwner::GlobalProxy => None,
                 }

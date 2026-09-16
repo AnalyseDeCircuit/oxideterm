@@ -184,6 +184,7 @@ impl TerminalSession {
         Self::telnet_with_login_and_encoding(
             config,
             None,
+            None,
             cols,
             rows,
             graphics_options,
@@ -195,6 +196,7 @@ impl TerminalSession {
     pub fn telnet_with_login_and_encoding(
         config: TelnetSessionConfig,
         login: Option<TelnetLoginCredentials>,
+        upstream_proxy: Option<oxideterm_network_proxy::tcp::UpstreamProxyConfig>,
         cols: usize,
         rows: usize,
         graphics_options: GraphicsOptions,
@@ -206,6 +208,7 @@ impl TerminalSession {
             backend: Box::new(TelnetSession::new_with_login(
                 config,
                 login,
+                upstream_proxy,
                 cols,
                 rows,
                 graphics_options,

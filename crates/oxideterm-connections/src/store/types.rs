@@ -943,6 +943,8 @@ pub struct TelnetProfile {
     pub icon_background_color: Option<String>,
     pub host: String,
     pub port: u16,
+    #[serde(default = "default_telnet_upstream_proxy")]
+    pub upstream_proxy: SavedUpstreamProxyPolicy,
     #[serde(
         default,
         skip_serializing_if = "ConnectionTerminalOptions::inherits_application_defaults"
@@ -967,6 +969,7 @@ pub struct SaveTelnetProfileRequest {
     pub icon_background_color: Option<String>,
     pub host: String,
     pub port: u16,
+    pub upstream_proxy: Option<SavedUpstreamProxyPolicy>,
     pub terminal: ConnectionTerminalOptions,
     pub connect_on_open: Option<bool>,
 }
@@ -1499,6 +1502,10 @@ impl SerialProfile {
     }
 }
 
+pub fn default_telnet_upstream_proxy() -> SavedUpstreamProxyPolicy {
+    SavedUpstreamProxyPolicy::Direct
+}
+
 impl TelnetProfile {
     pub fn new(name: impl Into<String>, host: impl Into<String>, port: u16) -> Self {
         let now = Utc::now();
@@ -1512,6 +1519,7 @@ impl TelnetProfile {
             icon_background_color: None,
             host: host.into(),
             port,
+            upstream_proxy: SavedUpstreamProxyPolicy::Direct,
             terminal: ConnectionTerminalOptions::default(),
             connect_on_open: false,
             created_at: now,
@@ -1529,6 +1537,11 @@ impl TelnetProfile {
         }
         if self.host.trim().is_empty() {
             bail!("Telnet host is required");
+        }
+        if let SavedUpstreamProxyPolicy::Custom { proxy } = &self.upstream_proxy
+            && (proxy.host.trim().is_empty() || proxy.port == 0)
+        {
+            bail!("Telnet upstream proxy requires a host and a nonzero port");
         }
         Ok(())
     }

@@ -63,6 +63,6 @@ pub use store::{
     SavedUpstreamProxyProtocol, SerialFlowControl, SerialLineEnding, SerialParity, SerialProfile,
     SerialProfilesSyncSnapshot, SshAlgorithmPreferences, SshChannelStrategy,
     StandaloneSftpEndpoint, StandaloneSftpProfile, StandaloneSftpProfilesSyncSnapshot,
-    StandaloneSftpTransferMode, TelnetProfile, TelnetProfilesSyncSnapshot, is_profile_credential,
-    validate_group_name,
+    StandaloneSftpTransferMode, TelnetProfile, TelnetProfilesSyncSnapshot,
+    default_telnet_upstream_proxy, is_profile_credential, validate_group_name,
 };
