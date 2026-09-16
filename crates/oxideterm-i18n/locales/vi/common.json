@@ -25,7 +25,8 @@
   "markdown": {
     "mermaid_unsupported": "Sơ đồ Mermaid không được hỗ trợ",
     "mermaid_expand": "Phóng to",
-    "mermaid_loading": "Đang kết xuất sơ đồ…"
+    "mermaid_loading": "Đang kết xuất sơ đồ…",
+    "html_details": "Chi tiết"
   },
   "layout": {
     "empty": {

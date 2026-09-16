@@ -35,18 +35,19 @@
 //!   underline, highlight, subscript, and superscript)
 //! - Safe native block HTML (headings, containers, lists, quotes, preformatted
 //!   code, tables, details content, and alignment); scripts are never executed
-//!   and CSS is ignored
+//!   and only image dimensions and text alignment are accepted from inline styles
 //! - Bare `http://` / `https://` URL autolinks
 //! - Horizontal rules
 //! - Smart punctuation
 
+mod disclosure;
 pub mod highlight;
 mod html;
 pub mod layout;
-pub mod navigation;
 pub mod math;
 pub mod mermaid;
 pub mod model;
+pub mod navigation;
 pub mod options;
 pub mod parser;
 pub mod render;
@@ -60,10 +61,22 @@ pub use render::{MarkdownCodeBlockActions, MarkdownMermaidZoomHandler};
 use gpui::{AnyElement, ElementId, ScrollHandle};
 use oxideterm_theme::ThemeTokens;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct MarkdownVirtualListScrollHandle {
     scroll: ScrollHandle,
     measurements: layout::MarkdownMeasurements,
+    navigation: navigation::MarkdownNavigation,
+}
+
+impl Default for MarkdownVirtualListScrollHandle {
+    fn default() -> Self {
+        let scroll = ScrollHandle::new();
+        Self {
+            navigation: navigation::MarkdownNavigation::new(scroll.clone()),
+            scroll,
+            measurements: Default::default(),
+        }
+    }
 }
 
 impl MarkdownVirtualListScrollHandle {

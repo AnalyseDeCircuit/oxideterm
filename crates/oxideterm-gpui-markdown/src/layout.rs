@@ -38,6 +38,7 @@ pub struct MarkdownBlockLayout {
     items: Rc<Vec<MarkdownLayoutItem>>,
     item_sizes: Rc<Vec<Size<Pixels>>>,
     measured: Option<Rc<RefCell<Vec<Option<f32>>>>>,
+    pub(crate) disclosures: crate::disclosure::DisclosureState,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -60,12 +61,18 @@ impl MarkdownMeasurements {
         let mut state = self.0.borrow_mut();
         let fonts = (opts.body_font_family.clone(), opts.code_font_family.clone());
         if let Some(previous) = state.as_ref()
+            && previous.layout.items == layout.items
+        {
+            layout.disclosures = previous.layout.disclosures.clone();
+        }
+        if let Some(previous) = state.as_ref()
             && previous.width == width
             && previous.fonts == fonts
             && previous.layout.items == layout.items
             && previous.layout.item_sizes == layout.item_sizes
         {
             layout.measured = previous.layout.measured.clone();
+            layout.disclosures = previous.layout.disclosures.clone();
             return layout;
         }
         layout.measured = Some(Rc::new(RefCell::new(vec![None; layout.items.len()])));
@@ -113,6 +120,7 @@ impl MarkdownBlockLayout {
             items: Rc::new(items),
             item_sizes: Rc::new(item_sizes),
             measured: None,
+            disclosures: Default::default(),
         }
     }
 
@@ -236,6 +244,14 @@ fn estimate_block_height(block: &Block, opts: &MarkdownOptions) -> f32 {
                 * BODY_LINE_HEIGHT
         }
         Block::HtmlContainer { blocks, .. } => estimate_blocks_height(blocks, opts),
+        Block::Details { blocks, open, .. } => {
+            opts.base_font_size * BODY_LINE_HEIGHT
+                + if *open {
+                    opts.block_gap + estimate_blocks_height(blocks, opts)
+                } else {
+                    0.0
+                }
+        }
         Block::CodeBlock { code, .. } => {
             let code_size = opts.base_font_size * opts.code_font_scale;
             let label_height = code_size * opts.code_label_font_scale * 1.3 + 8.0 + 3.0;
@@ -256,31 +272,13 @@ fn estimate_block_height(block: &Block, opts: &MarkdownOptions) -> f32 {
             estimate_blocks_height(blocks, opts) + opts.block_gap + opts.blockquote_border_width
         }
         Block::Table { headers, rows, .. } => {
-            let row_font_height = opts.base_font_size * BODY_LINE_HEIGHT + TABLE_ROW_EXTRA;
-            let header_lines = headers
-                .iter()
-                .map(|cell| {
-                    estimate_wrapped_lines(
-                        inlines_text_len(cell),
-                        chars_per_line(opts.base_font_size, false) / headers.len().max(1) as f32,
-                    )
-                })
-                .fold(1.0, f32::max);
-            let body_lines: f32 = rows
-                .iter()
-                .map(|row| {
-                    row.iter()
-                        .map(|cell| {
-                            estimate_wrapped_lines(
-                                inlines_text_len(cell),
-                                chars_per_line(opts.base_font_size, false)
-                                    / headers.len().max(1) as f32,
-                            )
-                        })
-                        .fold(1.0, f32::max)
-                })
-                .sum();
-            (header_lines + body_lines) * row_font_height + 2.0
+            let row_height = |row: &[Vec<Block>]| {
+                row.iter()
+                    .map(|cell| estimate_blocks_height(cell, opts))
+                    .fold(opts.base_font_size * BODY_LINE_HEIGHT, f32::max)
+                    + TABLE_ROW_EXTRA
+            };
+            row_height(headers) + rows.iter().map(|row| row_height(row)).sum::<f32>() + 2.0
         }
     }
     .max(MIN_BLOCK_HEIGHT)
@@ -346,5 +344,43 @@ fn inline_text_len(inline: &Inline) -> usize {
         }
         Inline::FootnoteReference { label, .. } => label.chars().count() + 2,
         Inline::LineBreak => LINE_BREAK_ESTIMATED_TEXT_LEN,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disclosure_state_survives_relayout_but_not_replacement_documents() {
+        let document = crate::parser::parse(
+            "<details><summary>A</summary><p>Body</p></details><details open><summary>B</summary><p>Other</p></details>",
+        );
+        let opts = MarkdownOptions::default();
+        let measurements = MarkdownMeasurements::default();
+        let layout = measurements.prepare(
+            MarkdownBlockLayout::from_document(&document, &opts),
+            640.0,
+            &opts,
+        );
+        layout.disclosures.toggle("html-details", false);
+        layout.disclosures.toggle("html-details-2", true);
+        for width in [640.0, 320.0] {
+            let layout = measurements.prepare(
+                MarkdownBlockLayout::from_document(&document, &opts),
+                width,
+                &opts,
+            );
+            assert!(layout.disclosures.is_open("html-details", false));
+            assert!(!layout.disclosures.is_open("html-details-2", true));
+        }
+        let replacement =
+            crate::parser::parse("<details><summary>Different</summary><p>New body</p></details>");
+        let layout = measurements.prepare(
+            MarkdownBlockLayout::from_document(&replacement, &opts),
+            320.0,
+            &opts,
+        );
+        assert!(!layout.disclosures.is_open("html-details", false));
     }
 }

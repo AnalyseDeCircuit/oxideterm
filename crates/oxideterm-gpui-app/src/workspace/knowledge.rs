@@ -1137,6 +1137,7 @@ impl Render for KnowledgeDocumentEditor {
                                         &self.preview_scroll,
                                         actions.as_ref(),
                                         &mut |key, text, runs, links| {
+                                            let join_previous = key.join_previous;
                                             let index = order;
                                             order += 1;
                                             if let Some(state) = selectable.as_ref() {
@@ -1144,7 +1145,7 @@ impl Render for KnowledgeDocumentEditor {
                                                     super::selectable_text::SelectableTextRole::PlainDocument,
                                                     group_id,
                                                     super::selectable_text::selectable_text_id("notes-preview-fragment", (group_id, key)),
-                                                    index, text, runs, links,
+                                                    index, text, runs, links, join_previous,
                                                 )
                                             } else {
                                                 gpui::StyledText::new(text).with_runs(runs).into_any_element()

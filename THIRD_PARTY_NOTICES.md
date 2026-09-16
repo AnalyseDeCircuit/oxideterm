@@ -2,12 +2,12 @@
 
 This file lists third-party Rust crates and detected licenses, including transitive dependencies.
 It is generated from `cargo deny list -f json -l crate`.
-Generated: 2026-09-15T16:51:42.608010Z
+Generated: 2026-09-16T05:36:48.130252Z
 
 ## Summary
 
-- MIT: 1089
-- Apache-2.0: 876
+- MIT: 1091
+- Apache-2.0: 877
 - Apache-2.0 WITH LLVM-exception: 59
 - Zlib: 45
 - BSD-3-Clause: 21
@@ -451,6 +451,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | hmac | 0.13.0 | MIT, Apache-2.0 | https://crates.io/crates/hmac |
 | home | 0.5.12 | MIT, Apache-2.0 | https://crates.io/crates/home |
 | html5ever | 0.39.0 | MIT, Apache-2.0 | https://crates.io/crates/html5ever |
+| html5gum | 0.8.4 | MIT | https://crates.io/crates/html5gum |
 | http | 1.4.0 | MIT, Apache-2.0 | https://crates.io/crates/http |
 | http-body | 1.0.1 | MIT | https://crates.io/crates/http-body |
 | http-body-util | 0.1.3 | MIT | https://crates.io/crates/http-body-util |
@@ -520,6 +521,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | itertools | 0.13.0 | MIT, Apache-2.0 | https://crates.io/crates/itertools |
 | itertools | 0.14.0 | MIT, Apache-2.0 | https://crates.io/crates/itertools |
 | itoa | 1.0.18 | MIT, Apache-2.0 | https://crates.io/crates/itoa |
+| jetscii | 0.5.3 | MIT, Apache-2.0 | https://crates.io/crates/jetscii |
 | jni | 0.21.1 | MIT, Apache-2.0 | https://crates.io/crates/jni |
 | jni-sys | 0.3.1 | MIT, Apache-2.0 | https://crates.io/crates/jni-sys |
 | jni-sys | 0.4.1 | MIT, Apache-2.0 | https://crates.io/crates/jni-sys |

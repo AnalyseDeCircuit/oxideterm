@@ -38,14 +38,21 @@ pub fn parse_with_smart_punctuation(
     source: &str,
     enable_smart_punctuation: bool,
 ) -> MarkdownDocument {
-    parse_events(Parser::new_ext(
-        source,
-        markdown_options(enable_smart_punctuation),
-    ))
+    parse_events(
+        Parser::new_ext(source, markdown_options(enable_smart_punctuation)),
+        enable_smart_punctuation,
+    )
 }
 
-fn parse_events<'input>(parser: impl Iterator<Item = Event<'input>>) -> MarkdownDocument {
-    let mut ctx = ParseContext::default();
+fn parse_events<'input>(
+    parser: impl Iterator<Item = Event<'input>>,
+    smart_punctuation: bool,
+) -> MarkdownDocument {
+    let mut ctx = ParseContext {
+        smart_punctuation,
+        ..Default::default()
+    };
+    let mut html_block = String::new();
 
     for event in parser {
         match &event {
@@ -62,6 +69,11 @@ fn parse_events<'input>(parser: impl Iterator<Item = Event<'input>>) -> Markdown
         }
 
         match event {
+            Event::Start(Tag::HtmlBlock) => html_block.clear(),
+            Event::End(TagEnd::HtmlBlock) => {
+                ctx.push_html(&html_block);
+                html_block.clear();
+            }
             // ── block-level open ────────────────────────────────────
             Event::Start(Tag::Heading { level, id, .. }) => {
                 ctx.push_inline_stack();
@@ -159,15 +171,7 @@ fn parse_events<'input>(parser: impl Iterator<Item = Event<'input>>) -> Markdown
                 ctx.push_inline_html(&html);
             }
             Event::Html(html) => {
-                let blocks = {
-                    let mut heading_id_for = |inlines: &[Inline], explicit_id: Option<&str>| {
-                        ctx.unique_heading_id(inlines, explicit_id)
-                    };
-                    html::parse_block_fragment(&html, &mut heading_id_for)
-                };
-                for block in blocks {
-                    ctx.push_block(block);
-                }
+                html_block.push_str(&html);
             }
             Event::Code(code) => {
                 ctx.push_inline(Inline::Code(code.to_string()));
@@ -193,7 +197,14 @@ fn parse_events<'input>(parser: impl Iterator<Item = Event<'input>>) -> Markdown
             Event::FootnoteReference(label) => {
                 let label = label.to_string();
                 let index = ctx.footnote_index(&label);
-                ctx.push_inline(Inline::FootnoteReference { label, index });
+                let occurrence = ctx.footnote_occurrences.entry(label.clone()).or_default();
+                *occurrence += 1;
+                let occurrence = *occurrence;
+                ctx.push_inline(Inline::FootnoteReference {
+                    label,
+                    index,
+                    occurrence,
+                });
             }
 
             // ── task list marker ────────────────────────────────────
@@ -277,7 +288,7 @@ fn parse_events<'input>(parser: impl Iterator<Item = Event<'input>>) -> Markdown
             Event::End(TagEnd::TableCell) => {
                 let inlines = ctx.pop_inline_stack();
                 if let Some(ref mut table) = ctx.table_state {
-                    table.current_row.push(inlines);
+                    table.current_row.push(vec![Block::Paragraph { inlines }]);
                 }
             }
             Event::End(TagEnd::Table) => {
@@ -322,7 +333,11 @@ fn parse_events<'input>(parser: impl Iterator<Item = Event<'input>>) -> Markdown
                 let url = ctx.image_url.take().unwrap_or_default();
                 // Flatten inner inlines into a plain-text alt string.
                 let alt = inlines_to_plain_text(&inner);
-                ctx.push_inline(Inline::Image { alt, url });
+                ctx.push_inline(Inline::Image {
+                    alt,
+                    url,
+                    dimensions: Default::default(),
+                });
             }
 
             // ── standalone ──────────────────────────────────────────
@@ -333,6 +348,9 @@ fn parse_events<'input>(parser: impl Iterator<Item = Event<'input>>) -> Markdown
         }
     }
 
+    while matches!(ctx.block_containers.last(), Some(BlockContainer::Details)) {
+        ctx.close_details();
+    }
     let footnotes = ctx.ordered_footnotes();
 
     MarkdownDocument {
@@ -345,6 +363,10 @@ fn parse_events<'input>(parser: impl Iterator<Item = Event<'input>>) -> Markdown
 
 #[derive(Default)]
 struct ParseContext {
+    smart_punctuation: bool,
+    details: Vec<DetailsFrame>,
+    summary_html: Option<String>,
+    skipped_details: usize,
     blocks: Vec<Block>,
     /// Stack of inline containers — each entry collects children for one
     /// nesting level (paragraph, heading, emphasis, strong, link, list item, …).
@@ -381,6 +403,7 @@ struct ParseContext {
     /// First-reference order used for display numbering.
     footnote_reference_order: Vec<String>,
     footnote_indices: HashMap<String, usize>,
+    footnote_occurrences: HashMap<String, usize>,
     heading_ids: HashMap<String, usize>,
 }
 
@@ -391,9 +414,9 @@ struct ListState {
 
 struct TableState {
     alignments: Vec<TableAlignment>,
-    headers: Vec<Vec<Inline>>,
-    rows: Vec<Vec<Vec<Inline>>>,
-    current_row: Vec<Vec<Inline>>,
+    headers: Vec<Vec<Block>>,
+    rows: Vec<Vec<Vec<Block>>>,
+    current_row: Vec<Vec<Block>>,
 }
 
 #[derive(Default)]
@@ -418,9 +441,199 @@ enum BlockContainer {
     ListItem,
     Blockquote,
     Footnote,
+    Details,
+}
+
+struct DetailsFrame {
+    id: String,
+    summary: Vec<Inline>,
+    blocks: Vec<Block>,
+    open: bool,
 }
 
 impl ParseContext {
+    fn push_html(&mut self, source: &str) {
+        let mut cursor = 0;
+        let boundaries = html::disclosure_boundaries(source);
+        let balance: i32 = boundaries
+            .iter()
+            .map(|(_, boundary)| match boundary {
+                html::DisclosureBoundary::Open(_) => 1,
+                html::DisclosureBoundary::Close => -1,
+                _ => 0,
+            })
+            .sum();
+        if !boundaries.is_empty() && balance == 0 && html::has_enclosing_html_container(source) {
+            let mut heading_id_for =
+                |inlines: &[Inline], id: Option<&str>| self.unique_heading_id(inlines, id);
+            for block in html::parse_block_fragment(source, &mut heading_id_for) {
+                self.push_block(block);
+            }
+            return;
+        }
+        for (range, boundary) in boundaries {
+            self.push_html_fragment(&source[cursor..range.start]);
+            if self.skipped_details > 0
+                || (self.details.len() >= html::MAX_HTML_NESTING_DEPTH
+                    && matches!(boundary, html::DisclosureBoundary::Open(_)))
+            {
+                match boundary {
+                    html::DisclosureBoundary::Open(_) => self.skipped_details += 1,
+                    html::DisclosureBoundary::Close => {
+                        self.skipped_details = self.skipped_details.saturating_sub(1)
+                    }
+                    _ => {}
+                }
+                self.push_block(Block::Html(source[range.clone()].to_string()));
+                cursor = range.end;
+                continue;
+            }
+            match boundary {
+                html::DisclosureBoundary::Open(open) => {
+                    let id = self.unique_heading_id(&[], Some("html-details"));
+                    self.details.push(DetailsFrame {
+                        id,
+                        summary: Vec::new(),
+                        blocks: Vec::new(),
+                        open,
+                    });
+                    self.block_containers.push(BlockContainer::Details);
+                }
+                html::DisclosureBoundary::Close => self.close_details(),
+                html::DisclosureBoundary::SummaryOpen if !self.details.is_empty() => {
+                    self.summary_html = Some(String::new())
+                }
+                html::DisclosureBoundary::SummaryClose => {
+                    if let Some(source) = self.summary_html.take()
+                        && let Some(frame) = self.details.last_mut()
+                    {
+                        frame.summary = html::summary_inlines(&source);
+                    }
+                }
+                _ => self.push_html_fragment(&source[range.clone()]),
+            }
+            cursor = range.end;
+        }
+        self.push_html_fragment(&source[cursor..]);
+    }
+
+    fn push_html_fragment(&mut self, source: &str) {
+        if self.skipped_details > 0 {
+            self.push_block(Block::Html(source.to_string()));
+            return;
+        }
+        if let Some(summary) = &mut self.summary_html {
+            summary.push_str(source);
+            return;
+        }
+        if source.trim().is_empty() {
+            return;
+        }
+        if matches!(self.block_containers.last(), Some(BlockContainer::Details)) {
+            let document = parse_with_smart_punctuation(source, self.smart_punctuation);
+            for mut block in document.blocks {
+                self.import_block(&mut block);
+                self.push_block(block);
+            }
+            for mut footnote in document.footnotes {
+                for block in &mut footnote.blocks {
+                    self.import_block(block);
+                }
+                self.footnote_definitions.push(footnote);
+            }
+        } else {
+            let mut heading_id_for =
+                |inlines: &[Inline], id: Option<&str>| self.unique_heading_id(inlines, id);
+            for block in html::parse_block_fragment(source, &mut heading_id_for) {
+                self.push_block(block);
+            }
+        }
+    }
+
+    fn import_block(&mut self, block: &mut Block) {
+        match block {
+            Block::Heading { id, inlines, .. } => {
+                *id = self.unique_heading_id(inlines, Some(id));
+                self.import_inlines(inlines);
+            }
+            Block::Paragraph { inlines } => self.import_inlines(inlines),
+            Block::Details {
+                id,
+                blocks,
+                summary,
+                ..
+            } => {
+                self.import_inlines(summary);
+                *id = self.unique_heading_id(&[], Some("html-details"));
+                for block in blocks {
+                    self.import_block(block);
+                }
+            }
+            Block::Blockquote { blocks, .. } | Block::HtmlContainer { blocks, .. } => {
+                for block in blocks {
+                    self.import_block(block);
+                }
+            }
+            Block::UnorderedList { items } | Block::OrderedList { items, .. } => {
+                for item in items {
+                    self.import_inlines(&mut item.inlines);
+                    for block in &mut item.children {
+                        self.import_block(block);
+                    }
+                }
+            }
+            Block::Table { headers, rows, .. } => {
+                for cell in headers.iter_mut().chain(rows.iter_mut().flatten()) {
+                    for block in cell {
+                        self.import_block(block);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn close_details(&mut self) {
+        if matches!(self.block_containers.last(), Some(BlockContainer::Details)) {
+            self.block_containers.pop();
+            if let Some(frame) = self.details.pop() {
+                self.push_block(Block::Details {
+                    id: frame.id,
+                    summary: frame.summary,
+                    blocks: frame.blocks,
+                    open: frame.open,
+                });
+            }
+        }
+    }
+
+    fn import_inlines(&mut self, inlines: &mut [Inline]) {
+        for inline in inlines {
+            match inline {
+                Inline::FootnoteReference {
+                    label,
+                    index,
+                    occurrence,
+                } => {
+                    *index = self.footnote_index(label);
+                    let count = self.footnote_occurrences.entry(label.clone()).or_default();
+                    *count += 1;
+                    *occurrence = *count;
+                }
+                Inline::Bold(children)
+                | Inline::Italic(children)
+                | Inline::Strikethrough(children)
+                | Inline::Kbd(children)
+                | Inline::Subscript(children)
+                | Inline::Superscript(children)
+                | Inline::Underline(children)
+                | Inline::Highlight(children)
+                | Inline::Link { text: children, .. } => self.import_inlines(children),
+                _ => {}
+            }
+        }
+    }
+
     fn push_inline_stack(&mut self) {
         self.inline_stack.push(Vec::new());
     }
@@ -506,6 +719,7 @@ impl ParseContext {
             Some(BlockContainer::Footnote) => {
                 self.footnote_stack.last_mut().unwrap().blocks.push(block)
             }
+            Some(BlockContainer::Details) => self.details.last_mut().unwrap().blocks.push(block),
             None => self.blocks.push(block),
         }
     }
@@ -887,7 +1101,7 @@ mod tests {
             Block::Paragraph { inlines } => {
                 assert!(inlines.iter().any(|inline| matches!(
                     inline,
-                    Inline::FootnoteReference { label, index }
+                    Inline::FootnoteReference { label, index, .. }
                         if label == "note" && *index == 1
                 )));
             }
@@ -975,6 +1189,149 @@ mod tests {
     }
 
     #[test]
+    fn multiline_html_preserves_table_and_list_structure() {
+        let table = parse("<table>\n<tr><th>A</th></tr>\n<tr><td>1</td></tr>\n</table>");
+        assert_eq!(
+            table.blocks,
+            vec![Block::Table {
+                headers: vec![vec![Block::Paragraph {
+                    inlines: vec![Inline::Text("A".into())]
+                }]],
+                alignments: vec![TableAlignment::None],
+                rows: vec![vec![vec![Block::Paragraph {
+                    inlines: vec![Inline::Text("1".into())]
+                }]]],
+            }]
+        );
+        let list =
+            parse("<ul>\n<li><p>First</p><p>Second</p><pre>code</pre><p>Last</p></li>\n</ul>");
+        assert_eq!(
+            list.blocks,
+            vec![Block::UnorderedList {
+                items: vec![ListItem {
+                    inlines: vec![Inline::Text("First".into())],
+                    children: vec![
+                        Block::Paragraph {
+                            inlines: vec![Inline::Text("Second".into())]
+                        },
+                        Block::CodeBlock {
+                            language: None,
+                            code: "code".into()
+                        },
+                        Block::Paragraph {
+                            inlines: vec![Inline::Text("Last".into())]
+                        },
+                    ],
+                    checked: None,
+                }]
+            }]
+        );
+    }
+
+    #[test]
+    fn disclosure_keeps_markdown_across_blank_lines_and_nested_disclosures() {
+        let doc = parse(
+            "<details>\n<summary>More</summary>\n\n## Inside\n\n**Bold**\n\n<details open><summary>Nested</summary>\n\n```rust\nlet n = 1;\n```\n\n</details>\n</details>\n\nAfter",
+        );
+        assert_eq!(
+            doc.blocks,
+            vec![
+                Block::Details {
+                    id: "html-details".into(),
+                    summary: vec![Inline::Text("More".into())],
+                    open: false,
+                    blocks: vec![
+                        Block::Heading {
+                            level: 2,
+                            id: "inside".into(),
+                            inlines: vec![Inline::Text("Inside".into())]
+                        },
+                        Block::Paragraph {
+                            inlines: vec![Inline::Bold(vec![Inline::Text("Bold".into())])]
+                        },
+                        Block::Details {
+                            id: "html-details-2".into(),
+                            summary: vec![Inline::Text("Nested".into())],
+                            open: true,
+                            blocks: vec![Block::CodeBlock {
+                                language: Some("rust".into()),
+                                code: "let n = 1;\n".into()
+                            }]
+                        },
+                    ],
+                },
+                Block::Paragraph {
+                    inlines: vec![Inline::Text("After".into())]
+                }
+            ]
+        );
+        let code = parse("```html\n<details><summary>Literal</summary></details>\n```");
+        assert_eq!(
+            code.blocks,
+            vec![Block::CodeBlock {
+                language: Some("html".into()),
+                code: "<details><summary>Literal</summary></details>\n".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn html_table_cells_keep_paragraphs_lists_and_code() {
+        let doc = parse(
+            "<table><tr><td><p>A</p><p>B</p><ul><li>C</li></ul><pre>code</pre></td></tr></table>",
+        );
+        assert_eq!(
+            doc.blocks,
+            vec![Block::Table {
+                headers: Vec::new(),
+                alignments: vec![TableAlignment::None],
+                rows: vec![vec![vec![
+                    Block::Paragraph {
+                        inlines: vec![Inline::Text("A".into())]
+                    },
+                    Block::Paragraph {
+                        inlines: vec![Inline::Text("B".into())]
+                    },
+                    Block::UnorderedList {
+                        items: vec![ListItem {
+                            inlines: vec![Inline::Text("C".into())],
+                            children: Vec::new(),
+                            checked: None
+                        }]
+                    },
+                    Block::CodeBlock {
+                        language: None,
+                        code: "code".into()
+                    },
+                ]]]
+            }]
+        );
+    }
+
+    #[test]
+    fn disclosure_markdown_preserves_the_surrounding_quote_and_list() {
+        let doc = parse("> <details>\n> <summary>More</summary>\n>\n> - Item\n>\n> </details>");
+        assert_eq!(
+            doc.blocks,
+            vec![Block::Blockquote {
+                kind: None,
+                blocks: vec![Block::Details {
+                    id: "html-details".into(),
+                    summary: vec![Inline::Text("More".into())],
+                    open: false,
+                    blocks: vec![Block::UnorderedList {
+                        items: vec![ListItem {
+                            inlines: vec![Inline::Text("Item".into())],
+                            children: Vec::new(),
+                            checked: None,
+                        }]
+                    }],
+                }]
+            }]
+        );
+    }
+
+    #[test]
     fn keeps_heading_ids_unique_across_markdown_and_html() {
         let doc = parse("# Intro\n\n<h1>Intro</h1>\n\n<h1 id='intro'>Explicit</h1>");
 
@@ -1019,7 +1376,7 @@ mod tests {
         )));
         assert!(inlines.iter().any(|inline| matches!(
             inline,
-            Inline::Image { alt, url }
+            Inline::Image { alt, url, .. }
                 if alt == "A" && url == "https://example.com/a.png"
         )));
     }

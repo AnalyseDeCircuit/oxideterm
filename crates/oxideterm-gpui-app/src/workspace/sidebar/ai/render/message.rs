@@ -820,7 +820,7 @@ impl WorkspaceApp {
         }
         let selectable = self.selectable_text_render_state(cx);
         let mut text_order = 0usize;
-        let mut render_text = |key: String,
+        let mut render_text = |key: markdown_render::MarkdownTextFragmentId,
                                text: gpui::SharedString,
                                runs: Vec<gpui::TextRun>,
                                links|
@@ -838,6 +838,7 @@ impl WorkspaceApp {
                 text,
                 runs,
                 links,
+                key.join_previous,
             )
         };
         let rendered = viewport

@@ -10,9 +10,59 @@
 use ego_tree::{NodeRef, iter::Edge};
 use scraper::{ElementRef, Html, Node};
 
-use crate::model::{Block, BlockAlignment, Inline, ListItem, TableAlignment};
+use crate::model::{
+    Block, BlockAlignment, ImageDimensions, ImageLength, Inline, ListItem, TableAlignment,
+};
 
-const MAX_HTML_NESTING_DEPTH: usize = 128;
+pub(crate) const MAX_HTML_NESTING_DEPTH: usize = 128;
+
+pub(crate) enum DisclosureBoundary {
+    Open(bool),
+    Close,
+    SummaryOpen,
+    SummaryClose,
+}
+
+pub(crate) fn has_enclosing_html_container(source: &str) -> bool {
+    Html::parse_fragment(source)
+        .root_element()
+        .child_elements()
+        .next()
+        .is_some_and(|element| !matches!(element.value().name(), "details" | "summary"))
+}
+
+pub(crate) fn disclosure_boundaries(
+    source: &str,
+) -> Vec<(std::ops::Range<usize>, DisclosureBoundary)> {
+    let mut emitter = html5gum::DefaultEmitter::<usize>::new_with_span();
+    emitter.naively_switch_states(true);
+    html5gum::Tokenizer::new_with_emitter(source, emitter)
+        .filter_map(|token| match token.ok()? {
+            html5gum::Token::StartTag(tag) if tag.name.as_slice() == b"details" => Some((
+                tag.span.start..tag.span.end,
+                DisclosureBoundary::Open(
+                    tag.attributes.keys().any(|key| key.as_slice() == b"open"),
+                ),
+            )),
+            html5gum::Token::EndTag(tag) if tag.name.as_slice() == b"details" => {
+                Some((tag.span.start..tag.span.end, DisclosureBoundary::Close))
+            }
+            html5gum::Token::StartTag(tag) if tag.name.as_slice() == b"summary" => Some((
+                tag.span.start..tag.span.end,
+                DisclosureBoundary::SummaryOpen,
+            )),
+            html5gum::Token::EndTag(tag) if tag.name.as_slice() == b"summary" => Some((
+                tag.span.start..tag.span.end,
+                DisclosureBoundary::SummaryClose,
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+pub(crate) fn summary_inlines(source: &str) -> Vec<Inline> {
+    element_children_to_inlines(Html::parse_fragment(source).root_element())
+}
 
 /// Supported container kinds for inline HTML events emitted around Markdown text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,6 +122,7 @@ pub(crate) fn parse_inline_event(source: &str) -> InlineHtmlEvent {
                 InlineHtmlEvent::Node(Inline::Image {
                     alt: element.attr("alt").unwrap_or_default().to_string(),
                     url: url.to_string(),
+                    dimensions: image_dimensions(element),
                 })
             })
             .unwrap_or(InlineHtmlEvent::Unsupported),
@@ -207,7 +258,7 @@ fn element_to_blocks(
         }
         "ul" => list_from_element(element, false, heading_id_for),
         "ol" => list_from_element(element, true, heading_id_for),
-        "table" => table_from_element(element),
+        "table" => table_from_element(element, heading_id_for),
         "details" => details_from_element(element, heading_id_for),
         "summary" | "figcaption" | "dt" => {
             let mut inlines = element_children_to_inlines(element);
@@ -244,18 +295,13 @@ fn details_from_element(
         }
     }
 
-    let mut blocks = summary
-        .filter(|inlines| !inlines.is_empty())
-        .map(|inlines| {
-            vec![Block::Paragraph {
-                inlines: vec![Inline::Bold(inlines)],
-            }]
-        })
-        .unwrap_or_default();
-    // GPUI markdown has no element-owned disclosure state, so keep body content
-    // readable instead of silently hiding it or introducing global mutable state.
-    blocks.extend(blocks_from_nodes(body_nodes, heading_id_for));
-    blocks
+    let summary = summary.unwrap_or_default();
+    vec![Block::Details {
+        id: heading_id_for(&summary, Some("html-details")),
+        summary,
+        blocks: blocks_from_nodes(body_nodes, heading_id_for),
+        open: element.attr("open").is_some(),
+    }]
 }
 
 fn list_from_element(
@@ -287,30 +333,15 @@ fn list_item_from_element(
     item: ElementRef<'_>,
     heading_id_for: &mut dyn FnMut(&[Inline], Option<&str>) -> String,
 ) -> ListItem {
-    let mut inlines = Vec::new();
-    let mut children = Vec::new();
-
-    for child in item.children() {
-        match child.value() {
-            Node::Text(text) => push_collapsed_text(&mut inlines, text),
-            Node::Element(_) => {
-                let element = ElementRef::wrap(child).expect("element node must be wrappable");
-                match element.value().name() {
-                    "ul" => children.extend(list_from_element(element, false, heading_id_for)),
-                    "ol" => children.extend(list_from_element(element, true, heading_id_for)),
-                    "p" => inlines.extend(element_children_to_inlines(element)),
-                    tag_name if is_dropped_element(tag_name) => {}
-                    tag_name if is_block_element(tag_name) => {
-                        children.extend(element_to_blocks(element, heading_id_for));
-                    }
-                    _ => inlines.extend(element_to_inlines(element)),
-                }
-            }
-            _ => {}
-        }
-    }
-
-    trim_inline_boundaries(&mut inlines);
+    let mut children = blocks_from_nodes(item.children().collect(), heading_id_for);
+    let inlines = if matches!(children.first(), Some(Block::Paragraph { .. })) {
+        let Block::Paragraph { inlines } = children.remove(0) else {
+            unreachable!()
+        };
+        inlines
+    } else {
+        Vec::new()
+    };
     ListItem {
         inlines,
         children,
@@ -318,7 +349,10 @@ fn list_item_from_element(
     }
 }
 
-fn table_from_element(table: ElementRef<'_>) -> Vec<Block> {
+fn table_from_element(
+    table: ElementRef<'_>,
+    heading_id_for: &mut dyn FnMut(&[Inline], Option<&str>) -> String,
+) -> Vec<Block> {
     let mut row_elements = Vec::new();
     for child in table.child_elements() {
         match child.value().name() {
@@ -349,18 +383,19 @@ fn table_from_element(table: ElementRef<'_>) -> Vec<Block> {
         }
         for (index, cell) in cells.iter().enumerate() {
             if alignments[index] == TableAlignment::None {
-                alignments[index] = html_table_alignment(cell.attr("align"));
+                alignments[index] = match element_alignment(*cell) {
+                    Some(BlockAlignment::Left) => TableAlignment::Left,
+                    Some(BlockAlignment::Center) => TableAlignment::Center,
+                    Some(BlockAlignment::Right) => TableAlignment::Right,
+                    None => TableAlignment::None,
+                };
             }
         }
 
         let is_header = headers.is_empty() && cells.iter().any(|cell| cell.value().name() == "th");
         let converted = cells
             .into_iter()
-            .map(|cell| {
-                let mut inlines = element_children_to_inlines(cell);
-                trim_inline_boundaries(&mut inlines);
-                inlines
-            })
+            .map(|cell| blocks_from_nodes(cell.children().collect(), heading_id_for))
             .collect::<Vec<_>>();
         if is_header {
             headers = converted;
@@ -410,6 +445,7 @@ fn element_to_inlines(element: ElementRef<'_>) -> Vec<Inline> {
                 vec![Inline::Image {
                     alt: element.attr("alt").unwrap_or_default().to_string(),
                     url: url.to_string(),
+                    dimensions: image_dimensions(element),
                 }]
             })
             .unwrap_or_default(),
@@ -451,6 +487,56 @@ fn element_to_inlines(element: ElementRef<'_>) -> Vec<Inline> {
         }
         _ => element_children_to_inlines(element),
     }
+}
+
+fn image_dimensions(element: ElementRef<'_>) -> ImageDimensions {
+    ImageDimensions {
+        width: style_property(element, "width", image_width)
+            .or_else(|| element.attr("width").and_then(image_width)),
+        height: style_property(element, "height", positive_length)
+            .or_else(|| element.attr("height").and_then(positive_length)),
+    }
+}
+
+fn image_width(value: &str) -> Option<ImageLength> {
+    if let Some(percent) = value.trim().strip_suffix('%') {
+        positive_length(percent).map(ImageLength::Percent)
+    } else {
+        positive_length(value).map(ImageLength::Pixels)
+    }
+}
+
+fn style_property<T>(
+    element: ElementRef<'_>,
+    property: &str,
+    parse: impl Fn(&str) -> Option<T>,
+) -> Option<T> {
+    element
+        .attr("style")?
+        .split(';')
+        .rev()
+        .find_map(|declaration| {
+            let (name, value) = declaration.split_once(':')?;
+            name.trim()
+                .eq_ignore_ascii_case(property)
+                .then(|| parse(value.trim()))
+                .flatten()
+        })
+}
+
+fn element_alignment(element: ElementRef<'_>) -> Option<BlockAlignment> {
+    style_property(element, "text-align", |value| {
+        html_block_alignment(Some(value))
+    })
+    .or_else(|| html_block_alignment(element.attr("align")))
+}
+
+fn positive_length(value: &str) -> Option<f32> {
+    let value = value.trim().strip_suffix("px").unwrap_or(value.trim());
+    value
+        .parse::<f32>()
+        .ok()
+        .filter(|value| value.is_finite() && *value > 0.0)
 }
 
 fn wrap_inline(
@@ -551,7 +637,7 @@ fn wrap_alignment(element: ElementRef<'_>, blocks: Vec<Block>) -> Vec<Block> {
     let alignment = if element.value().name() == "center" {
         Some(BlockAlignment::Center)
     } else {
-        html_block_alignment(element.attr("align"))
+        element_alignment(element)
     };
     match alignment {
         Some(alignment) => wrap_blocks(alignment, blocks),
@@ -573,15 +659,6 @@ fn html_block_alignment(value: Option<&str>) -> Option<BlockAlignment> {
         Some("center") | Some("middle") => Some(BlockAlignment::Center),
         Some("right") => Some(BlockAlignment::Right),
         _ => None,
-    }
-}
-
-fn html_table_alignment(value: Option<&str>) -> TableAlignment {
-    match html_block_alignment(value) {
-        Some(BlockAlignment::Left) => TableAlignment::Left,
-        Some(BlockAlignment::Center) => TableAlignment::Center,
-        Some(BlockAlignment::Right) => TableAlignment::Right,
-        None => TableAlignment::None,
     }
 }
 
@@ -731,6 +808,44 @@ mod tests {
     }
 
     #[test]
+    fn accepts_supported_image_dimensions_and_alignment_styles() {
+        let blocks = parse_block_fragment(
+            "<p align='left' style='text-align:center;position:fixed'><img src='a.png' width='320' height='160' style='width:50%;height:80px;background-image:url(bad)' /></p>",
+            &mut heading_id,
+        );
+        assert_eq!(
+            blocks,
+            vec![Block::HtmlContainer {
+                alignment: BlockAlignment::Center,
+                blocks: vec![Block::Paragraph {
+                    inlines: vec![Inline::Image {
+                        alt: String::new(),
+                        url: "a.png".into(),
+                        dimensions: ImageDimensions {
+                            width: Some(ImageLength::Percent(50.0)),
+                            height: Some(80.0)
+                        },
+                    }]
+                }],
+            }]
+        );
+        for invalid in ["-1", "NaN", "inf", "calc(100% - 1px)", "url(x)"] {
+            let parsed = parse_inline_event(&format!(
+                "<img src='a.png' width='{invalid}' height='{invalid}'>"
+            ));
+            assert_eq!(
+                parsed,
+                InlineHtmlEvent::Node(Inline::Image {
+                    alt: String::new(),
+                    url: "a.png".into(),
+                    dimensions: ImageDimensions::default(),
+                }),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
     fn html5_parser_recovers_misnested_formatting() {
         let blocks = parse_block_fragment("<p><b>bold <i>both</b> italic</i></p>", &mut heading_id);
 
@@ -755,22 +870,24 @@ mod tests {
     }
 
     #[test]
-    fn keeps_details_content_readable_without_global_disclosure_state() {
-        let blocks = parse_block_fragment(
-            "<details><summary>More</summary><p>Body</p></details>",
-            &mut heading_id,
-        );
-
-        assert!(matches!(
-            &blocks[0],
-            Block::Paragraph { inlines }
-                if matches!(&inlines[0], Inline::Bold(children) if children == &vec![Inline::Text("More".to_string())])
-        ));
-        assert!(matches!(
-            &blocks[1],
-            Block::Paragraph { inlines }
-                if inlines == &vec![Inline::Text("Body".to_string())]
-        ));
+    fn preserves_details_summary_body_and_initial_state() {
+        for (attribute, open) in [("", false), (" open", true)] {
+            let blocks = parse_block_fragment(
+                &format!("<details{attribute}><summary>More</summary><p>Body</p></details>"),
+                &mut heading_id,
+            );
+            assert_eq!(
+                blocks,
+                vec![Block::Details {
+                    id: "html-details".into(),
+                    summary: vec![Inline::Text("More".into())],
+                    blocks: vec![Block::Paragraph {
+                        inlines: vec![Inline::Text("Body".into())]
+                    }],
+                    open,
+                }]
+            );
+        }
     }
 
     #[test]

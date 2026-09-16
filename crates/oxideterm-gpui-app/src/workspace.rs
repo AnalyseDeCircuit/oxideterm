@@ -733,6 +733,7 @@ impl WorkspaceWindowTabState {
 
 #[derive(Clone)]
 pub(super) struct SelectableTextFragmentState {
+    pub join_previous: bool,
     pub group_id: u64,
     pub order: usize,
     pub generation: u64,
@@ -983,6 +984,7 @@ impl WorkspaceApp {
         options.mermaid_error_prefix = self.i18n.t("markdown.mermaid_unsupported");
         options.mermaid_expand_label = self.i18n.t("markdown.mermaid_expand");
         options.mermaid_loading_label = self.i18n.t("markdown.mermaid_loading");
+        options.html_details_label = self.i18n.t("markdown.html_details");
         options
     }
 

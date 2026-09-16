@@ -25,7 +25,8 @@
   "markdown": {
     "mermaid_unsupported": "不支持的 Mermaid 图",
     "mermaid_expand": "放大",
-    "mermaid_loading": "正在渲染图表…"
+    "mermaid_loading": "正在渲染图表…",
+    "html_details": "详细内容"
   },
   "layout": {
     "empty": {

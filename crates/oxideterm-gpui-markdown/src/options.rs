@@ -12,6 +12,8 @@ pub const MARKDOWN_IMAGE_CACHE_ID: &str = "oxideterm-markdown-images";
 /// Options that control markdown rendering behaviour.
 #[derive(Clone, Debug)]
 pub struct MarkdownOptions {
+    pub(crate) disclosures: crate::disclosure::DisclosureState,
+    pub html_details_label: String,
     pub navigation: Option<crate::navigation::MarkdownNavigation>,
     /// Base font size in pixels for body text.
     /// Heading sizes are derived as multiples of this value.
@@ -118,6 +120,8 @@ impl MarkdownOptions {
     /// Build markdown renderer options from UI metrics.
     pub fn from_metrics(metrics: UiMetrics) -> Self {
         Self {
+            disclosures: Default::default(),
+            html_details_label: "Details".into(),
             navigation: None,
             base_font_size: metrics.markdown_body_font_size,
             body_font_family: metrics.markdown_body_font_family.into(),

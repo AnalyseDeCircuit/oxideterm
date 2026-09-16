@@ -1,4 +1,5 @@
 pub mod autostart;
+pub mod http_client;
 pub mod rendering;
 pub mod vibrancy;
 pub mod window_opacity;

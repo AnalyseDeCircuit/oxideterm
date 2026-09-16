@@ -9,6 +9,8 @@ version.workspace = true
 
 [dependencies]
 ego-tree = "0.11"
+html5gum = "0.8.3"
+unicode-linebreak = "0.1.5"
 mermaid-rs-renderer = { version = "0.3.1", default-features = false }
 gpui.workspace = true
 url.workspace = true

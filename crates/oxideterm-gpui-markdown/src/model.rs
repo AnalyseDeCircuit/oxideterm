@@ -44,6 +44,13 @@ pub enum Block {
         blocks: Vec<Block>,
     },
 
+    Details {
+        id: String,
+        summary: Vec<Inline>,
+        blocks: Vec<Block>,
+        open: bool,
+    },
+
     /// Fenced or indented code block with an optional language hint.
     CodeBlock {
         language: Option<String>,
@@ -65,11 +72,11 @@ pub enum Block {
         blocks: Vec<Block>,
     },
 
-    /// GFM table.
+    /// GFM or HTML table; block cells preserve nested paragraphs and lists.
     Table {
-        headers: Vec<Vec<Inline>>,
+        headers: Vec<Vec<Block>>,
         alignments: Vec<TableAlignment>,
-        rows: Vec<Vec<Vec<Inline>>>,
+        rows: Vec<Vec<Vec<Block>>>,
     },
 }
 
@@ -104,7 +111,7 @@ pub enum CalloutKind {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ListItem {
     pub inlines: Vec<Inline>,
-    /// Nested sub-list, if any.
+    /// Remaining blocks after the initial paragraph, in source order.
     pub children: Vec<Block>,
     /// Task list checkbox state: `None` = not a task item, `Some(true)` = checked,
     /// `Some(false)` = unchecked.
@@ -151,16 +158,36 @@ pub enum Inline {
     Strikethrough(Vec<Inline>),
 
     /// `![alt](url)`.
-    Image { alt: String, url: String },
+    Image {
+        alt: String,
+        url: String,
+        dimensions: ImageDimensions,
+    },
 
     /// `$...$` or `$$...$$` LaTeX math.
     Math { latex: String, display: bool },
 
     /// `[^label]`.
-    FootnoteReference { label: String, index: usize },
+    FootnoteReference {
+        label: String,
+        index: usize,
+        occurrence: usize,
+    },
 
     /// Soft or hard line break inside a paragraph.
     LineBreak,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ImageDimensions {
+    pub width: Option<ImageLength>,
+    pub height: Option<f32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ImageLength {
+    Pixels(f32),
+    Percent(f32),
 }
 
 impl MarkdownDocument {
@@ -192,7 +219,7 @@ fn inlines_bytes(inlines: &Vec<Inline>) -> usize {
                     | Inline::Highlight(items)
                     | Inline::Strikethrough(items) => inlines_bytes(items),
                     Inline::Link { text, url } => inlines_bytes(text) + url.capacity(),
-                    Inline::Image { alt, url } => alt.capacity() + url.capacity(),
+                    Inline::Image { alt, url, .. } => alt.capacity() + url.capacity(),
                     Inline::Math { latex, .. } => latex.capacity(),
                     Inline::FootnoteReference { label, .. } => label.capacity(),
                     Inline::LineBreak => 0,
@@ -213,6 +240,12 @@ fn blocks_bytes(blocks: &Vec<Block>) -> usize {
                     Block::HtmlContainer { blocks, .. } | Block::Blockquote { blocks, .. } => {
                         blocks_bytes(blocks)
                     }
+                    Block::Details {
+                        id,
+                        summary,
+                        blocks,
+                        ..
+                    } => id.capacity() + inlines_bytes(summary) + blocks_bytes(blocks),
                     Block::CodeBlock { language, code } => {
                         language.as_ref().map_or(0, String::capacity) + code.capacity()
                     }
@@ -230,15 +263,15 @@ fn blocks_bytes(blocks: &Vec<Block>) -> usize {
                         alignments,
                         rows,
                     } => {
-                        headers.capacity() * std::mem::size_of::<Vec<Inline>>()
-                            + headers.iter().map(inlines_bytes).sum::<usize>()
+                        headers.capacity() * std::mem::size_of::<Vec<Block>>()
+                            + headers.iter().map(blocks_bytes).sum::<usize>()
                             + alignments.capacity() * std::mem::size_of::<TableAlignment>()
-                            + rows.capacity() * std::mem::size_of::<Vec<Vec<Inline>>>()
+                            + rows.capacity() * std::mem::size_of::<Vec<Vec<Block>>>()
                             + rows
                                 .iter()
                                 .map(|row| {
-                                    row.capacity() * std::mem::size_of::<Vec<Inline>>()
-                                        + row.iter().map(inlines_bytes).sum::<usize>()
+                                    row.capacity() * std::mem::size_of::<Vec<Block>>()
+                                        + row.iter().map(blocks_bytes).sum::<usize>()
                                         + 32
                                 })
                                 .sum::<usize>()

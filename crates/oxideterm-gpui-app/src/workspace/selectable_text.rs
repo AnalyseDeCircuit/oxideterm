@@ -75,6 +75,7 @@ struct SelectableTextAnchorUpdate {
 }
 
 struct SelectableTextFragmentUpdate {
+    join_previous: bool,
     group_id: u64,
     fragment_id: u64,
     order: usize,
@@ -92,6 +93,19 @@ fn selectable_text_fragment_selection_content_changed(
     existing.is_none_or(|(existing_group_id, existing_order, existing_text)| {
         existing_group_id != group_id || existing_order != order || existing_text != text
     })
+}
+
+fn join_selectable_fragment_text<'a>(
+    fragments: impl IntoIterator<Item = (bool, &'a str)>,
+) -> String {
+    let mut text = String::new();
+    for (index, (join_previous, fragment)) in fragments.into_iter().enumerate() {
+        if index > 0 && !join_previous {
+            text.push('\n');
+        }
+        text.push_str(fragment);
+    }
+    text
 }
 
 fn begin_selectable_text_frame_flush(flush_scheduled: &Cell<bool>) -> bool {
@@ -735,6 +749,7 @@ impl WorkspaceApp {
                     .borrow_mut()
                     .fragments
                     .push(SelectableTextFragmentUpdate {
+                        join_previous: false,
                         group_id,
                         fragment_id,
                         order,
@@ -851,6 +866,7 @@ impl WorkspaceApp {
             self.selectable_text_fragments.insert(
                 update.fragment_id,
                 SelectableTextFragmentState {
+                    join_previous: update.join_previous,
                     group_id: update.group_id,
                     order: update.order,
                     generation: self.selectable_text_generation,
@@ -870,14 +886,9 @@ impl WorkspaceApp {
         if fragments.is_empty() {
             return None;
         }
-        let mut text = String::new();
-        for (index, fragment) in fragments.into_iter().enumerate() {
-            if index > 0 {
-                text.push('\n');
-            }
-            text.push_str(&fragment.text);
-        }
-        Some(text)
+        Some(join_selectable_fragment_text(fragments.into_iter().map(
+            |fragment| (fragment.join_previous, fragment.text.as_str()),
+        )))
     }
 
     pub(super) fn selectable_text_group_closest_index_for_position(
@@ -947,7 +958,7 @@ impl WorkspaceApp {
             .into_iter()
             .enumerate()
         {
-            if index > 0 {
+            if index > 0 && !fragment.join_previous {
                 cursor = cursor.saturating_add(1);
             }
             let start = cursor;
@@ -1127,6 +1138,7 @@ impl SelectableTextRenderState {
                     text.into(),
                     vec![run],
                     Vec::new(),
+                    false,
                 ),
             SelectableTextRole::NonSelectable => render_non_selectable_styled_text(text, vec![run]),
         }
@@ -1141,6 +1153,7 @@ impl SelectableTextRenderState {
         text: SharedString,
         runs: Vec<TextRun>,
         links: Vec<oxideterm_gpui_markdown::render::MarkdownTextLink>,
+        join_previous: bool,
     ) -> AnyElement {
         debug_assert_ne!(role, SelectableTextRole::NonSelectable);
         let target = WorkspaceImeTarget::ReadOnlyText(group_id);
@@ -1227,6 +1240,7 @@ impl SelectableTextRenderState {
                     .borrow_mut()
                     .fragments
                     .push(SelectableTextFragmentUpdate {
+                        join_previous,
                         group_id,
                         fragment_id,
                         order,
@@ -1269,7 +1283,7 @@ impl SelectableTextRenderState {
             .into_iter()
             .enumerate()
         {
-            if index > 0 {
+            if index > 0 && !fragment.join_previous {
                 cursor = cursor.saturating_add(1);
             }
             let start = cursor;
@@ -1421,6 +1435,18 @@ fn distance_from_bounds(point: Point<Pixels>, bounds: gpui::Bounds<Pixels>) -> f
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn copying_wrapped_inline_fragments_preserves_paragraph_boundaries() {
+        assert_eq!(
+            super::join_selectable_fragment_text([
+                (false, "中文"),
+                (true, "与 English "),
+                (true, "🙂"),
+                (false, "下一段"),
+            ]),
+            "中文与 English 🙂\n下一段"
+        );
+    }
     use super::*;
 
     #[test]

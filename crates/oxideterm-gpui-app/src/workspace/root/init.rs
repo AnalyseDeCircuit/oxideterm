@@ -147,6 +147,9 @@ impl WorkspaceApp {
                 .worker_threads(Self::WORKSPACE_ASYNC_RUNTIME_WORKER_THREADS)
                 .build()?,
         );
+        cx.set_http_client(Arc::new(
+            oxideterm_gpui_platform::http_client::AssetHttpClient::new(forwarding_runtime.clone())?,
+        ));
         // The SSH pool idle timer is long-lived backend work, matching Tauri's
         // registry-owned timeout task rather than tying disconnects to a GPUI
         // render/update turn.
