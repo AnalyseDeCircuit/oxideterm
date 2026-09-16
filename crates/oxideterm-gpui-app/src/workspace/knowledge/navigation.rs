@@ -273,32 +273,32 @@ impl WorkspaceApp {
                     .child(self.i18n.t("settings_view.knowledge.notebooks")),
             )
             .child(
-                oxideterm_gpui_ui::toolbar_button(
-                    &self.tokens,
-                    String::new(),
-                    None,
-                    options,
-                )
-                .id("notes-notebooks")
-                .flex_1()
-                .min_w_0()
-                .border_0()
-                .justify_start()
-                .child(div().flex_1().min_w_0().truncate().child(label))
-                .child(
-                    svg()
-                        .path(LucideIcon::ChevronDown.path())
-                        .size(px(KNOWLEDGE_NAVIGATOR_ACTION_ICON_SIZE))
-                        .flex_none()
-                        .text_color(rgb(self.tokens.ui.text_muted)),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                        this.open_knowledge_menu(MenuKind::Notebooks, event.position, window, cx);
-                        cx.stop_propagation();
-                    }),
-                ),
+                oxideterm_gpui_ui::toolbar_button(&self.tokens, String::new(), None, options)
+                    .id("notes-notebooks")
+                    .flex_1()
+                    .min_w_0()
+                    .border_0()
+                    .justify_start()
+                    .child(div().flex_1().min_w_0().truncate().child(label))
+                    .child(
+                        svg()
+                            .path(LucideIcon::ChevronDown.path())
+                            .size(px(KNOWLEDGE_NAVIGATOR_ACTION_ICON_SIZE))
+                            .flex_none()
+                            .text_color(rgb(self.tokens.ui.text_muted)),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                            this.open_knowledge_menu(
+                                MenuKind::Notebooks,
+                                event.position,
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ),
             )
             .child(self.knowledge_navigator_action(
                 "notes-more",
