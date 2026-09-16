@@ -4,7 +4,7 @@
 use std::{cell::Cell, collections::BTreeMap, ops::Range, rc::Rc};
 
 use gpui::{
-    Anchor, AnchoredPositionMode, AnyElement, App, AppContext, Context, CursorStyle, Div,
+    Anchor, AnchoredPositionMode, AnyElement, App, AppContext, ColorExt, Context, CursorStyle, Div,
     EmptyView, Entity, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ParentElement, Render, ScrollWheelEvent, SharedString,
     StatefulInteractiveElement, Styled, Window, anchored, deferred, div, prelude::FluentBuilder,
@@ -30,6 +30,7 @@ use super::{
 const CM_ACTIVE_LINE_ACCENT_ALPHA: u32 = 0x12;
 const CM_ACTIVE_GUTTER_ACCENT_ALPHA: u32 = 0xcc;
 const CM_SELECTION_ACCENT_ALPHA: u32 = 0x40;
+const CM_SELECTED_LINE_ACCENT_ALPHA: u32 = 0x0c;
 const CM_SEARCH_MATCH_ACCENT_ALPHA: u32 = 0x40;
 const CM_SEARCH_MATCH_OUTLINE_ALPHA: u32 = 0x80;
 const CM_INDENT_GUIDE_ALPHA: u32 = 0x26;
@@ -86,6 +87,7 @@ struct EditorHorizontalScrollbarDragState {
 
 struct RenderRowContext {
     selections: Vec<Selection>,
+    multiline_selected_lines: Vec<Range<usize>>,
     matching_bracket_pair: Option<BracketPair>,
     indentation_columns_by_line: BTreeMap<usize, Vec<usize>>,
     primary_caret_display_index: Option<usize>,
@@ -474,7 +476,12 @@ impl TextEditorView {
             .offset_to_line_col(self.cursor.selection().head)
             .ok()
             .filter(|position| position.line == line);
-        let is_current_line = cursor_position.is_some();
+        let is_current_line =
+            cursor_position.is_some() && row_context.multiline_selected_lines.is_empty();
+        let is_selected_line = row_context
+            .multiline_selected_lines
+            .iter()
+            .any(|range| range.contains(&line));
         let cursor_visual_column = cursor_position
             .map(|position| visual_column_for_byte_column(&line_text, position.column))
             .unwrap_or(0);
@@ -571,7 +578,9 @@ impl TextEditorView {
             .flex()
             .items_center()
             .bg(
-                if is_current_line && self.presentation == EditorPresentation::Document {
+                if is_selected_line && self.presentation == EditorPresentation::Document {
+                    rgba((self.appearance.accent_hex << 8) | CM_SELECTED_LINE_ACCENT_ALPHA)
+                } else if is_current_line && self.presentation == EditorPresentation::Document {
                     rgba((self.appearance.accent_hex << 8) | CM_ACTIVE_LINE_ACCENT_ALPHA)
                 } else {
                     rgba(self.appearance.background_hex << 8)
@@ -735,7 +744,8 @@ impl TextEditorView {
                     display_row,
                     line_height,
                     gutter_width,
-                    is_current_line,
+                    cursor_position.is_some(),
+                    is_selected_line,
                     foldable,
                     folded,
                     cx,
@@ -749,6 +759,7 @@ impl TextEditorView {
         line_height: f32,
         gutter_width: f32,
         is_current_line: bool,
+        is_selected_line: bool,
         foldable: Option<super::FoldRange>,
         folded: bool,
         cx: &mut Context<Self>,
@@ -756,6 +767,8 @@ impl TextEditorView {
         let line = display_row.line;
         let text_hex = if is_current_line && display_row.is_first {
             self.appearance.background_hex
+        } else if is_selected_line {
+            self.appearance.text_hex
         } else {
             self.appearance.muted_text_hex
         };
@@ -795,6 +808,11 @@ impl TextEditorView {
             .pr(px(self.metrics.gutter_padding_x))
             .bg(if is_current_line && display_row.is_first {
                 rgba((self.appearance.accent_hex << 8) | CM_ACTIVE_GUTTER_ACCENT_ALPHA)
+            } else if is_selected_line {
+                self.editor_panel_background(self.appearance.gutter_background_hex)
+                    .blend(&rgba(
+                        (self.appearance.accent_hex << 8) | CM_SELECTED_LINE_ACCENT_ALPHA,
+                    ))
             } else {
                 self.editor_panel_background(self.appearance.gutter_background_hex)
             })
@@ -1085,10 +1103,23 @@ impl TextEditorView {
                     })
             })
             .flatten();
+        let selections = self.active_selections();
+        let multiline_selected_lines = selections
+            .iter()
+            .filter_map(|selection| {
+                let range = selection.range();
+                let start = self.buffer.offset_to_line_col(range.start).ok()?;
+                let end = self.buffer.offset_to_line_col(range.end).ok()?;
+                // A selection ending at column zero does not include that final line.
+                (start.line < end.line)
+                    .then_some(start.line..end.line + usize::from(end.column > 0))
+            })
+            .collect();
         RenderRowContext {
+            multiline_selected_lines,
             // Selection ordering and bracket matching depend on editor state,
             // not on the row, so compute them once for the current frame.
-            selections: self.active_selections(),
+            selections,
             matching_bracket_pair: self.matching_bracket_pair(),
             indentation_columns_by_line: visible_indentation_columns(
                 &self.structure_cache,
