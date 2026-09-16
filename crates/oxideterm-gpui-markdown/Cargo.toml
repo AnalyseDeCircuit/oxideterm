@@ -13,6 +13,7 @@ mermaid-rs-renderer = { version = "0.3.1", default-features = false }
 gpui.workspace = true
 url.workspace = true
 oxideterm-theme = { path = "../oxideterm-theme" }
+oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 pulldown-cmark = "0.12"
 ratex-layout = "0.1.8"
 ratex-parser = "0.1.8"

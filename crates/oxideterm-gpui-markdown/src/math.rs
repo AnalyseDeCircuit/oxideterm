@@ -25,6 +25,8 @@ pub struct RenderedMathImage {
     pub image: Arc<Image>,
     pub display_width: f32,
     pub display_height: f32,
+    /// Distance from the math baseline to the bottom of the image, including padding.
+    pub baseline_depth: f32,
 }
 
 pub fn render_math_svg(
@@ -96,6 +98,7 @@ fn render_math_svg_uncached(
         image: Arc::new(Image::from_bytes(ImageFormat::Svg, svg.into_bytes())),
         display_width,
         display_height,
+        baseline_depth: (display_list.depth * logical_font_size + logical_padding) as f32,
     })
 }
 

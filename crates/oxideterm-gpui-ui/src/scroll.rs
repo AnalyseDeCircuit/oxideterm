@@ -246,6 +246,7 @@ where
             .read(cx)
             .clone();
         let style = self.element.style().clone();
+        let restrict_scroll_to_axis = style.restrict_scroll_to_axis == Some(true);
         *self.element.style() = StyleRefinement::default();
 
         let mut root = div().id(self.id).size_full().relative();
@@ -262,6 +263,9 @@ where
                     ScrollbarAxis::Both => this.overflow_scroll(),
                 })
                 .track_scroll(&scroll_handle)
+                .when(restrict_scroll_to_axis, |area| {
+                    area.restrict_scroll_to_axis()
+                })
                 .child(self.element.flex_1()),
         )
         .child(

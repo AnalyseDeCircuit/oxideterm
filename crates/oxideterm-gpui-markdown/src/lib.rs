@@ -60,7 +60,29 @@ pub use render::{MarkdownCodeBlockActions, MarkdownMermaidZoomHandler};
 use gpui::{AnyElement, ElementId, ScrollHandle};
 use oxideterm_theme::ThemeTokens;
 
-pub type MarkdownVirtualListScrollHandle = ScrollHandle;
+#[derive(Clone, Debug, Default)]
+pub struct MarkdownVirtualListScrollHandle {
+    scroll: ScrollHandle,
+    measurements: layout::MarkdownMeasurements,
+}
+
+impl MarkdownVirtualListScrollHandle {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn scroll_handle(&self) -> &ScrollHandle {
+        &self.scroll
+    }
+}
+
+impl std::ops::Deref for MarkdownVirtualListScrollHandle {
+    type Target = ScrollHandle;
+
+    fn deref(&self) -> &Self::Target {
+        &self.scroll
+    }
+}
 
 /// Parse and render markdown source into a GPUI element tree.
 ///

@@ -9,6 +9,19 @@ use oxideterm_theme::ThemeTokens;
 use crate::options::MarkdownOptions;
 
 const BACKGROUND_SURFACE_CODE_ALPHA: f32 = 0.4; // Match the application-wide image-background surface opacity.
+pub(crate) const BODY_LINE_HEIGHT: f32 = 22.0 / 14.0;
+
+pub(crate) fn block_top_padding(
+    block: &crate::model::Block,
+    index: usize,
+    opts: &MarkdownOptions,
+) -> f32 {
+    if index > 0 && matches!(block, crate::model::Block::Heading { .. }) {
+        opts.block_gap * 0.5
+    } else {
+        0.0
+    }
+}
 
 // ── colour helpers ──────────────────────────────────────────────────────
 
@@ -151,7 +164,7 @@ pub fn code_font(opts: &MarkdownOptions) -> Font {
 
 pub fn heading_font(opts: &MarkdownOptions) -> Font {
     Font {
-        weight: FontWeight::BOLD,
+        weight: FontWeight::SEMIBOLD,
         ..body_font(opts)
     }
 }

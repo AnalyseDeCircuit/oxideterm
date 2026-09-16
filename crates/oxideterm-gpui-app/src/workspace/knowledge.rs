@@ -386,7 +386,7 @@ impl KnowledgeDocumentEditor {
             autosave_task: None,
             index_state_task: None,
             preview_navigation: oxideterm_gpui_markdown::navigation::MarkdownNavigation::new(
-                preview_scroll.clone(),
+                preview_scroll.scroll_handle().clone(),
             ),
             preview_scroll,
             preview_workspace: None,
@@ -506,7 +506,7 @@ impl KnowledgeDocumentEditor {
                 if surface.draft == source {
                     surface.preview_navigation =
                         oxideterm_gpui_markdown::navigation::MarkdownNavigation::new(
-                            surface.preview_scroll.clone(),
+                            surface.preview_scroll.scroll_handle().clone(),
                         );
                     surface.preview_document = Some(document);
                     cx.notify();
@@ -888,6 +888,7 @@ impl Render for KnowledgeDocumentEditor {
             );
         options.background_surface_active = self.has_background_image;
         options.navigation = Some(self.preview_navigation.clone());
+        options.code_block_padding = self.tokens.spacing.two;
         if let Some(path) = self.source_path.as_ref() {
             options = options.with_source_path(path);
         }

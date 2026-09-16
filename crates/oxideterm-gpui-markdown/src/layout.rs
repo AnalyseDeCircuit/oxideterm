@@ -8,20 +8,20 @@
 //! markdown model so consumers such as SFTP preview do not need to approximate
 //! rendered markdown from the outside.
 
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use gpui::{Pixels, Size, px, size};
 
 use crate::model::{Block, FootnoteDefinition, Inline, ListItem, MarkdownDocument};
 use crate::options::MarkdownOptions;
+use crate::style::BODY_LINE_HEIGHT;
 
 const ESTIMATED_CONTENT_WIDTH: f32 = 920.0;
 const BODY_AVERAGE_CHAR_WIDTH: f32 = 0.55;
 const CODE_AVERAGE_CHAR_WIDTH: f32 = 0.6;
-const BODY_LINE_HEIGHT: f32 = 1.45;
-const CODE_LINE_HEIGHT: f32 = 1.4;
-const HEADING_LINE_HEIGHT: f32 = 1.2;
-const TABLE_ROW_EXTRA: f32 = 16.0;
+const CODE_LINE_HEIGHT: f32 = 1.5;
+const HEADING_LINE_HEIGHT: f32 = 1.25;
+const TABLE_ROW_EXTRA: f32 = 10.0;
 const MIN_BLOCK_HEIGHT: f32 = 18.0;
 const LINE_BREAK_ESTIMATED_TEXT_LEN: usize = 128;
 
@@ -37,6 +37,45 @@ pub enum MarkdownLayoutItem {
 pub struct MarkdownBlockLayout {
     items: Rc<Vec<MarkdownLayoutItem>>,
     item_sizes: Rc<Vec<Size<Pixels>>>,
+    measured: Option<Rc<RefCell<Vec<Option<f32>>>>>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct MarkdownMeasurements(Rc<RefCell<Option<MeasurementState>>>);
+
+#[derive(Debug)]
+struct MeasurementState {
+    layout: MarkdownBlockLayout,
+    width: f32,
+    fonts: (String, String),
+}
+
+impl MarkdownMeasurements {
+    pub(crate) fn prepare(
+        &self,
+        mut layout: MarkdownBlockLayout,
+        width: f32,
+        opts: &MarkdownOptions,
+    ) -> MarkdownBlockLayout {
+        let mut state = self.0.borrow_mut();
+        let fonts = (opts.body_font_family.clone(), opts.code_font_family.clone());
+        if let Some(previous) = state.as_ref()
+            && previous.width == width
+            && previous.fonts == fonts
+            && previous.layout.items == layout.items
+            && previous.layout.item_sizes == layout.item_sizes
+        {
+            layout.measured = previous.layout.measured.clone();
+            return layout;
+        }
+        layout.measured = Some(Rc::new(RefCell::new(vec![None; layout.items.len()])));
+        *state = Some(MeasurementState {
+            layout: layout.clone(),
+            width,
+            fonts,
+        });
+        layout
+    }
 }
 
 impl MarkdownBlockLayout {
@@ -55,10 +94,17 @@ impl MarkdownBlockLayout {
 
         let item_sizes = items
             .iter()
-            .map(|item| {
+            .enumerate()
+            .map(|(index, item)| {
+                let top_padding = match item {
+                    MarkdownLayoutItem::Block(block) => {
+                        crate::style::block_top_padding(block, index, opts)
+                    }
+                    MarkdownLayoutItem::Footnotes(_) => 0.0,
+                };
                 size(
                     px(ESTIMATED_CONTENT_WIDTH),
-                    px(estimate_item_height(item, opts)),
+                    px(estimate_item_height(item, opts) + top_padding),
                 )
             })
             .collect();
@@ -66,6 +112,7 @@ impl MarkdownBlockLayout {
         Self {
             items: Rc::new(items),
             item_sizes: Rc::new(item_sizes),
+            measured: None,
         }
     }
 
@@ -76,7 +123,64 @@ impl MarkdownBlockLayout {
 
     /// Estimated GPUI sizes used by windowed markdown rendering.
     pub fn item_sizes(&self) -> Rc<Vec<Size<Pixels>>> {
-        self.item_sizes.clone()
+        let Some(measured) = &self.measured else {
+            return self.item_sizes.clone();
+        };
+        let measured = measured.borrow();
+        Rc::new(
+            self.item_sizes
+                .iter()
+                .enumerate()
+                .map(|(index, size)| {
+                    gpui::size(
+                        size.width,
+                        px(measured[index].unwrap_or(f32::from(size.height))),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    pub(crate) fn measure(&self, index: usize, child: gpui::AnyElement) -> gpui::AnyElement {
+        use gpui::{IntoElement, ParentElement, Styled};
+        if self.measured.is_none() {
+            return child;
+        }
+        let layout = self.clone();
+        gpui::div()
+            .relative()
+            .w_full()
+            .min_w_0()
+            .flex_shrink_0()
+            .child(child)
+            .child(
+                gpui::canvas(
+                    move |bounds, window, _| {
+                        let height = f32::from(bounds.size.height);
+                        if layout.record_height(index, height) {
+                            window.refresh();
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full(),
+            )
+            .into_any_element()
+    }
+
+    pub(crate) fn record_height(&self, index: usize, height: f32) -> bool {
+        let Some(measured) = &self.measured else {
+            return false;
+        };
+        let mut sizes = measured.borrow_mut();
+        if sizes[index].is_some_and(|old| (old - height).abs() <= 0.5) {
+            return false;
+        }
+        sizes[index] = Some(height);
+        true
     }
 }
 
@@ -132,12 +236,9 @@ fn estimate_block_height(block: &Block, opts: &MarkdownOptions) -> f32 {
                 * BODY_LINE_HEIGHT
         }
         Block::HtmlContainer { blocks, .. } => estimate_blocks_height(blocks, opts),
-        Block::CodeBlock { language, code } => {
+        Block::CodeBlock { code, .. } => {
             let code_size = opts.base_font_size * opts.code_font_scale;
-            let label_height = language
-                .as_ref()
-                .map(|_| code_size * opts.code_label_font_scale * BODY_LINE_HEIGHT)
-                .unwrap_or(0.0);
+            let label_height = code_size * opts.code_label_font_scale * 1.3 + 8.0 + 3.0;
             let code_lines: f32 = code
                 .lines()
                 .map(|line| {

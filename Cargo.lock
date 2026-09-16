@@ -7790,6 +7790,7 @@ dependencies = [
  "ego-tree",
  "gpui",
  "mermaid-rs-renderer",
+ "oxideterm-gpui-ui",
  "oxideterm-theme",
  "pulldown-cmark",
  "ratex-layout",
