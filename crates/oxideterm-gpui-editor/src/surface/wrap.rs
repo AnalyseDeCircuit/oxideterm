@@ -83,7 +83,7 @@ impl TextEditorView {
         let last_line = self.buffer.offset_to_line_col(range.end).ok()?.line;
         let mut cached = self.display_rows_cache.borrow_mut();
         let cache = cached.as_ref()?;
-        if cache.wrap_column.is_some()
+        if cache.wrap_width.is_some()
             || !self.folded_ranges.is_empty()
             || cache.buffer_version != self.buffer.version()
         {
@@ -101,7 +101,7 @@ impl TextEditorView {
         let Some(mut edit) = edit else {
             return;
         };
-        if self.wrap_column().is_some() {
+        if self.wrap_width().is_some() {
             return;
         }
         let DisplayRows::Unwrapped(widths) = Arc::make_mut(&mut edit.cache.rows) else {
@@ -140,21 +140,21 @@ impl TextEditorView {
     }
 
     pub(super) fn display_rows(&self) -> Arc<DisplayRows> {
-        let wrap_column = self.wrap_column();
+        let wrap_width = self.wrap_width();
         let buffer_version = self.buffer.version();
         if let Some(cache) = self.display_rows_cache.borrow().as_ref()
             && cache.buffer_version == buffer_version
-            && cache.wrap_column == wrap_column
+            && cache.wrap_width == wrap_width
             && cache.fold_revision == self.fold_revision
         {
             return cache.rows.clone();
         }
 
-        let rows = Arc::new(self.compute_display_rows(wrap_column));
+        let rows = Arc::new(self.compute_display_rows(wrap_width));
         let max_width_columns = rows.max_width();
         *self.display_rows_cache.borrow_mut() = Some(DisplayRowsCache {
             buffer_version,
-            wrap_column,
+            wrap_width,
             fold_revision: self.fold_revision,
             max_width_columns,
             rows: rows.clone(),
@@ -172,8 +172,8 @@ impl TextEditorView {
             .unwrap_or(0)
     }
 
-    fn compute_display_rows(&self, wrap_column: Option<usize>) -> DisplayRows {
-        if wrap_column.is_none() && self.folded_ranges.is_empty() {
+    fn compute_display_rows(&self, wrap_width: Option<f32>) -> DisplayRows {
+        if wrap_width.is_none() && self.folded_ranges.is_empty() {
             return DisplayRows::Unwrapped(
                 (0..self.buffer.line_count())
                     .map(|line| {
@@ -184,6 +184,9 @@ impl TextEditorView {
                     .collect(),
             );
         }
+        // Share the renderer's font fallback and shaping rules. This temporary
+        // cache belongs to one layout rebuild; scroll frames reuse DisplayRows.
+        let text_system = gpui::WindowTextSystem::new(self.text_system.clone());
         let mut rows = Vec::new();
         let mut line = 0;
         while line < self.buffer.line_count() {
@@ -192,10 +195,10 @@ impl TextEditorView {
                 .iter()
                 .find(|range| range.start_line == line)
                 .copied();
-            let line_wrap_column = if folded.is_some() { None } else { wrap_column };
+            let line_wrap_width = if folded.is_some() { None } else { wrap_width };
             self.buffer
                 .with_line_text(line, |text| {
-                    if line_wrap_column.is_none() {
+                    if line_wrap_width.is_none() {
                         rows.push(DisplayRow {
                             line,
                             start_col: 0,
@@ -204,11 +207,18 @@ impl TextEditorView {
                             is_folded_header: folded.is_some(),
                         });
                     } else {
+                        let shaped = self.shape_coordinate_line(text, &text_system);
+                        let mut previous_x = 0.0;
                         append_display_rows_for_line(
                             &mut rows,
                             line,
-                            text.graphemes(true).map(grapheme_visual_width),
-                            line_wrap_column,
+                            text.grapheme_indices(true).map(|(start, grapheme)| {
+                                let x = f32::from(shaped.x_for_index(start + grapheme.len()));
+                                let advance = x - previous_x;
+                                previous_x = x;
+                                (grapheme_visual_width(grapheme), advance)
+                            }),
+                            line_wrap_width,
                             folded.is_some(),
                         );
                     }
@@ -218,7 +228,7 @@ impl TextEditorView {
                         &mut rows,
                         line,
                         std::iter::empty(),
-                        line_wrap_column,
+                        line_wrap_width,
                         folded.is_some(),
                     );
                 });
@@ -229,7 +239,7 @@ impl TextEditorView {
         DisplayRows::Explicit(rows)
     }
 
-    fn wrap_column(&self) -> Option<usize> {
+    fn wrap_width(&self) -> Option<f32> {
         if self.is_large_file() || !self.settings.soft_wrap {
             return None;
         }
@@ -237,11 +247,13 @@ impl TextEditorView {
         let available_width = f32::from(bounds.size.width)
             - self.visible_gutter_width()
             - self.visible_content_padding_x() * 2.0;
-        let measured = (available_width / self.metrics.char_width).floor().max(8.0) as usize;
+        let available_width = available_width.max(self.metrics.char_width);
         Some(
             self.settings
                 .soft_wrap_column
-                .map_or(measured, |limit| measured.min(limit.max(8))),
+                .map_or(available_width, |limit| {
+                    available_width.min(limit.max(8) as f32 * self.metrics.char_width)
+                }),
         )
     }
 }
@@ -292,8 +304,14 @@ fn compute_display_rows_from_grapheme_widths(
         append_display_rows_for_line(
             &mut rows,
             line,
-            line_grapheme_widths[line].iter().copied(),
-            if folded.is_some() { None } else { wrap_column },
+            line_grapheme_widths[line]
+                .iter()
+                .map(|&width| (width, width as f32)),
+            if folded.is_some() {
+                None
+            } else {
+                wrap_column.map(|width| width as f32)
+            },
             folded.is_some(),
         );
         line = folded
@@ -306,16 +324,15 @@ fn compute_display_rows_from_grapheme_widths(
 fn append_display_rows_for_line(
     rows: &mut Vec<DisplayRow>,
     line: usize,
-    grapheme_widths: impl IntoIterator<Item = usize>,
-    wrap_column: Option<usize>,
+    grapheme_widths: impl IntoIterator<Item = (usize, f32)>,
+    wrap_width: Option<f32>,
     is_folded_header: bool,
 ) {
     let mut start_col = 0;
     let mut end_col = 0;
-    for grapheme_width in grapheme_widths {
-        if wrap_column.is_some_and(|column| {
-            end_col > start_col && end_col + grapheme_width > start_col + column
-        }) {
+    let mut row_width = 0.0;
+    for (grapheme_width, advance) in grapheme_widths {
+        if wrap_width.is_some_and(|width| end_col > start_col && row_width + advance > width) {
             rows.push(DisplayRow {
                 line,
                 start_col,
@@ -324,8 +341,10 @@ fn append_display_rows_for_line(
                 is_folded_header: false,
             });
             start_col = end_col;
+            row_width = 0.0;
         }
         end_col += grapheme_width;
+        row_width += advance;
     }
     // Every physical line owns at least one display row, including empty lines.
     rows.push(DisplayRow {
@@ -425,21 +444,34 @@ mod edit_layout_tests {
     use oxideterm_theme::default_tokens;
 
     #[gpui::test]
-    fn viewport_wrapping_uses_available_columns_and_tracks_resize(cx: &mut TestAppContext) {
+    fn viewport_wrapping_uses_shaped_width_and_tracks_resize_and_font_changes(
+        cx: &mut TestAppContext,
+    ) {
         use gpui::{Bounds, point, px, size};
         let editor = cx.new(|cx| TextEditorView::new("中a".repeat(50), &default_tokens(), cx));
-        editor.update(cx, |editor, _| {
+        editor.update(cx, |editor, cx| {
+            editor.apply_runtime_settings(
+                &default_tokens(),
+                "monospace".into(),
+                10.0,
+                1.2,
+                true,
+                false,
+                cx,
+            );
             editor.settings.soft_wrap = true;
             editor.settings.soft_wrap_column = None;
             let padding = editor.visible_gutter_width() + editor.visible_content_padding_x() * 2.0;
-            for (columns, expected) in [
-                (180.5, vec![(0, 150)]),
-                (90.5, vec![(0, 90), (90, 150)]),
-                (180.5, vec![(0, 150)]),
+            // GPUI's headless font assigns 6 px to each BMP character at 10 px.
+            // CJK visual columns still count as two, but cannot dictate wrapping.
+            for (width, expected) in [
+                (605.0, vec![(0, 150)]),
+                (305.0, vec![(0, 75), (75, 150)]),
+                (605.0, vec![(0, 150)]),
             ] {
                 editor.content_bounds = Some(Bounds::new(
                     point(px(0.0), px(0.0)),
-                    size(px(padding + columns * editor.metrics.char_width), px(500.0)),
+                    size(px(padding + width), px(500.0)),
                 ));
                 assert_eq!(
                     editor
@@ -450,6 +482,23 @@ mod edit_layout_tests {
                     expected,
                 );
             }
+            editor.apply_runtime_settings(
+                &default_tokens(),
+                "monospace".into(),
+                20.0,
+                1.2,
+                true,
+                false,
+                cx,
+            );
+            assert_eq!(
+                editor
+                    .display_rows()
+                    .iter()
+                    .map(|row| (row.start_col, row.end_col))
+                    .collect::<Vec<_>>(),
+                [(0, 75), (75, 150)],
+            );
         });
     }
 

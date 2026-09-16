@@ -526,8 +526,8 @@ impl TextEditorView {
             || !indent_guides.is_empty();
         // Shape once and use the same glyph positions for every visible
         // overlay. Fixed cell widths diverge under font fallback.
-        let coordinate_line =
-            needs_shaped_coordinates.then(|| self.shape_coordinate_line(segment_text, window));
+        let coordinate_line = needs_shaped_coordinates
+            .then(|| self.shape_coordinate_line(segment_text, window.text_system()));
         let cursor_x = cursor_byte_column.map(|byte_column| {
             f32::from(
                 coordinate_line
@@ -574,6 +574,7 @@ impl TextEditorView {
         let row = div()
             .relative()
             .h(px(line_height))
+            .flex_shrink_0()
             .w_full()
             .flex()
             .items_center()

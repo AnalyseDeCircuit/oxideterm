@@ -210,10 +210,10 @@ struct EditorContextMenu {
     y: f32,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct DisplayRowsCache {
     buffer_version: u64,
-    wrap_column: Option<usize>,
+    wrap_width: Option<f32>,
     fold_revision: u64,
     max_width_columns: usize,
     rows: Arc<wrap::DisplayRows>,
@@ -285,6 +285,8 @@ pub struct TextEditorView {
     focus_handle: FocusHandle,
     viewport: EditorViewport,
     metrics: EditorMetrics,
+    configured_line_height: f32,
+    text_system: Arc<gpui::TextSystem>,
     appearance: EditorAppearance,
     read_only: bool,
     on_save: Option<SaveCallback>,
@@ -342,6 +344,8 @@ impl TextEditorView {
             cursor: Cursor::new(BufferOffset::ZERO),
             focus_handle: cx.focus_handle(),
             viewport: EditorViewport::new(metrics.overscan_rows),
+            configured_line_height: metrics.line_height,
+            text_system: cx.text_system().clone(),
             metrics,
             appearance: EditorAppearance::from_theme(tokens),
             read_only: false,
@@ -639,6 +643,8 @@ impl TextEditorView {
         self.appearance.font_fallback_family = font_fallback_family;
         self.metrics =
             EditorMetrics::from_theme_with_editor_typography(tokens, font_size, line_height);
+        self.configured_line_height = self.metrics.line_height;
+        self.display_rows_cache.borrow_mut().take();
         self.set_transparent_background(background_active, cx);
         self.highlight_chunk_cache.borrow_mut().clear();
         // Tauri wires Settings.ide.wordWrap into CodeMirror's lineWrapping
@@ -1109,6 +1115,12 @@ impl TextEditorView {
     }
 
     fn measure_code_metrics(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // GPUI snaps every row's explicit height before layout. Use that same
+        // height for scrolling and hit testing to avoid drift at the final row.
+        // Preserve the configured value when moving between display scales.
+        let line_height = f32::from(window.pixel_snap(px(self.configured_line_height)));
+        let line_height_changed = self.metrics.line_height != line_height;
+        self.metrics.line_height = line_height;
         // CodeMirror measures actual font advances through the browser layout
         // engine. GPUI needs the same explicit measurement; the old 0.62 ratio
         // is only a startup fallback before the first render has a Window.
@@ -1117,7 +1129,8 @@ impl TextEditorView {
             &self.appearance.font_family,
             self.appearance.font_fallback_family.as_deref(),
             self.appearance.font_weight,
-        ) {
+        ) || line_height_changed
+        {
             self.viewport
                 .clamp(self.document_row_count(), self.metrics.line_height);
             cx.notify();
@@ -1278,7 +1291,10 @@ impl TextEditorView {
         let segment_text = line_text
             .get(byte_start..position.column)
             .unwrap_or_default();
-        let caret_x = f32::from(self.shape_coordinate_line(segment_text, window).width());
+        let caret_x = f32::from(
+            self.shape_coordinate_line(segment_text, window.text_system())
+                .width(),
+        );
         Bounds {
             origin: bounds.origin
                 + point(
@@ -1294,7 +1310,11 @@ impl TextEditorView {
         }
     }
 
-    fn shape_coordinate_line(&self, text: &str, window: &mut Window) -> gpui::ShapedLine {
+    fn shape_coordinate_line(
+        &self,
+        text: &str,
+        text_system: &gpui::WindowTextSystem,
+    ) -> gpui::ShapedLine {
         let text = SharedString::from(text.to_string());
         let run = TextRun {
             len: text.len(),
@@ -1309,15 +1329,13 @@ impl TextEditorView {
             strikethrough: None,
             letter_spacing: None,
         };
-        window
-            .text_system()
-            .shape_line(text, px(self.metrics.font_size), &[run], None)
+        text_system.shape_line(text, px(self.metrics.font_size), &[run], None)
     }
 
     fn closest_grapheme_byte_for_x(&self, text: &str, x: f32, window: &mut Window) -> usize {
         use unicode_segmentation::UnicodeSegmentation;
 
-        let shaped = self.shape_coordinate_line(text, window);
+        let shaped = self.shape_coordinate_line(text, window.text_system());
         // Font shaping is authoritative for pointer hit testing, but only
         // grapheme boundaries are legal caret positions.
         text.grapheme_indices(true)
@@ -1464,6 +1482,46 @@ mod tests {
         wrapped_selection_text,
     };
     use oxideterm_editor_core::{BufferOffset, Selection};
+
+    #[gpui::test]
+    fn fractional_line_height_keeps_the_final_row_inside_the_viewport(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (editor, cx) = cx.add_window_view(|_, cx| {
+            super::TextEditorView::new(
+                vec!["Last row must remain visible"; 201].join("\n"),
+                &oxideterm_theme::default_tokens(),
+                cx,
+            )
+        });
+        cx.update(|window, app| {
+            editor.update(app, |editor, cx| {
+                editor.apply_runtime_settings(
+                    &oxideterm_theme::default_tokens(),
+                    "monospace".into(),
+                    14.0,
+                    1.2,
+                    false,
+                    false,
+                    cx,
+                );
+                for (scale, row_height, scroll_end) in [
+                    (1.0, 17.0, 3237.0),
+                    (2.0, 17.0, 3237.0),
+                    (1.25, 16.8, 3196.8),
+                ] {
+                    window.set_scale_factor(scale);
+                    editor.measure_code_metrics(window, cx);
+                    assert!((editor.metrics.line_height - row_height).abs() < 0.001);
+                    editor.viewport.set_height(180.0);
+                    editor
+                        .viewport
+                        .scroll_by(0.0, 10000.0, 0.0, 201, editor.metrics.line_height);
+                    assert!((editor.viewport.scroll_y_px - scroll_end).abs() < 0.001);
+                }
+            });
+        });
+    }
 
     #[gpui::test]
     fn editor_caret_blink_uses_scheduled_time_and_stops_when_released(
