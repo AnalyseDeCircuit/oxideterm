@@ -268,7 +268,8 @@ impl WorkspaceApp {
                         svg()
                             .path(LucideIcon::BookOpen.path())
                             .size(px(KNOWLEDGE_NAVIGATOR_ACTION_ICON_SIZE))
-                            .flex_none(),
+                            .flex_none()
+                            .text_color(rgb(self.tokens.ui.text_muted)),
                     )
                     .child(self.i18n.t("settings_view.knowledge.notebooks")),
             )
