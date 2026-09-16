@@ -101,6 +101,7 @@ impl Render for TextEditorView {
         // Content edits, wrapping, and resizing can all shorten the widest row.
         self.viewport
             .clamp_horizontal(self.max_horizontal_scroll_px());
+        self.reveal_changed_caret_horizontally(window);
         let display_rows = self.display_rows();
         let visible = self
             .viewport
@@ -239,6 +240,33 @@ impl Render for TextEditorView {
 }
 
 impl TextEditorView {
+    fn reveal_changed_caret_horizontally(&mut self, window: &mut Window) {
+        let Some(bounds) = self.content_bounds else {
+            return;
+        };
+        let caret_state = (self.buffer.version(), self.cursor.selection().head);
+        if self.last_revealed_caret == Some(caret_state) {
+            return;
+        }
+        self.last_revealed_caret = Some(caret_state);
+        // Only edits and caret movement reveal text. Repaints after manual scrolling
+        // must not pull the viewport back to an unchanged selection.
+        let caret = self.bounds_for_byte_offset(caret_state.1, bounds, window);
+        let left =
+            bounds.left() + px(self.visible_gutter_width() + self.visible_content_padding_x());
+        let right = bounds.right() - px(CM_SCROLLBAR_TRACK_WIDTH + CM_CURSOR_WIDTH);
+        if right <= left {
+            return;
+        }
+        if caret.left() < left {
+            self.viewport.scroll_x_px += f32::from(caret.left() - left);
+        } else if caret.left() > right {
+            self.viewport.scroll_x_px += f32::from(caret.left() - right);
+        }
+        self.viewport
+            .clamp_horizontal(self.max_horizontal_scroll_px());
+    }
+
     fn render_vertical_scrollbar(
         &self,
         editor: Entity<Self>,

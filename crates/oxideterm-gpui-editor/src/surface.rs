@@ -289,6 +289,7 @@ pub struct TextEditorView {
     scroll_origin: EditorScrollOrigin,
     last_published_scroll: Option<(u64, f32, f32, f32)>,
     pending_layout_anchor: Option<EditorScrollAnchor>,
+    last_revealed_caret: Option<(u64, BufferOffset)>,
     metrics: EditorMetrics,
     configured_line_height: f32,
     text_system: Arc<gpui::TextSystem>,
@@ -352,6 +353,7 @@ impl TextEditorView {
             scroll_origin: EditorScrollOrigin::Layout,
             last_published_scroll: None,
             pending_layout_anchor: None,
+            last_revealed_caret: None,
             configured_line_height: metrics.line_height,
             text_system: cx.text_system().clone(),
             metrics,
@@ -1503,6 +1505,62 @@ mod tests {
         wrapped_selection_text,
     };
     use oxideterm_editor_core::{BufferOffset, Selection};
+
+    #[gpui::test]
+    fn long_input_keeps_caret_visible_without_overriding_manual_horizontal_scroll(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            let editor = super::TextEditorView::new("", &oxideterm_theme::default_tokens(), cx);
+            window.focus(&editor.focus_handle, cx);
+            editor
+        });
+        cx.simulate_resize(gpui::size(gpui::px(420.0), gpui::px(126.0)));
+        cx.update(|window, app| {
+            window.draw(app).clear(app);
+        });
+        let text = format!("echo {}", "1234567890".repeat(30));
+        cx.simulate_input(&text);
+        cx.update(|window, app| {
+            window.draw(app).clear(app);
+            editor.update(app, |editor, _| {
+                let bounds = editor.content_bounds.unwrap();
+                let caret =
+                    editor.bounds_for_byte_offset(editor.cursor.selection().head, bounds, window);
+                assert!(caret.right() <= bounds.right(), "typed caret is clipped");
+                assert!(caret.left() >= bounds.left() + gpui::px(editor.visible_gutter_width()));
+                assert_eq!(editor.buffer.text(), text);
+            });
+        });
+        let track_start = editor.read_with(cx, |editor, _| {
+            let bounds = editor.content_bounds.unwrap();
+            gpui::point(
+                bounds.left() + gpui::px(editor.visible_gutter_width() + 1.0),
+                bounds.bottom() - gpui::px(5.0),
+            )
+        });
+        cx.simulate_click(track_start, gpui::Modifiers::default());
+        cx.update(|window, app| {
+            window.draw(app).clear(app);
+        });
+        editor.read_with(cx, |editor, _| {
+            assert_eq!(editor.viewport.scroll_x_px, 0.0);
+            assert_eq!(editor.cursor.selection().head, BufferOffset(text.len()));
+        });
+        cx.simulate_input("x");
+        cx.update(|window, app| {
+            window.draw(app).clear(app);
+        });
+        editor.read_with(cx, |editor, _| assert!(editor.viewport.scroll_x_px > 0.0));
+        cx.simulate_input("\n");
+        cx.update(|window, app| {
+            window.draw(app).clear(app);
+        });
+        editor.read_with(cx, |editor, _| {
+            assert_eq!(editor.viewport.scroll_x_px, 0.0);
+            assert_eq!(editor.buffer.text(), format!("{text}x\n"));
+        });
+    }
 
     #[gpui::test]
     fn fractional_line_height_keeps_the_final_row_inside_the_viewport(
