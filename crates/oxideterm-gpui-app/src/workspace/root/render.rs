@@ -477,7 +477,7 @@ impl WorkspaceApp {
                         &this.settings_store.settings().keybindings.overrides,
                     )
                 {
-                    this.open_command_palette(cx);
+                    this.open_command_palette(window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this
@@ -761,8 +761,8 @@ impl WorkspaceApp {
             .on_action(cx.listener(|this, _: &ToggleSidebar, _window, cx| {
                 this.toggle_sidebar(cx);
             }))
-            .on_action(cx.listener(|this, _: &CommandPalette, _window, cx| {
-                this.open_command_palette(cx);
+            .on_action(cx.listener(|this, _: &CommandPalette, window, cx| {
+                this.open_command_palette(window, cx);
             }))
             .on_action(cx.listener(|this, _: &ZenMode, _window, cx| {
                 this.toggle_zen_mode(cx);

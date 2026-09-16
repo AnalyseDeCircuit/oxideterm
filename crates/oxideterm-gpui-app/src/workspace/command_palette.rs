@@ -151,15 +151,18 @@ enum ShortcutsModalVirtualRow {
 }
 
 impl WorkspaceApp {
-    pub(super) fn open_command_palette(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn open_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.bootstrap_native_plugin_runtime(cx);
-        self.release_active_remote_desktop_inputs(cx);
+        self.prepare_modal_interaction_boundary(cx);
         let auto_load_hosts = self.settings_store.settings().ssh_config.auto_load_hosts;
         let existing_names = self.command_palette_existing_connection_names();
         self.command_palette.update(cx, |palette, cx| {
             palette.open(auto_load_hosts, existing_names, cx);
         });
-        self.ime_marked_text = None;
+        self.clear_ime_selection();
+        self.show_active_input_caret(cx);
+        self.needs_active_pane_focus = false;
+        window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 

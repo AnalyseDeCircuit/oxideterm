@@ -411,7 +411,7 @@ impl WorkspaceApp {
             "app.newConnection" => self.open_new_connection_form(window, cx),
             "app.settings" => self.open_settings(window, cx),
             "app.toggleSidebar" => self.toggle_sidebar(cx),
-            "app.commandPalette" => self.open_command_palette(cx),
+            "app.commandPalette" => self.open_command_palette(window, cx),
             "app.zenMode" => self.toggle_zen_mode(cx),
             "app.nextTab" => self.next_tab(true, window, cx),
             "app.prevTab" => self.next_tab(false, window, cx),
