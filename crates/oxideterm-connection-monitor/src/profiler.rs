@@ -252,7 +252,7 @@ impl ProfilerRegistry {
         connection_id: impl Into<String>,
         sampler: Arc<dyn ResourceSampler>,
         os_type: impl Into<String>,
-        update_tx: Option<mpsc::UnboundedSender<ProfilerUpdate>>,
+        update_tx: Option<mpsc::Sender<()>>,
     ) -> bool {
         let spawn_handle = Handle::try_current().ok();
         self.start_with_sampler_on_handle(
@@ -270,7 +270,7 @@ impl ProfilerRegistry {
         connection_id: impl Into<String>,
         sampler: Arc<dyn ResourceSampler>,
         os_type: impl Into<String>,
-        update_tx: Option<mpsc::UnboundedSender<ProfilerUpdate>>,
+        update_tx: Option<mpsc::Sender<()>>,
         handle: Handle,
     ) -> bool {
         self.start_with_sampler_on_config(
@@ -290,7 +290,7 @@ impl ProfilerRegistry {
         sampler: Arc<dyn ResourceSampler>,
         os_type: impl Into<String>,
         config: ResourceSamplingConfig,
-        update_tx: Option<mpsc::UnboundedSender<ProfilerUpdate>>,
+        update_tx: Option<mpsc::Sender<()>>,
         handle: Handle,
     ) -> bool {
         self.start_with_sampler_on_handle(
@@ -309,7 +309,7 @@ impl ProfilerRegistry {
         sampler: Arc<dyn ResourceSampler>,
         os_type: impl Into<String>,
         config: ResourceSamplingConfig,
-        update_tx: Option<mpsc::UnboundedSender<ProfilerUpdate>>,
+        update_tx: Option<mpsc::Sender<()>>,
         spawn_handle: Option<Handle>,
     ) -> bool {
         let connection_id = connection_id.into();
@@ -417,6 +417,25 @@ impl ProfilerRegistry {
         lock(&self.profilers)
             .get(connection_id)
             .map(|entry| entry.snapshot.history.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn trend_history(&self, connection_id: &str) -> Vec<crate::ResourceTrendSample> {
+        lock(&self.profilers)
+            .get(connection_id)
+            .map(|entry| {
+                entry
+                    .snapshot
+                    .history
+                    .iter()
+                    .map(|sample| crate::ResourceTrendSample {
+                        timestamp_ms: sample.timestamp_ms,
+                        cpu_percent: sample.cpu_percent,
+                        rx_bytes_per_sec: sample.net_rx_bytes_per_sec,
+                        tx_bytes_per_sec: sample.net_tx_bytes_per_sec,
+                    })
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -660,10 +679,15 @@ async fn sample_loop(
     sampler: Arc<dyn ResourceSampler>,
     os_type: String,
     config: ResourceSamplingConfig,
-    update_tx: Option<mpsc::UnboundedSender<ProfilerUpdate>>,
+    update_tx: Option<mpsc::Sender<()>>,
     mut stop_rx: oneshot::Receiver<()>,
 ) {
-    let mut shell = match open_resource_sample_shell(sampler.as_ref(), &os_type).await {
+    let opened = tokio::select! {
+        biased;
+        _ = &mut stop_rx => return,
+        opened = open_resource_sample_shell(sampler.as_ref(), &os_type) => opened,
+    };
+    let mut shell = match opened {
         Ok(shell) => shell,
         Err(_) => {
             registry.mark_degraded(&connection_id);
@@ -688,8 +712,9 @@ async fn sample_loop(
 
     loop {
         tokio::select! {
+            biased;
             _ = &mut stop_rx => {
-                let _ = shell.close().await;
+                let _ = tokio::time::timeout(RESOURCE_SAMPLE_TIMEOUT, shell.close()).await;
                 break;
             }
             _ = interval.tick() => {
@@ -706,7 +731,7 @@ async fn sample_loop(
                             cached_system_info.as_ref(),
                         ),
                         );
-                    let _ = shell.close().await;
+                    let _ = tokio::time::timeout(RESOURCE_SAMPLE_TIMEOUT, shell.close()).await;
                     break;
                     }
 
@@ -715,15 +740,21 @@ async fn sample_loop(
                 } else {
                     &initial_command
                 };
-                match shell
-                    .sample_until(
+                // Stop must also cancel the in-flight read, not just the interval wait.
+                let sampled = tokio::select! {
+                    biased;
+                    _ = &mut stop_rx => {
+                        let _ = tokio::time::timeout(RESOURCE_SAMPLE_TIMEOUT, shell.close()).await;
+                        return;
+                    }
+                    result = shell.sample_until(
                         command,
                         RESOURCE_END_MARKER,
                         RESOURCE_SAMPLE_TIMEOUT,
                         RESOURCE_MAX_OUTPUT_SIZE,
-                    )
-                    .await
-                {
+                    ) => result,
+                };
+                match sampled {
                     Ok(output) => {
                         let timestamp_ms = now_ms();
                         let mut metrics =
@@ -762,7 +793,7 @@ async fn sample_loop(
                                     cached_system_info.as_ref(),
                                 ),
                             );
-                            let _ = shell.close().await;
+                            let _ = tokio::time::timeout(RESOURCE_SAMPLE_TIMEOUT, shell.close()).await;
                             break;
                         }
                         previous_sample = previous_sample_from_metrics(&metrics, &output);
@@ -783,16 +814,22 @@ async fn sample_loop(
                                     cached_system_info.as_ref(),
                                 ),
                             );
-                            let _ = shell.close().await;
+                            let _ = tokio::time::timeout(RESOURCE_SAMPLE_TIMEOUT, shell.close()).await;
                             break;
                         }
                         // Tauri writes a Failed sample on each transient read
                         // failure and then tries to reopen the persistent shell
                         // once. Without that update, the native UI can look
                         // inert until the profiler finally degrades.
-                        if let Ok(new_shell) =
-                            open_resource_sample_shell(sampler.as_ref(), &os_type).await
-                        {
+                        let reopened = tokio::select! {
+                            biased;
+                            _ = &mut stop_rx => {
+                                let _ = tokio::time::timeout(RESOURCE_SAMPLE_TIMEOUT, shell.close()).await;
+                                return;
+                            }
+                            result = open_resource_sample_shell(sampler.as_ref(), &os_type) => result,
+                        };
+                        if let Ok(new_shell) = reopened {
                             shell = new_shell;
                         }
                         record_and_emit(
@@ -834,7 +871,7 @@ async fn open_resource_sample_shell(
 
 fn record_and_emit(
     registry: &ProfilerRegistry,
-    update_tx: &Option<mpsc::UnboundedSender<ProfilerUpdate>>,
+    update_tx: &Option<mpsc::Sender<()>>,
     connection_id: String,
     metrics: ResourceMetrics,
 ) {
@@ -842,9 +879,12 @@ fn record_and_emit(
         connection_id,
         metrics,
     };
-    registry.record_metrics(update.clone());
-    if let Some(update_tx) = update_tx {
-        let _ = update_tx.send(update);
+    if registry.record_metrics(update)
+        && let Some(update_tx) = update_tx
+    {
+        // The registry owns the latest sample and bounded history. A full notification
+        // channel already guarantees a refresh, so slow consumers retain no payloads.
+        let _ = update_tx.try_send(());
     }
 }
 
@@ -933,6 +973,55 @@ mod tests {
     }
 
     #[test]
+    fn slow_ui_does_not_accumulate_samples_and_stop_releases_history() {
+        let registry = ProfilerRegistry::new();
+        registry.start("conn-1");
+        let (tx, mut rx) = mpsc::channel(1);
+        let tx = Some(tx);
+        for timestamp in 0..5_000 {
+            let mut metrics = ResourceMetrics::empty(timestamp, MetricsSource::Full);
+            metrics.cpu_percent = Some((timestamp % 100) as f64);
+            metrics.system_info = Some(ResourceSystemInfo {
+                system_version: Some("v".repeat(2_048)),
+                ..Default::default()
+            });
+            record_and_emit(&registry, &tx, "conn-1".into(), metrics);
+        }
+        assert_eq!(
+            rx.len(),
+            1,
+            "a stalled UI needs only one refresh notification"
+        );
+        let expected_times: Vec<_> = (4_940..5_000).collect();
+        assert_eq!(
+            registry
+                .history("conn-1")
+                .iter()
+                .map(|sample| sample.timestamp_ms)
+                .collect::<Vec<_>>(),
+            expected_times
+        );
+        assert_eq!(
+            registry
+                .trend_history("conn-1")
+                .iter()
+                .map(|sample| sample.timestamp_ms)
+                .collect::<Vec<_>>(),
+            expected_times
+        );
+        assert_eq!(registry.latest("conn-1").unwrap().cpu_percent, Some(99.0));
+        rx.try_recv().unwrap();
+        assert!(matches!(
+            rx.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+        registry.stop("conn-1");
+        assert_eq!(registry.current("conn-1"), None);
+        assert_eq!(registry.trend_history("conn-1"), Vec::new());
+        assert!(registry.connection_ids().is_empty());
+    }
+
+    #[test]
     fn sampling_command_includes_only_enabled_recurring_probes() {
         let processes_only = build_sample_command_for(
             "Linux",
@@ -1002,19 +1091,17 @@ mod tests {
     #[tokio::test]
     async fn sampler_open_failure_degrades_and_emits_rtt_only() {
         let registry = ProfilerRegistry::new();
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = mpsc::channel(1);
 
         assert!(
             registry.start_with_sampler("conn-1", Arc::new(FailingSampler), "Linux", Some(tx),)
         );
 
-        let update = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+        tokio::time::timeout(Duration::from_secs(1), rx.recv())
             .await
             .expect("degraded update should be emitted")
             .expect("update channel should stay open");
 
-        assert_eq!(update.connection_id, "conn-1");
-        assert_eq!(update.metrics.source, MetricsSource::RttOnly);
         assert_eq!(registry.state("conn-1"), Some(ProfilerState::Degraded));
         assert_eq!(
             registry.latest("conn-1").map(|metrics| metrics.source),
@@ -1039,6 +1126,100 @@ mod tests {
     }
 
     struct FailingSampler;
+
+    #[tokio::test]
+    async fn stopping_cancels_in_flight_open_and_sample_and_releases_the_owner() {
+        for block_open in [true, false] {
+            let registry = ProfilerRegistry::new();
+            let entered = Arc::new(tokio::sync::Notify::new());
+            let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let (dropped_tx, dropped_rx) = oneshot::channel();
+            let sampler = Arc::new(BlockingSampler {
+                block_open,
+                entered: entered.clone(),
+                closed: closed.clone(),
+                dropped: Some(dropped_tx),
+            });
+            let owner = Arc::downgrade(&sampler);
+            registry.start_with_sampler("conn-1", sampler, "Linux", None);
+            tokio::time::timeout(
+                RESOURCE_SAMPLE_INTERVAL + Duration::from_secs(2),
+                entered.notified(),
+            )
+            .await
+            .expect("sampler must enter the blocked operation");
+            registry.stop("conn-1");
+            tokio::time::timeout(Duration::from_secs(1), dropped_rx)
+                .await
+                .expect("stop must interrupt the blocked operation")
+                .expect("sampler owner must be dropped");
+            assert!(owner.upgrade().is_none());
+            assert_eq!(
+                closed.load(std::sync::atomic::Ordering::SeqCst),
+                !block_open
+            );
+            assert!(registry.connection_ids().is_empty());
+        }
+    }
+
+    struct BlockingSampler {
+        block_open: bool,
+        entered: Arc<tokio::sync::Notify>,
+        closed: Arc<std::sync::atomic::AtomicBool>,
+        dropped: Option<oneshot::Sender<()>>,
+    }
+
+    impl Drop for BlockingSampler {
+        fn drop(&mut self) {
+            let _ = self.dropped.take().unwrap().send(());
+        }
+    }
+
+    impl ResourceSampler for BlockingSampler {
+        fn open_shell<'a>(
+            &'a self,
+            _: &'a str,
+            _: Duration,
+        ) -> ResourceSamplerFuture<'a, Result<Box<dyn ResourceSampleShell>, String>> {
+            Box::pin(async move {
+                if self.block_open {
+                    self.entered.notify_one();
+                    std::future::pending::<()>().await;
+                }
+                Ok(Box::new(BlockingShell {
+                    entered: self.entered.clone(),
+                    closed: self.closed.clone(),
+                }) as Box<dyn ResourceSampleShell>)
+            })
+        }
+    }
+
+    struct BlockingShell {
+        entered: Arc<tokio::sync::Notify>,
+        closed: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl ResourceSampleShell for BlockingShell {
+        fn sample_until<'a>(
+            &'a mut self,
+            _: &'a str,
+            _: &'a str,
+            _: Duration,
+            _: usize,
+        ) -> ResourceSamplerFuture<'a, Result<String, String>> {
+            Box::pin(async move {
+                self.entered.notify_one();
+                std::future::pending().await
+            })
+        }
+
+        fn close<'a>(&'a mut self) -> ResourceSamplerFuture<'a, Result<(), String>> {
+            Box::pin(async move {
+                self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            })
+        }
+    }
 
     impl ResourceSampler for FailingSampler {
         fn open_shell<'a>(

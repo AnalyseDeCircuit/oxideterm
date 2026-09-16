@@ -3,6 +3,9 @@
 use super::*;
 
 use oxideterm_connection_monitor::ProfilerState;
+#[path = "monitor/charts.rs"]
+mod charts;
+use charts::{monitor_usage, render_trend, render_usage};
 
 pub(in crate::workspace::connection_monitor) struct MonitorRenderContext {
     pub(in crate::workspace::connection_monitor) tokens: ThemeTokens,
@@ -17,6 +20,8 @@ struct CompactMonitorRenderContext {
     tokens: ThemeTokens,
     i18n: I18n,
     mono_font_family: SharedString,
+    metrics: Arc<ResourceMetrics>,
+    history: Arc<[oxideterm_connection_monitor::ResourceTrendSample]>,
 }
 
 impl WorkspaceApp {
@@ -315,7 +320,7 @@ impl HostToolsEntity {
                     .h_2()
                     .rounded_full()
                     .bg(rgb(if is_running {
-                        MONITOR_EMERALD_DARK
+                        theme.success
                     } else {
                         theme.text_muted
                     }))
@@ -363,7 +368,7 @@ impl HostToolsEntity {
     ) -> AnyElement {
         let rows = Arc::new(compact_monitor_rows(
             metrics,
-            can_retry_sampling.then_some(connection_id),
+            can_retry_sampling.then_some(connection_id.clone()),
         ));
         self.sync_compact_monitor_list_state(&rows, render.sidebar_width);
         let state = self.compact_monitor_list_state();
@@ -374,6 +379,11 @@ impl HostToolsEntity {
             tokens: render.tokens,
             i18n: render.i18n.clone(),
             mono_font_family: render.mono_font_family.clone(),
+            metrics: Arc::new(metrics.clone()),
+            history: self
+                .profiler_registry()
+                .trend_history(&connection_id)
+                .into(),
         };
 
         div()
@@ -387,6 +397,10 @@ impl HostToolsEntity {
                     host_tools.update(cx, |host_tools, cx| {
                         host_tools.render_compact_monitor_virtual_row(
                             rows.get(index).cloned(),
+                            rows[..index].iter().rev().find_map(|row| match row {
+                                CompactMonitorRow::Section { kind } => Some(*kind),
+                                _ => None,
+                            }),
                             layout,
                             &row_render,
                             cx,
@@ -423,6 +437,7 @@ impl HostToolsEntity {
     fn render_compact_monitor_virtual_row(
         &self,
         row: Option<CompactMonitorRow>,
+        section: Option<MonitorSectionKind>,
         layout: CompactMonitorLayout,
         render: &CompactMonitorRenderContext,
         cx: &mut Context<Self>,
@@ -432,6 +447,26 @@ impl HostToolsEntity {
         };
         match row {
             CompactMonitorRow::Metric { kind, value, level } => {
+                if let Some(percent) = monitor_usage(kind, &render.metrics) {
+                    let usage = render_usage(
+                        monitor_metric_icon(kind),
+                        self.compact_monitor_metric_label(kind, render),
+                        value,
+                        percent,
+                        render,
+                    );
+                    return if kind == MonitorMetricKind::Cpu {
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .child(usage)
+                            .child(render_trend(render, true))
+                            .into_any_element()
+                    } else {
+                        usage.into_any_element()
+                    };
+                }
                 let value = if kind == MonitorMetricKind::Source {
                     render.i18n.t(&value)
                 } else {
@@ -441,25 +476,55 @@ impl HostToolsEntity {
                     monitor_metric_icon(kind),
                     self.compact_monitor_metric_label(kind, render),
                     value,
-                    monitor_value_level_color(level, render.tokens.ui.text_muted),
+                    if matches!(kind, MonitorMetricKind::Rtt) {
+                        monitor_value_level_color(level, render.tokens.ui.text_muted)
+                    } else {
+                        render.tokens.ui.text
+                    },
                     render,
                 )
             }
-            CompactMonitorRow::Network { rx, tx } => {
-                self.render_compact_monitor_network_row(rx, tx, layout, render)
-            }
+            CompactMonitorRow::Network { rx, tx } => div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .child(self.render_compact_monitor_network_row(rx, tx, layout, render))
+                .child(render_trend(render, false))
+                .into_any_element(),
             CompactMonitorRow::Section { kind } => self.render_compact_monitor_section_row(
                 monitor_section_icon(kind),
                 render.i18n.t(monitor_section_label_key(kind)),
                 render,
             ),
-            CompactMonitorRow::Detail { name, value, level } => self
-                .render_compact_monitor_detail_row(
+            CompactMonitorRow::Detail { name, value, level } => {
+                if section == Some(MonitorSectionKind::Mounts)
+                    && let Some(disk) = render
+                        .metrics
+                        .disks
+                        .iter()
+                        .find(|disk| disk.mount_point == name)
+                {
+                    return render_usage(
+                        LucideIcon::HardDrive,
+                        name,
+                        format!(
+                            "{} / {}",
+                            oxideterm_connection_monitor::format_bytes(disk.used),
+                            oxideterm_connection_monitor::format_bytes(disk.total)
+                        ),
+                        disk.percent
+                            .or_else(|| charts::capacity_percent(disk.used, disk.total)),
+                        render,
+                    )
+                    .into_any_element();
+                }
+                self.render_compact_monitor_detail_row(
                     name,
                     value,
                     monitor_value_level_color(level, render.tokens.ui.text_muted),
                     render,
-                ),
+                )
+            }
             CompactMonitorRow::Interface { name, rx, tx } => {
                 self.render_compact_monitor_interface_row(name, rx, tx, layout, render)
             }
@@ -585,7 +650,7 @@ impl HostToolsEntity {
                                 .min_w_0()
                                 .flex_1()
                                 .truncate()
-                                .text_color(rgb(MONITOR_EMERALD))
+                                .text_color(rgb(theme.accent))
                                 .child(format!("↓ {rx}")),
                         )
                         .child(
@@ -594,7 +659,7 @@ impl HostToolsEntity {
                                 .flex_1()
                                 .truncate()
                                 .text_align(gpui::TextAlign::Right)
-                                .text_color(rgb(MONITOR_AMBER))
+                                .text_color(rgb(theme.accent_secondary))
                                 .child(format!("↑ {tx}")),
                         ),
                 )
@@ -644,14 +709,14 @@ impl HostToolsEntity {
                         div()
                             .flex_none()
                             .truncate()
-                            .text_color(rgb(MONITOR_EMERALD))
+                            .text_color(rgb(theme.accent))
                             .child(format!("↓ {rx}")),
                     )
                     .child(
                         div()
                             .flex_none()
                             .truncate()
-                            .text_color(rgb(MONITOR_AMBER))
+                            .text_color(rgb(theme.accent_secondary))
                             .child(format!("↑ {tx}")),
                     ),
             )
@@ -669,12 +734,15 @@ impl HostToolsEntity {
             .w_full()
             .h(px(COMPACT_MONITOR_SECTION_ROW_HEIGHT))
             .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
+            .border_t_1()
+            .border_color(rgba((theme.border << 8) | 0x60))
             .flex()
             .items_center()
             .gap(px(6.0))
             .min_w_0()
             .text_size(px(12.0))
-            .text_color(rgb(theme.text_muted))
+            .text_color(rgb(theme.text))
+            .font_weight(gpui::FontWeight::MEDIUM)
             .child(WorkspaceApp::render_lucide_icon(
                 icon,
                 13.0,
@@ -777,7 +845,8 @@ impl HostToolsEntity {
                                 .min_w_0()
                                 .flex_1()
                                 .truncate()
-                                .child(format!("rx {rx}")),
+                                .text_color(rgb(theme.accent))
+                                .child(format!("↓ {rx}")),
                         )
                         .child(
                             div()
@@ -785,7 +854,8 @@ impl HostToolsEntity {
                                 .flex_1()
                                 .truncate()
                                 .text_align(gpui::TextAlign::Right)
-                                .child(format!("tx {tx}")),
+                                .text_color(rgb(theme.accent_secondary))
+                                .child(format!("↑ {tx}")),
                         ),
                 )
                 .into_any_element();
@@ -793,7 +863,7 @@ impl HostToolsEntity {
 
         self.render_compact_monitor_detail_row(
             name,
-            format!("rx {rx} / tx {tx}"),
+            format!("↓ {rx} / ↑ {tx}"),
             theme.text_muted,
             render,
         )

@@ -19,7 +19,7 @@ pub(in crate::workspace) struct HostToolsEntity {
     ssh_registry: SshConnectionRegistry,
     ssh_consumer_context: Option<HostToolsSshConsumerContext>,
     pub(super) profiler_registry: ProfilerRegistry,
-    pub(super) profiler_update_tx: tokio::sync::mpsc::UnboundedSender<ProfilerUpdate>,
+    pub(super) profiler_update_tx: tokio::sync::mpsc::Sender<()>,
     pub(super) sampler_delivery_wake: crate::workspace::delivery::ActiveDeliveryWake,
     pub(super) sampler_delivery_rx:
         std::sync::mpsc::Receiver<super::delivery::HostToolsSamplerDelivery>,
@@ -511,8 +511,8 @@ impl HostToolsEntity {
     }
 
     pub(in crate::workspace) fn new(
-        profiler_update_tx: tokio::sync::mpsc::UnboundedSender<ProfilerUpdate>,
-        profiler_update_rx: tokio::sync::mpsc::UnboundedReceiver<ProfilerUpdate>,
+        profiler_update_tx: tokio::sync::mpsc::Sender<()>,
+        profiler_update_rx: tokio::sync::mpsc::Receiver<()>,
         ssh_registry: SshConnectionRegistry,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -1905,7 +1905,7 @@ mod tests {
     fn lifecycle_tick_samples_only_visible_host_tools(cx: &mut TestAppContext) {
         let runtime = tokio::runtime::Runtime::new().expect("create test runtime");
         let registry = SshConnectionRegistry::default();
-        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::channel(1);
         let entity =
             cx.new(|cx| HostToolsEntity::new(profiler_update_tx, profiler_update_rx, registry, cx));
 
@@ -1957,7 +1957,7 @@ mod tests {
             shell_open_count: shell_open_count.clone(),
             shell_close_count: shell_close_count.clone(),
         });
-        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::channel(1);
         let entity =
             cx.new(|cx| HostToolsEntity::new(profiler_update_tx, profiler_update_rx, registry, cx));
         let mut events = cx.events(&entity);
@@ -2103,7 +2103,7 @@ mod tests {
 
     #[gpui::test]
     fn process_action_state_and_delivery_are_entity_owned_and_redacted(cx: &mut TestAppContext) {
-        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::channel(1);
         let entity = cx.new(|cx| {
             HostToolsEntity::new(
                 profiler_update_tx,
@@ -2187,7 +2187,7 @@ mod tests {
 
     #[gpui::test]
     fn docker_actions_and_logs_are_entity_owned_and_redacted(cx: &mut TestAppContext) {
-        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::channel(1);
         let entity = cx.new(|cx| {
             HostToolsEntity::new(
                 profiler_update_tx,
@@ -2288,7 +2288,7 @@ mod tests {
     #[gpui::test]
     fn service_snapshot_actions_and_logs_are_entity_owned_and_redacted(cx: &mut TestAppContext) {
         let runtime = tokio::runtime::Runtime::new().expect("create test runtime");
-        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::channel(1);
         let entity = cx.new(|cx| {
             HostToolsEntity::new(
                 profiler_update_tx,
@@ -2436,7 +2436,7 @@ mod tests {
     fn tmux_snapshot_action_and_confirm_are_entity_owned_and_redacted(cx: &mut TestAppContext) {
         let runtime = tokio::runtime::Runtime::new().expect("create test runtime");
         let runtime_handle = runtime.handle().clone();
-        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::channel(1);
         let entity = cx.new(|cx| {
             HostToolsEntity::new(
                 profiler_update_tx,
@@ -2559,7 +2559,7 @@ mod tests {
 
     #[gpui::test]
     fn log_snapshot_delivery_is_entity_owned_and_redacted(cx: &mut TestAppContext) {
-        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::channel(1);
         let entity = cx.new(|cx| {
             HostToolsEntity::new(
                 profiler_update_tx,
@@ -2621,7 +2621,7 @@ mod tests {
 
     #[gpui::test]
     fn schedule_logs_and_actions_are_entity_owned_and_redacted(cx: &mut TestAppContext) {
-        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::channel(1);
         let entity = cx.new(|cx| {
             HostToolsEntity::new(
                 profiler_update_tx,

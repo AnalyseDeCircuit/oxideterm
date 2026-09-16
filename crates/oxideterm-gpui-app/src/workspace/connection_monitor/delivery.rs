@@ -2,7 +2,6 @@ use super::*;
 use crate::workspace::delivery as workspace_delivery;
 
 pub(super) enum HostToolsSamplerDelivery {
-    ProfilerUpdated,
     GpuUpdated(GpuUpdate),
 }
 
@@ -27,7 +26,7 @@ pub(super) enum HostToolsReliableDelivery {
 }
 
 pub(in crate::workspace) struct HostToolsDeliveryBridges {
-    pub(super) profiler_update_rx: tokio::sync::mpsc::UnboundedReceiver<ProfilerUpdate>,
+    pub(super) profiler_update_rx: tokio::sync::mpsc::Receiver<()>,
     pub(super) gpu_update_rx: tokio::sync::mpsc::UnboundedReceiver<GpuUpdate>,
     pub(super) sampler_delivery_tx:
         workspace_delivery::ActiveDeliverySender<HostToolsSamplerDelivery>,
@@ -44,15 +43,11 @@ impl HostToolsEntity {
             mut gpu_update_rx,
             sampler_delivery_tx,
         } = bridges;
-        let profiler_delivery_tx = sampler_delivery_tx.clone();
-        cx.spawn(async move |_, _| {
+        cx.spawn(async move |weak, cx| {
             while profiler_update_rx.recv().await.is_some() {
-                // ProfilerRegistry already owns the snapshot; only its change signal crosses
-                // into the foreground queue.
-                if profiler_delivery_tx
-                    .send(HostToolsSamplerDelivery::ProfilerUpdated)
-                    .is_err()
-                {
+                // This already runs on the foreground executor; do not enqueue
+                // another notification that could accumulate behind slow frames.
+                if weak.update(cx, |_, cx| cx.notify()).is_err() {
                     break;
                 }
             }
@@ -119,12 +114,10 @@ impl HostToolsEntity {
             .sampling_task
             .as_ref()
             .map(|task| task.connection_id().to_string());
-        let mut profiler_updated = false;
         let mut latest_gpu_update = None;
 
         for delivery in drain.items {
             match delivery {
-                HostToolsSamplerDelivery::ProfilerUpdated => profiler_updated = true,
                 HostToolsSamplerDelivery::GpuUpdated(update)
                     if active_gpu_connection_id.as_deref()
                         == Some(update.connection_id.as_str()) =>
@@ -141,7 +134,7 @@ impl HostToolsEntity {
             self.host_gpu.snapshot_connection_id = Some(update.connection_id);
             self.host_gpu.snapshot = Some(update.snapshot);
         }
-        if profiler_updated || gpu_updated {
+        if gpu_updated {
             cx.notify();
         }
         drain.outcome.backlog_remaining

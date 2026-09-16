@@ -8,6 +8,15 @@ use crate::service::{ResourceServiceSnapshot, parse_service_snapshot};
 
 pub const RESOURCE_HISTORY_CAPACITY: usize = 60;
 
+/// Numeric history for charts, without process lists or other sampled payloads.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ResourceTrendSample {
+    pub timestamp_ms: u64,
+    pub cpu_percent: Option<f64>,
+    pub rx_bytes_per_sec: Option<u64>,
+    pub tx_bytes_per_sec: Option<u64>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MetricsSource {

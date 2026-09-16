@@ -61,9 +61,10 @@ pub use metrics::{
     CpuSnapshot, MemorySnapshot, MetricsSource, NetInterfaceSnapshot, NetSnapshot,
     PreviousResourceSample, RESOURCE_HISTORY_CAPACITY, ResourceCpuCore, ResourceDisk, ResourceGpu,
     ResourceMetrics, ResourceNetInterface, ResourceSystemInfo, ResourceTopProcess,
-    parse_cpu_snapshot, parse_disk_usage, parse_disks, parse_gpus, parse_loadavg, parse_meminfo,
-    parse_memory_snapshot, parse_net_snapshot, parse_nproc, parse_resource_metrics,
-    parse_system_info, parse_top_processes, previous_sample_from_metrics, push_history,
+    ResourceTrendSample, parse_cpu_snapshot, parse_disk_usage, parse_disks, parse_gpus,
+    parse_loadavg, parse_meminfo, parse_memory_snapshot, parse_net_snapshot, parse_nproc,
+    parse_resource_metrics, parse_system_info, parse_top_processes, previous_sample_from_metrics,
+    push_history,
 };
 pub use package::{
     PackageCaptureCommand, PackageCommandCapability, PackageFilter, PackageInspectCommand,

@@ -399,7 +399,7 @@ impl WorkspaceApp {
                 cx.notify();
             },
         );
-        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::channel(1);
         let host_tools_messages = HostToolsMessages::from_i18n(&i18n);
         let host_tools = cx.new(|cx| {
             let mut host_tools = HostToolsEntity::new(

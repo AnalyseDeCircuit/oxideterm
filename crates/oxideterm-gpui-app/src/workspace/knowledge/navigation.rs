@@ -152,13 +152,16 @@ impl WorkspaceApp {
         } else {
             !state.navigator_hidden
         };
+        let action_inset =
+            (KNOWLEDGE_NAVIGATOR_ACTION_SIZE - KNOWLEDGE_NAVIGATOR_ACTION_ICON_SIZE) / 2.0;
         div()
             .h(px(self.tokens.metrics.ui_button_lg_height))
             .flex_none()
             .flex()
             .items_center()
-            .gap(px(self.tokens.spacing.two))
-            .px(px(self.tokens.spacing.two))
+            .gap(px(self.tokens.spacing.two - action_inset))
+            .pl(px(self.tokens.spacing.two - action_inset))
+            .pr(px(self.tokens.spacing.two))
             .border_b_1()
             .border_color(rgb(self.tokens.ui.border))
             .child(self.knowledge_navigator_action(
