@@ -3292,8 +3292,8 @@ mod tests {
         pane.update(cx, |pane, cx| {
             pane.test_accepts_input = true;
             pane.snapshot.lines[pane.snapshot.cursor_row].active_input = true;
-            pane.observe_autosuggest_input_bytes(b"ls", cx);
             pane.autosuggest_prompt_active = true;
+            pane.observe_autosuggest_input_bytes(b"ls", cx);
 
             assert!(pane.handle_terminal_autosuggest_key(
                 "down",
