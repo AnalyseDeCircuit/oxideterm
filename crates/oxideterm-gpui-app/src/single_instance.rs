@@ -216,7 +216,8 @@ fn acquire_or_forward_with_paths(
 
     match lock_file.try_lock_exclusive() {
         Ok(()) => start_primary(lock_file, paths, connection_launch),
-        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+        // Windows reports ERROR_LOCK_VIOLATION, which is not mapped to WouldBlock.
+        Err(error) if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
             forward_to_primary(&paths.state_path, connection_launch_path, connection_launch)
                 .with_context(|| {
                     format!(
@@ -492,6 +493,69 @@ mod tests {
 
         drop(guard);
         let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn cli_handoff_delivers_the_connection_and_removes_the_file() {
+        for already_running in [false, true] {
+            let data_dir =
+                std::env::temp_dir().join(format!("oxideterm-cli-handoff-{}", Uuid::new_v4()));
+            fs::create_dir_all(&data_dir).unwrap();
+            let paths = InstancePaths::for_data_dir(&data_dir, "test");
+            let request_path = data_dir.join("launch.json");
+            // Synthetic credentials exercise the secret-bearing CLI handoff without a network.
+            fs::write(&request_path, br#"{"kind":"ssh","username":"cli-user","host":"example.test","port":2222,"password":"handoff-test"}"#).unwrap();
+            let primary = if already_running {
+                acquire_or_forward_with_paths(paths.clone(), None, None).unwrap()
+            } else {
+                acquire_or_forward_with_paths(paths.clone(), Some(request_path.clone()), None)
+                    .unwrap()
+            };
+            let SingleInstanceOutcome::Primary {
+                _guard: guard,
+                receiver,
+                ..
+            } = primary
+            else {
+                panic!("initial launch must own the instance");
+            };
+            let launch = if already_running {
+                assert!(matches!(
+                    acquire_or_forward_with_paths(paths, Some(request_path.clone()), None).unwrap(),
+                    SingleInstanceOutcome::Forwarded
+                ));
+                let receiver = receiver.lock().unwrap();
+                assert!(matches!(
+                    receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+                    SingleInstanceEvent::ShowMainWindow
+                ));
+                let SingleInstanceEvent::OpenNativeConnection(launch) =
+                    receiver.recv_timeout(Duration::from_secs(1)).unwrap()
+                else {
+                    panic!("CLI launch must not be treated as an external URI");
+                };
+                launch
+            } else {
+                // Startup consumes the file after acquiring primary ownership.
+                read_connection_launch_file(Some(request_path.clone()))
+                    .unwrap()
+                    .unwrap()
+            };
+            let NativeConnectionLaunch::Ssh(launch) = launch else {
+                panic!("expected an SSH launch");
+            };
+            assert_eq!(
+                (launch.username.as_str(), launch.host.as_str(), launch.port),
+                ("cli-user", "example.test", 2222)
+            );
+            assert_eq!(
+                launch.password.as_deref().map(|password| password.as_str()),
+                Some("handoff-test")
+            );
+            assert!(!request_path.exists());
+            drop(guard);
+            fs::remove_dir_all(data_dir).unwrap();
+        }
     }
 
     #[test]
