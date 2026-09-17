@@ -55,6 +55,7 @@ OxideTerm 2.0.30 adds a native notes workspace with synchronized Markdown source
 
 #### 🧰 Maintenance and Validation
 
+- Added bounded retries for macOS DMG creation when `hdiutil` reports a transient resource-busy error; other creation errors still stop packaging immediately.
 - Moved the maintained `russh` dependency to a separate repository pinned to a specific revision, and applied the workspace's Clippy policy across application crates.
 - Updated affected interface text across all 11 supported languages. The maintainer completed GUI validation before approving this release. The latest identifier-coloring changes passed 44 classification tests, 11 rendering tests, and the application build; Windows CLI handoff still needs Windows-specific runtime confirmation.
 
@@ -108,6 +109,7 @@ OxideTerm 2.0.30 新增原生笔记工作区，支持 Markdown 源码与预览�
 
 #### 🧰 维护与验证
 
+- macOS DMG 创建遇到 `hdiutil` 的临时资源忙错误时进行有限重试，其他创建错误仍立即终止打包。
 - 将维护中的 `russh` 依赖移到独立仓库并固定具体修订，同时让应用各 crate 采用工作区 Clippy 规则。
 - 更新涉及的全部 11 个语言包。维护者已完成 GUI 验证并批准发布；最新标识符着色改动通过 44 项分类测试、11 项渲染测试及应用构建。Windows 命令行转交仍需 Windows 环境的运行确认。
 

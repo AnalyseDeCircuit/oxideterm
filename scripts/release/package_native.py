@@ -35,6 +35,8 @@ MACOS_DMG_BACKGROUND_NAME = "unsigned-dmg-background.png"
 MACOS_DMG_DETACH_MAX_ATTEMPTS = 5
 MACOS_DMG_FORCE_DETACH_MAX_ATTEMPTS = 15
 MACOS_DMG_DETACH_RETRY_DELAY_SECONDS = 2
+MACOS_DMG_CREATE_MAX_ATTEMPTS = 3
+MACOS_DMG_CREATE_RETRY_DELAY_SECONDS = 2
 MACOS_RESOURCE_BUSY_EXIT_CODE = 16
 DIST_DIR = ROOT_DIR / "dist"
 BASE_APP_NAME = "OxideTerm"
@@ -721,25 +723,52 @@ end run
 '''.strip()
 
 
+def create_macos_disk_image(
+    source: Path, destination: Path, volume_name: str, image_format: str
+) -> None:
+    command = [
+        "hdiutil", "create", "-volname", volume_name,
+        "-srcfolder", str(source), "-ov", "-format", image_format, str(destination),
+    ]
+    env = os.environ.copy()
+    env["LC_ALL"] = "C"
+    for attempt in range(1, MACOS_DMG_CREATE_MAX_ATTEMPTS + 1):
+        print("+", " ".join(command), flush=True)
+        try:
+            result = subprocess.run(
+                command, cwd=ROOT_DIR, env=env, check=True,
+                text=True, stderr=subprocess.PIPE,
+            )
+        except subprocess.CalledProcessError as error:
+            diagnostic = error.stderr or ""
+            if diagnostic:
+                print(diagnostic, end="", file=sys.stderr, flush=True)
+            # Unlike detach, create can report EBUSY as exit 1; preserve the
+            # diagnostic and retry only that transient failure, never all errors.
+            busy = (
+                error.returncode == MACOS_RESOURCE_BUSY_EXIT_CODE
+                or "Resource busy" in diagnostic
+            )
+            if not busy or attempt == MACOS_DMG_CREATE_MAX_ATTEMPTS:
+                raise
+            print(
+                "warning: DMG creation is busy; retrying "
+                f"({attempt}/{MACOS_DMG_CREATE_MAX_ATTEMPTS})",
+                file=sys.stderr, flush=True,
+            )
+            time.sleep(MACOS_DMG_CREATE_RETRY_DELAY_SECONDS)
+        else:
+            if result.stderr:
+                print(result.stderr, end="", file=sys.stderr, flush=True)
+            return
+
+
 def create_macos_dmg(
     dmg_root: Path, dmg_path: Path, identity: ReleaseIdentity
 ) -> None:
     """Create a compressed DMG, applying Finder chrome when it is available."""
     if not should_include_macos_unsigned_install_notice(identity):
-        run(
-            [
-                "hdiutil",
-                "create",
-                "-volname",
-                identity.app_name,
-                "-srcfolder",
-                str(dmg_root),
-                "-ov",
-                "-format",
-                "UDZO",
-                str(dmg_path),
-            ]
-        )
+        create_macos_disk_image(dmg_root, dmg_path, identity.app_name, "UDZO")
         return
 
     writable_dmg = dmg_path.with_name(f".{dmg_path.stem}.writable.dmg")
@@ -749,20 +778,7 @@ def create_macos_dmg(
         shutil.rmtree(mount_point)
     mount_point.mkdir()
 
-    run(
-        [
-            "hdiutil",
-            "create",
-            "-volname",
-            identity.app_name,
-            "-srcfolder",
-            str(dmg_root),
-            "-ov",
-            "-format",
-            "UDRW",
-            str(writable_dmg),
-        ]
-    )
+    create_macos_disk_image(dmg_root, writable_dmg, identity.app_name, "UDRW")
     attached_device: str | None = None
     try:
         attached_device = attach_macos_dmg(writable_dmg, mount_point)
