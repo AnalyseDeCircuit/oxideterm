@@ -31,6 +31,7 @@ pub(crate) fn output_role_for_command(command: &ParsedCommand<'_>) -> Option<Sem
         return match token {
             "status" => Some(SemanticLineRole::GitStatusOutput),
             "diff" | "show" => Some(SemanticLineRole::GitDiffOutput),
+            "log" => Some(SemanticLineRole::GitLogOutput),
             _ => None,
         };
     }
@@ -49,11 +50,55 @@ pub(crate) fn line_candidates(
             push_human_status(text, &allows_class, &mut candidates);
         }
         SemanticLineRole::GitDiffOutput => {
+            push_commit_id(text, false, &allows_class, &mut candidates);
             push_diff_line(text, &allows_class, &mut candidates);
+        }
+        SemanticLineRole::GitLogOutput => {
+            push_commit_id(text, true, &allows_class, &mut candidates);
         }
         _ => {}
     }
     candidates
+}
+
+fn is_object_id(text: &str) -> bool {
+    (4..=64).contains(&text.len()) && text.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn push_commit_id(
+    text: &str,
+    allow_oneline: bool,
+    allows_class: &impl Fn(SemanticClass) -> bool,
+    candidates: &mut Vec<Candidate>,
+) {
+    if !allows_class(SemanticClass::Variable) {
+        return;
+    }
+    let content = if allow_oneline && text.starts_with(['*', '|']) {
+        let content = text.trim_start_matches(['*', '|', '/', '\\', ' ']);
+        // Graph continuation lines also prefix indented commit messages with pipes.
+        if !text[..text.len() - content.len()].contains('*') {
+            return;
+        }
+        content
+    } else {
+        text
+    };
+    let id = if let Some(rest) = content.strip_prefix("commit ") {
+        rest.split_whitespace().next()
+    } else if allow_oneline && !content.starts_with(char::is_whitespace) {
+        content.split_whitespace().next()
+    } else {
+        None
+    };
+    if let Some(id) = id.filter(|id| is_object_id(id)) {
+        let start = text.len() - content.len() + content.find(id).expect("ID belongs to header");
+        candidates.push(Candidate::new(
+            start..start + id.len(),
+            SemanticClass::Variable,
+            GIT_CONTENT_PRIORITY,
+        ));
+    }
 }
 
 fn push_porcelain_status(
@@ -147,6 +192,29 @@ fn push_diff_line(
     allows_class: &impl Fn(SemanticClass) -> bool,
     candidates: &mut Vec<Candidate>,
 ) {
+    if let Some(rest) = text.strip_prefix("index ") {
+        if let Some((before, after)) = rest
+            .split_whitespace()
+            .next()
+            .and_then(|ids| ids.split_once(".."))
+            && is_object_id(before)
+            && is_object_id(after)
+            && allows_class(SemanticClass::Variable)
+        {
+            let start = text.len() - rest.len();
+            for range in [
+                start..start + before.len(),
+                start + before.len() + 2..start + before.len() + 2 + after.len(),
+            ] {
+                candidates.push(Candidate::new(
+                    range,
+                    SemanticClass::Variable,
+                    GIT_CONTENT_PRIORITY,
+                ));
+            }
+        }
+        return;
+    }
     if let Some(paths) = text.strip_prefix("diff --git ") {
         if allows_class(SemanticClass::Keyword) {
             candidates.push(Candidate::new(

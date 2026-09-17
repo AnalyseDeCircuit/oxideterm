@@ -78,6 +78,7 @@ pub enum SemanticLineRole {
     CCompilerOutput,
     GitStatusOutput,
     GitDiffOutput,
+    GitLogOutput,
     SystemdOutput,
     TestOutput,
     ContainerOutput,
@@ -107,6 +108,7 @@ impl SemanticLineRole {
                 | Self::CCompilerOutput
                 | Self::GitStatusOutput
                 | Self::GitDiffOutput
+                | Self::GitLogOutput
                 | Self::SystemdOutput
                 | Self::TestOutput
                 | Self::ContainerOutput

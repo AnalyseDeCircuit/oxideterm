@@ -36,6 +36,11 @@ const WINDOWS_PATH_PATTERN: &str = r#"(?ix)(?:^|[\s(])((?:
 
 const OPTION_ASSIGNMENT_PATTERN: &str = r"(?:^|\s)(--?[A-Za-z][A-Za-z0-9_-]*)(=)([^\s]+)";
 const VARIABLE_ASSIGNMENT_PATTERN: &str = r"(?:^|[\s,])([A-Za-z_][A-Za-z0-9_-]*)(=)([^,\s]+)";
+// UUIDs and complete hex digests share a scan and the same identifier styling.
+const IDENTIFIER_PATTERN: &str = r"(?x)\b[0-9a-fA-F]{8}(?:
+    -[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}
+    |[0-9a-fA-F]{24}(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{24}|[0-9a-fA-F]{32}|[0-9a-fA-F]{64}|[0-9a-fA-F]{96})?
+)\b";
 const ENGLISH_WEEKDAY_PATTERN: &str = r"(?i)\b(?:Mon(?:day)?|Tue(?:sday)?|Wed(?:nesday)?|Thu(?:rsday)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?)\b";
 const ENGLISH_MONTH_PATTERN: &str = r"(?i)\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\b";
 
@@ -167,6 +172,14 @@ static BUILT_IN_RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
             1,
             SemanticClass::Path,
             90,
+            SemanticRuleContext::Any,
+        ),
+        Rule::new(
+            "identifier",
+            IDENTIFIER_PATTERN,
+            0,
+            SemanticClass::Variable,
+            89,
             SemanticRuleContext::Any,
         ),
         Rule::new(
@@ -485,6 +498,19 @@ pub(crate) fn candidates_for_compiled(
         .iter()
         .filter(|rule| rule.applies_to(role))
     {
+        if rule.capture == 0 {
+            // Whole-token rules need only match ranges, not capture-group storage.
+            candidates.extend(
+                rule.matcher
+                    .find_iter(text)
+                    .filter(|matched| !matched.is_empty())
+                    .map(|matched| Candidate {
+                        span: SemanticSpan::new(matched.range(), rule.class),
+                        priority: rule.priority,
+                    }),
+            );
+            continue;
+        }
         for captures in rule.matcher.captures_iter(text) {
             let Some(matched) = captures.get(rule.capture) else {
                 continue;

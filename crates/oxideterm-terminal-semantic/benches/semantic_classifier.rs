@@ -31,6 +31,30 @@ fn benchmark_line(
 fn benchmark_semantic_classifier(criterion: &mut Criterion) {
     benchmark_line(
         criterion,
+        "semantic_classifier/hash_line",
+        "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  artifact.tar",
+        SemanticLineRole::Output,
+    );
+    benchmark_line(
+        criterion,
+        "semantic_classifier/container_line",
+        "d7a8f90b1234 nginx:latest Up 5 minutes 80/tcp web",
+        SemanticLineRole::ContainerOutput,
+    );
+    benchmark_line(
+        criterion,
+        "semantic_classifier/session_id_line",
+        "Session ID: 01a0ad3f-3b2d-7c72-9518-8ff3f1cb012a",
+        SemanticLineRole::Output,
+    );
+    benchmark_line(
+        criterion,
+        "semantic_classifier/identifier_like_line",
+        "worker-thread-name request-id=01234567-89ab-cdef-0123-456789abcdeg build-id=12345678-1234-1234-1234-1234567890123",
+        SemanticLineRole::Output,
+    );
+    benchmark_line(
+        criterion,
         "semantic_classifier/ordinary_long_line",
         "application worker completed request processing successfully with no permission field near the beginning and enough trailing output to expose accidental full-line scans",
         SemanticLineRole::Output,

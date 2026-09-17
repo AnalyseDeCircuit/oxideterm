@@ -17,6 +17,157 @@ fn matched_texts(text: &str) -> Vec<(&str, SemanticClass)> {
 }
 
 #[test]
+fn uuid_identifiers_are_atomic_and_keep_container_precedence() {
+    let uuid = "01a0ad3f-3b2d-7c72-9518-8ff3f1cb012a";
+    let uppercase = uuid.to_uppercase();
+    for (text, expected) in [
+        (format!("Session ID: {uuid}"), uuid),
+        (format!("会话：{{{uuid}}}"), uuid),
+        (uppercase.clone(), uppercase.as_str()),
+    ] {
+        for scheme in [SemanticScheme::Balanced, SemanticScheme::Conservative] {
+            let spans = classify_line_with_compiled_scheme(
+                &text,
+                SemanticLineRole::Output,
+                compiled_builtin_scheme(scheme),
+            );
+            let identifiers: Vec<_> = spans
+                .iter()
+                .filter(|span| span.class == SemanticClass::Variable)
+                .map(|span| &text[span.range.clone()])
+                .collect();
+            assert_eq!(identifiers, [expected]);
+            assert!(!spans.iter().any(|span| span.class == SemanticClass::Number));
+        }
+    }
+    for text in [
+        format!("x{uuid}"),
+        format!("{uuid}0"),
+        "01a0ad3f-3b2d-7c72-9518-8ff3f1cb012g".into(),
+        "01a0ad3f-3b2d-7c72-9518-8ff3f1cb012".into(),
+    ] {
+        assert!(
+            !matched_texts(&text)
+                .iter()
+                .any(|(_, class)| *class == SemanticClass::Variable)
+        );
+    }
+    for (text, expected) in [
+        (format!("https://example.test/{uuid}"), SemanticClass::Link),
+        (format!("/tmp/{uuid}"), SemanticClass::Path),
+        (format!("\"{uuid}\""), SemanticClass::String),
+    ] {
+        assert_eq!(matched_texts(&text), [(text.as_str(), expected)]);
+    }
+}
+
+#[test]
+fn hex_digests_are_atomic_without_overriding_paths_or_urls() {
+    for digest in [
+        "d41d8cd98f00b204e9800998ecf8427e",
+        "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+        "d14a028c2a3a2bc9476102bb288234c415a2b01f828ea62ac5b3e42f",
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7",
+        concat!(
+            "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a",
+            "2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
+        ),
+    ] {
+        for text in [digest.to_owned(), digest.to_uppercase()] {
+            for scheme in [SemanticScheme::Balanced, SemanticScheme::Conservative] {
+                let spans = classify_line_with_scheme(&text, SemanticLineRole::Output, scheme);
+                let matches: Vec<_> = spans
+                    .into_iter()
+                    .map(|span| (&text[span.range], span.class))
+                    .collect();
+                assert_eq!(matches, [(text.as_str(), SemanticClass::Variable)]);
+            }
+        }
+    }
+    let digest = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    for text in [
+        format!("sha256:{digest}"),
+        format!("校验：{digest}  archive.tar"),
+    ] {
+        assert!(matched_texts(&text).contains(&(digest, SemanticClass::Variable)));
+    }
+    for text in [
+        "abcdef",
+        "deadbeef",
+        "1234567890",
+        "d41d8cd98f00b204e9800998ecf8427g",
+        "d41d8cd98f00b204e9800998ecf8427e0",
+        "prefix_d41d8cd98f00b204e9800998ecf8427e",
+    ] {
+        assert!(
+            !matched_texts(text)
+                .iter()
+                .any(|(_, class)| *class == SemanticClass::Variable),
+            "{text}"
+        );
+    }
+    for (text, class) in [
+        (
+            format!("https://example.test/{digest}"),
+            SemanticClass::Link,
+        ),
+        (format!("/tmp/{digest}"), SemanticClass::Path),
+        (format!("\"{digest}\""), SemanticClass::String),
+    ] {
+        assert_eq!(matched_texts(&text), [(text.as_str(), class)]);
+    }
+}
+
+#[test]
+fn abbreviated_hashes_require_command_context() {
+    for (command, text, expected) in [
+        ("git log --oneline", "a1b2c3d fix parsing", vec!["a1b2c3d"]),
+        (
+            "git log --graph --oneline",
+            "| * a1b2c3d (HEAD -> main) fix parsing",
+            vec!["a1b2c3d"],
+        ),
+        (
+            "git show --abbrev-commit",
+            "commit a1b2c3d",
+            vec!["a1b2c3d"],
+        ),
+        (
+            "git diff",
+            "index a1b2c3d..d4e5f60 100644",
+            vec!["a1b2c3d", "d4e5f60"],
+        ),
+        (
+            "docker ps",
+            "d7a8f90b1234 nginx Up 5 minutes web",
+            vec!["d7a8f90b1234"],
+        ),
+        (
+            "podman ps",
+            "d7a8f90b1234 nginx Up 5 minutes web",
+            vec!["d7a8f90b1234"],
+        ),
+        ("git log", "    a1b2c3d is mentioned in the message", vec![]),
+        (
+            "git log --graph",
+            "|     deadbeef is mentioned in the message",
+            vec![],
+        ),
+        ("git diff", "+a1b2c3d", vec![]),
+        ("docker logs web", "d7a8f90b1234 processing", vec![]),
+        ("printf text", "a1b2c3d fix parsing", vec![]),
+    ] {
+        let matches: Vec<_> = classify_line(text, semantic_output_role_for_command(command))
+            .into_iter()
+            .filter(|span| span.class == SemanticClass::Variable)
+            .map(|span| &text[span.range])
+            .collect();
+        assert_eq!(matches, expected, "{command}: {text}");
+    }
+}
+
+#[test]
 fn structured_output_variants_preserve_column_identity() {
     for (command, text, expected) in [
         (

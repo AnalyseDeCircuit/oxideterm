@@ -32,6 +32,17 @@ pub(crate) fn line_candidates(
     }
     let mut candidates = Vec::new();
     for (start, token) in token_ranges(text) {
+        if start == 0
+            && token.len() == 12
+            && token.bytes().all(|byte| byte.is_ascii_hexdigit())
+            && allows_class(SemanticClass::Variable)
+        {
+            candidates.push(Candidate::new(
+                0..token.len(),
+                SemanticClass::Variable,
+                CONTAINER_STATUS_PRIORITY,
+            ));
+        }
         let label = token.trim_matches(|character: char| {
             !character.is_alphanumeric() && !matches!(character, '/' | '-')
         });
