@@ -1129,6 +1129,19 @@ impl WorkspaceApp {
             strict_host_key_checking: true,
             ..SshConfig::default()
         };
+        // CLI launches must ask for host-key trust before starting the node-owned
+        // transport, just like an unsaved connection opened from the UI.
+        self.start_ssh_preflight(config, title, SshConnectionIntent::ConnectTemporary, cx);
+        cx.notify();
+        Ok(())
+    }
+
+    pub(in crate::workspace) fn connect_verified_temporary_ssh(
+        &mut self,
+        config: SshConfig,
+        title: String,
+        cx: &mut Context<Self>,
+    ) -> Result<()> {
         let node_id = self.materialize_ssh_root_node(config, title.clone(), None);
         let queue_outcome = self.workspace_runtime.update(cx, |runtime, runtime_cx| {
             runtime.queue_ssh_terminal_open(
@@ -1146,8 +1159,6 @@ impl WorkspaceApp {
         if queue_outcome == runtime_entity::QueueSshTerminalOpenOutcome::WorkspaceShuttingDown {
             return Err(anyhow::anyhow!("workspace runtime is shutting down"));
         }
-        // The temporary launch now shares the same node-owned transport attempt
-        // and reliable completion delivery as every other first terminal.
         self.ensure_node_connection_started(&node_id, cx);
         cx.notify();
         Ok(())

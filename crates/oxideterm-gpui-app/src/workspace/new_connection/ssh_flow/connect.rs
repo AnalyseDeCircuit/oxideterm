@@ -956,6 +956,7 @@ impl WorkspaceApp {
                 );
             }
             SshConnectionIntent::Test
+            | SshConnectionIntent::ConnectTemporary
             | SshConnectionIntent::TestStandaloneSftp
             | SshConnectionIntent::DrillDown { .. }
             | SshConnectionIntent::Mosh(_)
@@ -1177,6 +1178,15 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match intent {
+            SshConnectionIntent::ConnectTemporary => {
+                self.connection_flow
+                    .update(cx, |flow, cx| flow.clear_host_key_challenge(cx));
+                if let Err(error) = self.connect_verified_temporary_ssh(config, title, cx) {
+                    self.session_manager.update(cx, |manager, cx| {
+                        manager.set_status(Some(error.to_string()), cx);
+                    });
+                }
+            }
             SshConnectionIntent::Connect(connection_options) => {
                 self.update_connection_form_state(cx, ConnectionFormState::clear);
                 self.connection_flow.update(cx, |connection_flow, cx| {

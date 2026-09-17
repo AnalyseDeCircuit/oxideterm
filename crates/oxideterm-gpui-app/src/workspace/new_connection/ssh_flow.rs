@@ -139,6 +139,7 @@ pub(in crate::workspace) enum SshConnectionIntent {
     Test,
     TestStandaloneSftp,
     Connect(SshTerminalConnectionOptions),
+    ConnectTemporary,
     ConnectSaved(String),
     DrillDown {
         parent_id: NodeId,
