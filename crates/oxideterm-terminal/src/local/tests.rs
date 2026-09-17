@@ -463,6 +463,79 @@ mod tests {
     }
 
     #[test]
+    fn split_synchronized_redraw_keeps_cursor_and_cells_until_frame_end() {
+        let size = TerminalSize {
+            cols: 20,
+            rows: 5,
+            cell_width: 10,
+            cell_height: 20,
+        };
+        // Exercise the same graphics and shell scanners that precede the local PTY parser.
+        for recording in [false, true] {
+            let term = std::cell::RefCell::new(Term::new(Config::default(), &size, VoidListener));
+            let mut parser = Processor::<StdSyncHandler>::new();
+            let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+            let mut shell = crate::shell_integration::TerminalShellIntegration::default();
+            let graphics = TerminalGraphicsState::default();
+            parser.advance(&mut *term.borrow_mut(), b"\x1b[4;3H");
+            let mut snapshot = snapshot_from_term(&term.borrow(), size, &graphics);
+            let frame = b"\x1b[?2026h\x1b[2;1H*\x1b[4;5H\x1b[?2026l";
+            for (index, byte) in frame.iter().enumerate() {
+                ingress.advance_ordered(
+                    std::slice::from_ref(byte),
+                    |segment| match segment {
+                        TerminalGraphicsSegment::Terminal(bytes) => {
+                            if recording {
+                                shell.advance_with_recording(
+                                    &mut parser,
+                                    &mut term.borrow_mut(),
+                                    &bytes,
+                                    |_| {},
+                                );
+                            } else {
+                                shell.advance(&mut parser, &mut term.borrow_mut(), &bytes, |_| {});
+                            }
+                        }
+                        TerminalGraphicsSegment::Event(_) => {
+                            panic!("redraw must stay terminal output")
+                        }
+                    },
+                    || graphics_cursor_from_term(&term.borrow(), size),
+                );
+                snapshot = incremental_snapshot_from_term(
+                    &mut term.borrow_mut(),
+                    size,
+                    &graphics,
+                    &snapshot,
+                );
+                let complete = index + 1 == frame.len();
+                assert_eq!(
+                    (snapshot.cursor_row, snapshot.cursor_col),
+                    if complete { (3, 4) } else { (3, 2) },
+                    "byte {index}, recording {recording}"
+                );
+                assert_eq!(
+                    snapshot.lines[1].cells[0].ch,
+                    if complete { '*' } else { ' ' }
+                );
+                assert_eq!(snapshot.cursor_shape, TerminalCursorShape::Block);
+                let painted_cursors = snapshot
+                    .lines
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(row, line)| {
+                        line.cells
+                            .iter()
+                            .enumerate()
+                            .filter_map(move |(col, cell)| cell.cursor.then_some((row, col)))
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(painted_cursors, [if complete { (3, 4) } else { (3, 2) }]);
+            }
+        }
+    }
+
+    #[test]
     fn full_screen_application_can_hide_and_restore_the_snapshot_cursor() {
         let size = TerminalSize {
             cols: 80,

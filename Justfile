@@ -16,6 +16,10 @@ run *args:
 notices:
     {{ python }} scripts/release/generate_third_party_notices.py
 
+# Report project code statistics with optional grouping and vendor flags.
+stats *args:
+    {{ python }} scripts/project-stats.py {{ args }}
+
 # Build and stage the CLI companion for an optional target triple.
 build-cli target="":
     bash scripts/build/build-cli.sh {{ target }}
