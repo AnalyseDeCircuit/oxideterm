@@ -12,7 +12,7 @@
 [package]
 edition = "2021"
 name = "russh-sftp"
-version = "2.3.0"
+version = "3.0.0"
 build = false
 autolib = false
 autobins = false
@@ -57,34 +57,34 @@ path = "benches/local_transfer_benchmark.rs"
 harness = false
 
 [dependencies.async-trait]
-version = "0.1.89"
+version = "0.1.92"
 optional = true
 
 [dependencies.bitflags]
-version = "2.11.1"
+version = "2.13.1"
 features = ["serde"]
 
 [dependencies.bytes]
-version = "1.11.1"
+version = "1.12.1"
 
 [dependencies.chrono]
-version = "0.4.44"
+version = "0.4.45"
 
 [dependencies.dashmap]
-version = "6.1.0"
+version = "6.2.1"
 
 [dependencies.log]
-version = "0.4.29"
+version = "0.4.34"
 
 [dependencies.serde]
-version = "1.0.228"
+version = "1.0.229"
 features = ["derive"]
 
 [dependencies.serde_bytes]
 version = "0.11.19"
 
 [dependencies.thiserror]
-version = "2.0.18"
+version = "2.0.20"
 
 [dependencies.tokio]
 version = "1"
@@ -98,28 +98,28 @@ features = [
 default-features = false
 
 [dependencies.tokio-util]
-version = "0.7.18"
+version = "0.7.19"
 features = ["rt"]
 default-features = false
 
 [dev-dependencies.anyhow]
-version = "1.0.102"
+version = "1.0.104"
 
 [dev-dependencies.criterion]
 version = "0.8.2"
 features = ["async_tokio"]
 
 [dev-dependencies.env_logger]
-version = "0.11.10"
+version = "0.11.11"
 
 [dev-dependencies.futures]
-version = "0.3.32"
+version = "0.3.34"
 
 [dev-dependencies.rand]
-version = "0.10.1"
+version = "0.10.2"
 
 [dev-dependencies.russh]
-version = "0.63.0"
+workspace = true
 
 [dev-dependencies.tempfile]
 version = "3.27.0"

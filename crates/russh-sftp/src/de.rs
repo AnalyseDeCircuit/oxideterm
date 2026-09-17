@@ -8,7 +8,7 @@ pub struct Deserializer<'a> {
     input: &'a mut Bytes,
 }
 
-/// Converting bytes to protocol-compliant type
+/// Converts an SFTP payload without packet framing to a value.
 pub fn from_bytes<'a, T>(bytes: &'a mut Bytes) -> Result<T, Error>
 where
     T: serde::Deserialize<'a>,
@@ -17,8 +17,7 @@ where
     T::deserialize(&mut deserializer)
 }
 
-/// Deserilization of a [`Vec`] without length. Usually reads until the end byte
-/// or end of the packet because the size is unknown.
+/// Deserialization of a [`Vec`] without length. Reads until the end of the payload.
 pub fn data_deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -149,7 +148,7 @@ impl<'de> serde::Deserializer<'de> for &mut Deserializer<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        visitor.visit_str(&self.input.try_get_string()?)
+        visitor.visit_string(self.input.try_get_string()?)
     }
 
     fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -163,7 +162,7 @@ impl<'de> serde::Deserializer<'de> for &mut Deserializer<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        visitor.visit_bytes(&self.input.try_get_bytes()?)
+        visitor.visit_byte_buf(self.input.try_get_bytes()?)
     }
 
     fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -376,7 +375,7 @@ impl<'de> VariantAccess<'de> for &mut Deserializer<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        use crate::serde::Deserializer;
+        use serde::Deserializer;
         self.deserialize_tuple(fields.len(), visitor)
     }
 }

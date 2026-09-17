@@ -10,7 +10,7 @@ pub struct Serializer {
     output: BytesMut,
 }
 
-/// Converting type to bytes according to protocol
+/// Converts a value to an SFTP payload without packet framing.
 pub fn to_bytes<T>(value: &T) -> Result<Bytes, Error>
 where
     T: serde::Serialize + ?Sized,
@@ -19,6 +19,26 @@ where
         output: BytesMut::new(),
     };
     value.serialize(&mut serializer)?;
+    Ok(serializer.output.freeze())
+}
+
+/// Converts a value to an SFTP packet with length and type.
+pub(crate) fn to_packet_bytes<T>(r#type: u8, value: &T) -> Result<Bytes, Error>
+where
+    T: serde::Serialize + ?Sized,
+{
+    let mut serializer = Serializer {
+        output: BytesMut::new(),
+    };
+    serializer.output.put_u32(0);
+    serializer.output.put_u8(r#type);
+    value.serialize(&mut serializer)?;
+
+    let length = serializer.output.len() - 4;
+    let length = u32::try_from(length)
+        .map_err(|_| Error::BadMessage("packet length exceeds u32".to_owned()))?;
+    serializer.output[..4].copy_from_slice(&length.to_be_bytes());
+
     Ok(serializer.output.freeze())
 }
 
@@ -97,14 +117,13 @@ impl<'a> serde::Serializer for &'a mut Serializer {
     }
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        let bytes = v.as_bytes();
-        self.output.put_u32(bytes.len() as u32);
-        self.output.put_slice(bytes);
-        Ok(())
+        self.serialize_bytes(v.as_bytes())
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
-        self.output.put_u32(v.len() as u32);
+        let len = u32::try_from(v.len())
+            .map_err(|_| Error::BadMessage("data length exceeds u32".to_owned()))?;
+        self.output.put_u32(len);
         self.output.put_slice(v);
         Ok(())
     }
@@ -163,7 +182,9 @@ impl<'a> serde::Serializer for &'a mut Serializer {
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
         if let Some(len) = len {
-            self.output.put_u32(len as u32);
+            let len = u32::try_from(len)
+                .map_err(|_| Error::BadMessage("sequence length exceeds u32".to_owned()))?;
+            self.output.put_u32(len);
         }
 
         Ok(self)
@@ -231,6 +252,23 @@ impl SerializeSeq for &mut Serializer {
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Buf;
+
+    use super::*;
+
+    #[test]
+    fn packet_length_includes_type_and_payload() {
+        let mut packet = to_packet_bytes(42, &123_u32).unwrap();
+
+        assert_eq!(packet.get_u32(), 5);
+        assert_eq!(packet.get_u8(), 42);
+        assert_eq!(packet.get_u32(), 123);
+        assert!(!packet.has_remaining());
     }
 }
 

@@ -285,43 +285,37 @@ impl TryFrom<&mut Bytes> for Packet {
 impl TryFrom<Packet> for Bytes {
     type Error = Error;
 
+    /// Encodes length, type and payload into a single buffer.
     fn try_from(packet: Packet) -> Result<Self, Self::Error> {
-        let (r#type, payload): (u8, Bytes) = match packet {
-            Packet::Init(init) => (SSH_FXP_INIT, ser::to_bytes(&init)?),
-            Packet::Version(version) => (SSH_FXP_VERSION, ser::to_bytes(&version)?),
-            Packet::Open(open) => (SSH_FXP_OPEN, ser::to_bytes(&open)?),
-            Packet::Close(close) => (SSH_FXP_CLOSE, ser::to_bytes(&close)?),
-            Packet::Read(read) => (SSH_FXP_READ, ser::to_bytes(&read)?),
-            Packet::Write(write) => (SSH_FXP_WRITE, ser::to_bytes(&write)?),
-            Packet::Lstat(stat) => (SSH_FXP_LSTAT, ser::to_bytes(&stat)?),
-            Packet::Fstat(stat) => (SSH_FXP_FSTAT, ser::to_bytes(&stat)?),
-            Packet::SetStat(setstat) => (SSH_FXP_SETSTAT, ser::to_bytes(&setstat)?),
-            Packet::FSetStat(setstat) => (SSH_FXP_FSETSTAT, ser::to_bytes(&setstat)?),
-            Packet::OpenDir(opendir) => (SSH_FXP_OPENDIR, ser::to_bytes(&opendir)?),
-            Packet::ReadDir(readdir) => (SSH_FXP_READDIR, ser::to_bytes(&readdir)?),
-            Packet::Remove(remove) => (SSH_FXP_REMOVE, ser::to_bytes(&remove)?),
-            Packet::MkDir(mkdir) => (SSH_FXP_MKDIR, ser::to_bytes(&mkdir)?),
-            Packet::RmDir(rmdir) => (SSH_FXP_RMDIR, ser::to_bytes(&rmdir)?),
-            Packet::RealPath(realpath) => (SSH_FXP_REALPATH, ser::to_bytes(&realpath)?),
-            Packet::Stat(stat) => (SSH_FXP_STAT, ser::to_bytes(&stat)?),
-            Packet::Rename(rename) => (SSH_FXP_RENAME, ser::to_bytes(&rename)?),
-            Packet::ReadLink(readlink) => (SSH_FXP_READLINK, ser::to_bytes(&readlink)?),
-            Packet::Symlink(symlink) => (SSH_FXP_SYMLINK, ser::to_bytes(&symlink)?),
-            Packet::Status(status) => (SSH_FXP_STATUS, ser::to_bytes(&status)?),
-            Packet::Handle(handle) => (SSH_FXP_HANDLE, ser::to_bytes(&handle)?),
-            Packet::Data(data) => return encode_data_packet(data),
-            Packet::Name(name) => (SSH_FXP_NAME, ser::to_bytes(&name)?),
-            Packet::Attrs(attrs) => (SSH_FXP_ATTRS, ser::to_bytes(&attrs)?),
-            Packet::Extended(extended) => (SSH_FXP_EXTENDED, ser::to_bytes(&extended)?),
-            Packet::ExtendedReply(reply) => (SSH_FXP_EXTENDED_REPLY, ser::to_bytes(&reply)?),
-        };
-
-        let length = payload.len() as u32 + 1;
-        let mut bytes = BytesMut::new();
-        bytes.put_u32(length);
-        bytes.put_u8(r#type);
-        bytes.put_slice(&payload);
-        Ok(bytes.freeze())
+        match packet {
+            Packet::Init(packet) => ser::to_packet_bytes(SSH_FXP_INIT, &packet),
+            Packet::Version(packet) => ser::to_packet_bytes(SSH_FXP_VERSION, &packet),
+            Packet::Open(packet) => ser::to_packet_bytes(SSH_FXP_OPEN, &packet),
+            Packet::Close(packet) => ser::to_packet_bytes(SSH_FXP_CLOSE, &packet),
+            Packet::Read(packet) => ser::to_packet_bytes(SSH_FXP_READ, &packet),
+            Packet::Write(packet) => ser::to_packet_bytes(SSH_FXP_WRITE, &packet),
+            Packet::Lstat(packet) => ser::to_packet_bytes(SSH_FXP_LSTAT, &packet),
+            Packet::Fstat(packet) => ser::to_packet_bytes(SSH_FXP_FSTAT, &packet),
+            Packet::SetStat(packet) => ser::to_packet_bytes(SSH_FXP_SETSTAT, &packet),
+            Packet::FSetStat(packet) => ser::to_packet_bytes(SSH_FXP_FSETSTAT, &packet),
+            Packet::OpenDir(packet) => ser::to_packet_bytes(SSH_FXP_OPENDIR, &packet),
+            Packet::ReadDir(packet) => ser::to_packet_bytes(SSH_FXP_READDIR, &packet),
+            Packet::Remove(packet) => ser::to_packet_bytes(SSH_FXP_REMOVE, &packet),
+            Packet::MkDir(packet) => ser::to_packet_bytes(SSH_FXP_MKDIR, &packet),
+            Packet::RmDir(packet) => ser::to_packet_bytes(SSH_FXP_RMDIR, &packet),
+            Packet::RealPath(packet) => ser::to_packet_bytes(SSH_FXP_REALPATH, &packet),
+            Packet::Stat(packet) => ser::to_packet_bytes(SSH_FXP_STAT, &packet),
+            Packet::Rename(packet) => ser::to_packet_bytes(SSH_FXP_RENAME, &packet),
+            Packet::ReadLink(packet) => ser::to_packet_bytes(SSH_FXP_READLINK, &packet),
+            Packet::Symlink(packet) => ser::to_packet_bytes(SSH_FXP_SYMLINK, &packet),
+            Packet::Status(packet) => ser::to_packet_bytes(SSH_FXP_STATUS, &packet),
+            Packet::Handle(packet) => ser::to_packet_bytes(SSH_FXP_HANDLE, &packet),
+            Packet::Data(packet) => encode_data_packet(packet),
+            Packet::Name(packet) => ser::to_packet_bytes(SSH_FXP_NAME, &packet),
+            Packet::Attrs(packet) => ser::to_packet_bytes(SSH_FXP_ATTRS, &packet),
+            Packet::Extended(packet) => ser::to_packet_bytes(SSH_FXP_EXTENDED, &packet),
+            Packet::ExtendedReply(packet) => ser::to_packet_bytes(SSH_FXP_EXTENDED_REPLY, &packet),
+        }
     }
 }
 

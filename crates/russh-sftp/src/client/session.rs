@@ -18,6 +18,7 @@ pub(crate) struct Features {
     pub hardlink: bool,
     pub fsync: bool,
     pub statvfs: bool,
+    pub expand_path: bool,
     pub limits: Option<Limits>,
     pub max_concurrent_writes: usize,
     pub max_packet_len: u32,
@@ -44,7 +45,7 @@ impl SftpSession {
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
-        let max_concurrent_writes = cfg.max_concurrent_writes;
+        let max_concurrent_writes = cfg.max_concurrent_writes.max(1);
         let max_packet_len = cfg.max_packet_len;
         let session = RawSftpSession::new_with_config(stream, cfg);
         Self::initialize(session, max_concurrent_writes, max_packet_len).await
@@ -65,7 +66,7 @@ impl SftpSession {
         R: AsyncRead + Unpin + Send + 'static,
         W: OwnedSftpWriter,
     {
-        let max_concurrent_writes = cfg.max_concurrent_writes;
+        let max_concurrent_writes = cfg.max_concurrent_writes.max(1);
         let max_packet_len = cfg.max_packet_len;
         let session = RawSftpSession::new_owned_with_config(reader, writer, cfg);
         Self::initialize(session, max_concurrent_writes, max_packet_len).await
@@ -83,6 +84,7 @@ impl SftpSession {
             hardlink: has_extension(extensions::HARDLINK, "1"),
             fsync: has_extension(extensions::FSYNC, "1"),
             statvfs: has_extension(extensions::STATVFS, "2"),
+            expand_path: has_extension(extensions::EXPAND_PATH, "1"),
             limits: None,
             max_concurrent_writes,
             max_packet_len,
@@ -189,6 +191,7 @@ impl SftpSession {
         let mut buffer = Vec::new();
 
         file.read_to_end(&mut buffer).await?;
+        file.close().await?;
 
         Ok(buffer)
     }
@@ -197,6 +200,7 @@ impl SftpSession {
     pub async fn write<P: Into<String>>(&self, path: P, data: &[u8]) -> SftpResult<()> {
         let mut file = self.open_with_flags(path, OpenFlags::WRITE).await?;
         file.write_all(data).await?;
+        file.close().await?;
         Ok(())
     }
 
@@ -310,13 +314,26 @@ impl SftpSession {
     }
 
     /// Performs a statvfs on the remote file system path.
-    /// Returns [`Ok(None)`] if the remote SFTP server does not support `statvfs@openssh.com` extension v2.
+    /// Returns `Ok(None)` if the remote SFTP server does not support `statvfs@openssh.com` extension v2.
     pub async fn fs_info<P: Into<String>>(&self, path: P) -> SftpResult<Option<Statvfs>> {
         if !self.features.statvfs {
             return Ok(None);
         }
 
         self.session.statvfs(path).await.map(Some)
+    }
+
+    /// Expands a `~`/`~user`-prefixed or relative path on the server.
+    /// Returns `Ok(None)` when the server does not advertise the extension.
+    pub async fn expand_path<P: Into<String>>(&self, path: P) -> SftpResult<Option<String>> {
+        if !self.features.expand_path {
+            return Ok(None);
+        }
+        let name = self.session.expand_path(path).await?;
+        match name.files.first() {
+            Some(file) => Ok(Some(file.filename.to_owned())),
+            None => Err(Error::UnexpectedBehavior("no file".to_owned())),
+        }
     }
 }
 
@@ -331,6 +348,93 @@ fn append_name_files(files: &mut Vec<(String, Metadata)>, batch: Vec<SftpNameFil
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn owned_session_propagates_close_errors_and_negotiates_path_expansion() {
+        use crate::protocol::{Handle, Name, Packet, Status, Version};
+        use bytes::Bytes;
+        use tokio::io::AsyncWriteExt;
+
+        struct Writer(tokio::io::WriteHalf<tokio::io::DuplexStream>);
+        impl OwnedSftpWriter for Writer {
+            async fn write_owned(&mut self, data: Bytes) -> std::io::Result<()> {
+                self.0.write_all(&data).await
+            }
+            async fn shutdown(&mut self) -> std::io::Result<()> {
+                self.0.shutdown().await
+            }
+        }
+
+        let (client, mut server) = tokio::io::duplex(4096);
+        let peer = tokio::spawn(async move {
+            for step in 0..6 {
+                let mut bytes = crate::utils::read_packet(&mut server, 4096).await.unwrap();
+                let request = Packet::try_from(&mut bytes).unwrap();
+                let response = match (step, request) {
+                    (0, Packet::Init(_)) => Packet::Version(Version {
+                        version: 3,
+                        extensions: [(extensions::EXPAND_PATH.to_string(), "1".to_string())].into(),
+                    }),
+                    (1, Packet::Open(open)) => {
+                        assert_eq!(open.filename, "config.txt");
+                        assert_eq!(
+                            crate::ser::to_bytes(&open.attrs).unwrap().as_ref(),
+                            &[0, 0, 0, 0]
+                        );
+                        Packet::Handle(Handle {
+                            id: open.id,
+                            handle: "file".into(),
+                        })
+                    }
+                    (2, Packet::Write(write)) => {
+                        assert_eq!(
+                            (write.handle.as_str(), write.offset, write.data.as_slice()),
+                            ("file", 0, b"new content".as_slice())
+                        );
+                        Packet::status(write.id, StatusCode::Ok, "", "")
+                    }
+                    (3, Packet::Close(close)) => Packet::Status(Status {
+                        id: close.id,
+                        status_code: StatusCode::Failure,
+                        error_message: "close rejected".into(),
+                        language_tag: String::new(),
+                    }),
+                    // A failed explicit CLOSE must still leave drop cleanup enabled.
+                    (4, Packet::Close(close)) => {
+                        assert_eq!(close.handle, "file");
+                        Packet::status(close.id, StatusCode::Ok, "", "")
+                    }
+                    (5, Packet::Extended(extended)) => {
+                        assert_eq!(extended.request, extensions::EXPAND_PATH);
+                        assert_eq!(extended.data.as_slice(), b"\x00\x00\x00\x07~/notes");
+                        Packet::Name(Name {
+                            id: extended.id,
+                            files: vec![named_file("/home/user/notes")],
+                        })
+                    }
+                    (_, packet) => panic!("unexpected packet at step {step}: {packet:?}"),
+                };
+                server
+                    .write_all(&Bytes::try_from(response).unwrap())
+                    .await
+                    .unwrap();
+            }
+        });
+        let (reader, writer) = tokio::io::split(client);
+        let session = SftpSession::new_owned(reader, Writer(writer))
+            .await
+            .unwrap();
+        let error = session
+            .write("config.txt", b"new content")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("close rejected"));
+        assert_eq!(
+            session.expand_path("~/notes").await.unwrap().as_deref(),
+            Some("/home/user/notes")
+        );
+        peer.await.unwrap();
+    }
+
     impl SftpSession {
         fn for_test_with_limits(limits: Option<Limits>, max_packet_len: u32) -> Self {
             let stream = tokio::io::duplex(64).0;
@@ -340,6 +444,7 @@ mod tests {
                     hardlink: false,
                     fsync: false,
                     statvfs: false,
+                    expand_path: false,
                     limits,
                     max_concurrent_writes: 8,
                     max_packet_len,

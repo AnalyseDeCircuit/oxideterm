@@ -16,7 +16,7 @@ impl File {
         Self {
             filename: filename.into(),
             longname: "".to_string(),
-            attrs: FileAttributes::default(),
+            attrs: FileAttributes::dummy(),
         }
     }
 

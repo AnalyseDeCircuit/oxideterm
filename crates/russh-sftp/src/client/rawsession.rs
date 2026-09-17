@@ -22,7 +22,8 @@ use crate::{
     client::Config,
     de,
     extensions::{
-        self, FsyncExtension, HardlinkExtension, LimitsExtension, Statvfs, StatvfsExtension,
+        self, ExpandPathExtension, FsyncExtension, HardlinkExtension, LimitsExtension, Statvfs,
+        StatvfsExtension,
     },
     protocol::{
         Attrs, Close, Data, Extended, ExtendedReply, FSetStat, FileAttributes, Fstat, Handle, Init,
@@ -932,6 +933,16 @@ impl RawSftpSession {
             }
             _ => Err(Error::UnexpectedPacket),
         }
+    }
+    /// Expands a path using the OpenSSH extension.
+    pub async fn expand_path<P: Into<String>>(&self, path: P) -> SftpResult<Name> {
+        let result = self
+            .extended(
+                extensions::EXPAND_PATH,
+                ExpandPathExtension { path: path.into() }.try_into()?,
+            )
+            .await?;
+        into_with_status!(result, Name)
     }
 }
 

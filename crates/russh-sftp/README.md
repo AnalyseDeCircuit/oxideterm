@@ -1,5 +1,9 @@
 # Russh SFTP
 
+This is OxideTerm's patched russh-sftp 3.0.0. See
+[OXIDETERM_PATCHES.md](OXIDETERM_PATCHES.md) for the upstream baseline,
+retained transport contracts, and deliberate differences from upstream defaults.
+
 SFTP subsystem supported server and client for [Russh](https://github.com/warp-tech/russh) and more!
 
 Crate can provide compatibility with anything that can provide the raw data stream in and out of the subsystem channel.\
@@ -22,7 +26,7 @@ The main idea of the project is to provide an implementation for interacting wit
 - [x] Server side
 - [x] Simple server example
 - [ ] Full server example
-- [x] Extension support: `limits@openssh.com`, `hardlink@openssh.com`, `fsync@openssh.com`, `statvfs@openssh.com`
+- [x] Extension support: `limits@openssh.com`, `hardlink@openssh.com`, `fsync@openssh.com`, `statvfs@openssh.com`, `expand-path@openssh.com`
 - [ ] Unit tests
 - [x] Workflow
 

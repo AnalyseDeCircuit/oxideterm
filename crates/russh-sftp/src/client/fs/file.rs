@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf},
+    io::{AsyncRead, AsyncSeek, AsyncWrite, AsyncWriteExt, ReadBuf},
     sync::oneshot,
 };
 
@@ -28,10 +28,11 @@ use crate::{
 
 type StateFn<T> = Option<Pin<Box<dyn Future<Output = io::Result<T>> + Send + Sync + 'static>>>;
 
-// read packet overhead: type(1) + id(4) + data_len(4)
-const READ_OVERHEAD_LENGTH: u32 = 9;
-// write packet overhead excluding handle: type(1) + id(4) + handle_len(4) + offset(8) + data_len(4)
-const WRITE_OVERHEAD_LENGTH: u32 = 21;
+// Framed DATA overhead: packet_len(4) + type(1) + id(4) + data_len(4).
+const READ_OVERHEAD_LENGTH: u32 = 13;
+// Framed WRITE overhead excluding handle: packet_len(4) + type(1) + id(4) +
+// handle_len(4) + offset(8) + data_len(4).
+const WRITE_OVERHEAD_LENGTH: u32 = 25;
 
 struct FileState {
     f_read: StateFn<Option<Bytes>>,
@@ -584,6 +585,11 @@ impl File {
         self.session.fsync(self.handle.as_str()).await.map(|_| ())
     }
 
+    /// Closes the file after all pending writes and the remote CLOSE are acknowledged.
+    pub async fn close(mut self) -> io::Result<()> {
+        self.shutdown().await
+    }
+
     /// Converts this file into a sequential pipelined reader starting at `offset`.
     ///
     /// The regular `AsyncRead` implementation intentionally remains single-request
@@ -676,24 +682,25 @@ impl File {
     }
 
     fn max_read_len(&self) -> usize {
+        let packet_limit = self
+            .features
+            .max_packet_len
+            .saturating_sub(READ_OVERHEAD_LENGTH) as u64;
         self.features
             .limits
             .and_then(|l| l.read_len)
-            .unwrap_or_else(|| {
-                self.features
-                    .max_packet_len
-                    .saturating_sub(READ_OVERHEAD_LENGTH) as u64
-            }) as usize
+            .unwrap_or(packet_limit)
+            .min(packet_limit) as usize
     }
 
     fn max_write_len(&self) -> usize {
+        let overhead = WRITE_OVERHEAD_LENGTH + self.handle.len() as u32;
+        let packet_limit = self.features.max_packet_len.saturating_sub(overhead) as u64;
         self.features
             .limits
             .and_then(|l| l.write_len)
-            .unwrap_or_else(|| {
-                let overhead = WRITE_OVERHEAD_LENGTH + self.handle.len() as u32;
-                self.features.max_packet_len.saturating_sub(overhead) as u64
-            }) as usize
+            .unwrap_or(packet_limit)
+            .min(packet_limit) as usize
     }
 }
 
@@ -1425,19 +1432,14 @@ impl AsyncRead for File {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
+        if buf.remaining() == 0 {
+            return Poll::Ready(Ok(()));
+        }
         let poll = Pin::new(match self.state.f_read.as_mut() {
             Some(f) => f,
             None => {
                 let session = self.session.clone();
-                let max_read_len = self
-                    .features
-                    .limits
-                    .and_then(|l| l.read_len)
-                    .unwrap_or_else(|| {
-                        self.features
-                            .max_packet_len
-                            .saturating_sub(READ_OVERHEAD_LENGTH) as u64
-                    }) as usize;
+                let max_read_len = self.max_read_len();
 
                 let file_handle = self.handle.clone();
 
@@ -1451,7 +1453,7 @@ impl AsyncRead for File {
                         Err(Error::Status(status)) if status.status_code == StatusCode::Eof => {
                             Ok(None)
                         }
-                        Err(e) => Err(io::Error::other(e.to_string())),
+                        Err(e) => Err(e.into()),
                     }
                 }))
             }
@@ -1526,8 +1528,10 @@ impl AsyncSeek for File {
         match self.state.f_seek.as_mut() {
             None => Poll::Ready(Ok(self.pos)),
             Some(f) => {
-                self.pos = ready!(Pin::new(f).poll(cx))?;
+                let result = ready!(Pin::new(f).poll(cx));
                 self.state.f_seek = None;
+                self.pos = result?;
+                self.state.f_read = None;
                 Poll::Ready(Ok(self.pos))
             }
         }
@@ -1540,22 +1544,24 @@ impl AsyncWrite for File {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
+        if buf.is_empty() {
+            return Poll::Ready(Ok(0));
+        }
         if self.state.write_acks.len() >= self.features.max_concurrent_writes {
             if let Some(poll) = poll_oldest_write(&mut self.state.write_acks, cx) {
                 ready!(poll)?;
             }
         }
 
-        let max_write_len = self
-            .features
-            .limits
-            .and_then(|l| l.write_len)
-            .unwrap_or_else(|| {
-                let overhead = WRITE_OVERHEAD_LENGTH + self.handle.len() as u32;
-                self.features.max_packet_len.saturating_sub(overhead) as u64
-            }) as usize;
+        let max_write_len = self.max_write_len();
 
         let len = usize::min(buf.len(), max_write_len);
+        if len == 0 {
+            return Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "configured SFTP packet limit is too small for a write",
+            )));
+        }
         let offset = self.pos;
 
         match self
@@ -1564,6 +1570,7 @@ impl AsyncWrite for File {
         {
             Ok(rx) => {
                 self.pos += len as u64;
+                self.state.f_read = None;
                 self.state.write_acks.push_back(rx);
                 Poll::Ready(Ok(len))
             }
@@ -1575,9 +1582,7 @@ impl AsyncWrite for File {
                     .register_outbound_capacity_waker(required_bytes, cx);
                 Poll::Pending
             }
-            Err(TryQueueError::Sftp(error)) => {
-                Poll::Ready(Err(io::Error::other(error.to_string())))
-            }
+            Err(TryQueueError::Sftp(error)) => Poll::Ready(Err(error.into())),
         }
     }
 
@@ -1616,6 +1621,9 @@ impl AsyncWrite for File {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), io::Error>> {
+        if self.closed {
+            return Poll::Ready(Ok(()));
+        }
         ready!(poll_drain_writes(&mut self.state.write_acks, cx))?;
 
         let poll = Pin::new(match self.state.f_shutdown.as_mut() {
@@ -1637,7 +1645,7 @@ impl AsyncWrite for File {
 
         if poll.is_ready() {
             self.state.f_shutdown = None;
-            self.closed = true;
+            self.closed = matches!(&poll, Poll::Ready(Ok(())));
         }
 
         poll
@@ -1647,6 +1655,42 @@ impl AsyncWrite for File {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn write_obeys_framed_packet_cap_even_when_server_allows_larger_payloads() {
+        use crate::client::rawsession::Limits;
+        use tokio::io::AsyncReadExt;
+
+        let (client, mut server) = tokio::io::duplex(1024);
+        let limits = Limits {
+            packet_len: Some(128),
+            read_len: Some(512),
+            write_len: Some(512),
+            open_handles: None,
+        };
+        let mut session = RawSftpSession::new(client);
+        session.set_limits(limits);
+        let mut file = File::new(
+            Arc::new(session),
+            "file".into(),
+            Features {
+                hardlink: false,
+                fsync: false,
+                statvfs: false,
+                expand_path: false,
+                limits: Some(limits),
+                max_concurrent_writes: 8,
+                max_packet_len: 128,
+            },
+        );
+        assert_eq!(file.write(&[0x5a; 512]).await.unwrap(), 99);
+        assert_eq!(server.read_u32().await.unwrap(), 124);
+        let mut body = vec![0; 124];
+        server.read_exact(&mut body).await.unwrap();
+        assert_eq!(body[0], crate::protocol::SSH_FXP_WRITE);
+        assert_eq!(&body[21..25], &99u32.to_be_bytes());
+        assert_eq!(&body[25..], &[0x5a; 99]);
+    }
 
     #[test]
     fn window_tuner_counts_short_read_without_reducing_window() {

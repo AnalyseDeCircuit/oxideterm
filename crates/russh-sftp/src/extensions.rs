@@ -4,6 +4,7 @@ pub const LIMITS: &str = "limits@openssh.com";
 pub const HARDLINK: &str = "hardlink@openssh.com";
 pub const FSYNC: &str = "fsync@openssh.com";
 pub const STATVFS: &str = "statvfs@openssh.com";
+pub const EXPAND_PATH: &str = "expand-path@openssh.com";
 
 macro_rules! impl_try_into_bytes {
     ($struct:ty) => {
@@ -46,6 +47,13 @@ pub struct StatvfsExtension {
 }
 
 impl_try_into_bytes!(StatvfsExtension);
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExpandPathExtension {
+    pub path: String,
+}
+
+impl_try_into_bytes!(ExpandPathExtension);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Statvfs {

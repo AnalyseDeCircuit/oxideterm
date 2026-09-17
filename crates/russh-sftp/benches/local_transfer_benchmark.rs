@@ -239,6 +239,40 @@ fn write_download_fixtures(root: &Path) -> Result<()> {
     Ok(())
 }
 
+async fn upload_bulk(session: &SftpSession, data: &[u8]) -> Result<()> {
+    let file = session.create("upload-bulk.bin").await?;
+    let mut writer = file.into_pipelined_uploader(0, 256 * 1024, 64, 16 * 1024 * 1024);
+    writer.write_all_chunk(data).await?;
+    writer.shutdown().await?;
+    session.remove_file("upload-bulk.bin").await?;
+    Ok(())
+}
+
+async fn download_bulk(session: &SftpSession) -> Result<()> {
+    let file = session.open("download-large.bin").await?;
+    let mut reader = file.into_pipelined_downloader_for_range(
+        0,
+        Some(LARGE_FILE_SIZE as u64),
+        256 * 1024,
+        64,
+        16 * 1024 * 1024,
+    );
+    let mut offset = 0;
+    while let Some(chunk) = reader.next_chunk().await? {
+        if chunk.offset != offset || chunk.data.iter().any(|byte| *byte != 0x5a) {
+            return Err(anyhow!(
+                "bulk download content or offset did not match fixture"
+            ));
+        }
+        offset += chunk.data.len() as u64;
+    }
+    reader.shutdown().await?;
+    if offset != LARGE_FILE_SIZE as u64 {
+        return Err(anyhow!("bulk download ended before fixture boundary"));
+    }
+    Ok(())
+}
+
 fn benchmark(c: &mut Criterion) {
     let runtime = Runtime::new().expect("benchmark runtime should start");
     let harness = runtime
@@ -298,6 +332,22 @@ fn benchmark(c: &mut Criterion) {
         });
     });
     download_group.finish();
+
+    let mut bulk_group = c.benchmark_group("sftp_local_bulk");
+    bulk_group.sample_size(10);
+    bulk_group.measurement_time(Duration::from_secs(10));
+    bulk_group.throughput(Throughput::Bytes(LARGE_FILE_SIZE as u64));
+    bulk_group.bench_function("upload_256mb", |bencher| {
+        bencher.iter(|| {
+            runtime
+                .block_on(upload_bulk(&harness.session, &large_data))
+                .unwrap()
+        });
+    });
+    bulk_group.bench_function("download_256mb", |bencher| {
+        bencher.iter(|| runtime.block_on(download_bulk(&harness.session)).unwrap());
+    });
+    bulk_group.finish();
 
     runtime
         .block_on(harness.shutdown())

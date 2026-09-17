@@ -189,7 +189,7 @@ impl From<u32> for FilePermissions {
 /// clients that can be displayed in longname. Can be omitted.
 ///
 /// The `flags` field is omitted because it is set by itself depending on the fields
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct FileAttributes {
     pub size: Option<u64>,
     pub uid: Option<u32>,
@@ -279,24 +279,13 @@ impl FileAttributes {
         }
     }
 
-    /// Creates a structure with omitted attributes
+    /// Creates a structure with omitted attributes. Same as [`Default`]
     pub fn empty() -> Self {
-        Self {
-            size: None,
-            uid: None,
-            user: None,
-            gid: None,
-            group: None,
-            permissions: None,
-            atime: None,
-            mtime: None,
-        }
+        Self::default()
     }
-}
 
-/// For packets which require dummy attributes
-impl Default for FileAttributes {
-    fn default() -> Self {
+    /// For packets which require dummy attributes
+    pub fn dummy() -> Self {
         Self {
             size: Some(0),
             uid: Some(0),

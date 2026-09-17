@@ -64,10 +64,20 @@ where
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub async fn timeout<F: Future>(duration: Duration, future: F) -> Result<F::Output, Error> {
-    tokio::time::timeout(duration, future)
-        .await
-        .map_err(|_| Error::Timeout)
+pub fn timeout<F: Future>(
+    duration: Duration,
+    future: F,
+) -> impl Future<Output = Result<F::Output, Error>> {
+    // Queued requests may only be polled after earlier replies have arrived.
+    let deadline = tokio::time::Instant::now().checked_add(duration);
+    async move {
+        match deadline {
+            Some(deadline) => tokio::time::timeout_at(deadline, future)
+                .await
+                .map_err(|_| Error::Timeout),
+            None => Ok(future.await),
+        }
+    }
 }
 
 // wasm32-unknown-unknown is single-threaded, so Send is trivially safe
@@ -89,14 +99,19 @@ impl<F: Future> Future for SendWrapper<F> {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub async fn timeout<F: Future>(duration: Duration, future: F) -> Result<F::Output, Error> {
+pub fn timeout<F: Future>(
+    duration: Duration,
+    future: F,
+) -> impl Future<Output = Result<F::Output, Error>> {
     let timer = SendWrapper(gloo_timers::future::TimeoutFuture::new(
         duration.as_millis() as u32,
     ));
-    tokio::pin!(future);
-    tokio::pin!(timer);
-    tokio::select! {
-        v = &mut future => Ok(v),
-        _ = &mut timer => Err(Error::Timeout),
+    async move {
+        tokio::pin!(future);
+        tokio::pin!(timer);
+        tokio::select! {
+            v = &mut future => Ok(v),
+            _ = &mut timer => Err(Error::Timeout),
+        }
     }
 }

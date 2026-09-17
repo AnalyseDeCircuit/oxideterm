@@ -9,9 +9,7 @@ pub trait TryBuf: Buf {
 
 impl<T: Buf> TryBuf for T {
     fn try_get_bytes(&mut self) -> Result<Vec<u8>, Error> {
-        let len = self
-            .try_get_u32()
-            .map_err(|e| Error::UnexpectedBehavior(e.to_string()))? as usize;
+        let len = self.try_get_u32()? as usize;
         if self.remaining() < len {
             return Err(Error::BadMessage("no remaining for vec".to_owned()));
         }
@@ -21,7 +19,7 @@ impl<T: Buf> TryBuf for T {
 
     fn try_get_string(&mut self) -> Result<String, Error> {
         let bytes = self.try_get_bytes()?;
-        //String::from_utf8(bytes).map_err(|_| Error::BadMessage("unable to parse str".to_owned()))
-        Ok(String::from_utf8_lossy(&bytes).into())
+        Ok(String::from_utf8(bytes)
+            .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned()))
     }
 }
