@@ -280,6 +280,13 @@
       "verifying": "確認中..."
     },
     "new_connection": {
+      "transport_ftp": "FTP / FTPS",
+      "ftp_description": "FTP または明示的 FTPS でリモートファイルを管理します。パッシブ接続を使用します。",
+      "ftp_tls": "FTPS を使用（明示的 TLS）",
+      "ftp_initial_path": "初期ディレクトリ",
+      "ftp_timeout": "接続タイムアウト（秒）",
+      "ftp_invalid": "FTP ホスト、ポート、ユーザー名、タイムアウトを確認してください。",
+      "ftp_failed": "FTP 接続に失敗しました",
       "title": "新規接続",
       "description": "ターミナル、SFTP、ポート転送、リモートファイル編集に使う SSH ホストを設定します。",
       "twofa_error": "2FAエラー: {{error}}",

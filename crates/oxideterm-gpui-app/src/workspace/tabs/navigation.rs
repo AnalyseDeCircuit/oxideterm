@@ -1030,6 +1030,7 @@ impl WorkspaceApp {
                     self.ssh_registry
                         .release(&runtime.connection_id, &runtime.consumer);
                 }
+                self.ftp_sessions.remove(&endpoint_id);
             }
         }
         self.ide_workspace.update(cx, |workspace, cx| {

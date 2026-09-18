@@ -52,6 +52,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(super) mod ftp;
 pub(super) mod native_video;
 
 use native_video::{SharedSftpNativeVideoSurface, sftp_native_video_element};
@@ -230,6 +231,7 @@ pub(super) struct SftpFileEntry {
     path: String,
     file_type: SftpFileType,
     size: u64,
+    size_known: bool,
     modified: Option<i64>,
     permissions: Option<String>,
     owner: Option<String>,
@@ -257,6 +259,7 @@ pub(super) enum SftpSurfaceId {
 pub(super) enum SftpRemoteId {
     Node(NodeId),
     Standalone(String),
+    Ftp(String),
 }
 
 impl SftpRemoteId {
@@ -264,19 +267,20 @@ impl SftpRemoteId {
         match self {
             Self::Node(node_id) => node_id.0.clone(),
             Self::Standalone(profile_id) => format!("standalone-sftp:{profile_id}"),
+            Self::Ftp(profile_id) => format!("ftp:{profile_id}"),
         }
     }
 
     fn node_id(&self) -> Option<&NodeId> {
         match self {
             Self::Node(node_id) => Some(node_id),
-            Self::Standalone(_) => None,
+            Self::Standalone(_) | Self::Ftp(_) => None,
         }
     }
 
     fn standalone_endpoint_id(&self) -> Option<&str> {
         match self {
-            Self::Node(_) => None,
+            Self::Node(_) | Self::Ftp(_) => None,
             Self::Standalone(endpoint_id) => Some(endpoint_id),
         }
     }
@@ -325,6 +329,9 @@ impl Drop for StandaloneSftpConsumerLease {
 
 #[derive(Clone)]
 pub(super) enum SftpRemoteBackend {
+    Ftp {
+        runtime: Arc<ftp::FtpRuntime>,
+    },
     Node {
         router: NodeRouter,
         node_id: NodeId,
@@ -392,11 +399,13 @@ impl SftpRemoteBackend {
         match self {
             Self::Node { .. } => self.node_connection().await,
             Self::Standalone { handle } => Ok(handle.clone()),
+            Self::Ftp { .. } => Err("FTP does not provide an SSH connection".into()),
         }
     }
 
     async fn acquire_sftp(&self) -> Result<Arc<tokio::sync::Mutex<SftpSession>>, String> {
         match self {
+            Self::Ftp { .. } => Err("FTP does not provide an SFTP subsystem".into()),
             Self::Node { .. } => self
                 .node_connection()
                 .await?
@@ -412,6 +421,7 @@ impl SftpRemoteBackend {
 
     async fn acquire_transfer_sftp(&self) -> Result<SftpSession, String> {
         match self {
+            Self::Ftp { .. } => Err("FTP does not provide an SFTP subsystem".into()),
             Self::Node {
                 router,
                 node_id,
@@ -1619,6 +1629,7 @@ mod entity_delivery_tests {
             name: name.to_string(),
             path: format!("/{name}"),
             file_type: SftpFileType::File,
+            size_known: true,
             size: 1,
             modified: None,
             permissions: None,

@@ -3384,6 +3384,7 @@ mod tests {
                     &[],
                     &[],
                     std::slice::from_ref(&cleared.id),
+                    &[],
                     Some("Moved"),
                 )
                 .unwrap(),
@@ -3453,6 +3454,7 @@ mod tests {
                     std::slice::from_ref(&mosh.id),
                     std::slice::from_ref(&standalone_sftp.id),
                     std::slice::from_ref(&remote.id),
+                    &[],
                     Some("Moved"),
                 )
                 .unwrap(),

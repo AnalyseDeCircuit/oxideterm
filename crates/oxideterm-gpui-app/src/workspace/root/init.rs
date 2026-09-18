@@ -830,6 +830,7 @@ impl WorkspaceApp {
             sftp_tab_nodes: HashMap::new(),
             standalone_sftp_tabs: HashMap::new(),
             standalone_sftp_sessions: HashMap::new(),
+            ftp_sessions: HashMap::new(),
             dedicated_sftp_connections: Arc::new(parking_lot::Mutex::new(HashMap::new())),
             ssh_consumer_prompt_handler,
             ssh_consumer_managed_key_resolver,

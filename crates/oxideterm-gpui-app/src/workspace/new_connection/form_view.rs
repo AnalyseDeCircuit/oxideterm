@@ -74,6 +74,7 @@ use oxideterm_settings_model::{settings_multiline_line_ranges, settings_multilin
 // submodules so their dependencies and visibility remain locally auditable.
 mod field_controls;
 mod form_modal;
+mod ftp;
 mod proxy_chain_view;
 mod ssh_algorithm_editor;
 mod standalone_sftp_modal;

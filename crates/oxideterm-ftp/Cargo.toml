@@ -1,0 +1,25 @@
+[package]
+name = "oxideterm-ftp"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
+oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
+suppaftp = { version = "12", default-features = false, features = ["tokio", "tokio-rustls-ring", "no-log"] }
+thiserror.workspace = true
+tokio.workspace = true
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+tokio-util.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+tempfile = "3"
+
+[dev-dependencies]
+rcgen = "0.14"

@@ -574,7 +574,7 @@
         "downloading": "Downloading objects"
       },
       "preview": {
-        "standalone_sftp_profiles": "Eigenständige SFTP-Profile ({{count}})",
+        "standalone_sftp_profiles": "Dateiübertragungsverbindungen ({{count}})",
         "summary_header": "Remote-Vorschau Zusammenfassung",
         "apply_plan_title": "Anwendungsplan",
         "upload_scope_title": "Uploadumfang",

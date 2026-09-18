@@ -574,7 +574,7 @@
         "downloading": "Downloading objects"
       },
       "preview": {
-        "standalone_sftp_profiles": "独立した SFTP 設定（{{count}}）",
+        "standalone_sftp_profiles": "ファイル転送接続 ({{count}})",
         "summary_header": "リモートプレビュー概要",
         "apply_plan_title": "適用計画",
         "upload_scope_title": "アップロード範囲",

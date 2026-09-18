@@ -21,6 +21,7 @@ pub enum CredentialOwner {
     Mosh(String),
     RemoteDesktop(String),
     Telnet(String),
+    Ftp(String),
     GlobalProxy,
 }
 
@@ -50,6 +51,7 @@ pub struct CredentialSyncSelection {
     pub mosh_ids: BTreeSet<String>,
     pub remote_desktop_ids: BTreeSet<String>,
     pub telnet_ids: BTreeSet<String>,
+    pub ftp_ids: BTreeSet<String>,
     pub global_proxy: bool,
 }
 
@@ -61,6 +63,7 @@ impl CredentialSyncSelection {
             CredentialOwner::Mosh(id) => self.mosh_ids.contains(id),
             CredentialOwner::RemoteDesktop(id) => self.remote_desktop_ids.contains(id),
             CredentialOwner::Telnet(id) => self.telnet_ids.contains(id),
+            CredentialOwner::Ftp(id) => self.ftp_ids.contains(id),
             CredentialOwner::GlobalProxy => self.global_proxy,
         }
     }
@@ -121,6 +124,12 @@ impl ConnectionStore {
                 .map(|p| (&p.id, p.updated_at))
                 .collect::<Vec<_>>(),
             &self.data.global_proxy_credential_revision,
+            self.data
+                .ftp_profiles
+                .iter()
+                .map(|p| (&p.id, p.updated_at))
+                .collect::<Vec<_>>(),
+            &self.data.ftp_tombstones,
         ))
     }
 

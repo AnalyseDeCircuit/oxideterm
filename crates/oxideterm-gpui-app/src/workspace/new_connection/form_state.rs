@@ -789,6 +789,9 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) serial_profile_id: Option<String>,
     /// Identifies an existing Telnet asset without changing a live Telnet session.
     pub(in crate::workspace) telnet_profile_id: Option<String>,
+    pub(in crate::workspace) ftp_profile_id: Option<String>,
+    pub(in crate::workspace) ftp_tls: bool,
+    pub(in crate::workspace) ftp_attempt: Option<(uuid::Uuid, tokio_util::sync::CancellationToken)>,
     /// Identifies an independent SFTP asset without creating a NodeRouter node.
     pub(in crate::workspace) standalone_sftp_profile_id: Option<String>,
     /// Controls whether the dual-pane SFTP surface has one or two authenticated remotes.
@@ -1093,6 +1096,9 @@ impl Default for NewConnectionForm {
             mosh_profile_id: None,
             serial_profile_id: None,
             telnet_profile_id: None,
+            ftp_profile_id: None,
+            ftp_tls: true,
+            ftp_attempt: None,
             standalone_sftp_profile_id: None,
             standalone_sftp_transfer_mode: StandaloneSftpTransferMode::LocalRemote,
             standalone_sftp_secondary: StandaloneSftpSecondaryForm::default(),
@@ -1223,6 +1229,9 @@ impl NewConnectionForm {
 
 impl Drop for NewConnectionForm {
     fn drop(&mut self) {
+        if let Some((_, cancel)) = &self.ftp_attempt {
+            cancel.cancel();
+        }
         // GPUI inputs require plain String drafts, so scrub them at owner teardown.
         self.zeroize_secret_drafts();
     }
@@ -1401,7 +1410,7 @@ pub(in crate::workspace) fn form_from_serial_profile(
     form
 }
 
-fn apply_saved_upstream_proxy_to_form(
+pub(super) fn apply_saved_upstream_proxy_to_form(
     form: &mut NewConnectionForm,
     policy: &oxideterm_connections::SavedUpstreamProxyPolicy,
 ) {
@@ -1601,13 +1610,29 @@ pub(in crate::workspace) fn next_connection_field(
         };
         return fields[next];
     }
-    if transport == NewConnectionTransport::Telnet {
-        let mut fields = vec![
-            NewConnectionField::TelnetProfileName,
-            NewConnectionField::Host,
-            NewConnectionField::Port,
-            NewConnectionField::Notes,
-        ];
+    if matches!(
+        transport,
+        NewConnectionTransport::Telnet | NewConnectionTransport::Ftp
+    ) {
+        let mut fields = if transport == NewConnectionTransport::Ftp {
+            vec![
+                NewConnectionField::Name,
+                NewConnectionField::Host,
+                NewConnectionField::Port,
+                NewConnectionField::Notes,
+                NewConnectionField::Username,
+                NewConnectionField::Password,
+                NewConnectionField::InitialRemotePath,
+                NewConnectionField::ConnectTimeoutSeconds,
+            ]
+        } else {
+            vec![
+                NewConnectionField::TelnetProfileName,
+                NewConnectionField::Host,
+                NewConnectionField::Port,
+                NewConnectionField::Notes,
+            ]
+        };
         if upstream_proxy_policy == NewConnectionUpstreamProxyPolicy::Custom {
             fields.extend([
                 NewConnectionField::UpstreamProxyHost,

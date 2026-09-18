@@ -617,6 +617,13 @@ fn preflight_structured_snapshots(
     {
         profile.validate()?;
     }
+    for profile in standalone_sftp_profiles_snapshot
+        .and_then(|s| s.ftp.as_ref())
+        .into_iter()
+        .flat_map(|s| &s.records)
+    {
+        profile.validate()?;
+    }
     for profile in remote_desktop_profiles_snapshot
         .into_iter()
         .flat_map(|snapshot| &snapshot.records)

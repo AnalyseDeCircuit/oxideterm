@@ -574,7 +574,7 @@
         "downloading": "下載物件"
       },
       "preview": {
-        "standalone_sftp_profiles": "獨立 SFTP 設定（{{count}}）",
+        "standalone_sftp_profiles": "檔案傳輸連線（{{count}}）",
         "summary_header": "遠端預覽摘要",
         "apply_plan_title": "本次套用計畫",
         "upload_scope_title": "上傳範圍",

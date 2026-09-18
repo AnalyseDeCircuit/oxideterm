@@ -1892,6 +1892,10 @@ pub struct ConnectionStoreData {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub telnet_profiles: Vec<TelnetProfile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ftp_profiles: Vec<FtpProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ftp_tombstones: Vec<DeletedConnectionTombstone>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mosh_profiles: Vec<MoshProfile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub standalone_sftp_profiles: Vec<StandaloneSftpProfile>,
@@ -1920,6 +1924,8 @@ impl Default for ConnectionStoreData {
             managed_ssh_keys: Vec::new(),
             serial_profiles: Vec::new(),
             telnet_profiles: Vec::new(),
+            ftp_profiles: Vec::new(),
+            ftp_tombstones: Vec::new(),
             mosh_profiles: Vec::new(),
             standalone_sftp_profiles: Vec::new(),
             remote_desktop_profiles: Vec::new(),
@@ -1964,6 +1970,14 @@ pub struct StandaloneSftpProfilesSyncSnapshot {
     pub exported_at: String,
     #[serde(default)]
     pub records: Vec<StandaloneSftpProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ftp: Option<FtpProfilesSyncSnapshot>,
+}
+
+impl StandaloneSftpProfilesSyncSnapshot {
+    pub fn record_count(&self) -> usize {
+        self.records.len() + self.ftp.as_ref().map_or(0, |ftp| ftp.records.len())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

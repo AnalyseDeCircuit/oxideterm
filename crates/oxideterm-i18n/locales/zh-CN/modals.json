@@ -280,6 +280,13 @@
       "verifying": "验证中..."
     },
     "new_connection": {
+      "transport_ftp": "FTP / FTPS",
+      "ftp_description": "通过 FTP 或显式 FTPS 管理远程文件，使用被动数据连接。",
+      "ftp_tls": "使用 FTPS（显式 TLS）",
+      "ftp_initial_path": "初始目录",
+      "ftp_timeout": "连接超时（秒）",
+      "ftp_invalid": "请检查 FTP 主机、端口、用户名和超时设置。",
+      "ftp_failed": "FTP 连接失败",
       "title": "新建连接",
       "description": "配置一台 SSH 主机，用于终端、SFTP、端口转发和远程文件编辑。",
       "twofa_error": "2FA 错误: {{error}}",

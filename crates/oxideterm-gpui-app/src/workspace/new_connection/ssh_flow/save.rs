@@ -1054,6 +1054,10 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
+        if transport == Some(NewConnectionTransport::Ftp) {
+            self.submit_ftp_connection_form(action, cx);
+            return;
+        }
         if transport == Some(NewConnectionTransport::LocalTerminal)
             && drill_down_parent_id.is_none()
             && mode == NewConnectionFormMode::NewConnection

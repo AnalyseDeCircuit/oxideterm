@@ -151,12 +151,18 @@ impl WorkspaceApp {
         let serial_edit_mode = form.serial_profile_id.is_some();
         let telnet_edit_mode = form.telnet_profile_id.is_some();
         let standalone_sftp_edit_mode = form.standalone_sftp_profile_id.is_some();
+        let ftp_edit_mode = self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .is_some_and(|form| form.ftp_profile_id.is_some());
         // Saved non-SSH profiles edit persisted assets without acquiring a runtime owner.
         let saved_profile_edit_mode = remote_desktop_edit_mode
             || mosh_edit_mode
             || serial_edit_mode
             || telnet_edit_mode
-            || standalone_sftp_edit_mode;
+            || standalone_sftp_edit_mode
+            || ftp_edit_mode;
         let drill_down_mode = self
             .connection_form_state(cx)
             .drill_down_parent_node_id
@@ -215,8 +221,10 @@ impl WorkspaceApp {
             && !drill_down_mode
             && form.transport == NewConnectionTransport::WslGraphics;
         let local_transport_mode = serial_mode || telnet_mode;
+        let ftp_mode = form.transport == NewConnectionTransport::Ftp;
         let remote_desktop_mode = remote_desktop_protocol.is_some();
         let ssh_submission_mode = !local_terminal_mode
+            && !ftp_mode
             && !local_transport_mode
             && !remote_desktop_mode
             && !wsl_graphics_mode
@@ -242,6 +250,8 @@ impl WorkspaceApp {
                 .t("sessionManager.edit_properties.duplicate_title")
         } else if edit_properties_mode || saved_profile_edit_mode {
             self.i18n.t("sessionManager.edit_properties.title")
+        } else if ftp_mode {
+            self.i18n.t("modals.new_connection.transport_ftp")
         } else if mosh_mode {
             self.i18n.t("mosh.form.title")
         } else if standalone_sftp_mode {
@@ -274,6 +284,8 @@ impl WorkspaceApp {
             self.i18n.t("sessionManager.edit_properties.description")
         } else if telnet_mode {
             self.i18n.t("modals.new_connection.telnet_description")
+        } else if ftp_mode {
+            self.i18n.t("modals.new_connection.ftp_description")
         } else if mosh_mode {
             self.i18n.t("mosh.form.description")
         } else if standalone_sftp_mode {
@@ -443,6 +455,7 @@ impl WorkspaceApp {
                                         .when(telnet_mode, |content| {
                                             content.child(self.render_telnet_form_branch(cx))
                                         })
+                                        .when(ftp_mode, |content| content.child(self.render_ftp_form_branch(cx)))
                                         .when(wsl_graphics_mode, |content| {
                                             content.child(self.render_wsl_graphics_form_branch(cx))
                                         })
@@ -454,6 +467,7 @@ impl WorkspaceApp {
                                             !serial_mode
                                                 && !local_terminal_mode
                                                 && !telnet_mode
+                                                && !ftp_mode
                                                 && !wsl_graphics_mode
                                                 && !remote_desktop_mode,
                                             |content| {

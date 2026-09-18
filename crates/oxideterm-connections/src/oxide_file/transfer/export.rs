@@ -676,8 +676,9 @@ fn count_mosh_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> 
 }
 
 fn count_standalone_sftp_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
-    let value = serde_json::from_str::<Value>(snapshot_json?).ok()?;
-    value.get("records")?.as_array().map(Vec::len)
+    let snapshot =
+        serde_json::from_str::<StandaloneSftpProfilesSyncSnapshot>(snapshot_json?).ok()?;
+    Some(snapshot.record_count())
 }
 
 fn portable_standalone_sftp_profiles_json(
@@ -691,6 +692,14 @@ fn portable_standalone_sftp_profiles_json(
         })?;
     for profile in &mut snapshot.records {
         crate::store::make_standalone_sftp_profile_portable(profile);
+    }
+    for profile in snapshot
+        .ftp
+        .as_mut()
+        .into_iter()
+        .flat_map(|s| &mut s.records)
+    {
+        crate::store::make_ftp_profile_portable(profile);
     }
     serde_json::to_string(&snapshot).map_err(|error| {
         OxideFileError::InvalidFormat(format!(

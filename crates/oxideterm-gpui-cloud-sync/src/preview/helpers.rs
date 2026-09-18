@@ -482,7 +482,7 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
                 standalone_sftp_profiles: preview
                     .standalone_sftp_profiles_snapshot
                     .as_ref()
-                    .map_or(0, |snapshot| snapshot.records.len()),
+                    .map_or(0, |snapshot| snapshot.record_count()),
                 connections,
                 forwards,
                 quick_commands,

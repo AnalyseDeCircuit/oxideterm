@@ -458,6 +458,33 @@ pub(super) fn merge_standalone_sftp_profile_records(
         .map(|profile| (profile.id.as_str(), profile))
         .collect::<BTreeMap<_, _>>();
     let mut changed = false;
+    if let (Some(remote), Some(base), Some(local)) = (&mut remote.ftp, &base.ftp, &local.ftp) {
+        let base_records = base
+            .records
+            .iter()
+            .map(|p| (p.id.as_str(), p))
+            .collect::<BTreeMap<_, _>>();
+        let local_records = local
+            .records
+            .iter()
+            .map(|p| (p.id.as_str(), p))
+            .collect::<BTreeMap<_, _>>();
+        for remote_profile in &mut remote.records {
+            let (Some(base), Some(local)) = (
+                base_records.get(remote_profile.id.as_str()),
+                local_records.get(remote_profile.id.as_str()),
+            ) else {
+                continue;
+            };
+            if let Some(mut merged) =
+                merge_structured_model_fields(*base, *local, remote_profile, conflict_strategy)?
+            {
+                merged.updated_at = merged_at;
+                *remote_profile = merged;
+                changed = true;
+            }
+        }
+    }
     for remote_profile in &mut remote.records {
         let Some(base_profile) = base_records.get(remote_profile.id.as_str()).copied() else {
             continue;

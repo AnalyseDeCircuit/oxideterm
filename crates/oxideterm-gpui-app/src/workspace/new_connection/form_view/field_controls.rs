@@ -238,6 +238,13 @@ const VNC_COMPRESSION_PREFERENCES: &[(RemoteDesktopVncPreference, &str)] = &[
 fn new_connection_transport_index(transport: NewConnectionTransport) -> usize {
     match transport {
         NewConnectionTransport::Ssh => 0,
+        NewConnectionTransport::Ftp => {
+            if cfg!(target_os = "windows") {
+                9
+            } else {
+                8
+            }
+        }
         NewConnectionTransport::Mosh => 1,
         NewConnectionTransport::Telnet => 2,
         NewConnectionTransport::Serial => 3,
@@ -263,7 +270,10 @@ fn new_connection_transport_index(transport: NewConnectionTransport) -> usize {
 
 fn new_connection_transport_visual_offset(transport: NewConnectionTransport) -> f32 {
     let row_stride = NEW_CONNECTION_TRANSPORT_ROW_HEIGHT + NEW_CONNECTION_TRANSPORT_ROW_GAP;
-    let advanced_offset = if transport == NewConnectionTransport::StandaloneSftp {
+    let advanced_offset = if matches!(
+        transport,
+        NewConnectionTransport::StandaloneSftp | NewConnectionTransport::Ftp
+    ) {
         NEW_CONNECTION_ADVANCED_GROUP_OFFSET
     } else {
         0.0
@@ -2693,6 +2703,13 @@ impl WorkspaceApp {
             LucideIcon::FolderSync,
             true,
         ));
+        choices.push((
+            NewConnectionTransport::Ftp,
+            self.i18n.t("modals.new_connection.transport_ftp"),
+            NewConnectionField::Name,
+            LucideIcon::FolderSync,
+            true,
+        ));
         let mut sidebar = div()
             .w(px(NEW_CONNECTION_TYPE_SIDEBAR_WIDTH))
             .h_full()
@@ -2704,8 +2721,10 @@ impl WorkspaceApp {
             .border_color(rgba((theme.border << 8) | 0x80))
             .pr(px(self.tokens.spacing.three));
 
+        let mut advanced_group_started = false;
         for (transport, label, focus_field, icon, advanced) in choices {
-            if advanced {
+            if advanced && !advanced_group_started {
+                advanced_group_started = true;
                 sidebar = sidebar.child(div().flex_1()).child(
                     div()
                         .id("new-connection-advanced-group")
@@ -2746,9 +2765,9 @@ impl WorkspaceApp {
                             }),
                         ),
                 );
-                if !advanced_connections_expanded {
-                    continue;
-                }
+            }
+            if advanced && !advanced_connections_expanded {
+                continue;
             }
             let active = active_transport == transport;
             let transport_index = new_connection_transport_index(transport);
@@ -2850,6 +2869,8 @@ impl WorkspaceApp {
                             if previous_transport != transport
                                 && previous_transport != NewConnectionTransport::StandaloneSftp
                                 && transport != NewConnectionTransport::StandaloneSftp
+                                && previous_transport != NewConnectionTransport::Ftp
+                                && transport != NewConnectionTransport::Ftp
                             {
                                 // The advanced group is pinned below a flexible spacer, so its
                                 // absolute row offset cannot use the fixed-list slide animation.

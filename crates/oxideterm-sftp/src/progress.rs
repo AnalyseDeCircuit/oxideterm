@@ -112,6 +112,8 @@ pub enum TransferProtocol {
     #[default]
     Sftp,
     Scp,
+    Ftp,
+    Ftps,
 }
 
 impl TransferProtocol {

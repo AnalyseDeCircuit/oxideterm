@@ -566,7 +566,7 @@
         "downloading": "下载对象"
       },
       "preview": {
-        "standalone_sftp_profiles": "独立 SFTP 配置（{{count}}）",
+        "standalone_sftp_profiles": "文件传输连接（{{count}}）",
         "summary_header": "远端预览摘要",
         "apply_plan_title": "本次应用计划",
         "upload_scope_title": "上传范围",

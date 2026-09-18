@@ -296,6 +296,14 @@ impl CloudSyncOperationService {
                 .flat_map(|s| &s.records)
                 .map(|p| p.id.clone())
                 .collect();
+            credential_selection.ftp_ids = preview
+                .standalone_sftp_profiles_snapshot
+                .as_ref()
+                .and_then(|s| s.ftp.as_ref())
+                .into_iter()
+                .flat_map(|s| &s.records)
+                .map(|p| p.id.clone())
+                .collect();
         }
         if selection.mosh_profiles {
             credential_selection.mosh_ids = preview

@@ -15,6 +15,14 @@ enum SessionManagerMoveInteraction {
 }
 
 impl WorkspaceApp {
+    pub(super) fn request_delete_ftp_profile(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.session_manager.update(cx, |state, cx| {
+            state.delete_confirm = Some(SessionManagerDeleteConfirm::Batch {
+                targets: vec![SessionManagerSelectionTarget::Ftp(id.to_owned())],
+            });
+            cx.notify();
+        });
+    }
     pub(super) fn connection_count_for_group(&self, group: &str) -> usize {
         let connection_count = self
             .connection_store
@@ -77,6 +85,16 @@ impl WorkspaceApp {
             })
             .count();
         connection_count
+            + self
+                .connection_store
+                .ftp_profiles()
+                .iter()
+                .filter(|profile| {
+                    profile.group.as_deref().is_some_and(|candidate| {
+                        candidate == group || candidate.starts_with(&format!("{group}/"))
+                    })
+                })
+                .count()
             + serial_count
             + telnet_count
             + mosh_count
@@ -100,6 +118,11 @@ impl WorkspaceApp {
             }
         }
         for profile in self.connection_store.telnet_profiles() {
+            if let Some(group) = profile.group.as_deref() {
+                add_group_path_segments(group, &mut paths);
+            }
+        }
+        for profile in self.connection_store.ftp_profiles() {
             if let Some(group) = profile.group.as_deref() {
                 add_group_path_segments(group, &mut paths);
             }
@@ -1252,6 +1275,15 @@ impl WorkspaceApp {
                         deleted += 1;
                     }
                 }
+                SessionManagerSelectionTarget::Ftp(id) => {
+                    match self.connection_store.delete_ftp_profile(&id) {
+                        Ok(true) => deleted += 1,
+                        Ok(false) => {}
+                        Err(error) => self.session_manager.update(cx, |state, cx| {
+                            state.set_status(Some(error.to_string()), cx)
+                        }),
+                    }
+                }
                 SessionManagerSelectionTarget::Telnet(id) => {
                     if self
                         .connection_store
@@ -1412,6 +1444,7 @@ impl WorkspaceApp {
         let mut connection_ids = Vec::new();
         let mut serial_profile_ids = Vec::new();
         let mut telnet_profile_ids = Vec::new();
+        let mut ftp_profile_ids = Vec::new();
         let mut mosh_profile_ids = Vec::new();
         let mut standalone_sftp_profile_ids = Vec::new();
         let mut remote_desktop_ids = Vec::new();
@@ -1424,6 +1457,7 @@ impl WorkspaceApp {
                 SessionManagerSelectionTarget::Connection(id) => connection_ids.push(id.clone()),
                 SessionManagerSelectionTarget::Serial(id) => serial_profile_ids.push(id.clone()),
                 SessionManagerSelectionTarget::Telnet(id) => telnet_profile_ids.push(id.clone()),
+                SessionManagerSelectionTarget::Ftp(id) => ftp_profile_ids.push(id.clone()),
                 SessionManagerSelectionTarget::Mosh(id) => mosh_profile_ids.push(id.clone()),
                 SessionManagerSelectionTarget::StandaloneSftp(id) => {
                     standalone_sftp_profile_ids.push(id.clone())
@@ -1434,6 +1468,7 @@ impl WorkspaceApp {
             }
         }
         let has_group_changes = !connection_ids.is_empty()
+            || !ftp_profile_ids.is_empty()
             || !serial_profile_ids.is_empty()
             || !telnet_profile_ids.is_empty()
             || !mosh_profile_ids.is_empty()
@@ -1456,6 +1491,7 @@ impl WorkspaceApp {
             &mosh_profile_ids,
             &standalone_sftp_profile_ids,
             &remote_desktop_ids,
+            &ftp_profile_ids,
             group,
         ) {
             Ok(count) => {
@@ -1498,6 +1534,10 @@ impl WorkspaceApp {
     ) -> Option<Option<&'a str>> {
         // Returning an outer Option distinguishes missing assets from the ungrouped root.
         match target {
+            SessionManagerSelectionTarget::Ftp(id) => self
+                .connection_store
+                .get_ftp_profile(id)
+                .map(|profile| profile.group.as_deref()),
             SessionManagerSelectionTarget::Connection(id) => self
                 .connection_store
                 .get(id)

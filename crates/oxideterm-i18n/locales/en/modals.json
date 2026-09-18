@@ -280,6 +280,13 @@
       "verifying": "Verifying..."
     },
     "new_connection": {
+      "transport_ftp": "FTP / FTPS",
+      "ftp_description": "Manage remote files over FTP or explicit FTPS. Uses passive data connections.",
+      "ftp_tls": "Use FTPS (explicit TLS)",
+      "ftp_initial_path": "Initial directory",
+      "ftp_timeout": "Connection timeout (seconds)",
+      "ftp_invalid": "Check the FTP host, port, username and timeout.",
+      "ftp_failed": "FTP connection failed",
       "title": "New Connection",
       "description": "Configure an SSH host for terminals, SFTP, port forwarding, and remote file editing.",
       "twofa_error": "2FA Error: {{error}}",

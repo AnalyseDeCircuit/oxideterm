@@ -291,8 +291,7 @@ impl WorkspaceApp {
             return;
         };
         let transfer_id = new_sftp_transfer_id(&remote_id, name);
-        let protocol =
-            configured_transfer_protocol(self.settings_store.settings().sftp.transfer_protocol);
+        let protocol = self.transfer_protocol_for_remote(&remote_id);
         let id = self.sftp_view.update(cx, |sftp, cx| {
             let id = sftp.next_transfer_id;
             sftp.next_transfer_id += 1;

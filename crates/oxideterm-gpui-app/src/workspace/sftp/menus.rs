@@ -71,8 +71,9 @@ impl WorkspaceApp {
             if menu.pane != SftpPane::Remote || file.file_type == SftpFileType::Directory {
                 menu_el
             } else {
-                let can_extract =
-                    selected_count == 1 && sftp_extract_archive_kind(&file.name).is_some();
+                let can_extract = selected_count == 1
+                    && sftp_extract_archive_kind(&file.name).is_some()
+                    && !matches!(self.visible_sftp_remote_id(cx), Some(SftpRemoteId::Ftp(_)));
                 menu_el
                     .child(self.render_sftp_context_menu_guarded_item(
                         LucideIcon::Eye,

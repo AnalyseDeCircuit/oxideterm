@@ -16,6 +16,7 @@ name = "oxideterm-native"
 path = "src/main.rs"
 
 [dependencies]
+oxideterm-ftp = { path = "../oxideterm-ftp" }
 futures-util.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true

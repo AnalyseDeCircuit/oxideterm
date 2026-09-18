@@ -547,6 +547,19 @@ impl WorkspaceApp {
         let local_drag_over = drag_over_pane == Some(SftpPane::Local);
         let remote_drag_over = drag_over_pane == Some(SftpPane::Remote);
         let remote_title = match &remote_id {
+            SftpRemoteId::Ftp(id) => self
+                .connection_store
+                .get_ftp_profile(id)
+                .map(|p| p.name.clone())
+                .or_else(|| {
+                    self.ftp_sessions.get(id).map(|r| {
+                        format!(
+                            "{}@{}:{}",
+                            r.options.username, r.options.host, r.options.port
+                        )
+                    })
+                })
+                .unwrap_or_else(|| id.clone()),
             SftpRemoteId::Node(node_id) => self
                 .ssh_nodes
                 .get(node_id)
@@ -561,6 +574,7 @@ impl WorkspaceApp {
         let pair_primary_title =
             self.sftp_pair_primary_remote_id(cx)
                 .map(|remote_id| match remote_id {
+                    SftpRemoteId::Ftp(id) => id,
                     SftpRemoteId::Node(node_id) => node_id.0,
                     SftpRemoteId::Standalone(endpoint_id) => self
                         .connection_store

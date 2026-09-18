@@ -206,6 +206,20 @@ fn update_reference(
                 _ => bail!("Invalid Telnet credential slot"),
             }
         }
+        CredentialOwner::Ftp(id) => {
+            let profile = data
+                .ftp_profiles
+                .iter_mut()
+                .find(|p| &p.id == id)
+                .context("FTP profile is unavailable")?;
+            match target.slot {
+                CredentialSlot::Primary => profile.password_keychain_id = reference,
+                CredentialSlot::UpstreamProxy => {
+                    set_policy_reference(&mut profile.upstream_proxy, reference)?
+                }
+                _ => bail!("Invalid FTP credential slot"),
+            }
+        }
         CredentialOwner::GlobalProxy => {
             data.synced_global_proxy_reference = reference.clone();
             data.global_proxy_credential_cleared = reference.is_none();

@@ -518,6 +518,7 @@ impl WorkspaceApp {
                     } else {
                         SftpFileType::File
                     },
+                    size_known: true,
                     size: metadata.len(),
                     modified,
                     permissions: None,
@@ -577,7 +578,7 @@ impl WorkspaceApp {
         let configured_protocol = if pair_primary_remote_id.is_some() {
             RemoteTransferProtocol::Sftp
         } else {
-            configured_transfer_protocol(self.settings_store.settings().sftp.transfer_protocol)
+            self.transfer_protocol_for_remote(&remote_id)
         };
         let launches = self.sftp_view.update(cx, |sftp, cx| {
             sftp.prepare_transfer_launches(

@@ -574,7 +574,7 @@
         "downloading": "Downloading objects"
       },
       "preview": {
-        "standalone_sftp_profiles": "독립 SFTP 프로필 ({{count}})",
+        "standalone_sftp_profiles": "파일 전송 연결 ({{count}})",
         "summary_header": "원격 미리보기 요약",
         "apply_plan_title": "적용 계획",
         "upload_scope_title": "업로드 범위",

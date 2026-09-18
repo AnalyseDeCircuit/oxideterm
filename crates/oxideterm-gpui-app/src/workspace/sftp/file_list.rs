@@ -257,11 +257,12 @@ impl WorkspaceApp {
                         };
                         let _metadata_fields_consumed =
                             (&file.permissions, &file.owner, &file.group);
-                        let size_text = if file.file_type == SftpFileType::Directory {
-                            "-".to_string()
-                        } else {
-                            format_file_size(file.size)
-                        };
+                        let size_text =
+                            if file.file_type == SftpFileType::Directory || !file.size_known {
+                                "-".to_string()
+                            } else {
+                                format_file_size(file.size)
+                            };
                         let modified_text = format_modified(file.modified);
                         div()
                             .w_full()

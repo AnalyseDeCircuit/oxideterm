@@ -597,6 +597,11 @@ impl ConnectionStore {
         &mut self,
         snapshot: StandaloneSftpProfilesSyncSnapshot,
     ) -> Result<usize> {
+        if let Some(ftp) = &snapshot.ftp {
+            for profile in &ftp.records {
+                profile.validate()?;
+            }
+        }
         // Treat every incoming snapshot as portable metadata, even when it came from a .oxide file.
         let mut applied = 0usize;
         for mut profile in snapshot.records {
@@ -620,6 +625,9 @@ impl ConnectionStore {
                 self.data.standalone_sftp_profiles.push(profile);
                 applied += 1;
             }
+        }
+        if let Some(ftp) = snapshot.ftp {
+            applied += self.apply_ftp_profiles_snapshot(ftp)?;
         }
         if applied > 0 {
             self.normalize();
@@ -812,10 +820,21 @@ fn build_standalone_sftp_profiles_sync_snapshot(
             .map(|profile| (&profile.id, profile.updated_at.to_rfc3339()))
             .collect::<Vec<_>>(),
     )?;
+    let ftp = if data.ftp_profiles.is_empty() && data.ftp_tombstones.is_empty() {
+        None
+    } else {
+        Some(build_ftp_profiles_sync_snapshot(data)?)
+    };
+    let revision = if let Some(ftp) = &ftp {
+        sha256_hex(&(revision, &ftp.revision))?
+    } else {
+        revision
+    };
     Ok(StandaloneSftpProfilesSyncSnapshot {
         revision,
         exported_at: Utc::now().to_rfc3339(),
         records,
+        ftp,
     })
 }
 

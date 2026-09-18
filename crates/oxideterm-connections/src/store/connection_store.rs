@@ -586,6 +586,16 @@ impl ConnectionStore {
                 profile.updated_at = now;
             }
         }
+        for profile in &mut self.data.ftp_profiles {
+            if profile
+                .group
+                .as_deref()
+                .is_some_and(|group| group_path_is_within(group, &name))
+            {
+                profile.group = None;
+                profile.updated_at = now;
+            }
+        }
         for profile in &mut self.data.mosh_profiles {
             if profile
                 .group
@@ -678,6 +688,17 @@ impl ConnectionStore {
                 updated += 1;
             }
         }
+        for profile in &mut self.data.ftp_profiles {
+            if let Some(renamed) = profile
+                .group
+                .as_deref()
+                .and_then(|group| rename_group_path(group, &old_name, &new_name))
+            {
+                profile.group = Some(renamed);
+                profile.updated_at = now;
+                updated += 1;
+            }
+        }
         for profile in &mut self.data.mosh_profiles {
             if let Some(renamed) = profile
                 .group
@@ -719,7 +740,7 @@ impl ConnectionStore {
     }
 
     pub fn move_to_group(&mut self, ids: &[String], group: Option<&str>) -> Result<usize> {
-        self.move_session_assets_to_group(ids, &[], &[], &[], &[], &[], group)
+        self.move_session_assets_to_group(ids, &[], &[], &[], &[], &[], &[], group)
     }
 
     /// Moves all saved Session Manager asset types in one metadata save.
@@ -731,6 +752,7 @@ impl ConnectionStore {
         mosh_profile_ids: &[String],
         standalone_sftp_profile_ids: &[String],
         remote_desktop_ids: &[String],
+        ftp_profile_ids: &[String],
         group: Option<&str>,
     ) -> Result<usize> {
         let group = normalize_optional_group_name(group)?;
@@ -741,6 +763,7 @@ impl ConnectionStore {
         let standalone_sftp_profile_id_set =
             standalone_sftp_profile_ids.iter().collect::<HashSet<_>>();
         let remote_desktop_id_set = remote_desktop_ids.iter().collect::<HashSet<_>>();
+        let ftp_profile_id_set = ftp_profile_ids.iter().collect::<HashSet<_>>();
         let now = Utc::now();
         let mut updated = 0;
         for conn in &mut self.data.connections {
@@ -773,6 +796,13 @@ impl ConnectionStore {
         }
         for profile in &mut self.data.standalone_sftp_profiles {
             if standalone_sftp_profile_id_set.contains(&profile.id) {
+                profile.group = group.clone();
+                profile.updated_at = now;
+                updated += 1;
+            }
+        }
+        for profile in &mut self.data.ftp_profiles {
+            if ftp_profile_id_set.contains(&profile.id) {
                 profile.group = group.clone();
                 profile.updated_at = now;
                 updated += 1;
@@ -3422,6 +3452,7 @@ impl ConnectionStore {
     fn normalize(&mut self) {
         self.data.connection_tombstones =
             active_connection_tombstones(&self.data.connection_tombstones);
+        self.data.ftp_tombstones = active_connection_tombstones(&self.data.ftp_tombstones);
         self.data
             .recent
             .retain(|recent_id| self.data.connections.iter().any(|conn| &conn.id == recent_id));
@@ -3445,6 +3476,7 @@ impl ConnectionStore {
             .serial_profiles
             .iter()
             .filter_map(|profile| profile.group.clone())
+            .chain(self.data.ftp_profiles.iter().filter_map(|profile|profile.group.clone()))
             .chain(
                 self.data
                     .telnet_profiles
@@ -3500,6 +3532,7 @@ impl ConnectionStore {
         self.data
             .standalone_sftp_profiles
             .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+        self.data.ftp_profiles.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
     }
 
     fn add_connection(&mut self, connection: SavedConnection) {

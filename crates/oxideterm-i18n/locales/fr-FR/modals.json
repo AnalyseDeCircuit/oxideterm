@@ -280,6 +280,13 @@
       "verifying": "Vérification..."
     },
     "new_connection": {
+      "transport_ftp": "FTP / FTPS",
+      "ftp_description": "Gérez les fichiers distants via FTP ou FTPS explicite avec des connexions de données passives.",
+      "ftp_tls": "Utiliser FTPS (TLS explicite)",
+      "ftp_initial_path": "Répertoire initial",
+      "ftp_timeout": "Délai de connexion (secondes)",
+      "ftp_invalid": "Vérifiez l’hôte FTP, le port, l’utilisateur et le délai.",
+      "ftp_failed": "Échec de la connexion FTP",
       "title": "Nouvelle connexion",
       "description": "Configurez un hôte SSH pour les terminaux, SFTP, les redirections de ports et l’édition de fichiers distants.",
       "twofa_error": "Erreur 2FA : {{error}}",

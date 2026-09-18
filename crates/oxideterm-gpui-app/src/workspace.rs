@@ -903,6 +903,7 @@ pub(crate) struct WorkspaceApp {
     sftp_tab_nodes: HashMap<TabId, NodeId>,
     standalone_sftp_tabs: HashMap<TabId, sftp::StandaloneSftpTabBinding>,
     standalone_sftp_sessions: HashMap<String, sftp::StandaloneSftpRuntime>,
+    ftp_sessions: HashMap<String, Arc<sftp::ftp::FtpRuntime>>,
     dedicated_sftp_connections:
         Arc<parking_lot::Mutex<HashMap<NodeId, sftp::DedicatedSftpConnectionSlot>>>,
     ssh_consumer_prompt_handler: Arc<dyn SshPromptHandler>,

@@ -744,6 +744,11 @@ impl WorkspaceApp {
         remote_id: &SftpRemoteId,
     ) -> Option<SftpRemoteBackend> {
         match remote_id {
+            SftpRemoteId::Ftp(id) => self
+                .ftp_sessions
+                .get(id)
+                .cloned()
+                .map(|runtime| SftpRemoteBackend::Ftp { runtime }),
             SftpRemoteId::Node(node_id) => Some(SftpRemoteBackend::Node {
                 router: self.node_router.clone(),
                 node_id: node_id.clone(),
@@ -771,6 +776,11 @@ impl WorkspaceApp {
         transfer_id: &str,
     ) -> Option<(SftpRemoteBackend, Option<StandaloneSftpConsumerLease>)> {
         match remote_id {
+            SftpRemoteId::Ftp(id) => self
+                .ftp_sessions
+                .get(id)
+                .cloned()
+                .map(|runtime| (SftpRemoteBackend::Ftp { runtime }, None)),
             SftpRemoteId::Node(node_id) => Some((
                 SftpRemoteBackend::Node {
                     router: self.node_router.clone(),
@@ -814,6 +824,9 @@ impl WorkspaceApp {
             .map(SftpRemoteId::Node)
             .or_else(|| {
                 self.standalone_sftp_tabs.get(&tab_id).map(|binding| {
+                    if self.ftp_sessions.contains_key(&binding.primary_endpoint_id) {
+                        return SftpRemoteId::Ftp(binding.primary_endpoint_id.clone());
+                    }
                     SftpRemoteId::Standalone(
                         binding
                             .secondary_endpoint_id
@@ -992,11 +1005,26 @@ impl WorkspaceApp {
         initial_remote_path: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        let ftp = self.ftp_sessions.get(&endpoint_id);
+        let label = ftp.map(|runtime| {
+            if runtime.options.security == oxideterm_ftp::Security::ExplicitTls {
+                "FTPS"
+            } else {
+                "FTP"
+            }
+        });
         let title = format!(
             "{} · {}",
-            self.i18n.t("sidebar.panels.sftp"),
+            label
+                .map(str::to_owned)
+                .unwrap_or_else(|| self.i18n.t("sidebar.panels.sftp")),
             endpoint_title
         );
+        let remote_id = if ftp.is_some() {
+            SftpRemoteId::Ftp(endpoint_id.clone())
+        } else {
+            SftpRemoteId::Standalone(endpoint_id.clone())
+        };
         let tab_id = if let Some((tab_id, _)) = self
             .standalone_sftp_tabs
             .iter()
@@ -1034,10 +1062,7 @@ impl WorkspaceApp {
         self.active_surface = ActiveSurface::Terminal;
         self.active_ssh_node_id = None;
         self.sftp_view.update(cx, |sftp, cx| {
-            sftp.activate_view(
-                SftpSurfaceId::Tab(tab_id),
-                SftpRemoteId::Standalone(endpoint_id),
-            );
+            sftp.activate_view(SftpSurfaceId::Tab(tab_id), remote_id);
             cx.notify();
         });
         if let Some(path) = initial_remote_path.filter(|path| !path.trim().is_empty()) {
@@ -1334,11 +1359,13 @@ impl WorkspaceApp {
             });
             return;
         };
-        let owner_backend = backend.clone();
-        runtime.spawn(async move {
-            // The visible surface creates one shared SFTP channel through its explicit owner.
-            let _ = owner_backend.acquire_sftp().await;
-        });
+        if !matches!(&backend, SftpRemoteBackend::Ftp { .. }) {
+            let owner_backend = backend.clone();
+            runtime.spawn(async move {
+                // The visible surface creates one shared SFTP channel through its explicit owner.
+                let _ = owner_backend.acquire_sftp().await;
+            });
+        }
         runtime.spawn(async move {
             let result = load_remote_sftp_listing(backend, &path).await;
             let _ = tx.send(SftpWorkerResult::RemoteList {
@@ -1778,6 +1805,7 @@ impl SftpWorkspaceEntity {
                 if let Some(file) = self.remote_files.iter_mut().find(|file| file.path == path) {
                     if let Some(size) = saved.size {
                         file.size = size;
+                        file.size_known = true;
                     }
                     file.modified = saved.mtime.map(|mtime| mtime as i64);
                 }

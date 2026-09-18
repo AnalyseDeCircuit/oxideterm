@@ -210,6 +210,7 @@ mod tests {
                 revision: "files".into(),
                 exported_at: Utc::now().to_rfc3339(),
                 records: vec![sftp],
+                ftp: None,
             })
             .unwrap();
         let first = oxideterm_connections::RemoteDesktopProfile::new(
@@ -236,6 +237,18 @@ mod tests {
             })
             .unwrap();
         let settings = SettingsStore::load_from_path(directory.join("settings.json")).unwrap();
+        source
+            .upsert_ftp_profile(oxideterm_connections::SaveFtpProfileRequest {
+                profile: oxideterm_connections::FtpProfile::new(
+                    "FTP files".into(),
+                    "ftp.test".into(),
+                    "backup".into(),
+                    oxideterm_connections::FtpSecurity::ExplicitTls,
+                ),
+                password: None,
+                clear_password: false,
+            })
+            .unwrap();
         let service = CloudSyncOperationService::new();
         for include_connections in [true, false] {
             let scope = crate::SyncScope {
@@ -266,7 +279,7 @@ mod tests {
             assert_eq!(preview.metadata.remote_desktop_profiles_count, Some(1));
             assert_eq!(
                 preview.metadata.standalone_sftp_profiles_count.unwrap_or(0),
-                usize::from(include_connections)
+                2 * usize::from(include_connections)
             );
             assert!(!preview.preview.has_app_settings);
             let mut target =
@@ -295,6 +308,18 @@ mod tests {
                     .collect::<Vec<_>>(),
                 if include_connections {
                     vec!["files.test"]
+                } else {
+                    vec![]
+                }
+            );
+            assert_eq!(
+                target
+                    .ftp_profiles()
+                    .iter()
+                    .map(|p| p.host.as_str())
+                    .collect::<Vec<_>>(),
+                if include_connections {
+                    vec!["ftp.test"]
                 } else {
                     vec![]
                 }

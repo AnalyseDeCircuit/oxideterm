@@ -1,5 +1,24 @@
 use super::*;
 
+#[test]
+fn ftp_cloud_merge_keeps_independent_local_and_remote_edits() {
+    use oxideterm_connections::{FtpProfile,FtpProfilesSyncSnapshot,FtpSecurity};
+    let profile=FtpProfile::new("Files".into(),"files.test".into(),"user".into(),FtpSecurity::ExplicitTls);
+    let now=Utc::now();
+    let base=StandaloneSftpProfilesSyncSnapshot {
+        revision:"base".into(),exported_at:now.to_rfc3339(),records:vec![],
+        ftp:Some(FtpProfilesSyncSnapshot {revision:"base-ftp".into(),exported_at:now.to_rfc3339(),records:vec![profile],tombstones:vec![]}),
+    };
+    let mut local=base.clone();
+    local.ftp.as_mut().unwrap().records[0].name="Local name".into();
+    let mut remote=base.clone();
+    remote.ftp.as_mut().unwrap().records[0].initial_path="/remote/archive".into();
+    merge_standalone_sftp_profile_records(&mut remote,&base,&local,&ConflictStrategy::Merge,now).unwrap();
+    let merged=&remote.ftp.as_ref().unwrap().records[0];
+    assert_eq!((&*merged.name,&*merged.initial_path),("Local name","/remote/archive"));
+    assert_eq!(merged.security,FtpSecurity::ExplicitTls);
+}
+
 fn connection_sync_record(
     options: oxideterm_connections::ConnectionOptions,
 ) -> oxideterm_connections::SavedConnectionSyncRecord {

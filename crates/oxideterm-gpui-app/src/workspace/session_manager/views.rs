@@ -27,6 +27,7 @@ pub(super) enum SessionManagerDisplayItem {
     SshConfig(SessionManagerSshConfigDisplayItem),
     Serial(SerialProfile),
     Telnet(TelnetProfile),
+    Ftp(oxideterm_connections::FtpProfile),
     Mosh(MoshProfile),
     StandaloneSftp(oxideterm_connections::StandaloneSftpProfile),
     RemoteDesktop(RemoteDesktopProfile),
@@ -60,6 +61,7 @@ pub(super) enum SessionManagerOpenTarget {
     SshConfig(String),
     Serial(String),
     Telnet(String),
+    Ftp(String),
     Mosh(String),
     StandaloneSftp(String),
     RemoteDesktop(String),
@@ -120,6 +122,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => &host.alias,
             Self::Serial(profile) => &profile.id,
             Self::Telnet(profile) => &profile.id,
+            Self::Ftp(profile) => &profile.id,
             Self::Mosh(profile) => &profile.id,
             Self::StandaloneSftp(profile) => &profile.id,
             Self::RemoteDesktop(profile) => &profile.id,
@@ -138,6 +141,7 @@ impl SessionManagerDisplayItem {
             Self::Telnet(profile) => {
                 Some(SessionManagerSelectionTarget::Telnet(profile.id.clone()))
             }
+            Self::Ftp(profile) => Some(SessionManagerSelectionTarget::Ftp(profile.id.clone())),
             Self::Mosh(profile) => Some(SessionManagerSelectionTarget::Mosh(profile.id.clone())),
             Self::StandaloneSftp(profile) => Some(SessionManagerSelectionTarget::StandaloneSftp(
                 profile.id.clone(),
@@ -161,6 +165,7 @@ impl SessionManagerDisplayItem {
             Self::Telnet(profile) => {
                 Some(SessionManagerRowActionTarget::Telnet(profile.id.clone()))
             }
+            Self::Ftp(profile) => Some(SessionManagerRowActionTarget::Ftp(profile.id.clone())),
             Self::Mosh(profile) => Some(SessionManagerRowActionTarget::Mosh(profile.id.clone())),
             Self::StandaloneSftp(profile) => Some(SessionManagerRowActionTarget::StandaloneSftp(
                 profile.id.clone(),
@@ -180,6 +185,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => SessionManagerOpenTarget::SshConfig(host.alias.clone()),
             Self::Serial(profile) => SessionManagerOpenTarget::Serial(profile.id.clone()),
             Self::Telnet(profile) => SessionManagerOpenTarget::Telnet(profile.id.clone()),
+            Self::Ftp(profile) => SessionManagerOpenTarget::Ftp(profile.id.clone()),
             Self::Mosh(profile) => SessionManagerOpenTarget::Mosh(profile.id.clone()),
             Self::StandaloneSftp(profile) => {
                 SessionManagerOpenTarget::StandaloneSftp(profile.id.clone())
@@ -196,6 +202,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => &host.alias,
             Self::Serial(profile) => &profile.name,
             Self::Telnet(profile) => &profile.name,
+            Self::Ftp(profile) => &profile.name,
             Self::Mosh(profile) => &profile.name,
             Self::StandaloneSftp(profile) => &profile.name,
             Self::RemoteDesktop(profile) => &profile.name,
@@ -208,6 +215,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(_) => None,
             Self::Serial(profile) => profile.group.as_deref(),
             Self::Telnet(profile) => profile.group.as_deref(),
+            Self::Ftp(profile) => profile.group.as_deref(),
             Self::Mosh(profile) => profile.group.as_deref(),
             Self::StandaloneSftp(profile) => profile.group.as_deref(),
             Self::RemoteDesktop(profile) => profile.group.as_deref(),
@@ -220,6 +228,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(_) => None,
             Self::Serial(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::Telnet(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
+            Self::Ftp(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::Mosh(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::StandaloneSftp(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::RemoteDesktop(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
@@ -232,6 +241,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => host.hostname.as_deref().unwrap_or(&host.alias),
             Self::Serial(profile) => &profile.port_path,
             Self::Telnet(profile) => &profile.host,
+            Self::Ftp(profile) => &profile.host,
             Self::Mosh(profile) => &profile.host,
             Self::StandaloneSftp(profile) => &profile.host,
             Self::RemoteDesktop(profile) => &profile.host,
@@ -244,6 +254,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => u32::from(host.port.unwrap_or(22)),
             Self::Serial(profile) => profile.baud_rate,
             Self::Telnet(profile) => u32::from(profile.port),
+            Self::Ftp(profile) => u32::from(profile.port),
             Self::Mosh(profile) => u32::from(profile.ssh_port),
             Self::StandaloneSftp(profile) => u32::from(profile.port),
             Self::RemoteDesktop(profile) => u32::from(profile.port),
@@ -255,6 +266,7 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => &connection.username,
             Self::SshConfig(host) => host.user.as_deref().unwrap_or_default(),
             Self::Serial(_) | Self::Telnet(_) => "",
+            Self::Ftp(profile) => &profile.username,
             Self::Mosh(profile) => &profile.username,
             Self::StandaloneSftp(profile) => &profile.username,
             Self::RemoteDesktop(profile) => profile.username.as_deref().unwrap_or_default(),
@@ -267,6 +279,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(_) => "ssh config".to_string(),
             Self::Serial(_) => "serial".to_string(),
             Self::Telnet(_) => "telnet".to_string(),
+            Self::Ftp(_) => "ftp".to_string(),
             Self::Mosh(_) => "mosh".to_string(),
             Self::StandaloneSftp(profile) => auth_label(profile.auth.auth_type()).to_lowercase(),
             Self::RemoteDesktop(profile) => profile.protocol.provider_id().to_string(),
@@ -298,6 +311,7 @@ impl SessionManagerDisplayItem {
             },
             Self::Serial(profile) => format!("{} · {}", profile.port_path, profile.baud_rate),
             Self::Telnet(profile) => format!("{}:{}", profile.host, profile.port),
+            Self::Ftp(profile) => format!("{}:{}", profile.host, profile.port),
             Self::Mosh(profile) => {
                 format!("{}@{}:{}", profile.username, profile.host, profile.ssh_port)
             }
@@ -331,6 +345,13 @@ impl SessionManagerDisplayItem {
                 profile.group.as_deref().unwrap_or_default()
             ),
             Self::Telnet(profile) => format!(
+                "{}\n{}\n{}\n{}",
+                profile.name,
+                profile.host,
+                profile.port,
+                profile.group.as_deref().unwrap_or_default()
+            ),
+            Self::Ftp(profile) => format!(
                 "{}\n{}\n{}\n{}",
                 profile.name,
                 profile.host,
@@ -374,6 +395,8 @@ impl SessionManagerDisplayItem {
                 .unwrap_or(LucideIcon::Radio),
             Self::Telnet(profile) => session_icons::session_icon_from_id(profile.icon.as_deref())
                 .unwrap_or(LucideIcon::Terminal),
+            Self::Ftp(profile) => session_icons::session_icon_from_id(profile.icon.as_deref())
+                .unwrap_or(LucideIcon::FolderSync),
             Self::Mosh(profile) => session_icons::session_icon_from_id(profile.icon.as_deref())
                 .unwrap_or(LucideIcon::Wifi),
             Self::StandaloneSftp(profile) => {
@@ -392,6 +415,7 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => connection.color.as_deref(),
             Self::Serial(profile) => profile.color.as_deref(),
             Self::Telnet(profile) => profile.color.as_deref(),
+            Self::Ftp(profile) => profile.color.as_deref(),
             Self::Mosh(profile) => profile.color.as_deref(),
             Self::StandaloneSftp(profile) => profile.color.as_deref(),
             Self::RemoteDesktop(profile) => profile.color.as_deref(),
@@ -404,6 +428,7 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => connection.icon_background_color.as_deref(),
             Self::Serial(profile) => profile.icon_background_color.as_deref(),
             Self::Telnet(profile) => profile.icon_background_color.as_deref(),
+            Self::Ftp(profile) => profile.icon_background_color.as_deref(),
             Self::Mosh(profile) => profile.icon_background_color.as_deref(),
             Self::StandaloneSftp(profile) => profile.icon_background_color.as_deref(),
             Self::RemoteDesktop(profile) => profile.icon_background_color.as_deref(),
@@ -450,6 +475,13 @@ impl WorkspaceApp {
                     .iter()
                     .cloned()
                     .map(SessionManagerDisplayItem::Telnet),
+            )
+            .chain(
+                self.connection_store
+                    .ftp_profiles()
+                    .iter()
+                    .cloned()
+                    .map(SessionManagerDisplayItem::Ftp),
             )
             .chain(
                 self.connection_store
@@ -1699,6 +1731,7 @@ impl WorkspaceApp {
             SessionManagerDisplayItem::SshConfig(_) => (0x8b5cf633, 0xc4b5fd),
             SessionManagerDisplayItem::Serial(_) => (0xf59e0b33, 0xfcd34d),
             SessionManagerDisplayItem::Telnet(_) => (0x22c55e33, 0x86efac),
+            SessionManagerDisplayItem::Ftp(_) => (0x22c55e33, 0x86efac),
             SessionManagerDisplayItem::Mosh(_) => (0x3b82f633, 0x93c5fd),
             SessionManagerDisplayItem::StandaloneSftp(_) => (0x14b8a633, 0x5eead4),
         };
@@ -1878,10 +1911,11 @@ impl WorkspaceApp {
                         cx,
                     ))
             }
-            SessionManagerDisplayItem::Telnet(profile) => {
-                let open_id = profile.id.clone();
-                let edit_id = profile.id.clone();
-                let menu_id = profile.id.clone();
+            SessionManagerDisplayItem::Telnet(_) | SessionManagerDisplayItem::Ftp(_) => {
+                let ftp = matches!(item, SessionManagerDisplayItem::Ftp(_));
+                let open_id = item.id().to_owned();
+                let edit_id = open_id.clone();
+                let menu_id = open_id.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1896,7 +1930,11 @@ impl WorkspaceApp {
                         rgb(self.tokens.ui.accent),
                         has_background,
                         move |this, _event, window, cx| {
-                            this.open_saved_telnet_profile(&open_id, window, cx);
+                            if ftp {
+                                this.open_saved_ftp_profile(&open_id, window, cx);
+                            } else {
+                                this.open_saved_telnet_profile(&open_id, window, cx);
+                            }
                             cx.stop_propagation();
                         },
                         cx,
@@ -1908,7 +1946,11 @@ impl WorkspaceApp {
                         rgb(self.tokens.ui.text),
                         has_background,
                         move |this, _event, window, cx| {
-                            this.open_saved_telnet_profile_editor(&edit_id, window, cx);
+                            if ftp {
+                                this.open_saved_ftp_profile_editor(&edit_id, window, cx);
+                            } else {
+                                this.open_saved_telnet_profile_editor(&edit_id, window, cx);
+                            }
                             cx.stop_propagation();
                         },
                         cx,
@@ -1921,7 +1963,11 @@ impl WorkspaceApp {
                         has_background,
                         move |this, event, _window, cx| {
                             this.open_session_manager_row_action_menu(
-                                SessionManagerRowActionTarget::Telnet(menu_id.clone()),
+                                if ftp {
+                                    SessionManagerRowActionTarget::Ftp(menu_id.clone())
+                                } else {
+                                    SessionManagerRowActionTarget::Telnet(menu_id.clone())
+                                },
                                 f32::from(event.position.x),
                                 f32::from(event.position.y),
                                 cx,
@@ -2107,6 +2153,7 @@ impl WorkspaceApp {
             }
             SessionManagerRowActionTarget::Serial(_)
             | SessionManagerRowActionTarget::Telnet(_)
+            | SessionManagerRowActionTarget::Ftp(_)
             | SessionManagerRowActionTarget::Mosh(_)
             | SessionManagerRowActionTarget::StandaloneSftp(_)
             | SessionManagerRowActionTarget::RemoteDesktop(_) => {
@@ -2330,7 +2377,10 @@ impl WorkspaceApp {
                 .child(dropdown_menu_separator(&self.tokens));
         }
 
-        if let SessionManagerRowActionTarget::Telnet(id) = &menu.target {
+        if let SessionManagerRowActionTarget::Telnet(id) | SessionManagerRowActionTarget::Ftp(id) =
+            &menu.target
+        {
+            let ftp = matches!(&menu.target, SessionManagerRowActionTarget::Ftp(_));
             let edit_id = id.clone();
             popup = popup
                 .child(self.render_session_manager_menu_action(
@@ -2345,7 +2395,11 @@ impl WorkspaceApp {
                     false,
                     has_background,
                     move |this, _event, window, cx| {
-                        this.open_saved_telnet_profile_editor(&edit_id, window, cx);
+                        if ftp {
+                            this.open_saved_ftp_profile_editor(&edit_id, window, cx);
+                        } else {
+                            this.open_saved_telnet_profile_editor(&edit_id, window, cx);
+                        }
                         cx.stop_propagation();
                     },
                     cx,
@@ -2354,6 +2408,9 @@ impl WorkspaceApp {
         }
 
         let delete_action = match &menu.target {
+            SessionManagerRowActionTarget::Ftp(id) => {
+                Some((id.clone(), self.i18n.t("sessionManager.actions.delete")))
+            }
             SessionManagerRowActionTarget::Connection(id) => {
                 Some((id.clone(), self.i18n.t("sessionManager.actions.delete")))
             }
@@ -2401,6 +2458,9 @@ impl WorkspaceApp {
                     has_background,
                     move |this, _event, _window, cx| {
                         match &delete_target {
+                            SessionManagerRowActionTarget::Ftp(_) => {
+                                this.request_delete_ftp_profile(&delete_id, cx)
+                            }
                             SessionManagerRowActionTarget::Connection(_) => {
                                 this.request_delete_connection(&delete_id, cx)
                             }
@@ -2502,6 +2562,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match target {
+            SessionManagerOpenTarget::Ftp(id) => self.open_saved_ftp_profile(&id, window, cx),
             SessionManagerOpenTarget::Connection(connection_id) => {
                 self.open_saved_connection(&connection_id, window, cx)
             }

@@ -280,6 +280,13 @@
       "verifying": "Verificando..."
     },
     "new_connection": {
+      "transport_ftp": "FTP / FTPS",
+      "ftp_description": "Gestiona archivos remotos mediante FTP o FTPS explícito con conexiones de datos pasivas.",
+      "ftp_tls": "Usar FTPS (TLS explícito)",
+      "ftp_initial_path": "Directorio inicial",
+      "ftp_timeout": "Tiempo de conexión (segundos)",
+      "ftp_invalid": "Comprueba el servidor FTP, el puerto, el usuario y el tiempo de espera.",
+      "ftp_failed": "Error de conexión FTP",
       "title": "Nueva conexión",
       "description": "Configura un host SSH para terminales, SFTP, reenvío de puertos y edición de archivos remotos.",
       "twofa_error": "Error 2FA: {{error}}",

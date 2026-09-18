@@ -8,6 +8,52 @@ fn store() -> ConnectionStore {
 }
 
 #[test]
+fn ftp_credentials_follow_selection_and_endpoint_identity() {
+    let mut source = store();
+    let profile = source
+        .upsert_ftp_profile(SaveFtpProfileRequest {
+            profile: FtpProfile::new(
+                "Files".into(),
+                "files.test".into(),
+                "backup".into(),
+                FtpSecurity::ExplicitTls,
+            ),
+            password: Some(SecretString::from("ftp-sync-secret")),
+            clear_password: false,
+        })
+        .unwrap();
+    let selection = CredentialSyncSelection {
+        ftp_ids: BTreeSet::from([profile.id.clone()]),
+        ..Default::default()
+    };
+    let secrets = source.export_profile_credentials(&selection, None).unwrap();
+    let mut target = store();
+    copy_metadata(&source, &mut target);
+    let mut prepared = target
+        .prepare_profile_credentials(&secrets, &CredentialSyncSelection::default(), &mut None)
+        .unwrap();
+    target.commit_profile_credentials(&mut prepared).unwrap();
+    assert!(target.get_ftp_password(&profile.id).unwrap().is_none());
+    let mut prepared = target
+        .prepare_profile_credentials(&secrets, &selection, &mut None)
+        .unwrap();
+    target.save().unwrap();
+    target.commit_profile_credentials(&mut prepared).unwrap();
+    assert_eq!(
+        target.get_ftp_password(&profile.id).unwrap().unwrap(),
+        "ftp-sync-secret"
+    );
+    let mut altered = store();
+    copy_metadata(&source, &mut altered);
+    altered.data.ftp_profiles[0].security = FtpSecurity::Plain;
+    let mut prepared = altered
+        .prepare_profile_credentials(&secrets, &selection, &mut None)
+        .unwrap();
+    altered.commit_profile_credentials(&mut prepared).unwrap();
+    assert!(altered.get_ftp_password(&profile.id).unwrap().is_none());
+}
+
+#[test]
 fn telnet_proxy_preserves_legacy_direct_routes_and_restores_selected_credentials() {
     let mut legacy = serde_json::to_value(TelnetProfile::new("router", "router.test", 23)).unwrap();
     legacy.as_object_mut().unwrap().remove("upstream_proxy");

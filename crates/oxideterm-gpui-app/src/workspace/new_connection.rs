@@ -2,6 +2,7 @@ mod entity;
 mod form_entity;
 mod form_state;
 mod form_view;
+mod ftp;
 mod host_key_dialog;
 mod kbi_dialog;
 mod ssh_flow;

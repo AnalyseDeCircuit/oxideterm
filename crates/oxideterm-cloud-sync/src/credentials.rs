@@ -38,6 +38,7 @@ pub(crate) fn credential_selection(
             .iter()
             .map(|p| p.id.clone())
             .collect();
+        result.ftp_ids = store.ftp_profiles().iter().map(|p| p.id.clone()).collect();
     }
     if scope.sync_mosh_profiles {
         result.mosh_ids = store

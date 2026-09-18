@@ -84,6 +84,7 @@ fn sftp_file_entry_from_local(entry: oxideterm_local_files::LocalFileEntry) -> S
             oxideterm_local_files::LocalFileType::File
             | oxideterm_local_files::LocalFileType::Symlink => SftpFileType::File,
         },
+        size_known: true,
         size: entry.size,
         modified: entry.modified,
         permissions: None,
@@ -117,6 +118,7 @@ pub(in crate::workspace::sftp) fn sftp_file_entry(
         path,
         file_type,
         size,
+        size_known: true,
         modified,
         permissions: None,
         owner: None,
@@ -484,6 +486,9 @@ async fn load_remote_sftp_listing_inner(
     path: &str,
     update_ready_path: bool,
 ) -> Result<RemoteSftpListing, String> {
+    if let SftpRemoteBackend::Ftp { runtime } = &backend {
+        return runtime.listing(path).await;
+    }
     let transfer = backend.acquire_transfer_sftp().await?;
     match list_remote_sftp_once(&transfer, path).await {
         Ok(listing) => {
@@ -541,6 +546,9 @@ pub(in crate::workspace::sftp) async fn load_remote_sftp_preview(
     backend: SftpRemoteBackend,
     path: &str,
 ) -> Result<PreviewContent, String> {
+    if let SftpRemoteBackend::Ftp { runtime } = &backend {
+        return runtime.preview(path, 0).await;
+    }
     let sftp = backend.acquire_transfer_sftp().await?;
     match load_remote_sftp_preview_once(&sftp, path).await {
         Ok(preview) => Ok(preview),
@@ -568,6 +576,9 @@ pub(in crate::workspace::sftp) async fn load_remote_sftp_preview_hex(
     path: &str,
     offset: u64,
 ) -> Result<PreviewContent, String> {
+    if let SftpRemoteBackend::Ftp { runtime } = &backend {
+        return runtime.preview(path, offset).await;
+    }
     let sftp = backend.acquire_transfer_sftp().await?;
     match load_remote_sftp_preview_hex_once(&sftp, path, offset).await {
         Ok(preview) => Ok(preview),
@@ -605,6 +616,9 @@ pub(in crate::workspace::sftp) async fn save_remote_sftp_preview(
     };
     let remote_content = restore_text_line_endings(content, line_ending);
     let encoded = encode_to_encoding(&remote_content, target_encoding);
+    if let SftpRemoteBackend::Ftp { runtime } = &backend {
+        return runtime.save(path, &encoded, target_encoding).await;
+    }
     let sftp = backend.acquire_transfer_sftp().await?;
     // Saving uses a short-lived SFTP channel so a large write/stat round trip
     // cannot stall the shared directory listing owner.
@@ -669,6 +683,7 @@ fn remote_listing_from_file_infos(cwd: String, entries: Vec<RemoteFileInfo>) -> 
                     SftpFileType::File
                 }
             },
+            size_known: true,
             size: entry.size,
             modified: Some(entry.modified),
             permissions: Some(entry.permissions),

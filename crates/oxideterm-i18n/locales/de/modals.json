@@ -280,6 +280,13 @@
       "verifying": "Wird überprüft..."
     },
     "new_connection": {
+      "transport_ftp": "FTP / FTPS",
+      "ftp_description": "Remote-Dateien über FTP oder explizites FTPS mit passiven Datenverbindungen verwalten.",
+      "ftp_tls": "FTPS verwenden (explizites TLS)",
+      "ftp_initial_path": "Startverzeichnis",
+      "ftp_timeout": "Verbindungszeitlimit (Sekunden)",
+      "ftp_invalid": "FTP-Host, Port, Benutzername und Zeitlimit prüfen.",
+      "ftp_failed": "FTP-Verbindung fehlgeschlagen",
       "title": "Neue Verbindung",
       "description": "Konfigurieren Sie einen SSH-Host für Terminals, SFTP, Portweiterleitungen und die Bearbeitung entfernter Dateien.",
       "twofa_error": "2FA-Fehler: {{error}}",

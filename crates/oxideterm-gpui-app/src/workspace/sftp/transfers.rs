@@ -396,6 +396,8 @@ impl SftpTransferRowRenderer {
         let protocol_label = match transfer.protocol {
             RemoteTransferProtocol::Sftp => "SFTP",
             RemoteTransferProtocol::Scp => "SCP",
+            RemoteTransferProtocol::Ftp => "FTP",
+            RemoteTransferProtocol::Ftps => "FTPS",
         };
 
         div()
@@ -543,6 +545,8 @@ impl SftpTransferRowRenderer {
         let protocol = match transfer.protocol {
             RemoteTransferProtocol::Sftp => "SFTP",
             RemoteTransferProtocol::Scp => "SCP",
+            RemoteTransferProtocol::Ftp => "FTP",
+            RemoteTransferProtocol::Ftps => "FTPS",
         };
         let status = match transfer.status {
             oxideterm_sftp::TransferStatus::Paused => self.labels.paused.clone(),

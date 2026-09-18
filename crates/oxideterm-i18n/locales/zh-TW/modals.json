@@ -280,6 +280,13 @@
       "verifying": "驗證中..."
     },
     "new_connection": {
+      "transport_ftp": "FTP / FTPS",
+      "ftp_description": "透過 FTP 或明確式 FTPS 管理遠端檔案，使用被動資料連線。",
+      "ftp_tls": "使用 FTPS（明確式 TLS）",
+      "ftp_initial_path": "初始目錄",
+      "ftp_timeout": "連線逾時（秒）",
+      "ftp_invalid": "請檢查 FTP 主機、連接埠、使用者名稱及逾時設定。",
+      "ftp_failed": "FTP 連線失敗",
       "title": "新增連線",
       "description": "設定一台 SSH 主機，用於終端機、SFTP、連接埠轉送與遠端檔案編輯。",
       "twofa_error": "2FA 錯誤：{{error}}",

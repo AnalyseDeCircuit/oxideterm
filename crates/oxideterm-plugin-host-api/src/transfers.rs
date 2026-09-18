@@ -105,6 +105,8 @@ fn native_plugin_transfer_snapshot(snapshot: &BackgroundTransferSnapshot) -> Val
     let protocol = match snapshot.protocol {
         oxideterm_sftp::TransferProtocol::Sftp => "sftp",
         oxideterm_sftp::TransferProtocol::Scp => "scp",
+        oxideterm_sftp::TransferProtocol::Ftp => "ftp",
+        oxideterm_sftp::TransferProtocol::Ftps => "ftps",
     };
     json!({
         "id": &snapshot.id,

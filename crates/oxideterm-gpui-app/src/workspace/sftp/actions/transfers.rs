@@ -47,6 +47,7 @@ impl SftpWorkspaceEntity {
                 name: name.to_string(),
                 path: remote_path.to_string(),
                 file_type: SftpFileType::File,
+                size_known: true,
                 size: 0,
                 modified: None,
                 permissions: None,
@@ -364,6 +365,7 @@ impl WorkspaceApp {
                 let standalone_endpoint_id =
                     remote_id.standalone_endpoint_id().map(ToOwned::to_owned);
                 let connection_id = match &backend {
+                    SftpRemoteBackend::Ftp { .. } => remote_id.storage_key(),
                     SftpRemoteBackend::Node {
                         router, node_id, ..
                     } => {
@@ -918,6 +920,11 @@ impl WorkspaceApp {
                     refresh_remote: false,
                     refresh_local: false,
                 });
+                return;
+            }
+            if let SftpRemoteBackend::Ftp {runtime}=&backend {
+                let result=ftp::run_transfer(runtime,&manager,&transfer_id,id,direction,is_directory,&local_path,&remote_path,download_disposition,&tx,&remote_storage_key).await;
+                let _=tx.send(SftpWorkerResult::TransferComplete {remote_id,transfer_id,id,result,refresh_remote:direction==SftpTransferDirection::Upload,refresh_local:direction==SftpTransferDirection::Download});
                 return;
             }
             let resolved_handle = match backend.resolve_connection().await {

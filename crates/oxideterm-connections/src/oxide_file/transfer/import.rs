@@ -194,6 +194,16 @@ fn apply_oxide_import_with_options_inner(
     if options.import_standalone_sftp_profiles {
         for profile in standalone_sftp_profiles_snapshot
             .as_ref()
+            .and_then(|s| s.ftp.as_ref())
+            .into_iter()
+            .flat_map(|s| &s.records)
+        {
+            profile.validate().map_err(|error| {
+                OxideFileError::InvalidFormat(format!("Invalid FTP profile: {error}"))
+            })?;
+        }
+        for profile in standalone_sftp_profiles_snapshot
+            .as_ref()
             .into_iter()
             .flat_map(|snapshot| &snapshot.records)
         {
@@ -480,7 +490,7 @@ fn apply_oxide_import_with_options_inner(
             }
         }
         if let Some(standalone_sftp_profiles_snapshot) = standalone_sftp_profiles_snapshot {
-            let profile_count = standalone_sftp_profiles_snapshot.records.len();
+            let profile_count = standalone_sftp_profiles_snapshot.record_count();
             if options.import_standalone_sftp_profiles {
                 result.imported_standalone_sftp_profiles = store
                     .apply_standalone_sftp_profiles_snapshot(standalone_sftp_profiles_snapshot)

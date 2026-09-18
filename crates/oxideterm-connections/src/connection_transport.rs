@@ -14,6 +14,7 @@ pub enum ConnectionTransport {
     LocalTerminal,
     Ssh,
     StandaloneSftp,
+    Ftp,
     Mosh,
     Telnet,
     Serial,
@@ -33,6 +34,7 @@ pub fn transport_default_port(transport: ConnectionTransport) -> Option<&'static
         ConnectionTransport::LocalTerminal => None,
         ConnectionTransport::Ssh => Some(SSH_DEFAULT_PORT_TEXT),
         ConnectionTransport::StandaloneSftp => Some(SSH_DEFAULT_PORT_TEXT),
+        ConnectionTransport::Ftp => Some("21"),
         ConnectionTransport::Mosh => Some(MOSH_DEFAULT_PORT_TEXT),
         ConnectionTransport::Telnet => Some(TELNET_DEFAULT_PORT_TEXT),
         ConnectionTransport::Rdp => Some(RDP_DEFAULT_PORT_TEXT),
@@ -111,6 +113,7 @@ pub fn transport_is_persistable(transport: ConnectionTransport) -> bool {
 
 fn is_known_transport_default_port(port: &str) -> bool {
     [
+        "21",
         SSH_DEFAULT_PORT_TEXT,
         MOSH_DEFAULT_PORT_TEXT,
         TELNET_DEFAULT_PORT_TEXT,

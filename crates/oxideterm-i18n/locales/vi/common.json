@@ -574,7 +574,7 @@
         "downloading": "Downloading objects"
       },
       "preview": {
-        "standalone_sftp_profiles": "Hồ sơ SFTP độc lập ({{count}})",
+        "standalone_sftp_profiles": "Kết nối truyền tệp ({{count}})",
         "summary_header": "Tóm tắt xem trước từ xa",
         "apply_plan_title": "Kế hoạch áp dụng",
         "upload_scope_title": "Phạm vi tải lên",

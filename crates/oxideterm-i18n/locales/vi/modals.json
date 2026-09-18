@@ -280,6 +280,13 @@
       "verifying": "Đang xác minh..."
     },
     "new_connection": {
+      "transport_ftp": "FTP / FTPS",
+      "ftp_description": "Quản lý tệp từ xa qua FTP hoặc FTPS tường minh với kết nối dữ liệu thụ động.",
+      "ftp_tls": "Dùng FTPS (TLS tường minh)",
+      "ftp_initial_path": "Thư mục ban đầu",
+      "ftp_timeout": "Thời gian chờ kết nối (giây)",
+      "ftp_invalid": "Kiểm tra máy chủ FTP, cổng, tên người dùng và thời gian chờ.",
+      "ftp_failed": "Kết nối FTP thất bại",
       "title": "Kết nối mới",
       "description": "Cấu hình một máy chủ SSH cho terminal, SFTP, chuyển tiếp cổng và chỉnh sửa tệp từ xa.",
       "twofa_error": "Lỗi 2FA: {{error}}",

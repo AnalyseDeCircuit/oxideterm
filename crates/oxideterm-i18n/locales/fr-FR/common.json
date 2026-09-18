@@ -574,7 +574,7 @@
         "downloading": "Downloading objects"
       },
       "preview": {
-        "standalone_sftp_profiles": "Profils SFTP autonomes ({{count}})",
+        "standalone_sftp_profiles": "Connexions de transfert de fichiers ({{count}})",
         "summary_header": "Résumé de l'aperçu distant",
         "apply_plan_title": "Plan d'application",
         "upload_scope_title": "Périmètre d’envoi",
