@@ -6,7 +6,7 @@
 //! This module converts OxideTerm-owned markdown model nodes into composed
 //! GPUI `Div` / `AnyElement` trees using only semantic theme tokens.
 
-use std::{ops::Range, path::PathBuf, sync::Arc};
+use std::{ops::Range, path::PathBuf, rc::Rc, sync::Arc};
 
 use gpui::{
     AnyElement, App, ClipboardItem, ElementId, Font, FontFeatures, FontStyle, FontWeight, Hsla,
@@ -51,7 +51,7 @@ impl From<String> for MarkdownTextFragmentId {
 #[derive(Clone)]
 pub struct MarkdownTextLink {
     pub range: Range<usize>,
-    pub open: Arc<dyn Fn(&mut Window, &mut App)>,
+    pub open: Rc<dyn Fn(&mut Window, &mut App)>,
 }
 
 pub type MarkdownCodeRunHandler = Arc<dyn Fn(String, &mut Window, &mut App) + 'static>;
@@ -2784,7 +2784,7 @@ fn flat_text(
             let opts = opts.clone();
             links.push(MarkdownTextLink {
                 range: start..text.len(),
-                open: Arc::new(move |window, cx| open_markdown_link(&url, &opts, window, cx)),
+                open: Rc::new(move |window, cx| open_markdown_link(&url, &opts, window, cx)),
             });
         }
     }

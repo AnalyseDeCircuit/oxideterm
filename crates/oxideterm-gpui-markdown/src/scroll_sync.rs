@@ -203,7 +203,6 @@ impl MarkdownScrollSync {
             move |_, window, cx| {
                 let sequence = sync.0.borrow().sequence;
                 let sync = sync.clone();
-                let scroll = scroll.clone();
                 window.defer(cx, move |window, cx| {
                     sync.finish(sequence, &scroll, window, cx)
                 });
